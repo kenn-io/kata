@@ -130,7 +130,7 @@ func TestAgentHooksContractHermesSessionStartIsNeutral(t *testing.T) {
 }
 
 func TestAgentHooksContractKitManagedProfilesNativeResponses(t *testing.T) {
-	t.Chdir(t.TempDir())
+	t.Chdir(writeKataWorkspace(t, t.TempDir()))
 	for _, profile := range agenthook.Profiles() {
 		if !agentHookUsesKit(string(profile.Agent)) {
 			continue
@@ -155,6 +155,86 @@ func TestAgentHooksContractKitManagedProfilesNativeResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+// writeKataWorkspace binds dir the way kata init does and returns it.
+func writeKataWorkspace(t *testing.T, dir string) string {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"), []byte("version = 1\n\n[project]\nname = \"example-project\"\n"), 0o600))
+	return dir
+}
+
+func assertContractOrNone(t *testing.T, agent agenthook.Agent, out, text string) {
+	t.Helper()
+	if text == "" {
+		assertNoNativeContext(t, out)
+		return
+	}
+	assertNativePrompt(t, agent, out, text)
+}
+
+func TestAgentHooksContractOnlyInKataWorkspaces(t *testing.T) {
+	workspace := writeKataWorkspace(t, t.TempDir())
+	nested := filepath.Join(workspace, "src", "pkg")
+	require.NoError(t, os.MkdirAll(nested, 0o700))
+	outside := t.TempDir()
+	t.Chdir(outside)
+
+	for _, tc := range []struct {
+		agent   string
+		payload func(dir string) string
+		want    func(t *testing.T, out, text string)
+	}{
+		{"codex", func(dir string) string {
+			return fmt.Sprintf(`{"hook_event_name":"SessionStart","session_id":"s","source":"startup","cwd":%q}`, dir)
+		}, func(t *testing.T, out, text string) { assertContractOrNone(t, agenthook.AgentCodex, out, text) }},
+		{"claude", func(dir string) string {
+			return fmt.Sprintf(`{"hook_event_name":"SessionStart","session_id":"s","source":"startup","cwd":%q}`, dir)
+		}, func(t *testing.T, out, text string) { assertContractOrNone(t, agenthook.AgentClaude, out, text) }},
+		{"droid", func(dir string) string {
+			return fmt.Sprintf(`{"hook_event_name":"SessionStart","session_id":"s","source":"startup","cwd":%q}`, dir)
+		}, func(t *testing.T, out, text string) { assertContractOrNone(t, agenthook.AgentClaude, out, text) }},
+		{"antigravity", func(dir string) string {
+			return fmt.Sprintf(`{"conversationId":"s","workspacePaths":[%q],"invocationNum":0,"initialNumSteps":0}`, dir)
+		}, func(t *testing.T, out, text string) {
+			if text == "" {
+				assert.JSONEq(t, `{}`, out)
+				return
+			}
+			assert.JSONEq(t, fmt.Sprintf(`{"injectSteps":[{"ephemeralMessage":%q}]}`, text), out)
+		}},
+		{"kimi-code", func(dir string) string {
+			return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s","prompt":"hello","cwd":%q}`, dir)
+		}, func(t *testing.T, out, text string) {
+			if text == "" {
+				assert.Empty(t, out)
+				return
+			}
+			assert.Equal(t, text+"\n", out)
+		}},
+	} {
+		t.Run(tc.agent, func(t *testing.T) {
+			out, stderr, err := executeAgentHook(t, strings.NewReader(tc.payload(nested)), "agent-hook", "contract", tc.agent)
+			require.NoError(t, err, stderr)
+			tc.want(t, out, agentContractText)
+
+			out, stderr, err = executeAgentHook(t, strings.NewReader(tc.payload(outside)), "agent-hook", "contract", tc.agent)
+			require.NoError(t, err, stderr)
+			tc.want(t, out, "")
+		})
+	}
+
+	t.Run("payload without cwd uses the hook's directory", func(t *testing.T) {
+		payload := `{"hook_event_name":"SessionStart","session_id":"s","source":"startup"}`
+		out, stderr, err := executeAgentHook(t, strings.NewReader(payload), "agent-hook", "contract", "codex")
+		require.NoError(t, err, stderr)
+		assertNoNativeContext(t, out)
+
+		t.Chdir(nested)
+		out, stderr, err = executeAgentHook(t, strings.NewReader(payload), "agent-hook", "contract", "codex")
+		require.NoError(t, err, stderr)
+		assertNativePrompt(t, agenthook.AgentCodex, out, agentContractText)
+	})
 }
 
 type unreadableHookInput struct{}
