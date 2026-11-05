@@ -55,7 +55,7 @@ import (
 
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "manage the kata daemon"}
-	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonLocateCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd(), daemonDiagnoseCmd(), daemonRecoverCmd())
+	cmd.AddCommand(daemonLocalEmbeddingsCmd(), daemonStartCmd(), daemonStatusCmd(), daemonLocateCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd(), daemonDiagnoseCmd(), daemonRecoverCmd())
 	return cmd
 }
 
@@ -901,10 +901,8 @@ func daemonRestartCmd() *cobra.Command {
 				return err
 			}
 			defer release()
-			for _, rec := range running {
-				if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
-					return unsupportedDaemonRestartError(rec)
-				}
+			if err := requireRestartable(running); err != nil {
+				return err
 			}
 			pids := make([]int, 0, len(running))
 			var out daemonStartOutput
@@ -917,23 +915,15 @@ func daemonRestartCmd() *cobra.Command {
 					return err
 				}
 			} else {
-				target := newDaemonRestart(io.Discard)
-				if target == nil {
-					return fmt.Errorf("cannot resolve the installed restart executable")
-				}
 				var flags []string
 				for _, name := range []string{"listen", "insecure-readonly", "no-auto-token"} {
 					if f := cmd.Flags().Lookup(name); f.Changed {
 						flags = append(flags, "--"+name+"="+f.Value.String())
 					}
 				}
-				for _, rec := range running {
-					replacement, err := requestDaemonRestart(cmd.Context(), ns, rec, target.executable, flags)
-					if err != nil {
-						return err
-					}
-					pids = append(pids, rec.PID)
-					out = daemonStartOutputFromRecord("restarted", replacement)
+				pids, out, err = restartRunningDaemons(cmd.Context(), ns, running, flags)
+				if err != nil {
+					return err
 				}
 			}
 			switch currentOutputMode() {
@@ -2096,7 +2086,7 @@ func preflightEmbeddingStartup(
 	if !ec.Enabled() {
 		return nil, "", nil
 	}
-	embedder, err := embedding.New(embedding.Config{
+	cfg := embedding.Config{
 		BaseURL:             ec.BaseURL,
 		Model:               ec.Model,
 		Credential:          ec.ResolveCredential(),
@@ -2110,7 +2100,15 @@ func preflightEmbeddingStartup(
 		BatchSize:           ec.BatchSize,
 		Timeout:             time.Duration(ec.TimeoutSeconds) * time.Second,
 		TrustPrivateNetwork: ec.TrustPrivateNetwork,
-	})
+	}
+	if ec.Local {
+		cfg.Endpoint = func(ctx context.Context) (string, error) {
+			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
+				return false, errors.New("run kata daemon local-embeddings to approve the download")
+			})
+		}
+	}
+	embedder, err := embedding.New(cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
 	}

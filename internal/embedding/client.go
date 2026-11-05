@@ -17,6 +17,7 @@ import (
 )
 
 type Config struct {
+	Endpoint            func(context.Context) (string, error)
 	BaseURL             string
 	Model               string
 	Credential          config.EmbeddingCredential
@@ -33,6 +34,7 @@ type Config struct {
 }
 
 type Client struct {
+	endpoint           func(context.Context) (string, error)
 	options            embedclient.Options
 	space              embedmodel.Descriptor
 	generation         kitvec.Generation
@@ -62,13 +64,20 @@ func New(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	parts, err := (embedconfig.Embedder{
-		BaseURL: cfg.BaseURL, Model: cfg.Model, Dims: dims,
-		FingerprintSalt: cfg.Salt, BatchSize: batch,
-		TrustPrivateNetwork: cfg.TrustPrivateNetwork,
-	}).Parts()
-	if err != nil {
-		return nil, fmt.Errorf("embedding: configure client: %w", err)
+	parts := embedconfig.Parts{
+		Model:     embedconfig.Model{Name: cfg.Model, Revision: cfg.Salt, Dimensions: dims, Metric: embedconfig.MetricCosine, Normalization: embedconfig.NormalizationL2},
+		Roles:     embedconfig.Roles{InputType: embedconfig.InputTypeNone},
+		Batch:     embedconfig.Batch{Items: batch},
+		Transport: embedconfig.Transport{Timeout: timeout},
+	}
+	if cfg.Endpoint == nil {
+		var err error
+		parts, err = (embedconfig.Embedder{
+			BaseURL: cfg.BaseURL, Model: cfg.Model, Dims: dims, FingerprintSalt: cfg.Salt, BatchSize: batch, TrustPrivateNetwork: cfg.TrustPrivateNetwork,
+		}).Parts()
+		if err != nil {
+			return nil, fmt.Errorf("embedding: configure client: %w", err)
+		}
 	}
 	parts.Model.RequestDimensions = cfg.RequestDimensions
 	parts.Roles.DocumentPrefix = cfg.DocumentPrefix
@@ -80,8 +89,10 @@ func New(cfg Config) (*Client, error) {
 		Model: parts.Model, Roles: parts.Roles, Deployment: parts.Deployment,
 		Batch: parts.Batch, Transport: parts.Transport,
 	}
-	if _, err := embedclient.New(options); err != nil {
-		return nil, fmt.Errorf("embedding: configure client: %w", err)
+	if cfg.Endpoint == nil {
+		if _, err := embedclient.New(options); err != nil {
+			return nil, fmt.Errorf("embedding: configure client: %w", err)
+		}
 	}
 	params := map[string]string{"recipe": strconv.Itoa(RecipeVersion)}
 	if cfg.Salt != "" {
@@ -107,7 +118,7 @@ func New(cfg Config) (*Client, error) {
 	if err := space.Validate(); err != nil {
 		return nil, fmt.Errorf("embedding: configure identity: %w", err)
 	}
-	client := &Client{options: options, space: space, generation: generation, http: &http.Client{Timeout: timeout}}
+	client := &Client{options: options, space: space, generation: generation, http: &http.Client{Timeout: timeout}, endpoint: cfg.Endpoint}
 	client.SetCredential(cfg.Credential)
 	return client, nil
 }
@@ -155,6 +166,12 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 		return nil, err
 	}
 	options := c.options
+	if c.endpoint != nil {
+		options.Deployment.BaseURL, err = c.endpoint(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	options.APIKey = credential.Key
 	options.HTTP = c.http
 	provider, err := embedclient.New(options)

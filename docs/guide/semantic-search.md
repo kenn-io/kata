@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-10-07
+last_edited: 2026-11-05
 ---
 
 # Semantic search
@@ -33,12 +33,32 @@ A search then runs two legs and fuses them:
 Results are merged with reciprocal rank fusion, so an issue that ranks well in
 either leg surfaces, and an issue that ranks well in both rises to the top.
 
-Embeddings are produced by an **OpenAI-compatible `/embeddings` endpoint** that
-you point kata at. That can be a local runtime (Ollama, LM Studio, or a
-llama.cpp server) or a hosted provider (OpenAI, Voyage, and others). kata only
-speaks the wire format and never bundles a model.
+Kata can run a shared local embeddings server or use an OpenAI-compatible
+`/embeddings` endpoint, such as Ollama or a hosted provider.
 
 ## Enabling it
+
+```sh
+kata daemon local-embeddings
+```
+
+The command shows the missing download size, about 290 MB on a fresh install,
+and asks before downloading. The files are shared by all Kenn apps. Use `--yes`
+for unattended setup. It restarts a running daemon, which embeds existing
+issues in the background. A stopped daemon picks up the setting on its next
+start. Watch progress with `kata health --json`.
+
+Switching from Ollama's 768-dimensional `nomic-embed-text` keeps your index and
+federation recipe. Smaller widths are kept only with `request_dimensions = true`.
+Other recipes rebuild the index after a warning. If this daemon shares
+embeddings, replicas need the same recipe before they can reuse its vectors.
+
+The command preserves config comments and unrelated formatting. It checks that
+running daemons support restart before writing, then waits for them to restart.
+Run it again to retry a failed restart. Older Kata releases reject the `local`
+config key; use the updated binary after enabling it.
+
+### Using Ollama or another provider
 
 1. Run an embeddings endpoint. For a fully local setup, install
    [Ollama](https://ollama.com) and pull an embedding model:
@@ -55,7 +75,7 @@ speaks the wire format and never bundles a model.
    model    = "nomic-embed-text"
    ```
 
-   `base_url` and `model` are both required once the section exists. With no
+   `base_url` and `model` are both required for an external provider. With no
    credential source configured, Kata sends requests without an `Authorization`
    header; local Ollama needs no placeholder key. For a provider that requires
    a key, use `api_key_file = "~/.config/kata/embedding.key"` with an owner-only

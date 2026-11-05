@@ -124,11 +124,11 @@ type SearchConfig struct {
 	Embeddings EmbeddingsConfig `toml:"embeddings"`
 }
 
-// EmbeddingsConfig is the [search.embeddings] block. It is opt-in: when BaseURL
-// and Model are both empty kata stays on lexical-only search. BaseURL and Model
-// must be set together (a partial config is rejected at load). Credentials use
-// inline > file > environment precedence.
+// EmbeddingsConfig opts into semantic search with Local or a BaseURL and Model.
+// Credentials use inline > file > environment precedence.
 type EmbeddingsConfig struct {
+	// Local uses the shared built-in Nomic embeddings server.
+	Local bool `toml:"local"`
 	// BaseURL is the OpenAI-compatible endpoint base, e.g.
 	// "http://localhost:11434/v1". The client appends "/embeddings".
 	BaseURL string `toml:"base_url"`
@@ -170,11 +170,15 @@ type EmbeddingsConfig struct {
 	TrustPrivateNetwork bool `toml:"trust_private_network"`
 }
 
-// Enabled reports whether semantic search is configured. Both base_url and
-// model are required; validateEmbeddings rejects a partial config so Enabled
-// never sees a half-set section.
+// Enabled reports whether semantic search uses a local or configured server.
 func (e EmbeddingsConfig) Enabled() bool {
-	return strings.TrimSpace(e.BaseURL) != "" && strings.TrimSpace(e.Model) != ""
+	return e.Local || strings.TrimSpace(e.BaseURL) != "" && strings.TrimSpace(e.Model) != ""
+}
+
+// LocalRecipeCompatible reports whether the built-in server supports this model and width.
+func (e EmbeddingsConfig) LocalRecipeCompatible() bool {
+	return (e.Model == "nomic-embed-text" || e.Model == "nomic-embed-text:latest" || e.Model == "nomic-embed-text:v1.5") &&
+		(e.Dims == 0 || e.Dims == 768 || e.Dims > 0 && e.Dims < 768 && e.RequestDimensions)
 }
 
 // StorageConfig is the [storage] block of <KATA_HOME>/config.toml. An empty
@@ -607,8 +611,23 @@ func ReadSearchConfig() (SearchConfig, error) {
 	if _, err := decodeConfigSection("search", &file); err != nil {
 		return SearchConfig{}, err
 	}
+	return resolveSearchConfig(file.Search)
+}
+
+// ParseSearchConfig applies the same environment overrides and validation as daemon startup.
+func ParseSearchConfig(data []byte) (SearchConfig, error) {
+	var file struct {
+		Search SearchConfig `toml:"search"`
+	}
+	if err := decodeSectionData(data, "search", &file); err != nil {
+		return SearchConfig{}, err
+	}
+	return resolveSearchConfig(file.Search)
+}
+
+func resolveSearchConfig(search SearchConfig) (SearchConfig, error) {
 	// Reuse the daemon's deployment overlay so search environment overrides stay consistent.
-	cfg := DaemonConfig{Search: file.Search}
+	cfg := DaemonConfig{Search: search}
 	trimSearchEmbeddings(&cfg)
 	initializeDeploymentSources(&cfg)
 	if err := applyDeploymentEnv(&cfg); err != nil {
@@ -632,9 +651,16 @@ func decodeConfigSection(name string, dst any) (string, error) {
 	if err != nil {
 		return path, fmt.Errorf("read %s: %w", path, err)
 	}
+	if err := decodeSectionData(data, name, dst); err != nil {
+		return path, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return path, nil
+}
+
+func decodeSectionData(data []byte, name string, dst any) error {
 	meta, err := toml.Decode(string(data), dst)
 	if err != nil {
-		return path, fmt.Errorf("parse %s: %w", path, err)
+		return err
 	}
 	var unknown []string
 	for _, key := range meta.Undecoded() {
@@ -643,9 +669,9 @@ func decodeConfigSection(name string, dst any) (string, error) {
 		}
 	}
 	if len(unknown) > 0 {
-		return path, fmt.Errorf("parse %s: unknown %s key(s): %s", path, name, strings.Join(unknown, ", "))
+		return fmt.Errorf("unknown %s key(s): %s", name, strings.Join(unknown, ", "))
 	}
-	return path, nil
+	return nil
 }
 
 func isClientConfigKey(key toml.Key) bool {
@@ -786,6 +812,9 @@ func trimSearchEmbeddings(cfg *DaemonConfig) {
 	e := &cfg.Search.Embeddings
 	e.BaseURL = strings.TrimSpace(e.BaseURL)
 	e.Model = strings.TrimSpace(e.Model)
+	if e.Local && e.Model == "" {
+		e.Model = "nomic-embed-text"
+	}
 	e.APIKey = strings.TrimSpace(e.APIKey)
 	e.APIKeyEnv = strings.TrimSpace(e.APIKeyEnv)
 	e.APIKeyFile = strings.TrimSpace(e.APIKeyFile)
@@ -894,7 +923,14 @@ func validateAuthProxy(p ProxyConfig) error {
 func validateEmbeddings(e EmbeddingsConfig) error {
 	hasBase := strings.TrimSpace(e.BaseURL) != ""
 	hasModel := strings.TrimSpace(e.Model) != ""
-	if hasBase != hasModel {
+	if e.Local {
+		if hasBase {
+			return errors.New("search.embeddings: local conflicts with base_url")
+		}
+		if !e.LocalRecipeCompatible() {
+			return errors.New("search.embeddings: local requires a nomic-embed-text model and dims 768, or request_dimensions for a smaller width")
+		}
+	} else if hasBase != hasModel {
 		return errors.New(
 			"search.embeddings: base_url and model must both be set or both omitted")
 	}
