@@ -68,6 +68,9 @@ var readyPriorityIndexMigrationSQL string
 //go:embed migrations/000047_ready_updated_index.up.sql
 var readyUpdatedIndexMigrationSQL string
 
+//go:embed migrations/000048_event_moved_from_id_index.up.sql
+var eventMovedFromIDIndexMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -126,6 +129,8 @@ var migrationAssets = []Migration{
 	{FromVersion: 44, ToVersion: 45, Name: "000045_issue_uid_prefix_index.up.sql", SQL: issueUIDPrefixIndexMigrationSQL},
 	{FromVersion: 45, ToVersion: 46, Name: "000046_ready_priority_index.up.sql", SQL: readyPriorityIndexMigrationSQL},
 	{FromVersion: 46, ToVersion: 47, Name: "000047_ready_updated_index.up.sql", SQL: readyUpdatedIndexMigrationSQL},
+
+	{FromVersion: 46, ToVersion: 48, Name: "000048_event_moved_from_id_index.up.sql", SQL: eventMovedFromIDIndexMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

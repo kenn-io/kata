@@ -71,7 +71,7 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 		q = "SELECT * FROM (" + eventSelect + " WHERE " + where + " AND e.project_id = ? ORDER BY e.id LIMIT ?)"
 		args = append(args, p.ProjectID, p.Limit)
 		movedWhere, movedArgs := sharedConditions()
-		// Keep the moved-from expression searchable through idx_events_moved_from.
+		// Keep the moved-from expression searchable through idx_events_moved_from_id.
 		// An inner ORDER BY/LIMIT on this leg can select a rowid walk after ANALYZE.
 		q += " UNION ALL " + eventSelect + " WHERE " + movedWhere + " AND e.type='issue.moved' AND json_extract(e.payload,'$.from_project_uid') = ? AND e.project_id <> ? ORDER BY 1 LIMIT ?"
 		args = append(args, movedArgs...)

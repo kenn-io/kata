@@ -153,6 +153,12 @@ for downtime and rollback. SQLite's JSONL cutover installs global and
 project-scoped prefix indexes; candidates sort by case-insensitive UID value,
 then original bytes.
 
+Schema 48 adds a project departure cursor index to match SQLite's event polling
+index. PostgreSQL's event query stays unchanged. Stop daemons and imports while
+the migration reads `events` and builds the index. See the
+[schema 48 migration requirements](../development/postgres-migrations.md#schema-48-project-departure-cursor-index)
+for the offline window, grants, and rollback.
+
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
 

@@ -14,7 +14,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   session starts under a `.kata.toml`; elsewhere they return an empty response
   instead of telling the agent to search, create, and close kata issues in a
   repository that does not use kata.
-- Poll and stream one project's events faster on large SQLite stores by skipping unrelated projects' history.
+- Poll and stream one project's events faster on large SQLite stores by skipping unrelated history and earlier departures. Existing stores upgrade to schema 48 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-48-project-departure-cursor-index).
 - Load web UI suggestions faster on large SQLite stores with unrestricted local owner access; scoped and account-bound access keep today's speed.
 - Fetch cross-project ready lists with a limit quickly as stores grow. SQLite and PostgreSQL use an ordered index for `kata ready --all --limit N`, MCP `kata.ready`, and `GET /api/v1/ready` without changing their filters or order. Existing stores upgrade to schema 47 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index).
 - Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
