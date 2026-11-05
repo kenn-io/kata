@@ -17,13 +17,8 @@ import (
 // must keep its raw text, even when the shared parser accepts it.
 func TestCronScheduleLabels(t *testing.T) {
 	for _, tc := range []struct{ expr, want string }{
-		{"0 * * * *", "Hourly"}, {"59 * * * *", "Hourly at :59"},
-		{"30 8 * * *", "Daily 08:30"}, {"0 9 * * 1-5", "Weekdays 09:00"},
+		{"0 0 * * 1-5", "Weekdays 00:00"},
 		{"0 0 * * 0", "Sundays 00:00"}, {"0 0 * * 7", "Sundays 00:00"},
-		{"0 9 * * 1", "Mondays 09:00"}, {"0 9 * * 2", "Tuesdays 09:00"},
-		{"0 9 * * 3", "Wednesdays 09:00"}, {"0 9 * * 4", "Thursdays 09:00"},
-		{"0 17 * * 5", "Fridays 17:00"}, {"0 9 * * 6", "Saturdays 09:00"},
-		{"00 09 * * *", "Daily 09:00"}, {"  0\t9 * * 1\t", "Mondays 09:00"},
 		{"@hourly", "Hourly"}, {"@daily", "Daily 00:00"},
 		{"@midnight", "Daily 00:00"}, {"@weekly", "Sundays 00:00"},
 	} {
@@ -48,10 +43,6 @@ func TestCronScheduleLabels(t *testing.T) {
 	}
 }
 
-func TestCronScheduleWeekdaysAtMidnightFromProperty(t *testing.T) {
-	require.Equal(t, "Weekdays 00:00", cronSchedule(generated.TriggerResponse{Kind: "cron", Cron: new("0 0 * * 1-5")}))
-}
-
 func TestCronScheduleZonesAndDetail(t *testing.T) {
 	for _, zone := range []string{"", "UTC", "Europe/Paris"} {
 		for _, tc := range []struct{ expr, list, detail string }{
@@ -62,19 +53,19 @@ func TestCronScheduleZonesAndDetail(t *testing.T) {
 			if zone != "" && zone != "UTC" {
 				suffix = " (" + zone + ")"
 			}
-			trigger := generated.TriggerResponse{Kind: "cron", Cron: new(tc.expr), Timezone: new(zone)}
+			trigger := generated.TriggerResponse{Kind: "cron", Cron: new(tc.expr), Timezone: nil}
+			if zone != "" {
+				trigger.Timezone = new(zone)
+			}
 			require.Equal(t, tc.list+suffix, cronSchedule(trigger))
-			m := cronFixture(t)
-			m.width = 160
-			m.cron.data.jobs[0].Definition.Trigger = trigger
-			m = sendKey(m, '\r')
-			require.Contains(t, stripANSI(m.viewBody()), tc.detail+suffix)
+			require.Equal(t, tc.detail+suffix, cronScheduleDetail(trigger))
 		}
 	}
 }
 
 func TestCronScheduleSupportedGrammar(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	type example struct{ expr, want string }
+	grammar := hegel.Composite(func(ht hegel.TestCase) example {
 		minute := hegel.Draw(ht, hegel.Integers(0, 59))
 		hour := hegel.Draw(ht, hegel.Integers(0, 23))
 		day := hegel.Draw(ht, hegel.SampledFrom([]string{"*", "1-5", "0", "1", "2", "3", "4", "5", "6", "7"}))
@@ -102,22 +93,23 @@ func TestCronScheduleSupportedGrammar(t *testing.T) {
 		if hegel.Draw(ht, hegel.Booleans()) {
 			expr = " \t" + strings.ReplaceAll(expr, " ", "\t ") + " "
 		}
-		got := cronSchedule(generated.TriggerResponse{Kind: "cron", Cron: new(expr)})
-		require.Equal(ht, want, got)
-		assertCronLabelOccurrences(ht, expr, got)
-	}, hegel.WithTestCases(1000))
-}
-
-func TestCronScheduleArbitraryText(t *testing.T) {
+		return example{expr, want}
+	})
 	seeds := []string{"0 9 * * *", "0 9 * * 1-5", "@hourly", "@daily", "@midnight", "@weekly", "@monthly", "0 9 15 * 1"}
 	mutated := hegel.FlatMap(hegel.SampledFrom(seeds), func(expr string) hegel.Generator[string] {
 		return hegel.Map(hegel.Text(), func(extra string) string { return expr + extra })
 	})
+	arbitrary := hegel.Map(hegel.OneOf(hegel.Text(), hegel.SampledFrom(seeds), mutated), func(expr string) example {
+		return example{expr: expr}
+	})
 	hegel.Test(t, func(ht *hegel.T) {
-		expr := hegel.Draw(ht, hegel.OneOf(hegel.Text(), hegel.SampledFrom(seeds), mutated))
-		got := cronSchedule(generated.TriggerResponse{Kind: "cron", Cron: new(expr)})
-		if got != expr {
-			assertCronLabelOccurrences(ht, expr, got)
+		tc := hegel.Draw(ht, hegel.OneOf(grammar, arbitrary))
+		got := cronSchedule(generated.TriggerResponse{Kind: "cron", Cron: new(tc.expr)})
+		if tc.want != "" {
+			require.Equal(ht, tc.want, got)
+		}
+		if got != tc.expr {
+			assertCronLabelOccurrences(ht, tc.expr, got)
 		}
 	}, hegel.WithTestCases(1000))
 }

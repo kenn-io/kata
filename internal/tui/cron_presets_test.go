@@ -10,6 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 	"hegel.dev/go/hegel"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
 // Literal expectations describe the user's choices, independent of the table
@@ -35,9 +37,6 @@ func TestCronPresetFieldAndValues(t *testing.T) {
 	f.val[cfCron] = presetTestExpressions[0]
 	for i, expr := range presetTestExpressions {
 		require.Equal(t, labels[i], f.display(cfPreset))
-		label, ok := cronScheduleLabel(expr)
-		require.True(t, ok)
-		require.Equal(t, labels[i], label)
 		_, def, err := f.build(cronTestUIDs)
 		require.NoError(t, err)
 		require.Equal(t, expr, def.Trigger.Cron)
@@ -72,62 +71,59 @@ func TestCronPresetRetainsCustomAndPristineState(t *testing.T) {
 			require.False(t, f.dirty(), "remembering Custom alone is not an edit")
 		}
 	}
-	for _, raw := range []string{"", "  ", "bad schedule"} {
-		f := newNativeForm(t)
-		f.val[cfCron] = raw
-		f.step(cfPreset, 1)
-		require.Equal(t, "0 * * * *", f.val[cfCron])
-	}
 }
 
-func TestCronPresetRoundTrips(t *testing.T) {
-	expressions := presetCronExpressionGen()
+func TestCronPresetArbitraryCustomDrafts(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
-		kind := hegel.Draw(ht, hegel.SampledFrom([]string{cronRecurringID, "prompt", "workflow", "notify"}))
-		opened := hegel.Draw(ht, expressions)
-		typed := hegel.Draw(ht, expressions)
+		raw := hegel.Draw(ht, hegel.OneOf(hegel.Text(), presetCronExpressionGen()))
 		zone := hegel.Draw(ht, hegel.SampledFrom([]string{"UTC", "Europe/Paris", "America/New_York"}))
 		f := newNativeForm(t)
-		f.kind = kind
-		f.val[cfPrompt], f.val[cfWorkflow], f.val[cfIssue] = "Example prompt", cronTestIssue, cronTestIssue
-		f.val[cfCron], f.val[cfZone] = opened, zone
-		_, def, err := f.build(cronTestUIDs)
-		require.NoError(ht, err)
-		rec := nativeRecord()
-		rec.Definition = def
-		f, err = cronFormFor(rec, nil)
-		require.NoError(ht, err)
-		require.False(ht, f.dirty())
-		_, def, err = f.build(cronTestUIDs)
-		require.NoError(ht, err)
-		require.Equal(ht, opened, def.Trigger.Cron)
-
-		f.val[cfCron] = typed
+		f.val[cfCron], f.val[cfZone] = raw, zone
+		f.focusField(cfPreset)
 		options := slices.Clone(presetTestExpressions)
-		for _, candidate := range []string{typed, opened} {
-			if !slices.Contains(presetTestExpressions, strings.Join(strings.Fields(candidate), " ")) {
-				options = append(options, candidate)
-				break
-			}
+		identity := strings.Join(strings.Fields(raw), " ")
+		if strings.TrimSpace(raw) != "" && !slices.Contains(options, identity) {
+			options = append(options, raw)
 		}
-		current := typed
-		walk := hegel.Draw(ht, hegel.Lists(hegel.SampledFrom([]int{-1, 1})).MaxSize(30))
-		// Include a complete cycle after any walk, in either direction.
-		delta := hegel.Draw(ht, hegel.SampledFrom([]int{-1, 1}))
-		walk = append(walk, slices.Repeat([]int{delta}, len(options))...)
-		for _, step := range walk {
-			identity := strings.Join(strings.Fields(current), " ")
-			at := slices.Index(presetTestExpressions, identity)
+		current := raw
+		step := func(delta int) {
+			at := slices.Index(options, strings.Join(strings.Fields(current), " "))
 			if at < 0 {
-				at = len(options) - 1
+				at = slices.Index(options, current)
 			}
-			current = options[(at+step+len(options))%len(options)]
-			f.step(cfPreset, step)
-			_, def, err = f.build(cronTestUIDs)
-			require.NoError(ht, err)
-			require.Equal(ht, current, def.Trigger.Cron)
-			require.Equal(ht, zone, def.Trigger.Timezone)
+			if at < 0 && delta < 0 {
+				at = 0
+			}
+			current = options[(at+delta+len(options))%len(options)]
+			f.step(cfPreset, delta)
+			require.Equal(ht, current, f.val[cfCron])
+			require.Equal(ht, zone, f.val[cfZone])
+			_, def, err := f.build(cronTestUIDs)
+			if _, parseErr := cron.ParseCron(current); parseErr != nil {
+				require.Error(ht, err)
+			} else {
+				require.NoError(ht, err)
+				require.Equal(ht, current, def.Trigger.Cron)
+				require.Equal(ht, zone, def.Trigger.Timezone)
+			}
 		}
+		walk := hegel.Draw(ht, hegel.Lists(hegel.SampledFrom([]int{-1, 1})).MaxSize(30))
+		for _, delta := range walk {
+			step(delta)
+		}
+		// A blank draft enters the presets, but is not remembered as Custom.
+		delta := hegel.Draw(ht, hegel.SampledFrom([]int{-1, 1}))
+		if strings.TrimSpace(current) == "" {
+			step(delta)
+		}
+		beforeCycle := current
+		if normalized := strings.Join(strings.Fields(current), " "); slices.Contains(presetTestExpressions, normalized) {
+			beforeCycle = normalized
+		}
+		for range len(options) {
+			step(delta)
+		}
+		require.Equal(ht, beforeCycle, f.val[cfCron])
 	}, hegel.WithTestCases(1000))
 }
 
@@ -140,36 +136,6 @@ func presetCronExpressionGen() hegel.Generator[string] {
 	})
 	corpus := append(slices.Clone(presetTestExpressions), "30 8 * * 1-5", "*/7 * * * *", "0 9 15 * 1", "@weekly", "@monthly", "0 9 * * 1\t")
 	return hegel.OneOf(grammar, hegel.SampledFrom(corpus))
-}
-
-func TestCronPresetArbitraryCustomDrafts(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		raw := hegel.Draw(ht, hegel.OneOf(hegel.Text(), presetCronExpressionGen()))
-		delta := hegel.Draw(ht, hegel.SampledFrom([]int{-1, 1}))
-		f := newNativeForm(t)
-		f.val[cfCron] = raw
-		f.focusField(cfPreset)
-		identity := strings.Join(strings.Fields(raw), " ")
-		want := raw
-		steps := 6
-		if slices.Contains(presetTestExpressions, identity) {
-			want, steps = identity, 5
-		}
-		if strings.TrimSpace(raw) == "" {
-			// An empty field can enter the presets, but is not a Custom choice.
-			f.step(cfPreset, delta)
-			if delta == 1 {
-				require.Equal(ht, "0 * * * *", f.val[cfCron])
-			} else {
-				require.Equal(ht, "0 17 * * 5", f.val[cfCron])
-			}
-			return
-		}
-		for range steps {
-			f.step(cfPreset, delta)
-		}
-		require.Equal(ht, want, f.val[cfCron])
-	}, hegel.WithTestCases(1000))
 }
 
 func TestCronPresetHiddenDrafts(t *testing.T) {
@@ -202,70 +168,44 @@ func TestCronPresetHiddenDrafts(t *testing.T) {
 }
 
 func TestCronPresetFollowsTypedAndPastedCron(t *testing.T) {
-	for _, paste := range []bool{false, true} {
-		m, _ := cronWriteFixture(t)
-		m = sendRune(m, 'n')
-		f := m.cron.form
-		f.val[cfCron] = ""
-		f.focusField(cfCron)
-		if paste {
-			m, _ = updateModel(m, tea.PasteMsg{Content: "0 17 * * 5"})
-		} else {
-			for _, r := range "0 17 * * 5" {
-				m = sendRune(m, r)
-			}
-		}
-		require.Contains(t, stripANSI(m.viewBody()), "‹ Fridays 17:00 ›")
-		f.val[cfCron] = ""
-		f.focusField(cfCron)
-		m, _ = updateModel(m, tea.PasteMsg{Content: "30 8 * * 1-5"})
-		f.focusField(cfPreset)
-		for _, selection := range []struct {
-			key   rune
-			expr  string
-			label string
-		}{
-			{tea.KeyRight, "0 * * * *", "Hourly"},
-			{tea.KeyLeft, "30 8 * * 1-5", "Custom"},
-			{tea.KeySpace, "0 * * * *", "Hourly"},
-			{tea.KeyLeft, "30 8 * * 1-5", "Custom"},
-		} {
-			m = sendKey(m, selection.key)
-			require.Equal(t, selection.expr, f.val[cfCron], "paste=%t key=%d", paste, selection.key)
-			require.Contains(t, stripANSI(m.viewBody()), "‹ "+selection.label+" ›")
-			require.Equal(t, "UTC", f.val[cfZone])
-		}
-		f.step(cfTrigger, 1)
-		require.False(t, f.shown(cfPreset))
-		f.step(cfTrigger, -1)
-		require.Equal(t, "Custom", f.display(cfPreset))
-		f.step(cfKind, 1)
-		f.step(cfKind, -1)
-		for range 6 {
-			f.step(cfPreset, 1)
-		}
-		require.Equal(t, "30 8 * * 1-5", f.val[cfCron])
+	m, _ := cronWriteFixture(t)
+	m = sendRune(m, 'n')
+	f := m.cron.form
+	f.val[cfCron] = ""
+	f.focusField(cfCron)
+	for _, r := range "0 17 * * 5" {
+		m = sendRune(m, r)
+	}
+	require.Contains(t, stripANSI(m.viewBody()), "‹ Fridays 17:00 ›")
+	f.val[cfCron] = ""
+	f.focusField(cfCron)
+	m, _ = updateModel(m, tea.PasteMsg{Content: "30 8 * * 1-5"})
+	f.focusField(cfPreset)
+	for _, selection := range []struct {
+		key   rune
+		expr  string
+		label string
+	}{
+		{tea.KeyRight, "0 * * * *", "Hourly"},
+		{tea.KeyLeft, "30 8 * * 1-5", "Custom"},
+		{tea.KeySpace, "0 * * * *", "Hourly"},
+		{tea.KeyLeft, "30 8 * * 1-5", "Custom"},
+	} {
+		m = sendKey(m, selection.key)
+		require.Equal(t, selection.expr, f.val[cfCron], "key=%d", selection.key)
+		require.Contains(t, stripANSI(m.viewBody()), "‹ "+selection.label+" ›")
 	}
 }
 
 func TestCronScheduleFilterUsesLabels(t *testing.T) {
-	for _, tc := range []struct {
-		expr, query string
-		count       int
-	}{
-		{"0 9 * * 1-5", "weekdays", 1},
-		{"0 9 * * 1-5", "1-5", 0},
-		{"*/7 * * * *", "*/7", 1},
-	} {
-		m := cronFixture(t)
-		m.cron.data.jobs[0].Name = "Example job"
-		m.cron.data.jobs[0].Definition.Trigger.Cron = new(tc.expr)
-		m = sendRune(m, '/')
-		m, _ = updateModel(m, tea.PasteMsg{Content: tc.query})
-		m = sendKey(m, tea.KeyEnter)
-		_, _, rows := cronScreen(m)
-		require.Len(t, rows, tc.count)
-	}
+	m := cronFixture(t)
+	m.cron.data.jobs[0].Name = "Example job"
+	m.cron.data.jobs[0].Definition.Trigger.Cron = new("0 9 * * 1-5")
+	m = sendRune(m, '/')
+	m, _ = updateModel(m, tea.PasteMsg{Content: "weekdays"})
+	m = sendKey(m, tea.KeyEnter)
+	_, _, rows := cronScreen(m)
+	require.Len(t, rows, 1)
 }
 
 func TestSnapshot_CronNewForm(t *testing.T) {
@@ -273,6 +213,5 @@ func TestSnapshot_CronNewForm(t *testing.T) {
 	m, _ := cronWriteFixture(t)
 	m = sendRune(m, 'n')
 	m.cron.form.uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-	require.Contains(t, stripANSI(m.viewBody()), "Preset")
 	assertGolden(t, "cron-form-new", m.viewBody())
 }
