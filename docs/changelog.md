@@ -18,6 +18,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Open long web UI lists with the first 150 rows and add more as you scroll. The
   browser's own Find sees only rendered rows. End and deep links to late rows
   still draw the remaining rows once.
+- Connect MCP clients directly to an identity-mode daemon's `/mcp` using each
+  caller's identity token. Reads and writes retain that token's actor and
+  authorization, and sessions reject requests made with a different token.
+  Remove `[mcp] token_file` and `token_env` when enabling identity mode; the
+  mount uses caller tokens instead. See
+  [Daemon mount with identity tokens](reference/mcp.md#daemon-mount-with-identity-tokens-unreleased).
 - Read empty multi-word search reasons in CLI JSON and MCP, including filtered
   searches. Empty lists report matching issues of the other status and a retry
   that keeps scope and filters, with PowerShell syntax on Windows.
