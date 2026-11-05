@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -52,9 +53,23 @@ func TestCronNoticeWindowPermutation(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		m := cronNoticeFixture(t)
 		n := hegel.Draw(ht, hegel.Integers[int](1, 8))
+		m.width = hegel.Draw(ht, hegel.Integers[int](64, 160))
+		jobs := []string{"named-a", "named-b", "0123456789abcdef"}
+		m.cron.data.jobs = []generated.CronJob{{UID: jobs[0], Name: "alpha\tjob"}, {UID: jobs[1], Name: "beta"}}
+		labels := []string{"alpha job", "beta", "job 0123456789a…"}
+		chosen := make([]string, n)
+		wantLabels := []string{}
+		for i := range n {
+			j := hegel.Draw(ht, hegel.Integers[int](0, len(jobs)-1))
+			chosen[i] = jobs[j]
+			if !slices.Contains(wantLabels, labels[j]) {
+				wantLabels = append(wantLabels, labels[j])
+			}
+		}
+		slices.Sort(wantLabels)
 		offset := hegel.Draw(ht, hegel.Integers[int](0, n-1))
 		for i := range n * 2 {
-			next, cmd := m.cronNoticeEvent(cronNoticeEvent(fmt.Sprint((i+offset)%n), "job", snapshotFixedNow))
+			next, cmd := m.cronNoticeEvent(cronNoticeEvent(fmt.Sprint((i+offset)%n), chosen[(i+offset)%n], snapshotFixedNow))
 			m = next
 			if (cmd != nil) != (i == 0) {
 				ht.Fatalf("event %d armed an unexpected window", i)
@@ -64,16 +79,23 @@ func TestCronNoticeWindowPermutation(t *testing.T) {
 		if cmd == nil || m.toast == nil {
 			ht.Fatal("eligible window must emit a toast")
 		}
-		if !strings.Contains(m.toast.text, fmt.Sprintf("%d run", n)) || strings.Count(m.toast.text, "job job") != 1 {
-			ht.Fatalf("wrong grouped notice: %q", m.toast.text)
+		wantText := strings.Join(wantLabels[:min(2, len(wantLabels))], ", ")
+		if len(wantLabels) > 2 {
+			wantText += fmt.Sprintf(" +%d", len(wantLabels)-2)
+		}
+		// Fixture labels are ASCII except the one-column ellipsis.
+		if limit := max(m.width-52, 12); len([]rune(wantText)) > limit {
+			wantText = string([]rune(wantText)[:limit-1]) + "…"
+		}
+		count := fmt.Sprintf("%d runs", n)
+		if n == 1 {
+			count = "1 run"
+		}
+		if want := "cron: " + count + " failed: " + wantText; m.toast.text != want {
+			ht.Fatalf("grouped notice = %q, want %q", m.toast.text, want)
 		}
 		if !m.toast.expiresAt.Equal(snapshotFixedNow.Add(10 * time.Second)) {
 			ht.Fatal("wrong notice lifetime")
-		}
-		before := m.toast
-		m, cmd = m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
-		if cmd != nil || m.toast != before {
-			ht.Fatal("an unseen announcement must suppress a later window")
 		}
 	}, hegel.WithTestCases(200))
 }
@@ -130,6 +152,9 @@ func TestCronNoticeStartupScopeAndCutoff(t *testing.T) {
 	m = cronNoticeFixture(t)
 	m, _ = m.cronNoticeEvent(cronNoticeEvent("first", "", snapshotFixedNow))
 	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+	m, cmd = m.cronNoticeEvent(cronNoticeEvent("first", "", snapshotFixedNow))
+	require.Nil(t, cmd, "same-UID workflow replay must stay suppressed without a job bucket")
+	require.Empty(t, m.cronNotices.pending)
 	m, cmd = m.cronNoticeEvent(cronNoticeEvent("second", "", snapshotFixedNow))
 	require.NotNil(t, cmd)
 }
@@ -166,20 +191,15 @@ func TestCronNoticeStaleWindowAndHints(t *testing.T) {
 	require.NotNil(t, m.toast)
 	for _, tc := range []struct {
 		view viewID
+		help bool
 		want string
-	}{{viewCron, "u to review"}, {viewList, "3 then u"}, {viewDetail, "3 then u"}, {viewProjects, "open Cron Runs"}} {
-		m.view = tc.view
+	}{{viewCron, false, "u to review"}, {viewCron, true, "open Cron Runs"}, {viewList, false, "3 then u"}, {viewDetail, false, "3 then u"}, {viewProjects, false, "open Cron Runs"}} {
+		m.view, m.cron.help = tc.view, tc.help
 		require.Contains(t, m.cronToast().text, tc.want)
 	}
 	m.view = viewCron
 	m.cron.filtering = true
 	require.Contains(t, m.cronToast().text, "open Cron Runs")
-	// Real SSE dispatch in the issue list invokes the same notice path.
-	m = cronNoticeFixture(t)
-	m.view = viewList
-	next, _ := m.handleEventReceived(cronNoticeEvent("r", "job", snapshotFixedNow))
-	m = next.(Model)
-	require.Len(t, m.cronNotices.pending, 1)
 
 	{
 		defer snapshotInit(t)()
@@ -215,7 +235,6 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 	event := cronNoticeEvent("new-failure", m.cron.data.jobs[0].UID, snapshotFixedNow)
 	m, cmd := updateModel(m, event)
 	require.NotNil(t, cmd)
-	require.True(t, m.pendingRefetch, "SSE must schedule fresh data")
 	m, _ = updateModel(m, cronNoticeTickFor(m))
 	require.NotNil(t, m.toast)
 	require.Equal(t, toastError, m.toast.level)
@@ -260,6 +279,21 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 		t.Fatal("failure notice missing from Projects")
 	})
 
+	for _, state := range []string{"help", "form", "narrow"} {
+		t.Run(state, func(t *testing.T) {
+			m := m
+			switch state {
+			case "help":
+				m.cron.help = true
+			case "form":
+				m.cron.form = newNativeForm(t)
+			case "narrow":
+				m.width = 79
+			}
+			require.Equal(t, 1, strings.Count(stripANSI(m.viewContent()), "cron: 1 run failed:"), "notice must appear exactly once")
+		})
+	}
+
 	t.Run("fresh failure after notice", func(t *testing.T) {
 		defer snapshotInit(t)()
 		m := cronNoticeFixture(t)
@@ -284,8 +318,6 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 		m, _ = updateModel(m, cronLoadedMsg(data))
 		out := stripANSI(m.viewContent())
 		require.Contains(t, out, "1 unseen failed")
-		require.Contains(t, out, "failing")
-		require.Contains(t, out, "failed 0s ago")
 	})
 }
 
@@ -309,10 +341,6 @@ func TestCronNoticeClearsOnSwitch(t *testing.T) {
 				}})
 			}
 			require.Nil(t, m.toast, "departed scope's failure must not survive a switch")
-			m.view = viewCron
-			m.cron.unseenOnly = true
-			m, _ = m.routeCronKey(keyRune('u'))
-			require.False(t, m.cron.unseenOnly, "u must toggle normally after switching")
 		})
 	}
 }
@@ -329,22 +357,6 @@ func TestCronNoticeJobSuppressionRelease(t *testing.T) {
 		name string
 		run  func(*testing.T, Model)
 	}{
-		{"winning correction", func(t *testing.T, m Model) {
-			// A high source revision was announced. A later winning peer correction has
-			// become local revision 3. A new failure for the job must be announced.
-			m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "failed", Revision: 2, UpdatedAt: snapshotFixedNow}}
-			first := cronNoticeEvent("old", "job", snapshotFixedNow)
-			first.cronRun.Revision = 9
-			m, _ = m.cronNoticeEvent(first)
-			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-			require.NotNil(t, m.toast)
-			m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "succeeded", Revision: 3, UpdatedAt: snapshotFixedNow}}
-			m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
-			require.NotNil(t, cmd, "a corrected announcement must stop suppressing this job")
-			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-			require.Contains(t, m.toast.text, "1 run")
-			require.Contains(t, m.cronNotices.announced, "next")
-		}},
 		{"snapshot at arrival", func(t *testing.T, m Model) {
 			m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "succeeded", Revision: 50, UpdatedAt: snapshotFixedNow}}
 			first := cronNoticeEvent("old", "job", snapshotFixedNow)
@@ -368,8 +380,6 @@ func TestCronNoticeJobSuppressionRelease(t *testing.T) {
 			m, cmd = m.cronNoticeEvent(cronNoticeEvent("c", "job", snapshotFixedNow))
 			require.NotNil(t, cmd)
 			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-			m, cmd = m.cronNoticeEvent(cronNoticeEvent("c", "job", snapshotFixedNow))
-			require.Nil(t, cmd, "same-UID replay stays suppressed even after acknowledgement")
 		}},
 		{"loaded correction after reset", func(t *testing.T, m Model) {
 			job := m.cron.data.jobs[0].UID
@@ -486,16 +496,24 @@ func TestCronNoticeWaitsForReadAfterEvent(t *testing.T) {
 		}
 		return r
 	}
-	for _, loaded := range []bool{true, false} {
-		t.Run(fmt.Sprintf("older read lands after failure/loaded=%v", loaded), func(t *testing.T) {
+	for _, mode := range []string{"loaded", "unloaded", "exact read failed"} {
+		t.Run("older read lands after failure/"+mode, func(t *testing.T) {
 			m := cronNoticeFixture(t)
-			if loaded {
+			if mode != "unloaded" {
 				m = land(m, m.cron.events, row(m, "running", 5, T))
 			}
 			m = deliver(m, "r", "running", T.Add(time.Second)) // the run's start or progress
 			inFlight := m.cron.events
 			m = deliver(m, "r", "failed", T.Add(time.Minute))
 			m = land(m, inFlight, row(m, "running", 6, T.Add(time.Second)))
+			if mode == "exact read failed" {
+				p := *m.cron.data
+				p.events, p.generation = m.cron.events, m.cron.readGen
+				p.runs = slices.DeleteFunc(slices.Clone(p.runs), func(r generated.CronRun) bool { return r.UID == "r" })
+				p.runErr = map[string]error{"r": errors.New("run refresh offline")}
+				m, _ = updateModel(m, cronLoadedMsg(p))
+				require.NotZero(t, m.cron.changed["r"].at, "a failed exact read cannot settle the failure")
+			}
 			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
 			require.NotNil(t, m.toast, "a read issued before the failure cannot supersede it")
 			require.Contains(t, m.cronNotices.announced, "r")

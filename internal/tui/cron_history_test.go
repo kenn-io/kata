@@ -273,31 +273,6 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 		require.Contains(t, text, "run refresh offline")
 	})
 
-	t.Run("retained row opens and is acknowledged", func(t *testing.T) {
-		m := cronSeenFixture(t)
-		head := m.cron.data.runs[0]
-		old := head
-		old.UID, old.Status = "retained-failure", "failed"
-		old.CreatedAt = snapshotFixedNow.Add(-24 * time.Hour)
-		old.EndedAt = new(old.CreatedAt)
-		m.cron.data.runs = []generated.CronRun{head}
-		m.cron.data.lastRuns = map[string]generated.CronRun{*head.JobUID: head}
-		m.cron.data.lookup = map[string]generated.CronRun{old.UID: old}
-		m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{head, old}, ready: true, older: true}
-		m.cron.tab = cronRuns
-		m.api = &cronReadTestAPI{data: *m.cron.data}
-		m.cron.events++
-		m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
-		_, _, lines := cronScreen(m)
-		i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
-		require.NotEqual(t, -1, i, "event retains the older row")
-		m.cron.lists[cronRuns].cursor = i
-		m, _ = m.routeCronKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-		require.Zero(t, m.cronUnseenCount(), "opening the retained row acknowledges it")
-		_, _, detail := cronScreen(m)
-		require.NotContains(t, cronLinesText(detail), "no longer in the loaded data", "an acknowledged run must still be readable")
-		require.Contains(t, cronLinesText(detail), "failed")
-	})
 }
 
 type cronRunRefreshAPI struct {

@@ -523,13 +523,48 @@ func TestCronSuccessfulHeadClearsMarkWithoutExactRead(t *testing.T) {
 // Matching counters name no run, so opening a retained row after missed events
 // or skipped or failed reads must itself read the run by UID.
 func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
-	for _, mode := range []string{"failed", "running", "old client", "closed before load"} {
-		t.Run(mode, func(t *testing.T) {
+	cases := []struct {
+		mode     string
+		closeKey tea.KeyPressMsg
+	}{{mode: "failed"}, {mode: "running"}, {mode: "old client"}, {mode: "closed before load"}, {mode: "already failed"}}
+	for _, key := range []tea.KeyPressMsg{keyRune('?'), {Code: tea.KeyEscape}, keyRune('h')} {
+		cases = append(cases, struct {
+			mode     string
+			closeKey tea.KeyPressMsg
+		}{"behind help", key})
+	}
+	for _, tc := range cases {
+		mode := tc.mode
+		name := mode
+		if mode == "behind help" {
+			name += "/" + tc.closeKey.String()
+		}
+		t.Run(name, func(t *testing.T) {
 			m, a := cronRefreshFixture(t, 1)
 			r := m.cron.runPage.runs[0]
 			r.Status, r.Actor, r.IssueUID = "running", "operator", new("wait-issue")
-			m.cron.runPage.runs[0] = r
+			if mode == "already failed" {
+				m = cronSeenFixture(t)
+				head := m.cron.data.runs[0]
+				r = head
+				r.UID, r.Status = "retained-failure", "failed"
+				r.CreatedAt = snapshotFixedNow.Add(-24 * time.Hour)
+				r.EndedAt = new(r.CreatedAt)
+				m.cron.data.runs = []generated.CronRun{head}
+				m.cron.data.lastRuns = map[string]generated.CronRun{*head.JobUID: head}
+				m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{head, r}, ready: true, older: true}
+			}
+			if mode != "already failed" {
+				m.cron.runPage.runs[0] = r
+			}
 			m = m.cronRemember([]generated.CronRun{r})
+			if mode == "already failed" {
+				// Refreshing the head must preserve this older failure in history.
+				m.cron.runPage.older = true
+				m.api = &cronReadTestAPI{data: *m.cron.data}
+				m.cron.events++
+				m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
+			}
 			if mode == "running" {
 				a.exact = func(context.Context, string) (generated.CronRun, error) { r.Revision = 3; return r, nil }
 			}
@@ -538,10 +573,22 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 			}
 			m.cron.tab = cronRuns
 			_, _, lines := cronScreen(m)
-			m.cron.lists[cronRuns].cursor = slices.IndexFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, r.UID} })
+			i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, r.UID} })
+			require.NotEqual(t, -1, i, "event retains the older row")
+			m.cron.lists[cronRuns].cursor = i
 			m = sendKey(m, tea.KeyEnter)
+			if mode == "already failed" {
+				require.Zero(t, m.cronUnseenCount(), "opening the retained row acknowledges it")
+				require.NotContains(t, cronScreenText(m), "no longer in the loaded data", "an acknowledged run must still be readable")
+				require.Contains(t, cronScreenText(m), "failed")
+				return
+			}
 			if mode == "closed before load" {
 				m = sendKey(m, tea.KeyEscape)
+			}
+			if mode == "behind help" {
+				m = sendRune(m, '?')
+				require.True(t, m.cron.help)
 			}
 			m = cronLoadTest(t, m)
 			got, _ := m.cron.data.run(r.UID)
@@ -558,36 +605,15 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 			case "closed before load":
 				require.Equal(t, "failed", got.Status)
 				require.Equal(t, 1, m.cronUnseenCount(), "a failure never shown stays unseen")
+			case "behind help":
+				require.Equal(t, "failed", got.Status)
+				require.Equal(t, 1, m.cronUnseenCount(), "a failure refreshed behind Help is not yet shown")
+				require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID])
+				m = cronUpdateTest(m, tc.closeKey)
+				require.False(t, m.cron.help)
+				require.Equal(t, cronRef{cronRuns, r.UID}, m.cron.stack[len(m.cron.stack)-1].ref)
+				require.Zero(t, m.cronUnseenCount(), "closing Help shows the failed run")
 			}
-		})
-	}
-}
-
-// Help covers the open run. A failure refreshed behind it is not shown, so it
-// stays unseen until Help closes and the run detail shows it again.
-func TestCronRefreshedFailureBehindHelpStaysUnseen(t *testing.T) {
-	for _, closeKey := range []tea.KeyPressMsg{keyRune('?'), {Code: tea.KeyEscape}, keyRune('h')} {
-		t.Run(closeKey.String(), func(t *testing.T) {
-			m, _ := cronRefreshFixture(t, 1)
-			r := m.cron.runPage.runs[0]
-			r.Status = "running"
-			m.cron.runPage.runs[0] = r
-			m = m.cronRemember([]generated.CronRun{r})
-			m.cron.tab = cronRuns
-			_, _, lines := cronScreen(m)
-			m.cron.lists[cronRuns].cursor = slices.IndexFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, r.UID} })
-			m = sendKey(m, tea.KeyEnter)
-			m = sendRune(m, '?')
-			require.True(t, m.cron.help)
-			m = cronLoadTest(t, m)
-			got, _ := m.cron.data.run(r.UID)
-			require.Equal(t, "failed", got.Status)
-			require.Equal(t, 1, m.cronUnseenCount(), "a failure refreshed behind Help is not yet shown")
-			require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID])
-			m = cronUpdateTest(m, closeKey)
-			require.False(t, m.cron.help)
-			require.Equal(t, cronRef{cronRuns, r.UID}, m.cron.stack[len(m.cron.stack)-1].ref)
-			require.Zero(t, m.cronUnseenCount(), "closing Help shows the failed run")
 		})
 	}
 }

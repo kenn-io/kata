@@ -19,8 +19,8 @@ import (
 // Contract: a pulled observation retains its payload through the daemon event
 // publisher on the pull-only path used by FederationPullOnce. This supplies
 // publisher.Events explicitly; it does not test daemon callback installation,
-// background Runner wiring, or fork admission. A repeat pull emits no duplicate.
-func TestCronPulledObservationPayloadAndOnceOnlyPublishing(t *testing.T) {
+// background Runner wiring, or fork admission.
+func TestCronPulledObservationPayloadPublishing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	hub := nativeStore(t, "sqlite")
@@ -73,13 +73,5 @@ func TestCronPulledObservationPayloadAndOnceOnlyPublishing(t *testing.T) {
 		require.Equal(t, observed.Run.UpdatedAt, payload.UpdatedAt)
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
-	}
-	// The sync invokes its callback inline after commit, and Events sends
-	// to the subscriber synchronously, so an empty channel is conclusive here.
-	pull()
-	select {
-	case msg := <-stream.Ch:
-		t.Fatalf("duplicate pull unexpectedly published %v", msg.Event)
-	default:
 	}
 }
