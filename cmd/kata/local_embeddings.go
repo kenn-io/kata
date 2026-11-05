@@ -49,6 +49,7 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 			return err
 		}
 		original, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
+		originalExists := err == nil
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -132,6 +133,13 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 		defer release()
 		if err := requireRestartable(running); err != nil {
 			return err
+		}
+		latest, err := os.ReadFile(path) // #nosec G304 -- same config snapshot read before installation
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read configuration before writing: %w", err)
+		}
+		if (err == nil) != originalExists || !bytes.Equal(latest, original) {
+			return fmt.Errorf("configuration %q changed during setup; rerun the command", path)
 		}
 		if !bytes.Equal(original, proposed) {
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

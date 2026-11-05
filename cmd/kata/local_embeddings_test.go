@@ -80,6 +80,61 @@ func TestLocalEmbeddingsSetupRefusesEnvironmentOverride(t *testing.T) {
 	require.Equal(t, original, got)
 }
 
+func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		original string
+		exists   bool
+		edited   string
+		remove   bool
+	}{
+		{name: "edited", exists: true, original: "[daemon]\nport = 8888\n", edited: "[daemon]\nport = 9999\n"},
+		{name: "created", edited: "[daemon]\nport = 9999\n"},
+		{name: "created empty"},
+		{name: "removed", exists: true, original: "[daemon]\nport = 8888\n", remove: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := setupKataEnv(t)
+			t.Setenv("KATA_SERVER", "")
+			path := filepath.Join(home, "config.toml")
+			if tc.exists {
+				require.NoError(t, os.WriteFile(path, []byte(tc.original), 0600))
+			}
+			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+			installed := false
+			localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
+				if !installed {
+					return "", embedlocal.ErrNotFound
+				}
+				return "http://127.0.0.1:12345/v1", nil
+			}
+			localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+				yes, err := opts.Confirm(ctx, 290_000_000)
+				require.NoError(t, err)
+				require.True(t, yes)
+				if tc.remove {
+					require.NoError(t, os.Remove(path))
+				} else {
+					require.NoError(t, os.WriteFile(path, []byte(tc.edited), 0600))
+				}
+				installed = true
+				return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+			}
+			out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+			got, readErr := os.ReadFile(path) // #nosec G304 -- path is derived from a test fixture
+			if tc.remove {
+				require.ErrorIs(t, readErr, os.ErrNotExist)
+			} else {
+				require.NoError(t, readErr)
+				require.Equal(t, tc.edited, string(got))
+			}
+			require.ErrorContains(t, err, "changed")
+			require.Empty(t, out)
+		})
+	}
+}
+
 func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
 	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
