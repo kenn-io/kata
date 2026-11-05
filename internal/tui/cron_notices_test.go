@@ -551,3 +551,39 @@ func TestCronNoticeWaitsForReadAfterEvent(t *testing.T) {
 		}
 	}
 }
+
+// A run outside the loaded head carries no change mark, so an older page read
+// before its failure event cannot settle the notice, whether that page lands
+// before or after the head refresh the event triggered. That refresh did not
+// read the run, so only the event describes it.
+func TestCronNoticeIgnoresStaleOlderPage(t *testing.T) {
+	T := snapshotFixedNow
+	for _, pageFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("page before head=%v", pageFirst), func(t *testing.T) {
+			m := cronNoticeFixture(t)
+			job := m.cron.data.jobs[0].UID
+			m.cron.runPage = cronHistoryPage{runs: m.cron.data.runs, next: "older-cursor", ready: true}
+			m, _ = m.cronRequestPage("", false)
+			require.True(t, m.cron.runPage.out)
+			stale := generated.CronRun{UID: "r", JobUID: &job, Status: "running", Revision: 5, CreatedAt: T.Add(-time.Hour), UpdatedAt: T.Add(-time.Hour)}
+			page := cronPageMsg{conn: m.connGen, scope: m.scopeGen, gen: m.cron.runPage.gen, cursor: "older-cursor", runs: []generated.CronRun{stale}}
+			next, _ := m.handleEventReceived(cronNoticeEvent("r", job, T.Add(time.Minute)))
+			m = next.(Model)
+			require.NotContains(t, m.cron.changed, "r", "an unloaded run has no change mark")
+			require.Contains(t, m.cronNotices.pending, "r")
+			if pageFirst {
+				m, _ = updateModel(m, page)
+			}
+			m = cronSettleTest(m) // the head refresh issued after the event; r is not in its head
+			if !pageFirst {
+				m, _ = updateModel(m, page)
+			}
+			got, loaded := m.cron.data.run("r")
+			require.True(t, loaded, "the older page's row is retained for display")
+			require.Equal(t, "running", got.Status)
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.NotNil(t, m.toast, "a page read before the failure cannot supersede it")
+			require.Contains(t, m.cronNotices.announced, "r")
+		})
+	}
+}

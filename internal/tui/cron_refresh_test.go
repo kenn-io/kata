@@ -312,7 +312,7 @@ func TestCronSharedParentEvidence(t *testing.T) {
 	}
 }
 
-func TestCronRefreshCancellationAndOldClient(t *testing.T) {
+func TestCronRefreshCancellation(t *testing.T) {
 	t.Run("exact cancellation", func(t *testing.T) {
 		m, a := cronRefreshFixture(t, 12)
 		r := m.cron.runPage.runs[0]
@@ -327,19 +327,6 @@ func TestCronRefreshCancellationAndOldClient(t *testing.T) {
 		require.Empty(t, a.reads)
 		require.ErrorIs(t, p.runErr[r.UID], context.Canceled)
 		require.Equal(t, r, p.lookup[r.UID])
-	})
-	t.Run("wrapped old client", func(t *testing.T) {
-		m, a := cronRefreshFixture(t, 4)
-		rows := slices.Clone(m.cron.runPage.runs)
-		for i := range rows {
-			rows[i].Status = "running"
-			rows[i].IssueUID = new(rows[i].UID)
-		}
-		p := cronData{inspectedRuns: rows[:1], historyRuns: rows}
-		cronEnrich(t.Context(), newUndoClient(a.cronWaitFetchAPI), 7, &p)
-		require.EqualError(t, p.runErr[rows[0].UID], "run refresh unavailable")
-		require.Len(t, p.runErr, 1)
-		require.Len(t, a.waiter.waitCalls, 4)
 	})
 }
 
@@ -526,7 +513,7 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 	cases := []struct {
 		mode     string
 		closeKey tea.KeyPressMsg
-	}{{mode: "failed"}, {mode: "running"}, {mode: "old client"}, {mode: "closed before load"}, {mode: "already failed"}}
+	}{{mode: "failed"}, {mode: "running"}, {mode: "closed before load"}, {mode: "already failed"}}
 	for _, key := range []tea.KeyPressMsg{keyRune('?'), {Code: tea.KeyEscape}, keyRune('h')} {
 		cases = append(cases, struct {
 			mode     string
@@ -568,9 +555,6 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 			if mode == "running" {
 				a.exact = func(context.Context, string) (generated.CronRun, error) { r.Revision = 3; return r, nil }
 			}
-			if mode == "old client" {
-				m.api = newUndoClient(a.cronWaitFetchAPI)
-			}
 			m.cron.tab = cronRuns
 			_, _, lines := cronScreen(m)
 			i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, r.UID} })
@@ -600,8 +584,6 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 			case "running":
 				require.Equal(t, map[string]int{"wait-issue": 1}, a.waiter.waitCalls)
 				require.Contains(t, cronScreenText(m), "blocked")
-			case "old client":
-				require.Contains(t, cronScreenText(m), "unavailable: run refresh unavailable")
 			case "closed before load":
 				require.Equal(t, "failed", got.Status)
 				require.Equal(t, 1, m.cronUnseenCount(), "a failure never shown stays unseen")

@@ -3877,7 +3877,7 @@ func (m Model) viewBody() string {
 	case viewList:
 		return m.list.View(m.width, m.height, m.chrome())
 	case viewDetail:
-		return m.detail.View(m.width, m.height, m.chrome())
+		return m.cronDetailView()
 	}
 	return ""
 }

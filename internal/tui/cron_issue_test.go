@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -212,4 +213,26 @@ func TestCronIssueActionsWaitForIssue(t *testing.T) {
 	require.NotNil(t, opened)
 	require.NotNil(t, opened.parentShortID)
 	require.Equal(t, "abcd", *opened.parentShortID)
+}
+
+// Stacked detail has no pane frame around it, so a linked issue that failed to
+// load must itself show why and how to return, while its actions stay inert.
+func TestCronIssueUnreadableStackedView(t *testing.T) {
+	m := cronIssueFixture(t, 80)
+	m = sendKey(m, tea.KeyEnter)
+	require.Equal(t, splitlayout.Stacked, m.layout)
+	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
+	require.Nil(t, m.detail.issue)
+	m.toast = nil // the notice expires; the screen must still explain
+	view := ansi.Strip(m.viewBody())
+	require.Contains(t, view, "issue not found")
+	require.Contains(t, view, "esc")
+	require.Contains(t, view, "back")
+	require.NotContains(t, view, "no issue selected")
+	m, cmd := updateModel(m, keyRune('N'))
+	require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }), "N on an unreadable issue must not open a parentless form")
+	require.Equal(t, inputNone, m.input.kind)
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = drainInboxCmds(m, cmd)
+	require.Equal(t, viewCron, m.view)
 }

@@ -66,15 +66,39 @@ func (m Model) cronNoticeSuppressed(r cronRunEvent) bool {
 }
 
 // The store folds a run's concurrent observations by an HLC the client never
-// sees, so only a read issued after the run's latest event, which settles its
+// sees, so only a row read after the run's latest event, which settles its
 // change mark, resolves it; an older in-flight read or a bare event does not.
 func (m Model) cronNoticeNewest(r cronRunEvent) generated.CronRun {
 	if m.cron.data != nil && m.cron.data.events >= r.seq && m.cron.changed[r.UID].at == 0 {
-		if known, ok := m.cron.data.run(r.UID); ok {
+		if known, ok := m.cron.data.fetched(r.UID); ok {
 			return known
 		}
 	}
 	return r.run()
+}
+
+// fetched returns uid's row only when this refresh itself read it: from the
+// head, an exact UID read, or a last-run fill. Retained page rows, rows kept
+// after a failed read, and snapshot copies may predate the events it captured.
+func (p cronData) fetched(uid string) (generated.CronRun, bool) {
+	var rows []generated.CronRun
+	if p.runsErr == nil {
+		rows = slices.Clone(p.runs)
+	}
+	if err, read := p.runErr[uid]; read && err == nil {
+		rows = append(rows, p.lookup[uid])
+	}
+	for job, r := range p.lastRuns {
+		if err, read := p.lastErr[job]; read && err == nil {
+			rows = append(rows, r)
+		}
+	}
+	rows = cronMergeRuns(nil, rows)
+	i := slices.IndexFunc(rows, func(r generated.CronRun) bool { return r.UID == uid })
+	if i < 0 {
+		return generated.CronRun{}, false
+	}
+	return rows[i], true
 }
 func (m Model) cronNoticeEvent(msg eventReceivedMsg) (Model, tea.Cmd) {
 	m = m.cronNoticeSync()
