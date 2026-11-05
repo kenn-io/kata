@@ -2103,9 +2103,9 @@ func TestRunnerUnsupportedPendingParentBackfillKeepsIncrementalREST(t *testing.T
 
 func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 	for _, tc := range []struct {
-		name                                                             string
-		cursor, cutoff, mapped, missingCreated, incomplete, large, fresh bool
-		wantRepository, wantIssue, prComments                            int
+		name                                             string
+		cursor, cutoff, mapped, incomplete, large, fresh bool
+		wantRepository, wantIssue, prComments            int
 	}{
 		{name: "small first sync", wantRepository: 1},
 		{name: "PR-heavy first sync", prComments: 1001, wantIssue: 1},
@@ -2115,10 +2115,8 @@ func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 		{name: "filtered new issue", cutoff: true, fresh: true, wantRepository: 1},
 		{name: "incomplete initial feed", incomplete: true, wantRepository: 1, wantIssue: 1},
 		{name: "cutoff preserves cursor window", cursor: true, cutoff: true, mapped: true, wantRepository: 1},
-		{name: "mapped unknown creation", cursor: true, mapped: true, missingCreated: true, wantRepository: 1},
 		{name: "mapped incremental", cursor: true, mapped: true, wantRepository: 1},
 		{name: "old first import", cursor: true, wantIssue: 1},
-		{name: "unknown creation first import", cursor: true, missingCreated: true, wantIssue: 1},
 		{name: "filtered first sync", cutoff: true, wantIssue: 1},
 		{name: "reset cursor keeps mappings", cutoff: true, mapped: true, wantIssue: 1},
 		{name: "incomplete repository feed", cursor: true, mapped: true, incomplete: true, wantRepository: 1, wantIssue: 1},
@@ -2153,9 +2151,6 @@ func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 			}
 			issue.UpdatedAt = new(h.now)
 			issue.Comments = 1
-			if tc.missingCreated {
-				issue.CreatedAt = nil
-			}
 			h.fetcher.issues = []Issue{issue}
 			if tc.large || tc.prComments > 0 {
 				h.fetcher.parentMap = map[int]int64{}

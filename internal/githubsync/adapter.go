@@ -266,7 +266,7 @@ func (r *adapter) fetchComments(ctx context.Context, fetcher Fetcher, binding db
 			continue
 		}
 		commented = append(commented, issue)
-		if window != nil && (issue.CreatedAt == nil || issue.CreatedAt.Before(*window)) {
+		if window != nil && issue.CreatedAt.Before(*window) {
 			older = append(older, issue)
 		}
 	}
@@ -332,15 +332,15 @@ func (r *adapter) fetchComments(ctx context.Context, fetcher Fetcher, binding db
 	return out, nil
 }
 
-// firstImportsBefore returns issues created at or before the given time, or
-// with an unknown creation time, that have no import mapping yet.
+// firstImportsBefore returns issues created at or before the given time that
+// have no import mapping yet.
 func (r *adapter) firstImportsBefore(ctx context.Context, binding db.IssueSyncBinding, issues []Issue, before *time.Time) ([]int, error) {
 	if before == nil {
 		return nil, nil
 	}
 	var numbers []int
 	for _, issue := range issues {
-		if IsPullRequestIssue(issue) || issue.Number <= 0 || (issue.CreatedAt != nil && issue.CreatedAt.After(*before)) {
+		if IsPullRequestIssue(issue) || issue.Number <= 0 || issue.CreatedAt == nil || issue.CreatedAt.After(*before) {
 			continue
 		}
 		externalID := issueExternalID(issue)
