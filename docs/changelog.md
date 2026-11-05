@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Choose common cron schedules from the `kata tui` job form's Preset field.
+  The Jobs list shows readable schedule labels, and the detail keeps the raw
+  expression. Custom drafts survive cycling through presets; the time zone
+  stays unchanged. See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding

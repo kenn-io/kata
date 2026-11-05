@@ -27,10 +27,21 @@ func cronTabs(tab int) string {
 	return strings.Join(names, " ")
 }
 func cronSchedule(t generated.TriggerResponse) string {
+	return formatCronSchedule(t, false)
+}
+
+func formatCronSchedule(t generated.TriggerResponse, includeRaw bool) string {
 	value := t.Kind
 	switch t.Kind {
 	case "cron":
 		value = deref(t.Cron)
+		if label, ok := cronScheduleLabel(value); ok {
+			if includeRaw {
+				value = label + " · " + value
+			} else {
+				value = label
+			}
+		}
 	case "interval":
 		value = "every " + (time.Duration(deref(t.IntervalSeconds)) * time.Second).String()
 	case "once":
@@ -49,8 +60,8 @@ func cronSchedule(t generated.TriggerResponse) string {
 			value += ", " + cronLead(lead) + " before"
 		}
 	}
-	if deref(t.Timezone) != "" && deref(t.Timezone) != "UTC" {
-		value += " (" + deref(t.Timezone) + ")"
+	if zone := deref(t.Timezone); zone != "" && zone != "UTC" {
+		value += " (" + zone + ")"
 	}
 	return value
 }
@@ -224,7 +235,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 		if j := p.job(ref.uid); j != nil {
 			name = j.Name
 			d.field("State", cronJobState(*j))
-			d.field("Schedule", cronSchedule(j.Definition.Trigger))
+			d.field("Schedule", cronScheduleDetail(j.Definition.Trigger))
 			if label, times := cronNextRuns(p, *j, renderNow()); len(times) > 0 {
 				d.field(label, times[0])
 				for _, t := range times[1:] {

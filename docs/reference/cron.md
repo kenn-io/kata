@@ -174,7 +174,8 @@ Schedules follow the trigger timezone's daylight-saving transitions:
   `Australia/Lord_Howe`, or that skip local midnight, such as
   `America/Santiago`, a daily schedule can miss that day's occurrence.
 
-The `kata tui` Jobs tab previews these instants with the same schedule code:
+The `kata tui` Jobs tab names common schedules in words and previews these
+instants with the same schedule code:
 see the `kata tui` notes in the [CLI reference](cli.md#daemon-and-diagnostics).
 
 Kata releases up to 0.19.0 used a parser that rejects `7` in day of week and

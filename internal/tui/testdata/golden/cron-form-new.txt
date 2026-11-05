@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ New job                                             01ARZ3NDEKTSV4RRFFQ69G5FAV
+
+  Kind:          ‹ recurring child issue ›
+▶ Name:
+  Trigger:       ‹ cron expression ›
+  Enabled:       ‹ yes ›
+  Preset:        ‹ Daily 09:00 ›
+  Cron:          0 9 * * *
+  Time zone:     UTC
+  Parent issue:
+  Issue title:
+  Issue body:
+  Recipient:
+  Message:
+  Catch up:      ‹ latest missed run ›
+
+
+
+invalid cron document: native recurring issues require a parent UID and a
+bounded title
+ tab/shift+tab field▕ ←/→ choose▕ ctrl+o save▕ ctrl+e edit text in $EDITOR
+ esc cancel

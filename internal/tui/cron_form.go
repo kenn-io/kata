@@ -29,6 +29,7 @@ const (
 	cfName
 	cfTrigger
 	cfEnabled
+	cfPreset
 	cfCron
 	cfZone
 	cfInterval
@@ -58,7 +59,7 @@ const (
 
 var cronFieldLabels = [cfCount]string{
 	cfKind: "Kind", cfName: "Name", cfTrigger: "Trigger", cfEnabled: "Enabled",
-	cfCron: "Cron", cfZone: "Time zone", cfInterval: "Interval", cfAt: "At", cfIssue: "Issue", cfLead: "Lead",
+	cfPreset: "Preset", cfCron: "Cron", cfZone: "Time zone", cfInterval: "Interval", cfAt: "At", cfIssue: "Issue", cfLead: "Lead",
 	cfParent: "Parent issue", cfTitle: "Issue title", cfBody: "Issue body", cfPrompt: "Prompt", cfWorkflow: "Workflow",
 	cfPolicy: "Issue policy", cfScheduled: "Scheduled offset", cfDeadline: "Deadline offset",
 	cfRecipient: "Recipient", cfMessage: "Message", cfReport: "Issue",
@@ -259,7 +260,7 @@ var cronNotifyKind = cronJobKind{
 }
 
 var cronCronTrigger = cronJobTrigger{
-	id: "cron", label: "cron expression", fields: []cronField{cfCron, cfZone},
+	id: "cron", label: "cron expression", fields: []cronField{cfPreset, cfCron, cfZone},
 	load: func(f *cronForm, t cron.Trigger) { f.val[cfCron], f.val[cfZone] = t.Cron, t.Timezone },
 	build: func(f *cronForm) (cron.Trigger, error) {
 		return cron.Trigger{Kind: "cron", Cron: f.val[cfCron], Timezone: strings.TrimSpace(f.val[cfZone])}, nil
@@ -489,7 +490,10 @@ func (f *cronForm) finish() {
 
 func (f *cronForm) dirty() bool {
 	f.syncEditor()
-	return f.val != f.snapshot || f.kind != f.snapKind || f.trigger != f.snapTrig
+	values := f.val
+	// Remembered Custom text is navigation state, not part of the saved job.
+	values[cfPreset] = f.snapshot[cfPreset]
+	return values != f.snapshot || f.kind != f.snapKind || f.trigger != f.snapTrig
 }
 
 // base starts a definition. An edit of the same kind of job keeps what the
@@ -580,7 +584,7 @@ func (f *cronForm) shown(field cronField) bool {
 	if slices.Contains(f.triggerDef().fields, field) {
 		return true
 	}
-	if slices.Contains([]cronField{cfCron, cfZone, cfInterval, cfAt, cfLead}, field) {
+	if slices.Contains([]cronField{cfPreset, cfCron, cfZone, cfInterval, cfAt, cfLead}, field) {
 		return false
 	}
 	return f.kindDef().shown(f, field)
@@ -594,7 +598,7 @@ func (f *cronForm) locked(field cronField) bool {
 
 func (f *cronForm) isChoice(field cronField) bool {
 	switch field {
-	case cfKind, cfTrigger, cfEnabled, cfPolicy, cfWorkflow, cfOverlap, cfCatchup:
+	case cfKind, cfTrigger, cfEnabled, cfPreset, cfPolicy, cfWorkflow, cfOverlap, cfCatchup:
 		return true
 	}
 	return false
@@ -625,6 +629,8 @@ func (f *cronForm) choices(field cronField) []cronChoice {
 		}
 	case cfEnabled:
 		out = cronYesNo
+	case cfPreset:
+		out = f.presetChoices()
 	case cfPolicy:
 		out = cronPolicies
 	case cfOverlap:
@@ -646,6 +652,8 @@ func (f *cronForm) current(field cronField) string {
 		return f.kind
 	case cfTrigger:
 		return f.trigger
+	case cfPreset:
+		return cronPresetValue(f.val[cfCron])
 	}
 	return f.val[field]
 }
@@ -681,6 +689,11 @@ func (f *cronForm) step(field cronField, delta int) {
 		}
 	case cfTrigger:
 		f.trigger = next
+	case cfPreset:
+		if raw := f.val[cfCron]; strings.TrimSpace(raw) != "" && !slices.Contains(cronPresets, cronPresetValue(raw)) {
+			f.val[cfPreset] = raw
+		}
+		f.val[cfCron] = next
 	default:
 		f.val[field] = next
 	}
