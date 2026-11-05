@@ -1859,6 +1859,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
 		if m.input.kind == inputRecurrenceForm {
 			m.input.err = fmt.Sprintf(successTemplates[mut.kind].failure, mut.err.Error())
+			if isRevisionConflict(mut.err) {
+				return m, tea.Batch(m.reportShownError(mut.kind), m.scheduleDetailRefresh())
+			}
 		}
 		return m, m.reportShownError(mut.kind)
 	}
