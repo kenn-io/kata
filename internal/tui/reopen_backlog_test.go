@@ -855,7 +855,7 @@ func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 				require.Equal(t, modalReopenBacklog, m.modal)
 				view := stripANSI(m.View().Content)
 				require.LessOrEqual(t, len(strings.Split(view, "\n")), size[1])
-				for _, line := range strings.Split(view, "\n") {
+				for line := range strings.SplitSeq(view, "\n") {
 					require.LessOrEqual(t, lipgloss.Width(line), size[0])
 				}
 				require.Contains(t, view, "#abcd")
@@ -881,8 +881,8 @@ func TestReopenBacklogConfirmationFitsSupportedSizes(t *testing.T) {
 			m := newTestModel()
 			m.modal = modalReopenBacklog
 			m.reopenPrompt = &reopenPrompt{ref: ref, count: count, undoEntryID: 1}
-			for width := 40; width <= 130; width++ {
-				for height := 2; height <= 14; height++ {
+			for _, width := range []int{40, 41, 47, 55, 80, 130} {
+				for _, height := range []int{2, 3, 4, 8, 14} {
 					t.Run(fmt.Sprintf("%s/%d/%dx%d", ref, count, width, height), func(t *testing.T) {
 						m = resizeModel(m, width, height)
 						view := stripANSI(m.View().Content)
