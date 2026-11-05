@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -69,7 +70,7 @@ type cronCLIOptions struct {
 	parent                           string
 	includeDeleted                   bool
 	limit                            int64
-	beforeUID, jobUID                string
+	beforeUID, jobUID, reason        string
 }
 
 func (o cronCLIOptions) mutation() bool   { return o.action != "list" && o.action != "show" }
@@ -119,6 +120,7 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		command.Flags().Int64Var(&options.limit, "limit", 100, "maximum results in one page (1-100)")
 		command.Flags().StringVar(&options.beforeUID, "before-uid", "", "run UID cursor from next_before_uid")
 		command.Flags().StringVar(&options.jobUID, "job-uid", "", "list only runs of this job")
+		command.Flags().StringVar(&options.reason, "reason", "", "list only runs with this reason code")
 	}
 	return command
 }
@@ -129,7 +131,7 @@ func cronOperationHelp(resource, action string) (string, string) {
 	switch resource + " " + action {
 	case "capabilities show":
 		return `Show whether the daemon supports shared cron and recurring child issues for
-this project (cron_v1 covers all cron features). Reads only; creates no cron state.`, "  kata cron capabilities --json"
+this project, including structured run summaries. Reads only; creates no cron state.`, "  kata cron capabilities --json"
 	case "run list":
 		return `List the project's recorded runs, newest first. --job-uid lists one job's runs.
 For the next page, pass the response's next_before_uid as --before-uid.`,
@@ -211,6 +213,9 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 			}
 			*value = normalized
 		}
+	}
+	if o.reason != "" && !cron.ValidReason(o.reason) {
+		return cronCLIValidation("invalid reason code")
 	}
 	if o.limit < 1 || o.limit > 100 {
 		return cronCLIValidation("limit must be between 1 and 100")
@@ -626,7 +631,12 @@ func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID in
 		}
 		return cronCLIResponse(response.StatusCode, response.Body, err)
 	case o.resource == "run" && o.action == "list":
-		response, err := c.ListCronRunsWithResponse(a.ctx, &generated.ListCronRunsRequestOptions{PathParams: &generated.ListCronRunsPath{ProjectID: projectID}, Query: &generated.ListCronRunsQuery{Limit: &o.limit, BeforeUID: &o.beforeUID, JobUID: &o.jobUID}})
+		if o.reason != "" {
+			if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, api.CronRunReasonAPIVersion, "cron run list --reason"); err != nil {
+				return nil, err
+			}
+		}
+		response, err := c.ListCronRunsWithResponse(a.ctx, &generated.ListCronRunsRequestOptions{PathParams: &generated.ListCronRunsPath{ProjectID: projectID}, Query: &generated.ListCronRunsQuery{Reason: optionalString(o.reason), Limit: &o.limit, BeforeUID: &o.beforeUID, JobUID: &o.jobUID}})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}

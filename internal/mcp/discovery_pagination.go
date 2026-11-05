@@ -14,6 +14,10 @@ import (
 // Recheck each call: a long-lived MCP client can outlive a daemon replacement.
 // A cached version could let an older daemon silently ignore new query fields.
 func (h toolHandlers) requireDiscoveryAPI(ctx context.Context) error {
+	return h.requireDaemonAPI(ctx, "0.27.0", "paginated discovery")
+}
+
+func (h toolHandlers) requireDaemonAPI(ctx context.Context, minimum, feature string) error {
 	health, err := h.options.Client.Health(ctx)
 	if err != nil {
 		return err
@@ -22,8 +26,8 @@ func (h toolHandlers) requireDiscoveryAPI(ctx context.Context) error {
 	if health.APISchemaVersion != nil {
 		version = strings.TrimSpace(*health.APISchemaVersion)
 	}
-	if !semver.IsValid("v"+version) || semver.Compare("v"+version, "v0.27.0") < 0 {
-		return errors.New("paginated discovery requires daemon API 0.27.0 or newer")
+	if !semver.IsValid("v"+version) || semver.Compare("v"+version, "v"+minimum) < 0 {
+		return fmt.Errorf("%s requires daemon API %s or newer", feature, minimum)
 	}
 	return nil
 }

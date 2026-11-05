@@ -1,0 +1,13 @@
+overlay: 1.0.0
+info:
+  title: Preserve explicit empty summary steps
+  version: 1.0.0
+actions:
+  - target: '$.components.schemas.Summary.properties.steps'
+    update:
+      x-oapi-codegen-extra-tags:
+        json: steps,omitzero
+  - target: '$.components.schemas.SummaryResponse.properties.steps'
+    update:
+      x-oapi-codegen-extra-tags:
+        json: steps,omitzero

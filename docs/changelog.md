@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -15,6 +15,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   the writer, except when a second invalidation lands during the check.
 - Fill semantic search vectors faster on large stores by resuming each page after the previous page's last key instead of rescanning from the start.
 - Make semantic search pick up new issues sooner in large stores by skipping unchanged issue text during mirror refreshes.
+- Record structured cron run reasons, triggers, steps, usage and log references,
+  inspect them in the TUI, and filter history by reason through the CLI, API
+  and MCP. Reason filtering requires daemon API `0.42.0` or newer; the CLI
+  and MCP refuse older daemons. Existing v1 summaries remain supported. Upgrade every project peer
+  before enabling adapter v2 writes; older Kata versions cannot read stored v2
+  summaries after a downgrade. See [run summaries](reference/cron.md#structured-run-summaries).
 - Keep issue writes responsive during due-date sweeps. Sweeps skip date values
   more than 24h past UTC now, including every issue 36h or more out in any zone.
   Other checks take SQLite's writer only for due notifications or cleanup.

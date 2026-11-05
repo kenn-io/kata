@@ -71,6 +71,14 @@ func TestFederationClientSignsRelayBatchAbovePreviousBodyLimit(t *testing.T) {
 		FederationSigning: &source,
 	})
 	require.NoError(t, err)
+	event := db.RemoteEvent{
+		EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EF", ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EB",
+		Type: "project.metadata_updated", Payload: jsontext.Value(`{"diff":{"note":{"from":null,"to":"` + strings.Repeat("x", 38<<20) + `"}}}`),
+	}
+	event.ContentHash, err = db.RemoteEventContentHash(event)
+	require.NoError(t, err)
+	body, err := db.EncodeRelaySourceEvent(event)
+	require.NoError(t, err)
 	_, err = client.AcceptRelayDeliveries(t.Context(), 42, db.RelayBatch{
 		Stream: db.RelayStreamEvent,
 		Envelopes: []db.RelayEnvelope{{
@@ -79,8 +87,8 @@ func TestFederationClientSignsRelayBatchAbovePreviousBodyLimit(t *testing.T) {
 			SenderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4ED", ReceiverInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EE",
 			Epoch: 1, Sequence: 1, Stream: db.RelayStreamEvent,
 			Path:      []string{"01HZNQ7VFPK1XGD8R5MABCD4ED"},
-			SourceUID: "01HZNQ7VFPK1XGD8R5MABCD4EF", SourceHash: strings.Repeat("b", 64),
-			Body: bytes.Repeat([]byte("x"), 50<<20), Digest: strings.Repeat("c", 64),
+			SourceUID: event.EventUID, SourceHash: event.ContentHash,
+			Body: body, Digest: strings.Repeat("c", 64),
 		}},
 	})
 	require.NoError(t, err)

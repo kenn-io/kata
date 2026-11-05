@@ -3690,6 +3690,7 @@ func (c *Client) ListCronRuns(ctx context.Context, options *ListCronRunsRequestO
 		"before_uid": {Style: "form", Explode: &[]bool{false}[0]},
 		"job_uid":    {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":      {Style: "form", Explode: &[]bool{false}[0]},
+		"reason":     {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runs",

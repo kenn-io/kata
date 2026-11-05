@@ -8,6 +8,8 @@ kata カタ jobs [runs] workflows
   Recorded:   2026-05-01T11:00:00Z
   Actor:      worker
   Executor:   executor-a
+
+  Usage
   Tokens:     30 input, 10 output
 
   Message
@@ -16,8 +18,6 @@ kata カタ jobs [runs] workflows
   Recorded with
   Job: Daily summary · current definition changed since this run
   Workflow: Summary flow
-
-
 
 
 

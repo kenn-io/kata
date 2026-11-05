@@ -3,12 +3,18 @@ package mcpserver
 import (
 	"encoding/json"
 	"maps"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func cronObservation(id string, job map[string]any) map[string]any {
@@ -135,6 +141,7 @@ func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 		{"status": "completed"},
 		{"summary": map[string]any{"version": 2}},
 		{"summary": map[string]any{"version": 1, "input_tokens": -1}},
+		{"summary": map[string]any{"version": 1, "steps": []any{map[string]any{"key": "review", "status": "failed", "message": "before\x00after"}}}},
 		{"job_uid": "invalid"},
 		{"definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
 	} {
@@ -143,4 +150,110 @@ func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 		require.True(t, cronCall(t, f.session, "cron_run_observe", args).IsError)
 	}
 	require.Empty(t, cronOK(t, f.session, "cron_runs", map[string]any{})["runs"])
+}
+
+func TestCronRunSummaryRoundTrip(t *testing.T) {
+	f := newCronFixture(t)
+	job := cronTestJob(t, f)
+	for _, summary := range []map[string]any{
+		{"version": float64(1), "steps": []any{}},
+		{"version": float64(1), "trigger": "request"},
+		{"version": float64(1), "reason": "agent_quota", "usage": map[string]any{"model": "model-large", "cost_micros": float64(0), "currency": "USD"}, "steps": []any{map[string]any{"key": "review", "status": "failed", "exit_code": float64(0), "started_at": "2026-11-03T01:00:00-08:00"}}, "log_ref": "urn:example:run"},
+	} {
+		args := cronObservation(cronNewUID(t, f.session), job)
+		args["summary"] = summary
+		first := cronOK(t, f.session, "cron_run_observe", args)
+		require.Equal(t, summary, first["run"].(map[string]any)["summary"])
+		again := cronOK(t, f.session, "cron_run_observe", args)
+		require.Equal(t, true, again["replayed"])
+		require.Equal(t, first["run"], again["run"])
+	}
+}
+
+func TestCronRunSummaryRejectsNullMembers(t *testing.T) {
+	f := newCronFixture(t)
+	job := cronTestJob(t, f)
+	for _, member := range []string{"reason", "usage", "steps", "log_ref", "trigger"} {
+		t.Run(member, func(t *testing.T) {
+			id := cronNewUID(t, f.session)
+			args := cronObservation(id, job)
+			args["summary"] = map[string]any{"version": 1, member: nil}
+			result := cronCall(t, f.session, "cron_run_observe", args)
+			require.True(t, result.IsError, "%s", mustJSON(t, result))
+			_, err := f.store.CronRun(t.Context(), f.project.ID, id)
+			require.ErrorIs(t, err, db.ErrNotFound)
+		})
+	}
+}
+
+func TestCronRunReasonFilter(t *testing.T) {
+	f := newCronFixture(t)
+	job := cronTestJob(t, f)
+	wanted := cronNewUID(t, f.session)
+	for _, id := range []string{wanted, cronNewUID(t, f.session)} {
+		args := cronObservation(id, job)
+		reason := "timeout"
+		if id == wanted {
+			reason = "failed"
+		}
+		args["summary"] = map[string]any{"version": 1, "reason": reason}
+		cronOK(t, f.session, "cron_run_observe", args)
+	}
+	runs := cronOK(t, f.session, "cron_runs", map[string]any{"reason": "failed", "limit": 1})["runs"].([]any)
+	require.Len(t, runs, 1)
+	require.Equal(t, wanted, runs[0].(map[string]any)["uid"])
+	result := cronCall(t, f.session, "cron_runs", map[string]any{"reason": "INVALID"})
+	require.True(t, result.IsError)
+	require.Contains(t, string(mustJSON(t, result)), "invalid reason code")
+}
+
+func TestMCPCronRunsReasonRefusesOldDaemon(t *testing.T) {
+	var version atomic.Value
+	version.Store(`{"ok":true,"api_schema_version":"0.42.0"}`)
+	var reads, probes atomic.Int32
+	var wantReason atomic.Value
+	wantReason.Store("failed")
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/health" {
+			probes.Add(1)
+			_, _ = w.Write([]byte(version.Load().(string)))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/cron/runs") {
+			reads.Add(1)
+			assert.Equal(t, wantReason.Load().(string), r.URL.Query().Get("reason"))
+			_, _ = w.Write([]byte(`{"runs":[]}`))
+			return
+		}
+		_, _ = w.Write(daemonResponse(r))
+	}))
+	defer daemon.Close()
+	client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
+	require.NoError(t, err)
+	session := connectTestServerWithClient(t, client)
+	// Reuse the session across upgrades and downgrades: no cached permission.
+	for _, health := range []string{`{"ok":true,"api_schema_version":"0.42.0"}`, `{"ok":true,"api_schema_version":"0.40.0"}`, `{"ok":true,"api_schema_version":""}`, `{"ok":true}`, `{"ok":true,"api_schema_version":"0.42.0"}`} {
+		version.Store(health)
+		before := reads.Load()
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.cron_runs", Arguments: map[string]any{"reason": "failed"}})
+		require.NoError(t, err)
+		if strings.Contains(health, "0.42.0") {
+			require.False(t, result.IsError, "%s", mustJSON(t, result))
+			require.Equal(t, before+1, reads.Load())
+		} else {
+			require.True(t, result.IsError)
+			require.Contains(t, string(mustJSON(t, result)), "requires daemon API 0.42.0 or newer")
+			require.Equal(t, before, reads.Load())
+		}
+	}
+	require.EqualValues(t, 5, probes.Load())
+	// An unfiltered read remains usable without a version handshake.
+	version.Store(`{"ok":true,"api_schema_version":"0.40.0"}`)
+	wantReason.Store("")
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.cron_runs", Arguments: map[string]any{}})
+	require.NoError(t, err)
+	require.False(t, result.IsError, "%s", mustJSON(t, result))
+	require.EqualValues(t, 5, probes.Load())
+	require.EqualValues(t, 3, reads.Load())
 }

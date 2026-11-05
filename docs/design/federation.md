@@ -439,16 +439,43 @@ adopting a project, joining a second peer, and rebuilding after a purge all carr
 pre-existing cron definitions and portable run history.
 
 Upgrade hubs before publishing cron. Federation clients advertise
-`X-Kata-Event-Features: cron_v1`. Successful metadata, event-poll, and
-ingest responses advertise server support in that same header. A project's
-`X-Kata-Required-Event-Features: cron_v1` header instead means that its
-history requires the feature. This requirement latches after the first event
-requiring `cron_v1` and survives deletion of its definitions. Missing support causes
-HTTP 409 `unsupported_event_features` before returning events or a reset cursor,
-or accepting a push. An unknown required response feature stops the new client
-before it accepts any response cursor. An empty requirement from an unused old
-hub does not prove support: cron publication first fetches metadata and
-requires the server's positive support advertisement.
+`X-Kata-Event-Features: cron_run_summary_v2,cron_v1,issue_move_v1`.
+Successful metadata, event-poll and ingest responses advertise server support in
+that same header. A project's `X-Kata-Required-Event-Features` header reports
+its exact requirements from retained events and current projections. Cron
+history requires `cron_v1`; structured run evidence additionally requires
+`cron_run_summary_v2`. Retained v2 events still require that feature after a
+v1 replacement. A baseline that removes the last evidence can remove a
+requirement; it is not a persisted latch.
+
+Each metadata read, event poll and ingest reads every retained `cron.run.*`
+payload and every current `cron_runs.summary_json` row in the project through
+a substring prefilter. Relay offers and resets do the same for peers without
+v2 support. No index covers this scan. Matching candidates are JSON-decoded;
+the scan stops at the first v2 document. Projects without v2 evidence pay the
+full cost. Projections use canonical member names; retained events also match
+escaped keys. On ingest the scan runs inside the write transaction holding the
+project lock. Its cost grows with retained run history.
+
+A cheaper approach would need persisted state or an index and therefore a
+migration. Classifying only a returned page would change the exact-header
+contract. This change adds no migration.
+
+Missing support causes HTTP 409 `unsupported_event_features` before returning
+events or a reset cursor, accepting a push, or advancing relay progress.
+Relay offers, retained envelopes and checkpoints refuse peers missing
+`cron_run_summary_v2` when they would disclose structured evidence. V1 relay
+reads retain their existing behavior, including for peers without feature headers.
+An unknown required response feature stops the client before it accepts any
+response cursor. An empty requirement from an unused old hub does not prove
+support: cron publication first fetches metadata and requires the server's
+positive support advertisement.
+
+Before an adapter writes v2, upgrade every peer of the project, including
+sibling spokes and relays. Admission checks the configured upstream hub; it
+does not certify other peers. Older peers cannot synchronize the project once
+its history requires v2, including issue events. See the
+[cron upgrade and retry contract](../reference/cron.md#structured-run-summaries).
 
 Wire envelope compatibility is independent of database schema upgrades.
 `db.FederationEventWireVersion` explicitly maps the supported legacy publication
@@ -459,7 +486,7 @@ This keeps ordinary traffic compatible with actual schema30 daemons, whose
 ingest handler refuses newer envelope versions before inspecting their events.
 
 `Storage.ReadFederation(ctx, db.FederationReadParams)` captures the project,
-binding, required feature latch, purge boundary, baseline and event cursor in one
+binding, required features, purge boundary, baseline and event cursor in one
 backend transaction. It also checks the features of the actual event page.
 The result is a consistent read. Scheduling and execution remain local to the
 plugin.

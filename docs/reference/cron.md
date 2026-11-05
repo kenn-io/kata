@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -414,8 +414,10 @@ checkout. Kata stores the definitions and run evidence.
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
-definitions, run observations, and native recurring child delivery. Missing,
+`X-Kata-Event-Features` header advertises `cron_run_summary_v2,cron_v1,issue_move_v1`.
+The cron capabilities body lists `cron_v1` for portable definitions, run
+observations and native recurring child delivery, and `cron_run_summary_v2`
+for structured run summaries. Missing,
 unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
@@ -488,8 +490,9 @@ UID, project, definition references, occurrence key, issue UID, attributed actor
 teammate, executor label, and server-created time are immutable. Status, summary,
 start time, and end time are mutable evidence. Supported statuses are `running`,
 `succeeded`, `failed`, `cancelled`, and `unknown`; they impose no transition or
-launch protocol. Summary version 1 permits a message and nonnegative integer
-input/output token counts and is bounded to 64 KiB. The whole observation and
+launch protocol. Summary version 1 permits a message, nonnegative integer
+input/output token counts, and the optional structured fields below. It is
+bounded to 64 KiB. The whole observation and
 its event are bounded to 96 KiB. Unknown fields are rejected. Times are RFC3339
 instants; an end cannot precede a start. An occurrence key is at most 1024
 characters; actor and optional executor label are at most 256 bytes. Teammates
@@ -510,15 +513,181 @@ page. Ordinary federation publishes observations from spokes, folds evidence
 by original event provenance per run UID, and preserves independent runs in
 baselines and backup. Run identity conflicts fail rather than replacing a run.
 
-An adapter with a machine-readable cause for a run's outcome starts
-`summary.message` with the line `reason: <code>`, then puts any detail on the
-next line. The `<code>` matches `[a-z0-9_.-]{1,64}`. Any status may carry one.
-Kata does not parse or validate the reason line; it is ordinary message text
-under the summary rules above. Clients that know the convention can show
-the code and filter on it client-side. Each adapter defines and documents its
-own codes; where two adapters mean the same thing they share the name, as
-`agent_quota`, `agent_login`, and `launch_unproven` do. The `reason: ` marker
-keeps short messages such as `admitted` from reading as codes.
+### Filter runs by reason
+
+`kata cron run list --reason agent_quota --limit 20 --json` selects one reason
+code. The REST query is `reason=agent_quota`; MCP `kata.cron_runs` accepts the
+same `reason` input. Codes must match `[a-z0-9_.-]{1,64}`. Invalid codes return
+400 `validation` from the daemon. The CLI and MCP require daemon API `0.42.0`
+or newer for reason filtering and refuse older daemons before listing runs.
+
+The structured `summary.reason` takes precedence. When it is absent, a run
+matches only if the first message line is exactly `reason: <code>`, terminated
+by LF or the end of the message. CRLF, trailing spaces and later lines do not
+match. Filtering happens before the page limit and composes with `job_uid`
+and `before_uid`; keep the same filters when following `next_before_uid`.
+The database scans summary JSON within the selected project; there is no new
+reason index.
+
+### Structured run summaries
+
+Adapters can report a reason, model usage, ordered step results, and an opaque
+log reference. “Summary v2” names the `cron_run_summary_v2` capability; the
+summary document's `version` remains `1`.
+
+```json
+{
+  "version": 1,
+  "reason": "agent_quota",
+  "trigger": "scheduled",
+  "message": "Weekly limit reached during review",
+  "input_tokens": 1200,
+  "output_tokens": 340,
+  "usage": {
+    "model": "model-large",
+    "cache_read_tokens": 9000,
+    "cache_write_tokens": 400,
+    "cost_micros": 41250,
+    "currency": "USD"
+  },
+  "steps": [
+    {"key": "fetch", "status": "succeeded", "attempts": 1, "exit_code": 0},
+    {"key": "review", "status": "failed", "attempts": 3, "reason": "agent_quota",
+     "started_at": "2026-11-03T09:00:00Z", "ended_at": "2026-11-03T09:04:10Z"}
+  ],
+  "log_ref": "https://logs.daemon.example/runs/01ARZ3NDEKTSV4RRFFQ69G5FAA"
+}
+```
+
+| Field | Contract |
+| --- | --- |
+| `reason` | Optional code matching `[a-z0-9_.-]{1,64}`. |
+| `trigger` | Optional `scheduled`, `catchup`, or `request`. |
+| `usage` | Optional object with a required `model` of 1–128 UTF-8 bytes without control characters. Cache counts are nonnegative integers and default to zero. |
+| `usage.cost_micros`, `usage.currency` | Optional pair: a nonnegative integer in millionths of the named currency and a three-letter uppercase currency code. Zero is a known cost; omission means unknown. |
+| `steps` | Optional ordered array of at most 64 steps. An explicit empty array still requires v2 support. |
+| `log_ref` | Optional absolute URI, at most 512 UTF-8 bytes. No `file` scheme, URI userinfo, whitespace, controls, backslashes, or drive-prefixed local paths. HTTP(S) requires a hostname. Kata stores the reference without opening it. |
+
+Kata rejects URI userinfo but cannot recognise credentials in a path or query.
+Adapters must leave credentials out of `log_ref`: the reference replicates to
+every project peer.
+
+Each step requires a unique workflow-style `key` and a `status` of `running`,
+`succeeded`, `failed`, `cancelled`, `unknown`, or `skipped`. `attempts` defaults
+to zero and is at most 1000. An optional `exit_code` is a signed 32-bit integer;
+zero is distinct from an omitted code. A step may also carry a `reason` under
+the same grammar, a UTF-8 `message` of at most 4096 bytes without NUL, and RFC3339
+`started_at`/`ended_at` instants. An end cannot precede a start. Steps need not
+match the current workflow definition: evidence may describe an older or ad-hoc
+workflow.
+
+The new top-level members reject `null`; an explicitly empty `reason`, `trigger`, or
+`log_ref` is invalid. Unknown members are rejected, including inside usage
+and steps. Nested optional scalars retain ordinary canonicalization: for example,
+`steps[].message: null` and an empty message decode as absent and re-encode
+without that member. Existing summary byte limits still apply.
+
+Upgrade the hub first, then every spoke and relay that must synchronize this
+project. Enable structured output in adapters only after all participating
+peers support v2. Send these fields only when `kata cron capabilities --json`
+lists `cron_run_summary_v2`; this advertisement confirms the target daemon
+supports it. Admission still depends on the project's binding and upstream:
+an enabled spoke requires push to be enabled and a reachable hub advertising
+v2. Each new or changed v2 write checks the hub without caching, with a
+15-second admission timeout. Projects containing current or retained v2 run
+evidence require both `cron_v1` and `cron_run_summary_v2`; older peers receive
+409 `unsupported_event_features` before receiving incompatible history or
+advancing relay progress. Backups containing v2 summaries require a Kata
+version that supports them. Downgrading a daemon to an older Kata also prevents
+it from reading stored v2 summaries.
+
+An identical retry of committed evidence returns `replayed: true` without an
+upstream probe, including while the hub is offline. After an uncertain outcome,
+retry the identical v2 observation first. An enabled spoke confirms its
+upstream's support before saving new or changed v2 evidence. If
+the hub is offline, lacks the feature, or the binding changes during admission,
+the write returns 409 `unsupported_event_features` without saving the run.
+For a rejected fresh write, retry the same run UID and expected revision with
+a v1 summary: remove
+`reason`, `trigger`, `usage`, `steps`, and `log_ref`, and put the reason in the legacy
+message line below. To enrich that fallback later, send v2 using the revision
+returned by the successful v1 write. V1 observations require no capability request. If another
+federation operation is changing the endpoint, admission returns 503
+`federation_busy`; retry the same observation with its v2 summary when the
+endpoint is available. Do not strip v2 fields for that response. This checks
+the current binding; operators still need to preserve compatibility when
+downgrading a hub or rebinding a project that already contains v2 evidence.
+
+A disabled binding does not check upstream support. If you record v2 evidence
+while it is disabled, confirm the hub supports `cron_run_summary_v2` before
+enabling it. Enabling it against an older hub blocks the push until the hub
+is upgraded or the project is bound to a compatible hub.
+
+The TUI Runs list prefixes messages with the structured reason code; legacy-only
+messages keep their existing display. A matching legacy first line is hidden
+when a structured reason is prefixed, and in run details after the Reason
+field. Conflicting first lines stay visible. Run details show usage, ordered steps, known-zero cost and exit values, and the log
+reference as plain text. Step blocks retain each step's own reason. A single
+step timestamp, a span too large for a duration, or subnanosecond precision
+that a duration would discard shows the original start and end instants. Costs retain exact micros with insignificant trailing zeros
+trimmed to at least two decimals; zero attempts are omitted. Log
+references are never opened or fetched. Run details show Trigger after the
+occurrence key, with `(derived)` on values inferred from older run evidence.
+Unknown triggers stay hidden. The three shared drop reasons show
+`(not launched)` after the selected reason code.
+
+### Reason codes
+
+Use `summary.reason` for a machine-readable outcome. Any status may carry one.
+When the structured field is absent, Kata also recognizes an exact first line
+`reason: <code>` in `summary.message`, followed by LF or the end of the message.
+The code must match `[a-z0-9_.-]{1,64}`; extra spaces and CRLF do not match.
+A structured reason takes precedence. Kata preserves the original message.
+
+Adapters may define more codes. Reserve the `kata.` prefix for Kata itself.
+Use these shared names when their meaning fits:
+
+| Code | Meaning |
+| --- | --- |
+| `agent_quota` | The provider or agent's usage allowance was exhausted. |
+| `agent_login` | The agent needs authentication. |
+| `launch_unproven` | The adapter could not confirm that execution started. |
+| `timeout` | Execution exceeded its time limit. |
+| `agent_lost` | The adapter lost contact with the agent. |
+| `unsupported` | The runtime does not support the requested work. |
+| `needs-human` | Execution needs human input. |
+| `failed` | Execution failed without a more specific shared cause. |
+| `overlap_skipped` | The occurrence was not launched after exceeding the adapter's overlap deferral bound under `forbid`. |
+| `catchup_missed` | The occurrence was not launched because it fell outside the job's catch-up policy (`skip`, `latest`, or a count/age cap). |
+| `paused_passed_over` | The occurrence was not launched: it came due while paused, and resume discarded it. |
+
+Drop codes describe evidence independently of run status. The adapter chooses
+that status and whether a run groups several dropped occurrences. They work in
+both `summary.reason` and the legacy first message line.
+
+### Run trigger
+
+Adapters should set `summary.trigger` when the hub advertises
+`cron_run_summary_v2`. It records `scheduled`, `catchup`, or `request`, and an
+explicit value takes precedence over the occurrence key. It does not replace
+`occurrence_key` or prove that work launched. Answered run requests use
+`request:<uid>` keys.
+
+When the field is absent, readers derive a display hint:
+
+| Occurrence key | Derived trigger |
+| --- | --- |
+| `request:<nonempty value>` | `request` |
+| `manual:<nonempty value>` (legacy local request) | `request` |
+| RFC3339 instant, with `started_at` more than 120 seconds later | `catchup` |
+| RFC3339 instant, with `started_at` at most 120 seconds later | `scheduled` |
+| Anything else, or an instant without `started_at` | Unknown; no trigger shown. |
+
+Exactly 120 seconds is scheduled. A start before the occurrence is also
+scheduled. The fixed threshold is a display heuristic; it does not read the
+pinned definition's grace or tolerance and does not decide execution
+eligibility. A run allowed by the adapter can still show derived catchup.
+When retrying with v1, omit `trigger`; the key remains available for derivation.
 
 ## Native issue planning dates
 

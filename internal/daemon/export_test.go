@@ -38,3 +38,6 @@ func FederationReplicaLeavePreparedForTest(store db.Storage, projectName string)
 	transition, ok := federationReplicaTransitions.transitions[federationReplicaTransitionKey(store, projectName)]
 	return ok && len(transition.preparations) > 0
 }
+
+// OutcomeTransport shares the functional HTTP transport with external daemon tests.
+type OutcomeTransport = outcomeTransport

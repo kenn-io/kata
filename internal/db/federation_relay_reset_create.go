@@ -77,6 +77,9 @@ func (p RelayResetProtocol) CreateReset(ctx context.Context, bindingUID string, 
 	if !ProjectAttributionVisible(ctx, project.UID) {
 		return RelayResetCheckpoint{}, ErrNotFound
 	}
+	if err := p.Backend.RequireProjectEventFeatures(ctx, project.UID); err != nil {
+		return RelayResetCheckpoint{}, err
+	}
 	pin, err := p.Backend.RootPin(ctx, project.UID, "")
 	if err != nil {
 		return RelayResetCheckpoint{}, err

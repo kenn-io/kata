@@ -1,0 +1,60 @@
+ Project: example-project kata…
+kata カタ jobs [runs] workflows
+ runs / 01ARZ3NDEKTSV4RRFFQ69G…
+
+▶ Status:     failed
+  Reason:     agent_quota
+  Occurrence: request:fixture-
+              run
+  Trigger:    request
+  Started:    05-01 10:00
+  Ended:      05-01 11:00
+  Recorded:   2026-05-
+              01T11:00:00Z
+  Actor:      worker
+  Executor:   executor-a
+  Log ref:    urn:example:run-
+              log
+
+  Usage
+  Model:      model-large
+  Cache:      10 read, 20 write
+  Cost:       0.00 USD
+
+  Steps (2)
+    review · failed
+    Attempts:   2
+    Exit:       0
+    Reason:     agent_quota
+    Duration:   2s
+    Message:    Quota exhausted
+                text
+
+    publish · skipped
+    Started:    2026-05-
+                01T10:00:00Z
+
+  Message
+  reason: failed
+  Budget exhausted
+
+  Recorded with
+  Job: Daily summary · current
+  definition changed since this
+  run
+  Workflow: Summary flow
+
+
+
+
+
+
+
+
+
+
+
+ j/k move  ▕ ↵/l follow
+ h/esc back▕ r refresh
+ 1-4 tabs  ▕ ? help
+ q quit

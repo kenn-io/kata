@@ -2,11 +2,13 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -14,6 +16,7 @@ import (
 
 // CronRunsInput requests a bounded project history page.
 type CronRunsInput struct {
+	Reason string `json:"reason,omitempty" jsonschema:"Reason code; matches structured evidence first, then an exact legacy reason line"`
 	CronProjectInput
 	Limit     *int64 `json:"limit,omitempty" jsonschema:"Results from 1 through 100; omit for 20"`
 	BeforeUID string `json:"before_uid,omitempty" jsonschema:"next_before_uid from the preceding page"`
@@ -38,6 +41,22 @@ type CronRunObserveInput struct {
 	EndedAt                    *time.Time                         `json:"ended_at,omitempty"`
 }
 
+// UnmarshalJSON validates the original summary before generated optional fields can erase
+// explicit null members during decoding and re-encoding.
+func (in *CronRunObserveInput) UnmarshalJSON(raw []byte) error {
+	var document struct {
+		Summary jsontext.Value `json:"summary"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return err
+	}
+	if _, err := cron.ParseSummary(document.Summary); err != nil {
+		return err
+	}
+	type plain CronRunObserveInput
+	return json.Unmarshal(raw, (*plain)(in))
+}
+
 func registerCronRunTools(server *sdkmcp.Server, h toolHandlers) {
 	read := toolHints(true, false, false)
 	addCronTool(server, "kata.cron_runs", "List cron run evidence", "Read bounded run observations with job filtering and next_before_uid pagination. Evidence does not prove or launch execution.", read, h.cronRuns)
@@ -51,6 +70,14 @@ func (h toolHandlers) cronRuns(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	}
 	if limit < 1 || limit > maximumResultLimit {
 		return nil, nil, errors.New("limit must be from 1 through 100")
+	}
+	if in.Reason != "" {
+		if !cron.ValidReason(in.Reason) {
+			return nil, nil, errors.New("invalid reason code")
+		}
+		if err := h.requireDaemonAPI(ctx, api.CronRunReasonAPIVersion, "cron run reason filtering"); err != nil {
+			return nil, nil, err
+		}
 	}
 	var err error
 	if in.BeforeUID != "" {
@@ -69,7 +96,7 @@ func (h toolHandlers) cronRuns(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	if err != nil {
 		return nil, nil, err
 	}
-	return cronResult(h.options.Client.ListCronRuns(ctx, &generated.ListCronRunsRequestOptions{PathParams: &generated.ListCronRunsPath{ProjectID: p.ID}, Query: &generated.ListCronRunsQuery{Limit: &limit, JobUID: optionalString(in.JobUID), BeforeUID: optionalString(in.BeforeUID)}}))
+	return cronResult(h.options.Client.ListCronRuns(ctx, &generated.ListCronRunsRequestOptions{PathParams: &generated.ListCronRunsPath{ProjectID: p.ID}, Query: &generated.ListCronRunsQuery{Reason: optionalString(in.Reason), Limit: &limit, JobUID: optionalString(in.JobUID), BeforeUID: optionalString(in.BeforeUID)}}))
 }
 func (h toolHandlers) cronRun(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, *generated.ShowCronRunResponse, error) {
 	id, err := cronUID(in.UID)
@@ -89,13 +116,6 @@ func (h toolHandlers) cronRunObserve(ctx context.Context, _ *sdkmcp.CallToolRequ
 	}
 	handle, err := teammate.Resolve(in.Teammate, h.options.Teammate)
 	if err != nil {
-		return nil, nil, err
-	}
-	raw, err := json.Marshal(in.Summary)
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, err = cron.ParseSummary(raw); err != nil {
 		return nil, nil, err
 	}
 	p, err := h.createTarget(ctx, in.Project)

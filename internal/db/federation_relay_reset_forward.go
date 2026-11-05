@@ -160,6 +160,9 @@ func (p RelayResetProtocol) AuthorizeCheckpointDownload(ctx context.Context, bin
 	if _, err := p.Backend.RelayGrant(ctx, bindingUID, "pull"); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
+	if err := RequireRelayCheckpointFeatures(ctx, checkpoint.Snapshot); err != nil {
+		return RelayResetCheckpoint{}, err
+	}
 	return checkpoint, nil
 }
 
