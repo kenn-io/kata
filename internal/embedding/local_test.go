@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,9 @@ func TestLocalEndpointPerBatch(t *testing.T) {
 	calls := 0
 	client, err := New(Config{BaseURL: "", Model: "nomic-embed-text", Dims: 2, Endpoint: func(context.Context) (string, error) {
 		calls++
+		if calls == 4 {
+			return "", errors.New("run kata daemon local-embeddings to approve the download")
+		}
 		if calls <= 2 {
 			return first.URL, nil
 		}
@@ -31,4 +35,7 @@ func TestLocalEndpointPerBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.InDelta(t, 0.8, vectors[0][0], 0.00001)
 	require.Equal(t, 3, calls)
+	_, err = client.Embed(t.Context(), []string{"hello"})
+	require.ErrorContains(t, err, "kata daemon local-embeddings")
+	require.Contains(t, client.CredentialHealth().LastError, "kata daemon local-embeddings")
 }

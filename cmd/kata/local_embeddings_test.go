@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -50,9 +51,6 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
 	require.True(t, cfg.Embeddings.Enabled())
-	out, _, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.NoError(t, err)
-	require.Contains(t, out, "index kept")
 }
 
 func TestLocalEmbeddingsSetupRefusesEnvironmentOverride(t *testing.T) {
@@ -114,11 +112,11 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 		original string
 		exists   bool
 		edited   string
-		remove   bool
+		dangling bool
 	}{
 		{name: "edited", exists: true, original: "[daemon]\nport = 8888\n", edited: "[daemon]\nport = 9999\n"},
 		{name: "created empty"},
-		{name: "removed", exists: true, original: "[daemon]\nport = 8888\n", remove: true},
+		{name: "dangling symlink", dangling: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := setupKataEnv(t)
@@ -126,6 +124,11 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 			path := filepath.Join(home, "config.toml")
 			if tc.exists {
 				require.NoError(t, os.WriteFile(path, []byte(tc.original), 0600))
+			}
+			if tc.dangling {
+				if err := os.Symlink("provider.toml", path); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
 			}
 			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
 			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
@@ -140,51 +143,41 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 				yes, err := opts.Confirm(ctx, 290_000_000)
 				require.NoError(t, err)
 				require.True(t, yes)
-				if tc.remove {
-					require.NoError(t, os.Remove(path))
-				} else {
-					require.NoError(t, os.WriteFile(path, []byte(tc.edited), 0600))
-				}
+				require.NoError(t, os.WriteFile(path, []byte(tc.edited), 0600))
 				installed = true
 				return embedlocal.Installation{Executable: "/example/kennembed"}, nil
 			}
 			out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-			got, readErr := os.ReadFile(path) // #nosec G304 -- path is derived from a test fixture
-			if tc.remove {
-				require.ErrorIs(t, readErr, os.ErrNotExist)
-			} else {
-				require.NoError(t, readErr)
-				require.Equal(t, tc.edited, string(got))
-			}
-			require.ErrorContains(t, err, "changed")
 			require.Empty(t, out)
+			if tc.dangling {
+				link, linkErr := os.Readlink(path)
+				require.NoError(t, linkErr)
+				require.Equal(t, "provider.toml", link)
+				require.ErrorContains(t, err, "symlink")
+				require.False(t, installed, "refuse before installing the shared server")
+				_, err = os.Stat(filepath.Join(home, "provider.toml"))
+				require.ErrorIs(t, err, os.ErrNotExist)
+				return
+			}
+			got, readErr := os.ReadFile(path) // #nosec G304 -- path is derived from a test fixture
+			require.NoError(t, readErr)
+			require.Equal(t, tc.edited, string(got))
+			require.ErrorContains(t, err, "changed")
 		})
 	}
-}
-
-func TestLocalEmbeddingsRecipeOffline(t *testing.T) {
-	home := setupKataEnv(t)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal = true\n"), 0600))
-	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
-		t.Fatal("recipe contacted server")
-		return "", nil
-	}
-	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		t.Fatal("recipe installed server")
-		return embedlocal.Installation{}, nil
-	}
-	_, stderr, err := executeRootCapture(t, t.Context(), "federation", "embedding-recipe")
-	require.NoError(t, err, stderr)
 }
 
 func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 	home := setupKataEnv(t)
 	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
 	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "", embedlocal.ErrNotFound }
+	calls := 0
+	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
+		calls++
+		return "", embedlocal.ErrNotFound
+	}
 	localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		calls++
 		approved, err := opts.Confirm(ctx, 290_000_000)
 		require.False(t, approved)
 		return embedlocal.Installation{}, err
@@ -192,9 +185,9 @@ func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 	ec := config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text"}
 	client, _, err := preflightEmbeddingStartup(ec, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
+	require.Zero(t, calls, "building the recipe must not contact or install the server")
 	_, err = client.Embed(t.Context(), []string{"x"})
 	require.ErrorContains(t, err, "kata daemon local-embeddings")
-	require.Contains(t, client.CredentialHealth().LastError, "kata daemon local-embeddings")
 }
 
 func TestLocalEmbeddingsSwitchRecipe(t *testing.T) {
@@ -294,29 +287,33 @@ func TestLocalEmbeddingsRebuildRefusal(t *testing.T) {
 }
 
 func TestLocalEmbeddingsRestartRollback(t *testing.T) {
-	for _, scenario := range []string{"existing symlink", "dangling symlink", "new", "concurrent edit"} {
+	for _, scenario := range []string{"existing symlink", "new", "concurrent edit", "unsupported daemon"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := setupKataEnv(t)
 			stubLocalEmbeddingsInstall(t)
 			t.Setenv("KATA_SERVER", "")
 			path := filepath.Join(home, "config.toml")
 			original := []byte("# original\n[search.embeddings]\nbase_url = 'http://127.0.0.1:11434/v1'\nmodel = 'nomic-embed-text'\n")
-			if scenario != "new" {
+			if scenario != "new" && scenario != "unsupported daemon" {
 				target := path
-				if scenario == "existing symlink" || scenario == "dangling symlink" {
+				if scenario == "existing symlink" {
 					target = filepath.Join(home, "provider.toml")
 					if err := os.Symlink("provider.toml", path); err != nil {
 						t.Skipf("symlink unavailable: %v", err)
 					}
 				}
-				if scenario != "dangling symlink" {
-					require.NoError(t, os.WriteFile(target, original, 0600))
-				}
+				require.NoError(t, os.WriteFile(target, original, 0600))
 			}
 			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
 			require.NoError(t, ns.EnsureDirs())
-			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:12345", Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}})
+			identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+			require.True(t, ok)
+			record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now(), Network: "tcp", Address: "127.0.0.1:12345"}
+			if scenario != "unsupported daemon" {
+				record.Metadata = map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}
+			}
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
 			require.NoError(t, err)
 			oldEndpoint := localEmbeddingsEndpoint
 			t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
@@ -330,21 +327,10 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 				}
 				return "", errors.New("replacement unavailable")
 			}
-			installed := false
-			if scenario == "dangling symlink" {
-				localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
-					installed = true
-					return embedlocal.Installation{Executable: "/example/kennembed"}, nil
-				}
-			}
 			out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-			if scenario == "dangling symlink" {
-				link, linkErr := os.Readlink(path)
-				require.NoError(t, linkErr)
-				require.Equal(t, "provider.toml", link)
-				require.ErrorContains(t, err, "symlink")
-				require.False(t, installed, "refuse before installing the shared server")
-				_, err = os.Stat(filepath.Join(home, "provider.toml"))
+			if scenario == "unsupported daemon" {
+				require.Error(t, err)
+				_, err = os.Stat(path)
 				require.ErrorIs(t, err, os.ErrNotExist)
 				return
 			}

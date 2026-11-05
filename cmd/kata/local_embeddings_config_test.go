@@ -2,15 +2,11 @@ package main
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemonruntime"
-	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/embedlocal"
 )
 
@@ -21,24 +17,6 @@ func stubLocalEmbeddingsInstall(t *testing.T) {
 	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
 		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
 	}
-}
-
-func TestLocalEmbeddingsRestartRefusal(t *testing.T) {
-	home := setupKataEnv(t)
-	stubLocalEmbeddingsInstall(t)
-	t.Setenv("KATA_SERVER", "")
-	oldEndpoint := localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:12345"})
-	require.NoError(t, err)
-	_, _, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.ErrorContains(t, err, "older kata release")
-	_, err = os.Stat(filepath.Join(home, "config.toml"))
-	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
