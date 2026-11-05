@@ -580,6 +580,8 @@ func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 	require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
 	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.deleted","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
 	assert.NotContains(t, h.page(), "repeats:")
+	event := decodeEventReceived(frame{data: []byte(`{"type":"recurrence.materialized","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)})
+	require.Nil(t, h.m.maybeRefetchOpenDetail(event), "another recurrence leaves a stopped issue's detail alone")
 }
 
 func TestRecurrenceFormConflictKeepsInputUntilReopened(t *testing.T) {
