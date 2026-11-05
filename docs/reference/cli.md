@@ -1898,8 +1898,8 @@ releases reject the `local` config key.
 
 When the shared files are already installed, a fresh home needs no prompt;
 switching an existing provider still asks before starting the server. To return
-to Ollama, set `local = false`, restore `base_url` and `model` in
-`[search.embeddings]`, and run `kata daemon restart`.
+to Ollama, set `local = false`, delete each setting that has a commented copy
+below it, uncomment the copies, and run `kata daemon restart`.
 
 The result includes `index`, one of `new`, `kept`, or `rebuilt`, and `progress`,
 the command `kata health --json` for watching indexing progress. JSON and agent

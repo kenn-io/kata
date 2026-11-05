@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -236,6 +237,7 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 	if !ok {
 		fields = map[string]any{}
 	}
+	previous := maps.Clone(fields)
 	delete(fields, "base_url")
 	// Environment overrides don't persist, so the written recipe must suit the built-in server.
 	if !written.Embeddings.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal() {
@@ -253,6 +255,19 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 	var encoded bytes.Buffer
 	if err := toml.NewEncoder(&encoded).Encode(fields); err != nil {
 		return nil, err
+	}
+	for key, value := range previous {
+		next, retained := fields[key]
+		if key == "local" || retained && fmt.Sprint(value) == fmt.Sprint(next) {
+			delete(previous, key)
+		}
+	}
+	if len(previous) > 0 {
+		var saved bytes.Buffer
+		if err := toml.NewEncoder(&saved).Encode(previous); err != nil {
+			return nil, err
+		}
+		encoded.WriteString("# " + strings.ReplaceAll(strings.TrimSuffix(saved.String(), "\n"), "\n", "\n# ") + "\n")
 	}
 	type edit struct {
 		start, end int

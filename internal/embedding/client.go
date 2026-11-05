@@ -162,6 +162,14 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 	if c.endpoint != nil {
 		options.Deployment.BaseURL, err = c.endpoint(ctx)
 		if err != nil {
+			c.mu.Lock()
+			if revision == c.credentialRevision {
+				now := time.Now().UTC()
+				c.credentialHealth.LastError = err.Error()
+				c.credentialHealth.LastErrorAt = &now
+				c.credentialHealth.LastErrorStatus = 0
+			}
+			c.mu.Unlock()
 			return nil, err
 		}
 	}

@@ -194,6 +194,7 @@ func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 	require.NoError(t, err)
 	_, err = client.Embed(t.Context(), []string{"x"})
 	require.ErrorContains(t, err, "kata daemon local-embeddings")
+	require.Contains(t, client.CredentialHealth().LastError, "kata daemon local-embeddings")
 }
 
 func TestLocalEmbeddingsSwitchRecipe(t *testing.T) {
