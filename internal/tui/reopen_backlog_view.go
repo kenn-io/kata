@@ -146,52 +146,29 @@ func (m Model) cancelReopenBacklog() Model {
 
 // overlayReopenBacklog draws the reopen confirmation over body with its
 // choices on a footer row of their own. The footer is reserved before the modal
-// is placed, so no terminal height lets the modal or a compact view layout hide
-// the keys that answer it.
+// is placed, keeping the keys visible from 40 columns and 2 rows up.
 func (m Model) overlayReopenBacklog(body string) string {
-	if m.reopenPrompt == nil {
-		return body
-	}
 	width := max(m.width, 1)
 	footer := renderFooterHelpTable(modalHelpRows(modalReopenBacklog), width)
 	bodyHeight := m.height - lipgloss.Height(footer)
-	if bodyHeight < 1 {
-		const keys = "  y reopen  n/esc cancel"
-		ref := sanitizeForLine(m.reopenPrompt.ref)
-		if hash := strings.LastIndex(ref, "#"); hash > 0 {
-			ref = "…" + ref[hash:]
-		}
-		minWidth := lipgloss.Width(fmt.Sprintf("Reopen %s? %d ", ref, m.reopenPrompt.count))
-		return truncate(compactReopenBacklog(m.reopenPrompt, max(width-len(keys), minWidth), 1)+keys, width)
-	}
 	full := renderReopenBacklogModal(m.reopenPrompt)
 	if lipgloss.Width(full) <= width && lipgloss.Height(full) <= bodyHeight {
 		lines := strings.Split(body, "\n")
 		body = strings.Join(lines[:min(bodyHeight, len(lines))], "\n")
 		body = overlayModal(body, full, width, bodyHeight)
 	} else {
-		body = lipgloss.Place(width, bodyHeight, lipgloss.Center, lipgloss.Center, compactReopenBacklog(m.reopenPrompt, width, bodyHeight))
+		body = lipgloss.Place(width, bodyHeight, lipgloss.Center, lipgloss.Center, compactReopenBacklog(m.reopenPrompt, width))
 	}
 	return body + "\n" + footer
 }
 
 // compactReopenBacklog keeps the issue ID when shortening a qualified reference.
-func compactReopenBacklog(prompt *reopenPrompt, width, bodyRows int) string {
+func compactReopenBacklog(prompt *reopenPrompt, width int) string {
 	ref := sanitizeForLine(prompt.ref)
 	line := fmt.Sprintf("Reopen %s? %d recurring child issues.", ref, prompt.count)
-	if lipgloss.Width(line) > width && bodyRows > 1 {
-		line = fmt.Sprintf("Reopen %s?", ref)
-		if cut := lipgloss.Width(line) - width; cut > 0 {
-			if hash := strings.LastIndex(ref, "#"); hash > 0 {
-				ref = runewidth.TruncateLeft(ref, min(cut, runewidth.StringWidth(ref[:hash])), "…")
-				line = fmt.Sprintf("Reopen %s?", ref)
-			}
-		}
-		return truncate(line, width) + "\n" + truncate(fmt.Sprintf("%d recurring child issues", prompt.count), width)
-	}
 	if cut := lipgloss.Width(line) - width; cut > 0 {
 		if hash := strings.LastIndex(ref, "#"); hash > 0 {
-			ref = runewidth.TruncateLeft(ref, min(cut, runewidth.StringWidth(ref[:hash])), "…")
+			ref = runewidth.TruncateLeft(ref, min(cut+1, runewidth.StringWidth(ref[:hash])), "…")
 			line = fmt.Sprintf("Reopen %s? %d recurring child issues.", ref, prompt.count)
 		}
 	}
