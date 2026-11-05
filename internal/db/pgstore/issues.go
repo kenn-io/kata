@@ -316,11 +316,11 @@ func (s *Store) IssueUIDPrefixMatch(
 	if limit <= 0 {
 		limit = 20
 	}
-	query := issueSelect + ` WHERE i.uid LIKE $1 || '%'`
+	query := issueSelect + ` WHERE i.uid LIKE $1`
 	if include == db.IncludeDeletedNo {
 		query += ` AND i.deleted_at IS NULL`
 	}
-	args := []any{prefix}
+	args := []any{prefix + "%"}
 	query += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
 	args = append(args, limit)
 	query += fmt.Sprintf(` ORDER BY i.uid ASC LIMIT $%d`, len(args))

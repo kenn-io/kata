@@ -144,6 +144,7 @@ CREATE TABLE issues (
   CHECK (short_id !~ '[^0-9abcdefghjkmnpqrstvwxyz]'),
   CHECK (short_id = lower(substr(uid, 27 - length(short_id), length(short_id))))
 );
+CREATE INDEX idx_issues_uid_prefix ON issues(uid text_pattern_ops);
 CREATE INDEX idx_issues_project_status_updated
   ON issues(project_id, status, updated_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_issues_project_updated

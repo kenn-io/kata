@@ -1062,11 +1062,11 @@ func (d *Store) IssueUIDPrefixMatch(ctx context.Context, prefix string, limit in
 	if limit <= 0 {
 		limit = 20
 	}
-	q := issueSelect + ` WHERE i.uid LIKE ? || '%'`
+	q := issueSelect + ` WHERE i.uid LIKE ?`
 	if include == db.IncludeDeletedNo {
 		q += ` AND i.deleted_at IS NULL`
 	}
-	args := []any{prefix}
+	args := []any{prefix + "%"}
 	q += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
 	q += ` ORDER BY i.uid ASC LIMIT ?`
 	args = append(args, limit)

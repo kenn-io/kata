@@ -201,6 +201,33 @@ func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	assert.Equal(t, db.CurrentSchemaVersion(), v)
 }
 
+func TestOpen_UIDPrefixIndexCutover(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	source, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	project, err := source.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	_, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, UID: "01hznq7v000000000000000001", Title: "Prefix match", Author: "agent"})
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `DROP INDEX idx_issues_uid_prefix;
+UPDATE meta SET value='44' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+
+	upgraded, err := storeopen.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	matches, err := upgraded.IssueUIDPrefixMatch(ctx, "01HZNQ7V", 1, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Equal(t, "01hznq7v000000000000000001", matches[0].UID)
+	var definition string
+	require.NoError(t, upgraded.(*sqlitestore.Store).QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_issues_uid_prefix'`).Scan(&definition))
+	require.Equal(t, `CREATE INDEX idx_issues_uid_prefix ON issues(uid COLLATE NOCASE)`, definition)
+}
+
 func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
