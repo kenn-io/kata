@@ -15,8 +15,9 @@ import (
 const (
 	// DefaultStaleLockTTL is the recovery horizon for an abandoned sync claim.
 	DefaultStaleLockTTL = 30 * time.Minute
-	// DefaultInitialBatchSize limits the number of imported issues per batch.
-	DefaultInitialBatchSize = 5000
+	// DefaultInitialBatchSize bounds each chunk's hold on the store's single
+	// writer, so a queued user write waits for at most one chunk.
+	DefaultInitialBatchSize = 200
 )
 
 const (
