@@ -13,6 +13,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   only issues that contain every word, so an empty multi-word search now
   prints a hint on stderr to search again with fewer words, instead of letting
   an agent conclude that no related issue exists and file a duplicate.
+- Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
 - Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
 - Resume local writes sooner after spoke rebuilds of large projects by skipping

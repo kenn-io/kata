@@ -865,49 +865,34 @@ func readUIIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Iss
 }
 
 func readUILinksForIssue(ctx context.Context, tx *sql.Tx, issueID int64, allowedIssueIDs []int64) ([]db.UILink, error) {
-	statement := linkSelect + `
-		WHERE (from_issue_id = ? OR to_issue_id = ?)
-		AND from_issue_id IN (SELECT endpoint.id FROM issues endpoint JOIN projects endpoint_project ON endpoint_project.id = endpoint.project_id WHERE endpoint.deleted_at IS NULL AND endpoint_project.deleted_at IS NULL)
-		AND to_issue_id IN (SELECT endpoint.id FROM issues endpoint JOIN projects endpoint_project ON endpoint_project.id = endpoint.project_id WHERE endpoint.deleted_at IS NULL AND endpoint_project.deleted_at IS NULL)`
+	statement := uiLinkSelect + `
+		WHERE (l.from_issue_id = ? OR l.to_issue_id = ?)
+		AND fi.deleted_at IS NULL AND fp.deleted_at IS NULL
+		AND ti.deleted_at IS NULL AND tp.deleted_at IS NULL`
 	args := []any{issueID, issueID}
-	fromPredicate, fromArgs := uiSQLiteIssueAllowlist(`from_issue_id`, allowedIssueIDs)
+	fromPredicate, fromArgs := uiSQLiteIssueAllowlist(`l.from_issue_id`, allowedIssueIDs)
 	if fromPredicate != "" {
 		statement += ` AND ` + fromPredicate
 		args = append(args, fromArgs...)
 	}
-	toPredicate, toArgs := uiSQLiteIssueAllowlist(`to_issue_id`, allowedIssueIDs)
+	toPredicate, toArgs := uiSQLiteIssueAllowlist(`l.to_issue_id`, allowedIssueIDs)
 	if toPredicate != "" {
 		statement += ` AND ` + toPredicate // #nosec G202 -- the predicate contains only a fixed column name and count-derived ? placeholders; values stay bound.
 		args = append(args, toArgs...)
 	}
 	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
-	statement += " AND " + authorizedLinkPredicate(ctx, "", &args)
-	statement += ` ORDER BY id`
+	statement += " AND " + authorizedLinkPredicate(ctx, "l.", &args)
+	statement += ` ORDER BY l.id`
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read selected UI links: %w", err)
 	}
-	links, err := collectUILinks(rows)
+	links, err := collectUIDetailedLinks(rows)
 	if err != nil {
 		return nil, err
 	}
-	return enrichUILinks(ctx, tx, links)
-}
-
-func enrichUILink(ctx context.Context, tx *sql.Tx, link db.Link) (db.UILink, error) {
-	var fromProject, fromShort, fromStatus, toProject, toShort, toStatus string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT fp.name, fi.short_id, fi.status, tp.name, ti.short_id, ti.status
-		FROM issues fi JOIN projects fp ON fp.id = fi.project_id
-		JOIN issues ti ON ti.id = ? JOIN projects tp ON tp.id = ti.project_id
-		WHERE fi.id = ?`, link.ToIssueID, link.FromIssueID).Scan(
-		&fromProject, &fromShort, &fromStatus, &toProject, &toShort, &toStatus); err != nil {
-		return db.UILink{}, fmt.Errorf("enrich UI link: %w", err)
-	}
-	return db.UILink{
-		Link: link, FromQualifiedID: fromProject + "#" + fromShort, FromStatus: fromStatus,
-		ToQualifiedID: toProject + "#" + toShort, ToStatus: toStatus,
-	}, nil
+	db.RecordExposedUILinks(ctx, links)
+	return links, nil
 }
 
 func readUIRecurrences(ctx context.Context, tx *sql.Tx, projectUID string) ([]db.Recurrence, error) {
@@ -991,20 +976,21 @@ func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]d
 	for _, issue := range issues {
 		ids = append(ids, issue.ID)
 	}
-	fromSet, fromSetArgs := uiSQLiteIssueAllowlist("from_issue_id", ids)
+	fromSet, fromSetArgs := uiSQLiteIssueAllowlist("l.from_issue_id", ids)
 	// Use the destination as a filter so SQLite doesn't probe the composite
 	// index for every pair of issue IDs. Both operands remain integers.
-	toSet, toSetArgs := uiSQLiteIssueAllowlist("+to_issue_id", ids)
+	toSet, toSetArgs := uiSQLiteIssueAllowlist("+l.to_issue_id", ids)
 	args := append(fromSetArgs, toSetArgs...)
-	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE `+fromSet+` AND `+toSet+` ORDER BY id`, args...)
+	rows, err := tx.QueryContext(ctx, uiLinkSelect+` WHERE `+fromSet+` AND `+toSet+` ORDER BY l.id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI graph links: %w", err)
 	}
-	links, err := collectUILinks(rows)
+	links, err := collectUIDetailedLinks(rows)
 	if err != nil {
 		return nil, err
 	}
-	return enrichUILinks(ctx, tx, links)
+	db.RecordExposedUILinks(ctx, links)
+	return links, nil
 }
 
 func readUIGraphUnresolved(
@@ -1160,19 +1146,6 @@ func collectUILinks(rows *sql.Rows) ([]db.Link, error) {
 		return nil, fmt.Errorf("close UI links: %w", err)
 	}
 	return links, nil
-}
-
-func enrichUILinks(ctx context.Context, tx *sql.Tx, links []db.Link) ([]db.UILink, error) {
-	enriched := make([]db.UILink, 0, len(links))
-	for _, link := range links {
-		uiLink, err := enrichUILink(ctx, tx, link)
-		if err != nil {
-			return nil, err
-		}
-		enriched = append(enriched, uiLink)
-	}
-	db.RecordExposedUILinks(ctx, enriched)
-	return enriched, nil
 }
 
 func readUIReferenceScope(
