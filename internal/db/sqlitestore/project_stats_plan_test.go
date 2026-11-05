@@ -1,7 +1,6 @@
 package sqlitestore
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,9 +9,7 @@ import (
 )
 
 func TestProjectStatsPlanUsesProjectIndexes(t *testing.T) {
-	store, err := Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store := openUIStore(t)
 	rows, err := store.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+batchProjectStatsSQL, db.SystemProjectName)
 	require.NoError(t, err)
 	var plan []string

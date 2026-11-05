@@ -507,7 +507,7 @@ var storageScenarios = []scenario{
 		name: "issue lifecycle",
 		methods: []string{
 			"BatchProjectStats", "ClaimOwner", "CloseIssue", "CloseIssueGuarded", "CloseIssueWithEvents", "CreateIssue", "CreateProject", "EditIssue",
-			"IssueByShortID", "IssueUIDPrefixMatch", "ListAllIssues", "ReopenIssue", "RestoreIssue",
+			"InsertRemoteEvent", "IssueByShortID", "IssueUIDPrefixMatch", "ListAllIssues", "ReopenIssue", "RestoreIssue",
 			"SoftDeleteIssue", "UpdateOwner", "UpdatePriority",
 		},
 		run: checkIssueLifecycle,

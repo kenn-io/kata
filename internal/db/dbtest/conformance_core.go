@@ -852,12 +852,40 @@ func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 	assert.False(t, changed)
 	assert.Nil(t, noEvent)
 
+	// Reconnecting spokes can relay older events after newer ones.
+	for _, createdAt := range []time.Time{
+		time.Date(2050, 1, 1, 0, 0, 1, 0, time.UTC),
+		time.Date(2050, 1, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		event := newRemoteEvent(t, project, &issue.UID, "issue.updated", "conformance-agent",
+			store.InstanceUID(), createdAt.UnixMilli(), jsontext.Value(`{"title":"relayed title"}`))
+		event.CreatedAt = createdAt
+		event.ContentHash = remoteEventHash(t, event)
+		inserted, err := store.InsertRemoteEvent(ctx, project.ID, event)
+		require.NoError(t, err)
+		require.True(t, inserted)
+	}
+
 	stats, err := store.BatchProjectStats(ctx)
 	if err != nil {
 		return fmt.Errorf("project stats: %w", err)
 	}
 	assert.Equal(t, 1, stats[project.ID].Closed)
 	assert.Equal(t, 0, stats[project.ID].Open)
+	require.NotNil(t, stats[project.ID].LastEventAt)
+	expected := time.Date(2050, 1, 1, 0, 0, 0, 0, time.UTC)
+	assert.True(t, stats[project.ID].LastEventAt.Equal(expected),
+		"batch event time: got %v, want %v", stats[project.ID].LastEventAt, expected)
+
+	uiStore, ok := store.(db.UIStore)
+	require.True(t, ok)
+	snapshot, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{View: "all-open"})
+	require.NoError(t, err)
+	require.Len(t, snapshot.Projects, 1)
+	uiStats := snapshot.Projects[0].Stats
+	require.NotNil(t, uiStats.LastEventAt)
+	assert.True(t, uiStats.LastEventAt.Equal(expected),
+		"UI event time: got %v, want %v", uiStats.LastEventAt, expected)
 
 	reopened, reopenEvent, changed, err := store.ReopenIssue(ctx, issue.ID, "conformance-agent")
 	if err != nil {

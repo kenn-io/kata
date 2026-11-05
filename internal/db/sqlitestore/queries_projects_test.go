@@ -743,34 +743,7 @@ func TestBatchProjectStats_ParsesZonedLegacyTimestamp(t *testing.T) {
 	expected := time.Date(2099, 5, 4, 19, 34, 56, 789000000, time.UTC)
 	require.True(t, stats[p.ID].LastEventAt.Equal(expected),
 		"zoned event time wrong: got %v, want %v", stats[p.ID].LastEventAt, expected)
-}
-
-// The newest recorded event can carry an older timestamp after relay ingest.
-func TestBatchProjectStats_MatchesUIProjectStats(t *testing.T) {
-	t.Parallel()
-	d := openTestDB(t)
-	ctx := t.Context()
-	p := createProject(ctx, t, d, "mixed-ts")
-	issue := makeIssue(t, ctx, d, p.ID, "live", "tester")
-
-	insertLegacyEvent(ctx, t, d, p, issue, "issue.edited", "2050-01-01T00:00:01.000Z")
-	insertLegacyEvent(ctx, t, d, p, issue, "issue.commented", "2050-01-01 00:00:00.000-00:00")
-
-	stats, err := d.BatchProjectStats(ctx)
-	require.NoError(t, err)
-	require.Contains(t, stats, p.ID)
-	require.NotNil(t, stats[p.ID].LastEventAt)
-	expected := time.Date(2050, 1, 1, 0, 0, 0, 0, time.UTC)
-	assert.True(t, stats[p.ID].LastEventAt.Equal(expected),
-		"batch event time: got %v, want %v", stats[p.ID].LastEventAt, expected)
-
-	snapshot, err := d.ReadUISnapshot(ctx, db.UISnapshotQuery{View: "all-open"})
-	require.NoError(t, err)
-	require.Len(t, snapshot.Projects, 1)
-	uiStats := snapshot.Projects[0].Stats
-	require.NotNil(t, uiStats.LastEventAt)
-	assert.True(t, uiStats.LastEventAt.Equal(expected),
-		"UI event time: got %v, want %v", uiStats.LastEventAt, expected)
+	require.Equal(t, time.UTC, stats[p.ID].LastEventAt.Location())
 }
 
 func TestHardDeleteProject(t *testing.T) {

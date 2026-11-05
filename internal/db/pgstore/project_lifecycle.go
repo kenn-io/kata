@@ -235,6 +235,7 @@ func (s *Store) BatchProjectStats(ctx context.Context) (map[int64]db.ProjectStat
 			if err != nil {
 				return nil, err
 			}
+			value = value.UTC()
 			stats.LastEventAt = &value
 		}
 		result[id] = stats
