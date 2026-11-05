@@ -20,22 +20,26 @@ func stubLocalEmbeddingsInstall(t *testing.T) {
 }
 
 func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
+	for _, key := range []string{"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS"} {
+		t.Setenv(key, "")
+	}
 	prefix := "title   = \"\"\"a fake header\n[search.embeddings]\n\"\"\"\nports = [\n  1,\n  2,\n]\n# before search\n"
 	suffix := "[display]\n# unrelated comment\n"
-	for _, body := range []string{
-		"[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='mxbai-embed-large'\ndims=1024\n",
-		"[search.embeddings]\nlocal=true\nfingerprint_salt='manual-reindex'\n",
-		"\ufeff[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
-		"[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1' # endpoint comment\nmodel='nomic-embed-text'\napi_key='example-key'\napi_key_file='/example/embedding.key'\napi_key_env='EXAMPLE_EMBEDDING_KEY'\n",
-		"[search . embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
-		"[search.\"embeddings\"]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
-		"[search]\nembeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}\n",
-		"[search]\nembeddings={\n # nested comment\n base_url='http://127.0.0.1:11434/v1',\n model='nomic-embed-text',\n}\n",
-		"[search]\nembeddings.base_url='http://127.0.0.1:11434/v1'\nembeddings.model='nomic-embed-text'\n",
-		"search.embeddings.base_url='http://127.0.0.1:11434/v1'\nsearch.embeddings.model='nomic-embed-text'\n",
-		"search={embeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}}\n",
+	for _, tc := range []struct{ name, body string }{
+		{name: "incompatible model", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='mxbai-embed-large'\ndims=1024\n"},
+		{name: "local salt", body: "[search.embeddings]\nlocal=true\nfingerprint_salt='manual-reindex'\n"},
+		{name: "BOM", body: "\ufeff[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n"},
+		{name: "credentials", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1' # endpoint comment\nmodel='nomic-embed-text'\napi_key='example-key'\napi_key_file='/example/embedding.key'\napi_key_env='EXAMPLE_EMBEDDING_KEY'\n"},
+		{name: "spaced table", body: "[search . embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n"},
+		{name: "quoted table", body: "[search.\"embeddings\"]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n"},
+		{name: "inline table", body: "[search]\nembeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}\n"},
+		{name: "multiline inline table", body: "[search]\nembeddings={\n # nested comment\n base_url='http://127.0.0.1:11434/v1',\n model='nomic-embed-text',\n}\n"},
+		{name: "dotted embeddings", body: "[search]\nembeddings.base_url='http://127.0.0.1:11434/v1'\nembeddings.model='nomic-embed-text'\n"},
+		{name: "dotted search", body: "search.embeddings.base_url='http://127.0.0.1:11434/v1'\nsearch.embeddings.model='nomic-embed-text'\n"},
+		{name: "inline search", body: "search={embeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}}\n"},
 	} {
-		t.Run(body, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
+			body := tc.body
 			text := prefix + strings.TrimPrefix(body, "\ufeff") + suffix
 			if strings.HasPrefix(body, "\ufeff") {
 				text = "\ufeff" + text

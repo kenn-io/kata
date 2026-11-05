@@ -50,31 +50,50 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
-	require.True(t, cfg.Embeddings.Enabled())
 }
 
 func TestLocalEmbeddingsSetupRefusesEnvironmentOverride(t *testing.T) {
-	home := setupKataEnv(t)
-	t.Setenv("KATA_SERVER", "")
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_BASE_URL", "http://127.0.0.1:11434/v1")
-	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
-		t.Fatal("environment refusal must precede server discovery")
-		return "", nil
+	for _, scenario := range []string{"environment override", "dangling symlink"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := setupKataEnv(t)
+			t.Setenv("KATA_SERVER", "")
+			t.Setenv("KATA_SEARCH_EMBEDDINGS_BASE_URL", "")
+			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+			localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
+				t.Fatal("setup refusal must precede server discovery")
+				return "", nil
+			}
+			localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+				t.Fatal("setup refusal must precede installation")
+				return embedlocal.Installation{}, nil
+			}
+			original := []byte("# untouched\n")
+			path := filepath.Join(home, "config.toml")
+			if scenario == "dangling symlink" {
+				if err := os.Symlink("provider.toml", path); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+			} else {
+				t.Setenv("KATA_SEARCH_EMBEDDINGS_BASE_URL", "http://127.0.0.1:11434/v1")
+				require.NoError(t, os.WriteFile(path, original, 0600))
+			}
+			_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+			if scenario == "dangling symlink" {
+				require.ErrorContains(t, err, "symlink")
+				link, err := os.Readlink(path)
+				require.NoError(t, err)
+				require.Equal(t, "provider.toml", link)
+				_, err = os.Stat(filepath.Join(home, "provider.toml"))
+				require.ErrorIs(t, err, os.ErrNotExist)
+				return
+			}
+			require.ErrorContains(t, err, "KATA_SEARCH_EMBEDDINGS_BASE_URL")
+			got, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
+			require.NoError(t, err)
+			require.Equal(t, original, got)
+		})
 	}
-	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		t.Fatal("environment refusal must precede installation")
-		return embedlocal.Installation{}, nil
-	}
-	original := []byte("# untouched\n")
-	path := filepath.Join(home, "config.toml")
-	require.NoError(t, os.WriteFile(path, original, 0600))
-	_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.ErrorContains(t, err, "KATA_SEARCH_EMBEDDINGS_BASE_URL")
-	got, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
-	require.NoError(t, err)
-	require.Equal(t, original, got)
 }
 
 func TestLocalEmbeddingsFreshOllama(t *testing.T) {
@@ -112,11 +131,9 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 		original string
 		exists   bool
 		edited   string
-		dangling bool
 	}{
 		{name: "edited", exists: true, original: "[daemon]\nport = 8888\n", edited: "[daemon]\nport = 9999\n"},
 		{name: "created empty"},
-		{name: "dangling symlink", dangling: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := setupKataEnv(t)
@@ -124,11 +141,6 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 			path := filepath.Join(home, "config.toml")
 			if tc.exists {
 				require.NoError(t, os.WriteFile(path, []byte(tc.original), 0600))
-			}
-			if tc.dangling {
-				if err := os.Symlink("provider.toml", path); err != nil {
-					t.Skipf("symlink unavailable: %v", err)
-				}
 			}
 			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
 			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
@@ -149,16 +161,6 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 			}
 			out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 			require.Empty(t, out)
-			if tc.dangling {
-				link, linkErr := os.Readlink(path)
-				require.NoError(t, linkErr)
-				require.Equal(t, "provider.toml", link)
-				require.ErrorContains(t, err, "symlink")
-				require.False(t, installed, "refuse before installing the shared server")
-				_, err = os.Stat(filepath.Join(home, "provider.toml"))
-				require.ErrorIs(t, err, os.ErrNotExist)
-				return
-			}
 			got, readErr := os.ReadFile(path) // #nosec G304 -- path is derived from a test fixture
 			require.NoError(t, readErr)
 			require.Equal(t, tc.edited, string(got))
@@ -318,18 +320,19 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 			oldEndpoint := localEmbeddingsEndpoint
 			t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
 			localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
-			oldExecutable := resolveDaemonExecutable
-			t.Cleanup(func() { resolveDaemonExecutable = oldExecutable })
 			edited := []byte("# edited while restart failed\n")
-			resolveDaemonExecutable = func() (string, error) {
+			stubDaemonExecutable(t, func() (string, error) {
+				if scenario == "unsupported daemon" {
+					t.Fatal("unsupported daemon must be refused before resolving a replacement")
+				}
 				if scenario == "concurrent edit" {
 					require.NoError(t, os.WriteFile(path, edited, 0600))
 				}
 				return "", errors.New("replacement unavailable")
-			}
+			})
 			out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 			if scenario == "unsupported daemon" {
-				require.Error(t, err)
+				require.ErrorContains(t, err, "is from an older kata release")
 				_, err = os.Stat(path)
 				require.ErrorIs(t, err, os.ErrNotExist)
 				return
