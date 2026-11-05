@@ -31,6 +31,27 @@ func assertCodexPrompt(t *testing.T, output, prompt string) {
 	assert.Equal(t, prompt, text)
 }
 
+// assertNoNativeContext checks a native hook response injects no context.
+// Native codecs may omit empty context; inspect every native context field so
+// escaped JSON cannot hide a default or prior prompt.
+func assertNoNativeContext(t *testing.T, out string) {
+	t.Helper()
+	var response map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(out), &response))
+	if specific, ok := response["hookSpecificOutput"]; ok {
+		var nested map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(specific, &nested))
+		maps.Copy(response, nested)
+	}
+	for _, key := range []string{"additionalContext", "additional_context", "context"} {
+		if value, ok := response[key]; ok {
+			var text string
+			require.NoError(t, json.Unmarshal(value, &text))
+			assert.Empty(t, text)
+		}
+	}
+}
+
 func TestAgentContractHookBare(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
@@ -40,8 +61,32 @@ func TestAgentContractHookBare(t *testing.T) {
 	assertCodexPrompt(t, stdout, agentContractText)
 }
 
+func TestAgentContractHookOnlyInKataWorkspaces(t *testing.T) {
+	workspace := writeKataWorkspace(t, t.TempDir())
+	outside := t.TempDir()
+	t.Chdir(outside)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"cwd outside", nil, ""},
+		{"workspace flag inside", []string{"--workspace", workspace}, agentContractText},
+		{"workspace flag outside", []string{"--workspace", t.TempDir()}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetRunEEntered(t)
+			resetFlags(t)
+			stdout, stderr, err := executeRootCapture(t, t.Context(), append(tc.args, "agent-contract-hook")...)
+			require.NoError(t, err)
+			assert.Empty(t, stderr)
+			assertCodexPrompt(t, stdout, tc.want)
+		})
+	}
+}
+
 func TestAgentContractHookCustomSource(t *testing.T) {
-	t.Chdir(t.TempDir())
+	t.Chdir(writeKataWorkspace(t, t.TempDir()))
 	for _, tc := range []struct {
 		name, path, text string
 		exists           bool
@@ -72,7 +117,7 @@ func TestAgentContractHookCustomSource(t *testing.T) {
 }
 
 func TestAgentContractHooksLegacyMarkerKeepsBuiltInContract(t *testing.T) {
-	t.Chdir(t.TempDir())
+	t.Chdir(writeKataWorkspace(t, t.TempDir()))
 	for _, content := range []string{"authored replacement", ""} {
 		require.NoError(t, os.WriteFile("kata-agent-contract-hook", []byte(content), 0o600))
 		out, stderr, err := executeRootCapture(t, t.Context(), "agent-contract-hook", "--source", "kata-agent-contract-hook")
@@ -162,7 +207,7 @@ func TestAgentContractHookUsage(t *testing.T) {
 }
 
 func TestAgentHooksContractCustomSource(t *testing.T) {
-	t.Chdir(t.TempDir())
+	t.Chdir(writeKataWorkspace(t, t.TempDir()))
 	require.NoError(t, os.WriteFile("custom.txt", []byte("replacement"), 0o600))
 	out, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agenthook.AgentCodex)), "agent-hook", "contract", "codex", "--source", "custom.txt")
 	require.NoError(t, err, stderr)
@@ -170,7 +215,7 @@ func TestAgentHooksContractCustomSource(t *testing.T) {
 }
 
 func TestAgentHooksContractSourceAllHarnesses(t *testing.T) {
-	t.Chdir(t.TempDir())
+	t.Chdir(writeKataWorkspace(t, t.TempDir()))
 	prompt := "custom \"prompt\"\nUnicode 世界\n"
 	require.NoError(t, os.WriteFile("prompt.txt", []byte(prompt), 0o600))
 	require.NoError(t, os.WriteFile("empty.txt", nil, 0o600))
@@ -181,22 +226,7 @@ func TestAgentHooksContractSourceAllHarnesses(t *testing.T) {
 			assertNativePrompt(t, agent, out, prompt)
 			out, stderr, err = executeAgentHook(t, strings.NewReader(contractHookPayload(agent)), "agent-hook", "contract", string(agent), "--source", "empty.txt")
 			require.NoError(t, err, stderr)
-			var response map[string]json.RawMessage
-			require.NoError(t, json.Unmarshal([]byte(out), &response))
-			// Native codecs may omit empty context; inspect every native context
-			// field so escaped JSON cannot hide a default or prior prompt.
-			if specific, ok := response["hookSpecificOutput"]; ok {
-				var nested map[string]json.RawMessage
-				require.NoError(t, json.Unmarshal(specific, &nested))
-				maps.Copy(response, nested)
-			}
-			for _, key := range []string{"additionalContext", "additional_context", "context"} {
-				if value, ok := response[key]; ok {
-					var text string
-					require.NoError(t, json.Unmarshal(value, &text))
-					assert.Empty(t, text)
-				}
-			}
+			assertNoNativeContext(t, out)
 		})
 	}
 }

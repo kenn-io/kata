@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep coding agents focused outside kata workspaces. User-scope contract hooks
+  installed by `kata agent-hook install` now inject the contract only when the
+  session starts under a `.kata.toml`; elsewhere they return an empty response
+  instead of telling the agent to search, create, and close kata issues in a
+  repository that does not use kata.
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the

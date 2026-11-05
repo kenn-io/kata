@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-30
+last_edited: 2026-11-05
 ---
 
 # Agent workflows
@@ -108,7 +108,8 @@ does not enroll an agent, initialize a project, or configure embeddings.
 
 ## Contract in every session
 
-Load Kata's contract in every coding-agent session on this machine:
+Load Kata's contract in every coding-agent session that starts inside a kata
+workspace on this machine:
 
 ```sh
 kata agent-hook install
@@ -156,8 +157,11 @@ completed project result separately from the hook failure.
 Most contract hooks use SessionStart; Hermes uses first-turn
 `pre_llm_call`, Kimi Code uses UserPromptSubmit, and Antigravity uses its first
 PreInvocation. Pi, Amp, OpenCode and OpenClaw use native code extensions.
-The contract also loads outside Kata workspaces. Attention requires a tracked
-issue in `KATA_REF` and uses the native workspace for routing.
+The contract loads only when the session starts inside a kata workspace, a
+directory under a `.kata.toml` written by `kata init`. Sessions in other
+directories receive no kata context, so agents are not told to track work in a
+repository that does not use kata. Attention requires a tracked issue in
+`KATA_REF` and uses the native workspace for routing.
 
 ### Hook target coverage
 

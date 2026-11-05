@@ -75,7 +75,7 @@ Default: full instructions for agents using kata.
 --json: instructions in a JSON response.
 --format contract: the canonical managed contract, exactly what kata agent-hook contract injects.
 
-Run kata agent-hook install --all to load the contract in every session on this machine.
+Run kata agent-hook install --all to load the contract in every session that starts in a kata workspace.
 Without hooks, run kata quickstart at session start.
 Setup guides cover federation enrollment and optional embeddings.
 The managed contract format stays static.

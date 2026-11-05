@@ -255,7 +255,8 @@ verified. Close each verified issue promptly with valid evidence and a
 substantive message. [Agent workflows](docs/workflows/agents.md) is the same
 contract in long form.
 
-On `main`, install the contract in every coding-agent session on this machine:
+On `main`, install the contract in every coding-agent session that starts
+inside a kata workspace on this machine:
 
 ```sh
 kata agent-hook install
@@ -282,15 +283,6 @@ Contract output is marker-free, has no terminal framing, works without an
 initialized workspace, and performs no workspace mutation. It is rendered from
 the same canonical body that `kata init --with-agents` places between its
 managed markers, so static and session-injected guidance cannot drift.
-
-If you want silence outside Kata workspaces, use this alternative Claude Code
-SessionStart command instead of the every-session installer:
-
-```sh
-if test -f "$CLAUDE_PROJECT_DIR/.kata.toml"; then
-  kata quickstart --format contract --workspace "$CLAUDE_PROJECT_DIR"
-fi
-```
 
 For a Codex SessionStart response without a stdin payload, run
 `kata agent-contract-hook`. To replace the prompt, use
