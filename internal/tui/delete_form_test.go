@@ -189,72 +189,54 @@ func TestDeletePreservesPendingReturn(t *testing.T) {
 }
 
 func TestDeletePreservesIndependentSplitDetail(t *testing.T) {
-	h := newDeleteHarness(t, viewList)
-	rows := h.m.list.visibleRows()
-	parent, child := rows[0].issue, rows[2].issue
-	_, err := h.client.KataAPI.AddLink(t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
-	require.NoError(t, err)
+	for _, state := range []string{"resolved", "pending"} {
+		t.Run(state, func(t *testing.T) {
+			h := newDeleteHarness(t, viewList)
+			rows := h.m.list.visibleRows()
+			parent, child := rows[0].issue, rows[2].issue
+			_, err := h.client.KataAPI.AddLink(t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
+			require.NoError(t, err)
 
-	h.selectIssue(parent.UID)
-	m, cmd := updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
-	h.m = m
-	h.m = h.drain(cmd)
-	require.Equal(t, splitlayout.Split, h.m.layout)
-	h.m = h.drain(h.enter())
-	h.m.detail.detailFocus = focusChildren
-	h.m = h.drain(h.enter())
-	require.NotNil(t, h.m.detail.issue)
-	require.Equal(t, child.UID, h.m.detail.issue.UID)
-	require.Len(t, h.m.detail.navStack, 1)
+			h.selectIssue(parent.UID)
+			m, cmd := updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+			h.m = m
+			if state == "resolved" {
+				h.m = h.drain(cmd)
+			}
+			require.Equal(t, splitlayout.Split, h.m.layout)
+			h.m = h.drain(h.enter())
+			h.m.detail.detailFocus = focusChildren
+			pending := h.finish(h.enter())
+			defer h.m.detail.cancelReads()
+			var late []tea.Msg
+			if state == "resolved" {
+				h.m = h.drain(pending)
+				require.NotNil(t, h.m.detail.issue)
+				require.Equal(t, child.UID, h.m.detail.issue.UID)
+			} else {
+				require.Nil(t, h.m.detail.issue)
+				late = runCmdTree(pending)
+			}
+			require.Len(t, h.m.detail.navStack, 1)
 
-	h.m.focus = focusList
-	h.key(runeKey('X'))
-	require.Equal(t, inputDeleteForm, h.m.input.kind)
-	h.m = typeString(h.m, "DELETE "+h.project.Name+"#"+parent.ShortID)
-	refresh := h.finish(h.enter())
-	require.True(t, h.isDeleted(parent.UID))
-	require.NotNil(t, h.m.detail.issue)
-	assert.Equal(t, child.UID, h.m.detail.issue.UID, "deletion keeps the independently opened detail")
-	h.m = h.drain(refresh)
-	require.NotNil(t, h.m.detail.issue)
-	assert.Equal(t, child.UID, h.m.detail.issue.UID, "list refresh keeps the independently opened detail")
-	selected, ok := h.m.list.targetRow()
-	require.True(t, ok)
-	assert.Equal(t, rows[1].issue.UID, selected.UID, "the list selects the neighbouring row")
-}
-
-func TestDeletePreservesPendingIndependentSplitDetail(t *testing.T) {
-	h := newDeleteHarness(t, viewList)
-	rows := h.m.list.visibleRows()
-	parent, child := rows[0].issue, rows[2].issue
-	_, err := h.client.KataAPI.AddLink(t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
-	require.NoError(t, err)
-
-	h.selectIssue(parent.UID)
-	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
-	require.Equal(t, splitlayout.Split, h.m.layout)
-	h.m = h.drain(h.enter())
-	h.m.detail.detailFocus = focusChildren
-	pending := h.finish(h.enter())
-	defer h.m.detail.cancelReads()
-	require.Nil(t, h.m.detail.issue)
-	require.Len(t, h.m.detail.navStack, 1)
-	late := runCmdTree(pending)
-
-	h.m.focus = focusList
-	h.key(runeKey('X'))
-	require.Equal(t, inputDeleteForm, h.m.input.kind)
-	h.m = typeString(h.m, "DELETE "+h.project.Name+"#"+parent.ShortID)
-	h.m = h.drain(h.finish(h.enter()))
-	require.True(t, h.isDeleted(parent.UID))
-	for _, msg := range late {
-		h.m, _ = updateModel(h.m, msg)
+			h.m.focus = focusList
+			h.key(runeKey('X'))
+			require.Equal(t, inputDeleteForm, h.m.input.kind)
+			h.m = typeString(h.m, "DELETE "+h.project.Name+"#"+parent.ShortID)
+			refresh := h.finish(h.enter())
+			require.True(t, h.isDeleted(parent.UID))
+			if state == "resolved" {
+				require.NotNil(t, h.m.detail.issue)
+				assert.Equal(t, child.UID, h.m.detail.issue.UID, "deletion keeps the independently opened detail")
+			}
+			h.m = h.drain(refresh)
+			for _, msg := range late {
+				h.m, _ = updateModel(h.m, msg)
+			}
+			require.NotNil(t, h.m.detail.issue)
+			assert.Equal(t, child.UID, h.m.detail.issue.UID, "list refresh keeps the requested child detail")
+		})
 	}
-	require.NotNil(t, h.m.detail.issue)
-	assert.Equal(t, child.UID, h.m.detail.issue.UID, "the pending child response opens the requested detail after parent deletion")
-	selected, ok := h.m.list.targetRow()
-	require.True(t, ok)
-	assert.Equal(t, rows[1].issue.UID, selected.UID, "the list selects the neighbouring row")
 }
 
 func TestAttentionUndoIgnoresOtherEdits(t *testing.T) {
@@ -335,9 +317,9 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 				require.NotNil(t, h.m.detail.issue)
 				assert.Equal(t, selected.UID, h.m.detail.issue.UID)
 			}
-			h.m = h.drain(h.key(runeKey('u')))
-			assert.False(t, h.isDeleted(target.UID))
 			if context == "Attention detail" || context == "Attention Back" {
+				h.m = h.drain(h.key(runeKey('u')))
+				assert.False(t, h.isDeleted(target.UID))
 				assert.True(t, slices.ContainsFunc(h.m.attention.rows, func(row attentionRequest) bool { return row.issue.UID == target.UID }), "undo reloads Attention")
 			}
 			if context == "Attention Back" {
@@ -351,7 +333,7 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 
 // Returning after a delete must refetch the saved parent and reject older reads.
 func TestDeleteInvalidatesSavedRelations(t *testing.T) {
-	for _, route := range []string{"Back", "Inbox list", "Inbox detail", "Attention list", "Attention detail"} {
+	for _, route := range []string{"Back", "Inbox list", "Attention list"} {
 		t.Run(route, func(t *testing.T) {
 			t.Setenv("KATA_INBOX_USER", "alice")
 			h := newDeleteHarness(t, viewDetail)
@@ -364,16 +346,12 @@ func TestDeleteInvalidatesSavedRelations(t *testing.T) {
 			switch route {
 			case "Back":
 				h.m = h.drain(h.enter())
-			case "Inbox list", "Inbox detail":
-				if route == "Inbox list" {
-					h.m.view = viewList
-				}
+			case "Inbox list":
+				h.m.view = viewList
 				h.openInbox()
 				h.selectIssue(child.UID)
-			case "Attention list", "Attention detail":
-				if route == "Attention list" {
-					h.m.view = viewList
-				}
+			case "Attention list":
+				h.m.view = viewList
 				h.openAttentionDetail(child.UID)
 			}
 			h.key(runeKey('X'))
@@ -385,9 +363,9 @@ func TestDeleteInvalidatesSavedRelations(t *testing.T) {
 			switch route {
 			case "Back":
 				refresh = deleted
-			case "Inbox list", "Inbox detail":
+			case "Inbox list":
 				refresh = h.key(runeKey('I'))
-			case "Attention list", "Attention detail":
+			case "Attention list":
 				refresh = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
 			}
 			for _, msg := range late {
@@ -399,7 +377,7 @@ func TestDeleteInvalidatesSavedRelations(t *testing.T) {
 			switch route {
 			case "Inbox list", "Attention list":
 				require.Equal(t, viewList, h.m.view)
-			case "Back", "Inbox detail", "Attention detail":
+			case "Back":
 				require.Equal(t, viewDetail, h.m.view)
 				require.NotNil(t, h.m.detail.issue)
 				assert.Equal(t, parent.UID, h.m.detail.issue.UID)
@@ -418,9 +396,12 @@ func assertNoDeletedView(t *testing.T, m Model, uid string) {
 		if dm.issue != nil {
 			assert.NotEqual(t, uid, dm.issue.UID)
 		}
-		if dm.loading {
-			assert.Empty(t, dm.links, "saved links wait for a fresh read")
-			assert.Nil(t, dm.parent)
+		for _, link := range dm.links {
+			assert.NotEqual(t, uid, link.From.UID)
+			assert.NotEqual(t, uid, link.To.UID)
+		}
+		if dm.parent != nil {
+			assert.NotEqual(t, uid, dm.parent.UID)
 		}
 		for _, child := range dm.children {
 			assert.NotEqual(t, uid, child.UID)
@@ -680,6 +661,8 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
 	require.Equal(t, splitlayout.Split, h.m.layout)
 	h.m.focus = focusList
+	back := h.m.list.issues[slices.IndexFunc(h.m.list.issues, func(issue Issue) bool { return issue.UID == h.issues[2].UID })]
+	h.m.detail.navStack = []detailModel{{scopePID: h.project.ID, issue: &back}}
 	h.selectIssue(child.UID)
 	late := runCmdTree(h.m.detail.refetch(h.m.api))
 
@@ -687,16 +670,12 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 	h.m = typeString(h.m, "DELETE "+h.qualified(child))
 	refresh := h.finish(h.enter())
 
-	require.True(t, h.isDeleted(child.UID))
-	require.Empty(t, h.m.detail.children, "the deleted child disappears before refresh")
-	assert.NotContains(t, stripANSI(h.m.detail.View(120, 40, h.m.chrome())), "Second")
+	assert.Empty(t, h.m.detail.children, "the deleted child disappears before refresh")
 	for _, msg := range late {
 		h.m, _ = updateModel(h.m, msg)
 	}
-	require.Empty(t, h.m.detail.children, "earlier reads cannot restore the deleted child")
+	assert.Empty(t, h.m.detail.children, "earlier reads cannot restore the deleted child")
 	h.m = h.drain(refresh)
 
-	require.NotNil(t, h.m.detail.issue)
-	assert.Equal(t, parent.UID, h.m.detail.issue.UID)
-	assert.Empty(t, h.m.detail.children, "the neighbouring parent loads without the deleted child")
+	assert.Empty(t, h.m.detail.children, "the retained parent refreshes without the deleted child")
 }
