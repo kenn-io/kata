@@ -215,6 +215,8 @@ func TestLocalEmbeddingsSwitchRecipe(t *testing.T) {
 			}
 			original := "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\n" + tt.recipe
 			require.NoError(t, os.WriteFile(target, []byte(original), 0640)) // #nosec G306 -- fixture exercises preservation of an existing mode
+			before, err := os.Stat(target)
+			require.NoError(t, err)
 			oldEndpoint := localEmbeddingsEndpoint
 			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
 				require.True(t, opts.SkipOllama)
@@ -226,7 +228,7 @@ func TestLocalEmbeddingsSwitchRecipe(t *testing.T) {
 			require.Contains(t, stderr, "index will be "+tt.index)
 			info, err := os.Stat(target)
 			require.NoError(t, err)
-			require.Equal(t, os.FileMode(0640), info.Mode().Perm())
+			require.Equal(t, before.Mode().Perm(), info.Mode().Perm())
 			if tt.symlink {
 				link, err := os.Readlink(path)
 				require.NoError(t, err)
