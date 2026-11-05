@@ -3,7 +3,6 @@ package tui
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -43,15 +42,6 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 		input.Blur()
 		s.fields = append(s.fields, inputField{id: f.id, kind: fieldSingleLine, input: input, label: f.label})
 	}
-	s = s.loadRecurrence(issue, rec)
-	_ = s.fields[0].focus()
-	return s
-}
-
-// loadRecurrence fills the form from the recurrence, or from the issue when it
-// has none: the issue's date and the zone kata schedule would pick. The
-// revisions a save is guarded on are the ones just read.
-func (s inputState) loadRecurrence(issue Issue, rec *recurrenceclient.View) inputState {
 	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec}
 	var rule, start, zone string
 	if rec != nil {
@@ -71,6 +61,7 @@ func (s inputState) loadRecurrence(issue Issue, rec *recurrenceclient.View) inpu
 			s.fields[i].setValue(zone)
 		}
 	}
+	_ = s.fields[0].focus()
 	return s
 }
 
@@ -130,10 +121,10 @@ func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 func (m Model) saveRecurrence(in RecurrenceInput) (Model, tea.Cmd) {
 	m.input.saving = true
 	m.input.err = ""
-	return m, withConnGen(dispatchFormSaveRecurrence(m.api, m.input.target, in, m.input.formGen), m.connGen)
+	return m, withConnGen(dispatchFormSaveRecurrence(m.api.(recurrenceAPI), m.input.target, in, m.input.formGen), m.connGen)
 }
 
-func dispatchFormSaveRecurrence(apiClient any, target formTarget, in RecurrenceInput, formGen int64) tea.Cmd {
+func dispatchFormSaveRecurrence(apiClient recurrenceAPI, target formTarget, in RecurrenceInput, formGen int64) tea.Cmd {
 	kind := "recurrence.change"
 	if in.Recurrence == nil {
 		kind = "recurrence.start"
@@ -141,16 +132,9 @@ func dispatchFormSaveRecurrence(apiClient any, target formTarget, in RecurrenceI
 		kind = "recurrence.stop"
 	}
 	return func() tea.Msg {
-		writer, ok := apiClient.(recurrenceAPI)
-		if !ok {
-			return mutationDoneMsg{
-				origin: "form", kind: kind, formGen: formGen,
-				err: errors.New("TUI client does not support editing recurrences"),
-			}
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		resp, err := writer.SaveRecurrence(ctx, target.projectID, target.issueUID, in)
+		resp, err := apiClient.SaveRecurrence(ctx, target.projectID, target.issueUID, in)
 		return mutationDoneMsg{
 			origin: "form", gen: target.detailGen, kind: kind, formGen: formGen,
 			resp: resp, err: err,
