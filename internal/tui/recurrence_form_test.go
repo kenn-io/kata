@@ -384,7 +384,7 @@ func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
 		{"an issue changed after the form opened is refused", func(h *recurrenceHarness) {
 			h.patchDaemon(map[string]string{"scheduled_on": "2026-12-01"})
 		}, "FREQ=DAILY", "Europe/Paris", []string{"Could not start repeat:"}},
-		{"Local is never sent as a zone", nil, "FREQ=DAILY", "Local", []string{"Local"}},
+		{"Local is never sent as a zone", nil, "FREQ=DAILY", "Local", []string{`"Local" is not an IANA zone`}},
 		{"an issue that became a cron parent after the form opened is refused", cronParent, "FREQ=DAILY", "Europe/Paris",
 			[]string{recurrenceclient.CronParentRefusal, "kata cron job create --parent"}},
 	} {
@@ -615,6 +615,12 @@ func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 			for _, want := range []string{"Rule", "Start", "Zone", "Could not start repeat", "ctrl+o save", "esc"} {
 				assert.Contains(t, got, want)
 			}
+			lines := strings.Split(got, "\n")
+			for i := range lines {
+				lines[i] = strings.Trim(lines[i], "│ ")
+			}
+			assert.Contains(t, strings.Join(lines, " "), "save again.")
+			s.err = ""
 			s.saving = true
 			modal = renderCenteredForm(s, width, 12, snapshotFixedNow)
 			assert.LessOrEqual(t, lipgloss.Height(modal), 12)
@@ -623,32 +629,30 @@ func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 			assert.NotContains(t, stripANSI(modal), "ctrl+o save")
 		}
 	}
-}
+	t.Run("rejected long rule", func(t *testing.T) {
+		h := newRecurrenceHarness(t, viewDetail)
+		h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+		h.open()
+		h.fill("FREQ=DAILY;BYDAY=MO;BYMONTH=1,2,3,4,5;BAD=1", "2026-11-09", "Europe/Paris")
+		// Match the cursor position after typing the rule.
+		h.key(tea.KeyPressMsg{Code: tea.KeyEnd})
+		h.save()
+		require.Contains(t, h.m.input.err, "unknown RRULE property: BAD")
 
-func TestRecurrenceFormRejectedLongRuleFitsMinimumHeight(t *testing.T) {
-	defer snapshotInit(t)()
-	h := newRecurrenceHarness(t, viewDetail)
-	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-	h.open()
-	h.fill("FREQ=DAILY;BYDAY=MO;BYMONTH=1,2,3,4,5;BAD=1", "2026-11-09", "Europe/Paris")
-	// Match the cursor position after typing the rule.
-	h.key(tea.KeyPressMsg{Code: tea.KeyEnd})
-	h.save()
-	require.Contains(t, h.m.input.err, "unknown RRULE property: BAD")
-
-	for _, width := range []int{80, 40} {
-		t.Run(strconv.Itoa(width), func(t *testing.T) {
-			modal := renderCenteredForm(h.m.input, width, 12, snapshotFixedNow)
-			assert.LessOrEqual(t, lipgloss.Height(modal), 12)
-			assert.LessOrEqual(t, lipgloss.Width(modal), width)
-			lines := strings.Split(stripANSI(modal), "\n")
-			for i := range lines {
-				lines[i] = strings.Trim(lines[i], "│ ")
-			}
-			got := strings.Join(lines, " ")
-			for _, want := range []string{"Rule", "Start", "Zone", "Could not change repeat", "unknown RRULE property: BAD", "ctrl+o save", "esc"} {
-				assert.Contains(t, got, want)
-			}
-		})
-	}
+		for _, width := range []int{80, 40} {
+			t.Run(strconv.Itoa(width), func(t *testing.T) {
+				modal := renderCenteredForm(h.m.input, width, 12, snapshotFixedNow)
+				assert.LessOrEqual(t, lipgloss.Height(modal), 12)
+				assert.LessOrEqual(t, lipgloss.Width(modal), width)
+				lines := strings.Split(stripANSI(modal), "\n")
+				for i := range lines {
+					lines[i] = strings.Trim(lines[i], "│ ")
+				}
+				got := strings.Join(lines, " ")
+				for _, want := range []string{"Rule", "Start", "Zone", "Could not change repeat", "unknown RRULE property: BAD", "ctrl+o save", "esc"} {
+					assert.Contains(t, got, want)
+				}
+			})
+		}
+	})
 }
