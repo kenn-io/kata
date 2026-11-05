@@ -213,6 +213,32 @@ func TestCronIssueUnreadableStackedView(t *testing.T) {
 	require.Equal(t, viewCron, stacked.view)
 }
 
+// The split pane shows a linked issue's pending read and, after its notice
+// expires, why it failed, while Esc still returns and identity actions wait.
+func TestCronIssueSplitPaneShowsReadState(t *testing.T) {
+	m := cronIssueFixture(t, 160)
+	m = sendKey(m, tea.KeyEnter)
+	require.Equal(t, splitlayout.Split, m.layout)
+	require.Nil(t, m.detail.issue)
+	view := ansi.Strip(m.viewBody())
+	require.Contains(t, view, "loading…")
+	require.NotContains(t, view, "select an issue from the list pane")
+	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
+	require.NotNil(t, m.toast)
+	m.toast = nil // the notice expires; the pane must still explain
+	view = ansi.Strip(m.viewBody())
+	require.Contains(t, view, "unavailable: issue not found")
+	require.Contains(t, view, "esc")
+	require.Contains(t, view, "back")
+	require.NotContains(t, view, "select an issue from the list pane")
+	m, cmd := updateModel(m, keyRune('N'))
+	require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }))
+	require.Equal(t, inputNone, m.input.kind)
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = drainInboxCmds(m, cmd)
+	require.Equal(t, viewCron, m.view)
+}
+
 // A layout change while a linked issue loads, or after its read failed, keeps
 // that issue in front, also behind Help, and its return to the Cron frame.
 func TestCronIssueLayoutChangeKeepsReturn(t *testing.T) {

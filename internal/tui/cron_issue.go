@@ -73,8 +73,7 @@ func (m Model) cronDetailView() string {
 		return dm.View(m.width, m.height, chrome)
 	}
 	rows := [][]helplayout.HelpItem{{{Key: "esc", Description: "back"}}}
-	reason := truncate("unavailable: "+sanitizeForLine(dm.err.Error()), max(m.width, 1))
-	lines := []string{renderTitleBar(m.width, chrome.scope, chrome.version, chrome.daemon), "", errorStyle.Render(reason)}
+	lines := []string{renderTitleBar(m.width, chrome.scope, chrome.version, chrome.daemon), "", dm.emptyBody(m.width)}
 	for len(lines) < m.height-helpLines(rows, m.width) {
 		lines = append(lines, "")
 	}
