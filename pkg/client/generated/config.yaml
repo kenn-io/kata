@@ -18,3 +18,4 @@ overlay:
   sources:
     - native_uuid_overlay.yaml
     - agent_overlay.yaml
+    - cron_execution_overlay.yaml

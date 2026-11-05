@@ -30,6 +30,11 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		out := &api.CronCapabilitiesResponse{EventFeatures: db.SupportedEventFeatures}
 		out.Body.ProjectUID = project.UID
 		out.Body.EventFeatures = []string{db.CronEventFeature}
+		execution, err := cronExecutionPolicy(ctx, cfg, project)
+		if err != nil {
+			return nil, err
+		}
+		out.Body.Execution = &execution
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "observeCronRun", Method: http.MethodPut, Path: base + "/runs/{run_uid}", MaxBodyBytes: db.CronObservationLimit}, func(ctx context.Context, in *api.ObserveCronRunRequest) (*api.ObserveCronRunResponse, error) {
@@ -37,7 +42,11 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkCronExecution(ctx, cfg, project, in); err != nil {
 			return nil, err
 		}
 		result, err := cfg.DB.ObserveCronRun(ctx, in.Body.Native(in.ProjectID, in.RunUID, actor))

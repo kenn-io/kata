@@ -277,6 +277,9 @@ func TestCronCLICapabilitiesEmptyProject(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, out, `"cron_v1"`)
 	require.Contains(t, out, project.UID)
+	var capabilities map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &capabilities))
+	require.Equal(t, map[string]any{"replica": false, "mode": "all", "source": "local"}, capabilities["execution"])
 	after, err := env.DB.UIEventCursor(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, before, after)

@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-03
+last_edited: 2026-11-05
 ---
 
 # Federation
@@ -2404,3 +2404,14 @@ disabled, so those spokes must re-run `kata federation join --actor <actor> --pu
 before local-origin work can sync to the hub again.
 
 Use a shared daemon when those trade-offs are unacceptable.
+
+## Local cron execution on replicas
+
+On unreleased main, spokes and relays default local adapter execution to
+`none`, including disabled bindings. Reading company definitions does not opt
+this daemon into running them. After upgrading the daemon, choose `owned` or
+`all` in its local `[cron]` configuration and restart it before resuming local
+adapter execution. `owned` runs only jobs and workflows whose stored creator is this replica's member actor; the creator is preserved across edits, so a colleague's edit on the hub does not change eligibility.
+See the [replica execution contract](../reference/cron.md#adapter-responsibilities)
+for ownership, admission, and project-name matching. Native notify delivery
+remains on the owning hub.

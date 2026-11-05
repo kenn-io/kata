@@ -255,6 +255,7 @@ func TestCronAuthorityAndCapabilities(t *testing.T) {
 	caps := cronOK(t, f.session, "cron_capabilities", map[string]any{})
 	require.Equal(t, f.project.UID, caps["project_uid"])
 	require.Contains(t, caps["event_features"], "cron_v1")
+	require.Equal(t, map[string]any{"replica": false, "mode": "all", "source": "local"}, caps["execution"])
 	require.True(t, cronCall(t, f.session, "cron_capabilities", map[string]any{"project": "outside-project"}).IsError)
 	// Preserve the daemon's authorization and capability failure, without upgrading it.
 	for _, tc := range []struct {

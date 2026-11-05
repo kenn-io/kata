@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -454,7 +454,34 @@ unknown, or failed advertisements remain distinct outcomes. This is an ordinary 
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
 
+The response also includes daemon-local `execution` policy:
+
+```json
+{"replica": true, "mode": "owned", "member_actor": "company-member", "source": "project"}
+```
+
+`execution.source` identifies which local setting selected the mode:
+
+| Value | Meaning |
+| --- | --- |
+| `project` | A matching `[[cron.project]]` override. |
+| `replica_default` | A spoke or relay using `cron.replica_execute`, including an explicit `all`, or `none` when unset. |
+| `local` | A local or hub-role project, which always uses `all`. |
+
+Local and hub-role projects return `{"replica":false,"mode":"all","source":"local"}`.
+`member_actor` is the binding's upstream account, including on relays; the
+relay's local setup account can differ. Disabled spoke bindings remain replicas.
+This field is local policy, not a replicated event feature, and does not change
+`X-Kata-Event-Features`. Older daemons omit it; adapters keep their previous
+local activation behavior against those daemons.
+
 ### Upgrade limits
+
+On unreleased main, replica daemons default execution to `none`. After
+upgrading a spoke or relay, configure `[[cron.project]] execute = "all"` or
+`"owned"` and restart the daemon before resuming local adapter execution. A newly
+reported run can be refused even when its evidence was buffered before the
+upgrade. Updates to existing runs and replicated ingest remain available.
 
 These limits apply to projects with cron data and the adapters that consume
 it. For ordinary issue synchronization, use the normal
@@ -521,8 +548,8 @@ occurrence key and issue. No occurrence is reserved by logging a run.
 UID, project, definition references, occurrence key, issue UID, attributed actor,
 teammate, executor label, and server-created time are immutable. Status, summary,
 start time, and end time are mutable evidence. Supported statuses are `running`,
-`succeeded`, `failed`, `cancelled`, and `unknown`; they impose no transition or
-launch protocol. Summary version 1 permits a message and nonnegative integer
+`succeeded`, `failed`, `cancelled`, and `unknown`; storage imposes no transition
+protocol. Adapters must follow the [launch admission contract](#adapter-responsibilities). Summary version 1 permits a message and nonnegative integer
 input/output token counts and is bounded to 64 KiB. The whole observation and
 its event are bounded to 96 KiB. Unknown fields are rejected. Times are RFC3339
 instants; an end cannot precede a start. An occurrence key is at most 1024
@@ -605,8 +632,60 @@ Adapters must exclude `notify` jobs with `issue.kind: "per-run"` from their
 schedulers; those jobs belong to the native hub. Existing strict decoders reject
 the new `parent_uid` shape instead of scheduling it.
 
-Shared `enabled` configuration does not activate an adapter installation. Each
-adapter owns its local activation, scheduler, overlap and catchup handling,
+Shared `enabled` configuration does not activate an adapter installation.
+On unreleased main, spokes and relays also require a daemon-local execution
+opt-in in `<KATA_HOME>/config.toml`:
+
+```toml
+[cron]
+replica_execute = "none" # none | owned | all; default none
+
+[[cron.project]]
+name = "company-project"
+execute = "owned"
+```
+
+| Mode | Eligible execution on this replica |
+| --- | --- |
+| `none` | No execute jobs or workflows. |
+| `owned` | Jobs and workflows created by the nonblank member actor. |
+| `all` | Every execute job and workflow, subject to the adapter's own activation. |
+
+Local and hub-role projects always use `all`. Overrides match the exact current
+local project name, including any leading or trailing spaces. Renaming a
+project removes its old match immediately; reusing a name applies that name's
+override to the replacement project. Update overrides when renaming, especially
+when the daemon default is `all`. Config edits take effect after
+`kata daemon restart`. Unknown project names are allowed for future joins and
+warn at startup; local/hub overrides warn and have no effect.
+
+Before scheduling or manually starting each new execution, adapters must read
+live capabilities and apply this rule to the job and any workflow named by
+its `action.workflow_uid` or by `workflow_uid` in the observation, including
+workflow-only runs. Only a reference to the current version 1 notify definition
+is exempt from the job execution rule; a notify job with a workflow reference
+must still satisfy the workflow rule. A non-current job definition reference
+counts as execution.
+
+`owned` runs only jobs and workflows whose stored creator is this replica's member actor; the creator is preserved across edits, so a colleague's edit on the hub does not change eligibility.
+Under `none` or `owned`, a fresh observation that references a job or workflow
+without a current row on this daemon receives `403 cron_execution_not_enabled`,
+even if its historical definition event exists. The message names the kind and
+UID and says the definition was not found on this daemon.
+
+Before launch, submit a `running` observation with a fresh run UID and require
+success. The local observe route rejects new excluded runs with
+`403 cron_execution_not_enabled`; its error includes `mode`, `member_actor`
+and a hint to check the definition reference or opt in. A failed admission must
+prevent launch. Existing or
+replicated run UIDs may still accept evidence updates; success on such an
+update never authorizes another execution. Policy uses the current binding
+and stored creator at check time; federation adoption can change the stored creator between checks.
+This cooperative adapter contract does not control an external process or a
+writer sending observations directly to the owning hub. Older adapters that
+launch before reporting must be updated to honor it.
+
+Each adapter owns its local activation, scheduler, overlap and catchup handling,
 checkout and secret mappings, process lifecycle, and conversation recovery.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
@@ -621,8 +700,8 @@ that do not read the key ignore it: Herdr Kata v0.1.0, for example, logs
 `ignored options key: adapter` and still runs the job.
 
 Local transcripts, process IDs, session handles, credentials, and delivery
-buffers are not shared run evidence. An adapter may buffer a failed observation
-write and retry it later without blocking its own work.
+buffers are not shared run evidence. An adapter may buffer failed evidence updates for an already admitted run
+and retry them later. Failure to admit a new run must block its launch.
 
 The adapter must refresh current definitions before starting new scheduled work;
 offline cached data is for labeled reads. Portable `cron` triggers use the
@@ -642,7 +721,7 @@ can race.
 
 Shared definitions and run evidence inherit ordinary authentication, project/
 issue-scoped roles, actor attribution, token revocation and credential-origin
-checks. Capability discovery advertises compatibility only. Shared federation and
+checks. Capability discovery advertises compatibility and local execution policy. Shared federation and
 backup do not transfer local activation, checkout credentials, execution buffers
 or conversation handles; preserve those separately under the adapter's backup
 workflow. PostgreSQL runtime roles still cannot perform owner-only migrations.

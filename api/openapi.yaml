@@ -1074,6 +1074,8 @@ components:
           items:
             type: string
           type: array
+        execution:
+          $ref: "#/components/schemas/CronExecutionPolicy"
         project_uid:
           type: string
       required:
@@ -1089,6 +1091,30 @@ components:
           type: string
       required:
         - expected_event_uid
+      type: object
+    CronExecutionPolicy:
+      additionalProperties: true
+      properties:
+        member_actor:
+          type: string
+        mode:
+          enum:
+            - none
+            - owned
+            - all
+          type: string
+        replica:
+          type: boolean
+        source:
+          enum:
+            - local
+            - replica_default
+            - project
+          type: string
+      required:
+        - replica
+        - mode
+        - source
       type: object
     CronJob:
       additionalProperties: true
@@ -7247,7 +7273,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.40.0
+  version: 0.41.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

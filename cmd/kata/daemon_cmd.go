@@ -1634,7 +1634,15 @@ func runDaemonProcess(
 			rec.Metadata["mcp"] = "unavailable"
 		}
 	}
+	cronWarnings, err := daemon.CronExecutionWarnings(ctx, store, dcfg.Cron)
+	if err != nil {
+		slog.Warn("check cron execution overrides", "error", err)
+	}
+	for _, warning := range cronWarnings {
+		slog.Warn(warning)
+	}
 	srv := daemon.NewServer(daemon.ServerConfig{
+		CronExecution:             dcfg.Cron,
 		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,

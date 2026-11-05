@@ -1299,12 +1299,30 @@ func (c CreateTokenResponseBody) Validate() error {
 }
 
 type CronCapabilitiesResponseBody struct {
-	EventFeatures []string `json:"event_features" validate:"required"`
-	ProjectUID    string   `json:"project_uid" validate:"required"`
+	EventFeatures []string             `json:"event_features" validate:"required"`
+	Execution     *CronExecutionPolicy `json:"execution,omitempty"`
+	ProjectUID    string               `json:"project_uid" validate:"required"`
 }
 
 func (c CronCapabilitiesResponseBody) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.EventFeatures, "required"); err != nil {
+		errors = errors.Append("EventFeatures", err)
+	}
+	if c.Execution != nil {
+		if v, ok := any(c.Execution).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Execution", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type CronDefinitionActionBody struct {
@@ -1314,6 +1332,31 @@ type CronDefinitionActionBody struct {
 
 func (c CronDefinitionActionBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CronExecutionPolicy struct {
+	MemberActor *string                   `json:"member_actor,omitempty"`
+	Mode        CronExecutionPolicyMode   `json:"mode" validate:"required"`
+	Replica     bool                      `json:"replica"`
+	Source      CronExecutionPolicySource `json:"source" validate:"required"`
+}
+
+func (c CronExecutionPolicy) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(c.Mode).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Mode", err)
+		}
+	}
+	if v, ok := any(c.Source).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Source", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type CronJob struct {

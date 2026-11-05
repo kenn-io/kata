@@ -46,6 +46,8 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	// CronExecution is daemon-local replica execution policy.
+	CronExecution             config.CronConfig
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage

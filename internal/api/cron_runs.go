@@ -18,12 +18,21 @@ type CronProjectRequest struct {
 	ProjectID int64 `path:"project_id"`
 }
 
-// CronCapabilitiesResponse advertises ordinary read-only feature support.
+// CronExecutionPolicy advertises daemon-local execution consent for adapters.
+type CronExecutionPolicy struct {
+	Replica     bool   `json:"replica"`
+	Mode        string `json:"mode" enum:"none,owned,all"`
+	MemberActor string `json:"member_actor,omitempty"`
+	Source      string `json:"source" enum:"local,replica_default,project"`
+}
+
+// CronCapabilitiesResponse advertises feature support and local execution policy.
 type CronCapabilitiesResponse struct {
 	EventFeatures string `header:"X-Kata-Event-Features"`
 	Body          struct {
-		ProjectUID    string   `json:"project_uid"`
-		EventFeatures []string `json:"event_features"`
+		ProjectUID    string               `json:"project_uid"`
+		EventFeatures []string             `json:"event_features"`
+		Execution     *CronExecutionPolicy `json:"execution,omitempty"`
 	}
 }
 

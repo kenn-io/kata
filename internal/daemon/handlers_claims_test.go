@@ -929,7 +929,7 @@ func TestShowIssueClaimRefreshPreservesDownstreamHolder(t *testing.T) {
 	}))
 	t.Cleanup(hubMock.Close)
 	setClaimBindingHubURL(t, spoke, spokeProject.ID, hubMock.URL)
-	configureClaimRelayBinding(t, hub, spoke, spokeProject)
+	configureClaimRelayBinding(t, spoke.DB, spokeProject, hub.DB.InstanceUID(), "tester", "tester")
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
 		HubURL: hubMock.URL, HubProjectID: hubProject.ID, Token: token, Capabilities: "claim",
 	}))
@@ -980,7 +980,7 @@ func TestDeniedClaimAcquirePreservesDownstreamHolder(t *testing.T) {
 	}))
 	t.Cleanup(hubMock.Close)
 	setClaimBindingHubURL(t, spoke, spokeProject.ID, hubMock.URL)
-	configureClaimRelayBinding(t, hub, spoke, spokeProject)
+	configureClaimRelayBinding(t, spoke.DB, spokeProject, hub.DB.InstanceUID(), "tester", "tester")
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
 		HubURL: hubMock.URL, HubProjectID: hubProject.ID, Token: token, Capabilities: "claim",
 	}))
@@ -1323,21 +1323,25 @@ func createClaimForwardingPair(
 	return hub, spoke, hubProject, spokeProject, issue, enrollment.Token
 }
 
-func configureClaimRelayBinding(t *testing.T, hub, spoke *testenv.Env, spokeProject db.Project) {
+func configureClaimRelayBinding(t *testing.T, store db.Storage, project db.Project, rootUID, upstreamActor, localActor string) {
 	t.Helper()
-	rootUID := hub.DB.InstanceUID()
+	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	binding.Actor = upstreamActor
+	_, err = store.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
 	public, _, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
-	require.NoError(t, spoke.DB.PinRootAuthority(t.Context(), db.RootKeyPin{
-		ProjectUID: spokeProject.UID, AuthorityUID: rootUID,
+	require.NoError(t, store.PinRootAuthority(t.Context(), db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: rootUID,
 		KeyID: db.RootPublicKeyID(public), PublicKey: public,
 	}))
 	bindingUID, err := katauid.New()
 	require.NoError(t, err)
-	_, err = spoke.DB.SetRelayBindingConfig(t.Context(), spokeProject.ID, db.RelayBindingConfig{
+	_, err = store.SetRelayBindingConfig(t.Context(), project.ID, db.RelayBindingConfig{
 		ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID,
 		UpstreamInstanceUID: rootUID, AuthorityUID: rootUID,
-		HubPath: []string{rootUID, spoke.DB.InstanceUID()}, LocalActor: "tester",
+		HubPath: []string{rootUID, store.InstanceUID()}, LocalActor: localActor,
 		ServeDownstream: true, ResetEpoch: 1,
 	})
 	require.NoError(t, err)

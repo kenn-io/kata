@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Members can now choose which company cron jobs their own adapters execute.
+  Spoke and relay daemons default to `none`; operators who execute jobs locally
+  must upgrade the daemon, set `[[cron.project]] execute = "owned"` or `"all"`,
+  and restart before resuming local adapter execution. Capabilities advertise
+  the local policy, and new excluded run observations return
+  `403 cron_execution_not_enabled`. Adapters must admit a
+  fresh run before launch; existing-run updates and replicated ingest continue.
+  `owned` runs only jobs and workflows whose stored creator is this replica's member actor; the creator is preserved across edits, so a colleague's edit on the hub does not change eligibility.
+  See the [adapter contract](reference/cron.md#adapter-responsibilities).
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.

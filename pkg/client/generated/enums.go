@@ -211,6 +211,42 @@ func (c CreateLinkRequestBodyType) Validate() error {
 	}
 }
 
+type CronExecutionPolicyMode string
+
+const (
+	CronExecutionModeAll   CronExecutionPolicyMode = "all"
+	CronExecutionModeNone  CronExecutionPolicyMode = "none"
+	CronExecutionModeOwned CronExecutionPolicyMode = "owned"
+)
+
+// Validate checks if the CronExecutionPolicyMode value is valid
+func (c CronExecutionPolicyMode) Validate() error {
+	switch c {
+	case CronExecutionModeAll, CronExecutionModeNone, CronExecutionModeOwned:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CronExecutionPolicyMode value, got: %v", c))
+	}
+}
+
+type CronExecutionPolicySource string
+
+const (
+	CronExecutionSourceLocal          CronExecutionPolicySource = "local"
+	CronExecutionSourceProject        CronExecutionPolicySource = "project"
+	CronExecutionSourceReplicaDefault CronExecutionPolicySource = "replica_default"
+)
+
+// Validate checks if the CronExecutionPolicySource value is valid
+func (c CronExecutionPolicySource) Validate() error {
+	switch c {
+	case CronExecutionSourceLocal, CronExecutionSourceProject, CronExecutionSourceReplicaDefault:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CronExecutionPolicySource value, got: %v", c))
+	}
+}
+
 // EmbeddingsHealthCredential Embedding credential state; an advisory warning that does not change health.ok.
 type EmbeddingsHealthCredential string
 
