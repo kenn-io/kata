@@ -313,7 +313,7 @@ func TestRunnerDefaultChunksBoundWriterHold(t *testing.T) {
 		b := testBinding(t, s, "example-project", "synthetic")
 		at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 		blocked := make(chan *sql.Tx, 1)
-		const itemCount = DefaultInitialBatchSize + 1
+		const itemCount = 201
 		a := &testAdapter{prepare: func(ctx context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
 			p := testPrepared(binding, at)
 			p.Batch.Items = nil
@@ -354,7 +354,7 @@ func TestRunnerDefaultChunksBoundWriterHold(t *testing.T) {
 		require.NoError(t, tx.Rollback())
 		require.NoError(t, receive(t, created))
 		require.NoError(t, receive(t, synced))
-		require.Equal(t, []int{DefaultInitialBatchSize, 1}, sizes)
+		require.Equal(t, []int{200, 1}, sizes)
 		require.Equal(t, itemCount, result.Import.Created)
 		first, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "item-0")
 		require.NoError(t, err)
