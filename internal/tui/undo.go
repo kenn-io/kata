@@ -202,10 +202,10 @@ func (m Model) undoTarget(entry undoEntry, out undoOutcome) string {
 	if entry.before.QualifiedID != "" && out.ref == "" {
 		return entry.before.QualifiedID
 	}
+	if project := m.projectsByID[entry.projectID]; project != "" && ref != entry.uid && !strings.Contains(ref, "#") {
+		return project + "#" + ref
+	}
 	if ref != entry.uid && !strings.Contains(ref, "#") {
-		if qualified, ok := m.qualifiedIssueRef(entry.projectID, ref); ok {
-			return qualified
-		}
 		return "#" + ref
 	}
 	return ref

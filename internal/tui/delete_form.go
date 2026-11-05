@@ -77,18 +77,14 @@ func (m Model) deleteConfirmation(issue Issue) (string, bool) {
 	if issue.QualifiedID != "" {
 		return issue.QualifiedID, true
 	}
-	return m.qualifiedIssueRef(issue.ProjectID, issue.ShortID)
-}
-
-func (m Model) qualifiedIssueRef(projectID int64, shortID string) (string, bool) {
-	project := m.projectsByID[projectID]
-	if project == "" && projectID == m.scope.projectID {
+	project := m.projectsByID[issue.ProjectID]
+	if project == "" && issue.ProjectID == m.scope.projectID {
 		project = m.scope.projectName
 	}
-	if project == "" || shortID == "" {
+	if project == "" || issue.ShortID == "" {
 		return "", false
 	}
-	return project + "#" + shortID, true
+	return project + "#" + issue.ShortID, true
 }
 
 // commitDeleteForm sends the delete once the typed text is the issue's
@@ -128,16 +124,16 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 	qualified := m.input.del.expected
 	m.input = inputState{}
 	uid := target.issueUID
-	m, forgotten := m.forgetDeletedIssue(target)
-	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
-	m.list = m.list.syncSelection(m.list.visibleRows()).withoutIssue(uid).refreshDay()
-	var follow tea.Cmd
-	// Pruning the deleted Back entry can leave an independently opened detail
-	// with an empty stack. Keep it open as the list selects its neighbour.
-	if m.detail.issue == nil || (m.detail.issue.UID == prevUID && detailProjectID(*m.detail.issue, m.scope) == prevPID) {
-		m, follow = m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
+	// Selection refresh can replace the deleted detail before cleanup sees it.
+	if m.detail.issue != nil && m.detail.issue.UID == uid && len(m.detail.navStack) == 0 {
+		m.focus = focusList
 	}
-	m, detailCmd := m.maybeBootstrapSplitDetail()
+	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
+	m, forgotten := m.forgetDeletedIssue(target)
+	var detailCmd tea.Cmd
+	if m.detail.issue == nil && m.detail.readRef == "" {
+		m, detailCmd = m.maybeBootstrapSplitDetail()
+	}
 	if m.cache != nil {
 		m.cache.markStale()
 	}

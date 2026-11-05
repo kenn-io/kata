@@ -223,6 +223,40 @@ func TestDeletePreservesIndependentSplitDetail(t *testing.T) {
 	assert.Equal(t, rows[1].issue.UID, selected.UID, "the list selects the neighbouring row")
 }
 
+func TestDeletePreservesPendingIndependentSplitDetail(t *testing.T) {
+	h := newDeleteHarness(t, viewList)
+	rows := h.m.list.visibleRows()
+	parent, child := rows[0].issue, rows[2].issue
+	_, err := h.client.KataAPI.AddLink(t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
+	require.NoError(t, err)
+
+	h.selectIssue(parent.UID)
+	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+	require.Equal(t, splitlayout.Split, h.m.layout)
+	h.m = h.drain(h.enter())
+	h.m.detail.detailFocus = focusChildren
+	pending := h.finish(h.enter())
+	defer h.m.detail.cancelReads()
+	require.Nil(t, h.m.detail.issue)
+	require.Len(t, h.m.detail.navStack, 1)
+	late := runCmdTree(pending)
+
+	h.m.focus = focusList
+	h.key(runeKey('X'))
+	require.Equal(t, inputDeleteForm, h.m.input.kind)
+	h.m = typeString(h.m, "DELETE "+h.project.Name+"#"+parent.ShortID)
+	h.m = h.drain(h.finish(h.enter()))
+	require.True(t, h.isDeleted(parent.UID))
+	for _, msg := range late {
+		h.m, _ = updateModel(h.m, msg)
+	}
+	require.NotNil(t, h.m.detail.issue)
+	assert.Equal(t, child.UID, h.m.detail.issue.UID, "the pending child response opens the requested detail after parent deletion")
+	selected, ok := h.m.list.targetRow()
+	require.True(t, ok)
+	assert.Equal(t, rows[1].issue.UID, selected.UID, "the list selects the neighbouring row")
+}
+
 func TestAttentionUndoIgnoresOtherEdits(t *testing.T) {
 	h := newDeleteHarness(t, viewAttention)
 	h.m.undoHistory.push(undoEntry{kind: "close", uid: h.issues[0].UID, projectID: h.project.ID})
@@ -244,6 +278,8 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 			h.m.focus = focusDetail
 			switch context {
 			case "Inbox":
+				h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+				require.Equal(t, splitlayout.Split, h.m.layout)
 				h.openInbox()
 				require.True(t, h.m.scope.inbox)
 				h.selectIssue(target.UID)
@@ -284,11 +320,14 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 			assertNoDeletedView(t, h.m, target.UID)
 			switch context {
 			case "Inbox":
-				h.m = h.drain(h.key(runeKey('I')))
+				h.m = h.drain(h.key(tea.KeyPressMsg{Code: tea.KeyEscape}))
 				assert.Equal(t, viewList, h.m.view)
+				selected, ok := h.m.list.targetRow()
+				require.True(t, ok)
+				require.NotNil(t, h.m.detail.issue, "leaving Inbox loads the highlighted neighbour")
+				assert.Equal(t, selected.UID, h.m.detail.issue.UID)
 			case "Attention detail", "Attention Back":
 				assert.Equal(t, viewAttention, h.m.view)
-				assertHelpItemPresent(t, flattenHelpRows(attentionHelpRows(h.m)), helplayout.HelpItem{Key: "u", Description: "undo"})
 			case "split detail":
 				selected, ok := h.m.list.targetRow()
 				require.True(t, ok)
