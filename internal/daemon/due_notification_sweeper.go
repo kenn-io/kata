@@ -53,6 +53,7 @@ type dueSweepResult struct {
 type recurringDispatchResult struct{ err, alert error }
 
 func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) dueSweepResult {
+	started := time.Now()
 	var idleLease *activity.Lease
 	if s.IdleAdmission != nil {
 		var admitted bool
@@ -99,7 +100,6 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) due
 		}
 	}
 	alerts := append([]error(nil), errs...)
-	started := time.Now()
 	candidates, err := s.DB.ListRecurringCronJobs(ctx, s.recurringAfterUID, 100)
 	if err != nil {
 		errs = append(errs, err)

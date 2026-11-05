@@ -64,6 +64,14 @@ func (r *CronDispatchRecorder) Record(ctx context.Context, c db.RecurringCronCan
 	// Keep committed counts even if the caller was canceled after commit.
 	// Shutdown failures do not create error or log-failure observations.
 	if ctx.Err() != nil && dispatchErr != nil {
+		r.mu.Lock()
+		key := cronDispatchKey{c.ProjectID, c.JobUID}
+		if prev, exists := r.last[key]; exists {
+			// The candidate was enumerated even though dispatch was canceled.
+			prev.seen = true
+			r.last[key] = prev
+		}
+		r.mu.Unlock()
 		return false, nil
 	}
 	r.logMu.Lock()
