@@ -126,11 +126,12 @@ func TestEventsAfter_CombinedProjectFilters(t *testing.T) {
 	ctx := t.Context()
 	source := createProject(ctx, t, d, "source-project")
 	target := createProject(ctx, t, d, "target-project")
+	// Keep the other issue's events inside both ThroughID bounds.
+	other, _ := createTesterIssue(ctx, t, d, source.ID, "Other issue")
+	_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: other.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: other.Revision, Actor: "tester"})
+	require.NoError(t, err)
 	issue, created := createTesterIssue(ctx, t, d, source.ID, "Moving issue")
 	move, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "tester"})
-	require.NoError(t, err)
-	other, _ := createTesterIssue(ctx, t, d, source.ID, "Other issue")
-	_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: other.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: other.Revision, Actor: "tester"})
 	require.NoError(t, err)
 	for _, projectID := range []int64{source.ID, target.ID} {
 		events, err := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: projectID, IssueUID: issue.UID, Types: []string{"issue.moved"}, ThroughID: move.EventID, Limit: 100})
