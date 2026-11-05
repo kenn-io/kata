@@ -41,8 +41,8 @@ func newCronRunPruneCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use: "prune", Short: "preview or remove old terminal run evidence on the owning hub",
-		Long: `Preview one batch of old terminal runs. Use --force and the exact confirmation
-to delete it. Each job or workflow keeps its newest --keep runs across all statuses;
+		Long: `Preview one batch of old terminal runs.
+Each job or workflow keeps its newest --keep runs across all statuses;
 running runs and recently updated runs are always retained. Export history first.
 Each nonempty deletion resets browser streams and federation replicas.
 Counts describe this batch. Preview each batch before deleting it.`,

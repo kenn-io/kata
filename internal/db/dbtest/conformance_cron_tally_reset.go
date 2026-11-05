@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	jsonv1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -113,14 +113,12 @@ func oldPeerValue(t *testing.T, current, from, to jsontext.Value) jsontext.Value
 }
 
 // Keep the legacy merge oracle independent of production metadata comparison.
-// UseNumber preserves one-count differences above 2^53.
+// Raw number literals preserve one-count differences above 2^53.
 func oldPeerJSON(t *testing.T, raw []byte) []byte {
 	t.Helper()
-	decoder := jsonv1.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
 	var value any
-	require.NoError(t, decoder.Decode(&value))
-	out, err := jsonv1.Marshal(value)
+	require.NoError(t, json.Unmarshal(raw, &value, jsonutil.PreserveNumberLiterals()))
+	out, err := json.Marshal(value, json.Deterministic(true))
 	require.NoError(t, err)
 	return out
 }
