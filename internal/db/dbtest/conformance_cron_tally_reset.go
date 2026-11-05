@@ -131,14 +131,15 @@ func checkCronTallyResetInventory(t *testing.T, store db.Storage) error {
 	// The legacy fold applies from/to changes rather than overwriting unchanged
 	// nested fields. Keep this independent oracle check: neither a project-path
 	// regression nor an oracle regression is subsumed by the issue fold test.
+	// The changed count must survive the scalar from/to comparison above 2^53.
 	ordinary := []db.RemoteEvent{
-		{ProjectUID: "example-project", Type: "project.federation_enabled", HLCPhysicalMS: 1, Payload: []byte(`{"metadata":{"profile":{"label":"root","count":1,"removed":true}}}`)},
-		{ProjectUID: "example-project", Type: "project.metadata_updated", HLCPhysicalMS: 2, Payload: []byte(`{"diff":{"profile":{"from":{"label":"old","count":1,"removed":true},"to":{"label":"old","count":2}}}}`)},
+		{ProjectUID: "example-project", Type: "project.federation_enabled", HLCPhysicalMS: 1, Payload: []byte(`{"metadata":{"profile":{"label":"root","count":9007199254740992,"removed":true}}}`)},
+		{ProjectUID: "example-project", Type: "project.metadata_updated", HLCPhysicalMS: 2, Payload: []byte(`{"diff":{"profile":{"from":{"label":"old","count":9007199254740992,"removed":true},"to":{"label":"old","count":9007199254740993}}}}`)},
 	}
 	folded := db.FoldEvents(remoteEventsToFold(ordinary))
 	legacy, err := json.Marshal(oldPeerMetadata(t, ordinary))
 	require.NoError(t, err)
-	require.JSONEq(t, `{"profile":{"label":"root","count":2}}`, string(folded.ProjectMetadata["example-project"]))
+	require.Equal(t, metadata.NormalizeJSON([]byte(`{"profile":{"label":"root","count":9007199254740993}}`)), metadata.NormalizeJSON(folded.ProjectMetadata["example-project"]))
 	require.Equal(t, metadata.NormalizeJSON(folded.ProjectMetadata["example-project"]), metadata.NormalizeJSON(legacy))
 	ctx := t.Context()
 	for i, mode := range []string{"removed kind", "removed key", "empty inventory"} {
