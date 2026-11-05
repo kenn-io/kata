@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Load labels for `kata list`, `kata ready`, and `kata search` on large SQLite stores with cost proportional to the issues returned.
+- Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
