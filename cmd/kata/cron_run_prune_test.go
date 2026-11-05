@@ -26,9 +26,8 @@ func TestCronRunPruneHumanReportsBatchWindowAndReplicaReset(t *testing.T) {
 }
 
 func TestCronPruneOlderThan(t *testing.T) {
-	// Prune's own entry point: its largest accepted window, plus overflowing
-	// day counts that must stay rejected even if prune stops sharing digest's
-	// day conversion (a wrapped product can land above the 24h minimum).
+	// Check prune's accepted duration range and whole-day input rules.
+	// These overflow inputs are rejected, but do not isolate the day guard.
 	for value, expected := range map[string]time.Duration{"30d": 720 * time.Hour, "24h": 24 * time.Hour, "25h30m": 25*time.Hour + 30*time.Minute, "1d": 24 * time.Hour, "106751d": 106751 * 24 * time.Hour} {
 		d, err := parseCronPruneAge(value)
 		require.NoError(t, err)

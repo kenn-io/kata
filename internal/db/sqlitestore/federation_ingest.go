@@ -148,9 +148,6 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs); err != nil {
 			return db.FederationIngestResult{}, err
 		}
-		if err := db.ValidateCronTallyEvent(ev); err != nil {
-			return db.FederationIngestResult{}, fmt.Errorf("%w: %v", db.ErrFederationIngestValidation, err)
-		}
 		if err := db.ValidateEmbeddingProducerEvent(ev, ""); err != nil {
 			return db.FederationIngestResult{}, err
 		}

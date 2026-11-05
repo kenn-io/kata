@@ -70,6 +70,7 @@ var storageScenarios = []scenario{
 	{name: "cron run counts snapshot", run: checkCronRunCountsSnapshot},
 	{name: "cron tally reset inventory", run: checkCronTallyResetInventory},
 	{name: "cron tally adoption", run: checkCronTallyAdoption},
+	{name: "cron tally legacy duplicate", run: checkCronTallyLegacyDuplicate},
 	{name: "cron tally adoption chunk", run: checkCronTallyAdoptionChunk},
 	{name: "cron tally equal subset replay", run: checkCronTallyEqualSubsetReplay},
 	{name: "cron tally live merge", run: checkCronTallyLiveMerge},

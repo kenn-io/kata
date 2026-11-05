@@ -119,9 +119,6 @@ func (s *Store) IngestFederationEvents(
 			); err != nil {
 				return err
 			}
-			if err := db.ValidateCronTallyEvent(event); err != nil {
-				return fmt.Errorf("%w: %v", db.ErrFederationIngestValidation, err)
-			}
 			if err := db.ValidateEmbeddingProducerEvent(event, ""); err != nil {
 				return err
 			}

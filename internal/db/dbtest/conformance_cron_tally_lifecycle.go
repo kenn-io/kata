@@ -318,6 +318,67 @@ func checkCronTallyAdoption(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+// Exact retries acknowledge already stored history without rematerializing it.
+// Fresh malformed tallies and altered retries must still roll back.
+func checkCronTallyLegacyDuplicate(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	f := newCronTallyFixture(ctx, t, store)
+	_, err := store.EnableProjectFederation(ctx, f.project.ID, "operator")
+	require.NoError(t, err)
+	spoke, err := uid.New()
+	require.NoError(t, err)
+	grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ProjectID: &f.project.ID, SpokeInstanceUID: spoke, Actor: "operator", Capabilities: "push", AllowAdoptionSnapshotAuthors: true})
+	require.NoError(t, err)
+	event := newRemoteEvent(t, f.project, nil, "project.metadata_updated", "operator", spoke, time.Now().UnixMilli()+100, []byte(`{"diff":{"ordinary":{"from":null,"to":"accepted"}}}`))
+	params := db.FederationIngestParams{ProjectID: f.project.ID, FederationEnrollmentID: grant.Enrollment.ID, SpokeInstanceUID: spoke, BoundActor: "operator", EventFeatures: db.CronEventFeature, AllowSnapshotAuthorPreservation: true, AdoptionBaseline: db.FederationAdoptionBaselineComplete, AdoptionBaselineEndSourceEventID: 1, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}}
+	malformed := fmt.Sprintf(`{"diff":{%q:{"from":null,"to":{"version":2,"groups":{}}}}}`, db.CronTallyPrefix+f.job.UID)
+	// The grant permits tally transfer, so rejection must come from value
+	// validation rather than the downstream direction guard.
+	params.Events[0].Event.Payload = []byte(malformed)
+	params.Events[0].Event.ContentHash = remoteEventHash(t, params.Events[0].Event)
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	require.ErrorContains(t, err, "unsupported version")
+	params.Events[0].Event = event
+	accepted, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, 1, accepted.Accepted)
+
+	// Model a pre-validation stored event, keeping its exact content hash.
+	event.Payload = []byte(malformed)
+	event.ContentHash = remoteEventHash(t, event)
+	updated, err := f.q.ExecContext(ctx, `UPDATE events SET payload=$1,content_hash=$2 WHERE uid=$3`, malformed, event.ContentHash, event.EventUID)
+	require.NoError(t, err)
+	n, err := updated.RowsAffected()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n)
+	before, err := store.ProjectByID(ctx, f.project.ID)
+	require.NoError(t, err)
+	cursor, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	params.AdoptionBaseline = ""
+	params.Events[0].Event = event
+	retry, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err, "exact legacy retry writes no tally and needs no adoption grant")
+	require.Equal(t, 1, retry.Duplicates)
+	require.Zero(t, retry.Accepted)
+	require.Empty(t, retry.Events)
+
+	params.Events[0].Event.Payload = []byte(fmt.Sprintf(`{"diff":{%q:{"from":null,"to":{"version":3,"groups":{}}}}}`, db.CronTallyPrefix+f.job.UID))
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrRemoteEventHashMismatch, "unchanged hash cannot authenticate altered bytes")
+	params.Events[0].Event.ContentHash = remoteEventHash(t, params.Events[0].Event)
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrRemoteEventConflict, "rehashed alteration is not a duplicate")
+	after, err := store.ProjectByID(ctx, f.project.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	afterCursor, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, cursor, afterCursor)
+	return nil
+}
+
 // Contract: a changed authorized adoption chunk publishes one root union,
 // regardless of the number of incoming metadata records.
 func checkCronTallyAdoptionChunk(t *testing.T, store db.Storage) error {
