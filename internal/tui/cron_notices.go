@@ -14,14 +14,14 @@ import (
 const cronNoticeWindow = 2 * time.Second
 
 type cronRunEvent struct {
-	localRevision int64      // loaded store revision when this event arrived; never a peer revision
-	UID           string     `json:"uid"`
-	JobUID        string     `json:"job_uid"`
-	ProjectUID    string     `json:"project_uid"`
-	Status        string     `json:"status"`
-	Revision      int64      `json:"revision"`
-	EndedAt       *time.Time `json:"ended_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	seq        uint64     // m.cron.events when this event arrived; reads that captured it describe it
+	UID        string     `json:"uid"`
+	JobUID     string     `json:"job_uid"`
+	ProjectUID string     `json:"project_uid"`
+	Status     string     `json:"status"`
+	Revision   int64      `json:"revision"`
+	EndedAt    *time.Time `json:"ended_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 func (r cronRunEvent) run() generated.CronRun {
@@ -65,14 +65,12 @@ func (m Model) cronNoticeSuppressed(r cronRunEvent) bool {
 	return false
 }
 
-// A local revision newer than the snapshot at announcement supersedes it.
-// Source peer revisions are incomparable with these store-local CAS tokens.
 // The store folds a run's concurrent observations by an HLC the client never
-// sees, so a read issued after the event, which settles its change mark, is
-// that resolution, even when the event lost the fold at an equal revision.
+// sees, so only a read issued after the run's latest event, which settles its
+// change mark, resolves it; an older in-flight read or a bare event does not.
 func (m Model) cronNoticeNewest(r cronRunEvent) generated.CronRun {
-	if m.cron.data != nil {
-		if known, ok := m.cron.data.run(r.UID); ok && (known.Revision > r.localRevision || m.cron.changed[r.UID].at == 0) {
+	if m.cron.data != nil && m.cron.data.events >= r.seq && m.cron.changed[r.UID].at == 0 {
+		if known, ok := m.cron.data.run(r.UID); ok {
 			return known
 		}
 	}
@@ -84,11 +82,7 @@ func (m Model) cronNoticeEvent(msg eventReceivedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	r := *msg.cronRun
-	if m.cron.data != nil {
-		if known, ok := m.cron.data.run(r.UID); ok {
-			r.localRevision = known.Revision
-		}
-	}
+	r.seq = m.cron.events
 	if r.UID == "" || r.ProjectUID == "" || r.ProjectUID != msg.projectUID {
 		return m, nil
 	}
@@ -96,11 +90,7 @@ func (m Model) cronNoticeEvent(msg eventReceivedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if r.Status != "failed" && r.Status != "unknown" {
-		m.cronNotices.pending = maps.Clone(m.cronNotices.pending)
-		m.cronNotices.announced = maps.Clone(m.cronNotices.announced)
-		delete(m.cronNotices.pending, r.UID)
-		delete(m.cronNotices.announced, r.UID)
-		return m, nil
+		return m, nil // a correction may lose the fold; its read settles it
 	}
 	at := cronFailureTime(r.run())
 	if at.IsZero() || at.Before(m.cronStartedAt.Add(-2*time.Minute)) {

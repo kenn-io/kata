@@ -17,7 +17,7 @@ func cronHealth(p cronData, j generated.CronJob, now time.Time) cronHealthState 
 		return cronHealthState{"paused", ""}
 	}
 	if p.jobsErr != nil {
-		return cronHealthState{"unavailable", "job definitions could not be refreshed"}
+		return cronHealthState{"unavailable", ""} // the jobs error row says why
 	}
 	def, err := cronJobDefinition(j)
 	if err != nil {

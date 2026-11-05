@@ -552,6 +552,10 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 	m = sendRune(m, '4')
 	require.Contains(t, stripANSI(m.viewBody()), "unknown")
 	require.NotContains(t, stripANSI(m.viewBody()), "1 job")
+	m = sendKey(sendRune(m, '2'), tea.KeyEnter)
+	require.Contains(t, stripANSI(m.viewBody()), "Health:   unavailable")
+	require.Contains(t, stripANSI(m.viewBody()), "jobs: refresh failed")
+	require.NotContains(t, stripANSI(m.viewBody()), "Reason:", "the jobs error row already says why")
 }
 
 func TestCronFilterAndTabState(t *testing.T) {

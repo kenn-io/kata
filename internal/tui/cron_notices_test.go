@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json/v2"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -392,29 +393,6 @@ func TestCronNoticeJobSuppressionRelease(t *testing.T) {
 			require.NotNil(t, m.toast)
 		}},
 	}
-	for _, announced := range []bool{false, true} {
-		tests = append(tests, struct {
-			name string
-			run  func(*testing.T, Model)
-		}{fmt.Sprintf("event correction/announced=%v", announced), func(t *testing.T, m Model) {
-			m, _ = m.cronNoticeEvent(cronNoticeEvent("corrected", "job", snapshotFixedNow))
-			if announced {
-				m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-				m.toast = nil
-			}
-			corrected := cronNoticeEvent("corrected", "job", snapshotFixedNow)
-			corrected.cronRun.Status = "succeeded"
-			m, _ = m.cronNoticeEvent(corrected)
-			require.NotContains(t, m.cronNotices.pending, "corrected")
-			require.NotContains(t, m.cronNotices.announced, "corrected")
-			if !announced {
-				m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-				require.Nil(t, m.toast)
-			}
-			m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
-			require.NotNil(t, cmd, "corrected failure must release job suppression")
-		}})
-	}
 	T := snapshotFixedNow
 	for _, at := range []struct {
 		name string
@@ -476,5 +454,82 @@ func TestCronNoticeJobSuppressionRelease(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.run(t, cronNoticeFixture(t))
 		})
+	}
+}
+
+// The store folds a run's observations by an HLC the client never sees, and
+// a refresh issued before an event cannot describe it. A notice therefore
+// trusts the store's row only from a read issued after the run's latest event:
+// an older in-flight read cannot drop a newer failure, and a correction that
+// may have lost the fold neither cancels nor releases a failure before then.
+func TestCronNoticeWaitsForReadAfterEvent(t *testing.T) {
+	T := snapshotFixedNow
+	deliver := func(m Model, uid, status string, at time.Time) Model {
+		msg := cronNoticeEvent(uid, m.cron.data.jobs[0].UID, at)
+		msg.cronRun.Status = status
+		next, _ := m.handleEventReceived(msg)
+		return next.(Model)
+	}
+	// land answers a fetch that captured events with the store's row r.
+	land := func(m Model, events uint64, r generated.CronRun) Model {
+		p := *m.cron.data
+		p.events, p.generation = events, m.cron.readGen
+		p.runs = append(slices.DeleteFunc(slices.Clone(p.runs), func(x generated.CronRun) bool { return x.UID == r.UID }), r)
+		m, _ = updateModel(m, cronLoadedMsg(p))
+		return m
+	}
+	row := func(m Model, status string, revision int64, at time.Time) generated.CronRun {
+		job := m.cron.data.jobs[0].UID
+		r := generated.CronRun{UID: "r", JobUID: &job, Status: status, Revision: revision, CreatedAt: T, UpdatedAt: at}
+		if status != "running" {
+			r.EndedAt = new(at)
+		}
+		return r
+	}
+	for _, loaded := range []bool{true, false} {
+		t.Run(fmt.Sprintf("older read lands after failure/loaded=%v", loaded), func(t *testing.T) {
+			m := cronNoticeFixture(t)
+			if loaded {
+				m = land(m, m.cron.events, row(m, "running", 5, T))
+			}
+			m = deliver(m, "r", "running", T.Add(time.Second)) // the run's start or progress
+			inFlight := m.cron.events
+			m = deliver(m, "r", "failed", T.Add(time.Minute))
+			m = land(m, inFlight, row(m, "running", 6, T.Add(time.Second)))
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.NotNil(t, m.toast, "a read issued before the failure cannot supersede it")
+			require.Contains(t, m.cronNotices.announced, "r")
+		})
+	}
+	for _, wins := range []bool{false, true} {
+		for _, flushed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("correction wins=%v/after flush=%v", wins, flushed), func(t *testing.T) {
+				m := cronNoticeFixture(t)
+				m = land(m, m.cron.events, row(m, "running", 5, T))
+				m = deliver(m, "r", "failed", T.Add(time.Minute))
+				failed := row(m, "failed", 6, T.Add(time.Minute))
+				m = land(m, m.cron.events, failed)
+				if flushed {
+					m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+					require.NotNil(t, m.toast)
+					m.toast = nil
+				}
+				m = deliver(m, "r", "succeeded", T.Add(30*time.Second))
+				_, pending := m.cronNotices.pending["r"]
+				_, announced := m.cronNotices.announced["r"]
+				require.True(t, pending || announced, "the event alone does not settle the store's fold")
+				store := failed
+				if wins {
+					store = row(m, "succeeded", 7, T.Add(30*time.Second))
+				}
+				m = land(m, m.cron.events, store)
+				if !flushed {
+					m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+					require.Equal(t, !wins, m.toast != nil, "the read after the correction decides the notice")
+				}
+				m = deliver(m, "next", "failed", T.Add(2*time.Minute))
+				require.Equal(t, wins, m.cronNotices.window, "only a correction the store kept releases the job")
+			})
+		}
 	}
 }
