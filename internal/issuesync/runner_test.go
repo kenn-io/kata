@@ -297,7 +297,6 @@ func TestRunnerClaimFences(t *testing.T) {
 type failureStore struct {
 	db.Storage
 	calls, failAt int
-	afterImport   func(context.Context, db.ImportBatchParams)
 }
 
 func (s *failureStore) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
@@ -305,11 +304,7 @@ func (s *failureStore) ImportBatch(ctx context.Context, p db.ImportBatchParams) 
 	if s.calls == s.failAt {
 		return db.ImportBatchResult{}, nil, errors.New("import failed")
 	}
-	result, events, err := s.Storage.ImportBatch(ctx, p)
-	if err == nil && s.afterImport != nil {
-		s.afterImport(ctx, p)
-	}
-	return result, events, err
+	return s.Storage.ImportBatch(ctx, p)
 }
 
 func TestRunnerDefaultChunksBoundWriterHold(t *testing.T) {
@@ -318,10 +313,11 @@ func TestRunnerDefaultChunksBoundWriterHold(t *testing.T) {
 		b := testBinding(t, s, "example-project", "synthetic")
 		at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 		blocked := make(chan *sql.Tx, 1)
+		const itemCount = DefaultInitialBatchSize + 1
 		a := &testAdapter{prepare: func(ctx context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
 			p := testPrepared(binding, at)
 			p.Batch.Items = nil
-			for i := range 201 {
+			for i := range itemCount {
 				p.Batch.Items = append(p.Batch.Items, db.ImportItem{ExternalID: fmt.Sprintf("item-%d", i), Title: "task", Author: "author", Status: "open", CreatedAt: at, UpdatedAt: at})
 			}
 			tx, err := s.BeginTx(ctx, nil)
@@ -332,10 +328,10 @@ func TestRunnerDefaultChunksBoundWriterHold(t *testing.T) {
 			return p, nil
 		}}
 		var sizes []int
-		store := &failureStore{Storage: s, afterImport: func(_ context.Context, p db.ImportBatchParams) {
-			sizes = append(sizes, len(p.Items))
-		}}
-		r := NewRunner(RunnerConfig{Store: store, Adapter: a, Clock: func() time.Time { return at }})
+		r := NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at }, EventSink: func(_ context.Context, _ int64, events []db.Event) error {
+			sizes = append(sizes, len(events))
+			return nil
+		}})
 		var result RunResult
 		synced := make(chan error, 1)
 		go func() {
@@ -358,17 +354,17 @@ func TestRunnerDefaultChunksBoundWriterHold(t *testing.T) {
 		require.NoError(t, tx.Rollback())
 		require.NoError(t, receive(t, created))
 		require.NoError(t, receive(t, synced))
-		require.Equal(t, []int{200, 1}, sizes)
-		require.Equal(t, 201, result.Import.Created)
+		require.Equal(t, []int{DefaultInitialBatchSize, 1}, sizes)
+		require.Equal(t, itemCount, result.Import.Created)
 		first, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "item-0")
 		require.NoError(t, err)
-		last, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "item-200")
+		last, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", fmt.Sprintf("item-%d", itemCount-1))
 		require.NoError(t, err)
 		require.Greater(t, native.ID, *first.IssueID)
 		require.Less(t, native.ID, *last.IssueID, "queued native create must commit before the last sync chunk")
 		issues, err := s.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: b.ProjectID})
 		require.NoError(t, err)
-		require.Len(t, issues, 202)
+		require.Len(t, issues, itemCount+1)
 		require.Contains(t, issues, native)
 	})
 }
