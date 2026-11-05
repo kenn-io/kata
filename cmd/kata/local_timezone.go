@@ -13,5 +13,3 @@ var localtimePath = recurrenceclient.DefaultLocaltimePath
 func localTimeZoneName() string {
 	return recurrenceclient.LocalZone(localtimePath)
 }
-
-var resolveLocalTimeZone = recurrenceclient.ResolveLocalZone
