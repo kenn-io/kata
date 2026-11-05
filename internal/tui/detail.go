@@ -351,11 +351,11 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		dm.loading = false
 		if m.issue != nil {
 			dm.issue = m.issue
+			dm.recurrence = m.recurrence
+			dm.recurrenceErr = m.recurrenceErr
 		}
 		dm.parent = m.parent
 		dm.children = m.children
-		dm.recurrence = m.recurrence
-		dm.recurrenceErr = m.recurrenceErr
 		dm = dm.clampChildFocus()
 		dm.err = mergeErr(dm.err, m.err)
 	case commentsFetchedMsg:
