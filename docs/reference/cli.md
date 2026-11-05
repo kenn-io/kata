@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 # CLI reference
@@ -261,7 +261,12 @@ kata agent-hook contract codex
 
 The command reads one finite native JSON payload from stdin through EOF and
 prints the unchanged [agent contract](#agent-contract-output) in that harness's
-native response. It works in directories without a `.kata.toml`. Repeating a
+native response when the session directory is inside a kata workspace: a
+`.kata.toml` found by the same discovery that project resolution uses. The
+session directory is the payload's `cwd` (or its first `workspace_roots` or
+`workspacePaths` entry), then `--workspace`, then the hook's working directory.
+Outside a workspace the command returns the harness's empty response, so a
+user-scope hook stays silent in unrelated repositories. Repeating a
 session payload returns the contract again; this command does not deduplicate
 independently configured hooks. Stdout contains only the native response,
 including when `--agent` or `--json` is supplied. Diagnostics go to stderr.
@@ -275,7 +280,8 @@ a fix in Kit. For accepted messages, later turns and payloads without the flag
 receive an empty native response. Hermes's `on_session_start` is an observer
 event and does not inject context.
 
-For a Codex response without a stdin payload, run the bare command:
+For a Codex response without a stdin payload, run the bare command. It applies
+the same workspace check to `--workspace`, or to its working directory:
 
 ```sh
 kata agent-contract-hook

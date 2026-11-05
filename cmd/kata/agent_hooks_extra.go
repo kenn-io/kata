@@ -182,6 +182,9 @@ func writeExtraAgentContract(target string, input io.Reader, output io.Writer, t
 			if _, ok := payload["prompt"].(string); !ok {
 				return errors.New("Kimi Code UserPromptSubmit requires prompt text") //nolint:staticcheck // ST1005: preserve the native product name in this user-facing payload error.
 			}
+			if text == "" {
+				return nil
+			}
 			_, err = io.WriteString(output, text+"\n")
 			return err
 		}
@@ -209,7 +212,7 @@ func writeExtraAgentContract(target string, input io.Reader, output io.Writer, t
 			return errors.New("Antigravity requires a nonnegative invocationNum") //nolint:staticcheck // ST1005: preserve the native product name in this user-facing payload error.
 		}
 		response = map[string]any{}
-		if *invocation.Num == 0 {
+		if *invocation.Num == 0 && text != "" {
 			response = map[string]any{"injectSteps": []any{map[string]any{"ephemeralMessage": text}}}
 		}
 	default:
