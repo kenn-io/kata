@@ -784,6 +784,9 @@ func TestProjectAccessReferenceSuggestionsWithheldAfterSourceIssueMoved(t *testi
 		require.NoError(t, err)
 		_, err = store.AddLabel(t.Context(), f.issue.ID, label, "admin")
 		require.NoError(t, err)
+		// Sort the visible issue first so the limit excludes the suggestion source.
+		_, err = store.RenameProject(t.Context(), f.public.ID, "first-suggestion-result")
+		require.NoError(t, err)
 		ui, ok := store.(db.UIStore)
 		require.True(t, ok)
 		armed, moved := false, false
@@ -803,10 +806,10 @@ func TestProjectAccessReferenceSuggestionsWithheldAfterSourceIssueMoved(t *testi
 				require.NoError(t, err)
 			},
 		})
-		path := "/api/v1/ui/references?q=matches-no-issue"
+		path := "/api/v1/ui/references?limit=1"
 		status, _, body := f.request(t, http.MethodGet, path, "member", nil, nil)
 		require.Equal(t, http.StatusOK, status, string(body))
-		require.NotContains(t, string(body), f.issue.UID, "the search does not list the source issue")
+		require.NotContains(t, string(body), f.issue.UID, "the limit excludes the source issue")
 		require.Contains(t, string(body), owner)
 		require.Contains(t, string(body), label)
 
