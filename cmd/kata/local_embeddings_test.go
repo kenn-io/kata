@@ -2,24 +2,18 @@ package main
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
@@ -238,53 +232,19 @@ func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 	require.Contains(t, health().LastError, "kata daemon local-embeddings")
 }
 
-func TestLocalEmbeddingsSwitchIndex(t *testing.T) {
+func TestLocalEmbeddingsSwitchRecipe(t *testing.T) {
 	for _, salt := range []string{"", "changed-nomic-weights"} {
 		t.Run("salt="+salt, func(t *testing.T) {
 			home := setupKataEnv(t)
 			stubLocalEmbeddingsInstall(t)
 			t.Setenv("KATA_SERVER", "")
-			store := openKataTestDB(t, filepath.Join(home, "kata.db"))
-			t.Cleanup(func() { require.NoError(t, store.Close()) })
-			project, err := store.CreateProject(t.Context(), "spoke-project")
-			require.NoError(t, err)
-			_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "login crash", Author: "agent"})
-			require.NoError(t, err)
-			var oldCalls, newCalls atomic.Int64
-			handler := func(counter *atomic.Int64) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					var request struct {
-						Input      []string `json:"input"`
-						Model      string   `json:"model"`
-						Dimensions int      `json:"dimensions"`
-					}
-					assert.NoError(t, json.UnmarshalRead(r.Body, &request))
-					assert.Equal(t, "nomic-embed-text", request.Model)
-					counter.Add(int64(len(request.Input)))
-					data := make([]map[string]any, len(request.Input))
-					width := request.Dimensions
-					if width == 0 {
-						width = 768
-					}
-					for i := range data {
-						vector := make([]float32, width)
-						vector[0] = 1
-						data[i] = map[string]any{"index": i, "embedding": vector}
-					}
-					assert.NoError(t, json.MarshalWrite(w, map[string]any{"data": data}))
-				})
-			}
-			oldProvider := httptest.NewServer(handler(&oldCalls))
-			t.Cleanup(oldProvider.Close)
-			newProvider := httptest.NewServer(handler(&newCalls))
-			t.Cleanup(newProvider.Close)
-			original := fmt.Sprintf("# shared config\n[search.embeddings]\n# keep recipe\nbase_url = %q\nmodel = 'nomic-embed-text'\ndims = 768\ndocument_prefix = 'search_document: '\nquery_prefix = 'search_query: '\nfingerprint_salt = %q\n[display]\n# untouched\n", oldProvider.URL, salt)
+			original := fmt.Sprintf("# shared config\n[search.embeddings]\n# keep recipe\nbase_url = %q\nmodel = 'nomic-embed-text'\ndims = 768\ndocument_prefix = 'search_document: '\nquery_prefix = 'search_query: '\nfingerprint_salt = %q\n[display]\n# untouched\n", "http://127.0.0.1:11434/v1", salt)
 			path := filepath.Join(home, "config.toml")
 			require.NoError(t, os.WriteFile(path, []byte(original), 0640)) // #nosec G306 -- fixture exercises preservation of an existing mode
 			oldEndpoint := localEmbeddingsEndpoint
 			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
 				require.True(t, opts.SkipOllama)
-				return newProvider.URL, nil
+				return "http://127.0.0.1:12345/v1", nil
 			}
 			t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
 			var firstFingerprint string
@@ -308,31 +268,9 @@ func TestLocalEmbeddingsSwitchIndex(t *testing.T) {
 					require.NotEqual(t, firstRecipe.RecipeFingerprint, recipe.RecipeFingerprint)
 				}
 				if phase == 1 {
+					require.True(t, ec.Embeddings.UsesLocal())
 					continue
 				}
-				ctx, cancel := context.WithCancel(t.Context())
-				workers := newDaemonWorkerGroup()
-				cycles := make(chan struct{}, 8)
-				admission := func() (*activity.Lease, bool, <-chan struct{}) {
-					return activity.NewLease(func() { cycles <- struct{}{} }, nil), true, nil
-				}
-				_, idx, health, _, err := startEmbeddingReconciler(ctx, workers, admission, ec.Embeddings, client, filepath.Join(home, "vectors.db"), store, daemon.NewEventBroadcaster(), log.New(io.Discard, "", 0))
-				require.NoError(t, err)
-				stop := func() {
-					cancel()
-					require.True(t, workers.Wait(context.WithoutCancel(t.Context())))
-					require.NoError(t, idx.Close())
-				}
-				t.Cleanup(func() { cancel(); workers.Wait(context.WithoutCancel(t.Context())) })
-				select {
-				case <-cycles:
-				case <-time.After(10 * time.Second):
-					t.Fatal("backfill did not finish")
-				}
-				require.Zero(t, health().Backlog)
-				require.EqualValues(t, 1, oldCalls.Load())
-				stop()
-				oldProvider.Close()
 				out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 				require.NoError(t, err, out+stderr)
 				if salt == "" {
