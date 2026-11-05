@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -614,6 +614,11 @@ federation operation is changing the endpoint, admission returns 503
 endpoint is available. Do not strip v2 fields for that response. This checks
 the current binding; operators still need to preserve compatibility when
 downgrading a hub or rebinding a project that already contains v2 evidence.
+
+A disabled binding does not check upstream support. If you record v2 evidence
+while it is disabled, confirm the hub supports `cron_run_summary_v2` before
+enabling it. Enabling it against an older hub blocks the push until the hub
+is upgraded or the project is bound to a compatible hub.
 
 The TUI Runs list prefixes messages with the structured reason code; legacy-only
 messages keep their existing display. A matching legacy first line is hidden
