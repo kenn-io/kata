@@ -843,7 +843,7 @@ func TestReopenBacklogAnswerAfterHelpIsDropped(t *testing.T) {
 // The confirmation's keys stay on screen at supported short terminal sizes.
 func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 	for _, origin := range []string{"list", "detail"} {
-		for _, size := range [][2]int{{100, 8}, {100, 4}, {100, 3}, {100, 2}, {60, 8}, {40, 24}} {
+		for _, size := range [][2]int{{100, 8}, {100, 4}, {100, 3}, {100, 2}, {60, 8}, {40, 24}, {40, 2}} {
 			t.Run(fmt.Sprintf("%s/%dx%d", origin, size[0], size[1]), func(t *testing.T) {
 				spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
 				model := listReopenModel
@@ -858,7 +858,7 @@ func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 				for _, line := range strings.Split(view, "\n") {
 					require.LessOrEqual(t, lipgloss.Width(line), size[0])
 				}
-				require.Contains(t, strings.ToLower(view), "reopen #abcd?")
+				require.Contains(t, view, "#abcd")
 				require.Contains(t, view, "3 recurring child", "the backlog being confirmed stays on screen")
 				require.Contains(t, view, "y reopen")
 				require.Contains(t, view, "n/esc cancel")
@@ -892,12 +892,44 @@ func TestReopenBacklogConfirmationFitsSupportedSizes(t *testing.T) {
 							require.LessOrEqual(t, lipgloss.Width(line), width)
 						}
 						require.Contains(t, view, "#abcd")
-						require.Contains(t, view, fmt.Sprintf("%d recurring child", count))
+						text := strings.Join(strings.Fields(strings.ReplaceAll(view, "│", "")), " ")
+						require.Contains(t, text, fmt.Sprintf("%d recurring child issues", count))
 						require.Contains(t, view, "y reopen")
 						require.Contains(t, view, "n/esc cancel")
 					})
 				}
 			}
 		}
+	}
+}
+
+func TestReopenBacklogConfirmationKeepsFullCountAndID(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		ref    string
+		count  int
+		height int
+		want   string
+	}{
+		{"three-digit count", "#abcd", 168, 2, "168 recurring child issues"},
+		{"six-digit count", "#abcd", 123456, 2, "123456 recurring child issues"},
+		{"full-length id", "#01ARZ3NDEKTSV4RRFFQ69G5FAV", 2503, 8, "2503 recurring child issues"},
+		{"eight-character id", "#abcdefgh", 123456, 2, "123456 recurring child issues"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := resizeModel(newTestModel(), 40, tc.height)
+			m.modal = modalReopenBacklog
+			m.reopenPrompt = &reopenPrompt{ref: tc.ref, count: tc.count}
+			view := stripANSI(m.View().Content)
+			lines := strings.Split(view, "\n")
+			require.LessOrEqual(t, len(lines), tc.height)
+			for _, line := range lines {
+				require.LessOrEqual(t, lipgloss.Width(line), 40)
+			}
+			require.Contains(t, view, tc.ref)
+			require.Contains(t, view, tc.want)
+			require.Contains(t, lines[len(lines)-1], "y reopen")
+			require.Contains(t, lines[len(lines)-1], "n/esc cancel")
+		})
 	}
 }

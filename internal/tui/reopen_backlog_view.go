@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kit/tui/termtext"
 )
 
 // reopenPrompt is the pending confirmation for a reopen that would deliver a
@@ -150,29 +150,40 @@ func (m Model) cancelReopenBacklog() Model {
 func (m Model) overlayReopenBacklog(body string) string {
 	width := max(m.width, 1)
 	footer := renderFooterHelpTable(modalHelpRows(modalReopenBacklog), width)
-	bodyHeight := m.height - lipgloss.Height(footer)
-	full := renderReopenBacklogModal(m.reopenPrompt)
-	if lipgloss.Width(full) <= width && lipgloss.Height(full) <= bodyHeight {
-		lines := strings.Split(body, "\n")
-		body = strings.Join(lines[:min(bodyHeight, len(lines))], "\n")
-		body = overlayModal(body, full, width, bodyHeight)
-	} else {
-		body = lipgloss.Place(width, bodyHeight, lipgloss.Center, lipgloss.Center, compactReopenBacklog(m.reopenPrompt, width))
+	rows := m.height - lipgloss.Height(footer)
+	if rows < 1 {
+		return footer
 	}
-	return body + "\n" + footer
+	full := renderReopenBacklogModal(m.reopenPrompt)
+	var top string
+	if lipgloss.Width(full) <= width && lipgloss.Height(full) <= rows {
+		top = overlayModal(body, full, width, rows)
+	} else {
+		top = lipgloss.Place(width, rows, lipgloss.Center, lipgloss.Center, compactReopenBacklog(m.reopenPrompt, width, rows))
+	}
+	lines := strings.Split(top, "\n")
+	return strings.Join(lines[:min(rows, len(lines))], "\n") + "\n" + footer
 }
 
-// compactReopenBacklog keeps the issue ID when shortening a qualified reference.
-func compactReopenBacklog(prompt *reopenPrompt, width int) string {
+// compactReopenBacklog keeps the issue ID and backlog count within the available rows.
+func compactReopenBacklog(prompt *reopenPrompt, width, rows int) string {
 	ref := sanitizeForLine(prompt.ref)
-	line := fmt.Sprintf("Reopen %s? %d recurring child issues.", ref, prompt.count)
-	if cut := lipgloss.Width(line) - width; cut > 0 {
-		if hash := strings.LastIndex(ref, "#"); hash > 0 {
-			ref = runewidth.TruncateLeft(ref, min(cut+1, runewidth.StringWidth(ref[:hash])), "…")
-			line = fmt.Sprintf("Reopen %s? %d recurring child issues.", ref, prompt.count)
+	bare := ref[max(strings.LastIndex(ref, "#"), 0):]
+	warning := fmt.Sprintf("%d recurring child issues", prompt.count)
+	var text string
+	for _, candidate := range []string{
+		fmt.Sprintf("Reopen %s?\n%s", ref, warning),
+		fmt.Sprintf("Reopen %s?\n%s", bare, warning),
+		ref + ": " + warning,
+		bare + ": " + warning,
+	} {
+		text = candidate
+		if lipgloss.Height(text) <= rows && lipgloss.Width(text) <= width {
+			break
 		}
 	}
-	return truncate(line, width)
+	lines := termtext.Wrap(text, width)
+	return strings.Join(lines[:min(rows, len(lines))], "\n")
 }
 
 func renderReopenBacklogModal(prompt *reopenPrompt) string {
