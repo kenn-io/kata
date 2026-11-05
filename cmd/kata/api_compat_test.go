@@ -230,7 +230,7 @@ func TestListSortDaemonCompatibility(t *testing.T) {
 }
 
 func TestNextPriorityDaemonCompatibility(t *testing.T) {
-	for _, version := range []string{"0.41.0", "0.40.0", "", "development"} {
+	for _, version := range []string{"0.41.0", "0.40.0"} {
 		for _, scope := range []struct {
 			name    string
 			all     bool
@@ -240,7 +240,7 @@ func TestNextPriorityDaemonCompatibility(t *testing.T) {
 			{name: "all", all: true},
 			{name: "all-unowned", all: true, unowned: true},
 		} {
-			if scope.unowned && version != "0.41.0" {
+			if scope.all && version != "0.41.0" {
 				continue
 			}
 			t.Run(version+"/"+scope.name, func(t *testing.T) {

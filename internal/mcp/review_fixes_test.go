@@ -1694,8 +1694,6 @@ func TestAllowlistListAndReadyApplyLimitAfterScopedFanout(t *testing.T) {
 func TestNextExaminesAllReadyIssuesOnOlderDaemon(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/api/v1/projects":
-			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
 		case "/api/v1/ready":
 			assert.Empty(t, request.URL.Query().Get("sort"))
 			assert.False(t, request.URL.Query().Has("limit"))

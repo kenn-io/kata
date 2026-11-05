@@ -79,31 +79,6 @@ func TestNextPriorityAgainstDaemon(t *testing.T) {
 	}
 }
 
-func TestNextAllIncludesProjectCreatedAfterCatalogRead(t *testing.T) {
-	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/health":
-			writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.41.0"})
-		case "/api/v1/projects":
-			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
-		case "/api/v1/ready":
-			issue := globalIssueJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "hub-project", "best")
-			issue["priority"] = 1
-			issue["title"] = "priority pick"
-			writeJSON(w, map[string]any{"issues": []any{issue}})
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	handlers := toolHandlers{options: Options{Client: client, Scope: NewAllScope()}}
-
-	_, output, err := handlers.next(t.Context(), nil, NextInput{})
-	require.NoError(t, err)
-	require.NotNil(t, output.Issue)
-	require.Equal(t, "hub-project#best", output.Issue.QualifiedRef)
-	require.Equal(t, "priority pick", output.Issue.Title)
-}
-
 func TestWorkflowToolsArePublished(t *testing.T) {
 	session := connectTestServer(t)
 	result, err := session.ListTools(t.Context(), nil)

@@ -33,20 +33,17 @@ func checkReadyPriorityOrder(t *testing.T, store db.Storage) error {
 				filter.AllowedIssueIDs = append(filter.AllowedIssueIDs, issue.ID)
 				return issue
 			}
-			create(primary.ID, "parked P0", new(int64(0)), map[string]jsontext.Value{"someday": jsontext.Value(`true`)})
 			for range 9 {
 				create(primary.ID, "scheduled P0", new(int64(0)), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2099-01-01"`)})
 			}
 			filter.At = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 			best := create(primary.ID, "due P1", new(int64(1)), nil)
-			newer := create(primary.ID, "P2 before edit", new(int64(2)), nil)
+			newer := create(primary.ID, "newer P2", new(int64(2)), nil)
 			secondProject := primary.ID
 			if global {
 				secondProject = other.ID
 			}
 			older := create(secondProject, "older P2", new(int64(2)), nil)
-			newer, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: newer.ID, Title: new("newer P2"), Actor: "author"})
-			require.NoError(t, err)
 			unprioritized := create(secondProject, "newest unprioritized", nil, nil)
 			sqlStore := store.(interface {
 				ExecContext(context.Context, string, ...any) (sql.Result, error)

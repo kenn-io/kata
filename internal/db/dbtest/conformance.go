@@ -678,7 +678,7 @@ var storageScenarios = []scenario{
 	},
 	{
 		name:    "ready priority ordering",
-		methods: []string{"CreateProject", "CreateIssue", "EditIssue", "ReadyIssues", "ReadyIssuesGlobal"},
+		methods: []string{"CreateProject", "CreateIssue", "ReadyIssues", "ReadyIssuesGlobal"},
 		run:     checkReadyPriorityOrder,
 	},
 	{

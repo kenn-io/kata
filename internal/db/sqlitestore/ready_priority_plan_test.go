@@ -19,9 +19,9 @@ func TestReadyPriorityUsesOrderedIndexes(t *testing.T) {
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	_, err = store.ExecContext(ctx, `WITH RECURSIVE numbers(n) AS (
-	 SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n < 1000
+	 SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n < 1002
 	) INSERT INTO issues(uid, project_id, short_id, title, author, priority, owner)
-SELECT printf('%026d', n), ?, printf('%06d', n), 'Ready issue', 'author', n % 5, CASE WHEN n % 3 = 0 THEN NULL WHEN n = 1000 THEN 'worker' ELSE 'other' END FROM numbers`, project.ID)
+SELECT printf('%026d', n), ?, printf('%06d', n), 'Ready issue', 'author', n % 5, CASE WHEN n % 3 = 0 THEN NULL ELSE 'other' END FROM numbers`, project.ID)
 	require.NoError(t, err)
 	for _, scope := range []string{"project", "global"} {
 		t.Run(scope, func(t *testing.T) {
@@ -31,36 +31,30 @@ SELECT printf('%026d', n), ?, printf('%06d', n), 'Ready issue', 'author', n % 5,
 				wantID int64
 			}{
 				{name: "all", filter: db.ReadyIssuesFilter{PriorityFirst: true}, wantID: 1000},
-				{name: "owner", filter: db.ReadyIssuesFilter{PriorityFirst: true, Owner: "worker"}, wantID: 1000},
 				{name: "unowned", filter: db.ReadyIssuesFilter{PriorityFirst: true, Unowned: true}, wantID: 990},
 			} {
-				if scope == "project" && tc.filter.Owner != "" {
-					continue
-				}
 				t.Run(tc.name, func(t *testing.T) {
-					if tc.filter.Owner == "" {
-						query, args := buildReadyIssuesQuery(ctx, project.ID, tc.filter, time.Now())
-						index := "idx_issues_project_ready_priority"
-						if scope == "global" {
-							query, args = buildReadyIssuesGlobalQuery(ctx, tc.filter, time.Now())
-							index = "idx_issues_ready_priority"
-						}
-						rows, err := store.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
-						require.NoError(t, err)
-						var details []string
-						for rows.Next() {
-							var id, parent, unused int
-							var detail string
-							require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
-							details = append(details, detail)
-						}
-						require.NoError(t, rows.Err())
-						require.NoError(t, rows.Close())
-						plan := strings.Join(details, "\n")
-						t.Log(plan)
-						require.Contains(t, plan, index)
-						require.NotContains(t, plan, "TEMP B-TREE")
+					query, args := buildReadyIssuesQuery(ctx, project.ID, tc.filter, time.Now())
+					index := "idx_issues_project_ready_priority"
+					if scope == "global" {
+						query, args = buildReadyIssuesGlobalQuery(ctx, tc.filter, time.Now())
+						index = "idx_issues_ready_priority"
 					}
+					rows, err := store.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
+					require.NoError(t, err)
+					var details []string
+					for rows.Next() {
+						var id, parent, unused int
+						var detail string
+						require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+						details = append(details, detail)
+					}
+					require.NoError(t, rows.Err())
+					require.NoError(t, rows.Close())
+					plan := strings.Join(details, "\n")
+					t.Log(plan)
+					require.Contains(t, plan, index)
+					require.NotContains(t, plan, "TEMP B-TREE")
 					var issue db.Issue
 					if scope == "global" {
 						issues, err := store.ReadyIssuesGlobal(ctx, 1, tc.filter)

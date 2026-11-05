@@ -52,6 +52,6 @@ func TestReadyPriorityIndexMigrationUpgradesVersion45(t *testing.T) {
 
 func dropReadyPriorityIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX %s.idx_issues_project_ready_priority; DROP INDEX %s.idx_issues_ready_priority`, schema, schema)) // #nosec G201 -- Fixed test schema.
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_project_ready_priority; DROP INDEX IF EXISTS %s.idx_issues_ready_priority`, schema, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
 }
