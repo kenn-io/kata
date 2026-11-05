@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLocalEndpointPerBatch(t *testing.T) {
+func TestLocalEndpointPerCall(t *testing.T) {
 	first := newFakeServer(t, 200, `{"data":[{"embedding":[3,4]}]}`, "")
 	second := newFakeServer(t, 200, `{"data":[{"embedding":[4,3]}]}`, "")
 	defer first.Close()

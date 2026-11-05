@@ -25,18 +25,21 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 	}
 	prefix := "title   = \"\"\"a fake header\n[search.embeddings]\n\"\"\"\nports = [\n  1,\n  2,\n]\n# before search\n"
 	suffix := "[display]\n# unrelated comment\n"
-	for _, tc := range []struct{ name, body string }{
-		{name: "incompatible model", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='mxbai-embed-large'\ndims=1024\n"},
+	for _, tc := range []struct {
+		name, body string
+		comments   []string
+	}{
+		{name: "incompatible model", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='mxbai-embed-large'\ndims=1024\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\"", "# model = \"mxbai-embed-large\"", "# dims = 1024"}},
 		{name: "local salt", body: "[search.embeddings]\nlocal=true\nfingerprint_salt='manual-reindex'\n"},
-		{name: "BOM", body: "\ufeff[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n"},
-		{name: "credentials", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1' # endpoint comment\nmodel='nomic-embed-text'\napi_key='example-key'\napi_key_file='/example/embedding.key'\napi_key_env='EXAMPLE_EMBEDDING_KEY'\n"},
-		{name: "spaced table", body: "[search . embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n"},
-		{name: "quoted table", body: "[search.\"embeddings\"]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n"},
-		{name: "inline table", body: "[search]\nembeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}\n"},
-		{name: "multiline inline table", body: "[search]\nembeddings={\n # nested comment\n base_url='http://127.0.0.1:11434/v1',\n model='nomic-embed-text',\n}\n"},
-		{name: "dotted embeddings", body: "[search]\nembeddings.base_url='http://127.0.0.1:11434/v1'\nembeddings.model='nomic-embed-text'\n"},
-		{name: "dotted search", body: "search.embeddings.base_url='http://127.0.0.1:11434/v1'\nsearch.embeddings.model='nomic-embed-text'\n"},
-		{name: "inline search", body: "search={embeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}}\n"},
+		{name: "BOM", body: "\ufeff[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\""}},
+		{name: "credentials", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1' # endpoint comment\nmodel='nomic-embed-text'\napi_key='example-key'\napi_key_file='/example/embedding.key'\napi_key_env='EXAMPLE_EMBEDDING_KEY'\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\"", "# endpoint comment"}},
+		{name: "spaced table", body: "[search . embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\""}},
+		{name: "quoted table", body: "[search.\"embeddings\"]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\""}},
+		{name: "inline table", body: "[search]\nembeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\""}},
+		{name: "multiline inline table", body: "[search]\nembeddings={\n # nested comment\n base_url='http://127.0.0.1:11434/v1',\n model='nomic-embed-text',\n}\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\"", "# nested comment"}},
+		{name: "dotted embeddings", body: "[search]\nembeddings.base_url='http://127.0.0.1:11434/v1'\nembeddings.model='nomic-embed-text'\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\""}},
+		{name: "dotted search", body: "search.embeddings.base_url='http://127.0.0.1:11434/v1'\nsearch.embeddings.model='nomic-embed-text'\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\""}},
+		{name: "inline search", body: "search={embeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}}\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\""}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := tc.body
@@ -62,18 +65,8 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 			require.Equal(t, result, again, "retry must preserve the already-written configuration")
 			require.Contains(t, string(result), prefix)
 			require.Contains(t, string(result), suffix)
-			if strings.Contains(body, "base_url") {
-				require.Contains(t, string(result), "# base_url = ")
-			}
-			if strings.Contains(body, "mxbai-embed-large") {
-				require.Contains(t, string(result), "# model = \"mxbai-embed-large\"")
-				require.Contains(t, string(result), "# dims = 1024")
-			}
-			if strings.Contains(body, "# nested comment") {
-				require.Contains(t, string(result), "# nested comment")
-			}
-			if strings.Contains(body, "# endpoint comment") {
-				require.Contains(t, string(result), "# endpoint comment")
+			for _, comment := range tc.comments {
+				require.Contains(t, string(result), comment)
 			}
 		})
 	}

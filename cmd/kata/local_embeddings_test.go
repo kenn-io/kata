@@ -34,9 +34,6 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		expectedDir, err := embedlocal.DefaultDir()
 		require.NoError(t, err)
 		require.Equal(t, expectedDir, opts.DataDir)
-		if installed {
-			return embedlocal.Installation{Executable: "/example/kennembed"}, nil
-		}
 		yes, err := opts.Confirm(ctx, 290_000_000)
 		require.NoError(t, err)
 		require.True(t, yes)
@@ -52,7 +49,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	require.True(t, cfg.Embeddings.Local)
 }
 
-func TestLocalEmbeddingsSetupRefusesEnvironmentOverride(t *testing.T) {
+func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
 	for _, scenario := range []string{"environment override", "dangling symlink"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := setupKataEnv(t)
@@ -76,6 +73,7 @@ func TestLocalEmbeddingsSetupRefusesEnvironmentOverride(t *testing.T) {
 				}
 			} else {
 				t.Setenv("KATA_SEARCH_EMBEDDINGS_BASE_URL", "http://127.0.0.1:11434/v1")
+				t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "nomic-embed-text")
 				require.NoError(t, os.WriteFile(path, original, 0600))
 			}
 			_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
@@ -94,6 +92,30 @@ func TestLocalEmbeddingsSetupRefusesEnvironmentOverride(t *testing.T) {
 			require.Equal(t, original, got)
 		})
 	}
+}
+
+func TestLocalEmbeddingsSetupRefusesUnsupportedDaemon(t *testing.T) {
+	home := setupKataEnv(t)
+	stubLocalEmbeddingsInstall(t)
+	t.Setenv("KATA_SERVER", "")
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now(), Network: "tcp", Address: "127.0.0.1:12345"})
+	require.NoError(t, err)
+	oldEndpoint := localEmbeddingsEndpoint
+	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
+	stubDaemonExecutable(t, func() (string, error) {
+		t.Fatal("unsupported daemon must be refused before resolving a replacement")
+		return "", nil
+	})
+	_, _, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+	require.ErrorContains(t, err, "is from an older kata release")
+	_, err = os.Stat(filepath.Join(home, "config.toml"))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestLocalEmbeddingsFreshOllama(t *testing.T) {
@@ -289,14 +311,14 @@ func TestLocalEmbeddingsRebuildRefusal(t *testing.T) {
 }
 
 func TestLocalEmbeddingsRestartRollback(t *testing.T) {
-	for _, scenario := range []string{"existing symlink", "new", "concurrent edit", "unsupported daemon"} {
+	for _, scenario := range []string{"existing symlink", "new", "concurrent edit"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := setupKataEnv(t)
 			stubLocalEmbeddingsInstall(t)
 			t.Setenv("KATA_SERVER", "")
 			path := filepath.Join(home, "config.toml")
 			original := []byte("# original\n[search.embeddings]\nbase_url = 'http://127.0.0.1:11434/v1'\nmodel = 'nomic-embed-text'\n")
-			if scenario != "new" && scenario != "unsupported daemon" {
+			if scenario != "new" {
 				target := path
 				if scenario == "existing symlink" {
 					target = filepath.Join(home, "provider.toml")
@@ -312,9 +334,7 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 			identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
 			require.True(t, ok)
 			record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now(), Network: "tcp", Address: "127.0.0.1:12345"}
-			if scenario != "unsupported daemon" {
-				record.Metadata = map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}
-			}
+			record.Metadata = map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}
 			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
 			require.NoError(t, err)
 			oldEndpoint := localEmbeddingsEndpoint
@@ -322,21 +342,12 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 			localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
 			edited := []byte("# edited while restart failed\n")
 			stubDaemonExecutable(t, func() (string, error) {
-				if scenario == "unsupported daemon" {
-					t.Fatal("unsupported daemon must be refused before resolving a replacement")
-				}
 				if scenario == "concurrent edit" {
 					require.NoError(t, os.WriteFile(path, edited, 0600))
 				}
 				return "", errors.New("replacement unavailable")
 			})
 			out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-			if scenario == "unsupported daemon" {
-				require.ErrorContains(t, err, "is from an older kata release")
-				_, err = os.Stat(path)
-				require.ErrorIs(t, err, os.ErrNotExist)
-				return
-			}
 			require.ErrorContains(t, err, "cannot resolve the installed restart executable")
 			require.Empty(t, out)
 			got, readErr := os.ReadFile(path) // #nosec G304 -- test-owned configuration snapshot
