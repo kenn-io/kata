@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 # HTTP API schema
@@ -696,6 +696,11 @@ endpoints published in OpenAPI:
   remain not found. The `#direct=1` fragment keeps the standalone application
   on the daemon that issued the target even when its roster defaults to a
   different remote daemon.
+
+With `include_graph=true`, the snapshot returns only issues and links reachable
+from the selected issue through parent, blocks, or related links in either
+direction. Traversal stays within issues the caller can read. The graph is
+empty without an available selected issue.
 
 Clients can count a parent's open and total children from the snapshot alone,
 without a second `GET /api/v1/issues` request. `collection_links` contains
