@@ -2059,13 +2059,16 @@ current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
 
-On main after 0.21.0, press `X` in the issue list to soft-delete the selected issue. In split
-layout, focus the list first. In Inbox and while browsing from Attention, use
-`kata delete` instead. The form shows the issue's title and the header
-`DELETE <project>#<id>`, the string `kata delete --confirm` takes. Type
-`DELETE <project>#<id>` and press `Enter`. `Enter` does nothing until the text
-matches. `Esc` cancels before the request starts. The selection then moves to
-the next row (the previous one after the last), and a notice names `u`.
+On main after 0.21.0, press `X` in the issue list or detail to soft-delete the
+selected issue, including in Inbox and a detail opened from Attention. The form
+shows the issue's title and the header `DELETE <project>#<id>`, the string
+`kata delete --confirm` takes. Type `DELETE <project>#<id>` and press `Enter`.
+`Enter` does nothing until the text matches. `Esc` cancels before the request
+starts. The selection then moves to the next row (the previous one after the
+last). A deleted detail returns to the previous issue in its Back history.
+When none remain, it returns to Attention if opened there, or to the list.
+Saved views also drop the deleted issue, and a notice names `u`. In Attention,
+`u` is available when the latest undo entry is a deletion.
 `u` restores the issue the way `kata restore` does; if the issue was restored
 elsewhere in the meantime, the TUI says so and changes nothing. Deletions share
 the 20-entry undo limit and the history-clearing boundaries above. Use

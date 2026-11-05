@@ -126,7 +126,11 @@ func (m Model) leaveInbox() (Model, tea.Cmd) {
 		// foreground view stays untouched.
 		fetch = m.fetchInitial()
 	}
-	if refetch := m.restoredDetailRefetch(); refetch != nil {
+	if m.layout == splitlayout.Split && m.detail.issue == nil && m.detail.readRef == "" && len(m.detail.navStack) == 0 {
+		var follow tea.Cmd
+		m, follow = m.scheduleDetailFollow()
+		fetch = tea.Batch(fetch, follow)
+	} else if refetch := m.restoredDetailRefetch(); refetch != nil {
 		fetch = tea.Batch(fetch, refetch)
 	}
 	return m, fetch

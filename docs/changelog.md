@@ -10,7 +10,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
+- Resume local writes sooner after spoke rebuilds of large projects by skipping
+  issues and comments whose stored values already match the event log.
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
+- Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
+
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding
@@ -20,15 +24,19 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep issue creation and missing short ID lookups fast as event history grows.
   Existing stores upgrade to schema 44 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-44-reset-reference-lookup-index).
+- Keep creates and comments responsive during issue syncs by committing imports
+  in smaller chunks.
 - Keep legacy spokes from adding stored sibling-project references after either
   project enrolls for relay. The hub rejects the whole fresh push batch with
   `400 validation` and identifies the offending event; accepted history,
   duplicate retries, missing peers, and cleanup keep their existing behavior.
   See [quarantine recovery](operations/federation.md#quarantine) before skipping
   a refused batch.
-- Delete an issue from `kata tui` with `X` from the list. Type
-  `DELETE <project>#<id>` to confirm; the selection moves to the
-  neighbouring row and `u` restores the issue, the way `kata restore` does.
+- Delete an issue from `kata tui` with `X` from the list or detail, including
+  Inbox and a detail opened from Attention. Saved views drop the deleted
+  issue. Type `DELETE <project>#<id>` to confirm; the selection moves to the
+  neighbouring row and `u` restores the issue, including from Attention, the
+  way `kata restore` does.
   Issue-scoped credentials cannot delete, so they are not offered the key. See
   the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 
