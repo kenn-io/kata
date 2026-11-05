@@ -843,7 +843,7 @@ func TestReopenBacklogAnswerAfterHelpIsDropped(t *testing.T) {
 // The confirmation's keys must stay on screen however short the terminal is.
 func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 	for _, origin := range []string{"list", "detail"} {
-		for _, size := range [][2]int{{100, 8}, {100, 4}, {100, 3}, {100, 2}, {100, 1}, {60, 8}, {40, 24}} {
+		for _, size := range [][2]int{{100, 8}, {100, 4}, {100, 3}, {100, 2}, {100, 1}, {60, 8}, {40, 24}, {24, 8}, {22, 1}} {
 			t.Run(fmt.Sprintf("%s/%dx%d", origin, size[0], size[1]), func(t *testing.T) {
 				spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
 				model := listReopenModel
@@ -855,14 +855,22 @@ func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 				require.Equal(t, modalReopenBacklog, m.modal)
 				view := stripANSI(m.View().Content)
 				require.LessOrEqual(t, len(strings.Split(view, "\n")), size[1])
-				require.Contains(t, strings.ToLower(view), "reopen #abcd?")
-				require.Contains(t, view, "3 recurring child", "the backlog being confirmed stays on screen")
-				require.Contains(t, view, "y reopen")
-				require.Contains(t, view, "n/esc cancel")
-				require.NotContains(t, view, "Parent", "the compact confirmation clears the underlying view")
 				for _, line := range strings.Split(view, "\n") {
 					require.LessOrEqual(t, lipgloss.Width(line), size[0])
 				}
+				require.Contains(t, strings.ToLower(view), "reopen #abcd?")
+				if size == [2]int{22, 1} {
+					require.Contains(t, view, "#abcd? 3", "the issue and count take priority over keys")
+				} else {
+					require.Contains(t, view, "3 recurring child", "the backlog being confirmed stays on screen")
+					require.Contains(t, view, "y reopen")
+					require.Contains(t, view, "n/esc cancel")
+				}
+				if size == [2]int{24, 8} {
+					require.Contains(t, view, "#abcd")
+					require.Contains(t, view, "3 recurring child issues")
+				}
+				require.NotContains(t, view, "Parent", "the compact confirmation clears the underlying view")
 
 				cancelled, cmd := updateModel(m, runeKey('n'))
 				require.Nil(t, cmd)

@@ -157,7 +157,12 @@ func (m Model) overlayReopenBacklog(body string) string {
 	bodyHeight := m.height - lipgloss.Height(footer)
 	if bodyHeight < 1 {
 		const keys = "  y reopen  n/esc cancel"
-		return compactReopenBacklog(m.reopenPrompt, width-len(keys)) + keys
+		ref := sanitizeForLine(m.reopenPrompt.ref)
+		if hash := strings.LastIndex(ref, "#"); hash > 0 {
+			ref = "…" + ref[hash:]
+		}
+		minWidth := lipgloss.Width(fmt.Sprintf("Reopen %s? %d ", ref, m.reopenPrompt.count))
+		return truncate(compactReopenBacklog(m.reopenPrompt, max(width-len(keys), minWidth), 1)+keys, width)
 	}
 	full := renderReopenBacklogModal(m.reopenPrompt)
 	if lipgloss.Width(full) <= width && lipgloss.Height(full) <= bodyHeight {
@@ -165,15 +170,25 @@ func (m Model) overlayReopenBacklog(body string) string {
 		body = strings.Join(lines[:min(bodyHeight, len(lines))], "\n")
 		body = overlayModal(body, full, width, bodyHeight)
 	} else {
-		body = lipgloss.Place(width, bodyHeight, lipgloss.Center, lipgloss.Center, compactReopenBacklog(m.reopenPrompt, width))
+		body = lipgloss.Place(width, bodyHeight, lipgloss.Center, lipgloss.Center, compactReopenBacklog(m.reopenPrompt, width, bodyHeight))
 	}
 	return body + "\n" + footer
 }
 
 // compactReopenBacklog keeps the issue ID when shortening a qualified reference.
-func compactReopenBacklog(prompt *reopenPrompt, width int) string {
+func compactReopenBacklog(prompt *reopenPrompt, width, bodyRows int) string {
 	ref := sanitizeForLine(prompt.ref)
 	line := fmt.Sprintf("Reopen %s? %d recurring child issues.", ref, prompt.count)
+	if lipgloss.Width(line) > width && bodyRows > 1 {
+		line = fmt.Sprintf("Reopen %s?", ref)
+		if cut := lipgloss.Width(line) - width; cut > 0 {
+			if hash := strings.LastIndex(ref, "#"); hash > 0 {
+				ref = runewidth.TruncateLeft(ref, min(cut, runewidth.StringWidth(ref[:hash])), "…")
+				line = fmt.Sprintf("Reopen %s?", ref)
+			}
+		}
+		return truncate(line, width) + "\n" + truncate(fmt.Sprintf("%d recurring child issues", prompt.count), width)
+	}
 	if cut := lipgloss.Width(line) - width; cut > 0 {
 		if hash := strings.LastIndex(ref, "#"); hash > 0 {
 			ref = runewidth.TruncateLeft(ref, min(cut, runewidth.StringWidth(ref[:hash])), "…")
