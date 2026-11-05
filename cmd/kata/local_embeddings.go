@@ -112,7 +112,7 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 				return err
 			}
 			if index == "rebuilt" {
-				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "If this daemon shares embeddings, replicas need the same recipe before they can reuse its vectors."); err != nil {
+				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Daemons sharing embeddings need the same model and settings before reusing them."); err != nil {
 					return err
 				}
 			}

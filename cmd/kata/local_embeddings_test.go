@@ -280,7 +280,7 @@ func TestLocalEmbeddingsRebuildRefusal(t *testing.T) {
 			require.ErrorContains(t, err, "no TTY")
 			require.Zero(t, starts, "server must not start before the switch is approved")
 			require.Contains(t, stderr, "index will be rebuilt")
-			require.Contains(t, stderr, "replicas need the same recipe")
+			require.Contains(t, stderr, "Daemons sharing embeddings need the same model and settings before reusing them.")
 			got, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
 			require.NoError(t, err)
 			require.Equal(t, original, got)
