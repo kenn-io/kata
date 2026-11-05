@@ -190,6 +190,19 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 		require.Zero(t, m.cronUnseenCount())
 		require.Equal(t, unknown.UpdatedAt, m.cronSeen.data.Projects["project-example"].ClearedThrough)
 	})
+	for _, open := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, keyRune('l')} {
+		t.Run("narrow open waits for resize/"+open.String(), func(t *testing.T) {
+			m, _ := fixture(t)
+			m = resizeModel(sendRune(m, 'u'), 60, 24)
+			m, _ = updateModel(m, open)
+			require.Equal(t, cronRuns, m.cron.stack[len(m.cron.stack)-1].ref.kind)
+			require.Contains(t, stripANSI(m.View().Content), "needs more space")
+			require.Equal(t, 2, m.cronUnseenCount(), "a run opened behind the narrow hint is not yet shown")
+			m = resizeModel(m, 100, 24)
+			require.NotContains(t, stripANSI(m.View().Content), "needs more space")
+			require.Equal(t, 1, m.cronUnseenCount(), "widening shows the opened run")
+		})
+	}
 	t.Run("roundtrip and project identity", func(t *testing.T) {
 		m, _ := fixture(t)
 		m = m.cronClearSeen()

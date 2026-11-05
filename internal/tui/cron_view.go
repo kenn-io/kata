@@ -425,7 +425,7 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			if target.uid != "" {
 				m.cron.stack = append(m.cron.stack, cronFrame{ref: target})
 				if target.kind == cronRuns {
-					m = m.cronOpenRun(target.uid)
+					m = m.cronOpenRun()
 				}
 				if target.kind == cronJobs {
 					return m.cronRequestPage(target.uid, true)

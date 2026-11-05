@@ -181,11 +181,11 @@ func (m Model) cronClearSeen() Model {
 }
 
 // Matching counters name no run, so an open requests the fenced refresh that
-// reads open runs by UID, as an explicit refresh does, before marking it seen.
-func (m Model) cronOpenRun(uid string) Model {
+// reads open runs by UID, as an explicit refresh does, and marks it once shown.
+func (m Model) cronOpenRun() Model {
 	m.cron.events++
 	m.cron.fence = m.cron.events
-	return m.cronMarkSeen(uid)
+	return m.cronMarkOpenSeen()
 }
 
 // A refreshed failure in the open run is seen once shown; a closed one, or one
