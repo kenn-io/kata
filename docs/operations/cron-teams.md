@@ -13,7 +13,7 @@ execute other jobs on the runtimes their operators activate.
 
 This guide connects the [cron contract](../reference/cron.md),
 [relay setup](../guide/project-relays.md), and [federation operations](federation.md).
-Project relays require Kata 0.19.0 or later; check the
+Check the [relay version requirements](../guide/project-relays.md) and
 [cron upgrade limits](../reference/cron.md#upgrade-limits) before mixing versions.
 
 ## Choose the shape
@@ -72,7 +72,6 @@ Definitions and run evidence replicate; local scheduler activation does not.
 
    ```sh
    kata teams create operators
-   kata teams members add operators --actor operator
    kata projects access set example-project --visibility teams --team operators
    kata projects access show example-project
    ```
@@ -86,7 +85,8 @@ Definitions and run evidence replicate; local scheduler activation does not.
    kata tokens create --actor operator --team operators
    ```
 
-   Deliver each token through your credential provisioning process. Keep it out
+   The `--team` flag also enrolls the account in the team. Deliver each token
+   through your credential provisioning process. Keep it out
    of project files and transcripts. Use the account token for attributed work.
 5. With an ordinary account token that can access the project, enable sharing:
 

@@ -30,11 +30,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
 - Operate cron across a company hub, personal hubs and multiple adapter
   runtimes with the [team operations guide](operations/cron-teams.md).
-
 - Find every cron HTTP operation, its CLI command and MCP tool in the
   [cron route table](reference/cron.md#routes-events-and-records), with run-list
   page defaults for each surface.
-
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.
 - Keep legacy spokes from adding stored sibling-project references after either

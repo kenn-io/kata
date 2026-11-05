@@ -679,8 +679,7 @@ newest page.
 
 ### Events and records
 
-Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
-`/api/v1/projects/{project_id}/cron/workflows/{cron_uid}`. Responses use
+Workflow responses use
 `workflow` or `workflows`; job actions and run observations use `workflow_uid`,
 and run observations pair it with `workflow_definition_event_uid`. Events use
 `cron.workflow.*`, and JSONL workflow records use `cron_workflow`.
