@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -565,6 +565,335 @@ planning-date object above: `field`, raw `value`, resolved `timezone`, and UTC
 `kata events --tail` and hooks subscribed to the event type, `issue.*`, or `*`
 receive it.
 
+## Adapter conformance
+
+Adapter authors can adopt **adapter conformance profile v1** to give portable
+jobs consistent scheduling and outcome semantics. MUST, SHOULD and MAY below
+apply only to adapters claiming this profile. Reading `cron_v1` documents alone
+does not imply conformance. Kata stores definitions and independent evidence;
+it does not launch adapter work or enforce this execution contract.
+
+### Eligibility and schedule instants
+
+A conforming scheduler MUST exclude deleted and disabled jobs and jobs naming
+another adapter in `options.adapter`. It MUST follow the existing
+[native-job exclusion](#adapter-responsibilities). A `manual` trigger runs only
+on an adapter-local request, never as scheduled work. Non-native adapter
+notifications retain the existing [delivery rules](#adapter-responsibilities).
+Local activation is still required.
+
+`issue-scheduled` and `issue-deadline` retain the existing
+[issue-date readiness and delivery rules](#adapter-responsibilities). This
+profile adds no date-dependent scheduling rules for those triggers.
+
+Calendar instants MUST use [Kata's grammar and DST rules](#cron-expressions).
+An embedded `TZ=` or `CRON_TZ=` directive takes precedence over the trigger's
+`timezone`; otherwise use that timezone, then UTC. An interval's anchor MUST be
+replicated job `created_at`. Its first instant is one interval after creation:
+`created_at + k * interval_seconds`, for integers `k >= 1`. A cron `@every` uses
+that anchor and the parser's effective duration, truncated to whole seconds.
+The shared grammar rejects durations below one second. A `once` instant at or
+before creation MUST NOT fire.
+
+Without a checkpoint, initialize the horizon to the later of creation and
+installation or project enrollment, even when the job is first seen disabled.
+Freeze it while ineligible; enumerate strictly after it when eligible. Keep
+installation time stable across restarts; do not backfill earlier work. Native
+recurring issues use their first-binding anchor; this profile does not change it.
+
+### Checkpoints, catchup and overlap
+
+A checkpoint contains an inclusive enumeration horizon `through`, opaque
+`definition_event_uid`, and pending instants. On every decision, combine retained
+pending UNION new instants in `(through, now]`, sort and deduplicate them.
+`through` says what was enumerated, not what ran. After each eligible decision,
+set it to `max(through, now)`; ineligible calls freeze it as described below.
+Retained pending can be later than `now` after a clock adjustment;
+selected future instants remain pending until due.
+
+Apply catchup to the combined set on every call, even when a gate opens at the
+same clock:
+
+| Policy | Selection |
+| --- | --- |
+| `all` | All candidates in ascending order, subject to declared limits. |
+| `latest` | Newest candidate only, including a future pending candidate. |
+| `skip` | Age at most `grace_seconds` plus declared tolerance, including equality. |
+
+The adapter MUST publish in its own documentation its scheduler tolerance
+from 0 to 120 seconds, exact count limit and age window, and `failure_policy`.
+
+After **every** catchup policy, apply the age window inclusively, then retain
+the newest count up to the declared limit. Drop oldest first. Zero means
+unlimited; a nonzero count is at least 100 and a nonzero window is at least
+86,400 seconds. These limits preserve the newest 100 selected candidates
+within the preceding 24 hours, including retained pending work. Other retention schemes are outside v1.
+
+With `overlap: "forbid"`, local prepared, running or held work occupies the gate.
+Uncertain termination also occupies it, including an `unknown` report. These
+are local states, not new Kata statuses. While occupied, retain selected work
+as pending unless the optional deferral rule below discards it. With a free gate, launch the oldest due selected instant and retain
+the rest. With `allow`,
+launch all due selected instants. Unknown work releases occupancy only after
+reconciliation establishes termination.
+
+The gate covers one runtime. Multiple adapters may execute the same occurrence;
+observations reserve nothing. Each execution keeps its own run UID. Occurrence
+keys MUST be stable across restarts and observation retries; canonical UTC
+RFC3339Nano instants are recommended.
+
+### Definition changes and pauses
+
+Before launching scheduled work, refresh the definition. Any different
+`definition_event_uid` replaces it; do not infer ordering from opaque UIDs.
+Discard old pending even for metadata-only edits, preserve `through`, and store
+the new identity. Already
+launched runs retain frozen definition references and local holds.
+
+Disabled, other-adapter, native and manual calls freeze the horizon and retain
+pending unless the revision changes. Apply revision replacement even while
+ineligible; deletion also clears pending. Re-enable, restore and reassignment
+apply catchup after the preserved horizon, subject to the declared count and
+age limits. Unlike this profile, [native `all`](#recurring-child-issues) retains
+missed occurrences without an age window and drains them within its per-sweep
+budget. Pending instants discarded on an adapter revision change are not
+reconstructed. Adopters SHOULD describe changes to their earlier interval
+anchors or checkpoint behavior.
+
+### Attempts, deadlines and outcomes
+
+A step allows at most `1 + retries` attempts. Retry only certainly failed
+attempts, never unknown or successful ones. All attempts share one run UID.
+Dependencies MUST succeed before a dependent starts. The declared
+`failure_policy` selects the branch behavior:
+`continue` permits independent branches after terminal failure; `stop` skips
+unstarted steps and dependents from the earliest failed/cancelled/unknown terminal,
+except tied terminals and their successful prerequisites (including equality).
+Started steps retain results and may retry. Retry-eligible failures are nonterminal.
+
+A positive `timeout_seconds` sets one deadline from run start for every attempt.
+Zero means no Kata deadline; document adapter defaults separately. Cancellation
+has an effective instant. The cutoff is the earlier of that instant and the
+run-wide deadline, when either exists; cancellation governs equal instants.
+No new attempt starts at or after the cutoff. An attempt completed strictly
+before it retains its result even when evaluated later; equality is subject to
+the cutoff. A run completed before cancellation keeps its final outcome.
+At the cutoff, stop attempts and retain the local hold while termination
+remains uncertain.
+
+While no cutoff has been reached, incomplete work is `running` unless an
+outcome is unknown. Terminal run outcomes have this precedence:
+
+1. `unknown` when an outcome or termination remains uncertain.
+2. `cancelled` when operator cancellation interrupted work and termination is certain.
+3. `failed` for a terminal step failure or a timeout with certain termination.
+4. `succeeded` when all steps succeeded.
+
+Use the existing [reason-line convention](#independent-run-evidence) for causes.
+The optional drop records below add three reason names without an observation
+state machine.
+
+### Optional drop records and deferral
+
+An adapter declaring `drop_records: true` MUST record every candidate discarded
+without launch, grouped once per nonempty reason in a committed Plan call.
+Candidates are formed after revision filtering; old pending removed by revision
+replacement, deletion or exclusion is not a drop. Fresh catchup drops after a
+replacement's preserved horizon still count. Excluded/deleted calls have none.
+
+| Reason | Meaning |
+| --- | --- |
+| `catchup_missed` | Removed by latest, skip grace, count or age policy. |
+| `overlap_skipped` | Removed at an occupied forbid gate under the rule below. |
+| `paused_passed_over` | Reserved for discarded pause windows when pause controls exist. |
+
+For each committed group, the adapter MUST allocate a fresh run UID and record
+`status: cancelled`, no `started_at`, and `ended_at` at the decision clock.
+Use the newest dropped instant's occurrence key. Set `summary.version: 1` and
+start `summary.message` with `reason: <code>`, followed on the second line by
+`<count> occurrences <oldest>..<newest>` in UTC RFC3339Nano, preserving fractions.
+When run summary v2 is advertised, its `reason` member MAY be used instead.
+These three shared names extend the existing reason-line convention; Kata
+still does not parse that line.
+
+Pair job and definition-event references with initial `expected_revision: 0`.
+Atomically persist the checkpoint and entire observation intent before delivery.
+Retries MUST preserve UID, attribution, key, summary and original timestamp.
+The kit checks the pure decision, not durability or delivery.
+
+`forbid_deferral` defaults to `queue`. Adapters SHOULD select
+`drop_after_grace`: after catchup, while `forbid` is occupied (`active_runs > 0`,
+including unresolved unknown), discard selected instants whose age is strictly
+greater than grace plus tolerance as `overlap_skipped`. Equality remains pending.
+With a free gate, launch the oldest retained instant regardless of age. This
+samples current occupancy only: equality followed by a free gate after grace
+can launch late. With grace and tolerance zero, only overdue work at a still
+occupied gate is discarded. Historical occupancy needs state outside this kit.
+Queue remains the default in both fixture v1 and v2. Changing that default
+requires a later fixture version.
+
+### Recommended failure alerts
+
+For scheduled runs, adapters SHOULD alert the job's `author` as follows.
+Manual runs report to their caller. Kata provides no alert route; delivery
+belongs to the adapter and is not fixture-checked.
+
+| Outcome | Alert and deduplication |
+| --- | --- |
+| `failed` or `unknown` | Immediately once per run UID, using one shared adverse-outcome key. Later revisions neither repeat nor retract the alert. |
+| `cancelled` with `catchup_missed` | One grouped count per job per sweep, keyed by job and a stable adapter-local sweep/batch ID retained across replay. |
+| `cancelled` with `overlap_skipped` or `paused_passed_over` | None; retain run-list evidence. |
+| Operator cancellation, succeeded or running | None. |
+
+Alerts are best effort. Log an alert sink error once and drop it; never block
+run recording. Log-and-drop does not guarantee receipt.
+
+### Check a Go adapter
+
+Implement `go.kenn.io/kata/pkg/cron/conformance.Adapter` around the runtime's
+pure `Plan` and `Settle` decisions. Public DTOs carry job definition JSON,
+clock, checkpoint, local occupancy and timestamped offered attempts. Skipped
+offers omit dependency-timing checks; structural validation still applies.
+These DTOs do not expose internal Kata types or launch an executor.
+
+```go
+func TestAdapterProfile(t *testing.T) {
+    conformance.Run(t, adapterDecisionBridge{})
+}
+```
+
+Replace `adapterDecisionBridge` with your implementation. `Declare` selects:
+
+| Member | Required value or range |
+| --- | --- |
+| `name` | Nonblank implementation name. |
+| `tolerance_seconds` | 0–120; zero when omitted. |
+| `catchup_limit` | 0/unlimited or at least 100; zero when omitted. |
+| `catchup_window_seconds` | 0/unlimited or 86,400–9,223,372,036; zero when omitted. |
+| `failure_policy` | Required: `continue` or `stop`. |
+| `drop_records` | Optional boolean, default false. |
+| `forbid_deferral` | Omitted means queue; explicit `queue` or `drop_after_grace`. Empty/null rejects. |
+
+Schema `kata.cron.adapter-conformance/v1` includes seven default bundles with
+54 frozen scenarios. `Scenarios()` returns fresh default vectors; `Load(raw)` strictly decodes a v1
+bundle supplied by the caller. V1 does not
+exercise successful dependent-step execution: an adapter that always skips
+dependents can pass v1. Passing v1 therefore does not establish that workflow
+progression works. Choose explicit fixture v2 for that coverage.
+`Suite(ctx, declaration)` keeps a bundle's literal expectations only when its
+policy matches. The seven default bundles use zero tolerance, count 1000,
+unlimited age, `continue`, recording off and `queue`. The optional drop bundle
+uses those defaults except window 86,400, `drop_records: true` and
+`forbid_deferral: "drop_after_grace"`. Other bundle-policy combinations use
+`Reference`-generated expectations and policy boundaries. Implementation names
+do not affect matching; omitted deferral and explicit `queue` are equivalent.
+
+`Reference` is deterministic and offline; running it alone does not
+test an adapter. Enumeration stops with an error beyond 100,000 new instants,
+never silently discarding unexamined work. After acknowledging that gap,
+rebuild the checkpoint at now with current revision and no pending to resume.
+Built-in suites and CLI export/check cannot materialize `catchup_limit` above
+100,000. Such declarations remain valid. To check them from Go, call `RunSuite`
+with a hand-built `FixtureSuite` carrying the adapter's declaration and a
+smaller candidate trace.
+
+Fixture version `kata.cron.adapter-conformance/v2` retains those v1 decisions
+and adds five workflow cases: successful and waiting dependencies, multiple
+successful parents, and blocked or waiting multi-parent dependencies. Their
+expected decisions are independent literals under both `continue` and `stop`.
+These finite fixed vectors remain literal oracles when declaration settings
+change; older policy-sensitive vectors use reference-materialized nondefault
+answers. Tied-terminal and stop-skipped offer timing requirements remain normative;
+`Reference` unit tests enforce them, but these exported literals do not pin them.
+Use Go `RunSuite` with a hand-built `FixtureSuite` to check additional boundary
+inputs. Selecting v2 changes the fixture suite, not stored cron definitions.
+
+To check v2 from Go, select the suite explicitly:
+
+```go
+suite, err := conformance.NewSuite(t.Context(), conformance.SchemaV2, adapter.Declare())
+if err != nil {
+    t.Fatal(err)
+}
+conformance.RunSuite(t, adapter, suite)
+```
+
+`Run(t, adapter)`, `Suite`, `Check`, and `ExportFiles` retain their v1 defaults.
+`NewSuite` and the suite's `Check` and `ExportFiles` methods share version-aware
+comparison and export with the CLI. Unsupported versions are rejected.
+
+Sequential decisions pass the actual previous checkpoint (`use_checkpoint`)
+or settlement occupancy (`use_occupancy`) across intervening decisions.
+`Execute` exposes this driver; `Check` uses the same comparisons as the harness
+and CLI. Expected answers must never substitute for actual adapter state.
+
+With recording declared, implement `DropRecorder.PlanWithDrops(ctx, input)`;
+the harness calls it once instead of Plan. Without the declaration it is
+ignored. Recording and deferral are independent switches. Recording adds an
+eighth `drops.json` bundle and a required non-null `drops` array to each plan
+output, including `[]` for none. Groups are ordered by reason, unique, and have
+ascending nonempty unique instants. Settle outputs never carry drops.
+
+Default export bytes and output shapes remain frozen. A conformance claim
+names the fixture schema version; changing frozen outputs requires a new one.
+
+### Check another runtime offline
+
+```sh
+kata cron conformance export --dir ./adapter-vectors
+kata cron conformance check --answers ./answers.jsonl
+# Stronger workflow coverage is explicit; v1 remains the default.
+kata cron conformance export --schema kata.cron.adapter-conformance/v2 --dir ./adapter-vectors-v2
+```
+
+These commands need no project, daemon or network. Export writes bundles plus
+`manifest.json` and refuses existing destinations. Supply a complete declaration
+with `--declaration ./declaration.json` for other policy choices. Use `-` for
+standard input with either `--declaration` or `--answers`; input is capped at
+16 MiB and cancellable while reading a file or standard input pipe.
+
+Check selects the suite from the answer header. Use the exact exported schema;
+there is no fallback between versions. V2 export adds `workflow.json`, and every
+bundle and the manifest declare v2. The answers file starts with a
+schema/declaration header:
+
+```json
+{"schema":"kata.cron.adapter-conformance/v1","declaration":{"name":"example-adapter","tolerance_seconds":0,"catchup_limit":1000,"catchup_window_seconds":0,"failure_policy":"continue"}}
+```
+
+Each following JSONL line is `{ "name": "scenario/name", "outputs": [...] }`,
+with one actual output per ordered decision and exactly one answer per scenario.
+Each output object requires every member below, including empty arrays, empty
+`excluded`, and `occupied: false`. Members must not be null. Unknown members,
+wrong types and missing required members are malformed input. Nested nulls are
+also invalid, including attempt-count map values and array elements; use numeric
+zero for an unconsumed attempt.
+
+| Output | Required wire members |
+| --- | --- |
+| Plan | `launch`: ascending instant array; `checkpoint`: object below; `excluded`: string below. |
+| Checkpoint | `through`: enumeration instant; `definition_event_uid`: revision identity; `pending`: ascending instant array. |
+| Settle | `attempts`: map of step keys to integer counts; `skipped`: step-key array; `status`: run status; `occupied`: boolean. |
+| Recorded plan | All plan members plus `drops`: non-null array of groups with `reason` and nonempty ascending `instants`. |
+
+`excluded` is empty when included, or `deleted`, `disabled`, `notify`, `manual`,
+`other_adapter`, or `once_past` (one-shot instant at or before creation).
+Settle status is `running`, `succeeded`, `failed`, `cancelled`, or `unknown`.
+
+The CLI report is
+`{kata_api_version:1,schema,passed,failed:[{name,diff}]}` as JSON; the Go
+`Report` has the last three members. Equivalent RFC3339 offsets compare as the
+same instant. Valid decisions that differ from expected values, missing,
+duplicate and unknown scenario answers exit 1. Malformed input, unsupported
+schemas and invalid declarations exit 3. JSONL must have no blank lines; the
+usual final newline is allowed, but additional empty lines are rejected.
+
+The kit does not certify process termination, observation delivery, alerts,
+issue-date readiness or cross-runtime arbitration. Issue-date triggers retain
+[existing adapter rules](#adapter-responsibilities). Keep job/installation
+identity, frozen definition references, run UIDs and occurrence keys stable in
+production; this offline kit does not inspect those I/O paths.
+
 ## Adapter responsibilities
 
 Adapters must exclude `notify` jobs with `issue.kind: "per-run"` from their
@@ -574,6 +903,9 @@ the new `parent_uid` shape instead of scheduling it.
 Shared `enabled` configuration does not activate an adapter installation. Each
 adapter owns its local activation, scheduler, overlap and catchup handling,
 checkout and secret mappings, process lifecycle, and conversation recovery.
+Adapters claiming the [conformance profile](#adapter-conformance) follow its
+scheduling, overlap, catchup and outcome rules; other adapters retain their own
+rules.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
 
@@ -592,8 +924,10 @@ write and retry it later without blocking its own work.
 
 The adapter must refresh current definitions before starting new scheduled work;
 offline cached data is for labeled reads. Portable `cron` triggers use the
-configured trigger timezone. Issue-date triggers use the planning-date instant
-above: issue timezone, recurrence fallback, daemon default and UTC remain
+configured trigger timezone. Adapters claiming the profile follow its
+[embedded timezone precedence](#eligibility-and-schedule-instants). Issue-date
+triggers use the planning-date instant above: issue timezone, recurrence
+fallback, daemon default and UTC remain
 authoritative. Future `scheduled_on` and `someday` defer ordinary execute
 readiness; `deadline_on` never does. Deadline actions are notification-only.
 

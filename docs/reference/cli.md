@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -2250,6 +2250,8 @@ kata cron job update <job-uid> --expected-event-uid <event-uid> --file replaceme
 kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 kata cron job restore <job-uid> --expected-event-uid <event-uid> --json
 kata cron capabilities --json
+kata cron conformance export --dir ./adapter-vectors [--declaration declaration.json] [--schema schema]
+kata cron conformance check --answers answers.jsonl
 kata cron run observe <run-uid> --json-input observation.json --json
 kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
 kata cron run show <run-uid> --json
@@ -2264,6 +2266,9 @@ assuming a create conflict is successful. Mutable definitions require the
 current expected event UID, from `--expected-event-uid` or the request body. Independent runs use a retained run UID, exact
 same-write retry idempotency, and ordinary revision CAS for changed evidence.
 The planning-date read returns native resolved dates without changing readiness.
+
+For offline adapter checks and declarations, see
+[adapter conformance](cron.md#adapter-conformance).
 
 ## Federation
 
