@@ -390,8 +390,8 @@ github.com/yuin/goldmark/v2 v2.1.11 h1:SPy9tHLsgxAZgBh+YDlx9R7LsKsykcM3nZTO8kjeS
 github.com/yuin/goldmark/v2 v2.1.11/go.mod h1:G6M4/qOFtfn01/o14BU1UR2Lo5N3S9Qo7xCuz/sHjGQ=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-go.kenn.io/kit v0.48.0 h1:Cg7Ul2qadzSNRdcUM4IrR0Gb3SMCYFXER1D4V76yA5w=
-go.kenn.io/kit v0.48.0/go.mod h1:YlkROWmslf2wlWajWkDfDy2ydhTVAH6Cjc/C+KJ093g=
+go.kenn.io/kit v0.48.1 h1:3MLZ+d1qB/RB3ZCq1ny5tbTMu/+aMn70Cm5lNVgc1D4=
+go.kenn.io/kit v0.48.1/go.mod h1:YlkROWmslf2wlWajWkDfDy2ydhTVAH6Cjc/C+KJ093g=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0 h1:LxwW/9ctSCv+QkE/cLR7M91ZIkXNMqJtEMi1vCw9U8s=

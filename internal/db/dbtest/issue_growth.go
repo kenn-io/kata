@@ -1,0 +1,47 @@
+package dbtest
+
+import (
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kit/growthtest"
+)
+
+// RunCreateIssueHistoryGrowth checks that issue creation stays flat as ordinary history grows.
+func RunCreateIssueHistoryGrowth(t *testing.T, open func(*testing.T) db.Storage, seed func(*testing.T, db.Storage, db.Project, db.Issue, int)) {
+	t.Helper()
+	growthtest.Run(t, growthtest.Check{
+		Small: 21_000, Large: 210_000,
+		MaxRatio: 2, Floor: float64(10 * time.Microsecond),
+		Measure: growthtest.Fastest(9),
+		Build: func(_ testing.TB, size int) (run, reset func()) {
+			store := open(t)
+			project, err := store.CreateProject(t.Context(), "example-project")
+			require.NoError(t, err)
+			historyIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, UID: "01M60000000000000000000000", Title: "History a", Author: "agent"})
+			require.NoError(t, err)
+			seed(t, store, project, historyIssue, size)
+			// A real move keeps PostgreSQL's reset-history join from ending at an empty move index.
+			target, err := store.CreateProject(t.Context(), "target-project")
+			require.NoError(t, err)
+			_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: historyIssue.ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: historyIssue.Revision, Actor: "agent"})
+			require.NoError(t, err)
+
+			// Choose a fresh UID outside each measurement, including the warm-up.
+			var issueUID string
+			sample := 0
+			return func() {
+					_, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+						ProjectID: project.ID, UID: issueUID, Title: "New issue", Author: "agent",
+					})
+					require.NoError(t, err)
+				}, func() {
+					sample++
+					issueUID = fmt.Sprintf("01M5%022d", sample)
+				}
+		},
+	})
+}
