@@ -86,14 +86,14 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 			}
 			current, err := config.ParseSearchConfig([]byte(text))
 			require.NoError(t, err)
-			result, err := localEmbeddingsConfig([]byte(text), current.Embeddings)
+			result, err := localEmbeddingsConfig([]byte(text), current.Embeddings, "")
 			require.NoError(t, err)
 			next, err := config.ParseSearchConfig(result)
 			require.NoError(t, err)
 			require.True(t, next.Embeddings.Local)
 			require.Empty(t, next.Embeddings.BaseURL)
 			require.Equal(t, strings.HasPrefix(text, "\ufeff"), strings.HasPrefix(string(result), "\ufeff"))
-			again, err := localEmbeddingsConfig(result, next.Embeddings)
+			again, err := localEmbeddingsConfig(result, next.Embeddings, "")
 			require.NoError(t, err)
 			require.Equal(t, result, again, "retry must preserve the already-written configuration")
 			require.Contains(t, string(result), prefix)
@@ -102,7 +102,7 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 				require.Contains(t, string(result), "# nested comment")
 			}
 			if strings.Contains(body, "# endpoint comment") {
-				require.Contains(t, string(result), "# endpoint comment")
+				require.Contains(t, string(result), "\n# endpoint comment\n")
 			}
 		})
 	}

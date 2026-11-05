@@ -42,14 +42,18 @@ Kata can run a shared local embeddings server or use an OpenAI-compatible
 kata daemon local-embeddings
 ```
 
-The command shows the missing download size, about 290 MB on a fresh install,
-and asks before downloading. The files are shared by all Kenn apps. Use `--yes`
+For a home without embeddings configured, the command uses a running Ollama
+without downloading anything. Otherwise, it shows the missing download size,
+about 290 MB on a fresh install, and asks before downloading the built-in
+server. The files are shared by all Kenn apps. Use `--yes`
 for unattended setup. It restarts a running daemon, which embeds existing
 issues in the background. A stopped daemon picks up the setting on its next
 start. Watch progress with `kata health --json`.
 
-If the shared files are already installed, a fresh home enables them without
-a prompt. Switching an existing provider still asks before starting the server.
+Run the command again to switch a configured Ollama home to the built-in
+server. It asks before starting the server, even when its files are installed.
+With no running Ollama and the shared files installed, a fresh home enables
+the built-in server without a prompt.
 
 Switching from Ollama's 768-dimensional `nomic-embed-text` keeps your index and
 federation recipe. Smaller widths are kept only with `request_dimensions = true`.

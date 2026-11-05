@@ -1882,8 +1882,10 @@ happens during replacement startup. Explicit restart flags override startup
 options and persist through later restarts. `kata daemon stop` followed by
 `kata daemon start` clears these overrides and uses the current startup settings.
 
-`kata daemon local-embeddings` enables the built-in server for the current
-`KATA_HOME` and rejects `--daemon`. It shows the missing download size, about
+`kata daemon local-embeddings` configures semantic search for the current
+`KATA_HOME` and rejects `--daemon`. A home without embeddings configured uses
+a running Ollama without a download. Run the command again to switch that
+home to the built-in server. Otherwise, it shows the missing download size, about
 290 MB on a fresh install, and asks before downloading files shared by all
 Kenn apps. Use `--yes` without a terminal. It keeps compatible Nomic vectors,
 config comments, and formatting outside the rewritten settings. Widths below

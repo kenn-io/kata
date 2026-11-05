@@ -968,8 +968,10 @@ widen authority. Structural guards still apply to every transport.
 This section is the field reference; see the
 [Semantic search guide](../guide/semantic-search.md) for setup and behavior.
 
-Semantic search is opt-in. Run `kata daemon local-embeddings` to download the
-shared built-in server with your consent and enable it:
+Semantic search is opt-in. Run `kata daemon local-embeddings` to use a running
+Ollama in a home without embeddings configured, or download the shared
+built-in server with your consent. Running it again switches a configured
+provider to the built-in server:
 
 ```toml
 [search.embeddings]
