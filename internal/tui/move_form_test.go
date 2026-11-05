@@ -687,3 +687,74 @@ func TestMoveKeepsAnUnrelatedListStatusWhenNoPriorityPromptIsArmed(t *testing.T)
 	m = openMove(t, m)
 	require.Equal(t, "filter: 3 of 9", m.list.status)
 }
+
+// deleteMoveAPI adds a delete that succeeds to the move fake, and swallows
+// screen-visit telemetry, which the fake's absent client cannot send.
+type deleteMoveAPI struct{ *moveTestAPI }
+
+func (deleteMoveAPI) ReportScreenViewed(context.Context, string) error { return nil }
+
+func (deleteMoveAPI) DeleteIssue(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
+	return &MutationResp{Changed: true}, nil
+}
+
+func (deleteMoveAPI) RestoreIssue(context.Context, int64, string, string) (*MutationResp, error) {
+	return &MutationResp{Changed: true}, nil
+}
+
+// A launch on `kata tui <ref>` opens the pane on that issue before the list
+// has a say. Esc returns focus to the list, whose highlight is another row, and
+// the pane keeps the opened issue with an empty Back history. A delete or move
+// of the highlighted row must leave that pane, its scroll and its tab alone.
+func TestDeleteAndMoveKeepAnUnrelatedSplitPaneWithNoBackHistory(t *testing.T) {
+	for _, action := range []string{"move", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			api := &moveTestAPI{
+				projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
+				preview: func(int, MoveInput) (*MutationResp, error) {
+					return &MutationResp{Issue: &Issue{UID: "issue-b", ShortID: "bbbb"}, Revision: 5}, nil
+				},
+			}
+			m := moveModel(t, api)
+			m.api = newUndoClient(deleteMoveAPI{api})
+			if action == "delete" {
+				m.api = deleteMoveAPI{api}
+			}
+			opened := m.list.issues[0]
+			opened.Body = strings.Repeat("A long paragraph of the opened issue.\n\n", 80)
+			m = m.seedOpenDetail(opened)
+			m, _ = updateModel(m, tea.WindowSizeMsg{Width: 140, Height: 40})
+			require.Equal(t, splitlayout.Split, m.layout)
+			require.Equal(t, focusDetail, m.focus)
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+			tab, scroll := m.detail.activeTab, m.detail.scroll
+			require.NotEqual(t, tabComments, tab, "Tab moved the pane off its first tab")
+			require.Positive(t, scroll, "PageDown scrolled the pane")
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+			require.Equal(t, focusList, m.focus)
+			require.Equal(t, "issue-b", m.list.selectedUID, "the list highlights a different row than the pane")
+			require.Empty(t, m.detail.navStack)
+
+			var cmd tea.Cmd
+			if action == "move" {
+				m = openMove(t, m)
+				m, cmd = enter(m)
+				m, _ = deliver(t, m, cmd)
+				m, cmd = enter(m)
+				m, _ = deliver(t, m, cmd)
+			} else {
+				m, _ = updateModel(m, runeKey('X'))
+				m = typeString(m, "DELETE source#bbbb")
+				m, cmd = enter(m)
+				m, _ = deliver(t, m, cmd)
+			}
+
+			require.Equal(t, "issue-c", m.list.selectedUID, "the list selects the row after the one removed")
+			require.NotNil(t, m.detail.issue)
+			require.Equal(t, "issue-a", m.detail.issue.UID, "the pane keeps the issue it was opened on")
+			require.Equal(t, tab, m.detail.activeTab)
+			require.Equal(t, scroll, m.detail.scroll)
+		})
+	}
+}

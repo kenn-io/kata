@@ -101,11 +101,20 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 // delete or move was started from: the rows leave the list and the selection
 // goes to the row after anchor (the one before it after the last), a detail
 // pane that shows one of them resets, the cached lists go stale, and the list
-// is fetched again.
+// is fetched again. A pane on an unrelated issue stays as it is, even when it
+// no longer shows the highlighted row: the list edit does not make it follow
+// the new selection.
 func (m Model) dropIssues(anchor string, gone []string) (Model, tea.Cmd) {
+	hadIssue := m.detail.issue != nil
 	m.detail = m.detail.withoutIssues(gone...)
-	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.droppingIssues(anchor, gone) })
-	m, detailCmd := m.maybeBootstrapSplitDetail()
+	drop := func(lm listModel) listModel { return lm.droppingIssues(anchor, gone) }
+	var follow, detailCmd tea.Cmd
+	if hadIssue && m.detail.issue != nil {
+		m = m.editListDay(drop)
+	} else {
+		m, follow = m.refreshListDay(drop)
+		m, detailCmd = m.maybeBootstrapSplitDetail()
+	}
 	if m.cache != nil {
 		m.cache.markStale()
 	}

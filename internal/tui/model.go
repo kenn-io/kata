@@ -2645,12 +2645,19 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 // keeps selection and split detail on the issue that was highlighted before.
 func (m Model) refreshListDay(edit func(listModel) listModel) (Model, tea.Cmd) {
 	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
+	m = m.editListDay(edit)
+	return m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
+}
+
+// editListDay applies edit to the list and re-filters relative dates, leaving
+// the split detail pane to the caller.
+func (m Model) editListDay(edit func(listModel) listModel) Model {
 	m.list = m.list.syncSelection(m.list.visibleRows())
 	if edit != nil {
 		m.list = edit(m.list)
 	}
 	m.list = m.list.refreshDay()
-	return m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
+	return m
 }
 
 func (m Model) staleConnMsg(gen uint64) bool {
