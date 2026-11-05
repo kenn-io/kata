@@ -60,22 +60,16 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 	where, args := sharedConditions()
 	q := eventSelect + " WHERE " + where + " ORDER BY e.id ASC LIMIT ?"
 	if p.ProjectID != 0 {
-		var projectUID string
-		err := d.QueryRowContext(ctx, "SELECT uid FROM projects WHERE id = ?", p.ProjectID).Scan(&projectUID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return []db.Event{}, nil
-		}
-		if err != nil {
-			return nil, fmt.Errorf("events after project uid: %w", err)
-		}
 		q = eventSelect + " WHERE " + where + " AND e.project_id = ?"
 		args = append(args, p.ProjectID)
 		movedWhere, movedArgs := sharedConditions()
 		// Keep the moved-from expression searchable through idx_events_moved_from_id.
+		// Read the UID in this snapshot; unary + removes its column affinity so
+		// SQLite can seek the expression index even before ANALYZE.
 		// An inner ORDER BY/LIMIT on this leg can select a rowid walk after ANALYZE.
-		q += " UNION ALL " + eventSelect + " WHERE " + movedWhere + " AND e.type='issue.moved' AND json_extract(e.payload,'$.from_project_uid') = ? AND e.project_id <> ? ORDER BY 1 LIMIT ?"
+		q += " UNION ALL " + eventSelect + " WHERE " + movedWhere + " AND e.type='issue.moved' AND json_extract(e.payload,'$.from_project_uid') = (SELECT +uid FROM projects WHERE id = ?) AND e.project_id <> ? ORDER BY 1 LIMIT ?"
 		args = append(args, movedArgs...)
-		args = append(args, projectUID, p.ProjectID)
+		args = append(args, p.ProjectID, p.ProjectID)
 	}
 	args = append(args, p.Limit)
 	rows, err := d.QueryContext(ctx, q, args...)
