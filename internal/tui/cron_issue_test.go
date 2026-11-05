@@ -196,9 +196,7 @@ func TestCronIssueUnreadableStackedView(t *testing.T) {
 	require.Nil(t, m.detail.issue)
 	require.ErrorContains(t, m.detail.err, "issue not found")
 	require.True(t, m.cron.returnToCron)
-	require.NotNil(t, m.toast)
-	require.Contains(t, m.toast.text, "issue not found")
-	m.toast = nil // the notice expires; the screen must still explain
+	require.Nil(t, m.toast, "the visible empty state already explains; a notice would repeat it")
 	view := ansi.Strip(m.viewBody())
 	require.Contains(t, view, "issue not found")
 	require.Contains(t, view, "esc")
@@ -213,8 +211,8 @@ func TestCronIssueUnreadableStackedView(t *testing.T) {
 	require.Equal(t, viewCron, stacked.view)
 }
 
-// The split pane shows a linked issue's pending read and, after its notice
-// expires, why it failed, while Esc still returns and identity actions wait.
+// The split pane shows a linked issue's pending read and then why it failed,
+// while Esc still returns and identity actions wait.
 func TestCronIssueSplitPaneShowsReadState(t *testing.T) {
 	m := cronIssueFixture(t, 160)
 	m = sendKey(m, tea.KeyEnter)
@@ -227,8 +225,7 @@ func TestCronIssueSplitPaneShowsReadState(t *testing.T) {
 	require.Contains(t, view, "loading…")
 	require.NotContains(t, view, "select an issue from the list pane")
 	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
-	require.NotNil(t, m.toast)
-	m.toast = nil // the notice expires; the pane must still explain
+	require.Nil(t, m.toast, "the visible pane already explains; a notice would repeat it")
 	view = ansi.Strip(m.viewBody())
 	require.Contains(t, view, "unavailable: issue not found")
 	require.Contains(t, view, "esc")
@@ -240,6 +237,36 @@ func TestCronIssueSplitPaneShowsReadState(t *testing.T) {
 	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = drainInboxCmds(m, cmd)
 	require.Equal(t, viewCron, m.view)
+}
+
+// A failed linked-issue read gets a notice only where no persistent error is
+// on screen: behind Help or the narrow hint, or on a retained issue's refresh.
+func TestCronIssueReadFailureNoticeWhenHidden(t *testing.T) {
+	for _, mode := range []string{"behind help", "behind narrow", "refresh"} {
+		t.Run(mode, func(t *testing.T) {
+			m := cronIssueFixture(t, 80)
+			m = sendKey(m, tea.KeyEnter)
+			require.True(t, m.cron.returnToCron)
+			switch mode {
+			case "behind help":
+				m = sendRune(m, '?')
+				require.Equal(t, viewHelp, m.view)
+			case "behind narrow":
+				m = resizeModel(m, 60, 40)
+				require.Contains(t, ansi.Strip(m.View().Content), "needs more space")
+			case "refresh":
+				m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &Issue{UID: "issue-example", ShortID: "abcd", Title: "Linked result", ProjectID: 7}})
+				require.Nil(t, m.toast)
+			}
+			m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("server unavailable")})
+			require.True(t, m.cron.returnToCron)
+			require.NotNil(t, m.toast, "no persistent error is visible, so a notice explains the failure")
+			require.Contains(t, m.toast.text, "server unavailable")
+			if mode == "refresh" {
+				require.Equal(t, "Linked result", m.detail.issue.Title, "a failed refresh keeps the retained issue")
+			}
+		})
+	}
 }
 
 // A layout change while a linked issue loads, or after its read failed, keeps

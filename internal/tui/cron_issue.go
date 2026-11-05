@@ -55,14 +55,21 @@ func (m Model) cronIssueAdopt(msg tea.Msg) Model {
 	return m
 }
 
-// A missing linked issue keeps ordinary detail error state and a visible notice.
+// A failed linked-issue read keeps ordinary detail error state. A notice says
+// why only where that error is not on screen, such as a retained issue's refresh.
 func (m Model) cronIssueFeedback(msg tea.Msg) (Model, tea.Cmd) {
 	fetched, ok := msg.(detailFetchedMsg)
-	if !ok || !m.cron.returnToCron || fetched.gen != m.detail.gen || fetched.err == nil || m.detail.err == nil {
+	if !ok || !m.cron.returnToCron || fetched.gen != m.detail.gen || fetched.err == nil || m.detail.err == nil || m.cronIssueErrorShown() {
 		return m, nil
 	}
 	m.toast = &toast{text: sanitizeForLine(m.detail.err.Error()), level: toastError, expiresAt: m.toastNow().Add(5 * time.Second)}
 	return m, toastExpireCmd(5 * time.Second)
+}
+
+// With no issue, stacked and split detail both render the error; Help and the
+// narrow hint cover it.
+func (m Model) cronIssueErrorShown() bool {
+	return m.detail.issue == nil && m.view == viewDetail && (m.width == 0 || m.width >= 80)
 }
 
 // Stacked detail has no pane frame, so a linked issue that failed to load says
