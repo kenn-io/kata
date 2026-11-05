@@ -12,7 +12,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
-	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/termtext"
 )
 
@@ -202,16 +201,8 @@ func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) strin
 
 func renderRecurrenceFooter(s inputState, innerW int) string {
 	var controls []string
-	for _, item := range recurrenceFormControls() {
+	for _, item := range saveCancelFieldControls() {
 		controls = append(controls, item.Key+" "+item.Description)
 	}
 	return renderFormFooterHint(s, innerW, strings.Join(controls, " · "))
-}
-
-func recurrenceFormControls() []helplayout.HelpItem {
-	return []helplayout.HelpItem{
-		{Key: "ctrl+o", Description: "save"},
-		{Key: "esc", Description: "cancel"},
-		{Key: "tab", Description: "field"},
-	}
 }
