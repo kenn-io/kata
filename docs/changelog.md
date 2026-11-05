@@ -17,6 +17,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   and planning dates moved to `kata quickstart` and the MCP `teammates` guide.
   In Codex runs, agents now reuse an existing issue instead of filing a
   duplicate, and recording a bug no longer sets attention metadata.
+- Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
 - Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
 - Resume local writes sooner after spoke rebuilds of large projects by skipping

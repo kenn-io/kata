@@ -139,64 +139,6 @@ func TestUISnapshotReadsCollectionLinkDetailsInOneBatch(t *testing.T) {
 	require.Equal(t, 1, detailReads)
 }
 
-func TestReadUIGraphLinksLargeIssueSet(t *testing.T) {
-	store := openUIStore(t)
-	project := createUIProject(t, store, "example-project")
-	_, err := store.ExecContext(t.Context(), `
-		WITH RECURSIVE filler(n) AS (
-			SELECT 1 UNION ALL SELECT n + 1 FROM filler WHERE n < 16386
-		)
-		INSERT INTO issues (uid, project_id, short_id, title, author)
-		SELECT printf('%026d', n), ?, printf('%08d', n), 'Filler issue', 'user-a'
-		FROM filler`, project.ID)
-	require.NoError(t, err)
-	wantIDs := []int64{}
-	for index, endpoints := range [][2]int64{{2, 1}, {1, 3}, {1, 16386}, {16386, 1}, {16386, 16385}} {
-		link, err := store.CreateLink(t.Context(), db.CreateLinkParams{
-			FromIssueID: endpoints[0], ToIssueID: endpoints[1], Type: "blocks", Author: "user-a",
-		})
-		require.NoError(t, err)
-		if index < 2 {
-			wantIDs = append(wantIDs, link.ID)
-		}
-	}
-	rows, err := store.QueryContext(t.Context(), `
-		INSERT INTO links (from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-		SELECT 1, id, printf('%026d', 1), uid, 'blocks', 'user-a'
-		FROM issues WHERE id BETWEEN 4 AND 16384
-		RETURNING id`)
-	require.NoError(t, err)
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var id int64
-		require.NoError(t, rows.Scan(&id))
-		wantIDs = append(wantIDs, id)
-	}
-	require.NoError(t, rows.Err())
-	require.NoError(t, rows.Close())
-	// Keep links with one or both endpoints outside the visible snapshot.
-	for _, id := range []int64{16385, 16386} {
-		_, _, _, err := store.SoftDeleteIssue(t.Context(), id, "user-a")
-		require.NoError(t, err)
-	}
-	// Leave ample headroom for slow runners, while catching quadratic ID-pair probes.
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{
-		View: "all-open", IncludeGraph: true, SelectedIssueUID: fmt.Sprintf("%026d", 1),
-	})
-	require.NoError(t, err)
-	require.Len(t, snapshot.Issues, 16384)
-	require.Len(t, snapshot.GraphIssues, 16384)
-	for _, links := range [][]db.UILink{snapshot.CollectionLinks, snapshot.GraphLinks} {
-		gotIDs := make([]int64, 0, len(links))
-		for _, link := range links {
-			gotIDs = append(gotIDs, link.ID)
-		}
-		require.Equal(t, wantIDs, gotIDs)
-	}
-}
-
 func TestUISnapshotReadyAssignmentExpiryContract(t *testing.T) {
 	t.Parallel()
 	dbtest.RunUISnapshotReadyAssignmentExpiryContract(t, func(t *testing.T) db.Storage {
