@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go.kenn.io/kit/consolewindow"
 )
 
 // ParentScan states which fetch outcome produced a ParentData value.
@@ -114,6 +116,7 @@ func (execCommandRunner) Run(ctx context.Context, name string, args ...string) (
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	consolewindow.Hide(cmd)
 	err = cmd.Run()
 	return stdout.Bytes(), stderr.Bytes(), err
 }
