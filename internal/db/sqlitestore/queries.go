@@ -298,46 +298,22 @@ func (d *Store) listProjects(ctx context.Context, includeArchived bool) ([]db.Pr
 	return out, rows.Err()
 }
 
-// BatchProjectStats returns aggregate stats for every active project. The
-// result includes projects with zero issues (Open=0, Closed=0) and zero
-// events (LastEventAt=nil), driven by LEFT JOINs onto pre-aggregated
-// subqueries. Pre-aggregation matters: the naive
-// projects⋈issues⋈events GROUP BY shape would multiply each issue row by
-// each event row and inflate counts. Spec §6.1.
-func (d *Store) BatchProjectStats(ctx context.Context) (map[int64]db.ProjectStats, error) {
-	const q = `
-WITH
-  issue_counts AS (
-    SELECT
-      project_id,
-      SUM(CASE WHEN status = 'open'   THEN 1 ELSE 0 END) AS open_count,
-      SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed_count
-    FROM issues
-    WHERE deleted_at IS NULL
-    GROUP BY project_id
-  ),
-  event_max AS (
-    -- julianday() normalizes both T-separated RFC3339 and space/offset
-    -- legacy layouts to a numeric julian day, so MAX picks the
-    -- absolute-latest event regardless of which text format was stored.
-    -- strftime() formats it back to RFC3339Nano with a 'Z' zone, matching
-    -- the layout the rest of the code emits via strftime() on insert.
-    SELECT project_id,
-           strftime('%Y-%m-%dT%H:%M:%fZ', MAX(julianday(created_at))) AS last_event_at
-    FROM events
-    GROUP BY project_id
-  )
+const batchProjectStatsSQL = `
 SELECT
   p.id,
-  COALESCE(ic.open_count,   0),
-  COALESCE(ic.closed_count, 0),
-  em.last_event_at
+  (SELECT count(*) FROM issues i WHERE i.project_id = p.id AND i.status = 'open' AND i.deleted_at IS NULL),
+  (SELECT count(*) FROM issues i WHERE i.project_id = p.id AND i.status = 'closed' AND i.deleted_at IS NULL),
+  (SELECT e.created_at FROM events e WHERE e.id = (SELECT max(m.id) FROM events m WHERE m.project_id = p.id))
 FROM projects p
-LEFT JOIN issue_counts ic ON ic.project_id = p.id
-LEFT JOIN event_max    em ON em.project_id = p.id
 WHERE p.deleted_at IS NULL AND p.name <> ?
 ORDER BY p.id`
-	rows, err := d.QueryContext(ctx, q, db.SystemProjectName)
+
+// BatchProjectStats returns aggregate stats for every active project, including
+// projects with zero issues or events. Correlated per-project subqueries cannot
+// multiply issue rows by event rows and inflate counts (spec §6.1).
+// LastEventAt follows the newest event by id, as in readUIProjectStats.
+func (d *Store) BatchProjectStats(ctx context.Context) (map[int64]db.ProjectStats, error) {
+	rows, err := d.QueryContext(ctx, batchProjectStatsSQL, db.SystemProjectName)
 	if err != nil {
 		return nil, fmt.Errorf("batch project stats: %w", err)
 	}
@@ -359,6 +335,7 @@ ORDER BY p.id`
 			if err != nil {
 				return nil, fmt.Errorf("parse last_event_at %q: %w", ts.String, err)
 			}
+			t = t.UTC()
 			s.LastEventAt = &t
 		}
 		out[id] = s
