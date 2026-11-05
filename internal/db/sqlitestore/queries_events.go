@@ -35,45 +35,48 @@ func (d *Store) MaxEventID(ctx context.Context) (int64, error) {
 // project filter: a link event's related issue may live in another project,
 // and `kata move` rehomes an issue while its historical events stay put.
 func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.Event, error) {
-	var (
-		conds []string
-		args  []any
-	)
-	conds = append(conds, "e.id > ?")
-	args = append(args, p.AfterID)
-	conds = append(conds, "p.name <> ?")
-	args = append(args, db.SystemProjectName)
-	conds = append(conds, authorizedEventStreamPredicate(ctx, &args))
-	if p.ProjectID != 0 {
-		conds = append(conds, `(e.project_id = ? OR (e.type='issue.moved' AND
-            json_extract(CASE WHEN e.type='issue.moved' THEN e.payload ELSE '{}' END,'$.from_project_uid') =
-            (SELECT uid FROM projects WHERE id = ?)))`)
-		args = append(args, p.ProjectID, p.ProjectID)
-	}
-	if p.ThroughID != 0 {
-		conds = append(conds, "e.id <= ?")
-		args = append(args, p.ThroughID)
-	}
-	if p.IssueUID != "" {
-		conds = append(conds, db.FederationReadIssueUIDExpr(false)+" = ?")
-		args = append(args, p.IssueUID)
-	}
-	if len(p.Types) > 0 {
-		placeholders := make([]string, len(p.Types))
-		for i, eventType := range p.Types {
-			placeholders[i] = "?"
-			args = append(args, eventType)
+	sharedConditions := func() (string, []any) {
+		conds := []string{"e.id > ?", "p.name <> ?"}
+		args := []any{p.AfterID, db.SystemProjectName}
+		conds = append(conds, authorizedEventStreamPredicate(ctx, &args))
+		if p.ThroughID != 0 {
+			conds = append(conds, "e.id <= ?")
+			args = append(args, p.ThroughID)
 		}
-		conds = append(conds, "e.type IN ("+strings.Join(placeholders, ",")+")")
+		if p.IssueUID != "" {
+			conds = append(conds, db.FederationReadIssueUIDExpr(false)+" = ?")
+			args = append(args, p.IssueUID)
+		}
+		if len(p.Types) > 0 {
+			placeholders := make([]string, len(p.Types))
+			for i, eventType := range p.Types {
+				placeholders[i] = "?"
+				args = append(args, eventType)
+			}
+			conds = append(conds, "e.type IN ("+strings.Join(placeholders, ",")+")")
+		}
+		return strings.Join(conds, " AND "), args
 	}
-	q := `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
-	             e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
-	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
-	      FROM events e
-	      JOIN projects p ON p.id = e.project_id
-	      LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
-	      LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
-	      WHERE ` + strings.Join(conds, " AND ") + ` ORDER BY e.id ASC LIMIT ?`
+	where, args := sharedConditions()
+	q := eventSelect + " WHERE " + where + " ORDER BY e.id ASC LIMIT ?"
+	if p.ProjectID != 0 {
+		var projectUID string
+		err := d.QueryRowContext(ctx, "SELECT uid FROM projects WHERE id = ?", p.ProjectID).Scan(&projectUID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return []db.Event{}, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("events after project uid: %w", err)
+		}
+		q = "SELECT * FROM (" + eventSelect + " WHERE " + where + " AND e.project_id = ? ORDER BY e.id LIMIT ?)"
+		args = append(args, p.ProjectID, p.Limit)
+		movedWhere, movedArgs := sharedConditions()
+		// Keep the moved-from expression searchable through idx_events_moved_from.
+		// An inner ORDER BY/LIMIT on this leg can select a rowid walk after ANALYZE.
+		q += " UNION ALL " + eventSelect + " WHERE " + movedWhere + " AND e.type='issue.moved' AND json_extract(e.payload,'$.from_project_uid') = ? AND e.project_id <> ? ORDER BY 1 LIMIT ?"
+		args = append(args, movedArgs...)
+		args = append(args, projectUID, p.ProjectID)
+	}
 	args = append(args, p.Limit)
 	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {
