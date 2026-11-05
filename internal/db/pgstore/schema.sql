@@ -160,6 +160,9 @@ CREATE INDEX idx_issues_project_ready_priority
 CREATE INDEX idx_issues_ready_priority
   ON issues(COALESCE(priority, 5), updated_at DESC, id DESC)
   WHERE status = 'open' AND deleted_at IS NULL;
+CREATE INDEX idx_issues_ready_updated
+  ON issues(updated_at DESC, id DESC)
+  WHERE status = 'open' AND deleted_at IS NULL;
 CREATE INDEX idx_issues_owner
   ON issues(owner) WHERE owner IS NOT NULL AND deleted_at IS NULL;
 CREATE INDEX idx_issues_assignment_expires_on
