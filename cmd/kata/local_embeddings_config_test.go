@@ -102,7 +102,7 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 				require.Contains(t, string(result), "# nested comment")
 			}
 			if strings.Contains(body, "# endpoint comment") {
-				require.Contains(t, string(result), "\n# endpoint comment\n")
+				require.Contains(t, string(result), "# endpoint comment")
 			}
 		})
 	}

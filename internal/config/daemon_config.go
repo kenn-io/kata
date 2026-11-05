@@ -181,7 +181,6 @@ func (e EmbeddingsConfig) UsesLocal() bool {
 }
 
 // LocalRecipeCompatible reports whether the built-in server supports this model and width.
-// Keep this aligned with embedserver/handler.go when upgrading Kit.
 func (e EmbeddingsConfig) LocalRecipeCompatible() bool {
 	return (e.Model == "nomic-embed-text" || e.Model == "nomic-embed-text:latest" || e.Model == "nomic-embed-text:v1.5") &&
 		(e.Dims == 0 || e.Dims == 768 || e.Dims > 0 && e.Dims < 768 && e.RequestDimensions)
@@ -930,6 +929,7 @@ func validateEmbeddings(e EmbeddingsConfig) error {
 	hasBase := strings.TrimSpace(e.BaseURL) != ""
 	hasModel := strings.TrimSpace(e.Model) != ""
 	if e.UsesLocal() {
+		// Kit embedserver/handler.go defines the built-in model aliases and widths.
 		if !e.LocalRecipeCompatible() {
 			return errors.New("search.embeddings: local requires a nomic-embed-text model and dims 768, or request_dimensions for a smaller width")
 		}

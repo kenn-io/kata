@@ -116,7 +116,7 @@ func TestLocalEmbeddingsFreshOllamaThenBuiltIn(t *testing.T) {
 		}
 		return "http://127.0.0.1:12345/v1", nil
 	}
-	out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+	_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 	require.NoError(t, err)
 	require.Zero(t, installs, "a fresh home must use the ready Ollama without installation")
 	cfg, err := config.ReadSearchConfig()
@@ -124,7 +124,6 @@ func TestLocalEmbeddingsFreshOllamaThenBuiltIn(t *testing.T) {
 	require.Equal(t, "http://127.0.0.1:11434/v1", cfg.Embeddings.BaseURL)
 	require.Equal(t, "nomic-embed-text", cfg.Embeddings.Model)
 	require.False(t, cfg.Embeddings.Local)
-	require.Contains(t, out, "Ollama")
 	_, _, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 	require.NoError(t, err)
 	require.Equal(t, 1, installs)
@@ -238,9 +237,6 @@ func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 	//nolint:kennlint // sleeptest: observe the asynchronous backfill failure.
 	require.Eventually(t, func() bool { return health().LastError != "" }, 10*time.Second, 10*time.Millisecond)
 	require.Contains(t, health().LastError, "kata daemon local-embeddings")
-	dir, err := embedlocal.DefaultDir()
-	require.NoError(t, err)
-	require.Contains(t, health().LastError, dir)
 	server := daemon.NewServer(daemon.ServerConfig{DB: store, Embedder: client, ReconcilerHealth: health})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	httpServer := httptest.NewServer(server.Handler())

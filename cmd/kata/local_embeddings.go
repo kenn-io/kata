@@ -40,11 +40,7 @@ func installLocalEmbeddings(ctx context.Context, confirm func(context.Context, i
 	if err != nil {
 		return embedlocal.Installation{}, err
 	}
-	installed, err := localEmbeddingsInstall(ctx, embedlocal.InstallOptions{DataDir: dir, Confirm: confirm})
-	if err != nil {
-		return installed, fmt.Errorf("local embeddings in %q: %w", dir, err)
-	}
-	return installed, nil
+	return localEmbeddingsInstall(ctx, embedlocal.InstallOptions{DataDir: dir, Confirm: confirm})
 }
 
 func daemonLocalEmbeddingsCmd() *cobra.Command {
@@ -214,11 +210,7 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 		case outputAgent:
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK index=%s progress=%s\n", index, agentValue("kata health --json"))
 		case outputHuman:
-			provider := "Built-in"
-			if !next.Embeddings.UsesLocal() {
-				provider = "Ollama"
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s embeddings configured in config.toml, index %s. Check indexing progress with kata health --json.\n", provider, index)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Embeddings configured in config.toml, index %s. Check indexing progress with kata health --json.\n", index)
 		}
 		return err
 	}}
@@ -307,7 +299,7 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 		end := start + int(node.Raw.Length)
 		if trailing := node.Next(); trailing != nil && trailing.Kind == unstable.Comment {
 			commentEnd := int(trailing.Raw.Offset + trailing.Raw.Length)
-			comments.Write(bytes.TrimSpace(data[end:commentEnd]))
+			comments.Write(data[end:commentEnd])
 			comments.WriteByte('\n')
 			end = commentEnd
 		}
