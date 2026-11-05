@@ -422,7 +422,7 @@ func TestReadUIReferencesVisibleRepresentatives(t *testing.T) {
 	deleted := createUIProject(t, store, "deleted-project")
 	var system db.Project
 	require.NoError(t, store.QueryRowContext(ctx, `SELECT id,uid FROM projects WHERE name=?`, db.SystemProjectName).Scan(&system.ID, &system.UID))
-	// Insert contributors out of ID order. Hidden rows sort before visible choices.
+	// Hidden rows sort between visible choices to exercise recursive-step filters.
 	for _, row := range []struct {
 		id, project  int64
 		owner, label string
@@ -433,9 +433,9 @@ func TestReadUIReferencesVisibleRepresentatives(t *testing.T) {
 		{10, visible.ID, "alpha", "alpha", false},
 		{20, visible.ID, "beta", "beta", false},
 		{30, visible.ID, "gamma", "gamma", false},
-		{1, visible.ID, "a-deleted", "a-deleted", true},
-		{2, deleted.ID, "a-hidden", "a-hidden", false},
-		{3, system.ID, "a-system", "a-system", false},
+		{1, visible.ID, "b-deleted", "b-deleted", true},
+		{2, deleted.ID, "b-hidden", "b-hidden", false},
+		{3, system.ID, "b-system", "b-system", false},
 		{4, visible.ID, "", "gamma", false},
 	} {
 		_, err := store.ExecContext(ctx, `INSERT INTO issues(id,uid,project_id,short_id,title,author,owner,deleted_at)

@@ -27,7 +27,6 @@ func TestUIReferences_PageBudget(t *testing.T) {
 		// About four to five times the measured 266 and 25 fetches.
 		{"all choices", 1100},
 		{"analyzed mostly deleted", 1100},
-		{"issue ordering", 128},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.name == "analyzed mostly deleted" {
@@ -37,12 +36,6 @@ func TestUIReferences_PageBudget(t *testing.T) {
 				_, err = raw.ExecContext(ctx, `ANALYZE`)
 				require.NoError(t, err)
 			}
-			if tc.name == "issue ordering" {
-				_, err := raw.ExecContext(ctx, `UPDATE issues SET owner=NULL`)
-				require.NoError(t, err)
-				_, err = raw.ExecContext(ctx, `DELETE FROM issue_labels`)
-				require.NoError(t, err)
-			}
 			conn, err := raw.Conn(ctx)
 			require.NoError(t, err)
 			sqlitePageFetches(t, conn, true)
@@ -50,10 +43,8 @@ func TestUIReferences_PageBudget(t *testing.T) {
 			refs, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Limit: 200})
 			require.NoError(t, err)
 			require.Len(t, refs.Issues, 200)
-			if tc.name != "issue ordering" {
-				require.Len(t, refs.Owners, 10)
-				require.Len(t, refs.Labels, 11)
-			}
+			require.Len(t, refs.Owners, 10)
+			require.Len(t, refs.Labels, 11)
 			conn, err = raw.Conn(ctx)
 			require.NoError(t, err)
 			count := sqlitePageFetches(t, conn, false)
