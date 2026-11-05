@@ -27,6 +27,9 @@ const labelsByIssuesChunkSize = 500
 // column (see schema.sql) — projection has to go through
 // issues.project_id.
 //
+// CROSS JOIN deliberately keeps issue_labels first. Replacing it with JOIN
+// brings back the whole-project scan when planner statistics are absent.
+//
 // Chunked into groups of labelsByIssuesChunkSize to stay under SQLite's
 // bound-parameter limit (roborev job 246). The list endpoint allows
 // limit=0 / unbounded results, so callers can pass arbitrarily many IDs;
@@ -66,7 +69,7 @@ func (d *Store) appendLabelsForChunk(
 	}
 	query := `SELECT il.issue_id, il.label
 	          FROM issue_labels il
-	          JOIN issues i ON i.id = il.issue_id
+	          CROSS JOIN issues i ON i.id = il.issue_id
 	          WHERE i.project_id = ?
 	            AND il.issue_id IN (` + strings.Join(placeholders, ",") + `)
 	          ORDER BY il.issue_id ASC, il.label ASC`
