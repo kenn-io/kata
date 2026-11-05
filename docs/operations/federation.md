@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-03
+last_edited: 2026-11-05
 ---
 
 # Federation
@@ -1927,15 +1927,21 @@ belongs to the bound spoke origin and actor, verifies schema version,
 deduplicates same-hash retries, rejects same-UID/different-hash conflicts,
 materializes the batch, and returns the advanced push cursor.
 
-Ingest work is bounded by the accepted batch: metadata, comment, label,
-status, and claim-only batches skip the federation group's link rebuild because
-they cannot change link state. Link mutations, snapshots, and issue lifecycle
-events that can change endpoint resolution still run the full reconciliation.
+Metadata, comment, label, status, and claim-only batches skip the federation
+group's link rebuild because they cannot change link state. Link mutations,
+snapshots, and issue lifecycle events that can change endpoint resolution
+still run the full reconciliation.
 
 Federation push and poll requests have a 60-second default budget, separate
 from the shorter interactive CLI default. `KATA_HTTP_TIMEOUT` overrides that
 budget when a large, healthy hub needs more time. A timed-out request leaves
 the cursor unchanged and retries through the normal sync loop.
+
+SQLite push and pull application first try up to two optimistic preparations.
+If concurrent writes invalidate both snapshots, the next attempt acquires the
+writer before preparing. Optimistic preparation time does not consume that
+fallback's contention retry budget; caller cancellation and deadlines still
+stop the operation.
 
 If a response is lost after the hub commits, retrying the same batch is safe.
 Permanent validation failures or hash conflicts record a quarantine on the

@@ -43,17 +43,15 @@ func (d *Store) IngestFederationEvents(
 		})
 	}
 	var result db.FederationIngestResult
-	attempt := 0
-	err := d.RetryTransient(ctx, func() error {
-		attempt++
+	err := d.retryFederationPreparation(ctx, func(locked bool) error {
 		var err error
-		result, err = d.ingestFederationEventsOnce(ctx, p, attempt > federationIngestOptimisticAttempts)
+		result, err = d.ingestFederationEventsOnce(ctx, p, locked)
 		return err
 	})
 	return result, err
 }
 
-// federationIngestOptimisticAttempts bounds how often a push prepares its
+// federationIngestOptimisticAttempts bounds how often a push or pull prepares its
 // materialization outside the writer lock. Any commit during preparation
 // invalidates the snapshot, so steady unrelated writes could otherwise make
 // every attempt fail. Later attempts take the project lock before preparing.
