@@ -669,7 +669,7 @@ Dependencies MUST succeed before a dependent starts. The declared
 `continue` permits independent branches after terminal failure; `stop` skips
 unstarted steps and dependents from the earliest failed/cancelled/unknown terminal,
 except tied terminals and their successful prerequisites (including equality).
-Started steps retain results. Retry-eligible failures are nonterminal.
+Started steps retain results and may retry. Retry-eligible failures are nonterminal.
 
 A positive `timeout_seconds` sets one deadline from run start for every attempt.
 Zero means no Kata deadline; document adapter defaults separately. Cancellation
