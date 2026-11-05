@@ -225,20 +225,22 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 	if hasBOM {
 		data = data[len(bom):]
 	}
-	var document map[string]any
-	if _, err := toml.Decode(string(data), &document); err != nil {
+	written, err := config.ParseSearchFile(data)
+	if err != nil {
 		return nil, err
 	}
-	fields := map[string]any{}
-	if search, ok := document["search"].(map[string]any); ok {
-		if existing, ok := search["embeddings"].(map[string]any); ok {
-			fields = existing
-		}
+	var document map[string]any
+	_, _ = toml.Decode(string(data), &document) // ParseSearchFile accepted the same text
+	search, _ := document["search"].(map[string]any)
+	fields, ok := search["embeddings"].(map[string]any)
+	if !ok {
+		fields = map[string]any{}
 	}
 	for _, key := range []string{"base_url", "api_key", "api_key_file", "api_key_env"} {
 		delete(fields, key)
 	}
-	if !current.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal() {
+	// Environment overrides don't persist, so the written recipe must suit the built-in server.
+	if !written.Embeddings.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal() {
 		for _, key := range []string{"model", "dims", "document_prefix", "document_suffix", "query_prefix", "query_suffix", "fingerprint_salt", "request_dimensions"} {
 			delete(fields, key)
 		}
@@ -325,7 +327,6 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 			result.WriteByte('\n')
 		}
 		if rootSearch {
-			search := document["search"].(map[string]any)
 			other := make(map[string]any)
 			for key, value := range search {
 				if key != "embeddings" {

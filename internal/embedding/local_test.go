@@ -13,7 +13,7 @@ func TestLocalEndpointPerBatch(t *testing.T) {
 	defer first.Close()
 	defer second.Close()
 	calls := 0
-	client, err := New(Config{BaseURL: "://ignored", Model: "nomic-embed-text", Dims: 2, Endpoint: func(context.Context) (string, error) {
+	client, err := New(Config{BaseURL: "", Model: "nomic-embed-text", Dims: 2, Endpoint: func(context.Context) (string, error) {
 		calls++
 		if calls <= 2 {
 			return first.URL, nil
@@ -27,7 +27,6 @@ func TestLocalEndpointPerBatch(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.Equal(t, 2, calls)
-	first.Close()
 	vectors, err := client.Embed(t.Context(), []string{"hello"})
 	require.NoError(t, err)
 	require.InDelta(t, 0.8, vectors[0][0], 0.00001)

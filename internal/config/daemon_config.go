@@ -621,13 +621,24 @@ func ReadSearchConfig() (SearchConfig, error) {
 
 // ParseSearchConfig applies the same environment overrides and validation as daemon startup.
 func ParseSearchConfig(data []byte) (SearchConfig, error) {
+	search, err := ParseSearchFile(data)
+	if err != nil {
+		return SearchConfig{}, err
+	}
+	return resolveSearchConfig(search)
+}
+
+// ParseSearchFile reads [search] as written, without environment overrides or validation.
+func ParseSearchFile(data []byte) (SearchConfig, error) {
 	var file struct {
 		Search SearchConfig `toml:"search"`
 	}
 	if err := decodeSectionData(data, "search", &file); err != nil {
 		return SearchConfig{}, err
 	}
-	return resolveSearchConfig(file.Search)
+	cfg := DaemonConfig{Search: file.Search}
+	trimSearchEmbeddings(&cfg)
+	return cfg.Search, nil
 }
 
 func resolveSearchConfig(search SearchConfig) (SearchConfig, error) {
