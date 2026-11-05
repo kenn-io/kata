@@ -172,7 +172,7 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 				return err
 			}
-			if err := atomicfile.WriteFile(path, proposed, atomicfile.WithPreserveMode()); err != nil {
+			if err := atomicfile.WriteFile(path, proposed, atomicfile.WithPreserveMode(), atomicfile.WithFollowLink()); err != nil {
 				return err
 			}
 		}
@@ -185,7 +185,7 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 				if readErr == nil && bytes.Equal(latest, proposed) {
 					var restoreErr error
 					if originalExists {
-						restoreErr = atomicfile.WriteFile(path, original, atomicfile.WithPreserveMode())
+						restoreErr = atomicfile.WriteFile(path, original, atomicfile.WithPreserveMode(), atomicfile.WithFollowLink())
 					} else {
 						restoreErr = os.Remove(path)
 					}

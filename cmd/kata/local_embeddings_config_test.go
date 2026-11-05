@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,27 +21,6 @@ func stubLocalEmbeddingsInstall(t *testing.T) {
 	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
 		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
 	}
-}
-
-func TestLocalEmbeddingsTemporaryRecipeOverride(t *testing.T) {
-	home := setupKataEnv(t)
-	stubLocalEmbeddingsInstall(t)
-	t.Setenv("KATA_SERVER", "")
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "nomic-embed-text")
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", "768")
-	oldEndpoint := localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
-	path := filepath.Join(home, "config.toml")
-	original := "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='mxbai-embed-large'\ndims=1024\n"
-	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
-	out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.NoError(t, err, out+stderr)
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "")
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", "")
-	next, err := config.ReadSearchConfig()
-	require.NoError(t, err, "persisted setup must remain valid after temporary overrides disappear")
-	require.True(t, next.Embeddings.UsesLocal())
 }
 
 func TestLocalEmbeddingsRestartRefusal(t *testing.T) {
@@ -108,32 +86,5 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 				require.Contains(t, string(result), "# endpoint comment")
 			}
 		})
-	}
-}
-
-func TestLocalEmbeddingsReducedWidth(t *testing.T) {
-	home := setupKataEnv(t)
-	stubLocalEmbeddingsInstall(t)
-	t.Setenv("KATA_SERVER", "")
-	oldEndpoint := localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
-	for _, requestsWidth := range []bool{false, true} {
-		text := fmt.Sprintf("[search.embeddings]\nbase_url = 'http://127.0.0.1:11434/v1'\nmodel = 'nomic-embed-text'\ndims = 512\nrequest_dimensions = %t\n", requestsWidth)
-		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(text), 0o600))
-		_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-		require.NoError(t, err)
-		index := "rebuilt"
-		if requestsWidth {
-			index = "kept"
-		}
-		require.Contains(t, stderr, "index will be "+index)
-		next, err := config.ReadSearchConfig()
-		require.NoError(t, err)
-		width := 768
-		if requestsWidth {
-			width = 512
-		}
-		require.Equal(t, width, next.Embeddings.Dims)
 	}
 }
