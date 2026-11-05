@@ -134,6 +134,33 @@ func TestCronHealthStates(t *testing.T) {
 			}
 		}, hegel.WithTestCases(2000))
 	})
+	t.Run("once grace boundaries", func(t *testing.T) {
+		j := cronFixture(t).cron.data.jobs[0]
+		hegel.Test(t, func(ht *hegel.T) {
+			// A fixed instant keeps the oracle about grace, rather than cron arithmetic.
+			due := snapshotFixedNow
+			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(due.Format(time.RFC3339))}
+			seconds := hegel.Draw(ht, hegel.Integers[int64](0, 86400))
+			for _, setting := range []*int64{nil, new(int64(0)), new(seconds)} {
+				j.Definition.GraceSeconds = setting
+				grace := 15 * time.Minute
+				if setting != nil && *setting > 0 {
+					grace = time.Duration(*setting) * time.Second
+				}
+				offset := time.Duration(hegel.Draw(ht, hegel.Integers[int64](-86400, 172800))) * time.Second
+				for _, elapsed := range []time.Duration{grace - time.Nanosecond, grace, grace + time.Nanosecond, offset} {
+					got := cronHealth(cronData{lastErr: map[string]error{}}, j, due.Add(elapsed))
+					if elapsed <= grace {
+						if got.state != "never ran" || got.reason != "No scheduled run is past its grace period" {
+							ht.Fatalf("health=%v grace=%v elapsed=%v", got, grace, elapsed)
+						}
+					} else if got.state != "missed" {
+						ht.Fatalf("health=%v grace=%v elapsed=%v", got, grace, elapsed)
+					}
+				}
+			}
+		}, hegel.WithTestCases(2000))
+	})
 }
 
 func TestCronHealthNativeDelivery(t *testing.T) {
@@ -168,34 +195,6 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 			}
 		}, hegel.WithTestCases(2000))
 	})
-}
-
-func TestCronHealthOnceGrace(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	hegel.Test(t, func(ht *hegel.T) {
-		// A fixed instant keeps the oracle about grace, rather than cron arithmetic.
-		due := snapshotFixedNow
-		j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(due.Format(time.RFC3339))}
-		seconds := hegel.Draw(ht, hegel.Integers[int64](0, 86400))
-		for _, setting := range []*int64{nil, new(int64(0)), new(seconds)} {
-			j.Definition.GraceSeconds = setting
-			grace := 15 * time.Minute
-			if setting != nil && *setting > 0 {
-				grace = time.Duration(*setting) * time.Second
-			}
-			offset := time.Duration(hegel.Draw(ht, hegel.Integers[int64](-86400, 172800))) * time.Second
-			for _, elapsed := range []time.Duration{grace - time.Nanosecond, grace, grace + time.Nanosecond, offset} {
-				got := cronHealth(cronData{lastErr: map[string]error{}}, j, due.Add(elapsed))
-				if elapsed <= grace {
-					if got.state != "never ran" || got.reason != "No scheduled run is past its grace period" {
-						ht.Fatalf("health=%v grace=%v elapsed=%v", got, grace, elapsed)
-					}
-				} else if got.state != "missed" {
-					ht.Fatalf("health=%v grace=%v elapsed=%v", got, grace, elapsed)
-				}
-			}
-		}
-	}, hegel.WithTestCases(2000))
 }
 
 func cronHealthFixture(t *testing.T) Model {

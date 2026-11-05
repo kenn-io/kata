@@ -130,28 +130,29 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	require.Contains(t, stripANSI(m.viewBody()), r.Status)
 	require.Contains(t, stripANSI(m.viewBody()), "runs / "+r.UID)
 	m.cron.stack = m.cron.stack[:1]
-
-	// A failed same-job reset keeps old rows; a successful empty reset clears them.
-	m = cronFixture(t)
-	job := m.cron.data.jobs[0].UID
-	rows := []generated.CronRun{{UID: "old-run", JobUID: new(job)}}
-	m.cron.jobPage = cronHistoryPage{job: job, runs: rows, ready: true, older: true}
-	a = &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, err: errors.New("offline")}
-	m.api = a
-	m, cmd = m.cronRequestPage(job, true)
-	m = m.cronPageLoaded(cmd().(cronPageMsg))
-	require.Equal(t, rows, m.cron.jobPage.runs, "failed reset retains every loaded row")
-	require.ErrorContains(t, m.cron.jobPage.err, "offline")
-	a.err = nil
-	m, cmd = m.cronRequestPage(job, true)
-	m = m.cronPageLoaded(cmd().(cronPageMsg))
-	require.Empty(t, m.cron.jobPage.runs, "successful empty replacement clears rows")
-	require.True(t, m.cron.jobPage.ready)
 }
 
 // Resetting history discards its old coverage only after a successful read.
 // Independent page, read, last-run and open-detail evidence remains loaded.
 func TestCronHistoryReplacementPrunesLookup(t *testing.T) {
+	t.Run("failed then empty replacement", func(t *testing.T) {
+		// A failed same-job reset keeps old rows; a successful empty reset clears them.
+		m := cronFixture(t)
+		job := m.cron.data.jobs[0].UID
+		rows := []generated.CronRun{{UID: "old-run", JobUID: new(job)}}
+		m.cron.jobPage = cronHistoryPage{job: job, runs: rows, ready: true, older: true}
+		a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, err: errors.New("offline")}
+		m.api = a
+		m, cmd := m.cronRequestPage(job, true)
+		m = m.cronPageLoaded(cmd().(cronPageMsg))
+		require.Equal(t, rows, m.cron.jobPage.runs, "failed reset retains every loaded row")
+		require.ErrorContains(t, m.cron.jobPage.err, "offline")
+		a.err = nil
+		m, cmd = m.cronRequestPage(job, true)
+		m = m.cronPageLoaded(cmd().(cronPageMsg))
+		require.Empty(t, m.cron.jobPage.runs, "successful empty replacement clears rows")
+		require.True(t, m.cron.jobPage.ready)
+	})
 	for _, source := range []string{"discarded", "project page", "job page", "fresh read", "last run", "open run", "failed replacement"} {
 		t.Run(source, func(t *testing.T) {
 			m := cronSeenFixture(t)

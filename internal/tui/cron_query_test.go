@@ -75,22 +75,18 @@ func TestCronQueryRepeatedStatusAndActorIntersection(t *testing.T) {
 			actor = "Operator" + actor
 		}
 		fields := map[string]string{"status": status, "actor": actor}
-		query := fmt.Sprintf("status:%s status:%s", first, second)
-		wantStatus := status == first || status == second
-		if got := cronQuery(query, cronRuns).match(fields, ""); got != wantStatus {
-			ht.Fatalf("OR mismatch: %q vs %q/%q", status, first, second)
-		}
 		wantActor := strings.Contains(strings.ToLower(actor), "operator")
-		if got := cronQuery(query+" actor:operator", cronRuns).match(fields, ""); got != (wantStatus && wantActor) {
-			ht.Fatal("new key must intersect the actor match")
-		}
-		fixed := cronQuery("status:failed status:running", cronRuns)
-		wantFixed := status == "failed" || status == "running"
-		if got := fixed.match(fields, ""); got != wantFixed {
-			ht.Fatal("fixed OR query must match exactly either status")
-		}
-		if got := cronQuery("status:failed status:running actor:operator", cronRuns).match(fields, ""); got != (wantFixed && wantActor) {
-			ht.Fatal("fixed query must intersect the actor match")
+		// Keep the fixed operands on every draw: random sampling alone does
+		// not guarantee the same mutation sensitivity as the fixed query.
+		for _, operands := range [][2]string{{first, second}, {"failed", "running"}} {
+			query := fmt.Sprintf("status:%s status:%s", operands[0], operands[1])
+			wantStatus := status == operands[0] || status == operands[1]
+			if got := cronQuery(query, cronRuns).match(fields, ""); got != wantStatus {
+				ht.Fatalf("OR mismatch: %q vs %q/%q", status, operands[0], operands[1])
+			}
+			if got := cronQuery(query+" actor:operator", cronRuns).match(fields, ""); got != (wantStatus && wantActor) {
+				ht.Fatal("new key must intersect the actor match")
+			}
 		}
 	}, hegel.WithTestCases(2000))
 }

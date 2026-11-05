@@ -19,7 +19,17 @@ func TestCronWaitOnlyExactNormalizedActorCounts(t *testing.T) {
 		valid := hegel.Draw(ht, hegel.SampledFrom([]string{"operator", " operator ", "operator/reader", "Équipe"}))
 		for _, actor := range []string{valid, arbitrary, arbitrary + "\x00"} {
 			normalized, err := notification.NormalizeRecipient(actor)
-			metadata := map[string]any{notification.MetadataKey("other-recipient"): map[string]any{"from": "worker", "message": "unrelated"}}
+			other := "other-recipient"
+			if normalized == other {
+				other = "another-recipient"
+			}
+			metadata := map[string]any{notification.MetadataKey(other): map[string]any{"from": "worker", "message": "unrelated"}}
+			// A valid request for somebody else cannot block this actor.
+			// Check before installing the matching request, using the same parent.
+			unrelated := cronRunWaitForActor(cronParent{open: true, metadata: metadata}, actor)
+			if unrelated.state == "blocked" {
+				ht.Fatalf("unrelated recipient blocked actor %q: %v", actor, unrelated)
+			}
 			if err == nil {
 				metadata[notification.MetadataKey(normalized)] = map[string]any{"from": "worker", "message": "review\nnow"}
 			}

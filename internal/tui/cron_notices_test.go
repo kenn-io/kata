@@ -108,16 +108,6 @@ func TestCronNoticeWindowPermutation(t *testing.T) {
 		}
 	}, hegel.WithTestCases(200))
 }
-func TestCronNoticeSeenBeforeFlush(t *testing.T) {
-	m := cronNoticeFixture(t)
-	for _, id := range []string{"a", "b"} {
-		m, _ = m.cronNoticeEvent(cronNoticeEvent(id, "job", snapshotFixedNow))
-	}
-	m.cronSeen.data.Projects["project-example"] = cronSeenProject{Runs: []string{"a", "b"}}
-	m, cmd := m.cronNoticeFlush(cronNoticeTickFor(m))
-	require.Nil(t, cmd)
-	require.Nil(t, m.toast)
-}
 func TestCronNoticeStartupScopeAndCutoff(t *testing.T) {
 	m := cronNoticeFixture(t)
 	m.cronSeen.ready = false
@@ -206,17 +196,6 @@ func TestCronNoticeStaleWindowAndHints(t *testing.T) {
 		m.cron.filtering = true
 		require.Contains(t, m.cronToast().text, "open Cron Runs")
 	})
-}
-
-func TestCronNoticeShortcutEnablesUnseen(t *testing.T) {
-	m := cronNoticeFixture(t)
-	m.cron.unseenOnly = true
-	m.toast = &toast{cronFailure: true, expiresAt: snapshotFixedNow.Add(time.Minute)}
-	m, _ = m.routeCronKey(keyRune('u'))
-	require.True(t, m.cron.unseenOnly)
-	m.toast = nil
-	m, _ = m.routeCronKey(keyRune('u'))
-	require.False(t, m.cron.unseenOnly, "ordinary u keeps its toggle behavior")
 }
 
 // Failure notices must use error styling and leave the help bar at the bottom.
@@ -333,6 +312,16 @@ func TestCronNoticeClearsOnSwitch(t *testing.T) {
 // An announcement stops suppressing its job only after acknowledgement or
 // authoritative correction. Peer revisions and timestamps are not local order.
 func TestCronNoticeJobSuppressionRelease(t *testing.T) {
+	t.Run("acknowledgement before flush", func(t *testing.T) {
+		m := cronNoticeFixture(t)
+		for _, id := range []string{"a", "b"} {
+			m, _ = m.cronNoticeEvent(cronNoticeEvent(id, "job", snapshotFixedNow))
+		}
+		m.cronSeen.data.Projects["project-example"] = cronSeenProject{Runs: []string{"a", "b"}}
+		m, cmd := m.cronNoticeFlush(cronNoticeTickFor(m))
+		require.Nil(t, cmd)
+		require.Nil(t, m.toast)
+	})
 	t.Run("workflow-only suppression", func(t *testing.T) {
 		// Workflow-only observations do not share an empty-job suppression bucket.
 		m := cronNoticeFixture(t)

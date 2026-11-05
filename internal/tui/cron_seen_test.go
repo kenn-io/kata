@@ -190,6 +190,16 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 		}
 	})
 	t.Run("review and clear keys", func(t *testing.T) {
+		t.Run("active notice preserves unseen filter", func(t *testing.T) {
+			m := cronNoticeFixture(t)
+			m.cron.unseenOnly = true
+			m.toast = &toast{cronFailure: true, expiresAt: snapshotFixedNow.Add(time.Minute)}
+			m, _ = m.routeCronKey(keyRune('u'))
+			require.True(t, m.cron.unseenOnly)
+			m.toast = nil
+			m, _ = m.routeCronKey(keyRune('u'))
+			require.False(t, m.cron.unseenOnly, "ordinary u keeps its toggle behavior")
+		})
 		m, unknown := fixture(t)
 		m = sendRune(m, 'u')
 		require.Equal(t, cronRuns, m.cron.tab)

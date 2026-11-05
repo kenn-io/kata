@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,10 +21,20 @@ import (
 // and callers need the server cursor to discover runs outside the project head.
 func TestCronClientPages(t *testing.T) {
 	requests := make(chan *http.Request, 1)
+	m := cronFixture(t)
+	base := m.cron.data.runs[0]
+	base.JobUID = new("job-example")
+	page := cronHistoryRows(base, 20)
+	cursor := page[len(page)-1].UID
+	payload, err := json.Marshal(struct {
+		Runs []generated.CronRun `json:"runs"`
+		Next string              `json:"next_before_uid"`
+	}{page, cursor})
+	require.NoError(t, err)
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		requests <- r
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"runs":[],"next_before_uid":"next-example"}`))
+		_, _ = w.Write(payload)
 	})
 	runs, next, err := c.ListCronJobRuns(t.Context(), 7, "job-example", "before-example", 20)
 	require.NoError(t, err)
@@ -34,8 +45,8 @@ func TestCronClientPages(t *testing.T) {
 	require.Equal(t, "before-example", req.URL.Query().Get("before_uid"))
 	require.Equal(t, "20", req.URL.Query().Get("limit"))
 
-	require.Empty(t, runs)
-	require.Equal(t, "next-example", next)
+	require.Equal(t, page, runs)
+	require.Equal(t, cursor, next)
 }
 
 type cronEnrichAPI struct {

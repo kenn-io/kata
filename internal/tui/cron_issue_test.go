@@ -239,6 +239,9 @@ func TestCronIssueActionsWaitForIssue(t *testing.T) {
 			m, cmd := updateModel(m, keyRune('N'))
 			require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }), "N without issue identity must not open a parentless form")
 			require.Equal(t, inputNone, m.input.kind)
+			if state == "unreadable" {
+				return // The failed fetch has no second response.
+			}
 			m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &Issue{UID: "issue-example", ShortID: "abcd", ProjectID: 7}})
 			m, cmd = updateModel(m, keyRune('N'))
 			var opened *openInputMsg
