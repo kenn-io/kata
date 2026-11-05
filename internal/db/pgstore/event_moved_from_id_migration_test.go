@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestEventMovedFromIDIndexMigrationUpgradesVersion46(t *testing.T) {
+func TestEventMovedFromIDIndexMigrationUpgradesVersion47(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires PostgreSQL")
 	}
@@ -25,14 +25,19 @@ func TestEventMovedFromIDIndexMigrationUpgradesVersion46(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 	_, err = admin.ExecContext(ctx, `DROP INDEX event_moved_from_id_upgrade.idx_events_moved_from_id;
-UPDATE event_moved_from_id_upgrade.meta SET value='46' WHERE key='schema_version'`)
+UPDATE event_moved_from_id_upgrade.meta SET value='47' WHERE key='schema_version'`)
 	require.NoError(t, err)
+	var readyIndex string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname=$1 AND indexname='idx_issues_ready_updated'`, schema).Scan(&readyIndex))
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
 	require.Equal(t, db.CurrentSchemaVersion(), version)
+	var upgradedReadyIndex string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname=$1 AND indexname='idx_issues_ready_updated'`, schema).Scan(&upgradedReadyIndex))
+	require.Equal(t, readyIndex, upgradedReadyIndex)
 	fresh, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "event_moved_from_id_fresh", SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	require.NoError(t, fresh.Close())

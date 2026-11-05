@@ -129,8 +129,7 @@ var migrationAssets = []Migration{
 	{FromVersion: 44, ToVersion: 45, Name: "000045_issue_uid_prefix_index.up.sql", SQL: issueUIDPrefixIndexMigrationSQL},
 	{FromVersion: 45, ToVersion: 46, Name: "000046_ready_priority_index.up.sql", SQL: readyPriorityIndexMigrationSQL},
 	{FromVersion: 46, ToVersion: 47, Name: "000047_ready_updated_index.up.sql", SQL: readyUpdatedIndexMigrationSQL},
-
-	{FromVersion: 46, ToVersion: 48, Name: "000048_event_moved_from_id_index.up.sql", SQL: eventMovedFromIDIndexMigrationSQL},
+	{FromVersion: 47, ToVersion: 48, Name: "000048_event_moved_from_id_index.up.sql", SQL: eventMovedFromIDIndexMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

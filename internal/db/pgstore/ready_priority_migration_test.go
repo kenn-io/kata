@@ -31,7 +31,7 @@ func TestReadyIndexMigrationUpgrades(t *testing.T) {
 			if sourceVersion == 45 {
 				dropReadyPriorityIndexes(ctx, t, admin, schema)
 			} else {
-				_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS ready_priority_upgrade.idx_issues_ready_updated`)
+				_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS ready_priority_upgrade.idx_issues_ready_updated; DROP INDEX ready_priority_upgrade.idx_events_moved_from_id`)
 				require.NoError(t, err)
 			}
 			_, err = admin.ExecContext(ctx, `UPDATE ready_priority_upgrade.meta SET value=$1 WHERE key='schema_version'`, fmt.Sprint(sourceVersion))
@@ -62,6 +62,6 @@ func TestReadyIndexMigrationUpgrades(t *testing.T) {
 
 func dropReadyPriorityIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_project_ready_priority; DROP INDEX IF EXISTS %s.idx_issues_ready_priority; DROP INDEX IF EXISTS %s.idx_issues_ready_updated`, schema, schema, schema)) // #nosec G201 -- Fixed test schema.
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_project_ready_priority; DROP INDEX IF EXISTS %s.idx_issues_ready_priority; DROP INDEX IF EXISTS %s.idx_issues_ready_updated; DROP INDEX IF EXISTS %s.idx_events_moved_from_id`, schema, schema, schema, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
 }

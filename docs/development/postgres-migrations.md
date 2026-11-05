@@ -407,7 +407,7 @@ there is no down migration.
 ## Schema 48: project departure cursor index
 
 SQLite project event polling and streaming can seek past earlier departures
-with `idx_events_moved_from_id`. The 46→48 PostgreSQL migration adds the same
+with `idx_events_moved_from_id`. The 47→48 PostgreSQL migration adds the same
 partial index on `events`, keyed by the payload's `from_project_uid` and `id`
 for `issue.moved` rows. PostgreSQL's event query stays unchanged. Fresh databases
 include the index. SQLite upgrades through its normal JSONL cutover.
