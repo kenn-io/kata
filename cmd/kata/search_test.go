@@ -62,11 +62,39 @@ func TestSearch_ReturnsMatchedIssues(t *testing.T) {
 func TestSearch_AgentOutputEmptyEmitsOnlyHeader(t *testing.T) {
 	env, dir, _ := setupCLIWorkspace(t)
 
-	out, stderr, err := runCLIWithErr(t, env, dir, "--agent", "search", "login race")
+	out, stderr, err := runCLIWithErr(t, env, dir, "--agent", "search", "login")
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
-	assert.Equal(t, "OK search count=0 query=\"login race\" mode=lexical complete=true\n", out)
+	assert.Equal(t, "OK search count=0 query=login mode=lexical complete=true\n", out)
+}
+
+// Lexical search returns only issues that contain every word. An agent that
+// adds context words to its query gets nothing back and files a duplicate, so
+// an empty multi-word search says why on stderr.
+func TestSearch_EmptyMultiWordSearchHintsEveryWordMustMatch(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "paginate drops the last partial page")
+	const hint = "Hint: no issue contains every word; search again with fewer words\n"
+
+	out, stderr, err := runCLIWithErr(t, env, dir, "--agent", "search", "paginate inventory")
+	require.NoError(t, err)
+	assert.Equal(t, "OK search count=0 query=\"paginate inventory\" mode=lexical complete=true\n", out)
+	assert.Equal(t, hint, stderr)
+
+	out, stderr, err = runCLIWithErr(t, env, dir, "search", "paginate", "inventory")
+	require.NoError(t, err)
+	assert.Equal(t, "no matches\n", out)
+	assert.Equal(t, hint, stderr)
+
+	_, stderr, err = runCLIWithErr(t, env, dir, "--quiet", "search", "paginate inventory")
+	require.NoError(t, err)
+	assert.Empty(t, stderr, "--quiet suppresses hints")
+
+	out, stderr, err = runCLIWithErr(t, env, dir, "--agent", "search", "paginate partial")
+	require.NoError(t, err)
+	assert.Contains(t, out, "count=1")
+	assert.Empty(t, stderr, "a search with results needs no hint")
 }
 
 func TestSearch_EmptyQueryIsValidationError(t *testing.T) {

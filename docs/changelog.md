@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- See why a multi-word `kata search` came back empty. Lexical search returns
+  only issues that contain every word, so an empty multi-word search now
+  prints a hint on stderr to search again with fewer words, instead of letting
+  an agent conclude that no related issue exists and file a duplicate.
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the

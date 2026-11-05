@@ -28,8 +28,8 @@ func newSearchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search <query>...",
 		Short: "search issues by title/body/comments",
-		Long: `Find issues whose title, body, or comments match the words. Run this before
-kata create and reuse an open match.
+		Long: `Find issues whose title, body, or comments contain every word. Run this before
+kata create and reuse an open match; one or two distinctive words find the most.
 Searches the bound project (or --project), open and closed unless --status.
 Mode is auto by default: hybrid when embeddings are configured, else
 lexical. --agent prints "OK search count=N" then one "- issue=<ref> ..." row
@@ -202,6 +202,14 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	// rather than emitting a bare "# mode=" / "mode=" line.
 	if b.Mode == "" {
 		b.Mode = "lexical"
+	}
+	// Lexical search returns only issues containing every word. Say so when a
+	// multi-word query finds nothing, so a caller retries with fewer words
+	// instead of concluding that no related issue exists.
+	if !flags.Quiet && len(b.Results) == 0 && b.Mode == "lexical" && len(strings.Fields(b.Query)) > 1 {
+		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Hint: no issue contains every word; search again with fewer words"); err != nil {
+			return err
+		}
 	}
 	if mode == outputAgent {
 		out := cmd.OutOrStdout()
