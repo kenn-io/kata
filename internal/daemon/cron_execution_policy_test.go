@@ -12,7 +12,7 @@ func TestExecutionEligible(t *testing.T) {
 		name, mode, member, author string
 		want                       bool
 	}{
-		{name: "exact spaces", mode: "owned", member: " member-a ", author: " member-a ", want: true},
+		{name: "owned author", mode: "owned", member: "member-a", author: "member-a", want: true},
 		{name: "spaces differ", mode: "owned", member: " member-a ", author: "member-a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

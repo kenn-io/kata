@@ -198,14 +198,36 @@ func TestCronExecutionExistingRun(t *testing.T) {
 	status, raw := cronHTTP(t, env, http.MethodPut, path, body)
 	require.Equalf(t, 200, status, "%s", raw)
 	executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, false)
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
 	status, raw = cronHTTP(t, env, http.MethodPut, path, body)
 	require.Equalf(t, 200, status, "replay: %s", raw)
+	var replay struct {
+		Replayed bool `json:"replayed"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &replay))
+	require.True(t, replay.Replayed)
+	after, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before, after, "replaying after opt-out creates no event")
 	body["status"], body["expected_revision"] = "succeeded", 1
 	status, raw = cronHTTP(t, env, http.MethodPut, path, body)
 	require.Equalf(t, 200, status, "finish: %s", raw)
+	finished, err := env.DB.CronRun(t.Context(), project.ID, id)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", finished.Status)
+	require.EqualValues(t, 2, finished.Revision)
+	before, err = env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
 	body["job_uid"] = cronHTTPUID(t)
 	status, raw = cronHTTP(t, env, http.MethodPut, path, body)
 	require.Equalf(t, 409, status, "identity: %s", raw)
+	after, err = env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before, after, "an identity conflict after opt-out creates no event")
+	unchanged, err := env.DB.CronRun(t.Context(), project.ID, id)
+	require.NoError(t, err)
+	require.Equal(t, finished, unchanged)
 }
 
 func TestCronExecutionOverrideFollowsCurrentName(t *testing.T) {
@@ -287,14 +309,16 @@ func TestCronExecutionLookupErrors(t *testing.T) {
 
 func TestCronExecutionConfigWarnings(t *testing.T) {
 	env := testenv.New(t)
-	local := seedProject(t, env, "local-project")
+	seedProject(t, env, "local-project")
 	hub := seedProject(t, env, "hub-project")
 	spoke := seedProject(t, env, "spoke-project")
-	_ = local
 	executionBinding(t, env.DB, hub, db.FederationRoleHub, true, false)
 	executionBinding(t, env.DB, spoke, db.FederationRoleSpoke, true, false)
 	warnings, err := daemon.CronExecutionWarnings(t.Context(), env.DB, config.CronConfig{Projects: []config.CronProjectConfig{{Name: "local-project", Execute: "none"}, {Name: "hub-project", Execute: "none"}, {Name: "spoke-project", Execute: "all"}, {Name: "future-project", Execute: "owned"}}})
 	require.NoError(t, err)
-	require.Len(t, warnings, 3)
-	require.Contains(t, strings.Join(warnings, "\n"), "future-project")
+	require.ElementsMatch(t, []string{
+		`cron.project "local-project" is not a replica; execution remains all`,
+		`cron.project "hub-project" is not a replica; execution remains all`,
+		`cron.project "future-project" matches no current project`,
+	}, warnings)
 }

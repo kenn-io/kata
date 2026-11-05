@@ -11,7 +11,7 @@ type CronExecuteMode string
 const (
 	// ModeNone excludes all replica jobs and workflows.
 	ModeNone CronExecuteMode = "none"
-	// ModeOwned requires the upstream member actor to create and last edit definitions.
+	// ModeOwned requires the member actor to be the stored creator.
 	ModeOwned CronExecuteMode = "owned"
 	// ModeAll allows all replica jobs and workflows.
 	ModeAll CronExecuteMode = "all"
