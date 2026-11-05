@@ -31,6 +31,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.
+- Keep legacy spokes from adding stored sibling-project references after either
+  project enrolls for relay. The hub rejects the whole fresh push batch with
+  `400 validation` and identifies the offending event; accepted history,
+  duplicate retries, missing peers, and cleanup keep their existing behavior.
+  See [quarantine recovery](operations/federation.md#quarantine) before skipping
+  a refused batch.
 - See when a cron job runs next: the `kata tui` Jobs tab detail lists the next
   three times in the trigger's timezone, computed with the same schedule code
   the daemon delivers with, including daylight-saving changes. A native

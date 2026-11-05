@@ -143,6 +143,11 @@ var storageScenarios = []scenario{
 		RunRelayIngestReturnsLocalIssueIDs(t, store)
 		return nil
 	}},
+	{name: "legacy relay admission", methods: []string{"IngestFederationEvents", "CreateRelayEnrollment", "RevokeFederationEnrollment"}, run: func(t *testing.T, store db.Storage) error {
+		RunLegacyRelayAdmission(t, store)
+		RunLegacyRelayParentUIDCollision(t, store)
+		return nil
+	}},
 	{name: "relay offers legacy ingested events", methods: []string{"IngestFederationEvents", "PendingRelayDeliveries", "PatchIssueMetadata"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayOffersLegacyIngestedEvents(t, store)
 		return nil

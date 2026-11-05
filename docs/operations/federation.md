@@ -162,6 +162,14 @@ of the project. Remove them on that side and retry; ask an operator there to
 remove links to projects you cannot access. Links that were already removed do
 not count.
 
+Fresh direct-spoke pushes also reject additions, close parents, and
+duplicate or superseded evidence that name a stored sibling issue when either
+project has a relay binding or an active relay enrollment. The whole batch
+returns `400 validation` and the spoke quarantines it; see
+[Quarantine](#quarantine) before retrying or skipping. Removals and missing
+peers remain admissible. Already accepted events retain their delivery order and
+retry identities; retained crossing history uses the existing checkpoint recovery.
+
 The hub runs this check, so preflight reports `hub_links_checked`. It is `false`
 when the hub predates API `0.31.0`; the preview is still ready, and the CLI warns
 that connect fails if the project has links. Connecting to such a hub reports
@@ -2221,6 +2229,14 @@ validation shape. Current hubs accept a missing link peer as deferred state,
 so the original batch can advance and the edge materializes after both endpoint
 projects reach the same hub federation group.
 
+A fresh cross-project addition involving a relayed project also returns
+`400 validation` and quarantines the whole push batch, including earlier valid
+events. The error names the offending event UID. Unlinking locally and retrying
+resends the same stored addition, so it is refused again while either project
+still uses a relay. Inspect the retained event range before using the explicit
+skip command below. Skipping advances past every event in that batch; none of
+that skipped work reaches the hub, and later removals do not restore it.
+
 Unknown primary issues are different: errors such as `issue.updated references
 unknown issue` still indicate a poisoned mutation, remain quarantined, and stop
 before another network request. Fix the root cause and explicitly retry other
@@ -2367,10 +2383,11 @@ Federation has expected stale or deferred states:
   pushes a different actor is rejected and records the batch in quarantine.
   Negotiated relays preserve source actors separately from accountable
   attribution; see [Project boundaries and attribution](#project-boundaries-and-attribution).
-- Direct-spoke links may span projects; negotiated relays reject cross-project
-  links. For direct spokes, a missing peer does not quarantine push: the event
-  and cursor advance while the edge remains absent. The edge materializes when
-  both endpoint projects are enabled through the same hub federation group.
+- Direct-spoke links may span projects when neither project uses a relay;
+  negotiated relays reject cross-project links. For direct spokes, a missing peer
+  does not quarantine push: the event and cursor advance while the edge remains
+  absent. The edge materializes when both endpoint projects are enabled through
+  the same hub federation group.
   Pulling clients must enroll both projects and use the same normalized hub URL
   origin to project it locally. Unfederated peers, different hub origins, and
   peers that never arrive stay absent. Malformed events, unknown primary
