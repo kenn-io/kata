@@ -48,7 +48,7 @@ func TestCronCollisionsOrderProperty(t *testing.T) {
 	require.NoError(t, definition.Validate())
 	raw, err := json.Marshal(definition)
 	require.NoError(t, err)
-	candidate := cron.CollisionJob{UID: "candidate", Name: "Candidate"}
+	candidate := cron.CollisionJob{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Name: "Candidate"}
 	hegel.Test(t, func(ht *hegel.T) {
 		tx, err := pool.BeginTx(t.Context(), nil)
 		require.NoError(ht, err)
@@ -58,7 +58,11 @@ func TestCronCollisionsOrderProperty(t *testing.T) {
 		for i := range peers {
 			var name string
 			if i%2 == 0 {
-				name = hegel.Draw(ht, hegel.Text())
+				drawn := hegel.Draw(ht, hegel.Text())
+				name = strings.TrimSpace(strings.ToValidUTF8(drawn[:min(len(drawn), 256)], ""))
+				if name == "" {
+					name = "Peer"
+				}
 			} else {
 				name = peers[i-1].Name
 			}

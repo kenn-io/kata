@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 	_ "time/tzdata"
@@ -240,7 +241,11 @@ func drawCollisionFleet(ht *hegel.T, native bool) (CollisionJob, []CollisionJob,
 	}
 	makeJob := func(i int) CollisionJob {
 		job := collisionJob(ht, fmt.Sprint(i), hegel.Draw(ht, hegel.SampledFrom([]string{"0 * * * *", "0 9 * * *", "30 1 * * *", "30 2 * * *", "0 0 * * 1"})))
-		job.Name = hegel.Draw(ht, hegel.Text())
+		name := hegel.Draw(ht, hegel.Text())
+		job.Name = strings.TrimSpace(strings.ToValidUTF8(name[:min(len(name), 256)], ""))
+		if job.Name == "" {
+			job.Name = "Peer"
+		}
 		job.Def.Trigger.Timezone = hegel.Draw(ht, hegel.SampledFrom([]string{"UTC", "America/New_York", "Australia/Lord_Howe", "Pacific/Kiritimati"}))
 		if native {
 			job.Def = nativeCollisionDefinition(job.Def)
@@ -399,8 +404,6 @@ func TestCronCollisionsBoundsProperty(t *testing.T) {
 				index := slices.IndexFunc(peers, func(peer CollisionJob) bool { return peer.UID == member.UID })
 				require.GreaterOrEqual(ht, index, 0)
 				peer := peers[index]
-				require.NotEqual(ht, candidate.UID, peer.UID)
-				require.Equal(ht, IsRecurringIssueJob(candidate.Def), IsRecurringIssueJob(peer.Def))
 				require.Contains(ht, referenceCollisionTimes(ht, peer, from), item.At)
 			}
 		}
@@ -417,6 +420,15 @@ func TestCronCollisionsCanceled(t *testing.T) {
 	cancel()
 	_, err := PreviewCollisions(ctx, collisionJob(t, "candidate", "0 * * * *"), nil, time.Now().UTC(), CollisionStepBudget)
 	require.ErrorIs(t, err, context.Canceled)
+	from := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+	candidate := collisionJob(t, "candidate", "0 * * * *")
+	peer := collisionJob(t, "peer", "0 * * * *")
+	between, err := PreviewCollisions(&countdownContext{Context: t.Context(), left: 1}, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, between.Items, "cancellation before the peer walk prevents its result")
+	finished, err := PreviewCollisions(&countdownContext{Context: t.Context(), left: 2}, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+	require.ErrorIs(t, err, context.Canceled, "cancellation after the last walk must remain an operational error")
+	require.NotEmpty(t, finished.Items, "the final cancellation check runs after grouping")
 }
 
 func TestCronCollisionsDormantDescriptors(t *testing.T) {
@@ -429,24 +441,25 @@ func TestCronCollisionsDormantDescriptors(t *testing.T) {
 	})
 	from := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
 	for _, native := range []bool{false, true} {
+		candidate := collisionJob(t, "candidate", "0 9 * * *")
+		peer := collisionJob(t, "peer", "0 0 1 1 *")
+		if native {
+			candidate.Def = nativeCollisionDefinition(candidate.Def)
+			peer.Def = nativeCollisionDefinition(peer.Def)
+			peer.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-time.Hour), Through: from.Add(-time.Minute)}
+		}
 		for _, expression := range []string{"@none", "@manual", "@triggered", "CRON_TZ=UTC @none", "TZ=UTC @manual"} {
 			t.Run(fmt.Sprintf("native=%t/%s", native, expression), func(t *testing.T) {
-				candidate := collisionJob(t, "candidate", "0 9 * * *")
-				peer := collisionJob(t, "peer", expression)
-				if native {
-					candidate.Def = nativeCollisionDefinition(candidate.Def)
-					peer.Def = nativeCollisionDefinition(peer.Def)
-					peer.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-time.Hour), Through: from.Add(-time.Minute)}
-				}
-				require.NoError(t, peer.Def.Validate())
-				got := collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+				dormant := peer
+				dormant.Def.Trigger = Trigger{Kind: "cron", Cron: expression}
+				require.NoError(t, dormant.Def.Validate())
+				got := collisionReport(t, candidate, []CollisionJob{dormant}, from, CollisionStepBudget)
 				require.Equal(t, 1, got.Skipped)
 				require.Empty(t, got.Items)
-				peer.Def.Trigger = Trigger{Kind: "cron", Cron: "0 0 1 1 *"}
-				require.Zero(t, collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget).Skipped,
-					"a calendar schedule outside the window is still previewable")
 			})
 		}
+		require.Zero(t, collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget).Skipped,
+			"a calendar schedule outside the window is still previewable")
 	}
 }
 

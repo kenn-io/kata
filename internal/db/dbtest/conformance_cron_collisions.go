@@ -141,8 +141,8 @@ func checkCronValidateNativeCollisions(t *testing.T, s db.Storage) error {
 			require.NoError(t, marshalErr)
 			_, err = q.ExecContext(ctx, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(raw), peer.UID)
 		case "zz-oversized-metadata":
-			// Oversized metadata must truncate the report before decoding.
-			// The direct parent-reader test separately checks pre-Scan byte bounds.
+			// Oversized metadata exhausts the remaining admission byte allowance.
+			// The direct SQLite parent-reader test owns the pre-Scan prefix assertion.
 			_, err = q.ExecContext(ctx, `UPDATE issues SET metadata=$1 WHERE id=$2`, `{"blob":"`+strings.Repeat("😀", 2<<20)+`"}`, parent.ID)
 		}
 		require.NoError(t, err)
@@ -172,7 +172,7 @@ func checkCronValidateCollisionReadBounds(t *testing.T, s db.Storage) error {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
 	for i := range 1025 {
-		_, err = q.ExecContext(ctx, `INSERT INTO cron_jobs(uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at) SELECT $1,project_id,$2,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at FROM cron_jobs WHERE uid=$3`, fmt.Sprintf("%026d", 2025-i), fmt.Sprintf("Peer %04d", i), seed.UID)
+		_, err = q.ExecContext(ctx, `INSERT INTO cron_jobs(uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at) SELECT $1,project_id,$2,definition_json,$4,definition_hlc_json,author,revision,created_at,updated_at FROM cron_jobs WHERE uid=$3`, fmt.Sprintf("%026d", 2025-i), fmt.Sprintf("Peer %04d", i), seed.UID, fmt.Sprintf("%026d", 3025-i))
 		require.NoError(t, err)
 	}
 	raw, err := json.Marshal(job)

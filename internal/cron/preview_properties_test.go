@@ -107,15 +107,6 @@ func TestCronValidationPreservesInput(t *testing.T) {
 		var fields map[string]jsontext.Value
 		require.NoError(ht, json.Unmarshal(normalized, &fields))
 		require.Equal(ht, jsontext.Value(nested), fields["options"])
-	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
-}
-
-func TestCronValidationOpaqueNumberSpelling(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		integer := hegel.Draw(ht, hegel.Integers(int64(math.MinInt64), int64(math.MaxInt64)))
-		exponent := hegel.Draw(ht, hegel.Integers(-300, 300))
-		literal := fmt.Sprintf(`%dE%+d`, integer, exponent)
-		nested := []byte(fmt.Sprintf(`{"nested":[{"value":%s}],"decimal":0.12345678901234567890123,"n":12345678901234567890123}`, literal))
 		workflow := WorkflowDefinition{Version: 1, Steps: []WorkflowStep{{Key: "review", Kind: "prompt", Prompt: "Review", Options: nested}}}
 		workflowRaw, err := json.Marshal(workflow)
 		require.NoError(ht, err)

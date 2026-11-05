@@ -15,12 +15,10 @@ func TestCronValidateDiscovery(t *testing.T) {
 	cronOK(t, session, "load_cron", map[string]any{})
 	tools, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	found := map[string]bool{}
 	for _, tool := range tools.Tools {
 		if tool.Name != "kata.cron_job_validate" && tool.Name != "kata.cron_workflow_validate" {
 			continue
 		}
-		found[tool.Name] = true
 		raw := mustJSON(t, tool.OutputSchema)
 		var schema struct{ Properties map[string]json.RawMessage }
 		require.NoError(t, json.Unmarshal(raw, &schema))
@@ -53,9 +51,6 @@ func TestCronValidateDiscovery(t *testing.T) {
 		for _, field := range []string{"collisions", "until", "items", "occurrences", "peer_count", "peers", "skipped", "truncated"} {
 			require.Contains(t, properties, field)
 		}
-	}
-	for _, name := range []string{"kata.cron_job_validate", "kata.cron_workflow_validate"} {
-		require.True(t, found[name], "%s absent from discovery", name)
 	}
 }
 

@@ -42,7 +42,8 @@ func TestCronValidateHTTP(t *testing.T) {
 		require.IsType(t, float64(0), item["occurrences"])
 		require.IsType(t, float64(0), item["peer_count"])
 		require.IsType(t, "", item["local"])
-		require.Len(t, schedule["next"], 1, "count does not shorten the collision horizon")
+		require.Len(t, schedule["next"], 1, "count bounds the next-fire preview")
+		require.Equal(t, float64(7), item["occurrences"], "count does not shorten the collision horizon")
 		require.Equal(t, "paused", out["warnings"].([]any)[0].(map[string]any)["code"])
 	})
 	for _, resource := range []string{"jobs", "workflows"} {
