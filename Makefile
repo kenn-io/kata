@@ -113,11 +113,9 @@ openapi: api-generate
 test-short:
 	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test -short $(GOFLAGS_TEST) ./...
 
-# gotestsum places packages after the go test flags, where go test would pass
-# them to the test binary after an unknown flag, so set rapid's checks through
-# its environment variable instead of -rapid.checks.
+# The randomized workload runs five generated cases and logs its replay seed.
 test-stress:
-	RAPID_CHECKS=5 go tool gotestsum --format pkgname-and-test-fails --format-icons text \
+	KATA_FEDERATION_STRESS_CHECKS=5 go tool gotestsum --format pkgname-and-test-fails --format-icons text \
 		--jsonfile gotestsum/federation-stress.json --rerun-fails=2 \
 		--rerun-fails-report gotestsum/federation-stress-reruns.txt --packages ./e2e -- \
 		-tags federation_stress -run 'TestFederationStress|TestFederationFailpoint' -count=1 -timeout $(FEDERATION_STRESS_TIMEOUT)

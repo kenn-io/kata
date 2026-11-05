@@ -4,9 +4,9 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"testing/quick"
 
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
 func groupSchema() DataSource {
@@ -174,62 +174,72 @@ func TestGroupConfigRoundTripPreservesOverrideAndMode(t *testing.T) {
 
 // Contract: custom option names and array order do not confer completion.
 func TestStatusMembershipWithGeneratedWorkflowOptions(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		ds := groupSchema()
-		p := &ds.Properties[1]
-		p.Options = nil
-		for i := range p.Groups {
-			p.Groups[i].OptionIDs = nil
-		}
-		requested := rapid.IntRange(2, int(^uint(0)>>1)).Draw(t, "option count")
-		count := min(requested, 40) // Bound test materialization, not the generated domain.
-		roles := make([]int, count)
-		for i := range count {
-			role := rapid.IntRange(0, 2).Draw(t, "group")
-			if i == 0 {
-				role = 0
+	if err := quick.Check(func(requested uint, choices [40]struct {
+		Role uint8
+		Name string
+	}, reverseOptions, reverseGroups bool) bool {
+		return t.Run("case", func(t *testing.T) {
+			ds := groupSchema()
+			p := &ds.Properties[1]
+			p.Options = nil
+			for i := range p.Groups {
+				p.Groups[i].OptionIDs = nil
 			}
-			if i == 1 {
-				role = 2
+			count := 2 + int(requested%39) // Materialize every supported test size from 2 through 40.
+			roles := make([]int, count)
+			for i := range count {
+				role := int(choices[i].Role % 3)
+				if i == 0 {
+					role = 0
+				}
+				if i == 1 {
+					role = 2
+				}
+				roles[i] = role
+				id := "option-" + strconv.Itoa(i)
+				p.Options = append(p.Options, Option{ID: id, Name: choices[i].Name})
+				// group fixture order is Complete, In progress, To-do.
+				p.Groups[2-role].OptionIDs = append(p.Groups[2-role].OptionIDs, id)
 			}
-			roles[i] = role
-			id := "option-" + strconv.Itoa(i)
-			p.Options = append(p.Options, Option{ID: id, Name: rapid.String().Draw(t, "option name")})
-			// group fixture order is Complete, In progress, To-do.
-			p.Groups[2-role].OptionIDs = append(p.Groups[2-role].OptionIDs, id)
-		}
-		if rapid.Bool().Draw(t, "reverse options") {
-			slices.Reverse(p.Options)
-		}
-		if rapid.Bool().Draw(t, "reverse groups") {
-			slices.Reverse(p.Groups)
-		}
-		c, err := ResolveConfig(ds, Selectors{StatusSync: "two-way"}, "")
-		require.NoError(t, err)
-		resolved, err := ResolveStatusSchema(c, ds)
-		require.NoError(t, err)
-		for i, role := range roles {
-			want := "open"
-			if role == 2 {
-				want = "closed"
+			if reverseOptions {
+				slices.Reverse(p.Options)
 			}
-			got, err := resolved.Classify(new("option-" + strconv.Itoa(i)))
+			if reverseGroups {
+				slices.Reverse(p.Groups)
+			}
+			c, err := ResolveConfig(ds, Selectors{StatusSync: "two-way"}, "")
 			require.NoError(t, err)
-			require.Equal(t, want, got)
-		}
-	})
+			resolved, err := ResolveStatusSchema(c, ds)
+			require.NoError(t, err)
+			for i, role := range roles {
+				want := "open"
+				if role == 2 {
+					want = "closed"
+				}
+				got, err := resolved.Classify(new("option-" + strconv.Itoa(i)))
+				require.NoError(t, err)
+				require.Equal(t, want, got)
+			}
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestGeneratedOverlappingMembershipRejects(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		ds := groupSchema()
-		id := "opaque-" + rapid.String().Draw(t, "opaque option ID")
-		ds.Properties[1].Options[3].ID = id
-		ds.Properties[1].Groups[0].OptionIDs[1] = id
-		ds.Properties[1].Groups[2].OptionIDs = append(ds.Properties[1].Groups[2].OptionIDs, id)
-		_, err := ResolveConfig(ds, Selectors{StatusSync: "two-way"}, "")
-		require.Error(t, err)
-	})
+	if err := quick.Check(func(suffix string) bool {
+		return t.Run("case", func(t *testing.T) {
+			ds := groupSchema()
+			id := "opaque-" + suffix
+			ds.Properties[1].Options[3].ID = id
+			ds.Properties[1].Groups[0].OptionIDs[1] = id
+			ds.Properties[1].Groups[2].OptionIDs = append(ds.Properties[1].Groups[2].OptionIDs, id)
+			_, err := ResolveConfig(ds, Selectors{StatusSync: "two-way"}, "")
+			require.Error(t, err)
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Contract: workflow group membership replaces a duplicated completed-option list.

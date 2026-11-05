@@ -10,8 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"pgregory.net/rapid"
+	"testing/quick"
 )
 
 func pluginPlanner(agent string) func(nativeAgentHookOptions, bool) (nativeAgentHookPlan, error) {
@@ -259,32 +258,36 @@ else if(a.includes('inbox')){let s=fs.readFileSync(process.env.KATA_PLUGIN_STATE
 }
 
 func TestNativePluginsConfigPreservesArbitraryForeignStrings(t *testing.T) {
-	rapid.Check(t, func(rt *rapid.T) {
-		foreign := rapid.SliceOf(rapid.String()).Draw(rt, "foreign plugins")
-		entries, err := json.Marshal(foreign)
-		if err != nil {
-			rt.Fatal(err)
-		}
-		if foreign == nil {
-			entries = []byte("[]")
-		}
-		original := append([]byte("{\n// authored\n\"plugins\":"), entries...)
-		original = append(original, []byte(",\"other\":{\"enabled\":false},\n}\n")...)
-		installed, present, _, err := editPluginAgentHookConfig(original, "file:///example/kata-plugin", true, false)
-		if err != nil {
-			rt.Fatal(err)
-		}
-		if present {
-			rt.Skip("authored entry already matches owned URL")
-		}
-		restored, _, _, err := editPluginAgentHookConfig(installed, "file:///example/kata-plugin", false, true)
-		if err != nil {
-			rt.Fatal(err)
-		}
-		if !bytes.Equal(restored, original) {
-			rt.Fatalf("foreign bytes changed: before=%q after=%q", original, restored)
-		}
-	})
+	if err := quick.Check(func(foreign []string) bool {
+		return t.Run("case", func(t *testing.T) {
+
+			entries, err := json.Marshal(foreign)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if foreign == nil {
+				entries = []byte("[]")
+			}
+			original := append([]byte("{\n// authored\n\"plugins\":"), entries...)
+			original = append(original, []byte(",\"other\":{\"enabled\":false},\n}\n")...)
+			installed, present, _, err := editPluginAgentHookConfig(original, "file:///example/kata-plugin", true, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if present {
+				return
+			}
+			restored, _, _, err := editPluginAgentHookConfig(installed, "file:///example/kata-plugin", false, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(restored, original) {
+				t.Fatalf("foreign bytes changed: before=%q after=%q", original, restored)
+			}
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestNativePluginsRemoveReorderedOwnedConfigProperty(t *testing.T) {

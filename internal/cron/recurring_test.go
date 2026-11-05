@@ -5,10 +5,10 @@ import (
 	"encoding/json/v2"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
 const recurringJSON = `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":7200},"action":{"kind":"notify","recipient":"current-owner-or-author"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","title":"Review service"},"overlap":"allow","catchup":"all"}`
@@ -158,36 +158,46 @@ func TestCalendarAndCatchup(t *testing.T) {
 // Across interval size and backlog, all-catchup must deliver the exact prefix once.
 func TestRecurringIntervalPrefixProperty(t *testing.T) {
 	base := nativeJob(t)
-	rapid.Check(t, func(t *rapid.T) {
-		seconds := rapid.Int64Range(60, maxDurationSeconds).Draw(t, "seconds")
-		count := rapid.Uint64().Draw(t, "count")
-		// Materialize a bounded timeline; generation still spans the duration domain.
-		n := int(count%200) + 1
-		if int64(n) > maxDurationSeconds/seconds {
-			n = int(maxDurationSeconds / seconds)
-		}
-		a := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-		j := base
-		j.Trigger.IntervalSeconds = seconds
-		p := RecurringProgress{Version: 1, Anchor: a, Through: a}
-		now := a.Add(time.Duration(seconds*int64(n)) * time.Second)
-		var got []time.Time
-		for {
-			b, e := PlanRecurring(j, definitionUID, p, now)
-			require.NoError(t, e)
-			require.LessOrEqual(t, len(b.Due), 50)
-			got = append(got, b.Due...)
-			p = b.Progress
-			if !b.More {
-				break
+	if err := quick.Check(func(rawSeconds, count uint64, domain uint8) bool {
+		return t.Run("case", func(t *testing.T) {
+			seconds := 60 + int64(rawSeconds%uint64(maxDurationSeconds-59))
+			switch domain % 3 {
+			case 1:
+				seconds = 60 + int64(rawSeconds%3600)
+			case 2:
+				seconds = []int64{60, maxDurationSeconds}[rawSeconds%2]
 			}
-		}
-		var want []time.Time
-		for i := 1; i <= n; i++ {
-			want = append(want, a.Add(time.Duration(seconds*int64(i))*time.Second))
-		}
-		require.Equal(t, want, got)
-	})
+
+			// Materialize a bounded timeline; generation still spans the duration domain.
+			n := int(count%200) + 1
+			if int64(n) > maxDurationSeconds/seconds {
+				n = int(maxDurationSeconds / seconds)
+			}
+			a := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			j := base
+			j.Trigger.IntervalSeconds = seconds
+			p := RecurringProgress{Version: 1, Anchor: a, Through: a}
+			now := a.Add(time.Duration(seconds*int64(n)) * time.Second)
+			var got []time.Time
+			for {
+				b, e := PlanRecurring(j, definitionUID, p, now)
+				require.NoError(t, e)
+				require.LessOrEqual(t, len(b.Due), 50)
+				got = append(got, b.Due...)
+				p = b.Progress
+				if !b.More {
+					break
+				}
+			}
+			var want []time.Time
+			for i := 1; i <= n; i++ {
+				want = append(want, a.Add(time.Duration(seconds*int64(i))*time.Second))
+			}
+			require.Equal(t, want, got)
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Skip converges immediately to its grace window even after a long calendar outage.

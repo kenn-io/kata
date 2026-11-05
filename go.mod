@@ -49,7 +49,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	hegel.dev/go/hegel v0.9.28
 	modernc.org/sqlite v1.61.0
-	pgregory.net/rapid v1.3.0
 )
 
 require (

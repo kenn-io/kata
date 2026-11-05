@@ -9,11 +9,11 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/agenthook"
-	"pgregory.net/rapid"
 )
 
 func assertCodexPrompt(t *testing.T, output, prompt string) {
@@ -240,28 +240,32 @@ func TestAgentHooksContractSourceAllHarnesses(t *testing.T) {
 
 func TestAgentContractHookPromptRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prompt.txt")
-	rapid.Check(t, func(rt *rapid.T) {
-		prompt := rapid.String().Draw(rt, "prompt")
-		if err := os.WriteFile(path, []byte(prompt), 0o600); err != nil {
-			rt.Fatal(err)
-		}
-		cmd := newAgentContractHookCmd()
-		var out bytes.Buffer
-		cmd.SetOut(&out)
-		cmd.SetArgs([]string{"--source", path})
-		if err := cmd.Execute(); err != nil {
-			rt.Fatal(err)
-		}
-		var response struct {
-			Output struct {
-				Text string `json:"additionalContext"`
-			} `json:"hookSpecificOutput"`
-		}
-		if err := json.Unmarshal(out.Bytes(), &response); err != nil {
-			rt.Fatal(err)
-		}
-		if response.Output.Text != prompt {
-			rt.Fatalf("prompt did not round-trip: want %q, got %q", prompt, response.Output.Text)
-		}
-	})
+	if err := quick.Check(func(prompt string) bool {
+		return t.Run("case", func(t *testing.T) {
+
+			if err := os.WriteFile(path, []byte(prompt), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := newAgentContractHookCmd()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetArgs([]string{"--source", path})
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			var response struct {
+				Output struct {
+					Text string `json:"additionalContext"`
+				} `json:"hookSpecificOutput"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Output.Text != prompt {
+				t.Fatalf("prompt did not round-trip: want %q, got %q", prompt, response.Output.Text)
+			}
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -27,7 +27,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	gitcmd "go.kenn.io/kit/git/cmd"
-	"pgregory.net/rapid"
 )
 
 const federationStressPullInterval = 25 * time.Millisecond
@@ -269,44 +268,53 @@ func (fx *federationStressFixture) pendingPushBacklogs(t federationStressTB) []s
 	return pending
 }
 
-func (fx *federationStressFixture) applyRandomOperation(t *rapid.T) {
+// Each choice is resolved against the resources available when the action runs.
+// No action keeps a stale issue or claim reference from sequence generation.
+type federationStressAction struct {
+	Operation                        uint8
+	Spoke, Issue, Claim              uint64
+	Actor, EditKind, Priority, Label uint8
+	CommentOnHub                     bool
+}
+
+func (fx *federationStressFixture) applyOperation(t *testing.T, action federationStressAction) {
 	t.Helper()
 	fx.opSeq++
-	switch rapid.IntRange(0, 5).Draw(t, "operation") {
+	switch action.Operation % 6 {
 	case 0:
 		fx.createIssueOnNode(t, fx.hub, "hub-create")
 	case 1:
-		if spoke, ok := fx.drawRunningSpoke(t, "create-spoke"); ok {
+		if spoke, ok := fx.selectRunningSpoke(t, action.Spoke); ok {
 			fx.createIssueOnNode(t, spoke, "spoke-create")
 		}
 	case 2:
-		fx.acquireSpokeHardClaim(t)
+		fx.acquireSpokeHardClaim(t, action)
 	case 3:
-		fx.releaseSpokeClaim(t)
+		fx.releaseSpokeClaim(t, action)
 	case 4:
-		fx.editClaimedIssue(t)
+		fx.editClaimedIssue(t, action)
 	case 5:
-		fx.commentClaimedIssue(t)
+		fx.commentClaimedIssue(t, action)
 	}
 }
 
-func (fx *federationStressFixture) acquireSpokeHardClaim(t *rapid.T) {
+func (fx *federationStressFixture) acquireSpokeHardClaim(t *testing.T, action federationStressAction) {
 	t.Helper()
-	spoke, issue, ok := fx.drawSpokeLiveIssue(t, "claim")
+	spoke, issue, ok := fx.selectSpokeLiveIssue(t, action.Spoke, action.Issue)
 	if !ok {
 		return
 	}
-	actor := fx.drawActor(t, "claim-actor")
+	actor := fx.selectActor(t, action.Actor)
 	_ = fx.acquireClaim(t, spoke, issue.ShortID, actor)
 }
 
-func (fx *federationStressFixture) releaseSpokeClaim(t *rapid.T) {
+func (fx *federationStressFixture) releaseSpokeClaim(t *testing.T, action federationStressAction) {
 	t.Helper()
-	spoke, ok := fx.drawRunningSpoke(t, "release-spoke")
+	spoke, ok := fx.selectRunningSpoke(t, action.Spoke)
 	if !ok {
 		return
 	}
-	claim, ok := fx.drawLiveClaim(t, spoke, "release-claim")
+	claim, ok := fx.selectLiveClaim(t, spoke, action.Claim)
 	if !ok {
 		return
 	}
@@ -316,17 +324,17 @@ func (fx *federationStressFixture) releaseSpokeClaim(t *rapid.T) {
 	})
 }
 
-func (fx *federationStressFixture) editClaimedIssue(t *rapid.T) {
+func (fx *federationStressFixture) editClaimedIssue(t *testing.T, action federationStressAction) {
 	t.Helper()
-	spoke, issue, ok := fx.drawSpokeLiveIssue(t, "edit")
+	spoke, issue, ok := fx.selectSpokeLiveIssue(t, action.Spoke, action.Issue)
 	if !ok {
 		return
 	}
-	actor := fx.drawActor(t, "edit-actor")
+	actor := fx.selectActor(t, action.Actor)
 	if !fx.acquireClaim(t, spoke, issue.ShortID, actor) {
 		return
 	}
-	switch rapid.IntRange(0, 3).Draw(t, "edit-kind") {
+	switch action.EditKind % 4 {
 	case 0:
 		fx.patchIssue(t, spoke, issue.ShortID, map[string]any{
 			"actor": actor,
@@ -334,7 +342,7 @@ func (fx *federationStressFixture) editClaimedIssue(t *rapid.T) {
 			"body":  fmt.Sprintf("stress body %03d", fx.opSeq),
 		})
 	case 1:
-		priority := int64(rapid.IntRange(0, 3).Draw(t, "priority"))
+		priority := int64(action.Priority % 4)
 		fx.patchIssue(t, spoke, issue.ShortID, map[string]any{
 			"actor":        actor,
 			"set_priority": priority,
@@ -346,15 +354,15 @@ func (fx *federationStressFixture) editClaimedIssue(t *rapid.T) {
 		})
 	case 3:
 		fx.addLabel(t, spoke, issue.ShortID, actor,
-			fmt.Sprintf("stress:%d", rapid.IntRange(0, 5).Draw(t, "label")))
+			fmt.Sprintf("stress:%d", action.Label%6))
 	}
 }
 
-func (fx *federationStressFixture) commentClaimedIssue(t *rapid.T) {
+func (fx *federationStressFixture) commentClaimedIssue(t *testing.T, action federationStressAction) {
 	t.Helper()
-	actor := fx.drawActor(t, "comment-actor")
-	if rapid.Bool().Draw(t, "comment-on-hub") {
-		issue, ok := fx.drawIssue(t, fx.hub, false, "hub-comment")
+	actor := fx.selectActor(t, action.Actor)
+	if action.CommentOnHub {
+		issue, ok := fx.selectIssue(t, fx.hub, false, action.Issue)
 		if !ok {
 			return
 		}
@@ -364,7 +372,7 @@ func (fx *federationStressFixture) commentClaimedIssue(t *rapid.T) {
 		fx.commentOnNode(t, fx.hub, issue.ShortID, actor)
 		return
 	}
-	spoke, issue, ok := fx.drawSpokeLiveIssue(t, "spoke-comment")
+	spoke, issue, ok := fx.selectSpokeLiveIssue(t, action.Spoke, action.Issue)
 	if !ok {
 		return
 	}
@@ -466,13 +474,13 @@ func (fx *federationStressFixture) commentOnNode(
 	require.Equalf(t, http.StatusOK, status, "comment body: %s", raw)
 }
 
-func (fx *federationStressFixture) drawActor(t *rapid.T, label string) string {
+func (fx *federationStressFixture) selectActor(t *testing.T, choice uint8) string {
 	t.Helper()
 	actors := []string{"alice", "bob", "charlie", "dana"}
-	return actors[rapid.IntRange(0, len(actors)-1).Draw(t, label)]
+	return actors[int(choice)%len(actors)]
 }
 
-func (fx *federationStressFixture) drawRunningSpoke(t *rapid.T, label string) (*federationStressNode, bool) {
+func (fx *federationStressFixture) selectRunningSpoke(t *testing.T, choice uint64) (*federationStressNode, bool) {
 	t.Helper()
 	var running []*federationStressNode
 	for _, spoke := range fx.spokes {
@@ -483,12 +491,12 @@ func (fx *federationStressFixture) drawRunningSpoke(t *rapid.T, label string) (*
 	if len(running) == 0 {
 		return nil, false
 	}
-	return running[rapid.IntRange(0, len(running)-1).Draw(t, label)], true
+	return running[choice%uint64(len(running))], true
 }
 
-func (fx *federationStressFixture) drawSpokeLiveIssue(t *rapid.T, label string) (*federationStressNode, federationStressIssue, bool) {
+func (fx *federationStressFixture) selectSpokeLiveIssue(t *testing.T, spokeChoice, issueChoice uint64) (*federationStressNode, federationStressIssue, bool) {
 	t.Helper()
-	spoke, ok := fx.drawRunningSpoke(t, label+"-spoke")
+	spoke, ok := fx.selectRunningSpoke(t, spokeChoice)
 	if !ok {
 		return nil, federationStressIssue{}, false
 	}
@@ -502,22 +510,22 @@ func (fx *federationStressFixture) drawSpokeLiveIssue(t *rapid.T, label string) 
 	if len(hubKnown) == 0 {
 		return nil, federationStressIssue{}, false
 	}
-	issue := hubKnown[rapid.IntRange(0, len(hubKnown)-1).Draw(t, label+"-issue")]
+	issue := hubKnown[issueChoice%uint64(len(hubKnown))]
 	return spoke, issue, true
 }
 
-func (fx *federationStressFixture) drawIssue(
-	t *rapid.T,
+func (fx *federationStressFixture) selectIssue(
+	t *testing.T,
 	node *federationStressNode,
 	includeDeleted bool,
-	label string,
+	choice uint64,
 ) (federationStressIssue, bool) {
 	t.Helper()
 	issues := fx.issuesOnNode(t, node, includeDeleted)
 	if len(issues) == 0 {
 		return federationStressIssue{}, false
 	}
-	return issues[rapid.IntRange(0, len(issues)-1).Draw(t, label)], true
+	return issues[choice%uint64(len(issues))], true
 }
 
 type federationStressLiveClaim struct {
@@ -525,13 +533,13 @@ type federationStressLiveClaim struct {
 	Holder   string
 }
 
-func (fx *federationStressFixture) drawLiveClaim(
-	t *rapid.T,
+func (fx *federationStressFixture) selectLiveClaim(
+	t *testing.T,
 	node *federationStressNode,
-	label string,
+	choice uint64,
 ) (federationStressLiveClaim, bool) {
 	t.Helper()
-	rows, err := node.db.QueryContext(context.Background(), `
+	rows, err := node.db.QueryContext(t.Context(), `
 		SELECT i.short_id, c.holder
 		  FROM issue_claims c
 		  JOIN issues i ON i.uid = c.issue_uid
@@ -551,7 +559,7 @@ func (fx *federationStressFixture) drawLiveClaim(
 	if len(claims) == 0 {
 		return federationStressLiveClaim{}, false
 	}
-	return claims[rapid.IntRange(0, len(claims)-1).Draw(t, label)], true
+	return claims[choice%uint64(len(claims))], true
 }
 
 func (fx *federationStressFixture) issuesOnNode(

@@ -6,9 +6,9 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
 const executeJSON = `{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review changes"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`
@@ -114,64 +114,84 @@ func TestParseWorkflow(t *testing.T) {
 // All representable prompt strings survive the native definition round trip;
 // invalid UTF-8 is rejected by JSON before reaching the domain.
 func TestJobPromptRoundTripProperty(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		prompt := rapid.String().Draw(t, "prompt")
-		job, err := ParseJob([]byte(executeJSON))
-		require.NoError(t, err)
-		job.Action.Prompt = "Review: " + prompt
-		encoded, err := json.Marshal(job)
-		require.NoError(t, err)
-		restored, err := ParseJob(encoded)
-		require.NoError(t, err)
-		require.Equal(t, job, restored)
-	})
+	if err := quick.Check(func(prompt string) bool {
+		return t.Run("case", func(t *testing.T) {
+
+			job, err := ParseJob([]byte(executeJSON))
+			require.NoError(t, err)
+			job.Action.Prompt = "Review: " + prompt
+			encoded, err := json.Marshal(job)
+			require.NoError(t, err)
+			restored, err := ParseJob(encoded)
+			require.NoError(t, err)
+			require.Equal(t, job, restored)
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestUnsupportedVersionsRejectedProperty(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		version := rapid.Int().Draw(t, "version")
-		if version == 1 {
-			return
-		}
-		job, err := ParseJob([]byte(executeJSON))
-		require.NoError(t, err)
-		job.Version = version
-		encoded, err := json.Marshal(job)
-		require.NoError(t, err)
-		_, err = ParseJob(encoded)
-		require.Error(t, err)
-	})
+	if err := quick.Check(func(version int) bool {
+		return t.Run("case", func(t *testing.T) {
+
+			if version == 1 {
+				return
+			}
+			job, err := ParseJob([]byte(executeJSON))
+			require.NoError(t, err)
+			job.Version = version
+			encoded, err := json.Marshal(job)
+			require.NoError(t, err)
+			_, err = ParseJob(encoded)
+			require.Error(t, err)
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Command and prompt variants obey the same exact document round-trip law,
 // including non-default retries and dependency lists.
 func TestWorkflowRoundTripProperty(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		texts := rapid.SliceOf(rapid.String()).Draw(t, "step text")
-		if len(texts) == 0 {
-			texts = []string{""}
-		}
-		workflow := WorkflowDefinition{Version: 1}
-		for i, text := range texts {
-			step := WorkflowStep{Key: fmt.Sprintf("step-%d", i), Retries: rapid.IntRange(0, 100).Draw(t, "retries")}
-			if rapid.Bool().Draw(t, "command") {
-				step.Kind = "command"
-				step.Command = "echo " + text
-			} else {
-				step.Kind = "prompt"
-				step.Prompt = "Review: " + text
+	if err := quick.Check(func(steps []struct {
+		Text                string
+		Retries             uint8
+		Command, Dependency bool
+	}) bool {
+		return t.Run("case", func(t *testing.T) {
+			if len(steps) == 0 {
+				steps = append(steps, struct {
+					Text                string
+					Retries             uint8
+					Command, Dependency bool
+				}{})
 			}
-			if i > 0 && rapid.Bool().Draw(t, "dependency") {
-				step.After = []string{workflow.Steps[i-1].Key}
+			workflow := WorkflowDefinition{Version: 1}
+			for i, generated := range steps {
+				text := generated.Text
+				step := WorkflowStep{Key: fmt.Sprintf("step-%d", i), Retries: int(generated.Retries % 101)}
+				if generated.Command {
+					step.Kind = "command"
+					step.Command = "echo " + text
+				} else {
+					step.Kind = "prompt"
+					step.Prompt = "Review: " + text
+				}
+				if i > 0 && generated.Dependency {
+					step.After = []string{workflow.Steps[i-1].Key}
+				}
+				workflow.Steps = append(workflow.Steps, step)
 			}
-			workflow.Steps = append(workflow.Steps, step)
-		}
-		raw, err := json.Marshal(workflow)
-		require.NoError(t, err)
-		restored, err := ParseWorkflow(raw)
-		require.NoError(t, err)
-		require.Equal(t, workflow, restored)
-	})
+			raw, err := json.Marshal(workflow)
+			require.NoError(t, err)
+			restored, err := ParseWorkflow(raw)
+			require.NoError(t, err)
+			require.Equal(t, workflow, restored)
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCronCompatibility(t *testing.T) {

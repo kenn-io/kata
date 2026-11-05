@@ -6,11 +6,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/quick"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
 func TestPortableTextFieldWireValidation(t *testing.T) {
@@ -105,65 +105,77 @@ func TestServeOneRejectsMalformedPortableFields(t *testing.T) {
 // Arbitrary bytes exercise the acceptance and rejection directions of the
 // portable text contract, including invalid UTF-8 and NUL.
 func TestPortableTextValidationProperty(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		text := string(rapid.SliceOf(rapid.Byte()).Draw(t, "text bytes"))
-		valid := utf8.ValidString(text) && !strings.ContainsRune(text, '\x00')
-		for _, value := range []FieldValue{{Kind: "string", Value: text}, {Kind: "string_set", Values: []string{text}}} {
-			err := ValidateFieldValue(value)
-			if (err == nil) != valid {
-				t.Fatalf("validation(%#v) = %v, want valid=%v", value, err, valid)
+	if err := quick.Check(func(raw []byte) bool {
+		return t.Run("case", func(t *testing.T) {
+			text := string(raw)
+			valid := utf8.ValidString(text) && !strings.ContainsRune(text, '\x00')
+			for _, value := range []FieldValue{{Kind: "string", Value: text}, {Kind: "string_set", Values: []string{text}}} {
+				err := ValidateFieldValue(value)
+				if (err == nil) != valid {
+					t.Fatalf("validation(%#v) = %v, want valid=%v", value, err, valid)
+				}
 			}
-		}
-	})
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCanonicalizeSetMembershipProperty(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		input := rapid.SliceOf(rapid.String()).Draw(t, "set members")
-		members := map[string]bool{}
-		valid := true
-		for _, text := range input {
-			members[text] = true
-			if strings.ContainsRune(text, '\x00') {
-				valid = false
+	if err := quick.Check(func(input []string) bool {
+		return t.Run("case", func(t *testing.T) {
+
+			members := map[string]bool{}
+			valid := true
+			for _, text := range input {
+				members[text] = true
+				if strings.ContainsRune(text, '\x00') {
+					valid = false
+				}
 			}
-		}
-		got, err := CanonicalizeFieldValue(FieldValue{Kind: "string_set", Values: input})
-		if !valid {
-			if err == nil {
-				t.Fatal("accepted NUL set member")
+			got, err := CanonicalizeFieldValue(FieldValue{Kind: "string_set", Values: input})
+			if !valid {
+				if err == nil {
+					t.Fatal("accepted NUL set member")
+				}
+				return
 			}
-			return
-		}
-		if err != nil {
-			t.Fatalf("rejected text set: %v", err)
-		}
-		if len(got.Values) != len(members) {
-			t.Fatalf("got %d members, want %d", len(got.Values), len(members))
-		}
-		for i, text := range got.Values {
-			if !members[text] || (i > 0 && got.Values[i-1] >= text) {
-				t.Fatalf("noncanonical or altered set: %#v", got.Values)
+			if err != nil {
+				t.Fatalf("rejected text set: %v", err)
 			}
-		}
-	})
+			if len(got.Values) != len(members) {
+				t.Fatalf("got %d members, want %d", len(got.Values), len(members))
+			}
+			for i, text := range got.Values {
+				if !members[text] || (i > 0 && got.Values[i-1] >= text) {
+					t.Fatalf("noncanonical or altered set: %#v", got.Values)
+				}
+			}
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCanonicalizeSetIdempotenceProperty(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		value := FieldValue{Kind: "string_set", Values: rapid.SliceOf(rapid.String()).Draw(t, "set members")}
-		first, err := CanonicalizeFieldValue(value)
-		if err != nil {
-			for _, text := range value.Values {
-				if strings.ContainsRune(text, '\x00') {
-					return
+	if err := quick.Check(func(members []string) bool {
+		return t.Run("case", func(t *testing.T) {
+			value := FieldValue{Kind: "string_set", Values: members}
+			first, err := CanonicalizeFieldValue(value)
+			if err != nil {
+				for _, text := range value.Values {
+					if strings.ContainsRune(text, '\x00') {
+						return
+					}
 				}
+				t.Fatalf("rejected valid set before idempotence check: %v", err)
 			}
-			t.Fatalf("rejected valid set before idempotence check: %v", err)
-		}
-		second, err := CanonicalizeFieldValue(first)
-		if err != nil || !reflect.DeepEqual(first, second) {
-			t.Fatalf("canonicalization changed canonical value: first=%#v second=%#v err=%v", first, second, err)
-		}
-	})
+			second, err := CanonicalizeFieldValue(first)
+			if err != nil || !reflect.DeepEqual(first, second) {
+				t.Fatalf("canonicalization changed canonical value: first=%#v second=%#v err=%v", first, second, err)
+			}
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }

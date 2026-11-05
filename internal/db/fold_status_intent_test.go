@@ -4,9 +4,9 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"testing"
+	"testing/quick"
 
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
 func TestFoldStatusIntentSurvivesOnlyEffectiveExplicitTransitions(t *testing.T) {
@@ -33,61 +33,67 @@ func TestFoldStatusIntentSurvivesOnlyEffectiveExplicitTransitions(t *testing.T) 
 }
 
 func TestFoldStatusIntentMatchesTraceForGeneratedPermutations(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		requested := rapid.IntRange(1, int(^uint(0)>>1)).Draw(t, "event count")
-		count := min(requested, 40)
-		sharedTick := rapid.Int64Range(0, int64(^uint64(0)>>1)).Draw(t, "shared physical clock")
-		tiedPhysical := rapid.Bool().Draw(t, "physical clocks tied")
-		events := []FoldEvent{testEvent("issue.created", 0, `{"uid":"issue-1","status":"open"}`)}
-		expectedState, expectedIntent := "open", ""
-		for i := 1; i <= count; i++ {
-			explicit := rapid.Bool().Draw(t, "explicit transition")
-			closed := rapid.Bool().Draw(t, "closed")
-			state := "open"
-			if closed {
-				state = "closed"
-			}
-			var event FoldEvent
-			if explicit {
-				kind := "issue.reopened"
+	if err := quick.Check(func(requested uint, rawTick uint64, tiedPhysical bool, choices [40]struct {
+		Explicit, Closed, Snapshot bool
+		EventSuffix, OriginSuffix  string
+		Counter, Swap              uint64
+	}) bool {
+		return t.Run("case", func(t *testing.T) {
+			count := 1 + int(requested%40)
+			sharedTick := int64(rawTick & (1<<63 - 1))
+			events := []FoldEvent{testEvent("issue.created", 0, `{"uid":"issue-1","status":"open"}`)}
+			expectedState, expectedIntent := "open", ""
+			for i := 1; i <= count; i++ {
+				explicit := choices[i-1].Explicit
+				closed := choices[i-1].Closed
+				state := "open"
 				if closed {
-					kind = "issue.closed"
+					state = "closed"
 				}
-				event = testEvent(kind, int64(i), `{}`)
-			} else {
-				kind := "issue.updated"
-				if rapid.Bool().Draw(t, "snapshot") {
-					kind = "issue.snapshot"
+				var event FoldEvent
+				if explicit {
+					kind := "issue.reopened"
+					if closed {
+						kind = "issue.closed"
+					}
+					event = testEvent(kind, int64(i), `{}`)
+				} else {
+					kind := "issue.updated"
+					if choices[i-1].Snapshot {
+						kind = "issue.snapshot"
+					}
+					event = testEvent(kind, int64(i), fmt.Sprintf(`{"uid":"issue-1","status":%q}`, state))
+					if state != expectedState {
+						expectedIntent = ""
+					}
 				}
-				event = testEvent(kind, int64(i), fmt.Sprintf(`{"uid":"issue-1","status":%q}`, state))
-				if state != expectedState {
-					expectedIntent = ""
+				event.UID = fmt.Sprintf("intent-%d-%s", i, choices[i-1].EventSuffix)
+				event.OriginInstanceUID = "example-origin-" + choices[i-1].OriginSuffix
+				if tiedPhysical {
+					event.HLCPhysicalMS = sharedTick
+					event.HLCCounter = int64(i)
+				} else {
+					event.HLCCounter = int64(choices[i-1].Counter & (1<<63 - 1))
 				}
+				if explicit {
+					expectedIntent = event.UID
+				}
+				expectedState = state
+				events = append(events, event)
 			}
-			event.UID = fmt.Sprintf("intent-%d-%s", i, rapid.String().Draw(t, "event UID suffix"))
-			event.OriginInstanceUID = "example-origin-" + rapid.String().Draw(t, "origin suffix")
-			if tiedPhysical {
-				event.HLCPhysicalMS = sharedTick
-				event.HLCCounter = int64(i)
-			} else {
-				event.HLCCounter = rapid.Int64Range(0, int64(^uint64(0)>>1)).Draw(t, "counter")
+			// Any arrival permutation must produce the chronological model's state and
+			// intent. All permutations are reachable, not only a reversal of the fixture.
+			for i := len(events) - 1; i > 0; i-- {
+				j := choices[i-1].Swap % uint64(i+1)
+				events[i], events[j] = events[j], events[i]
 			}
-			if explicit {
-				expectedIntent = event.UID
-			}
-			expectedState = state
-			events = append(events, event)
-		}
-		// Any arrival permutation must produce the chronological model's state and
-		// intent. All permutations are reachable, not only a reversal of the fixture.
-		for i := len(events) - 1; i > 0; i-- {
-			j := rapid.IntRange(0, i).Draw(t, "arrival swap")
-			events[i], events[j] = events[j], events[i]
-		}
-		got := FoldEvents(events).Issues["issue-1"]
-		require.Equal(t, expectedState, got.Status)
-		require.Equal(t, expectedIntent, got.StatusIntentUID)
-	})
+			got := FoldEvents(events).Issues["issue-1"]
+			require.Equal(t, expectedState, got.Status)
+			require.Equal(t, expectedIntent, got.StatusIntentUID)
+		})
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestFoldStatusMetadataStaysOutOfSerialization(t *testing.T) {
