@@ -214,7 +214,7 @@ func (d *cronDoc) text(value string, target cronRef) {
 }
 func (d *cronDoc) field(label, value string) {
 	if pad := fmt.Sprintf("%-*s ", d.labelWidth, label+":"); value != "" {
-		if len(pad) >= d.width { // No cell remains beside the label column: flow the label with the value.
+		if d.width-len(pad) < 2 { // Wide characters need two cells beside the label column.
 			pad, value = "", label+": "+value
 		}
 		v := cronDoc{width: d.width - len(pad)}
