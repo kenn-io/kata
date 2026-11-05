@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"slices"
 
 	"go.kenn.io/kata/internal/db"
@@ -198,22 +197,9 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 		if err != nil {
 			return err
 		}
-		metadata := string(m.projection.IssueMetadata[issue.UID])
-		if metadata == "" {
-			metadata = "{}"
-		}
-		updatedAt := issue.UpdatedAt
-		if updatedAt == "" {
-			updatedAt = issue.CreatedAt
-		}
-		values := []any{shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status), issue.ClosedReason, issue.Owner,
-			issue.AssignmentExpiresOn, issue.Priority, nonEmptyAuthor(issue.Author), nonEmptyTime(issue.CreatedAt),
-			nonEmptyTime(updatedAt), optionalStringValue(issue.ClosedAt), optionalStringValue(issue.DeletedAt), metadata}
-		for i, value := range values {
-			values[i], err = driver.DefaultParameterConverter.ConvertValue(value)
-			if err != nil {
-				return err
-			}
+		values, err := federatedIssueValues(issue, shortID, m.projection.IssueMetadata[issue.UID])
+		if err != nil {
+			return err
 		}
 		if slices.Equal(values, row.values) {
 			delete(m.projection.Issues, issue.UID)
