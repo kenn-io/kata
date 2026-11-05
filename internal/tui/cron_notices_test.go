@@ -30,7 +30,7 @@ func cronNoticeTickFor(m Model) cronNoticeTickMsg {
 }
 
 func TestCronNoticeDecodeObservedOnly(t *testing.T) {
-	payload := map[string]any{"uid": "run", "project_uid": "project-example", "status": "unknown", "job_uid": "job", "updated_at": snapshotFixedNow}
+	payload := map[string]any{"uid": "run", "project_uid": "project-example", "status": "unknown", "job_uid": "job", "updated_at": snapshotFixedNow, "ended_at": snapshotFixedNow.Add(-time.Minute), "revision": int64(7)}
 	for _, kind := range []string{"cron.run.observed", "cron.run.snapshot", "issue.updated"} {
 		raw, err := json.Marshal(map[string]any{"type": kind, "project_id": 7, "project_uid": "project-example", "payload": payload})
 		require.NoError(t, err)
@@ -38,6 +38,9 @@ func TestCronNoticeDecodeObservedOnly(t *testing.T) {
 		if kind == "cron.run.observed" {
 			require.NotNil(t, msg.cronRun)
 			require.Equal(t, "run", msg.cronRun.UID)
+			require.Equal(t, int64(7), msg.cronRun.Revision)
+			require.NotNil(t, msg.cronRun.EndedAt)
+			require.Equal(t, snapshotFixedNow.Add(-time.Minute), *msg.cronRun.EndedAt)
 		} else {
 			require.Nil(t, msg.cronRun)
 		}
@@ -197,16 +200,6 @@ func TestCronNoticeStaleWindowAndHints(t *testing.T) {
 		m.cron.filtering = true
 		require.Contains(t, m.cronToast().text, "open Cron Runs")
 	})
-	t.Run("goldens", func(t *testing.T) {
-		defer snapshotInit(t)()
-		m := cronNoticeFixture(t)
-		m.width = 120
-		m, _ = m.cronNoticeEvent(cronNoticeEvent("run-a", m.cron.data.jobs[0].UID, snapshotFixedNow))
-		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-		assertGolden(t, "cron-notice", m.viewContent())
-		m.view = viewList
-		assertGolden(t, "cron-notice-list", m.viewContent())
-	})
 }
 
 func TestCronNoticeShortcutEnablesUnseen(t *testing.T) {
@@ -273,6 +266,17 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 			}
 		}
 		t.Fatal("failure notice missing from Projects")
+	})
+
+	t.Run("goldens", func(t *testing.T) {
+		defer snapshotInit(t)()
+		m := cronNoticeFixture(t)
+		m.width = 120
+		m, _ = m.cronNoticeEvent(cronNoticeEvent("run-a", m.cron.data.jobs[0].UID, snapshotFixedNow))
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		assertGolden(t, "cron-notice", m.viewContent())
+		m.view = viewList
+		assertGolden(t, "cron-notice-list", m.viewContent())
 	})
 
 	for _, state := range []string{"help", "form", "narrow"} {

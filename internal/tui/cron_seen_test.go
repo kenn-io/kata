@@ -78,26 +78,19 @@ func TestCronSeenDecodeRejectsInvalid(t *testing.T) {
 }
 
 func TestCronSeenUnseen(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		statuses := []string{"running", "succeeded", "cancelled", "failed", "unknown"}
-		status := hegel.Draw(ht, hegel.SampledFrom(statuses))
-		at := snapshotFixedNow.Add(123 * time.Nanosecond)
-		r := generated.CronRun{UID: "run", Status: status, UpdatedAt: at}
-		before := cronSeenProject{ClearedThrough: snapshotFixedNow}
-		want := status == "failed" || status == "unknown"
-		if before.unseen(r) != want {
-			ht.Fatalf("unexpected unseen for %q", status)
-		}
-		before.Runs = []string{"run"}
-		if before.unseen(r) {
-			ht.Fatal("acknowledged failure remains unseen")
-		}
-		before.Runs = nil
-		before.ClearedThrough = at
-		if before.unseen(r) {
-			ht.Fatal("acknowledged failure remains unseen")
-		}
-	}, hegel.WithTestCases(200))
+	for _, status := range []string{"running", "succeeded", "cancelled", "failed", "unknown"} {
+		t.Run(status, func(t *testing.T) {
+			at := snapshotFixedNow.Add(123 * time.Nanosecond)
+			r := generated.CronRun{UID: "run", Status: status, UpdatedAt: at}
+			before := cronSeenProject{ClearedThrough: snapshotFixedNow}
+			require.Equal(t, status == "failed" || status == "unknown", before.unseen(r))
+			before.Runs = []string{"run"}
+			require.False(t, before.unseen(r), "explicit acknowledgement wins")
+			before.Runs = nil
+			before.ClearedThrough = at
+			require.False(t, before.unseen(r), "watermark equality acknowledges the run")
+		})
+	}
 }
 
 func TestCronSeenFiles(t *testing.T) {
@@ -109,8 +102,8 @@ func TestCronSeenFiles(t *testing.T) {
 	cancel()
 	_, err = cronSeenLoad(ctx, path)
 	require.ErrorIs(t, err, context.Canceled)
-	// Each writer starts from the same stale snapshot. Saving must merge the
-	// current disk state rather than replace another project's acknowledgements.
+	// Sequential saves each supply only their own acknowledgement. Saving must
+	// merge with disk rather than replace prior acknowledgements from either project.
 	for i := range 20 {
 		_, err := cronSeenSave(t.Context(), path, cronSeenStore{Projects: map[string]cronSeenProject{fmt.Sprint(i % 2): {Runs: []string{fmt.Sprint(i)}}}})
 		require.NoError(t, err)

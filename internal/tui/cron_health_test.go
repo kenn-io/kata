@@ -104,6 +104,36 @@ func TestCronHealthStates(t *testing.T) {
 			}
 		})
 	}
+	t.Run("disabled always paused", func(t *testing.T) {
+		hegel.Test(t, func(ht *hegel.T) {
+			j := generated.CronJob{Definition: generated.CronJobDefinitionResponse{Enabled: false, Trigger: generated.TriggerResponse{Kind: hegel.Draw(ht, hegel.SampledFrom([]string{"manual", "cron", "interval", "once", "issue-deadline"}))}}}
+			got := cronHealth(cronData{jobsErr: errors.New("offline")}, j, hegel.Draw(ht, hegel.Datetimes()))
+			if got.state != "paused" {
+				ht.Fatalf("disabled health: %s", got.state)
+			}
+		}, hegel.WithTestCases(2000))
+	})
+
+	t.Run("adapter interval never missed", func(t *testing.T) {
+		j := cronFixture(t).cron.data.jobs[0]
+		hegel.Test(t, func(ht *hegel.T) {
+			j.Definition.Trigger = generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(hegel.Draw(ht, hegel.Integers[int64](1, 31536000)))}
+			j.CreatedAt = hegel.Draw(ht, hegel.Datetimes())
+			if got := cronHealth(cronData{lastRuns: map[string]generated.CronRun{}, lastErr: map[string]error{}}, j, hegel.Draw(ht, hegel.Datetimes())); got.state == "missed" {
+				ht.Fatal("adapter interval has no anchor")
+			}
+		}, hegel.WithTestCases(2000))
+	})
+
+	t.Run("failed regardless of observation time", func(t *testing.T) {
+		j := cronFixture(t).cron.data.jobs[0]
+		hegel.Test(t, func(ht *hegel.T) {
+			p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: "failed", CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}, lastErr: map[string]error{}}
+			if got := cronHealth(p, j, hegel.Draw(ht, hegel.Datetimes())); got.state != "failing" {
+				ht.Fatalf("failed run must be failing: %v", got)
+			}
+		}, hegel.WithTestCases(2000))
+	})
 }
 
 func TestCronHealthNativeDelivery(t *testing.T) {
@@ -139,37 +169,6 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 			}
 		}, hegel.WithTestCases(2000))
 	})
-}
-
-func TestCronHealthDisabledAlwaysPaused(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		j := generated.CronJob{Definition: generated.CronJobDefinitionResponse{Enabled: false, Trigger: generated.TriggerResponse{Kind: hegel.Draw(ht, hegel.SampledFrom([]string{"manual", "cron", "interval", "once", "issue-deadline"}))}}}
-		got := cronHealth(cronData{jobsErr: errors.New("offline")}, j, hegel.Draw(ht, hegel.Datetimes()))
-		if got.state != "paused" {
-			ht.Fatalf("disabled health: %s", got.state)
-		}
-	}, hegel.WithTestCases(2000))
-}
-
-func TestCronHealthAdapterIntervalNeverMissed(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	hegel.Test(t, func(ht *hegel.T) {
-		j.Definition.Trigger = generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(hegel.Draw(ht, hegel.Integers[int64](1, 31536000)))}
-		j.CreatedAt = hegel.Draw(ht, hegel.Datetimes())
-		if got := cronHealth(cronData{lastRuns: map[string]generated.CronRun{}, lastErr: map[string]error{}}, j, hegel.Draw(ht, hegel.Datetimes())); got.state == "missed" {
-			ht.Fatal("adapter interval has no anchor")
-		}
-	}, hegel.WithTestCases(2000))
-}
-
-func TestCronHealthFailedNeverOK(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	hegel.Test(t, func(ht *hegel.T) {
-		p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: "failed", CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}, lastErr: map[string]error{}}
-		if got := cronHealth(p, j, hegel.Draw(ht, hegel.Datetimes())); got.state != "failing" {
-			ht.Fatalf("failed run must be failing: %v", got)
-		}
-	}, hegel.WithTestCases(2000))
 }
 
 func TestCronHealthOnceGrace(t *testing.T) {
@@ -261,6 +260,16 @@ func TestCronHealthColumnRollupAndReason(t *testing.T) {
 		require.NotContains(t, cronLinesText(lines), "State:")
 		require.Contains(t, cronLinesText(lines), "Health:")
 	}
+
+	t.Run("overdue takes precedence over blocked", func(t *testing.T) {
+		m := cronBlockedFixture(t)
+		m.width = 140
+		m.cron.data.waits["issue-example"] = cronParent{open: true, metadata: map[string]any{"work.attention": "stuck"}}
+		m.cron.data.jobs[0].Definition.TimeoutSeconds = new(int64(1))
+		title, _, _ := cronScreen(m)
+		require.Contains(t, title, "1 overdue")
+		require.NotContains(t, title, "1 blocked")
+	})
 
 	assertGolden(t, "cron-jobs-health", cronHealthFixture(t).viewBody())
 }

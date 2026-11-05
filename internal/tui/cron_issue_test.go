@@ -219,6 +219,8 @@ func TestCronIssueSplitPaneShowsReadState(t *testing.T) {
 	m := cronIssueFixture(t, 160)
 	m = sendKey(m, tea.KeyEnter)
 	require.Equal(t, splitlayout.Split, m.layout)
+	require.True(t, m.detail.loading)
+	require.Equal(t, "issue-example", m.detail.readRef)
 	require.Nil(t, m.detail.issue)
 	view := ansi.Strip(m.viewBody())
 	require.Contains(t, view, "loading…")

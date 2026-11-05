@@ -148,6 +148,13 @@ func TestCronEnrichmentAdmissionAndWorkerCaps(t *testing.T) {
 				t.Fatal("enrichment worker did not start")
 			}
 		}
+		// Settle every runnable worker while reads are still blocked. Otherwise
+		// an uncapped pool can pass merely because its extra workers start late.
+		synctest.Wait()
+		a.mu.Lock()
+		peak := a.peak
+		a.mu.Unlock()
+		require.Equal(t, 4, peak)
 		close(release)
 		select {
 		case <-done:
@@ -156,9 +163,7 @@ func TestCronEnrichmentAdmissionAndWorkerCaps(t *testing.T) {
 		}
 		require.Equal(t, 200, a.calls)
 		require.Equal(t, 200, a.parents)
-		// Fills block together; parent reads run later. This checks per-stage caps.
-		require.LessOrEqual(t, a.peak, 4)
-		require.Greater(t, a.peak, 1)
+		require.Equal(t, 4, a.peak, "later parent reads share the same worker pool")
 		require.ErrorContains(t, p.lastErr["204"], "200 jobs per refresh")
 		require.NotContains(t, p.parentOpen, "parent-204")
 	})

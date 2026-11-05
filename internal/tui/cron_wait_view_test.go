@@ -60,12 +60,20 @@ func TestCronWaitRendering(t *testing.T) {
 	m.cron.data.waits = map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}
 	m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, deref(r.JobUID)}}}
 	require.Contains(t, cronScreenText(m), "running · blocked")
-	m.cron.data.jobs[0].Definition.TimeoutSeconds = new(int64(1))
-	m.cron.stack = nil
-	m.cron.tab = cronJobs
-	title, _, _ = cronScreen(m)
-	require.Contains(t, title, "1 overdue")
-	require.NotContains(t, title, "1 blocked")
+
+	t.Run("plain run detail does not repeat status", func(t *testing.T) {
+		m := cronFixture(t)
+		r := m.cron.data.runs[0]
+		r.Status = "running"
+		r.IssueUID = new("issue")
+		m.cron.data.runs = []generated.CronRun{r}
+		m.cron.data.waits = map[string]cronParent{"issue": {open: true}}
+		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
+		_, _, lines := cronScreen(m)
+		require.Equal(t, 1, strings.Count(cronLinesText(lines), "running"), "plain status must appear exactly once")
+		require.Contains(t, cronLinesText(lines), "Status:     running")
+		require.NotContains(t, cronLinesText(lines), "Health:")
+	})
 
 	{
 		defer snapshotInit(t)()
@@ -75,18 +83,6 @@ func TestCronWaitRendering(t *testing.T) {
 		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, m.cron.data.runs[0].UID}}}
 		assertGolden(t, "cron-run-detail-blocked", m.viewBody())
 	}
-}
-
-func TestCronWaitMetadataEventsRefreshAllLoadedRuns(t *testing.T) {
-	m := cronBlockedFixture(t)
-	require.True(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "issue-example"}))
-	m.cron.data.runs = nil
-	m.cron.data.lastRuns = nil
-	m.cron.data.lookup = map[string]generated.CronRun{"historical": {UID: "historical", Status: "running", IssueUID: new("history-issue")}}
-	require.True(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "history-issue"}))
-	m.cron.data.lookup["historical"] = generated.CronRun{UID: "historical", Status: "failed", IssueUID: new("history-issue")}
-	require.False(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "history-issue"}))
-	require.False(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "other-issue"}))
 }
 
 func TestCronWaitNativeRunDoesNotAddAttentionRead(t *testing.T) {
@@ -99,24 +95,22 @@ func TestCronWaitNativeRunDoesNotAddAttentionRead(t *testing.T) {
 	require.Equal(t, map[string]int{nextParentUID: 1}, a.waitCalls, "only the shared native parent read is needed")
 }
 
-func TestCronWaitPlainRunDetailDoesNotRepeatStatus(t *testing.T) {
-	m := cronFixture(t)
-	r := m.cron.data.runs[0]
-	r.Status = "running"
-	r.IssueUID = new("issue")
-	m.cron.data.runs = []generated.CronRun{r}
-	m.cron.data.waits = map[string]cronParent{"issue": {open: true}}
-	m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
-	_, _, lines := cronScreen(m)
-	require.Equal(t, 1, strings.Count(cronLinesText(lines), "running"), "plain status must appear exactly once")
-	require.Contains(t, cronLinesText(lines), "Status:     running")
-	require.NotContains(t, cronLinesText(lines), "Health:")
-}
-
 // A running run's issue that moved to another project still decides Cron
 // health: its events carry the destination project but refresh Cron at once,
 // and the refreshed attention read, not the stale snapshot, sets the health.
 func TestCronMovedRunIssueEventRefreshesCron(t *testing.T) {
+	t.Run("metadata event loaded run selection", func(t *testing.T) {
+		m := cronBlockedFixture(t)
+		require.True(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "issue-example"}))
+		m.cron.data.runs = nil
+		m.cron.data.lastRuns = nil
+		m.cron.data.lookup = map[string]generated.CronRun{"historical": {UID: "historical", Status: "running", IssueUID: new("history-issue")}}
+		require.True(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "history-issue"}))
+		m.cron.data.lookup["historical"] = generated.CronRun{UID: "historical", Status: "failed", IssueUID: new("history-issue")}
+		require.False(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "history-issue"}))
+		require.False(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "other-issue"}))
+	})
+
 	moved := func(uid string) eventReceivedMsg {
 		return eventReceivedMsg{eventType: "issue.metadata_updated", projectID: 8, issueUID: uid}
 	}

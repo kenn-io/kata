@@ -65,7 +65,7 @@ func cronLoadTest(t *testing.T, m Model) Model {
 
 // An event naming a retained run refreshes it even beyond the fallback cap.
 func TestCronEventRefreshReadsLoadedRuns(t *testing.T) {
-	t.Run("1", func(t *testing.T) {
+	t.Run("named retained run beyond fallback cap", func(t *testing.T) {
 		m, a := cronRefreshFixture(t, 103)
 		m = cronNameTest(m, "o-102", 1)
 		m = cronLoadTest(t, m)
@@ -135,7 +135,7 @@ func TestCronNamedBurstDrains(t *testing.T) {
 			}
 			m, _ = updateModel(m, refetchTickMsg{})
 			m.view = viewCron
-			m, _ = updateModel(m, nil)
+			m, _ = updateModel(m, refetchTickMsg{})
 			m = cronLoadTest(t, m)
 			require.Len(t, a.reads, 100)
 			for i := 30; i < 130; i++ {
@@ -145,7 +145,7 @@ func TestCronNamedBurstDrains(t *testing.T) {
 				require.Len(t, m.cron.changed, 130)
 				require.False(t, m.cron.out)
 				for range 3 {
-					m, _ = updateModel(m, nil)
+					m, _ = updateModel(m, refetchTickMsg{})
 					require.False(t, m.cron.out)
 				}
 				m, _ = updateModel(m, eventReceivedMsg{eventType: "cron.job.updated", projectID: 7})
@@ -350,7 +350,7 @@ func TestCronLosingHigherSourceRevision(t *testing.T) {
 	}
 	m, _ = updateModel(m, refetchTickMsg{})
 	m.view = viewCron
-	m, _ = updateModel(m, nil)
+	m, _ = updateModel(m, refetchTickMsg{})
 	m = cronLoadTest(t, m)
 	require.Empty(t, m.cron.changed)
 	require.False(t, m.cron.out)

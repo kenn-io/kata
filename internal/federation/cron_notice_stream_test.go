@@ -59,11 +59,13 @@ func TestCronPulledObservationPayloadPublishing(t *testing.T) {
 		require.NotNil(t, msg.Event)
 		require.Equal(t, "cron.run.observed", msg.Event.Type)
 		var payload struct {
-			UID        string    `json:"uid"`
-			JobUID     string    `json:"job_uid"`
-			UpdatedAt  time.Time `json:"updated_at"`
-			Status     string    `json:"status"`
-			ProjectUID string    `json:"project_uid"`
+			UID        string     `json:"uid"`
+			EndedAt    *time.Time `json:"ended_at"`
+			Revision   int64      `json:"revision"`
+			JobUID     string     `json:"job_uid"`
+			UpdatedAt  time.Time  `json:"updated_at"`
+			Status     string     `json:"status"`
+			ProjectUID string     `json:"project_uid"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(msg.Event.Payload), &payload))
 		require.Equal(t, runUID, payload.UID)
@@ -71,6 +73,9 @@ func TestCronPulledObservationPayloadPublishing(t *testing.T) {
 		require.Equal(t, project.UID, payload.ProjectUID)
 		require.Equal(t, job.UID, payload.JobUID)
 		require.Equal(t, observed.Run.UpdatedAt, payload.UpdatedAt)
+		require.NotNil(t, payload.EndedAt)
+		require.Equal(t, ended, *payload.EndedAt)
+		require.Equal(t, observed.Run.Revision, payload.Revision)
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
