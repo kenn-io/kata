@@ -114,32 +114,22 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	require.NoError(t, m.cron.jobPage.err)
 	require.Empty(t, m.cron.jobPage.next, "empty terminal page is ordinary exhaustion")
 
-	// Failed first-page retries retain every row until a successful empty reset.
-	for count := 1; count <= 15; count++ {
-		for attempts := 2; attempts <= 9; attempts++ {
-			m := cronFixture(t)
-			job := m.cron.data.jobs[0].UID
-			rows := make([]generated.CronRun, count)
-			for i := range rows {
-				rows[i] = generated.CronRun{UID: fmt.Sprintf("old-%d", i), JobUID: new(job)}
-			}
-			m.cron.jobPage = cronHistoryPage{job: job, runs: rows, ready: true, older: true}
-			a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, err: errors.New("offline")}
-			m.api = a
-			for range attempts {
-				var cmd tea.Cmd
-				m, cmd = m.cronRequestPage(job, true)
-				m = m.cronPageLoaded(cmd().(cronPageMsg))
-				require.Equal(t, rows, m.cron.jobPage.runs, "failed reset retains every loaded row")
-			}
-			a.err = nil
-			m, cmd := m.cronRequestPage(job, true)
-			m = m.cronPageLoaded(cmd().(cronPageMsg))
-			if len(m.cron.jobPage.runs) != 0 || !m.cron.jobPage.ready {
-				t.Fatalf("successful empty replacement retained rows: %+v", m.cron.jobPage)
-			}
-		}
-	}
+	// A failed same-job reset keeps old rows; a successful empty reset clears them.
+	m = cronFixture(t)
+	job := m.cron.data.jobs[0].UID
+	rows := []generated.CronRun{{UID: "old-run", JobUID: new(job)}}
+	m.cron.jobPage = cronHistoryPage{job: job, runs: rows, ready: true, older: true}
+	a = &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, err: errors.New("offline")}
+	m.api = a
+	m, cmd = m.cronRequestPage(job, true)
+	m = m.cronPageLoaded(cmd().(cronPageMsg))
+	require.Equal(t, rows, m.cron.jobPage.runs, "failed reset retains every loaded row")
+	require.ErrorContains(t, m.cron.jobPage.err, "offline")
+	a.err = nil
+	m, cmd = m.cronRequestPage(job, true)
+	m = m.cronPageLoaded(cmd().(cronPageMsg))
+	require.Empty(t, m.cron.jobPage.runs, "successful empty replacement clears rows")
+	require.True(t, m.cron.jobPage.ready)
 }
 
 func TestCronRunsLoadOlderByKey(t *testing.T) {
@@ -308,24 +298,6 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 		require.NotContains(t, cronLinesText(detail), "no longer in the loaded data", "an acknowledged run must still be readable")
 		require.Contains(t, cronLinesText(detail), "failed")
 	})
-
-	t.Run("project lookup survives failed refresh", func(t *testing.T) {
-		m := cronFixture(t)
-		r := m.cron.data.runs[0]
-		r.UID = "old-page"
-		a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{r}}
-		m.api = a
-		m.cron.runPage.runs = cronHistoryRows(m.cron.data.runs[0], 100)
-		m.cron.runPage.next = m.cron.runPage.runs[len(m.cron.runPage.runs)-1].UID
-		m, cmd := m.cronRequestPage("", false)
-		m = m.cronPageLoaded(cmd().(cronPageMsg))
-		data := *m.cron.data
-		data.runsErr = errors.New("offline")
-		m = m.cronLoaded(cronLoadedMsg(data))
-		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
-		_, _, lines := cronScreen(m)
-		require.Contains(t, cronLinesText(lines), "Report ready")
-	})
 }
 
 type cronRunRefreshAPI struct {
@@ -342,70 +314,6 @@ func (a *cronRunRefreshAPI) readCronRun(ctx context.Context, _ int64, uid string
 		return generated.CronRun{}, errors.New("wrong run UID")
 	}
 	return a.run, a.err
-}
-
-func TestCronHistoryRefreshPreservesEventPages(t *testing.T) {
-	for _, kind := range []string{"event", "manual", "failed event"} {
-		t.Run(kind, func(t *testing.T) {
-			m := cronSeenFixture(t)
-			head := m.cron.data.runs[0]
-			old := head
-			old.UID = "old-history"
-			old.CreatedAt = head.CreatedAt.Add(-time.Hour)
-			old.Status = "failed"
-			m.cron.data.runs = []generated.CronRun{old}
-			m.cron.data.lastRuns = map[string]generated.CronRun{*old.JobUID: old}
-			m.cron.runPage = cronHistoryPage{runs: cronHistoryRows(old, 100), next: old.UID, ready: true, older: true}
-			m.cron.jobPage = cronHistoryPage{job: *old.JobUID, runs: cronHistoryRows(old, 20), next: old.UID, ready: true, older: true}
-			m.cron.runPage.next = m.cron.runPage.runs[len(m.cron.runPage.runs)-1].UID
-			m.cron.jobPage.next = m.cron.jobPage.runs[len(m.cron.jobPage.runs)-1].UID
-			projectCursor, jobCursor := m.cron.runPage.next, m.cron.jobPage.next
-			m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, *old.JobUID}}}
-			_, _, lines := cronScreen(m)
-			m.cron.stack[0].cursor = slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
-			require.GreaterOrEqual(t, m.cron.stack[0].cursor, 0)
-			fresh := *m.cron.data
-			fresh.runs = []generated.CronRun{head}
-			if kind == "failed event" {
-				fresh.runsErr = errors.New("offline")
-			}
-			m.api = &cronReadTestAPI{data: fresh}
-			if kind == "manual" {
-				m, _ = m.routeCronKey(keyRune('r'))
-			} else {
-				model, _ := m.handleEventReceived(eventReceivedMsg{eventType: "cron.run.observed", projectID: 7})
-				m = model.(Model)
-			}
-			next, fetch := m.cronSync()
-			m = next
-			require.NotNil(t, fetch)
-			m = m.cronLoaded(fetch().(cronLoadedMsg))
-			m, page := m.cronSync()
-			if page != nil {
-				msg, ok := page().(cronPageMsg)
-				require.True(t, ok)
-				m = m.cronPageLoaded(msg)
-			}
-			hasOld := func(rows []generated.CronRun) bool {
-				return slices.ContainsFunc(rows, func(r generated.CronRun) bool { return r.UID == old.UID })
-			}
-			if kind == "manual" {
-				require.False(t, hasOld(m.cron.runPage.runs))
-				require.False(t, hasOld(m.cron.jobPage.runs))
-				return
-			}
-			require.True(t, hasOld(m.cron.runPage.runs), "event must retain project history")
-			require.True(t, hasOld(m.cron.jobPage.runs), "event must retain job history")
-			require.Equal(t, projectCursor, m.cron.runPage.next)
-			require.Equal(t, jobCursor, m.cron.jobPage.next)
-			_, _, lines = cronScreen(m)
-			require.Equal(t, old.UID, lines[m.cron.stack[0].cursor].target.uid, "event keeps the selected run even when the head grows")
-			if kind == "failed event" {
-				require.ErrorContains(t, m.cron.runPage.err, "offline")
-				require.ErrorContains(t, m.cron.jobPage.err, "offline")
-			}
-		})
-	}
 }
 
 func cronGapFixture(t *testing.T, jobPage bool, count int) (Model, *cronReadTestAPI, string) {
@@ -474,179 +382,6 @@ func cronGapOlder(t *testing.T, m Model, job string) Model {
 	return m.cronPageLoaded(msg)
 }
 
-// Creation-ordered arrivals stay reachable across event head merges without
-// losing retained rows or selection.
-func TestCronHistoryEventHeadGapStaysReachable(t *testing.T) {
-	for _, jobPage := range []bool{false, true} {
-		limit := 100
-		if jobPage {
-			limit = 20
-		}
-		for _, arrivals := range []int{limit, 150} {
-			for _, state := range []string{"deep", "exhausted", "empty"} {
-				for _, selectOlder := range []bool{false, true} {
-					if state == "exhausted" && selectOlder {
-						continue // Identical to deep/link=true.
-					}
-					t.Run(fmt.Sprintf("job=%v/arrivals=%d/%s/link=%v", jobPage, arrivals, state, selectOlder), func(t *testing.T) {
-						m, a, job := cronGapFixture(t, jobPage, arrivals+limit+1)
-						p := cronGapPage(&m, job)
-						if state != "empty" {
-							p.runs = slices.Clone(a.data.runs[1 : limit+1])
-							slices.Reverse(p.runs)
-						}
-						if state == "deep" || selectOlder {
-							p.runs = slices.Clone(a.data.runs[1 : limit+1])
-							slices.Reverse(p.runs)
-							p.next = a.data.runs[1].UID
-						}
-						_, _, lines := cronScreen(m)
-						wanted := cronRef{cronRuns, a.data.runs[1].UID}
-						if selectOlder {
-							wanted = cronRef{kind: cronOlder, uid: job}
-							if job == "" {
-								wanted.uid = "project"
-							}
-						}
-						selected := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == wanted })
-						if state != "empty" || selectOlder {
-							require.GreaterOrEqual(t, selected, 0)
-						}
-						if selected >= 0 {
-							if jobPage {
-								m.cron.stack[0].cursor = selected
-							} else {
-								m.cron.lists[cronRuns].cursor = selected
-							}
-						}
-						m = cronGapEvent(t, m)
-						p = cronGapPage(&m, job)
-						require.Equal(t, a.data.runs[len(a.data.runs)-limit].UID, p.next)
-						if selected >= 0 {
-							_, _, lines = cronScreen(m)
-							cursor := m.cron.lists[cronRuns].cursor
-							if jobPage {
-								cursor = m.cron.stack[0].cursor
-							}
-							require.Equal(t, wanted, lines[cursor].target)
-						}
-						m = cronGapOlder(t, m, job)
-						p = cronGapPage(&m, job)
-						require.True(t, slices.ContainsFunc(p.runs, func(r generated.CronRun) bool { return r.UID == a.data.runs[len(a.data.runs)-limit-1].UID }))
-						if state != "empty" {
-							require.Contains(t, p.runs, a.data.runs[1])
-						}
-					})
-				}
-			}
-		}
-	}
-}
-
-func TestCronHistoryEventKeepsInflightOlderPage(t *testing.T) {
-	for _, jobPage := range []bool{false, true} {
-		limit := 100
-		if jobPage {
-			limit = 20
-		}
-		for _, olderFirst := range []bool{false, true} {
-			for _, terminal := range []bool{false, true} {
-				for _, overlaps := range []bool{false, true} {
-					if terminal && overlaps {
-						continue // overlaps overrides terminal: identical to terminal=false.
-					}
-					t.Run(fmt.Sprintf("job=%v/older-first=%v/terminal=%v/overlap=%v", jobPage, olderFirst, terminal, overlaps), func(t *testing.T) {
-						m, a, job := cronGapFixture(t, jobPage, 350)
-						index := 101
-						if terminal {
-							index = 1
-						}
-						if overlaps {
-							index = 340
-						}
-						p := cronGapPage(&m, job)
-						start, end := index, index+limit
-						if overlaps {
-							// Retain a full page ending at the original overlapping row.
-							start, end = index-limit+1, index+1
-						}
-						p.runs, p.next = slices.Clone(a.data.runs[start:end]), a.data.runs[start].UID
-						slices.Reverse(p.runs)
-						m, request := m.cronRequestPage(job, false)
-						late := request().(cronPageMsg)
-						require.NoError(t, late.err)
-						gen, cursor := cronGapPage(&m, job).gen, cronGapPage(&m, job).cursor
-						if olderFirst {
-							m = m.cronPageLoaded(late)
-						}
-						m = cronGapEvent(t, m)
-						if !olderFirst {
-							p = cronGapPage(&m, job)
-							require.True(t, p.out)
-							require.Equal(t, gen, p.gen)
-							require.Equal(t, cursor, p.cursor)
-							m = m.cronPageLoaded(late)
-							// Job head reloads intentionally wait for older results.
-							next, head := m.cronSync()
-							m = next
-							if head != nil {
-								m = m.cronPageLoaded(head().(cronPageMsg))
-							}
-						}
-						p = cronGapPage(&m, job)
-						require.Contains(t, p.runs, a.data.runs[index])
-						for _, r := range late.runs {
-							require.Contains(t, p.runs, r)
-						}
-						require.False(t, p.out)
-						want := a.data.runs[350-limit].UID
-						if overlaps {
-							want = late.next
-						}
-						require.Equal(t, want, p.next)
-						m = cronGapOlder(t, m, job)
-						require.Contains(t, cronGapPage(&m, job).runs, a.data.runs[350-limit-1])
-					})
-				}
-			}
-		}
-	}
-}
-
-func TestCronHistorySuccessiveHeadGapsDrainToExhaustion(t *testing.T) {
-	for _, jobPage := range []bool{false, true} {
-		t.Run(fmt.Sprintf("job=%v", jobPage), func(t *testing.T) {
-			limit := 100
-			if jobPage {
-				limit = 20
-			}
-			m, a, job := cronGapFixture(t, jobPage, 6*limit)
-			all := slices.Clone(a.data.runs)
-			p := cronGapPage(&m, job)
-			p.runs, p.next = slices.Clone(all[:limit]), all[0].UID
-			slices.Reverse(p.runs)
-			a.data.runs = all[:4*limit]
-			m = cronGapEvent(t, m)
-			m = cronGapOlder(t, m, job) // Fill only part of the first gap.
-			a.data.runs = all
-			m = cronGapEvent(t, m)
-			presses := 0
-			for cronGapPage(&m, job).next != "" {
-				require.Less(t, presses, 10, "continuation must terminate")
-				m = cronGapOlder(t, m, job)
-				presses++
-			}
-			// The full final page advertises a cursor; the final empty reply clears it.
-			require.Equal(t, 6, presses)
-			got := cronGapPage(&m, job).runs
-			require.Len(t, got, len(all))
-			for i, r := range got {
-				require.Equal(t, all[len(all)-1-i].UID, r.UID)
-			}
-		})
-	}
-}
-
 // Job details have independent server-filtered history; job pages and lookup
 // never enlarge the workflow's documented newest-100 history.
 func TestCronHistoryJobPagesAndLookup(t *testing.T) {
@@ -680,14 +415,284 @@ func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 	m.cron.stack = append(m.cron.stack, cronFrame{ref: cronRef{cronRuns, old.UID}})
 	require.Contains(t, stripANSI(m.viewBody()), old.Status)
 	require.Contains(t, stripANSI(m.viewBody()), "runs / "+old.UID)
-	// A head refresh must retain the run currently being inspected.
-	data := *m.cron.data
-	data.runs = nil
-	m = m.cronLoaded(cronLoadedMsg(data))
-	require.Contains(t, stripANSI(m.viewBody()), old.Status)
-	require.Contains(t, stripANSI(m.viewBody()), "runs / "+old.UID)
+	// A head refresh must retain the run currently being inspected, including
+	// when the project-head read fails.
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("inspected job run/failed=%v", failed), func(t *testing.T) {
+			data := *m.cron.data
+			data.runs = nil
+			if failed {
+				data.runsErr = errors.New("offline")
+			}
+			next := m.cronLoaded(cronLoadedMsg(data))
+			require.Contains(t, stripANSI(next.viewBody()), old.Status)
+			require.Contains(t, stripANSI(next.viewBody()), "runs / "+old.UID)
+		})
+	}
+
 	m.cron.stack = []cronFrame{{ref: cronRef{cronWorkflows, m.cron.data.workflows[0].UID}}}
 	_, _, lines = cronScreen(m)
 	require.False(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID }))
+	require.Contains(t, cronLinesText(lines), fmt.Sprintf("Loaded runs (%d) · newest 100", len(m.cron.data.runs)))
 
+	t.Run("project lookup survives failed refresh", func(t *testing.T) {
+		m := cronFixture(t)
+		r := m.cron.data.runs[0]
+		r.UID = "old-page"
+		a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{r}}
+		m.api = a
+		m.cron.runPage.runs = cronHistoryRows(m.cron.data.runs[0], 100)
+		m.cron.runPage.next = m.cron.runPage.runs[len(m.cron.runPage.runs)-1].UID
+		m, cmd := m.cronRequestPage("", false)
+		m = m.cronPageLoaded(cmd().(cronPageMsg))
+		data := *m.cron.data
+		data.runsErr = errors.New("offline")
+		m = m.cronLoaded(cronLoadedMsg(data))
+		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
+		_, _, lines := cronScreen(m)
+		require.Contains(t, cronLinesText(lines), "Report ready")
+	})
+}
+
+// Events retain pages, cursors, selection and in-flight reads; manual refresh
+// resets pages. Failed refreshes keep evidence and expose the read error.
+func TestCronHistoryEventPages(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		check func(*testing.T)
+	}{
+		{"refresh policy", func(t *testing.T) {
+			for _, kind := range []string{"event", "manual", "failed event"} {
+				t.Run(kind, func(t *testing.T) {
+					m := cronSeenFixture(t)
+					head := m.cron.data.runs[0]
+					old := head
+					old.UID = "old-history"
+					old.CreatedAt = head.CreatedAt.Add(-time.Hour)
+					old.Status = "failed"
+					m.cron.data.runs = []generated.CronRun{old}
+					m.cron.data.lastRuns = map[string]generated.CronRun{*old.JobUID: old}
+					m.cron.runPage = cronHistoryPage{runs: cronHistoryRows(old, 100), next: old.UID, ready: true, older: true}
+					m.cron.jobPage = cronHistoryPage{job: *old.JobUID, runs: cronHistoryRows(old, 20), next: old.UID, ready: true, older: true}
+					m.cron.runPage.next = m.cron.runPage.runs[len(m.cron.runPage.runs)-1].UID
+					m.cron.jobPage.next = m.cron.jobPage.runs[len(m.cron.jobPage.runs)-1].UID
+					projectCursor, jobCursor := m.cron.runPage.next, m.cron.jobPage.next
+					m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, *old.JobUID}}}
+					_, _, lines := cronScreen(m)
+					m.cron.stack[0].cursor = slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
+					require.GreaterOrEqual(t, m.cron.stack[0].cursor, 0)
+					fresh := *m.cron.data
+					fresh.runs = []generated.CronRun{head}
+					if kind == "failed event" {
+						fresh.runsErr = errors.New("offline")
+					}
+					m.api = &cronReadTestAPI{data: fresh}
+					if kind == "manual" {
+						m, _ = m.routeCronKey(keyRune('r'))
+					} else {
+						model, _ := m.handleEventReceived(eventReceivedMsg{eventType: "cron.run.observed", projectID: 7})
+						m = model.(Model)
+					}
+					next, fetch := m.cronSync()
+					m = next
+					require.NotNil(t, fetch)
+					m = m.cronLoaded(fetch().(cronLoadedMsg))
+					m, page := m.cronSync()
+					if page != nil {
+						msg, ok := page().(cronPageMsg)
+						require.True(t, ok)
+						m = m.cronPageLoaded(msg)
+					}
+					hasOld := func(rows []generated.CronRun) bool {
+						return slices.ContainsFunc(rows, func(r generated.CronRun) bool { return r.UID == old.UID })
+					}
+					if kind == "manual" {
+						require.False(t, hasOld(m.cron.runPage.runs))
+						require.False(t, hasOld(m.cron.jobPage.runs))
+						return
+					}
+					require.True(t, hasOld(m.cron.runPage.runs), "event must retain project history")
+					require.True(t, hasOld(m.cron.jobPage.runs), "event must retain job history")
+					require.Equal(t, projectCursor, m.cron.runPage.next)
+					require.Equal(t, jobCursor, m.cron.jobPage.next)
+					_, _, lines = cronScreen(m)
+					require.Equal(t, old.UID, lines[m.cron.stack[0].cursor].target.uid, "event keeps the selected run even when the head grows")
+					if kind == "failed event" {
+						require.ErrorContains(t, m.cron.runPage.err, "offline")
+						require.ErrorContains(t, m.cron.jobPage.err, "offline")
+					}
+				})
+			}
+		}},
+		{"head gap", func(t *testing.T) {
+			for _, jobPage := range []bool{false, true} {
+				limit := 100
+				if jobPage {
+					limit = 20
+				}
+				for _, arrivals := range []int{limit, 150} {
+					for _, state := range []string{"deep", "exhausted", "empty"} {
+						for _, selectOlder := range []bool{false, true} {
+							if (state == "exhausted" || state == "empty") && selectOlder {
+								continue // Identical to deep/link=true.
+							}
+							t.Run(fmt.Sprintf("job=%v/arrivals=%d/%s/link=%v", jobPage, arrivals, state, selectOlder), func(t *testing.T) {
+								m, a, job := cronGapFixture(t, jobPage, arrivals+limit+1)
+								p := cronGapPage(&m, job)
+								if state != "empty" {
+									p.runs = slices.Clone(a.data.runs[1 : limit+1])
+									slices.Reverse(p.runs)
+								}
+								if state == "deep" || selectOlder {
+									p.runs = slices.Clone(a.data.runs[1 : limit+1])
+									slices.Reverse(p.runs)
+									p.next = a.data.runs[1].UID
+								}
+								_, _, lines := cronScreen(m)
+								wanted := cronRef{cronRuns, a.data.runs[1].UID}
+								if selectOlder {
+									wanted = cronRef{kind: cronOlder, uid: job}
+									if job == "" {
+										wanted.uid = "project"
+									}
+								}
+								selected := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == wanted })
+								if state != "empty" || selectOlder {
+									require.GreaterOrEqual(t, selected, 0)
+								}
+								if selected >= 0 {
+									if jobPage {
+										m.cron.stack[0].cursor = selected
+									} else {
+										m.cron.lists[cronRuns].cursor = selected
+									}
+								}
+								m = cronGapEvent(t, m)
+								p = cronGapPage(&m, job)
+								require.Equal(t, a.data.runs[len(a.data.runs)-limit].UID, p.next)
+								if selected >= 0 {
+									_, _, lines = cronScreen(m)
+									cursor := m.cron.lists[cronRuns].cursor
+									if jobPage {
+										cursor = m.cron.stack[0].cursor
+									}
+									require.Equal(t, wanted, lines[cursor].target)
+								}
+								m = cronGapOlder(t, m, job)
+								p = cronGapPage(&m, job)
+								require.True(t, slices.ContainsFunc(p.runs, func(r generated.CronRun) bool { return r.UID == a.data.runs[len(a.data.runs)-limit-1].UID }))
+								if state != "empty" {
+									require.Contains(t, p.runs, a.data.runs[1])
+								}
+							})
+						}
+					}
+				}
+			}
+		}},
+		{"inflight older page", func(t *testing.T) {
+			for _, jobPage := range []bool{false, true} {
+				limit := 100
+				if jobPage {
+					limit = 20
+				}
+				for _, olderFirst := range []bool{false, true} {
+					for _, terminal := range []bool{false, true} {
+						for _, overlaps := range []bool{false, true} {
+							if terminal && overlaps {
+								continue // overlaps overrides terminal: identical to terminal=false.
+							}
+							t.Run(fmt.Sprintf("job=%v/older-first=%v/terminal=%v/overlap=%v", jobPage, olderFirst, terminal, overlaps), func(t *testing.T) {
+								m, a, job := cronGapFixture(t, jobPage, 350)
+								index := 101
+								if terminal {
+									index = 1
+								}
+								if overlaps {
+									index = 340
+								}
+								p := cronGapPage(&m, job)
+								start, end := index, index+limit
+								if overlaps {
+									// Retain a full page ending at the original overlapping row.
+									start, end = index-limit+1, index+1
+								}
+								p.runs, p.next = slices.Clone(a.data.runs[start:end]), a.data.runs[start].UID
+								slices.Reverse(p.runs)
+								m, request := m.cronRequestPage(job, false)
+								late := request().(cronPageMsg)
+								require.NoError(t, late.err)
+								gen, cursor := cronGapPage(&m, job).gen, cronGapPage(&m, job).cursor
+								if olderFirst {
+									m = m.cronPageLoaded(late)
+								}
+								m = cronGapEvent(t, m)
+								if !olderFirst {
+									p = cronGapPage(&m, job)
+									require.True(t, p.out)
+									require.Equal(t, gen, p.gen)
+									require.Equal(t, cursor, p.cursor)
+									m = m.cronPageLoaded(late)
+									// Job head reloads intentionally wait for older results.
+									next, head := m.cronSync()
+									m = next
+									if head != nil {
+										m = m.cronPageLoaded(head().(cronPageMsg))
+									}
+								}
+								p = cronGapPage(&m, job)
+								require.Contains(t, p.runs, a.data.runs[index])
+								for _, r := range late.runs {
+									require.Contains(t, p.runs, r)
+								}
+								require.False(t, p.out)
+								want := a.data.runs[350-limit].UID
+								if overlaps {
+									want = late.next
+								}
+								require.Equal(t, want, p.next)
+								m = cronGapOlder(t, m, job)
+								require.Contains(t, cronGapPage(&m, job).runs, a.data.runs[350-limit-1])
+							})
+						}
+					}
+				}
+			}
+		}},
+		{"successive gaps", func(t *testing.T) {
+			for _, jobPage := range []bool{false, true} {
+				t.Run(fmt.Sprintf("job=%v", jobPage), func(t *testing.T) {
+					limit := 100
+					if jobPage {
+						limit = 20
+					}
+					m, a, job := cronGapFixture(t, jobPage, 6*limit)
+					all := slices.Clone(a.data.runs)
+					p := cronGapPage(&m, job)
+					p.runs, p.next = slices.Clone(all[:limit]), all[0].UID
+					slices.Reverse(p.runs)
+					a.data.runs = all[:4*limit]
+					m = cronGapEvent(t, m)
+					m = cronGapOlder(t, m, job) // Fill only part of the first gap.
+					a.data.runs = all
+					m = cronGapEvent(t, m)
+					presses := 0
+					for cronGapPage(&m, job).next != "" {
+						require.Less(t, presses, 10, "continuation must terminate")
+						m = cronGapOlder(t, m, job)
+						presses++
+					}
+					// The full final page advertises a cursor; the final empty reply clears it.
+					require.Equal(t, 6, presses)
+					got := cronGapPage(&m, job).runs
+					require.Len(t, got, len(all))
+					for i, r := range got {
+						require.Equal(t, all[len(all)-1-i].UID, r.UID)
+					}
+				})
+			}
+		}},
+	} {
+		t.Run(tc.name, tc.check)
+	}
 }

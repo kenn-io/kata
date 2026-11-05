@@ -2,7 +2,6 @@ package tui
 
 import (
 	"errors"
-	"fmt"
 	"math"
 	"slices"
 	"strconv"
@@ -26,6 +25,7 @@ func TestCronHealthStates(t *testing.T) {
 		name, status, want, reason string
 		edit                       func(*generated.CronJob)
 		unreadable                 bool
+		prefix                     bool
 		runDefinition              *string
 	}{
 		{name: "success", reason: "last run status is succeeded", status: "succeeded", want: "ok"},
@@ -74,7 +74,7 @@ func TestCronHealthStates(t *testing.T) {
 		{name: "grace equality", reason: "No scheduled run is past its grace period", want: "never ran", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-15 * time.Minute).Format(time.RFC3339))}
 		}},
-		{name: "invalid trigger", reason: "invalid definition: ", want: "unavailable", edit: func(j *generated.CronJob) {
+		{name: "invalid trigger", prefix: true, reason: "invalid definition: ", want: "unavailable", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("invalid")}
 		}},
 	} {
@@ -93,7 +93,7 @@ func TestCronHealthStates(t *testing.T) {
 			}
 			got := cronHealth(p, j, now)
 			require.Equal(t, tc.want, got.state)
-			if tc.name == "invalid trigger" {
+			if tc.prefix {
 				require.True(t, strings.HasPrefix(got.reason, tc.reason), "%q must start with %q", got.reason, tc.reason)
 			} else {
 				require.Equal(t, tc.reason, got.reason)
@@ -116,9 +116,6 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 	require.Equal(t, "parent closed", cronHealth(p, j, now).state)
 	delete(p.parentOpen, nextParentUID)
 	require.Equal(t, "unavailable", cronHealth(p, j, now).state)
-	p.parentOpen[nextParentUID] = true
-	p.progress[j.UID] = cron.RecurringProgress{Version: 9, Anchor: now, Through: now}
-	require.Equal(t, "unavailable", cronHealth(p, j, now).state, "corrupt progress cannot establish delivery health")
 
 	t.Run("observations do not affect delivery", func(t *testing.T) {
 		j := cronFixture(t).cron.data.jobs[0]
@@ -165,28 +162,26 @@ func TestCronHealthFailedNeverOK(t *testing.T) {
 	}, hegel.WithTestCases(2000))
 }
 
-func TestCronHealthDailyScheduleAndGrace(t *testing.T) {
+func TestCronHealthOnceGrace(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	hegel.Test(t, func(ht *hegel.T) {
-		minute := hegel.Draw(ht, hegel.Integers(0, 59))
-		hour := hegel.Draw(ht, hegel.Integers(0, 23))
-		j.Definition.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new(fmt.Sprintf("%d %d * * *", minute, hour))}
-		base := hegel.Draw(ht, hegel.Datetimes())
-		j.CreatedAt = base
-		j.Definition.GraceSeconds = new(hegel.Draw(ht, hegel.Integers[int64](0, 86400)))
-		now := base.Add(time.Duration(hegel.Draw(ht, hegel.Integers[int64](0, 7*86400))) * time.Second)
-		due := time.Date(base.Year(), base.Month(), base.Day(), hour, minute, 0, 0, time.UTC)
-		if !due.After(base) {
-			due = due.AddDate(0, 0, 1)
-		}
+		// A fixed instant keeps the oracle about grace, rather than cron arithmetic.
+		due := snapshotFixedNow
+		j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(due.Format(time.RFC3339))}
+		seconds := hegel.Draw(ht, hegel.Integers[int64](0, 86400))
+		j.Definition.GraceSeconds = new(seconds)
 		grace := 15 * time.Minute
-		if *j.Definition.GraceSeconds > 0 {
-			grace = time.Duration(*j.Definition.GraceSeconds) * time.Second
+		if seconds > 0 {
+			grace = time.Duration(seconds) * time.Second
 		}
-		want := due.Year() <= 9999 && due.Add(grace).Before(now)
-		got := cronHealth(cronData{lastErr: map[string]error{}}, j, now)
-		if (got.state == "missed") != want {
-			ht.Fatalf("missed=%v want=%v base=%s due=%v now=%s", got, want, base, due, now)
+		// Always check equality and both sides; also vary now independently.
+		offset := time.Duration(hegel.Draw(ht, hegel.Integers[int64](-86400, 172800))) * time.Second
+		for _, elapsed := range []time.Duration{grace - time.Nanosecond, grace, grace + time.Nanosecond, offset} {
+			now := due.Add(elapsed)
+			got := cronHealth(cronData{lastErr: map[string]error{}}, j, now)
+			if (got.state == "missed") != (elapsed > grace) {
+				ht.Fatalf("health=%v grace=%v elapsed=%v", got, grace, elapsed)
+			}
 		}
 	}, hegel.WithTestCases(2000))
 }

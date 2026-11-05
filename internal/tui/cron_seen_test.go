@@ -111,8 +111,9 @@ func TestCronSeenFiles(t *testing.T) {
 	cancel()
 	_, err = cronSeenLoad(ctx, path)
 	require.ErrorIs(t, err, context.Canceled)
-	// Simultaneous processes may begin from different stale snapshots. The lock
-	// protects reread/merge/replace, including unrelated project entries.
+	// Concurrent-save smoke test: stale snapshots must merge unrelated project
+	// entries. Scheduling is uncontrolled, so this does not deterministically
+	// prove that the file lock prevents lost updates.
 	var wg sync.WaitGroup
 	errs := make(chan error, 20)
 	for i := range 20 {

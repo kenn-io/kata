@@ -17,8 +17,9 @@ import (
 )
 
 // Contract: a pulled observation retains its payload through the daemon event
-// publisher, and repeating the pull publishes nothing. This supplies a callback;
-// it does not exercise the daemon runner's callback wiring or fork admission.
+// publisher on the pull-only path used by FederationPullOnce. This supplies
+// publisher.Events explicitly; it does not test daemon callback installation,
+// background Runner wiring, or fork admission. A repeat pull emits no duplicate.
 func TestCronPulledObservationPayloadAndOnceOnlyPublishing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
@@ -50,7 +51,7 @@ func TestCronPulledObservationPayloadAndOnceOnlyPublishing(t *testing.T) {
 	pull := func() {
 		binding, err := spoke.FederationBindingByProject(ctx, local.ID)
 		require.NoError(t, err)
-		require.NoError(t, federation.SyncFederationOnceWithPulledEvents(ctx, spoke, binding, credential, clientpkg.Opts{}, func(projectID int64, events []db.Event) { publisher.EventsFrom(projectID, events, nil) }))
+		require.NoError(t, federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, spoke, binding, credential, clientpkg.Opts{}, publisher.Events))
 	}
 	pull()
 	select {
@@ -73,7 +74,7 @@ func TestCronPulledObservationPayloadAndOnceOnlyPublishing(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	// The sync invokes its callback inline after commit, and EventsFrom sends
+	// The sync invokes its callback inline after commit, and Events sends
 	// to the subscriber synchronously, so an empty channel is conclusive here.
 	pull()
 	select {

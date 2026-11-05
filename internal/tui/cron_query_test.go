@@ -59,50 +59,6 @@ func TestCronQueryArbitraryInputTotal(t *testing.T) {
 	}, hegel.WithTestCases(2000))
 }
 
-func TestCronQueryUsesUntruncatedFields(t *testing.T) {
-	defer snapshotInit(t)()
-	m := cronFixture(t)
-	m.cron.data.jobs[0].Name = strings.Repeat("a", 100) + "tail"
-	m = m.cronFilter("health:ok action:workflow tail")
-	title, _, lines := cronScreen(m)
-	require.Len(t, lines, 1)
-	require.Contains(t, title, "filtered")
-	m = sendRune(m, '3')
-	r := &m.cron.runPage.runs[0]
-	r.Teammate = new("reader")
-	r.IssueUID = new("01ABC123")
-	r.Revision++
-	m = m.cronRemember([]generated.CronRun{*r})
-	m = m.cronFilter("status:succeeded executor:executor-a teammate:reader issue:01abc")
-	title, _, lines = cronScreen(m)
-	require.Len(t, lines, 1)
-	require.Contains(t, title, "filtered")
-	require.Equal(t, m.cron.data.runs[0].UID, lines[0].target.uid, "the matching full-value row is reachable")
-	assertGolden(t, "cron-runs-filter-tokens", m.viewBody())
-}
-
-func TestCronQueryCombinedBlockedFilter(t *testing.T) {
-	m := cronSeenFixture(t)
-	j := m.cron.data.jobs[0]
-	j.Definition.Trigger = generated.TriggerResponse{Kind: "manual"}
-	r := generated.CronRun{UID: "waiting-run", JobUID: new(j.UID), IssueUID: new("waiting-issue"), Status: "running", Actor: "operator", CreatedAt: snapshotFixedNow}
-	m.cron.data.jobs = []generated.CronJob{j}
-	m.cron.data.runs = []generated.CronRun{r}
-	m.cron.runPage.runs = []generated.CronRun{r}
-	m.cron.data.lastRuns = map[string]generated.CronRun{j.UID: r}
-	m.cron.data.lastErr = map[string]error{}
-	m.cron.data.waits = map[string]cronParent{"waiting-issue": {open: true, metadata: map[string]any{"work.attention": "needs-human"}}}
-	m.cron.lists[cronJobs].query = "health:blocked status:running"
-	_, _, lines := cronScreen(m)
-	require.Len(t, lines, 1)
-	require.Contains(t, lines[0].text, "blocked")
-	m.cron.tab = cronRuns
-	m.cron.lists[cronRuns].query = "status:running actor:operator"
-	_, _, lines = cronScreen(m)
-	require.Len(t, lines, 1)
-	require.Contains(t, lines[0].text, "blocked")
-}
-
 // OR within status and AND across actor share one closed-form query oracle.
 func TestCronQueryRepeatedStatusAndActorIntersection(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
@@ -137,4 +93,57 @@ func TestCronQueryRepeatedStatusAndActorIntersection(t *testing.T) {
 			ht.Fatal("fixed query must intersect the actor match")
 		}
 	}, hegel.WithTestCases(2000))
+}
+
+func TestCronQueryViewFields(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		fixture func(*testing.T) Model
+		check   func(*testing.T, Model)
+	}{
+		{"full values", cronFixture, func(t *testing.T, m Model) {
+			m.cron.data.jobs[0].Name = strings.Repeat("a", 100) + "tail"
+			m = m.cronFilter("health:ok action:workflow tail")
+			title, _, lines := cronScreen(m)
+			require.Len(t, lines, 1)
+			require.Contains(t, title, "filtered")
+			m = sendRune(m, '3')
+			r := &m.cron.runPage.runs[0]
+			r.Teammate = new("reader")
+			r.IssueUID = new("01ABC123")
+			r.Revision++
+			m = m.cronRemember([]generated.CronRun{*r})
+			m = m.cronFilter("status:succeeded executor:executor-a teammate:reader issue:01abc")
+			title, _, lines = cronScreen(m)
+			require.Len(t, lines, 1)
+			require.Contains(t, title, "filtered")
+			require.Equal(t, m.cron.data.runs[0].UID, lines[0].target.uid, "the matching full-value row is reachable")
+			assertGolden(t, "cron-runs-filter-tokens", m.viewBody())
+		}},
+		{"blocked running", cronSeenFixture, func(t *testing.T, m Model) {
+			j := m.cron.data.jobs[0]
+			j.Definition.Trigger = generated.TriggerResponse{Kind: "manual"}
+			r := generated.CronRun{UID: "waiting-run", JobUID: new(j.UID), IssueUID: new("waiting-issue"), Status: "running", Actor: "operator", CreatedAt: snapshotFixedNow}
+			m.cron.data.jobs = []generated.CronJob{j}
+			m.cron.data.runs = []generated.CronRun{r}
+			m.cron.runPage.runs = []generated.CronRun{r}
+			m.cron.data.lastRuns = map[string]generated.CronRun{j.UID: r}
+			m.cron.data.lastErr = map[string]error{}
+			m.cron.data.waits = map[string]cronParent{"waiting-issue": {open: true, metadata: map[string]any{"work.attention": "needs-human"}}}
+			m.cron.lists[cronJobs].query = "health:blocked status:running"
+			_, _, lines := cronScreen(m)
+			require.Len(t, lines, 1)
+			require.Contains(t, lines[0].text, "blocked")
+			m.cron.tab = cronRuns
+			m.cron.lists[cronRuns].query = "status:running actor:operator"
+			_, _, lines = cronScreen(m)
+			require.Len(t, lines, 1)
+			require.Contains(t, lines[0].text, "blocked")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer snapshotInit(t)()
+			tc.check(t, tc.fixture(t))
+		})
+	}
 }

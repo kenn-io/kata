@@ -80,45 +80,30 @@ func TestCronWaitClientReadsOpenAndDeletedMetadata(t *testing.T) {
 // Contract: a wait is an inference from a running observation plus an open
 // issue's work.attention or the exact run actor's validated notification.
 func TestCronWaitBlockedIffRunningOpenAndSignalled(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		statuses := []string{"running", "failed", "unknown", "succeeded", "cancelled"}
-		attentions := []string{"needs-human", "stuck", "ok", "", "unrecognized"}
-		status := hegel.Draw(ht, hegel.SampledFrom(statuses))
-		attention := hegel.Draw(ht, hegel.SampledFrom(attentions))
-		open := hegel.Draw(ht, hegel.Booleans())
-		request := hegel.Draw(ht, hegel.Booleans())
-		r := generated.CronRun{Status: status, Actor: " operator ", IssueUID: new("issue-example")}
-		metadata := map[string]any{"work.attention": attention}
-		if request {
-			metadata[notification.MetadataKey("operator")] = map[string]any{"from": "worker", "message": "please review"}
-		}
-		p := cronData{waits: map[string]cronParent{"issue-example": {open: open, metadata: metadata}}}
-		want := status == "running" && open && (request || attention == "needs-human" || attention == "stuck")
-		got := cronRunHealth(p, r)
-		if request {
-			if _, ok := metadata[notification.MetadataKey("operator")]; !ok {
-				ht.Fatal("reading attention must not consume requests")
+	// Enumerate the finite contract so removing the transition examples cannot
+	// lose their cases to random sampling. Both normalized actor forms matter.
+	for _, status := range []string{"running", "failed", "unknown", "succeeded", "cancelled"} {
+		for _, attention := range []string{"needs-human", "stuck", "ok", "", "unrecognized"} {
+			for _, open := range []bool{false, true} {
+				for _, request := range []bool{false, true} {
+					for _, actor := range []string{"operator", " operator "} {
+						r := generated.CronRun{Status: status, Actor: actor, IssueUID: new("issue-example")}
+						metadata := map[string]any{"work.attention": attention}
+						if request {
+							metadata[notification.MetadataKey("operator")] = map[string]any{"from": "worker", "message": "please review"}
+						}
+						p := cronData{waits: map[string]cronParent{"issue-example": {open: open, metadata: metadata}}}
+						want := status == "running" && open && (request || attention == "needs-human" || attention == "stuck")
+						got := cronRunHealth(p, r)
+						if request {
+							require.Contains(t, metadata, notification.MetadataKey("operator"), "reading attention must not consume requests")
+						}
+						require.Equal(t, want, got.state == "blocked", "status=%q open=%v attention=%q request=%v actor=%q: %v", status, open, attention, request, actor, got)
+					}
+				}
 			}
 		}
-		if (got.state == "blocked") != want {
-			ht.Fatalf("status=%q open=%v attention=%q request=%v: got %v want blocked=%v", status, open, attention, request, got, want)
-		}
-	}, hegel.WithTestCases(600))
-
-	t.Run("both signals must clear", func(t *testing.T) {
-		key := notification.MetadataKey("operator")
-		w := cronParent{open: true, metadata: map[string]any{"work.attention": "needs-human", key: map[string]any{"from": "worker", "message": "review"}}}
-		require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
-		require.Contains(t, w.metadata, key, "reading attention must not consume the request")
-		delete(w.metadata, key)
-		require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
-		w.metadata["work.attention"] = "ok"
-		require.Equal(t, "running", cronRunWaitForActor(w, "operator").state)
-		w.metadata[key] = map[string]any{"from": "worker", "message": "review"}
-		require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
-		w.open = false
-		require.Equal(t, "running", cronRunWaitForActor(w, "operator").state)
-	})
+	}
 }
 
 func TestCronHealthOverdueWinsAndNativeIgnoresWait(t *testing.T) {
