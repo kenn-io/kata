@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -87,4 +88,33 @@ func TestCronJobShowWhyRejectsUnsupportedResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCronJobShowWhyNativeParentClosed(t *testing.T) {
+	env := testenv.New(t)
+	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Recurring commitment", Author: "operator"})
+	require.NoError(t, err)
+	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60}, Action: cron.Action{Kind: "notify", Recipient: "operator"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "all"}
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Review", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+	_, _, _, err = env.DB.CloseIssue(t.Context(), parent.ID, "done", "operator", "Pause delivery while the parent is closed", nil)
+	require.NoError(t, err)
+	plain, _, err := executeCronCLI(t, env.URL, nil, "job", "show", job.UID)
+	require.NoError(t, err)
+	why, _, err := executeCronCLI(t, env.URL, nil, "job", "show", job.UID, "--why")
+	require.NoError(t, err)
+	var before, after map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(plain), &before))
+	require.NoError(t, json.Unmarshal([]byte(why), &after))
+	var dispatch struct {
+		Gate struct {
+			Reason string `json:"reason"`
+		} `json:"gate"`
+	}
+	require.NoError(t, json.Unmarshal(after["dispatch"], &dispatch))
+	require.Equal(t, "parent_closed", dispatch.Gate.Reason)
+	delete(after, "dispatch")
+	require.Equal(t, before, after)
 }

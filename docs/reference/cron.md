@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -350,7 +350,12 @@ records; the reader does not validate it against this CLI's known codes.
 | `definition_changed` | The definition changed after enumeration; the next sweep retries. |
 | `parent_missing`, `parent_deleted`, `parent_closed` | The bound parent could not accept delivery. |
 | `progress_invalid`, `schedule_invalid`, `recipient_invalid` | Delivery failed closed on invalid stored state or recipient. |
-| `error` | Another failure occurred; the local log contains its detail. |
+| `error` | Another failure occurred; recorded dispatch errors have detail in the cron log. Live check errors have detail in daemon diagnostic output. |
+
+For a failed live check, search `daemon.log` or the daemon's stderr/service logs
+for `explain recurring cron dispatch`. Embedded hosts use their configured
+`Config.Logger` output. Recorded dispatch errors remain available through
+`kata daemon logs --cron`.
 
 The daemon retains each candidate's last decision in memory and logs changes,
 deliveries and finalized skips. A first idle observation, or a return to idle

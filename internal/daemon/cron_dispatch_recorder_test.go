@@ -77,15 +77,22 @@ func (s *failingRecurringStore) DispatchRecurringCron(ctx context.Context, in db
 	return s.Storage.DispatchRecurringCron(ctx, in)
 }
 
+func nativeDispatchJob(t *testing.T, store db.Storage, projectID int64) db.CronJob {
+	t.Helper()
+	parent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projectID, Title: "Recurring commitment", Author: "operator"})
+	require.NoError(t, err)
+	job, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: projectID, Name: "Review", Actor: "operator", Definition: cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60}, Action: cron.Action{Kind: "notify", Recipient: "operator"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "all"}})
+	require.NoError(t, err)
+	return job
+}
+
 func TestCronSweeperRetainsCommittedBatchBeforeLaterError(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
-	parent, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Recurring commitment", Author: "operator"})
-	require.NoError(t, err)
-	job, _, err := env.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Review", Actor: "operator", Definition: cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60}, Action: cron.Action{Kind: "notify", Recipient: "operator"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "all"}})
-	require.NoError(t, err)
+	job := nativeDispatchJob(t, env.DB, p.ID)
+
 	r := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
 	t.Cleanup(func() { require.NoError(t, r.Close()) })
 	sink := &captureHookSink{}

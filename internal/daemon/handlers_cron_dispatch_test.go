@@ -125,11 +125,7 @@ func TestCronDispatchExplanationRedactsFailureAndObservation(t *testing.T) {
 	env := testenv.New(t)
 	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
-	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Review", Author: "operator"})
-	require.NoError(t, err)
-	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60}, Action: cron.Action{Kind: "notify", Recipient: "operator"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "all"}
-	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Review", Actor: "operator", Definition: definition})
-	require.NoError(t, err)
+	job := nativeDispatchJob(t, env.DB, p.ID)
 	recorder := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
 	t.Cleanup(func() { require.NoError(t, recorder.Close()) })
 	_, err = recorder.Record(t.Context(), db.RecurringCronCandidate{JobUID: job.UID, ProjectID: p.ID, ProjectUID: p.UID}, db.DispatchRecurringCronOut{Reason: cron.DispatchError}, errors.New("local-sensitive-detail"), time.Now())
@@ -144,7 +140,6 @@ func TestCronDispatchExplanationRedactsFailureAndObservation(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	require.Equalf(t, 200, response.Code, "%s", response.Body.String())
 	require.NotContains(t, response.Body.String(), "local-sensitive-detail")
-	require.Contains(t, response.Body.String(), cron.DispatchError.PublicDetail())
 	require.Contains(t, logs.String(), "local-sensitive-detail")
 	require.Contains(t, response.Body.String(), `"last":{`)
 	// The route must wire both recorder outputs correctly; recorder-only tests
@@ -155,6 +150,9 @@ func TestCronDispatchExplanationRedactsFailureAndObservation(t *testing.T) {
 	require.Equal(t, cron.DispatchIdle, body.Last.Reason)
 	require.NotNil(t, body.LastNonIdle)
 	require.Equal(t, cron.DispatchError, body.LastNonIdle.Reason)
+	require.Equal(t, "Live dispatch check failed; inspect daemon.log or the daemon's stderr/service logs for 'explain recurring cron dispatch'.", body.Gate.Detail)
+	require.Equal(t, cron.DispatchError.PublicDetail(), body.LastNonIdle.Detail)
+	require.Contains(t, logs.String(), "explain recurring cron dispatch")
 	t.Run("invalid progress polling", func(t *testing.T) {
 		env := testenv.New(t)
 		p, err := env.DB.CreateProject(t.Context(), "example-project")

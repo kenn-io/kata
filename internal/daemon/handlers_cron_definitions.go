@@ -194,8 +194,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "explainCronJobDispatch", Method: http.MethodGet, Path: path + "/{cron_uid}/dispatch"}, func(ctx context.Context, in *api.CronDefinitionRequest) (*api.CronDispatchResponse, error) {
-		_, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
-		if err != nil {
+		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
 		in.UID = strings.ToUpper(strings.TrimSpace(in.UID))
@@ -206,6 +205,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			if logger == nil {
 				logger = slog.Default()
 			}
+			gate.Detail = "Live dispatch check failed; inspect daemon.log or the daemon's stderr/service logs for 'explain recurring cron dispatch'."
 			logger.ErrorContext(ctx, "explain recurring cron dispatch", "project_id", in.ProjectID, "job_uid", in.UID, "err", err)
 		}
 		if gate.Reason == cron.DispatchJobMissing || gate.Reason == cron.DispatchProjectUnavailable {
