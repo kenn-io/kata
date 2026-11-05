@@ -14,6 +14,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
@@ -823,7 +824,8 @@ func TestUndoBacklogAnswerAfterHelpKeepsEntryAndHelpExit(t *testing.T) {
 // A reopen lookup that lands after the user opened Help is dropped the same way.
 func TestReopenBacklogAnswerAfterHelpIsDropped(t *testing.T) {
 	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
-	m, _ := updateModel(listReopenModel(t, spy), tea.WindowSizeMsg{Width: 120, Height: 40})
+	m := resizeModel(listReopenModel(t, spy), 200, 40)
+	require.Equal(t, splitlayout.Split, m.layout)
 	m, cmd := updateModel(m, runeKey('r'))
 	require.NotNil(t, cmd)
 	reply := cmd()
@@ -841,7 +843,7 @@ func TestReopenBacklogAnswerAfterHelpIsDropped(t *testing.T) {
 // The confirmation's keys must stay on screen however short the terminal is.
 func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 	for _, origin := range []string{"list", "detail"} {
-		for _, size := range [][2]int{{100, 8}, {100, 5}, {100, 3}, {100, 2}, {200, 6}, {60, 8}} {
+		for _, size := range [][2]int{{100, 8}, {100, 4}, {100, 3}, {100, 2}, {100, 1}, {60, 8}, {40, 24}} {
 			t.Run(fmt.Sprintf("%s/%dx%d", origin, size[0], size[1]), func(t *testing.T) {
 				spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
 				model := listReopenModel
@@ -857,26 +859,37 @@ func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 				require.Contains(t, view, "3 recurring child", "the backlog being confirmed stays on screen")
 				require.Contains(t, view, "y reopen")
 				require.Contains(t, view, "n/esc cancel")
+				require.NotContains(t, view, "Parent", "the compact confirmation clears the underlying view")
+				for _, line := range strings.Split(view, "\n") {
+					require.LessOrEqual(t, lipgloss.Width(line), size[0])
+				}
 
-				m, cmd := updateModel(m, runeKey('n'))
+				cancelled, cmd := updateModel(m, runeKey('n'))
 				require.Nil(t, cmd)
-				require.Equal(t, modalNone, m.modal)
+				require.Equal(t, modalNone, cancelled.modal)
 				require.Zero(t, spy.reopens)
+				if size == [2]int{100, 1} {
+					_, cmd = updateModel(m, runeKey('y'))
+					require.NotNil(t, cmd)
+					require.IsType(t, mutationDoneMsg{}, cmd())
+					require.Equal(t, 1, spy.reopens)
+				}
 			})
 		}
 	}
 }
 
 // Undo names the issue with its project, so a long reference must not push the
-// backlog count off a narrow compact confirmation.
-func TestReopenBacklogCountSurvivesLongReference(t *testing.T) {
+// issue ID or backlog count off a narrow compact confirmation.
+func TestReopenBacklogLongReferenceKeepsIDAndCount(t *testing.T) {
 	m := newTestModel()
 	m.modal = modalReopenBacklog
 	m.reopenPrompt = &reopenPrompt{ref: "example-workspace-recurring-automation#abcd", count: 3, undoEntryID: 1}
-	for _, size := range [][2]int{{60, 8}, {60, 5}, {60, 3}, {60, 2}} {
+	for _, size := range [][2]int{{60, 8}, {60, 2}, {60, 1}} {
 		m = resizeModel(m, size[0], size[1])
 		view := stripANSI(m.viewContent())
 		require.LessOrEqual(t, len(strings.Split(view, "\n")), size[1])
+		require.Contains(t, view, "#abcd", "%dx%d", size[0], size[1])
 		require.Contains(t, view, "3 recurring child", "%dx%d", size[0], size[1])
 		require.Contains(t, view, "n/esc cancel")
 	}

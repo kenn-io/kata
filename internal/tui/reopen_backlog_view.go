@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 )
 
 // reopenPrompt is the pending confirmation for a reopen that would deliver a
@@ -148,38 +149,38 @@ func (m Model) cancelReopenBacklog() Model {
 // is placed, so no terminal height lets the modal or a compact view layout hide
 // the keys that answer it.
 func (m Model) overlayReopenBacklog(body string) string {
-	footer := renderFooterHelpTable(modalHelpRows(modalReopenBacklog), max(m.width, 1))
-	bodyHeight := max(0, m.height-lipgloss.Height(footer))
-	lines := strings.Split(body, "\n")
-	body = strings.Join(lines[:min(bodyHeight, len(lines))], "\n")
-	body = overlayModal(body, fitReopenBacklogModal(m.reopenPrompt, m.width, bodyHeight), m.width, bodyHeight)
-	lines = strings.Split(body, "\n")
-	return joinNonEmpty([]string{strings.Join(lines[:min(bodyHeight, len(lines))], "\n"), footer})
+	if m.reopenPrompt == nil {
+		return body
+	}
+	width := max(m.width, 1)
+	footer := renderFooterHelpTable(modalHelpRows(modalReopenBacklog), width)
+	bodyHeight := m.height - lipgloss.Height(footer)
+	if bodyHeight < 1 {
+		const keys = "  y reopen  n/esc cancel"
+		return compactReopenBacklog(m.reopenPrompt, width-len(keys)) + keys
+	}
+	full := renderReopenBacklogModal(m.reopenPrompt)
+	if lipgloss.Width(full) <= width && lipgloss.Height(full) <= bodyHeight {
+		lines := strings.Split(body, "\n")
+		body = strings.Join(lines[:min(bodyHeight, len(lines))], "\n")
+		body = overlayModal(body, full, width, bodyHeight)
+	} else {
+		body = lipgloss.Place(width, bodyHeight, lipgloss.Center, lipgloss.Center, compactReopenBacklog(m.reopenPrompt, width))
+	}
+	return body + "\n" + footer
 }
 
-// fitReopenBacklogModal returns the full confirmation when it fits in height
-// rows, else a compact one that drops padding, then the border, before it drops
-// the target or the backlog it warns about.
-func fitReopenBacklogModal(prompt *reopenPrompt, width, height int) string {
-	if prompt == nil {
-		return ""
-	}
-	if full := renderReopenBacklogModal(prompt); lipgloss.Height(full) <= height {
-		return full
-	}
+// compactReopenBacklog keeps the issue ID when shortening a qualified reference.
+func compactReopenBacklog(prompt *reopenPrompt, width int) string {
 	ref := sanitizeForLine(prompt.ref)
-	count := fmt.Sprintf("Delivers %d recurring child issues.", prompt.count)
-	clip := lipgloss.NewStyle().MaxWidth(max(width, 1))
-	if height <= 1 {
-		// One row: the count leads, so a long reference is what gets cut.
-		return clip.Render(fmt.Sprintf("%d recurring child issues: reopen %s?", prompt.count, ref))
+	line := fmt.Sprintf("Reopen %s? %d recurring child issues.", ref, prompt.count)
+	if cut := lipgloss.Width(line) - width; cut > 0 {
+		if hash := strings.LastIndex(ref, "#"); hash > 0 {
+			ref = runewidth.TruncateLeft(ref, min(cut, runewidth.StringWidth(ref[:hash])), "…")
+			line = fmt.Sprintf("Reopen %s? %d recurring child issues.", ref, prompt.count)
+		}
 	}
-	// The count has a row of its own, so a long reference cannot push it off.
-	lines := []string{"Reopen " + ref + "?", count, "Missed runs: `kata cron job update`."}
-	if height >= len(lines)+2 {
-		return modalBoxStyle.Padding(0, 1).MaxWidth(max(width, 1)).Render(strings.Join(lines, "\n"))
-	}
-	return clip.Render(strings.Join(lines[:min(height, len(lines))], "\n"))
+	return truncate(line, width)
 }
 
 func renderReopenBacklogModal(prompt *reopenPrompt) string {
