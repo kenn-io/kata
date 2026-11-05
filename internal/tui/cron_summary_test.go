@@ -84,7 +84,6 @@ func TestSnapshot_CronSummary(t *testing.T) {
 			m := cronSummaryFixture(t)
 			m.cron.data.runs[0].OccurrenceKey = new("request:fixture-run")
 			m.cron.data.runs[0].Summary.Trigger = new("request")
-			m.cron.data.runs[0].Summary.Reason = new("overlap_skipped")
 			m.cron.data.runs[0].Summary.Steps[1].StartedAt = new("2026-05-01T10:00:00Z")
 			m.width = width
 			m.height = 60

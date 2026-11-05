@@ -3,7 +3,7 @@ kata カタ jobs [runs] workflows
  runs / 01ARZ3NDEKTSV4RRFFQ69G5FAY
 
 ▶ Status:     failed
-  Reason:     overlap_skipped (not launched)
+  Reason:     agent_quota
   Occurrence: request:fixture-run
   Trigger:    request
   Started:    05-01 10:00

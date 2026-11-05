@@ -45,9 +45,10 @@ func TestSummaryRetainedRelayFeatures(t *testing.T) {
 		required, err := db.RelayEnvelopeRequiredFeatures(envelope)
 		require.NoError(t, err)
 		require.Equal(t, "cron_run_summary_v2,cron_v1", required)
-		corrupted := bytes.Replace(body, []byte(kind), []byte("cron.run.changed"), 1)
+		corrupted := bytes.Replace(body, []byte(kind), []byte("cron.run.modified"), 1)
 		_, err = db.RelayEnvelopeRequiredFeatures(db.RelayEnvelope{Stream: db.RelayStreamEvent, Body: corrupted})
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		require.ErrorIs(t, err, db.ErrRemoteEventHashMismatch)
 		records, err := json.Marshal([][]byte{body})
 		require.NoError(t, err)
 		for _, snapshot := range []db.RootResetSnapshot{{Events: records, Entities: []byte(`[]`)}, {Events: []byte(`[]`), Entities: records}} {
