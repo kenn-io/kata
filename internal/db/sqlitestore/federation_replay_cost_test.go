@@ -27,11 +27,7 @@ func TestFederationReplayCostUnchangedIssues(t *testing.T) {
 			}
 			_, err = d.DB.ExecContext(ctx, `UPDATE federation_bindings SET role = 'spoke', hub_url = 'https://hub.example', hub_project_id = ?, hub_project_uid = ? WHERE project_id = ?`, p.ID, p.UID, p.ID)
 			require.NoError(t, err)
-			var path string
-			var seq int
-			var name string
-			require.NoError(t, d.QueryRowContext(ctx, `PRAGMA database_list`).Scan(&seq, &name, &path))
-			raw, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+			raw, err := sql.Open("sqlite", d.Path()+"?_pragma=foreign_keys(1)")
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, raw.Close()) })
 			raw.SetMaxOpenConns(1)
