@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep coding agents focused outside kata workspaces. User-scope contract hooks
+  installed by `kata agent-hook install` now inject the contract only when the
+  session starts under a `.kata.toml`; elsewhere they return an empty response
+  instead of telling the agent to search, create, and close kata issues in a
+  repository that does not use kata.
 - Load web UI suggestions faster on large SQLite stores with unrestricted local owner access; scoped and account-bound access keep today's speed.
 - Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
 - Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
