@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -133,22 +134,27 @@ func parseSinceUntil(s string, now time.Time) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t.UTC(), nil
 	}
-	expanded := s
-	if before, ok := strings.CutSuffix(s, "d"); ok {
-		num := before
-		// Trust no integer-overflow wraparound here: a multi-year window is
-		// the user's call, and ParseDuration will reject pathological inputs
-		// (e.g. trailing "d" with non-numeric prefix).
-		expanded = num + "h"
-		if d, err := time.ParseDuration(expanded); err == nil {
-			return now.Add(-24 * d).UTC(), nil
-		}
-	}
-	d, err := time.ParseDuration(expanded)
+	d, err := parseDurationWithDays(s)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("invalid time spec %q: must be a duration (24h, 7d) or RFC3339 timestamp", s)
 	}
 	return now.Add(-d).UTC(), nil
+}
+
+// parseDurationWithDays extends Go durations with a day suffix. Check before
+// scaling so large day windows cannot wrap into a different duration.
+func parseDurationWithDays(s string) (time.Duration, error) {
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		d, err := time.ParseDuration(days + "h")
+		if err != nil {
+			return 0, err
+		}
+		if d > time.Duration(math.MaxInt64/24) || d < time.Duration(math.MinInt64/24) {
+			return 0, fmt.Errorf("day duration %q overflows", s)
+		}
+		return 24 * d, nil
+	}
+	return time.ParseDuration(s)
 }
 
 type digestURLOpts struct {

@@ -4,7 +4,6 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"math"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -18,16 +17,10 @@ import (
 )
 
 func parseCronPruneAge(value string) (time.Duration, error) {
-	var age time.Duration
-	var err error
-	if days, ok := strings.CutSuffix(value, "d"); ok {
-		var n uint64
-		n, err = strconv.ParseUint(days, 10, 64)
-		if err == nil && n <= uint64(math.MaxInt64/int64(24*time.Hour)) {
-			age = time.Duration(n) * 24 * time.Hour
-		}
-	} else {
-		age, err = time.ParseDuration(value)
+	age, err := parseDurationWithDays(value)
+	// Prune accepts whole days, while digest also accepts fractional days.
+	if days, ok := strings.CutSuffix(value, "d"); ok && err == nil {
+		_, err = strconv.ParseUint(days, 10, 64)
 	}
 	if err != nil || age < 24*time.Hour {
 		return 0, cronCLIValidation("--older-than must be at least 24h; use a duration such as 720h or whole days such as 30d")

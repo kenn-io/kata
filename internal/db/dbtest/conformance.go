@@ -57,7 +57,6 @@ var storageScenarios = []scenario{
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "cron prune history scale", runWithBackend: checkCronPruneHistoryScale},
 	{name: "cron prune event model", run: checkCronPruneEventModel},
-	{name: "cron prune event identity", run: checkCronPruneEventIdentity},
 	{name: "cron prune rollback", runWithBackend: checkCronPruneRollback},
 	{name: "cron prune accepted replay", run: checkCronPruneAcceptedReplay},
 	{name: "cron prune relay reset", runWithBackend: checkCronPruneRelayReset},

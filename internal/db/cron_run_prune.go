@@ -185,6 +185,8 @@ func (a CronSQL) selectPruneRuns(ctx context.Context, tx *sql.Tx, in PruneCronRu
 	// The existing project/job/time index can read each job's newest keep rows
 	// directly. Derive groups from runs so deleted definitions stay protected.
 	// Workflow-only rows have no equivalent index and retain window ranking.
+	// SQLite expands each correlated top-keep result with json_each; PostgreSQL
+	// uses LATERAL for the same indexed lookup. SQLite has no LATERAL syntax.
 	protectedJobs := `SELECT kept.value FROM (
  SELECT DISTINCT job_uid FROM cron_runs WHERE project_id=$1 AND job_uid IS NOT NULL
  ) AS jobs CROSS JOIN json_each((

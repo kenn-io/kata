@@ -95,16 +95,43 @@ func pruneEvents(ctx context.Context, t require.TestingT, s db.Storage, p db.Pro
 // disappear, including across 500-ID delete chunks; every survivor is identical.
 func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 	p, q := pruneEventFixture(t, s)
-	hegel.Test(t, func(ht *hegel.T) {
-		matches := hegel.Draw(ht, hegel.Integers(0, 20))
-		if hegel.Draw(ht, hegel.Booleans()) {
-			matches = []int{0, 1, 499, 500, 501, 999, 1000, 1001}[hegel.Draw(ht, hegel.Integers(0, 7))]
-		}
+	// A second project's eligible runs and metadata must survive selection.
+	// Its different UIDs do not probe event-query project scoping independently.
+	other := newCronTallyFixture(t.Context(), t, s)
+	other.add(t.Context(), t, "job", "succeeded", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), "")
+	other.add(t.Context(), t, "job", "running", other.before, "")
+	otherEvents := pruneEvents(t.Context(), t, s, other.project)
+	otherRuns, err := s.ListCronRuns(t.Context(), db.CronRunList{ProjectID: other.project.ID})
+	require.NoError(t, err)
+	otherProject, err := s.ProjectByID(t.Context(), other.project.ID)
+	require.NoError(t, err)
+	checkOther := func(ht require.TestingT) {
+		require.Equal(ht, otherEvents, pruneEvents(t.Context(), ht, s, other.project))
+		gotRuns, err := s.ListCronRuns(t.Context(), db.CronRunList{ProjectID: other.project.ID})
+		require.NoError(ht, err)
+		require.Equal(ht, otherRuns, gotRuns)
+		gotProject, err := s.ProjectByID(t.Context(), other.project.ID)
+		require.NoError(ht, err)
+		require.Equal(ht, otherProject, gotProject)
+	}
+	check := func(ht require.TestingT, matches int, escaped bool) {
 		// Each four-row cycle has two matching run events, one job snapshot,
 		// and one retained run event. Target deletion counts, not scan pages.
 		count := 4*(matches/2) + matches%2
 		seedPruneEventRows(t.Context(), ht, q, p, count)
-		want := pruneEvents(t.Context(), ht, s, p)
+		if escaped {
+			selected := fmt.Sprintf("%026d", 100)
+			var payload string
+			require.NoError(ht, q.QueryRowContext(t.Context(), `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, p.ID, fmt.Sprintf("%026d", 1004)).Scan(&payload))
+			identity := `"uid":"` + selected + `"`
+			require.Contains(ht, payload, identity)
+			// Preserve the complete observation while varying its JSON spelling.
+			payload = " " + strings.Replace(payload, identity, `"uid" : "\u0030`+selected[1:]+`"`, 1) + " "
+			_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, p.ID, fmt.Sprintf("%026d", 1004))
+			require.NoError(ht, err)
+		}
+		original := pruneEvents(t.Context(), ht, s, p)
+		want := maps.Clone(original)
 		eventCount := len(want)
 		for id, e := range want {
 			var body struct {
@@ -115,14 +142,27 @@ func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 				delete(want, id)
 			}
 		}
+		if escaped {
+			// Keep the deterministic identity oracle independent of JSON decoding.
+			want = maps.Clone(original)
+			for _, i := range []int{0, 1, 4} {
+				delete(want, fmt.Sprintf("%026d", 1000+i))
+			}
+		}
 		in := db.PruneCronRuns{ProjectID: p.ID, Actor: "operator", Before: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Keep: 1, DryRun: true}
 		require.Equal(ht, matches, eventCount-len(want))
 		preview, err := s.PruneCronRuns(t.Context(), in)
 		require.NoError(ht, err)
+		require.Equal(ht, 1, preview.Pruned)
+		require.False(ht, preview.More)
 		require.Equal(ht, eventCount-len(want), preview.EventsDeleted)
+		require.Equal(ht, original, pruneEvents(t.Context(), ht, s, p))
+		checkOther(ht)
 		in.DryRun = false
 		result, err := s.PruneCronRuns(t.Context(), in)
 		require.NoError(ht, err)
+		require.Equal(ht, 1, result.Pruned)
+		require.False(ht, result.More)
 		require.Equal(ht, eventCount-len(want), result.EventsDeleted)
 		got := pruneEvents(t.Context(), ht, s, p)
 		metadataEvent, ok := got[result.MetadataEvent.UID]
@@ -139,58 +179,18 @@ func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 		}, metadataEvent)
 		delete(got, result.MetadataEvent.UID)
 		require.Equal(ht, want, got)
-	}, hegel.WithTestCases(30))
-	return nil
-}
-
-// Match exact top-level run UIDs regardless of JSON spelling, and leave other projects' runs, events and metadata untouched.
-func checkCronPruneEventIdentity(t *testing.T, s db.Storage) error {
-	p, q := pruneEventFixture(t, s)
-	seedPruneEventRows(t.Context(), t, q, p, 5)
-	selected := fmt.Sprintf("%026d", 100)
-	var payload string
-	require.NoError(t, q.QueryRowContext(t.Context(), `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, p.ID, fmt.Sprintf("%026d", 1004)).Scan(&payload))
-	identity := `"uid":"` + selected + `"`
-	require.Contains(t, payload, identity)
-	// Keep all other observation fields. In particular, the escaped UID
-	// case remains a complete observation a peer could send.
-	payload = " " + strings.Replace(payload, identity, `"uid" : "\u0030`+selected[1:]+`"`, 1) + " "
-	_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, p.ID, fmt.Sprintf("%026d", 1004))
-	require.NoError(t, err)
-	other := newCronTallyFixture(t.Context(), t, s)
-	other.add(t.Context(), t, "job", "succeeded", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), "")
-	other.add(t.Context(), t, "job", "running", other.before, "")
-	otherEvents := pruneEvents(t.Context(), t, s, other.project)
-	otherRuns, err := s.ListCronRuns(t.Context(), db.CronRunList{ProjectID: other.project.ID})
-	require.NoError(t, err)
-	original := pruneEvents(t.Context(), t, s, p)
-	want := maps.Clone(original)
-	otherProject, err := s.ProjectByID(t.Context(), other.project.ID)
-	require.NoError(t, err)
-	for _, i := range []int{0, 1, 4} {
-		delete(want, fmt.Sprintf("%026d", 1000+i))
+		checkOther(ht)
 	}
-	for _, dry := range []bool{true, false} {
-		result, err := s.PruneCronRuns(t.Context(), db.PruneCronRuns{ProjectID: p.ID, Actor: "operator", Before: other.before, Keep: 1, DryRun: dry})
-		require.NoError(t, err)
-		require.Equal(t, 1, result.Pruned)
-		require.Equal(t, 3, result.EventsDeleted)
-		require.False(t, result.More)
-		got := pruneEvents(t.Context(), t, s, p)
-		if dry {
-			require.Equal(t, original, got)
-		} else {
-			delete(got, result.MetadataEvent.UID)
-			require.Equal(t, want, got)
+	// Deterministically retain the five-row identity case: observed, snapshot,
+	// job snapshot with the same UID, retained run, and escaped observed UID.
+	check(t, 3, true)
+	hegel.Test(t, func(ht *hegel.T) {
+		matches := hegel.Draw(ht, hegel.Integers(0, 20))
+		if hegel.Draw(ht, hegel.Booleans()) {
+			matches = []int{0, 1, 499, 500, 501, 999, 1000, 1001}[hegel.Draw(ht, hegel.Integers(0, 7))]
 		}
-		require.Equal(t, otherEvents, pruneEvents(t.Context(), t, s, other.project))
-		gotRuns, err := s.ListCronRuns(t.Context(), db.CronRunList{ProjectID: other.project.ID})
-		require.NoError(t, err)
-		require.Equal(t, otherRuns, gotRuns)
-		gotProject, err := s.ProjectByID(t.Context(), other.project.ID)
-		require.NoError(t, err)
-		require.Equal(t, otherProject, gotProject)
-	}
+		check(ht, matches, false)
+	}, hegel.WithTestCases(30))
 	return nil
 }
 

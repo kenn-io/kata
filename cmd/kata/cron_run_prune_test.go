@@ -26,12 +26,12 @@ func TestCronRunPruneHumanReportsBatchWindowAndReplicaReset(t *testing.T) {
 }
 
 func TestCronPruneOlderThan(t *testing.T) {
-	for value, expected := range map[string]time.Duration{"30d": 720 * time.Hour, "24h": 24 * time.Hour, "25h30m": 25*time.Hour + 30*time.Minute, "1d": 24 * time.Hour} {
+	for value, expected := range map[string]time.Duration{"30d": 720 * time.Hour, "24h": 24 * time.Hour, "25h30m": 25*time.Hour + 30*time.Minute, "1d": 24 * time.Hour, "106751d": 106751 * 24 * time.Hour} {
 		d, err := parseCronPruneAge(value)
 		require.NoError(t, err)
 		require.Equal(t, expected, d)
 	}
-	for _, value := range []string{"", "0d", "-1d", "1.5d", "23h", "abc", "106752d", "9223372036854775807d"} {
+	for _, value := range []string{"", "0d", "-1d", "1.5d", "1h2d", "2026-05-01T00:00:00Z", "23h", "abc", "106752d", "9223372036854775807d"} {
 		_, err := parseCronPruneAge(value)
 		require.Error(t, err, value)
 	}

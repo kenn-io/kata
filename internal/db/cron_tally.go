@@ -293,10 +293,10 @@ func MergeCronTallyMetadata(target, source JSONBlob) (map[string]jsontext.Value,
 }
 
 // CronTallyAdoptionPatch combines a chunk before publishing its single root
-// metadata event. Each accepted source remains intact in the event history.
+// metadata event. Events have passed ingress validation before duplicate detection;
+// each accepted source remains intact in the event history.
 func CronTallyAdoptionPatch(current JSONBlob, events []RemoteEvent) (map[string]jsontext.Value, error) {
-	fields, err := cronTallyMetadataFields(current)
-	if err != nil {
+	if _, err := cronTallyMetadataFields(current); err != nil {
 		return nil, err
 	}
 	patch := map[string]jsontext.Value{}
@@ -309,7 +309,7 @@ func CronTallyAdoptionPatch(current JSONBlob, events []RemoteEvent) (map[string]
 		return compareClock(FoldClock{HLCPhysicalMS: a.HLCPhysicalMS, HLCCounter: a.HLCCounter, OriginInstanceUID: a.OriginInstanceUID, EventUID: a.EventUID}, FoldClock{HLCPhysicalMS: b.HLCPhysicalMS, HLCCounter: b.HLCCounter, OriginInstanceUID: b.OriginInstanceUID, EventUID: b.EventUID}) < 0
 	})
 	for _, event := range ordered {
-		incoming, touched, err := CronTallyEventMetadata(event)
+		incoming, touched, err := cronTallyEventMetadata(event)
 		if err != nil {
 			return nil, err
 		}
@@ -324,10 +324,8 @@ func CronTallyAdoptionPatch(current JSONBlob, events []RemoteEvent) (map[string]
 		if err != nil {
 			return nil, err
 		}
-		for key, value := range additions {
-			fields[key], patch[key] = value, value
-		}
-		encoded, err := json.Marshal(fields, json.Deterministic(true))
+		maps.Copy(patch, additions)
+		encoded, err := ApplyMetadataPatch(jsontext.Value(current), additions)
 		if err != nil {
 			return nil, err
 		}

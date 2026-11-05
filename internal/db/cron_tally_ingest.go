@@ -7,12 +7,9 @@ import (
 	"strings"
 )
 
-// CronTallyEventMetadata extracts only complete reserved values. It validates
-// both diff sides even when the event is an accepted duplicate.
-func CronTallyEventMetadata(event RemoteEvent) (JSONBlob, bool, error) {
-	if err := ValidateCronTallyEvent(event); err != nil {
-		return "", false, fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
-	}
+// cronTallyEventMetadata extracts reserved values from accepted adoption events.
+// Both diff sides have already passed ingress validation before duplicate detection.
+func cronTallyEventMetadata(event RemoteEvent) (JSONBlob, bool, error) {
 	fields := map[string]jsontext.Value{}
 	touched := false
 	for key, raw := range cronTallyEventFields(event) {
