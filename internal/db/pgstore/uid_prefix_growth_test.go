@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kit/growthtest"
 )
 
 func TestIssueUIDPrefixGrowth(t *testing.T) {
@@ -31,7 +33,7 @@ SELECT $2||lpad(x::text,22,'0'),lpad(x::text,6,'0'),CASE x%2 WHEN 0 THEN $3::big
 		require.NoError(t, err)
 		_, err = postgres.ExecContext(t.Context(), `ANALYZE issues`)
 		require.NoError(t, err)
-	})
+	}, growthtest.Fastest(9), float64(32*time.Microsecond))
 
 	ctx := t.Context()
 	project, err := large.ProjectByName(ctx, "example-project")
