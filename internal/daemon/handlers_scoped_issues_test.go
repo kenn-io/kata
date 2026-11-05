@@ -616,9 +616,14 @@ func TestIssueScopedTokenNarrowsBrowserSnapshotAndReferences(t *testing.T) {
 		Issues   []db.UIIssueReference `json:"issues"`
 	}
 	require.NoError(t, json.Unmarshal(body, &references))
+	require.Empty(t, references.Issues)
+
+	resp, body = envDoRaw(t, env, http.MethodGet,
+		"/api/v1/ui/references", nil, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+	require.NoError(t, json.Unmarshal(body, &references))
 	require.Len(t, references.Projects, 1)
 	assertMinimalScopedProject(t, references.Projects[0], project)
-	require.Empty(t, references.Issues)
 
 	resp, body = envDoRaw(t, env, http.MethodGet,
 		"/api/v1/ui/issue-reference?project_id="+strconv.FormatInt(project.ID, 10)+"&ref="+outside.ShortID,
