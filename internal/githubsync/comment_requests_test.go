@@ -25,7 +25,6 @@ func TestRunnerCommentRequestCounts(t *testing.T) {
 			var issues []Issue
 			type commentRow struct {
 				Comment
-				IssueURL  string    `json:"issue_url"`
 				UpdatedAt time.Time `json:"updated_at"`
 			}
 			var comments []commentRow

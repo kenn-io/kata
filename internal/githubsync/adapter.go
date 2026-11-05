@@ -288,14 +288,21 @@ func (r *adapter) fetchComments(ctx context.Context, fetcher Fetcher, binding db
 	}
 	out := make(map[int][]Comment)
 	var windowed, individual []Issue
+	individualPages := 0
 	for _, issue := range commented {
-		// A large unfiltered feed may be truncated. The bound includes PR
-		// comments because the repository feed includes them too.
-		if fullHistory[issue.Number] || (window == nil && (totalComments+99)/100 >= 300) {
+		if fullHistory[issue.Number] {
 			individual = append(individual, issue)
 		} else {
 			windowed = append(windowed, issue)
+			individualPages += (issue.Comments + 99) / 100
 		}
+	}
+	// Without a cursor, PR comments can make the repository feed more
+	// expensive than individual reads, or push it to the truncation limit.
+	repositoryPages := (totalComments + 99) / 100
+	if binding.LastCursorAt == nil && (repositoryPages >= 300 || repositoryPages > individualPages) {
+		individual = append(individual, windowed...)
+		windowed = nil
 	}
 	if len(windowed) > 0 {
 		reportProgress(ctx, "comments", 0, 0)

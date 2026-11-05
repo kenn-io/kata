@@ -178,8 +178,10 @@ check the active claim atomically, preventing superseded runs from restoring
 obsolete filter settings. This adds no persisted objects or schema changes.
 
 Pagination carries a context-local progress reporter so authenticated fetcher
-sessions can report completed parent/issue rows without storing mutable run
-state in shared fetchers. Phase transitions reset counts; comments count
-eligible issues, and importing counts committed items after event delivery.
+sessions can report completed parent, issue, and repository comment rows without
+storing mutable run state in shared fetchers. Phase transitions reset counts.
+Repository comment reads count rows with an unknown total; per-issue comment
+reads count issues read out of those needing a read. Importing counts committed
+items after event delivery.
 Unknown totals remain zero. Successful historical totals retain their existing
 durable semantics and are labeled as the last successful run.

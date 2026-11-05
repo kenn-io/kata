@@ -2105,9 +2105,13 @@ func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 	for _, tc := range []struct {
 		name                                                             string
 		cursor, cutoff, mapped, missingCreated, incomplete, large, fresh bool
-		wantRepository, wantIssue                                        int
+		wantRepository, wantIssue, prComments                            int
 	}{
 		{name: "small first sync", wantRepository: 1},
+		{name: "PR-heavy first sync", prComments: 1001, wantIssue: 1},
+		{name: "PR-heavy filtered first sync", cutoff: true, fresh: true, prComments: 1001, wantIssue: 1},
+		{name: "PR-heavy incremental", cursor: true, mapped: true, prComments: 1001, wantRepository: 1},
+		{name: "filtered large first sync", cutoff: true, fresh: true, large: true, wantIssue: 1},
 		{name: "filtered new issue", cutoff: true, fresh: true, wantRepository: 1},
 		{name: "incomplete initial feed", incomplete: true, wantRepository: 1, wantIssue: 1},
 		{name: "cutoff preserves cursor window", cursor: true, cutoff: true, mapped: true, wantRepository: 1},
@@ -2153,11 +2157,15 @@ func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 				issue.CreatedAt = nil
 			}
 			h.fetcher.issues = []Issue{issue}
-			if tc.large {
+			if tc.large || tc.prComments > 0 {
 				h.fetcher.parentMap = map[int]int64{}
 				pr := testIssue(102, 2, "pull request", old)
 				pr.PullRequest = &PullRequest{}
-				pr.Comments = 29999
+				pr.Comments = tc.prComments
+				if tc.large {
+					pr.Comments = 29999
+				}
+				pr.UpdatedAt = new(h.now)
 				h.fetcher.issues = append(h.fetcher.issues, pr)
 			}
 			h.fetcher.comments = map[int][]Comment{1: {{ID: 1001, Body: "old comment", CreatedAt: new(old)}}}

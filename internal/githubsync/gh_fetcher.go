@@ -86,7 +86,7 @@ type Fetcher interface {
 	Issues(ctx context.Context, binding Binding, since *time.Time) ([]Issue, error)
 	Comments(ctx context.Context, binding Binding, issueNumber int) ([]Comment, error)
 	// RepositoryComments groups comments updated at or after since by issue
-	// number, in creation order. A full last page may indicate truncation.
+	// number, in creation order. At least 30,000 rows may indicate truncation.
 	RepositoryComments(ctx context.Context, binding Binding, since *time.Time) (map[int][]Comment, bool, error)
 	// ParentData returns child issue parent REST IDs plus the child numbers
 	// covered by the scan. Unsupported providers should return ParentScanUnsupported.

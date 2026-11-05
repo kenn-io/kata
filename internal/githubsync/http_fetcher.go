@@ -262,7 +262,7 @@ func (s *httpFetcherBindingSession) RepositoryComments(ctx context.Context, bind
 		}
 		out[number] = append(out[number], comment)
 	}
-	return out, len(rows) == 0 || len(rows)%100 != 0, nil
+	return out, len(rows) < 300*100, nil
 }
 
 func commentIssueNumber(raw string) (int, error) {

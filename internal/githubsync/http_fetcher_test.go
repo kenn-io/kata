@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -787,7 +788,11 @@ func TestHTTPFetcherRepositoryCommentsCompletenessAndMalformedURL(t *testing.T) 
 		complete, wantError bool
 	}{
 		{"empty", "", 0, true, false},
-		{"full last page", "https://api.github.com/repos/example-owner/example-repo/issues/1", 100, false, false},
+		{"full last page", "https://api.github.com/repos/example-owner/example-repo/issues/1", 100, true, false},
+		{"two full pages", "https://api.github.com/repos/example-owner/example-repo/issues/1", 200, true, false},
+		{"below feed limit", "https://api.github.com/repos/example-owner/example-repo/issues/1", 29999, true, false},
+		{"feed limit", "https://api.github.com/repos/example-owner/example-repo/issues/1", 30000, false, false},
+		{"above feed limit", "https://api.github.com/repos/example-owner/example-repo/issues/1", 30001, false, false},
 		{"malformed", "bogus", 1, false, true},
 		{"zero", "https://api.github.com/repos/example-owner/example-repo/issues/0", 1, false, true},
 		{"wrong resource", "https://api.github.com/repos/example-owner/example-repo/pulls/1", 1, false, true},
@@ -795,9 +800,18 @@ func TestHTTPFetcherRepositoryCommentsCompletenessAndMalformedURL(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Empty(t, r.URL.Query().Get("since"))
-				rows := make([]map[string]any, tc.rows)
+				page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+				if page == 0 {
+					page = 1
+				}
+				start := (page - 1) * 100
+				end := min(start+100, tc.rows)
+				if end < tc.rows {
+					w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?page=%d>; rel="next"`, r.Host, r.URL.Path, page+1))
+				}
+				rows := make([]map[string]any, end-start)
 				for i := range rows {
-					rows[i] = map[string]any{"id": i + 1, "issue_url": tc.issueURL}
+					rows[i] = map[string]any{"id": start + i + 1, "issue_url": tc.issueURL}
 				}
 				require.NoError(t, json.MarshalWrite(w, rows))
 			}))
