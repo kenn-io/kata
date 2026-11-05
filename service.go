@@ -247,8 +247,7 @@ func New(ctx context.Context, cfg Config) (*Service, error) {
 }
 
 func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, error) {
-	cronExecution := cfg.CronExecution.internal()
-	if err := cronExecution.Validate(); err != nil {
+	if err := cfg.CronExecution.Validate(); err != nil {
 		return nil, fmt.Errorf("kata: %w", err)
 	}
 	if strings.TrimSpace(cfg.DSN) == "" {
@@ -461,7 +460,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		DocbankFolder:   docbankConfig.Folder,
 		WebHandler:      cfg.WebHandler,
 		DefaultTimezone: cfg.DefaultTimezone,
-		CronExecution:   cronExecution,
+		CronExecution:   cfg.CronExecution,
 		StartedAt:       startedAt,
 		Broadcaster:     broadcaster,
 		FederationWake:  wakeFederation,

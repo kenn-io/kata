@@ -192,6 +192,7 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 				if tc.missingJob || tc.omittedJob || tc.omittedWorkflow || tc.missingActionWorkflow {
 					require.Contains(t, problem.Error.Hint, "Check the definition UID")
 				} else {
+					require.Contains(t, problem.Error.Hint, "[cron].replica_execute")
 					require.Contains(t, problem.Error.Hint, "[[cron.project]]")
 				}
 				require.Contains(t, problem.Error.Message, "replicated project")

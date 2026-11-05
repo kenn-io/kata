@@ -64,11 +64,11 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 		if readErr != nil {
 			return readErr
 		}
-		// Only the current v1 notify action is exempt. Adapters refresh current
+		// Only the current notify action is exempt. Adapters refresh current
 		// definitions before launch; an older reference counts as execution.
 		notify := in.Body.DefinitionEventUID != nil &&
 			strings.EqualFold(*in.Body.DefinitionEventUID, job.DefinitionEventUID) &&
-			job.Definition.Version == 1 && job.Definition.Action.Kind == "notify"
+			job.Definition.Action.Kind == "notify"
 		if !notify {
 			if !executionEligible(config.CronExecuteMode(policy.Mode), policy.MemberActor, job.Author) {
 				return cronExecutionRefusal(policy, "job", id)
@@ -109,7 +109,7 @@ func executionEligible(mode config.CronExecuteMode, memberActor, author string) 
 }
 
 func cronExecutionRefusal(policy api.CronExecutionPolicy, kind, id string) error {
-	return api.NewError(403, "cron_execution_not_enabled", fmt.Sprintf("this daemon has not opted in to executing %s %s for this replicated project", kind, id), "Set [[cron.project]] execute in config.toml on this daemon, or run it on the owning hub.", map[string]any{"mode": policy.Mode, "member_actor": policy.MemberActor})
+	return api.NewError(403, "cron_execution_not_enabled", fmt.Sprintf("this daemon has not opted in to executing %s %s for this replicated project", kind, id), "Set [cron].replica_execute or [[cron.project]] execute in config.toml on this daemon, or run it on the owning hub.", map[string]any{"mode": policy.Mode, "member_actor": policy.MemberActor})
 }
 
 func cronExecutionMissingDefinition(policy api.CronExecutionPolicy, kind, id string) error {
