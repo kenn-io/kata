@@ -243,8 +243,7 @@ func (a CronSQL) selectPruneRuns(ctx context.Context, tx *sql.Tx, in PruneCronRu
 
 func pruneRunEvents(ctx context.Context, tx *sql.Tx, projectID int64, ids map[string]bool, dry bool) (int, error) {
 	// Stream once rather than planning and opening a query for every page.
-	// Keep strict Go decoding even for unselected runs: SQL JSON extraction
-	// would change rejection of duplicate members and incorrectly typed UIDs.
+	// Decode in Go so both backends share one parser instead of per-backend JSON SQL.
 	rows, err := tx.QueryContext(ctx, `SELECT id,payload FROM events WHERE project_id=$1 AND id>0 AND type LIKE 'cron.%' AND type IN ('cron.run.observed','cron.run.snapshot') ORDER BY id`, projectID)
 	if err != nil {
 		return 0, err

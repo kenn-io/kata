@@ -17,8 +17,7 @@ import (
 func newCronRunCountsCmd() *cobra.Command {
 	var job, workflow string
 	command := &cobra.Command{Use: "counts", Short: "show retained runs and recorded pruning counts", Long: `Read current retained-run counts and pruned-since-tracking counts from one snapshot.
-Pruned counts start with the first contributing prune. Replayed evidence that is
-pruned again contributes again.
+Pruned counts start with the first contributing prune. Runs pruned again count again.
 --workflow does not include job runs belonging to that workflow.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		for name, value := range map[string]*string{"job": &job, "workflow": &workflow} {
 			if cmd.Flags().Changed(name) || *value != "" {

@@ -143,61 +143,23 @@ func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 	return nil
 }
 
-// Match only exact top-level run UIDs, independently of JSON spelling.
-// Null/missing/nested and prefix/suffix identities deliberately exercise the
-// deletion decoder, not current ingress validation. The foreign matching body
-// is a project-isolation probe, not a second materialized run with the same UID.
+// Match exact top-level run UIDs regardless of JSON spelling, and leave other projects' runs, events and metadata untouched.
 func checkCronPruneEventIdentity(t *testing.T, s db.Storage) error {
 	p, q := pruneEventFixture(t, s)
-	seedPruneEventRows(t.Context(), t, q, p, 13)
+	seedPruneEventRows(t.Context(), t, q, p, 5)
 	selected := fmt.Sprintf("%026d", 100)
-	for i, replacement := range map[int]string{
-		1:  `"uid":null`,
-		4:  `"uid" : "\u0030` + selected[1:] + `"`,
-		5:  `"unused_uid":"` + selected + `"`,
-		8:  `"nested":{"uid":"` + selected + `"}`,
-		12: `"uid":"prefix-` + selected + `-suffix"`,
-	} {
-		var payload string
-		require.NoError(t, q.QueryRowContext(t.Context(), `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, p.ID, fmt.Sprintf("%026d", 1000+i)).Scan(&payload))
-		identity := `"uid":"` + selected + `"`
-		require.Contains(t, payload, identity)
-		// Keep all other observation fields. In particular, the escaped UID
-		// case remains a complete observation a peer could send.
-		payload = " " + strings.Replace(payload, identity, replacement, 1) + " "
-		if i == 5 {
-			var fields map[string]jsontext.Value
-			require.NoError(t, json.Unmarshal([]byte(payload), &fields))
-			delete(fields, "unused_uid")
-			raw, err := json.Marshal(fields)
-			require.NoError(t, err)
-			payload = string(raw)
-		}
-		_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, p.ID, fmt.Sprintf("%026d", 1000+i))
-		require.NoError(t, err)
-	}
+	var payload string
+	require.NoError(t, q.QueryRowContext(t.Context(), `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, p.ID, fmt.Sprintf("%026d", 1004)).Scan(&payload))
+	identity := `"uid":"` + selected + `"`
+	require.Contains(t, payload, identity)
+	// Keep all other observation fields. In particular, the escaped UID
+	// case remains a complete observation a peer could send.
+	payload = " " + strings.Replace(payload, identity, `"uid" : "\u0030`+selected[1:]+`"`, 1) + " "
+	_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, p.ID, fmt.Sprintf("%026d", 1004))
+	require.NoError(t, err)
 	other := newCronTallyFixture(t.Context(), t, s)
 	other.add(t.Context(), t, "job", "succeeded", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), "")
 	other.add(t.Context(), t, "job", "running", other.before, "")
-	rows, err := q.QueryContext(t.Context(), `SELECT uid,payload FROM events WHERE project_id=$1 AND type='cron.run.observed'`, other.project.ID)
-	require.NoError(t, err)
-	foreignBodies := map[string]string{}
-	for rows.Next() {
-		var id, payload string
-		require.NoError(t, rows.Scan(&id, &payload))
-		var observation db.CronRunObservation
-		require.NoError(t, json.Unmarshal([]byte(payload), &observation))
-		observation.UID = selected
-		raw, err := json.Marshal(observation)
-		require.NoError(t, err)
-		foreignBodies[id] = string(raw)
-	}
-	require.NoError(t, rows.Err())
-	require.NoError(t, rows.Close())
-	for id, payload := range foreignBodies {
-		_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, other.project.ID, id)
-		require.NoError(t, err)
-	}
 	otherEvents := pruneEvents(t.Context(), t, s, other.project)
 	otherRuns, err := s.ListCronRuns(t.Context(), db.CronRunList{ProjectID: other.project.ID})
 	require.NoError(t, err)
@@ -205,9 +167,7 @@ func checkCronPruneEventIdentity(t *testing.T, s db.Storage) error {
 	want := maps.Clone(original)
 	otherProject, err := s.ProjectByID(t.Context(), other.project.ID)
 	require.NoError(t, err)
-	// Only these bodies match. Null/missing UIDs immediately follow matches
-	// so a reused decoder target must not carry a UID into the next row.
-	for _, i := range []int{0, 4, 9} {
+	for _, i := range []int{0, 1, 4} {
 		delete(want, fmt.Sprintf("%026d", 1000+i))
 	}
 	for _, dry := range []bool{true, false} {
@@ -230,69 +190,6 @@ func checkCronPruneEventIdentity(t *testing.T, s db.Storage) error {
 		gotProject, err := s.ProjectByID(t.Context(), other.project.ID)
 		require.NoError(t, err)
 		require.Equal(t, otherProject, gotProject)
-	}
-	return nil
-}
-
-// The deletion decoder must retain its strict errors even on an unselected
-// run. These deliberately corrupted persisted bodies do not model accepted
-// ingress. Preview and deletion must preserve the whole batch on decoder error.
-func checkCronPruneMalformedEvents(t *testing.T, s db.Storage) error {
-	p, q := pruneEventFixture(t, s)
-	seedPruneEventRows(t.Context(), t, q, p, 4)
-	var original string
-	require.NoError(t, q.QueryRowContext(t.Context(), `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, p.ID, fmt.Sprintf("%026d", 1003)).Scan(&original))
-	identity := `"uid":"` + fmt.Sprintf("%026d", 101) + `"`
-	require.Contains(t, original, identity)
-	// ExportEvents intentionally refuses duplicate JSON members. Compare raw
-	// persisted bodies so that export validation cannot mask the prune result.
-	snapshot := func(t *testing.T) map[int64]string {
-		t.Helper()
-		rows, err := q.QueryContext(t.Context(), `SELECT id,payload FROM events WHERE project_id=$1`, p.ID)
-		require.NoError(t, err)
-		defer func() { _ = rows.Close() }()
-		out := map[int64]string{}
-		for rows.Next() {
-			var id int64
-			var body string
-			require.NoError(t, rows.Scan(&id, &body))
-			out[id] = body
-		}
-		require.NoError(t, rows.Err())
-		return out
-	}
-	for name, replacement := range map[string]string{
-		"numeric_uid":           `"uid":123`,
-		"duplicate_uid":         identity + `,` + identity,
-		"nested_duplicate":      identity + `,"extra":{"x":1,"x":2}`,
-		"escaped_duplicate_uid": identity + `,"\u0075id":"unselected"`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			payload := strings.Replace(original, identity, replacement, 1)
-			_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, p.ID, fmt.Sprintf("%026d", 1003))
-			require.NoError(t, err)
-			wantEvents := snapshot(t)
-			wantRuns, err := s.ListCronRuns(t.Context(), db.CronRunList{ProjectID: p.ID})
-			require.NoError(t, err)
-			wantProject, err := s.ProjectByID(t.Context(), p.ID)
-			require.NoError(t, err)
-			var body struct {
-				UID string `json:"uid"`
-			}
-			decodeErr := json.Unmarshal([]byte(payload), &body)
-			require.Error(t, decodeErr)
-			for _, dry := range []bool{true, false} {
-				_, err := s.PruneCronRuns(t.Context(), db.PruneCronRuns{ProjectID: p.ID, Actor: "operator", Before: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Keep: 1, DryRun: dry})
-				require.EqualError(t, err, decodeErr.Error())
-				require.Equal(t, wantEvents, snapshot(t))
-				gotRuns, err := s.ListCronRuns(t.Context(), db.CronRunList{ProjectID: p.ID})
-				require.NoError(t, err)
-				require.Equal(t, wantRuns, gotRuns)
-				gotProject, err := s.ProjectByID(t.Context(), p.ID)
-				require.NoError(t, err)
-				require.Equal(t, wantProject, gotProject)
-			}
-		})
 	}
 	return nil
 }

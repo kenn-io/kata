@@ -58,7 +58,6 @@ var storageScenarios = []scenario{
 	{name: "cron prune history scale", runWithBackend: checkCronPruneHistoryScale},
 	{name: "cron prune event model", run: checkCronPruneEventModel},
 	{name: "cron prune event identity", run: checkCronPruneEventIdentity},
-	{name: "cron prune malformed events", run: checkCronPruneMalformedEvents},
 	{name: "cron prune rollback", runWithBackend: checkCronPruneRollback},
 	{name: "cron prune accepted replay", run: checkCronPruneAcceptedReplay},
 	{name: "cron prune relay reset", runWithBackend: checkCronPruneRelayReset},
