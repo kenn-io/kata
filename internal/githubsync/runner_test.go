@@ -43,7 +43,9 @@ func TestRunnerFirstSyncFetchesAllImportsCommentsEmitsEventsAndAdvancesCursor(t 
 
 	require.Len(t, h.fetcher.issueCalls, 1)
 	assert.Nil(t, h.fetcher.issueCalls[0].since)
-	assert.Equal(t, []int{1, 2}, h.fetcher.commentCalls)
+	assert.Empty(t, h.fetcher.commentCalls)
+	require.Len(t, h.fetcher.repositoryCommentCalls, 1)
+	assert.Nil(t, h.fetcher.repositoryCommentCalls[0])
 	assert.Equal(t, 2, result.Import.Created)
 	assert.Equal(t, 2, result.Import.Comments)
 	assert.Equal(t, 2, result.Status.LastCreated)
@@ -643,7 +645,10 @@ func TestRunnerFetchesCommentsForReturnedNonPullRequestIssuesInOverlapWindow(t *
 	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
 	require.NoError(t, err)
 
-	assert.Equal(t, []int{1, 2}, h.fetcher.commentCalls)
+	assert.Empty(t, h.fetcher.commentCalls)
+	require.Len(t, h.fetcher.repositoryCommentCalls, 1)
+	require.NotNil(t, h.fetcher.repositoryCommentCalls[0])
+	assert.Equal(t, lastCursor.Add(-2*time.Minute), *h.fetcher.repositoryCommentCalls[0])
 }
 
 func TestRunnerSkipsCommentFetchWhenGitHubIssueReportsZeroComments(t *testing.T) {
@@ -665,7 +670,9 @@ func TestRunnerSkipsCommentFetchWhenGitHubIssueReportsZeroComments(t *testing.T)
 	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
 	require.NoError(t, err)
 
-	assert.Equal(t, []int{1}, h.fetcher.commentCalls)
+	assert.Empty(t, h.fetcher.commentCalls)
+	require.Len(t, h.fetcher.repositoryCommentCalls, 1)
+	assert.Nil(t, h.fetcher.repositoryCommentCalls[0])
 	assert.Equal(t, 2, result.Import.Created)
 	assert.Equal(t, 1, result.Import.Comments)
 }
@@ -1359,28 +1366,31 @@ func (s *spyStorage) RefreshIssueSyncBinding(ctx context.Context, p db.IssueSync
 }
 
 type fakeRunnerFetcher struct {
-	parentRequests     []ParentRequest
-	mu                 sync.Mutex
-	repo               Repository
-	repos              map[string]Repository
-	repoErr            error
-	repoErrs           map[string]error
-	issues             []Issue
-	issuesByRepo       map[string][]Issue
-	issuesErr          error
-	beforeIssuesReturn func()
-	comments           map[int][]Comment
-	commentsErr        error
-	parentData         ParentData
-	parentDataSet      bool
-	parentMap          map[int]int64
-	parentMapErr       error
-	repoCalls          []string
-	issueCalls         []fakeIssueCall
-	commentCalls       []int
-	blockRepository    chan struct{}
-	releaseRepository  chan struct{}
-	blockOnce          sync.Once
+	parentRequests               []ParentRequest
+	mu                           sync.Mutex
+	repo                         Repository
+	repos                        map[string]Repository
+	repoErr                      error
+	repoErrs                     map[string]error
+	issues                       []Issue
+	issuesByRepo                 map[string][]Issue
+	issuesErr                    error
+	beforeIssuesReturn           func()
+	comments                     map[int][]Comment
+	commentsErr                  error
+	repositoryCommentCalls       []*time.Time
+	repositoryCommentsIncomplete bool
+	commentUpdatedAt             map[int64]time.Time
+	parentData                   ParentData
+	parentDataSet                bool
+	parentMap                    map[int]int64
+	parentMapErr                 error
+	repoCalls                    []string
+	issueCalls                   []fakeIssueCall
+	commentCalls                 []int
+	blockRepository              chan struct{}
+	releaseRepository            chan struct{}
+	blockOnce                    sync.Once
 }
 
 type fakeBindingSessionFetcher struct {
@@ -1445,6 +1455,28 @@ func (f *fakeRunnerFetcher) Comments(_ context.Context, _ Binding, issueNumber i
 		return nil, f.commentsErr
 	}
 	return append([]Comment(nil), f.comments[issueNumber]...), nil
+}
+
+func (f *fakeRunnerFetcher) RepositoryComments(_ context.Context, _ Binding, since *time.Time) (map[int][]Comment, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repositoryCommentCalls = append(f.repositoryCommentCalls, since)
+	if f.commentsErr != nil {
+		return nil, false, f.commentsErr
+	}
+	out := make(map[int][]Comment)
+	for number, comments := range f.comments {
+		for _, comment := range comments {
+			updatedAt := comment.CreatedAt
+			if updated, ok := f.commentUpdatedAt[comment.ID]; ok {
+				updatedAt = &updated
+			}
+			if since == nil || updatedAt == nil || !updatedAt.Before(*since) {
+				out[number] = append(out[number], comment)
+			}
+		}
+	}
+	return out, !f.repositoryCommentsIncomplete, nil
 }
 
 func (f *fakeRunnerFetcher) ParentData(_ context.Context, _ Binding, request ParentRequest) (ParentData, error) {
@@ -2066,5 +2098,97 @@ func TestRunnerUnsupportedPendingParentBackfillKeepsIncrementalREST(t *testing.T
 		assert.Nil(t, h.fetcher.parentRequests[len(h.fetcher.parentRequests)-1].Since)
 		cursor = h.now
 		h.advance(5 * time.Minute)
+	}
+}
+
+func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                             string
+		cursor, cutoff, mapped, missingCreated, incomplete, large, fresh bool
+		wantRepository, wantIssue                                        int
+	}{
+		{name: "small first sync", wantRepository: 1},
+		{name: "filtered new issue", cutoff: true, fresh: true, wantRepository: 1},
+		{name: "incomplete initial feed", incomplete: true, wantRepository: 1, wantIssue: 1},
+		{name: "cutoff preserves cursor window", cursor: true, cutoff: true, mapped: true, wantRepository: 1},
+		{name: "mapped unknown creation", cursor: true, mapped: true, missingCreated: true, wantRepository: 1},
+		{name: "mapped incremental", cursor: true, mapped: true, wantRepository: 1},
+		{name: "old first import", cursor: true, wantIssue: 1},
+		{name: "unknown creation first import", cursor: true, missingCreated: true, wantIssue: 1},
+		{name: "filtered first sync", cutoff: true, wantIssue: 1},
+		{name: "reset cursor keeps mappings", cutoff: true, mapped: true, wantIssue: 1},
+		{name: "incomplete repository feed", cursor: true, mapped: true, incomplete: true, wantRepository: 1, wantIssue: 1},
+		{name: "unfiltered large first sync", large: true, wantIssue: 1},
+		{name: "large parent backfill keeps window", cursor: true, mapped: true, large: true, wantRepository: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			old := h.now.Add(-time.Hour)
+			issue := testIssue(101, 1, "old issue", old)
+			if tc.mapped {
+				batch := BuildImportBatch(h.binding.SourceKey, []Issue{issue}, nil, old)
+				batch.ProjectID = h.project.ID
+				_, _, err := h.db.ImportBatch(h.ctx, batch)
+				require.NoError(t, err)
+			}
+			cursor := h.now.Add(-10 * time.Minute)
+			if tc.cursor {
+				recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, cursor)
+			}
+			if tc.cutoff {
+				cfg, err := DecodeConfig(h.binding.Config)
+				require.NoError(t, err)
+				cfg.Since = h.now.Add(-5 * time.Minute).Format(time.RFC3339)
+				raw, err := EncodeConfig(cfg)
+				require.NoError(t, err)
+				_, err = h.db.RefreshIssueSyncBinding(h.ctx, db.IssueSyncBindingUpdateParams{BindingID: h.binding.ID, Config: raw, DisplayName: cfg.DisplayName()})
+				require.NoError(t, err)
+			}
+			if tc.fresh {
+				issue.CreatedAt = new(h.now.Add(-time.Minute))
+			}
+			issue.UpdatedAt = new(h.now)
+			issue.Comments = 1
+			if tc.missingCreated {
+				issue.CreatedAt = nil
+			}
+			h.fetcher.issues = []Issue{issue}
+			if tc.large {
+				h.fetcher.parentMap = map[int]int64{}
+				pr := testIssue(102, 2, "pull request", old)
+				pr.PullRequest = &PullRequest{}
+				pr.Comments = 29999
+				h.fetcher.issues = append(h.fetcher.issues, pr)
+			}
+			h.fetcher.comments = map[int][]Comment{1: {{ID: 1001, Body: "old comment", CreatedAt: new(old)}}}
+			// The incremental feed also returns edited comments, even when they
+			// were created before the window.
+			if tc.fresh {
+				h.fetcher.comments[1][0].CreatedAt = new(h.now)
+			}
+			if tc.cursor && !tc.incomplete {
+				h.fetcher.commentUpdatedAt = map[int64]time.Time{1001: cursor.Add(-2 * time.Minute)}
+			}
+			h.fetcher.repositoryCommentsIncomplete = tc.incomplete
+			result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+			require.NoError(t, err)
+			assert.Equal(t, 1, result.Import.Comments)
+			require.Len(t, h.fetcher.repositoryCommentCalls, tc.wantRepository)
+			assert.Len(t, h.fetcher.commentCalls, tc.wantIssue)
+			if tc.wantRepository > 0 {
+				if tc.cursor {
+					require.NotNil(t, h.fetcher.repositoryCommentCalls[0])
+					assert.Equal(t, cursor.Add(-2*time.Minute), *h.fetcher.repositoryCommentCalls[0])
+				} else if tc.cutoff {
+					require.NotNil(t, h.fetcher.repositoryCommentCalls[0])
+					assert.Equal(t, h.now.Add(-5*time.Minute), *h.fetcher.repositoryCommentCalls[0])
+				} else {
+					assert.Nil(t, h.fetcher.repositoryCommentCalls[0])
+				}
+			}
+			if tc.large && tc.cursor {
+				assert.Nil(t, h.fetcher.issueCalls[0].since)
+			}
+		})
 	}
 }
