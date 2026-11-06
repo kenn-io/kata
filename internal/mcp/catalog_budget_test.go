@@ -16,14 +16,6 @@ import (
 const firstCatalogBudget = 24_000
 const loadedCatalogBudget = 289_000
 
-func defaultCatalogOptions(t *testing.T) Options {
-	t.Helper()
-	return Options{
-		Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
-		Actor: "example-agent", Version: "test-version",
-	}
-}
-
 func catalogOverBudget(result *sdkmcp.ListToolsResult, budget int) string {
 	encoded, _ := json.Marshal(result)
 	if len(encoded) <= budget {
@@ -57,7 +49,7 @@ func TestToolCatalogStaysWithinBudget(t *testing.T) {
 		{"every section loaded", loadedCatalogBudget, connectTestServerWithOptions},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			session := test.connect(t, defaultCatalogOptions(t))
+			session := test.connect(t, defaultCatalogOptions(inertTestClient(t)))
 			result, err := session.ListTools(t.Context(), nil)
 			require.NoError(t, err)
 			require.Empty(t, catalogOverBudget(result, test.budget))
@@ -66,9 +58,12 @@ func TestToolCatalogStaysWithinBudget(t *testing.T) {
 }
 
 func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
-	catalog := func(description string) *sdkmcp.ListToolsResult {
-		server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-server", Version: "1"}, nil)
-		addTool(server, "kata.load_fixture", "Load fixture", description, toolHints(true, false, false),
+	fixture := toolSections(false, false)[0]
+	catalog := func(padding int) *sdkmcp.ListToolsResult {
+		server, err := New(defaultCatalogOptions(inertTestClient(t)))
+		require.NoError(t, err)
+		// Extend an existing loader so the real catalog can use its full budget.
+		addTool(server, fixture.loader, fixture.title, fixture.description+strings.Repeat("x", padding), toolHints(true, false, false),
 			func(context.Context, *sdkmcp.CallToolRequest, ToolSectionInput) (*sdkmcp.CallToolResult, ToolSectionOutput, error) {
 				return successResult(), ToolSectionOutput{}, nil
 			})
@@ -77,9 +72,10 @@ func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
 		require.NoError(t, err)
 		return result
 	}
-	base, _ := json.Marshal(catalog("x"))
+	base, _ := json.Marshal(catalog(0))
 	padding := firstCatalogBudget - len(base)
-	over := catalog(strings.Repeat("x", padding+2))
-	require.Contains(t, catalogOverBudget(over, firstCatalogBudget), "kata.load_fixture")
-	require.Empty(t, catalogOverBudget(catalog(strings.Repeat("x", padding+1)), firstCatalogBudget))
+	require.GreaterOrEqual(t, padding, 0)
+	over := catalog(padding + 1)
+	require.Contains(t, catalogOverBudget(over, firstCatalogBudget), fixture.loader)
+	require.Empty(t, catalogOverBudget(catalog(padding), firstCatalogBudget))
 }
