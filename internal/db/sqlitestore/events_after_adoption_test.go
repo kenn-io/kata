@@ -55,7 +55,7 @@ func TestEventsAfter_ProjectUIDAdoptionDuringCursorRead(t *testing.T) {
 	require.NoError(t, err)
 	var moveID int64
 	capture := &eventAdoptionConnector{path: path, beforePage: func() {
-		// The old implementation has already read source.UID here.
+		// A separate UID pre-read would retain source.UID across adoption here.
 		_, err := d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
 			ProjectID: source.ID, HubURL: "https://hub.example", HubProjectID: 41,
 			HubProjectUID: newTestUID(t), Actor: "tester",

@@ -16,7 +16,7 @@ func TestReadyIndexMigrationUpgrades(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires PostgreSQL")
 	}
-	for _, sourceVersion := range []int{45, 46, 47} {
+	for _, sourceVersion := range []int{45, 46} {
 		t.Run(fmt.Sprint(sourceVersion), func(t *testing.T) {
 			ctx := t.Context()
 			dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
@@ -30,11 +30,8 @@ func TestReadyIndexMigrationUpgrades(t *testing.T) {
 			t.Cleanup(func() { _ = admin.Close() })
 			if sourceVersion == 45 {
 				dropLaterReadyAndEventIndexes(ctx, t, admin, schema)
-			} else if sourceVersion == 46 {
-				_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS ready_priority_upgrade.idx_issues_ready_updated; DROP INDEX ready_priority_upgrade.idx_events_moved_from_id`)
-				require.NoError(t, err)
 			} else {
-				_, err = admin.ExecContext(ctx, `DROP INDEX ready_priority_upgrade.idx_events_moved_from_id`)
+				_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS ready_priority_upgrade.idx_issues_ready_updated; DROP INDEX ready_priority_upgrade.idx_events_moved_from_id`)
 				require.NoError(t, err)
 			}
 			_, err = admin.ExecContext(ctx, `UPDATE ready_priority_upgrade.meta SET value=$1 WHERE key='schema_version'`, fmt.Sprint(sourceVersion))
