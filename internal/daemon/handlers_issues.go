@@ -1643,11 +1643,13 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 		map[string]any{"candidates": matched})
 }
 
-// titleHasPortableToken reports whether title is ASCII and has a letter or
-// digit, so SQLite unicode61 and PostgreSQL simple search both index one of
-// its tokens. Other titles keep the exact-title fallback.
+// titleHasPortableToken accepts ASCII letters, digits, and spaces, with at
+// least one letter or digit. SQLite unicode61 and PostgreSQL simple search
+// both index these titles. Punctuation and Unicode keep the exact-title fallback.
 func titleHasPortableToken(title string) bool {
-	return !strings.ContainsFunc(title, func(r rune) bool { return r > unicode.MaxASCII }) &&
+	return !strings.ContainsFunc(title, func(r rune) bool {
+		return r > unicode.MaxASCII || r != ' ' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) &&
 		strings.ContainsFunc(title, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) })
 }
 

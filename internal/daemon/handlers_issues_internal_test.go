@@ -77,10 +77,10 @@ func TestRunLookalikeCheckExactTitleGate(t *testing.T) {
 		{"full page", "Inventory page crashes", 20, 19, true, 20},
 		{"underfull page", "Inventory page crashes", 19, 0, false, 0},
 		{"stop word", "the", 0, 0, false, 0},
-		{"single digit", "1", 0, 0, false, 0},
 		{"Unicode", "𞤢", 0, 0, true, 20},
 		{"mixed Unicode", "Inventory 𞤢", 0, 0, true, 20},
 		{"punctuation", "!!!", 0, 0, true, 20},
+		{"PostgreSQL tag", "<T>", 0, 0, true, 20},
 		{"title past search prefix", strings.Repeat("x", 501), 0, 0, true, 20},
 		{"twenty qualifying FTS hits", "Inventory page crashes", 20, 20, false, 20},
 	} {

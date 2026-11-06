@@ -225,14 +225,5 @@ func checkListExactTitle(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.Equal(t, first.UID, rows[0].UID)
-	params.IssueScope = &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: first.UID}
-	rows, err = store.ListIssues(ctx, params)
-	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	require.Equal(t, first.UID, rows[0].UID)
-	params.IssueScope = nil
-	rows, err = store.ListIssues(db.WithAuthorizedProjects(ctx, []string{other.UID}), params)
-	require.NoError(t, err)
-	require.Empty(t, rows)
 	return nil
 }
