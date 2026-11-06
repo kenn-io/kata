@@ -1,6 +1,6 @@
 <script lang="ts">
   /* eslint-disable svelte/prefer-svelte-reactivity */
-  import { onDestroy, tick } from 'svelte'
+  import { onDestroy, tick, untrack } from 'svelte'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
   import ChevronUpIcon from '@lucide/svelte/icons/chevron-up'
@@ -155,15 +155,23 @@
   let lastRevealGeneration: number | null = null
   let anchorMeasurementGeneration = 0
   let catalogByUID = $derived(new Map(issueCatalog.map((issue) => [issue.uid, issue])))
-  let childrenByParentUID = $derived.by(() => {
+  let parentUIDOf = $derived.by(() => {
     const byHierarchyKey = new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue]))
-    const children = new Map<string, KataTaskSummary[]>()
+    const parents = new Map<string, string>()
     for (const issue of issueCatalog) {
       const parentUID =
         issue.parent?.uid ??
         (issue.parent_short_id
           ? byHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
           : undefined)
+      if (parentUID) parents.set(issue.uid, parentUID)
+    }
+    return parents
+  })
+  let childrenByParentUID = $derived.by(() => {
+    const children = new Map<string, KataTaskSummary[]>()
+    for (const issue of issueCatalog) {
+      const parentUID = parentUIDOf.get(issue.uid)
       if (!parentUID) continue
       const siblings = children.get(parentUID)
       if (siblings) siblings.push(issue)
@@ -225,10 +233,13 @@
         )
       : [],
   )
+  let sortedGroups = $derived(
+    visibleGroups.map((group) => ({ ...group, issues: sortKataTasks(group.issues, sort) })),
+  )
   let ordinaryRootIssues = $derived.by(() => {
     if (isProjectScoped) return sortKataTasks(flatIssues, sort)
     if (shouldFlatten) return globalSortedIssues
-    return visibleGroups.flatMap((group) => sortKataTasks(group.issues, sort))
+    return sortedGroups.flatMap((group) => group.issues)
   })
   let visibleTemporaryRevealChain = $derived(revealChainForStatus(temporaryRevealChain))
   let hasTemporaryReveal = $derived(visibleTemporaryRevealChain.length > 0)
@@ -249,6 +260,46 @@
       knownExpandableIssues.every((issue) => expanded[issue.uid] === true),
   )
   let hasAnyExpandedRows = $derived(Object.values(expanded).some(Boolean))
+
+  const ROW_LIMIT_STEP = 150
+  let rowLimit = $state(ROW_LIMIT_STEP)
+  let rowSentinel: HTMLDivElement | null = $state(null)
+  let hasHiddenRows = $derived(visibleRootIssues.length > rowLimit)
+  let renderedRoots = $derived(visibleRootIssues.slice(0, rowLimit))
+  let renderedGroups = $derived.by(() => {
+    let remaining = rowLimit
+    const groups = []
+    for (const group of sortedGroups) {
+      if (remaining <= 0) break
+      groups.push({
+        ...group,
+        total: group.issues.length,
+        issues: group.issues.slice(0, remaining),
+      })
+      remaining -= group.issues.length
+    }
+    return groups
+  })
+
+  function growRows(): void {
+    rowLimit = Math.min(visibleRootIssues.length, rowLimit + ROW_LIMIT_STEP)
+  }
+
+  function ensureRowRendered(uid: string): void {
+    const limit = untrack(() => rowLimit)
+    const positions = new Map(visibleRootIssues.map((issue, index) => [issue.uid, index]))
+    const seen = new Set<string>()
+    let current: string | undefined = uid
+    while (current && !seen.has(current)) {
+      const position = positions.get(current)
+      if (position !== undefined) {
+        if (position >= limit) rowLimit = position + ROW_LIMIT_STEP
+        return
+      }
+      seen.add(current)
+      current = parentUIDOf.get(current)
+    }
+  }
 
   function loadSort(): KataTaskSort {
     if (typeof window === 'undefined') return DEFAULT_KATA_TASK_SORT
@@ -598,6 +649,18 @@
     switch (event.key) {
       case 'ArrowDown':
       case 'j':
+        if (idx === rows.length - 1 && hasHiddenRows) {
+          // Past the rendered prefix: render the next chunk, then move.
+          event.preventDefault()
+          heldNavKeys.add(event.code)
+          growRows()
+          void tick().then(() => {
+            const grown = Array.from(tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [])
+            const at = grown.indexOf(target)
+            if (at !== -1) focusRow(grown[at + 1] ?? null)
+          })
+          return
+        }
         nextIdx = Math.min(rows.length - 1, idx + 1)
         break
       case 'ArrowUp':
@@ -610,6 +673,17 @@
         break
       case 'End':
       case 'G':
+        if (hasHiddenRows) {
+          // End means the last row of the whole list, so render all of it.
+          event.preventDefault()
+          heldNavKeys.add(event.code)
+          rowLimit = visibleRootIssues.length
+          void tick().then(() => {
+            const all = Array.from(tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [])
+            focusRow(all[all.length - 1] ?? null)
+          })
+          return
+        }
         nextIdx = rows.length - 1
         break
       case 'ArrowRight': {
@@ -707,6 +781,38 @@
     }
   })
 
+  let lastRowLimitKey: string | null = null
+  $effect(() => {
+    const key = JSON.stringify([currentView.name, scopedProjectName, statusFilter, resetGeneration])
+    if (key !== lastRowLimitKey) {
+      lastRowLimitKey = key
+      rowLimit = ROW_LIMIT_STEP
+    }
+  })
+
+  $effect(() => {
+    void rowLimit
+    if (selectedIssueUID) ensureRowRendered(selectedIssueUID)
+  })
+
+  // Grow when the end sentinel comes within a few screens of the viewport.
+  $effect(() => {
+    const body = tableBody
+    const sentinel = rowSentinel
+    // A fresh observer reports the sentinel's current state, so a sentinel
+    // that is still near the viewport after a chunk lands asks for another.
+    void rowLimit
+    if (!body || !sentinel || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) growRows()
+      },
+      { root: body, rootMargin: '1500px 0px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  })
+
   // Clear stale expansion before the reveal effect below so a snapshot that
   // changes structure can still restore its hidden selected ancestor chain.
   $effect(() => {
@@ -736,6 +842,7 @@
         document.activeElement instanceof HTMLElement &&
         document.activeElement.dataset.uid === revealRequest.uid)
     temporaryRevealChain = statusFilter === 'ready' || revealChain.length > 1 ? revealChain : []
+    ensureRowRendered(revealChain[0]?.uid ?? revealRequest.uid)
     void (async () => {
       const request = revealRequest
       for (const issue of revealChain.slice(0, -1)) {
@@ -924,30 +1031,25 @@
         <div class="empty">No tasks</div>
       {/if}
 
-      {#if hasTemporaryReveal}
-        {#each visibleRootIssues as issue (issue.uid)}
-          {@render row(issue)}
-        {/each}
-      {:else if isProjectScoped}
-        {#each visibleRootIssues as issue (issue.uid)}
-          {@render row(issue)}
-        {/each}
-      {:else if shouldFlatten}
-        {#each globalSortedIssues as issue (issue.uid)}
+      {#if hasTemporaryReveal || isProjectScoped || shouldFlatten}
+        {#each renderedRoots as issue (issue.uid)}
           {@render row(issue)}
         {/each}
       {:else}
-        {#each visibleGroups as group (group.id)}
+        {#each renderedGroups as group (group.id)}
           <section class="group" aria-labelledby={`group-${group.id}`}>
             <h3 class="group-title" id={`group-${group.id}`}>
               <span>{group.title}</span>
-              <span class="group-count">{group.issues.length}</span>
+              <span class="group-count">{group.total}</span>
             </h3>
-            {#each sortKataTasks(group.issues, sort) as issue (issue.uid)}
+            {#each group.issues as issue (issue.uid)}
               {@render row(issue)}
             {/each}
           </section>
         {/each}
+      {/if}
+      {#if hasHiddenRows}
+        <div class="row-sentinel" bind:this={rowSentinel} aria-hidden="true"></div>
       {/if}
     </div>
   </div>
@@ -1223,6 +1325,9 @@
 
   .group {
     margin-top: 6px;
+  }
+  .row-sentinel {
+    height: 1px;
   }
 
   .group:first-of-type {

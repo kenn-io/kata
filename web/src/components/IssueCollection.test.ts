@@ -86,6 +86,158 @@ describe('IssueCollection', () => {
     vi.useRealTimers()
   })
 
+  describe('capped render', () => {
+    function manyTasks(count: number): KataTaskSummary[] {
+      return Array.from({ length: count }, (_, index) =>
+        task({
+          id: 1000 + index,
+          uid: `bulk-${String(index).padStart(5, '0')}`,
+          short_id: `b${index}`,
+          qualified_id: `example-project#b${index}`,
+          title: `Bulk ${String(index).padStart(5, '0')}`,
+        }),
+      )
+    }
+    function renderMany(count: number, extra: Record<string, unknown> = {}) {
+      const issues = manyTasks(count)
+      return render(IssueCollection, {
+        props: {
+          currentView: {
+            name: 'today',
+            fetched_at: '2026-05-16T10:00:00Z',
+            groups: [{ id: 'all', title: 'All', issues }],
+          },
+          scopedProjectName: 'example-project',
+          onSelect: vi.fn(),
+          ...extra,
+        },
+      })
+    }
+    const rowCount = (container: HTMLElement) => container.querySelectorAll('button.row').length
+
+    it('renders a prefix of a long list and still reports the full count', () => {
+      const { container } = renderMany(1000, { scopedProjectName: null })
+      expect(container.querySelector('.group-count')?.textContent).toBe('1000')
+      expect(rowCount(container)).toBe(150)
+      expect(screen.getByText('1000 tasks')).toBeTruthy()
+    })
+
+    it.each(['ArrowDown', 'j'])(
+      'renders the next chunk when %s runs past the last rendered row',
+      async (key) => {
+        const { container } = renderMany(1000)
+        const rows = container.querySelectorAll<HTMLElement>('button.row')
+        const last = rows[rows.length - 1]!
+        last.focus()
+        await fireEvent.keyDown(last, { key })
+        await waitFor(() => expect(rowCount(container)).toBe(300))
+        await waitFor(() =>
+          expect(document.activeElement).toBe(container.querySelectorAll('button.row')[150]),
+        )
+      },
+    )
+
+    it('renders every row when End is pressed and focuses the last one', async () => {
+      const { container } = renderMany(1000)
+      const first = container.querySelector<HTMLElement>('button.row')!
+      first.focus()
+      await fireEvent.keyDown(first, { key: 'End' })
+      await waitFor(() => expect(rowCount(container)).toBe(1000))
+      await waitFor(() =>
+        expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00999'),
+      )
+    })
+
+    it('grows once when the sentinel intersects and re-arms the observer', async () => {
+      let observations = 0
+      const disconnect = vi.fn()
+      vi.stubGlobal(
+        'IntersectionObserver',
+        class {
+          constructor(
+            private callback: IntersectionObserverCallback,
+            options: IntersectionObserverInit,
+          ) {
+            expect(options.root).toBeInstanceOf(HTMLDivElement)
+            expect(options.rootMargin).toBe('1500px 0px')
+          }
+          observe(target: Element) {
+            expect(target.classList.contains('row-sentinel')).toBe(true)
+            if (observations++ === 0)
+              this.callback(
+                [{ isIntersecting: true } as IntersectionObserverEntry],
+                this as unknown as IntersectionObserver,
+              )
+          }
+          disconnect = disconnect
+        },
+      )
+      try {
+        const { container } = renderMany(1000)
+        await waitFor(() => expect(rowCount(container)).toBe(300))
+        expect(observations).toBe(2)
+        expect(disconnect).toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it('keeps the grown prefix when row selection bumps navigation generation', async () => {
+      const issues = manyTasks(1000)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        onSelect: vi.fn(),
+        navigationGeneration: 0,
+      }
+      const { container, rerender } = render(IssueCollection, { props })
+      await fireEvent.keyDown(container.querySelectorAll('button.row')[149]!, { key: 'ArrowDown' })
+      await waitFor(() => expect(rowCount(container)).toBe(300))
+      await rerender({ ...props, navigationGeneration: 1, selectedIssueUID: 'bulk-00150' })
+      expect(rowCount(container)).toBe(300)
+      expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
+        'bulk-00150',
+      )
+    })
+
+    it('renders and scrolls to a revealed child whose root is beyond the cap', async () => {
+      const issues = manyTasks(1000)
+      const root = issues[500]!
+      const child = task({
+        uid: 'bulk-child',
+        title: 'Revealed child',
+        parent_short_id: root.short_id,
+      })
+      const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView')
+      const { container } = render(IssueCollection, {
+        props: {
+          currentView: viewWithIssues(issues),
+          issueCatalog: [...issues, child],
+          onSelect: vi.fn(),
+          revealRequest: { uid: child.uid, chain: [root, child], generation: 1 },
+        },
+      })
+      await waitFor(() =>
+        expect(container.querySelector('button.row[data-uid="bulk-child"]')).toBeTruthy(),
+      )
+      expect(rowCount(container)).toBeLessThan(1000)
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }))
+      expect(scrollIntoView.mock.contexts).toContain(
+        container.querySelector('button.row[data-uid="bulk-child"]'),
+      )
+    })
+
+    it('renders the prefix that holds a selected issue beyond the cap', async () => {
+      const { container } = renderMany(1000, { selectedIssueUID: 'bulk-00500' })
+      await waitFor(() =>
+        expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
+          'bulk-00500',
+        ),
+      )
+      expect(rowCount(container)).toBeLessThan(1000)
+    })
+  })
+
   it('expands snapshot-bounded descendants without loading task detail', async () => {
     const parent = task({
       uid: 'issue-parent',
