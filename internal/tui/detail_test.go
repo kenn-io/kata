@@ -476,6 +476,29 @@ func TestDetail_Scroll_PageDownClampsToDocument(t *testing.T) {
 	}
 }
 
+func TestDetail_TinyViewportEndThenArrowUpMovesDocument(t *testing.T) {
+	m := setupDetailScenario(t, 80, 6, strings.Repeat("body line\n", 40)+"tail")
+	width, visible, ok := m.detail.viewportDims()
+	if !ok || visible != m.height-1 {
+		t.Fatalf("tiny viewport = (%d, %d, %t), want width and height-1 rows", width, visible, ok)
+	}
+	docLines, _ := m.detail.detailDocumentLines(width, m.detail.scrollChrome())
+	maxStart := viewportMaxStart(len(docLines), visible)
+
+	m = pressRune(t, m, 'G')
+	if m.detail.scroll != maxStart {
+		t.Fatalf("G set scroll=%d, want tiny viewport maxStart=%d", m.detail.scroll, maxStart)
+	}
+	endView := m.viewContent()
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.detail.scroll != maxStart-1 {
+		t.Fatalf("Up after G set scroll=%d, want %d", m.detail.scroll, maxStart-1)
+	}
+	if upView := m.viewContent(); upView == endView {
+		t.Fatal("Up after G did not move the visible document")
+	}
+}
+
 // TestDetail_Scroll_SplitViewportClamp: in split-pane mode the cached
 // lastDetailWidth/Height is the inner pane size. Aggressive PgDn must
 // clamp scroll using that pane height, not the full terminal — split

@@ -617,6 +617,9 @@ func (dm detailModel) viewportDims() (width, visible int, ok bool) {
 	if dm.lastTermWidth <= 0 || dm.lastTermHeight <= 0 {
 		return 0, 0, false
 	}
+	if dm.lastTermHeight < listMinHeight {
+		return dm.lastTermWidth, max(dm.lastTermHeight-1, 0), true
+	}
 	helpRows := detailHelpRows(dm, dm.scrollChrome())
 	footerLines := helpLines(helpRows, dm.lastTermWidth)
 	visible = max(dm.lastTermHeight-2-1-footerLines, 1)
