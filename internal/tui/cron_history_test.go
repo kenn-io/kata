@@ -93,6 +93,8 @@ func TestCronHistoryRecordedIdentityAndCreationOrder(t *testing.T) {
 			text, links := historyDocument(p, ref, 200)
 			require.Contains(t, text, "Loaded project observations (incomplete)")
 			require.Contains(t, text, "Sample: 5 observations")
+			require.Contains(t, text, "Loaded run links · newest 100")
+			require.NotContains(t, text, "Loaded runs (", "the observation sample already states its size")
 			require.Contains(t, text, "succeeded 1 · failed 1 · cancelled 1 · running 1 · unknown 1")
 			require.Contains(t, text, "Order: SFCR?")
 			require.Contains(t, text, "Oldest left, newest right")
