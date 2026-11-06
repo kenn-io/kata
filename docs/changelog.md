@@ -57,6 +57,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.
 
+- Pull shared cron updates faster on large SQLite spokes by replaying cron
+  history without reconciling unrelated issues and their short IDs.
+
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding

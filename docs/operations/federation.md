@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-03
+last_edited: 2026-11-05
 ---
 
 # Federation
@@ -1918,7 +1918,9 @@ This section describes direct-spoke transport. Negotiated relays use
 A spoke polls the hub for events after its pull cursor. It applies hub events
 in order, deduplicates by event UID and content hash, folds portable payloads
 into the local projection, and advances its pull cursor only after successful
-application.
+application. SQLite cron-only pull pages replay the project's cron history
+without reconciling unrelated issues or their short IDs. Mixed pages and
+project or move baselines retain the ordinary issue reconciliation path.
 
 A push-enabled spoke scans for local-origin events above its push cursor and
 sends them to the hub as an all-or-nothing batch. The hub authenticates the
