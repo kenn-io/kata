@@ -681,6 +681,10 @@ func claimForwardClient(
 	if err != nil {
 		return nil, config.FederationCredential{}, internalAPIError(err)
 	}
+	return claimForwardClientWithCredential(ctx, binding, cred)
+}
+
+func claimForwardClientWithCredential(ctx context.Context, binding db.FederationBinding, cred config.FederationCredential) (*claimHubClient, config.FederationCredential, error) {
 	if cred.RelayEnrollmentPending {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "relay enrollment pending", "finish bridge enrollment before forwarding claims", nil)
 	}

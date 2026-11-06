@@ -140,6 +140,12 @@ func (c *Client) Content(ctx context.Context, version uuid.UUID) (*http.Response
 	return verifiedContent(c.request(ctx, "GET", "/api/v1/versions/"+version.String()+"/content", nil, nil))
 }
 
+// VerifyContentResponse verifies an origin response again at a relay boundary.
+// The caller must preserve the blob hash and size headers for its downstream.
+func VerifyContentResponse(resp *http.Response) (*http.Response, error) {
+	return verifiedContent(resp, nil)
+}
+
 func verifiedContent(resp *http.Response, err error) (*http.Response, error) {
 	if err != nil {
 		return nil, err

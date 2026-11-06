@@ -37,3 +37,17 @@ func TestAttachmentValid(t *testing.T) {
 	_, ok = Valid(jsontext.Value(strings.TrimSuffix(good, "}") + `,"schema_version":2}`))
 	require.False(t, ok, "unknown reference shapes are unreadable")
 }
+
+// Origin identity survives byte-for-byte replication; old local references
+// remain usable, while an unknown origin cannot silently choose a vault.
+func TestAttachmentOriginContract(t *testing.T) {
+	const fields = `"name":"report.pdf","media_type":"application/pdf","size":12,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"`
+	for _, origin := range []string{`"local"`, `"01ARZ3NDEKTSV4RRFFQ69G5FAV"`} {
+		_, valid := Valid(jsontext.Value(`{` + fields + `,"origin":` + origin + `}`))
+		require.True(t, valid, origin)
+	}
+	for _, origin := range []string{`"upstream"`, `""`, `null`, `42`, `{}`} {
+		_, valid := Valid(jsontext.Value(`{` + fields + `,"origin":` + origin + `}`))
+		require.False(t, valid, origin)
+	}
+}

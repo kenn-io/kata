@@ -247,6 +247,7 @@ type RelayHandshake struct {
 type RelayOfferRequest struct {
 	ProjectID       int64    `path:"project_id"`
 	Authorization   string   `header:"Authorization"`
+	EventFeatures   string   `header:"X-Kata-Event-Features"`
 	Stream          string   `query:"stream" enum:"events,receipts,artifacts"`
 	Limit           int      `query:"limit" default:"100" minimum:"1" maximum:"1024"`
 	ArtifactDigests []string `query:"artifact_digest,explode" maxItems:"32"`
@@ -257,18 +258,28 @@ type RelayOfferRequest struct {
 type RelayResetRequest struct {
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
+	EventFeatures string `header:"X-Kata-Event-Features"`
 }
 
 // RelayResetResponse returns the retained signed checkpoint and its hop translation.
-type RelayResetResponse struct{ Body db.RelayResetCheckpoint }
+type RelayResetResponse struct {
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	Body                  db.RelayResetCheckpoint
+}
 
 // RelayOfferResponse returns the emitted prefix retained for retry.
-type RelayOfferResponse struct{ Body db.RelayBatch }
+type RelayOfferResponse struct {
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	Body                  db.RelayBatch
+}
 
 // RelayAcceptRequest submits an authenticated batch for durable prefix acceptance.
 type RelayAcceptRequest struct {
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	Body          db.RelayBatch
 }
 

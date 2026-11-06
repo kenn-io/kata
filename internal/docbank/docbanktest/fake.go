@@ -49,6 +49,7 @@ func (f *Fake) Seed(path string, node docbank.Node, versions map[uuid.UUID][]byt
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	node.Size = int64(len(versions[node.CurrentVersionID]))
+	node.Path = path
 	f.nodes[node.ID] = node
 	f.paths[path] = node.ID
 	for id, content := range versions {
@@ -186,6 +187,22 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 			f.versions[key] = version
 			f.content[version] = b
 		}
+		var parentPath string
+		for candidate, id := range f.dirs {
+			if id == parent {
+				parentPath = candidate
+				break
+			}
+		}
+		fullPath := path.Join(parentPath, name)
+		nodeID, foundNode := f.paths[fullPath]
+		if !foundNode {
+			nodeID = int64(100000 + len(f.nodes))
+			f.paths[fullPath] = nodeID
+		}
+		versionID := uuid.MustParse(version)
+		f.nodes[nodeID] = docbank.Node{ID: nodeID, Path: fullPath, Name: name, Kind: "file", Size: int64(len(b)), CurrentVersionID: versionID}
+		f.metadata[version] = docbank.Version{ID: versionID, NodeID: nodeID, Size: int64(len(b))}
 		send(map[string]any{"node": map[string]string{"current_version_id": version}})
 	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/versions/") && strings.HasSuffix(r.URL.Path, "/content"):
 		version := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/versions/"), "/content")

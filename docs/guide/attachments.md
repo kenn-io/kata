@@ -1,7 +1,7 @@
 ---
 title: Issue attachments
 description: Attach files through Docbank and view images and videos in Kata.
-last_edited: 2026-11-04
+last_edited: 2026-11-06
 ---
 
 # Issue attachments
@@ -24,7 +24,43 @@ folder = "/kata"
 
 Protect the key file with mode `0600`. Restart after changing the section. Keys resolve on each request, so rotating the key needs no restart. HTTPS is required except on loopback. See the [configuration reference](../reference/configuration.md#docbank-attachments) for credential precedence and environment overrides.
 
-Without Docbank configured, references still appear in lists, and the web UI shows their names and details. Upload and content requests return `docbank_not_configured`. If a referenced version is absent from the configured Docbank, reads return `attachment_content_missing`.
+Without Docbank configured, references still appear in lists, and the web UI shows their names and details. Local upload and content requests return `docbank_not_configured`. A relayed project uses its origin's configuration instead. If a referenced version is absent from the selected Docbank, reads return `attachment_content_missing`.
+
+## Use attachments through project relays
+
+New attachments for a shared project use the root hub's Docbank. Add and link
+commands stay the same on a leaf or intermediate relay. Only the root needs
+the Docbank key; every connection uses its own project enrollment credential.
+Upgrade the CLI and every daemon on the path before using this feature.
+An unsupported hop returns an explicit upgrade error.
+
+The root exposes its configured `folder` subtree to each enrolled project's
+readers and metadata writers. This includes upload folders for other projects
+under that same subtree. Use a separate Docbank instance or folder audience
+when those files must not be shared. Forwarded links accept only files whose
+live canonical path is inside the exposed folder, including links selected by
+node ID or historical version. Moving a file outside that folder makes its
+origin references unreadable. Membership checks and content reads are separate
+Docbank operations; they do not provide an atomic folder ACL during moves.
+
+An origin service uploads or resolves the file and returns a pinned descriptor.
+The requesting daemon saves the issue reference locally, so it can be cited in
+an immediate close before metadata synchronization reaches the root. A new
+issue that has not reached the root returns `attachment_issue_not_synced`;
+sync the project and retry. The issue is not created at the root by uploading.
+
+New references carry the serving Kata instance UID in `origin`. Every replica
+stores the same value. References without this marker, including history from
+before relay adoption, keep using each serving daemon's local Docbank. A marked
+reference never falls back to a different local vault: an unreachable upstream
+returns `federation_offline`; a missing or changed route is an explicit origin
+error; a missing version at a reachable origin remains
+`attachment_content_missing`.
+
+Signed uploads use bounded temporary disk files for digest verification at
+each hop. The 256 MiB file limit remains. Transfer failures or a denied final
+metadata write can leave an unreferenced Docbank version; Docbank retention
+owns those bytes. A lost upload response can create another reference on retry.
 
 ## Add, read, and remove files
 
@@ -97,7 +133,7 @@ that version. Removed or changed references retain their frozen description.
 
 ## Read references as metadata
 
-Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields. These are ordinary opaque metadata keys. The browser checks field types for display; the daemon validates the full reference when serving content.
+Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields, plus optional `origin` for origin-routed references. An absent marker or explicit `local` keeps local resolution. These are ordinary opaque metadata keys. The browser checks field types for display; the daemon validates the full reference when serving content. Version reuse compares both origin and content version.
 
 ```sh
 kata meta get abc4

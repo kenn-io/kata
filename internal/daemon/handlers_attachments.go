@@ -2,17 +2,13 @@ package daemon
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
-	"os"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,10 +16,10 @@ import (
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -38,6 +34,9 @@ var attachmentRoute = regexp.MustCompile(`^(?:/api/v1/ui/proxy)?/api/v1/projects
 
 // isAttachmentTransfer matches the upload and content routes, which stream file bytes.
 func isAttachmentTransfer(r *http.Request) bool {
+	if federationsigning.IsAttachmentTransfer(r.Method, r.URL.Path) {
+		return true
+	}
 	m := attachmentRoute.FindStringSubmatch(r.URL.Path)
 	return m != nil && (r.Method == http.MethodPost && m[1] == "" || r.Method == http.MethodGet && m[1] != "")
 }
@@ -103,23 +102,15 @@ func recheckAttachmentWrite(ctx context.Context, cfg ServerConfig, projectID int
 	if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
 		return err
 	}
-	return requireFederatedIssueClaim(ctx, cfg, projectID, iss, actor)
+	return requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, false)
 }
 
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
+	registerFederatedDocbankHandlers(h, cfg)
 	huma.Register(h, huma.Operation{OperationID: "linkAttachment", Method: "POST", Path: attachmentPath + "/links"}, func(ctx context.Context, in *api.LinkAttachmentRequest) (*api.AddAttachmentResponse, error) {
 		return linkAttachment(ctx, cfg, in)
 	})
-	rawBody := func(ctx huma.Context, next func(huma.Context)) {
-		r, w := humago.Unwrap(ctx)
-		// Match huma's unlimited body-read timeout for a streaming upload.
-		_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
-		next(huma.WithContext(ctx, context.WithValue(ctx.Context(), attachmentUploadContextKey{}, http.MaxBytesReader(w, r.Body, maxAttachmentBytes))))
-	}
-	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, RequestBody: &huma.RequestBody{Required: true, Content: binaryContent("application/octet-stream")}, BodyReadTimeout: -1, Middlewares: huma.Middlewares{rawBody}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*api.AddAttachmentResponse, error) {
-		if cfg.Docbank == nil {
-			return nil, attachmentError(503, "docbank_not_configured")
-		}
+	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, RequestBody: &huma.RequestBody{Required: true, Content: binaryContent("application/octet-stream")}, BodyReadTimeout: -1, Middlewares: huma.Middlewares{attachmentRawBody}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*api.AddAttachmentResponse, error) {
 		actor, err := attributedActor(ctx, in.Actor)
 		if err != nil {
 			return nil, err
@@ -128,39 +119,44 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, iss, actor); err != nil {
+		if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, false); err != nil {
 			return nil, err
 		}
-		e := metadata.Attachment{Name: in.Name}
-		if !metadata.ValidAttachmentName(e.Name) {
+		if !metadata.ValidAttachmentName(in.Name) {
 			return nil, attachmentError(400, "attachment_invalid")
 		}
-		file, err := os.CreateTemp("", "kata-attachment-*")
+		binding, err := docbankUpstream(ctx, cfg, iss.ProjectID)
 		if err != nil {
-			return nil, internalAPIError(err)
+			return nil, err
 		}
-		defer func() { _ = file.Close(); _ = os.Remove(file.Name()) }()
-		hash := sha256.New()
-		e.Size, err = io.Copy(io.MultiWriter(file, hash), ctx.Value(attachmentUploadContextKey{}).(io.Reader))
-		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			return nil, attachmentError(413, "attachment_too_large")
+		var e metadata.Attachment
+		if binding != nil {
+			project, err := activeProjectByID(ctx, cfg.DB, iss.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			principal, err := attachmentForwardPrincipal(ctx, cfg, *binding, iss, actor, in.ClientKind)
+			if err != nil {
+				return nil, err
+			}
+			e, err = forwardDocbankDescriptor(ctx, cfg, project, iss, principal, "", in.Name, nil, ctx.Value(attachmentUploadContextKey{}).(io.Reader))
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			e, err = uploadDocbankAttachment(ctx, cfg, iss, in.Name, ctx.Value(attachmentUploadContextKey{}).(io.Reader), func() error { return recheckAttachmentWrite(ctx, cfg, iss.ProjectID, iss, actor) })
+			if err != nil {
+				return nil, err
+			}
+			root, err := cfg.DB.FederationBindingByProject(ctx, iss.ProjectID)
+			if err != nil && !errors.Is(err, db.ErrNotFound) {
+				return nil, internalAPIError(err)
+			}
+			if err == nil && root.Enabled && root.Role == db.FederationRoleHub {
+				e.Origin = cfg.DB.InstanceUID()
+			}
 		}
-		if err != nil {
-			return nil, internalAPIError(err)
-		}
-		if _, err = file.Seek(0, io.SeekStart); err != nil {
-			return nil, internalAPIError(err)
-		}
-		parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(cfg.DocbankFolder, iss.ProjectUID))
-		if err != nil {
-			return nil, docbankError(err, docbankUploadErrors)
-		}
-		sha := hex.EncodeToString(hash.Sum(nil))
-		e.DocbankVersion, err = cfg.Docbank.Upload(ctx, parent, e.Name, file, e.Size, sha)
-		if err != nil {
-			return nil, docbankError(err, docbankUploadErrors)
-		}
-		return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, e, nil)
+		return saveAttachment(ctx, cfg, iss.ProjectID, iss, actor, e, nil)
 	})
 	huma.Register(h, huma.Operation{OperationID: "attachmentContent", Method: "GET", Path: attachmentPath + "/{attachment_id}/content", Responses: map[string]*huma.Response{"200": {Description: "Attachment content.", Content: binaryContent("*/*")}}}, func(ctx context.Context, in *api.AttachmentReadRequest) (*huma.StreamResponse, error) {
 		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -179,12 +175,24 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if !valid {
 			return nil, attachmentError(400, "attachment_invalid")
 		}
-		if cfg.Docbank == nil {
-			return nil, attachmentError(503, "docbank_not_configured")
-		}
-		resp, err := cfg.Docbank.Content(ctx, e.DocbankVersion)
-		if err != nil {
-			return nil, docbankError(err, docbankContentErrors)
+		var resp *http.Response
+		if e.Origin == "" || e.Origin == "local" {
+			if cfg.Docbank == nil {
+				return nil, attachmentError(503, "docbank_not_configured")
+			}
+			resp, err = cfg.Docbank.Content(ctx, e.DocbankVersion)
+			if err != nil {
+				return nil, docbankError(err, docbankContentErrors)
+			}
+		} else {
+			project, err := activeProjectByID(ctx, cfg.DB, iss.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			resp, err = originDocbankContent(ctx, cfg, project, e)
+			if err != nil {
+				return nil, err
+			}
 		}
 		typ, disposition := "application/octet-stream", "attachment"
 		if inlineAttachmentType(e.MediaType) {
@@ -197,6 +205,8 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			if resp.ContentLength >= 0 {
 				hctx.SetHeader("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 			}
+			hctx.SetHeader("X-Docbank-Blob-Hash", resp.Header.Get("X-Docbank-Blob-Hash"))
+			hctx.SetHeader("X-Docbank-Blob-Size", resp.Header.Get("X-Docbank-Blob-Size"))
 			hctx.SetHeader("X-Content-Type-Options", "nosniff")
 			if _, err := io.Copy(hctx.BodyWriter(), resp.Body); err != nil {
 				panic(http.ErrAbortHandler)
@@ -206,10 +216,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 }
 
 func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string, e metadata.Attachment, reuseVersion *uuid.UUID) (*api.AddAttachmentResponse, error) {
-	e.MediaType = "application/octet-stream"
-	if typ := attachmentTypes[strings.ToLower(path.Ext(e.Name))]; typ != "" {
-		e.MediaType = typ
-	}
+	e.MediaType = attachmentMediaType(e.Name)
 	id, err := uid.New()
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -226,7 +233,7 @@ func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss 
 		// Recheck under the metadata write transaction so concurrent retries
 		// cannot each observe an absent reference and create a second one.
 		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
-			existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion})
+			existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion}, e.Origin)
 			if err != nil {
 				return nil, err
 			}
@@ -247,7 +254,7 @@ func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss 
 		cfg.Publish().Event(res.Event.ProjectID, res.Event)
 	}
 	if reuseVersion != nil {
-		id, e, err = attachmentForVersion(res.Issue, docbank.Version{ID: *reuseVersion})
+		id, e, err = attachmentForVersion(res.Issue, docbank.Version{ID: *reuseVersion}, e.Origin)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
