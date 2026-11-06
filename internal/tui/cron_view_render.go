@@ -352,7 +352,7 @@ func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 	}
 	runs := cronProjectObservations(p.runs, ref)
 	d.text(cronObservationSummary(runs), cronRef{})
-	d.section(fmt.Sprintf("Loaded runs (%d) · newest 100", len(runs)))
+	d.section("Loaded run links · newest 100")
 	for _, r := range runs {
 		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
 	}
