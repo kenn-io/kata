@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json/v2"
 	"fmt"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -30,13 +31,30 @@ func reportHint(cmd *cobra.Command, body []byte, hint cliHint) ([]byte, error) {
 	}
 	encoded, err := json.Marshal([]cliHint{hint})
 	body = bytes.TrimSpace(body)
-	return slices.Concat(body[:len(body)-1], []byte(`,"hints":`), encoded, []byte("}")), err
+	separator := []byte(`,"hints":`)
+	if len(bytes.TrimSpace(body[1:len(body)-1])) == 0 {
+		separator = []byte(`"hints":`)
+	}
+	return slices.Concat(body[:len(body)-1], separator, encoded, []byte("}")), err
 }
 
 // retryCommand returns a shell command that runs kata command with set, then
 // each daemon, scope, output, and keep flag the caller changed, then term
 // after "--". Actor flags such as --as and --teammate stay out of it.
 func retryCommand(cmd *cobra.Command, command string, set, keep []string, term string) string {
+	return retryCommandForOS(cmd, command, set, keep, term, runtime.GOOS)
+}
+
+func retryCommandForOS(cmd *cobra.Command, command string, set, keep []string, term, goos string) string {
+	quote := shellQuoteArg
+	if goos == "windows" {
+		quote = func(s string) string {
+			if isShellSafeArg(s) && !strings.ContainsAny(s, "@%,") {
+				return s
+			}
+			return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+		}
+	}
 	parts := append([]string{"kata", command}, set...)
 	for _, name := range slices.Concat([]string{"daemon", "project", "workspace", "format", "json", "agent", "quiet"}, keep) {
 		f := cmd.Flags().Lookup(name)
@@ -56,14 +74,14 @@ func retryCommand(cmd *cobra.Command, command string, set, keep []string, term s
 				value = strings.TrimSuffix(field.String(), "\n")
 			}
 			if f.Value.Type() != "bool" {
-				parts = append(parts, "--"+name, shellQuoteArg(value))
+				parts = append(parts, "--"+name, quote(value))
 			} else if value == "true" {
 				parts = append(parts, "--"+name)
 			}
 		}
 	}
 	if term != "" {
-		parts = append(parts, "--", shellQuoteArg(term))
+		parts = append(parts, "--", quote(term))
 	}
 	return strings.Join(parts, " ")
 }

@@ -173,7 +173,8 @@ func printSearchResults(cmd *cobra.Command, bs []byte, firstPage bool) error {
 		Results []jsontext.Value `json:"results"`
 	}
 	if err := json.Unmarshal(bs, &response); err == nil {
-		if hint := searchhint.EmptyLexical(response.Query, response.Mode, len(response.Results), firstPage); hint != nil {
+		filtered := cmd.Flags().Changed("status") || cmd.Flags().Changed("label") || cmd.Flags().Changed("no-label")
+		if hint := searchhint.EmptyLexical(response.Query, response.Mode, len(response.Results), firstPage, filtered); hint != nil {
 			next := retryCommand(cmd, "search", nil, []string{"status", "limit", "include-deleted", "lexical", "hybrid", "semantic", "label", "no-label"}, hint.Term)
 			bs, err = reportHint(cmd, bs, cliHint{Code: hint.Code, Message: hint.Message, Next: next})
 			if err != nil {
