@@ -484,3 +484,23 @@ func TestSearchEmptyMultiWordHints(t *testing.T) {
 	assert.Empty(t, continued["results"])
 	assert.NotContains(t, continued, "hints")
 }
+
+func TestSearchEmptyCatalogHasNoEveryWordHint(t *testing.T) {
+	env := testenv.New(t)
+	client, err := kataclient.NewWithHTTPClient(env.URL, env.HTTP)
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
+	for _, mode := range []string{"lexical", "hybrid", "semantic"} {
+		t.Run(mode, func(t *testing.T) {
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+				Name: "kata.search", Arguments: map[string]any{"query": "paginate inventory", "mode": mode},
+			})
+			require.NoError(t, err)
+			require.False(t, result.IsError, "%s", mustJSON(t, result))
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &out))
+			assert.Empty(t, out["results"])
+			assert.NotContains(t, out, "hints")
+		})
+	}
+}
