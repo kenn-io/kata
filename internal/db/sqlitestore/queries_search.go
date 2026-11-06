@@ -126,12 +126,16 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		// Every match contains every word, so the rarest word bounds the issues
 		// worth scoring. Scoring walks each posting of a word, while skipping
 		// postings outside that set is far cheaper.
-		anchor, none, err := d.anchorWord(ctx, words)
-		if err != nil {
-			return nil, fmt.Errorf("search fts: %w", err)
-		}
-		if none {
-			return nil, nil
+		var anchor string
+		if len(phrases) > 1 {
+			var none bool
+			anchor, none, err = d.anchorWord(ctx, words)
+			if err != nil {
+				return nil, fmt.Errorf("search fts: %w", err)
+			}
+			if none {
+				return nil, nil
+			}
 		}
 		anchorCTE, issueIn, commentIn := "", "", ""
 		if anchor != "" {
