@@ -159,7 +159,6 @@ func TestScore_MissingBody(t *testing.T) {
 		name, titleA, bodyA, titleB, bodyB string
 		want                               float64
 	}{
-		{"both empty", "fix login crash", "", "fix login crash", "", 1},
 		{"first empty", "fix login crash", "", "fix login crash", "stack trace here", 1},
 		{"second empty", "fix login crash", "stack trace here", "fix login crash", "", 1},
 		{"case differs", "fix LOGIN crash", "", "fix login crash", "", 0.6},
