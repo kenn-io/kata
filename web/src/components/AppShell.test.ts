@@ -1164,6 +1164,40 @@ describe('AppShell', () => {
     )
   })
 
+  test('resets grown rows when repeated label filters change', async () => {
+    const current = snapshot()
+    current.collection = Array.from({ length: 400 }, (_, index) => ({
+      ...current.collection[0]!,
+      id: index + 1,
+      uid: `bulk-${index}`,
+      short_id: `b${index}`,
+      title: `Bulk ${index}`,
+      labels: ['a', 'b', 'c', 'd'],
+    }))
+    const props = {
+      route: {
+        kind: 'kata' as const,
+        view: 'all-open' as const,
+        graph: false,
+        filters: { status: [], owner: [], label: ['a', 'b'], relationship: [] },
+      },
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { container, rerender } = render(AppShell, { props })
+    expect(container.querySelectorAll('button.row')).toHaveLength(150)
+    await fireEvent.keyDown(container.querySelector('button.row')!, { key: 'End' })
+    expect(container.querySelectorAll('button.row')).toHaveLength(400)
+    await rerender({
+      ...props,
+      route: { ...props.route, filters: { ...props.route.filters, label: ['c', 'd'] } },
+    })
+    expect(container.querySelectorAll('button.row')).toHaveLength(150)
+  })
+
   test('retains repeated route filters when another control changes', async () => {
     const onNavigate = vi.fn()
     render(AppShell, {

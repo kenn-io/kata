@@ -157,15 +157,23 @@
   let lastRevealGeneration: number | null = null
   let anchorMeasurementGeneration = 0
   let catalogByUID = $derived(new Map(issueCatalog.map((issue) => [issue.uid, issue])))
+  let catalogByHierarchyKey = $derived(
+    new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue])),
+  )
+
+  function parentUIDOf(issue: KataTaskSummary): string | undefined {
+    return (
+      issue.parent?.uid ??
+      (issue.parent_short_id
+        ? catalogByHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
+        : undefined)
+    )
+  }
+
   let childrenByParentUID = $derived.by(() => {
-    const byHierarchyKey = new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue]))
     const children = new Map<string, KataTaskSummary[]>()
     for (const issue of issueCatalog) {
-      const parentUID =
-        issue.parent?.uid ??
-        (issue.parent_short_id
-          ? byHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
-          : undefined)
+      const parentUID = parentUIDOf(issue)
       if (!parentUID) continue
       const siblings = children.get(parentUID)
       if (siblings) siblings.push(issue)
@@ -259,6 +267,11 @@
   let listKey = $derived(JSON.stringify([currentView.name, resultsKey]))
   let grown = $state({ key: '', limit: ROW_LIMIT_STEP })
   let rowLimit = $derived(grown.key === listKey ? grown.limit : ROW_LIMIT_STEP)
+
+  $effect.pre(() => {
+    if (grown.key !== listKey) grown = { key: listKey, limit: ROW_LIMIT_STEP }
+  })
+
   let rowSentinel: HTMLDivElement | null = $state(null)
   let hasHiddenRows = $derived(visibleRootIssues.length > rowLimit)
   let renderedRoots = $derived(visibleRootIssues.slice(0, rowLimit))
@@ -282,7 +295,16 @@
   }
 
   function rootIndexOf(uid: string): number {
-    return visibleRootIssues.findIndex((issue) => issue.uid === uid)
+    const visited = new Set<string>()
+    let currentUID: string | undefined = uid
+    while (currentUID && !visited.has(currentUID)) {
+      const index = visibleRootIssues.findIndex((issue) => issue.uid === currentUID)
+      if (index !== -1) return index
+      visited.add(currentUID)
+      const issue = catalogByUID.get(currentUID)
+      currentUID = issue ? parentUIDOf(issue) : undefined
+    }
+    return -1
   }
 
   function loadSort(): KataTaskSort {
@@ -639,9 +661,11 @@
           heldNavKeys.add(event.code)
           showRows(rowLimit + ROW_LIMIT_STEP)
           void tick().then(() => {
-            const grown = Array.from(tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [])
-            const at = grown.indexOf(target)
-            if (at !== -1) focusRow(grown[at + 1] ?? null)
+            const nextRows = Array.from(
+              tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [],
+            )
+            const at = nextRows.indexOf(target)
+            if (at !== -1) focusRow(nextRows[at + 1] ?? null)
           })
           return
         }

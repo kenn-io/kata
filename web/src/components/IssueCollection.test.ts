@@ -267,6 +267,68 @@ describe('IssueCollection', () => {
       }
     })
 
+    it('starts at 150 rows after clearing a narrowed search following End', async () => {
+      const issues = manyTasks(1000)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        resultsKey: 'all',
+        onSelect: vi.fn(),
+      }
+      const { rerender } = render(IssueCollection, { props })
+      await fireEvent.keyDown(visibleRows()[0]!, { key: 'End' })
+      expect(visibleRows()).toHaveLength(1000)
+      await rerender({
+        ...props,
+        resultsKey: 'search',
+        currentView: viewWithIssues(issues.slice(0, 200)),
+      })
+      expect(visibleRows()).toHaveLength(150)
+      await rerender(props)
+      expect(visibleRows()).toHaveLength(150)
+    })
+
+    it.each(['uid', 'short_id'])(
+      'keeps a selected expanded descendant rendered after its root moves past the cap using parent %s',
+      async (parentReference) => {
+        window.localStorage.setItem(
+          'kata:issue-sort/v1',
+          JSON.stringify({ key: 'title', direction: 'asc' }),
+        )
+        const issues = manyTasks(400)
+        const root = { ...issues[0]!, child_counts: { open: 1, total: 1 } }
+        issues[0] = root
+        const child = task({
+          uid: 'bulk-child',
+          short_id: 'child',
+          title: 'Selected child',
+          ...(parentReference === 'uid'
+            ? { parent: root, parent_short_id: 'missing' }
+            : { parent_short_id: root.short_id }),
+        })
+        const props = {
+          currentView: viewWithIssues(issues),
+          issueCatalog: [...issues, child],
+          selectedIssueUID: child.uid,
+          onSelect: vi.fn(),
+        }
+        const { container, rerender } = render(IssueCollection, { props })
+        await fireEvent.keyDown(visibleRows()[0]!, { key: 'ArrowRight' })
+        expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
+          child.uid,
+        )
+        const refreshed = [{ ...root, title: 'Z moved root' }, ...issues.slice(1)]
+        await rerender({
+          ...props,
+          currentView: viewWithIssues(refreshed),
+          issueCatalog: [...refreshed, child],
+        })
+        expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
+          child.uid,
+        )
+      },
+    )
+
     it('renders and scrolls to a revealed child whose root is beyond the cap', async () => {
       const issues = manyTasks(1000)
       const root = issues[500]!
