@@ -364,6 +364,9 @@ func buildListIssuesQuery(ctx context.Context, params db.ListIssuesParams, count
 	if scopeFilter.Len() > 0 {
 		conditions = append(conditions, strings.TrimPrefix(scopeFilter.String(), " AND "))
 	}
+	if params.ExactTitle != "" {
+		add(`i.title COLLATE "C" = $%d`, params.ExactTitle)
+	}
 	if params.Status != "" {
 		add("i.status = $%d", params.Status)
 	}

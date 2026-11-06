@@ -129,15 +129,14 @@ func Jaccard(a, b []string) float64 {
 //	0.6 * Jaccard(title[:500] tokens) + 0.4 * Jaccard(body[:500] tokens)
 //
 // Field slicing is rune-based: the first 500 Unicode codepoints of each title
-// and body are tokenized. Spec §3.7. If either body has no tokens, titles equal
-// after canonical normalization and case folding score 1.
+// and body are tokenized. Spec §3.7. If either bounded body has no tokens,
+// identical full title strings score 1.
 func Score(titleA, bodyA, titleB, bodyB string) float64 {
-	titleA, titleB = TitlePrefix(titleA), TitlePrefix(titleB)
 	bodyTokensA, bodyTokensB := Tokenize(BodyPrefix(bodyA)), Tokenize(BodyPrefix(bodyB))
-	if (len(bodyTokensA) == 0 || len(bodyTokensB) == 0) && strings.EqualFold(Canonical(titleA), Canonical(titleB)) {
+	if (len(bodyTokensA) == 0 || len(bodyTokensB) == 0) && titleA == titleB {
 		return 1
 	}
-	titleScore := Jaccard(Tokenize(titleA), Tokenize(titleB))
+	titleScore := Jaccard(Tokenize(TitlePrefix(titleA)), Tokenize(TitlePrefix(titleB)))
 	bodyScore := Jaccard(bodyTokensA, bodyTokensB)
 	return 0.6*titleScore + 0.4*bodyScore
 }

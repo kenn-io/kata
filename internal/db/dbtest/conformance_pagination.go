@@ -191,3 +191,54 @@ func checkCreationPaginationPrecision(t *testing.T, store db.Storage) error {
 	}
 	return nil
 }
+
+func checkListExactTitle(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	create := func(projectID int64, title string) db.Issue {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projectID, Title: title, Author: "tester"})
+		require.NoError(t, err)
+		return issue
+	}
+	first := create(project.ID, "Inventory crash!")
+	second := create(project.ID, "Inventory crash!")
+	create(other.ID, "Inventory crash!")
+	for _, title := range []string{"inventory crash!", "Inventory crash?", "Inventory  crash!", "Inventory crash! suffix"} {
+		create(project.ID, title)
+	}
+	deleted := create(project.ID, "Inventory crash!")
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "tester")
+	require.NoError(t, err)
+	params := db.ListIssuesParams{ProjectID: project.ID, ExactTitle: "Inventory crash!", CreatedFirst: true, Limit: 20}
+	rows, err := store.ListIssues(ctx, params)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, second.UID, rows[0].UID)
+	require.Equal(t, first.UID, rows[1].UID)
+	count, err := store.CountIssues(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), count)
+	params.Limit = 1
+	rows, err = store.ListIssues(ctx, params)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, second.UID, rows[0].UID)
+	params.IssueScope = &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: first.UID}
+	rows, err = store.ListIssues(ctx, params)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, first.UID, rows[0].UID)
+	params.AllowedIssueIDs = []int64{second.ID}
+	rows, err = store.ListIssues(ctx, params)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	params.IssueScope = nil
+	params.AllowedIssueIDs = nil
+	rows, err = store.ListIssues(db.WithAuthorizedProjects(ctx, []string{other.UID}), params)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	return nil
+}

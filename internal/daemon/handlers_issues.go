@@ -1584,13 +1584,10 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 	return fp, out, nil
 }
 
-// runLookalikeCheck runs the §3.7 soft-block: SearchFTSAny over the
-// 500-code-point title and body prefixes used by the scorer
-// (OR-of-tokens for high recall), scores each candidate via similarity.Score,
-// and returns a 409 duplicate_candidates error if any candidate is at or
-// above the 0.7 threshold. nil means proceed. The OR variant is required
-// because near-duplicates that differ by even one token would be filtered
-// out by SearchFTS's implicit-AND before similarity scoring runs.
+// runLookalikeCheck scores exact full-title matches and SearchFTSAny results
+// over the scorer's 500-code-point title and body prefixes. OR retrieval keeps
+// near-duplicates that differ by a token. A score at or above 0.7 returns a
+// 409 duplicate_candidates error; nil means proceed. Spec §3.7.
 func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssueRequest, projectName string) error {
 	q := similarity.LookalikeQuery(in.Body.Title, in.Body.Body)
 	candidates, err := cfg.DB.SearchFTSAny(ctx, db.SearchFTSParams{
@@ -1599,8 +1596,23 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 	if err != nil {
 		return internalAPIError(err)
 	}
+	exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
+		ProjectID: in.ProjectID, ExactTitle: in.Body.Title, Limit: 20,
+		CreatedFirst: true, IssueScope: issueScopeFromContext(ctx),
+	})
+	if err != nil {
+		return internalAPIError(err)
+	}
+	for _, issue := range exact {
+		candidates = append(candidates, db.SearchCandidate{Issue: issue})
+	}
+	seen := make(map[string]bool, len(candidates))
 	matched := []map[string]any{}
 	for _, c := range candidates {
+		if seen[c.Issue.UID] {
+			continue
+		}
+		seen[c.Issue.UID] = true
 		score := similarity.Score(in.Body.Title, in.Body.Body, c.Issue.Title, c.Issue.Body)
 		if score >= similarityThreshold {
 			matched = append(matched, map[string]any{

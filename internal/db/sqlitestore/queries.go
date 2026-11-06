@@ -1083,6 +1083,10 @@ func buildListIssuesQuery(ctx context.Context, p db.ListIssuesParams, count bool
 	appendAllowedIssueIDsSQLite(&q, &args, p.AllowedIssueIDs)
 	q.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopeSQLite(&q, &args, p.IssueScope)
+	if p.ExactTitle != "" {
+		q.WriteString(` AND i.title = ? COLLATE BINARY`)
+		args = append(args, p.ExactTitle)
+	}
 	if p.Status != "" {
 		q.WriteString(` AND i.status = ?`)
 		args = append(args, p.Status)

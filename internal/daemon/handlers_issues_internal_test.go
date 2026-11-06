@@ -17,6 +17,10 @@ type lookalikeQueryRecordingStore struct {
 	query string
 }
 
+func (s *lookalikeQueryRecordingStore) ListIssues(_ context.Context, _ db.ListIssuesParams) ([]db.Issue, error) {
+	return nil, nil
+}
+
 func (s *lookalikeQueryRecordingStore) SearchFTSAny(_ context.Context, params db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	s.query = params.Query
 	return nil, nil
@@ -52,6 +56,10 @@ func TestRunLookalikeCheckBoundsSearchQuery(t *testing.T) {
 type lookalikeCandidateStore struct {
 	db.Storage
 	candidates []db.SearchCandidate
+}
+
+func (s *lookalikeCandidateStore) ListIssues(_ context.Context, _ db.ListIssuesParams) ([]db.Issue, error) {
+	return nil, nil
 }
 
 func (s *lookalikeCandidateStore) SearchFTSAny(_ context.Context, _ db.SearchFTSParams) ([]db.SearchCandidate, error) {
