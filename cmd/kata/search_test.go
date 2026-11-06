@@ -24,7 +24,7 @@ func renderSearch(t *testing.T, mode outputMode, body string) string {
 	cmd := &cobra.Command{}
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
-	require.NoError(t, printSearchResults(cmd, []byte(body), true))
+	require.NoError(t, printSearchResults(cmd, []byte(body)))
 	return buf.String()
 }
 
@@ -103,12 +103,6 @@ func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
 	_ = requireCLIError(t, f.execute("search", "  "), ExitValidation)
 }
 
-// Adding the reason keeps the daemon's existing JSON members in order.
-func TestSearchJSONHintPreservesResponseOrder(t *testing.T) {
-	out := renderSearch(t, outputJSON, `{"query":"paginate inventory","mode":"lexical","results":[],"complete":true}`)
-	assert.Equal(t, `{"kata_api_version":1,"query":"paginate inventory","mode":"lexical","results":[],"complete":true,"hints":[{"code":"every_word_required","message":"no issue contains every word; search again with fewer words"}]}`+"\n", out)
-}
-
 func TestSearch_FilteredMissKeepsEveryWordHint(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "inventory export stalls")
@@ -119,10 +113,8 @@ func TestSearch_FilteredMissKeepsEveryWordHint(t *testing.T) {
 				out, stderr, err := runCLIWithErr(t, env, dir, append([]string{mode, "search", "paginate inventory"}, filter...)...)
 				require.NoError(t, err, stderr)
 				if mode == "--json" {
-					var got map[string]any
-					require.NoError(t, json.Unmarshal([]byte(out), &got))
-					assert.Empty(t, got["results"])
-					assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}, got["hints"])
+					// The reason follows the daemon's members, in their order.
+					assert.Equal(t, `{"kata_api_version":1,"complete":true,"truncated":false,"query":"paginate inventory","mode":"lexical","results":[],"hints":[{"code":"every_word_required","message":"no issue contains every word; search again with fewer words"}]}`+"\n", out)
 					assert.Empty(t, stderr)
 				} else {
 					assert.Equal(t, "Hint: no issue contains every word; search again with fewer words\n", stderr)
@@ -361,7 +353,7 @@ func TestSearchCredentialFallbackIsSilentButLabeled(t *testing.T) {
 			cmd.SetOut(&out)
 			cmd.SetErr(&stderr)
 			body := `{"query":"credential","mode":"lexical","degraded":true,"degraded_reason":"semantic search unavailable: no embedding API key (env EXAMPLE_KEY is unset)","results":[]}`
-			require.NoError(t, printSearchResults(cmd, []byte(body), true))
+			require.NoError(t, printSearchResults(cmd, []byte(body)))
 			assert.Empty(t, stderr.String())
 			assert.Contains(t, out.String(), "EXAMPLE_KEY")
 			if mode == outputHuman {
@@ -380,6 +372,6 @@ func TestSearchPlainLexicalHasNoFallbackWarning(t *testing.T) {
 	var out, stderr bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&stderr)
-	require.NoError(t, printSearchResults(cmd, []byte(`{"query":"credential","mode":"lexical","results":[]}`), true))
+	require.NoError(t, printSearchResults(cmd, []byte(`{"query":"credential","mode":"lexical","results":[]}`)))
 	assert.Empty(t, stderr.String())
 }

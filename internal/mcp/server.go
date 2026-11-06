@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/mcpicon"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/storageadmin"
 	"go.kenn.io/kata/internal/teammate"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -852,17 +853,11 @@ type SearchHit struct {
 	MatchedIn []string     `json:"matched_in"`
 }
 
-// SearchHint explains an empty search.
-type SearchHint struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
 // SearchOutput reports the effective mode and any semantic fallback.
 type SearchOutput struct {
-	Hints      []SearchHint `json:"hints,omitempty"`
-	Complete   bool         `json:"complete"`
-	NextCursor *string      `json:"next_cursor,omitempty"`
+	Hints      []searchhint.Hint `json:"hints,omitempty"`
+	Complete   bool              `json:"complete"`
+	NextCursor *string           `json:"next_cursor,omitempty"`
 
 	Project        *ProjectIdentity  `json:"project,omitempty"`
 	Projects       []ProjectIdentity `json:"projects,omitempty"`

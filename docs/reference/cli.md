@@ -792,8 +792,7 @@ Lexical search returns only issues whose title, body, or comments contain every
 query word. When the first page of a multi-word lexical search finds nothing,
 `kata search` prints `Hint: no issue contains every word; search again with fewer words`
 to stderr, including when status or label filters are set. `--quiet` suppresses
-it. JSON carries a `hints` entry with code `every_word_required` and the same
-message. Search hints contain a reason only; choose fewer words for the retry.
+it. JSON adds a `hints` entry with code `every_word_required` and that message.
 
 By default `kata search` runs lexical (FTS) search. When the daemon has
 [semantic search](../guide/semantic-search.md) configured, search

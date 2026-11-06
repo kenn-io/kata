@@ -191,11 +191,9 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		results = results[:limit]
 		truncated = true
 	}
-	var hints []SearchHint
+	var hints []searchhint.Hint
 	if len(searches) > 0 {
-		if hint := searchhint.EmptyLexical(query, effectiveMode, len(results), input.Cursor == ""); hint != nil {
-			hints = []SearchHint{{Code: hint.Code, Message: hint.Message}}
-		}
+		hints = searchhint.EmptyLexical(query, effectiveMode, len(results), input.Cursor == "")
 	}
 	project, outputProjects := outputProjectScope(projects)
 	return successResult(), SearchOutput{

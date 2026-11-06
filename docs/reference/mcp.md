@@ -235,8 +235,7 @@ and handle syntax.
 
 An empty first page of a lexical multi-word `kata.search` includes
 `hints: [{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}]`,
-including when status or label filters are set. Search hints contain a reason
-only; choose fewer words for the retry.
+including when status or label filters are set.
 
 `kata.search` accepts optional `status: "open"` or `status: "closed"`; omit
 it to search both statuses. It combines with labels and the selected search

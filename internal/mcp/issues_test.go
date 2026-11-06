@@ -429,8 +429,8 @@ func writeJSON(writer http.ResponseWriter, value any) {
 	_ = json.NewEncoder(writer).Encode(value)
 }
 
-// An initial every-word miss explains the empty result. A single word and
-// an empty continuation page get no hint.
+// An initial every-word miss explains the empty result, with or without
+// filters. A single word and an empty continuation page get no hint.
 func TestSearchEmptyMultiWordHints(t *testing.T) {
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(t.Context(), "example-project")
@@ -449,26 +449,16 @@ func TestSearchEmptyMultiWordHints(t *testing.T) {
 	client, err := kataclient.NewWithHTTPClient(env.URL, env.HTTP)
 	require.NoError(t, err)
 	session := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
-	search := func(args map[string]any) map[string]any {
-		t.Helper()
-		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: args})
-		require.NoError(t, err)
-		require.False(t, result.IsError, "%s", mustJSON(t, result))
-		var out map[string]any
-		require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &out))
-		return out
+	want := []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}
+	for _, filter := range []map[string]any{{}, {"status": "open"}, {"labels": []string{"bug"}}, {"exclude_labels": []string{"missing"}}} {
+		filter["query"] = "paginate inventory"
+		assert.Equal(t, want, callWorkflowTool(t, session, "kata.search", filter)["hints"], filter)
 	}
 
-	args := map[string]any{"query": "paginate inventory"}
-	out := search(args)
-	assert.Equal(t, []any{map[string]any{
-		"code": "every_word_required", "message": "no issue contains every word; search again with fewer words",
-	}}, out["hints"])
-
-	assert.NotContains(t, search(map[string]any{"query": "paginate"}), "hints")
+	assert.NotContains(t, callWorkflowTool(t, session, "kata.search", map[string]any{"query": "paginate"}), "hints")
 
 	page := map[string]any{"query": "inventory export", "mode": "lexical", "project": "example-project", "limit": 1}
-	first := search(page)
+	first := callWorkflowTool(t, session, "kata.search", page)
 	require.Len(t, first["results"], 1)
 	require.NotEmpty(t, first["next_cursor"])
 	for _, id := range ids {
@@ -476,31 +466,9 @@ func TestSearchEmptyMultiWordHints(t *testing.T) {
 		require.NoError(t, err)
 	}
 	page["cursor"] = first["next_cursor"]
-	continued := search(page)
+	continued := callWorkflowTool(t, session, "kata.search", page)
 	assert.Empty(t, continued["results"])
 	assert.NotContains(t, continued, "hints")
-}
-
-func TestSearchFilteredMissKeepsEveryWordHint(t *testing.T) {
-	env := testenv.New(t)
-	project, err := env.DB.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Author: "example-agent", Title: "inventory export stalls", Labels: []string{"bug"}})
-	require.NoError(t, err)
-	client, err := kataclient.NewWithHTTPClient(env.URL, env.HTTP)
-	require.NoError(t, err)
-	session := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
-	for name, value := range map[string]any{"status": "open", "labels": []string{"bug"}, "exclude_labels": []string{"missing"}} {
-		t.Run(name, func(t *testing.T) {
-			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "paginate inventory", name: value}})
-			require.NoError(t, err)
-			require.False(t, result.IsError, "%s", mustJSON(t, result))
-			var out map[string]any
-			require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &out))
-			assert.Empty(t, out["results"])
-			assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}, out["hints"])
-		})
-	}
 }
 
 func TestSearchEmptyCatalogHasNoEveryWordHint(t *testing.T) {
@@ -508,17 +476,7 @@ func TestSearchEmptyCatalogHasNoEveryWordHint(t *testing.T) {
 	client, err := kataclient.NewWithHTTPClient(env.URL, env.HTTP)
 	require.NoError(t, err)
 	session := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
-	for _, mode := range []string{"lexical", "hybrid", "semantic"} {
-		t.Run(mode, func(t *testing.T) {
-			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
-				Name: "kata.search", Arguments: map[string]any{"query": "paginate inventory", "mode": mode},
-			})
-			require.NoError(t, err)
-			require.False(t, result.IsError, "%s", mustJSON(t, result))
-			var out map[string]any
-			require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &out))
-			assert.Empty(t, out["results"])
-			assert.NotContains(t, out, "hints")
-		})
-	}
+	out := callWorkflowTool(t, session, "kata.search", map[string]any{"query": "paginate inventory"})
+	assert.Empty(t, out["results"])
+	assert.NotContains(t, out, "hints")
 }

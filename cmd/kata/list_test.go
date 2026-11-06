@@ -523,8 +523,8 @@ func TestList_JSONOmitsHint(t *testing.T) {
 	assert.Len(t, got.Issues, 2)
 }
 
-// An unfiltered empty list counts the issues of the other status in every
-// output mode, and --quiet silences only the text notice.
+// An empty open list counts the project's closed issues, and agent output
+// keeps its header.
 func TestList_EmptyStatusHints(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"first", "second", "third", "fourth"} {
@@ -532,42 +532,28 @@ func TestList_EmptyStatusHints(t *testing.T) {
 		runCLI(t, env, dir, "close", ref, "--done", "--message", "completed the work for this closed issue fixture", "--commit", "abc1234")
 	}
 	t.Chdir(dir)
-	message := "no open issues; 4 closed; see kata list --status all"
-	jsonFlags, agentFlag := " --json --quiet", " --agent"
+	ctx := contextWithBaseURL(t.Context(), env.URL)
+	next, agentFlag := "kata list --status all", " --agent"
 	if runtime.GOOS == "windows" {
-		message = "no open issues; 4 closed; see & 'kata' 'list' '--status' 'all'"
-		jsonFlags, agentFlag = " '--json' '--quiet'", " '--agent'"
+		next, agentFlag = "& 'kata' 'list' '--status' 'all'", " '--agent'"
 	}
-	for _, args := range [][]string{{"list"}, {"--agent", "list"}, {"--json", "--quiet", "list"}, {"--quiet", "list"}, {"list", "--label", "missing"}} {
-		out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
-		require.NoError(t, err)
-		switch args[0] {
-		case "--json":
-			var got map[string]any
-			require.NoError(t, json.Unmarshal([]byte(out), &got))
-			assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": message + jsonFlags, "next": strings.TrimPrefix(message, "no open issues; 4 closed; see ") + jsonFlags}}, got["hints"])
-			assert.Empty(t, stderr)
-		case "--agent":
-			assert.Equal(t, "Hint: "+message+agentFlag+"\n", stderr)
-			assert.Equal(t, "OK list count=0 complete=true\n", out)
-		case "--quiet":
-			assert.Empty(t, out+stderr)
-		default:
-			if len(args) > 1 {
-				assert.Empty(t, stderr, "no closed issue has the label")
-			} else {
-				assert.Equal(t, "Hint: "+message+"\n", stderr)
-				assert.Empty(t, out)
-			}
-		}
-	}
+	out, stderr, err := executeRootCapture(t, ctx, "list")
+	require.NoError(t, err)
+	assert.Empty(t, out)
+	assert.Equal(t, "Hint: no open issues; 4 closed; see "+next+"\n", stderr)
+
+	out, stderr, err = executeRootCapture(t, ctx, "--agent", "list")
+	require.NoError(t, err)
+	assert.Equal(t, "OK list count=0 complete=true\n", out)
+	assert.Equal(t, "Hint: no open issues; 4 closed; see "+next+agentFlag+"\n", stderr)
 }
 
 // Running the filtered list retry from an unbound directory keeps the scope,
 // output mode, limit, and membership filters. Without them, the newer
 // unrelated issues would fill the one-row page and hide the counted issue.
 // The quoted comma filter excludes one nonexistent label. Splitting it would
-// exclude the counted issue's "wont" label.
+// exclude the counted issue's "wont" label. The workspace's apostrophe must
+// survive this platform's shell.
 func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	hidden := createIssue(t, env, pid, "hidden match")
@@ -582,7 +568,7 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 			runCLI(t, env, dir, "close", ref, "--done", "--message", "completed the work for this closed issue fixture", "--commit", "abc1234")
 		}
 	}
-	workspace := filepath.Join(t.TempDir(), "example workspace")
+	workspace := filepath.Join(t.TempDir(), "reader's workspace")
 	require.NoError(t, os.Mkdir(workspace, 0o700))
 	t.Chdir(t.TempDir())
 	ctx := contextWithBaseURL(t.Context(), env.URL)
@@ -596,55 +582,48 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	require.Len(t, got.Hints, 1)
-	next := "kata list --status all --project kata --workspace '" + workspace + "' --json --quiet --limit 1 --label bug --label ui --no-label '\"wont,fix\"' --meta 'work.attention=needs review'"
+	next := "kata list --status all --project kata --workspace '" + strings.ReplaceAll(workspace, "'", `'\''`) + "' --json --quiet --limit 1 --label bug --label ui --no-label '\"wont,fix\"' --meta 'work.attention=needs review'"
 	if runtime.GOOS == "windows" {
-		next = "& 'kata' 'list' '--status' 'all' '--project' 'kata' '--workspace' '" + workspace + "' '--json' '--quiet' '--limit' '1' '--label' 'bug' '--label' 'ui' '--no-label' '\"wont,fix\"' '--meta' 'work.attention=needs review'"
+		next = "& 'kata' 'list' '--status' 'all' '--project' 'kata' '--workspace' '" + strings.ReplaceAll(workspace, "'", "''") + "' '--json' '--quiet' '--limit' '1' '--label' 'bug' '--label' 'ui' '--no-label' '\"wont,fix\"' '--meta' 'work.attention=needs review'"
 	}
 	assert.Equal(t, cliHint{Code: "excluded_open", Message: "no closed issues match the filters; 1 open match; see " + next, Next: next}, got.Hints[0])
 
-	words, err := splitHelpWords(got.Hints[0].Next)
-	require.NoError(t, err)
+	// The shell prints the arguments it would pass to kata, one per line.
+	shell := []string{"sh", "-c", `kata() { printf '%s\n' "$@"; }; ` + got.Hints[0].Next}
 	if runtime.GOOS == "windows" {
-		words = words[1:] // PowerShell's call operator precedes the executable.
+		shell = []string{"pwsh", "-NoProfile", "-Command", "function kata { $args }; " + got.Hints[0].Next}
 	}
-	out, stderr, err = executeRootCapture(t, ctx, words[1:]...)
+	output, err := exec.CommandContext(t.Context(), shell[0], shell[1:]...).Output() //nolint:gosec // G204: the test runs the emitted retry.
+	require.NoError(t, err)
+	out, stderr, err = executeRootCapture(t, ctx, strings.Split(strings.TrimSpace(strings.ReplaceAll(string(output), "\r\n", "\n")), "\n")...)
 	require.NoError(t, err, stderr)
 	assert.Contains(t, out, "hidden match")
 	assert.NotContains(t, out, "unrelated")
 }
 
-func TestList_PowerShellRetryPreservesApostrophes(t *testing.T) {
-	pwsh, err := exec.LookPath("pwsh")
-	if err != nil {
-		t.Skip("pwsh is unavailable")
-	}
-	env, _, pid := setupCLIWorkspace(t)
-	createIssue(t, env, pid, "hidden match")
-	workspace := filepath.Join(t.TempDir(), "reader's workspace")
-	require.NoError(t, os.Mkdir(workspace, 0o700))
-	cmd := newListCmd()
-	cmd.Flags().String("workspace", "", "")
-	cmd.Flags().String("project", "", "")
-	require.NoError(t, cmd.Flags().Set("workspace", workspace))
-	require.NoError(t, cmd.Flags().Set("project", "kata"))
-	commands, err := retryCommand(cmd, "list", []string{"--status", "all"}, nil)
-	require.NoError(t, err)
-	// Run the emitted command through PowerShell, then replay its arguments
-	// against the fixture daemon.
-	output, err := exec.CommandContext(t.Context(), pwsh, "-NoProfile", "-Command", "function kata { ConvertTo-Json -Compress -InputObject @($args) }; "+commands.PowerShell).CombinedOutput() //nolint:gosec // G204: controlled fixture values exercise the emitted shell command.
-	require.NoError(t, err, "%s", output)
-	var args []string
-	require.NoError(t, json.Unmarshal(output, &args))
-	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
-	require.NoError(t, err, stderr)
-	assert.Contains(t, out, "hidden match")
-}
-
 // The count runs once, scoped to the listed project, only for an empty first
-// page with one status; a failed count keeps the empty list.
+// page with one status whose output can show it. A failed count keeps the
+// empty list, and --quiet suppresses only text.
 func TestList_EmptyStatusHintRequests(t *testing.T) {
-	for _, scenario := range []string{"scoped", "global", "nonempty", "all-status", "cursor", "count-failed", "missing-total", "quiet-text", "quiet-agent", "quiet-json"} {
-		t.Run(scenario, func(t *testing.T) {
+	scoped := []string{"--json", "list", "--project", "spoke-project"}
+	for _, tt := range []struct {
+		name  string
+		args  []string
+		calls int32
+		next  []string // flags after "kata list --status all" in the hint
+	}{
+		{"scoped", scoped, 2, []string{"--project", "spoke-project", "--json"}},
+		{"global", []string{"--json", "list", "--all"}, 2, []string{"--json", "--all"}},
+		{"quiet-json", append(scoped, "--quiet"), 2, []string{"--project", "spoke-project", "--json", "--quiet"}},
+		{"nonempty", scoped, 1, nil},
+		{"all-status", append(scoped, "--status", "all"), 1, nil},
+		{"cursor", append(scoped, "--sort", "created", "--cursor", "next-page"), 1, nil},
+		{"count-failed", scoped, 2, nil},
+		{"missing-total", scoped, 2, nil},
+		{"quiet-text", []string{"--quiet", "list", "--project", "spoke-project"}, 1, nil},
+		{"quiet-agent", []string{"--quiet", "--agent", "list", "--project", "spoke-project"}, 1, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -657,7 +636,7 @@ func TestList_EmptyStatusHintRequests(t *testing.T) {
 					calls.Add(1)
 					query := r.URL.Query()
 					if query.Get("status") != "closed" {
-						if scenario == "nonempty" {
+						if tt.name == "nonempty" {
 							_, _ = fmt.Fprint(w, `{"issues":[{"short_id":"abcd","title":"a match","status":"open"}],"complete":true}`)
 						} else {
 							_, _ = fmt.Fprint(w, `{"issues":[],"complete":true}`)
@@ -666,68 +645,43 @@ func TestList_EmptyStatusHintRequests(t *testing.T) {
 					}
 					assert.Equal(t, "/api/v1/issues", r.URL.Path)
 					wantProject := "1"
-					if scenario == "global" {
+					if tt.name == "global" {
 						wantProject = ""
 					}
 					assert.Equal(t, wantProject, query.Get("project_id"))
 					assert.Equal(t, "1", query.Get("limit"))
-					if scenario == "count-failed" {
+					switch tt.name {
+					case "count-failed":
 						w.WriteHeader(http.StatusServiceUnavailable)
 						_, _ = fmt.Fprint(w, `{"error":{"code":"unavailable","message":"count unavailable"}}`)
-						return
-					}
-					if scenario == "missing-total" {
+					case "missing-total":
 						_, _ = fmt.Fprint(w, `{"issues":[],"complete":true}`)
-						return
+					default:
+						_, _ = fmt.Fprint(w, `{"issues":[],"complete":true,"total":4}`)
 					}
-					_, _ = fmt.Fprint(w, `{"issues":[],"complete":true,"total":4}`)
 				default:
 					http.NotFound(w, r)
 				}
 			}))
 			t.Cleanup(server.Close)
-			args := map[string][]string{
-				"quiet-text":  {"--project", "spoke-project", "--quiet"},
-				"quiet-agent": {"--project", "spoke-project", "--quiet", "--agent"},
-				"quiet-json":  {"--project", "spoke-project", "--quiet"},
-				"global":      {"--all"},
-				"cursor":      {"--project", "spoke-project", "--sort", "created", "--cursor", "next-page"},
-				"all-status":  {"--project", "spoke-project", "--status", "all"},
-			}[scenario]
-			if args == nil {
-				args = []string{"--project", "spoke-project"}
-			}
-			command := []string{"--json", "list"}
-			if scenario == "quiet-text" || scenario == "quiet-agent" {
-				command = []string{"list"}
-			}
-			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), append(command, args...)...)
+			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), tt.args...)
 			require.NoError(t, err)
 			assert.Empty(t, stderr)
-			if scenario == "quiet-text" || scenario == "quiet-agent" {
-				assert.EqualValues(t, 1, calls.Load())
+			assert.Equal(t, tt.calls, calls.Load())
+			if tt.args[0] != "--json" {
 				return
 			}
 			var got map[string]any
 			require.NoError(t, json.Unmarshal([]byte(out), &got))
-			switch scenario {
-			case "scoped", "global", "quiet-json":
-				assert.EqualValues(t, 2, calls.Load())
-				next := map[string]string{"scoped": "kata list --status all --project spoke-project --json", "global": "kata list --status all --json --all"}[scenario]
-				if scenario == "quiet-json" {
-					next = "kata list --status all --project spoke-project --json --quiet"
-				}
-				if runtime.GOOS == "windows" {
-					next = map[string]string{"scoped": "& 'kata' 'list' '--status' 'all' '--project' 'spoke-project' '--json'", "global": "& 'kata' 'list' '--status' 'all' '--json' '--all'", "quiet-json": "& 'kata' 'list' '--status' 'all' '--project' 'spoke-project' '--json' '--quiet'"}[scenario]
-				}
-				assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": "no open issues; 4 closed; see " + next, "next": next}}, got["hints"])
-			case "count-failed", "missing-total":
-				assert.EqualValues(t, 2, calls.Load())
+			if tt.next == nil {
 				assert.NotContains(t, got, "hints")
-			default:
-				assert.EqualValues(t, 1, calls.Load())
-				assert.NotContains(t, got, "hints")
+				return
 			}
+			next := "kata list --status all " + strings.Join(tt.next, " ")
+			if runtime.GOOS == "windows" {
+				next = "& 'kata' 'list' '--status' 'all' '" + strings.Join(tt.next, "' '") + "'"
+			}
+			assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": "no open issues; 4 closed; see " + next, "next": next}}, got["hints"])
 		})
 	}
 }

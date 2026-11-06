@@ -141,7 +141,14 @@ per match.`,
 				return err
 			}
 			bs := response.Body
-			if err := printSearchResults(cmd, bs, cursor == ""); err != nil {
+			if r := response.JSON200; r != nil {
+				for _, hint := range searchhint.EmptyLexical(r.Query, r.Mode, len(r.Results), cursor == "") {
+					if bs, err = reportHint(cmd, bs, cliHint{Code: hint.Code, Message: hint.Message}); err != nil {
+						return err
+					}
+				}
+			}
+			if err := printSearchResults(cmd, bs); err != nil {
 				return err
 			}
 			if cursor == "" && response.JSON200 != nil && len(response.JSON200.Results) == 0 {
@@ -163,23 +170,9 @@ per match.`,
 }
 
 // printSearchResults renders a search response in the active output mode:
-// JSON envelope, human-readable list, or "no matches" when empty. firstPage
-// reports that the request carried no cursor.
-func printSearchResults(cmd *cobra.Command, bs []byte, firstPage bool) error {
+// JSON envelope, human-readable list, or "no matches" when empty.
+func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	mode := currentOutputMode()
-	var response struct {
-		Query   string           `json:"query"`
-		Mode    string           `json:"mode"`
-		Results []jsontext.Value `json:"results"`
-	}
-	if err := json.Unmarshal(bs, &response); err == nil {
-		if hint := searchhint.EmptyLexical(response.Query, response.Mode, len(response.Results), firstPage); hint != nil {
-			bs, err = reportHint(cmd, bs, cliHint{Code: hint.Code, Message: hint.Message})
-			if err != nil {
-				return err
-			}
-		}
-	}
 	if mode == outputJSON {
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
