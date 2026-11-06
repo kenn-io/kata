@@ -2111,13 +2111,7 @@ func TestCreate_LookalikeMissingBody(t *testing.T) {
 	body := map[string]any{"actor": "agent-1", "title": "!!!"}
 	first := postWithHeader(t, ts, path, nil, body)
 	requireOK(t, first)
-	var created struct {
-		Issue struct {
-			ShortID string `json:"short_id"`
-		} `json:"issue"`
-	}
-	require.NoError(t, json.Unmarshal(first.body, &created))
-	require.NotEmpty(t, created.Issue.ShortID)
+	firstShortID := issueShortIDFromCreate(t, first.body)
 
 	second := postWithHeader(t, ts, path, nil, body)
 	require.Equal(t, http.StatusConflict, second.status, string(second.body))
@@ -2134,7 +2128,7 @@ func TestCreate_LookalikeMissingBody(t *testing.T) {
 	require.NoError(t, json.Unmarshal(second.body, &conflict))
 	assert.Equal(t, "duplicate_candidates", conflict.Error.Code)
 	require.Len(t, conflict.Error.Data.Candidates, 1)
-	assert.Equal(t, created.Issue.ShortID, conflict.Error.Data.Candidates[0].ShortID)
+	assert.Equal(t, firstShortID, conflict.Error.Data.Candidates[0].ShortID)
 }
 
 // TestCreate_ForceNewBypassesLookalike verifies that force_new=true on a body
