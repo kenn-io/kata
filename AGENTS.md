@@ -228,9 +228,16 @@ closes with `kata reopen <ref>`.
 
 ## CI runners
 
-All CI jobs use GitHub-hosted runners: `ubuntu-latest` for Linux and
+CI test jobs use GitHub-hosted runners: `ubuntu-latest` for Linux and
 `windows-2025` for Windows. Pull requests call the reusable test workflow from
 the same commit so workflow changes are exercised before merge.
+
+The `CI gate` job in `test-pr.yml` runs on the Namespace profile
+`namespace-profile-linux-1cpu` so it does not wait in the GitHub-hosted queue.
+That profile uses Namespace's
+[Restricted access level](https://namespace.so/docs/solutions/github-actions/runner-controls/access-levels),
+which disables workload access to Namespace features and APIs. GitHub fork
+approvals, token permissions, and secrets are separate controls.
 
 ## Repository-writer trust/threat model
 
