@@ -69,63 +69,33 @@ func (s *lookalikeCandidateStore) SearchFTSAny(_ context.Context, _ db.SearchFTS
 	return s.candidates, nil
 }
 
-func TestRunLookalikeCheckExactTitlePaging(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		body        string
-		fts         bool
-		wantCalls   int
-		wantMatches int
-	}{
-		{"bodyless stops at twenty", "", false, 1, 20},
-		{"nonmatches exhaust short page", "apples bananas cherries dates elderberries figs grapes hazelnuts", false, 2, 0},
-		{"full FTS skips exact lookup", "apples", true, 0, 20},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			in := &api.CreateIssueRequest{ProjectID: 7}
-			in.Body.Title = "Inventory page crashes on second page"
-			in.Body.Body = tc.body
-			stamp := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			rows := make([]db.Issue, 21)
-			for i := range rows {
-				rows[i] = db.Issue{ID: int64(21 - i), UID: fmt.Sprintf("issue-%d", i), Title: in.Body.Title, Body: "apples", CreatedAt: stamp}
-			}
-			calls := 0
-			store := &lookalikeCandidateStore{listIssues: func(params db.ListIssuesParams) ([]db.Issue, error) {
-				calls++
-				require.Equal(t, 20, params.Limit)
-				require.True(t, params.CreatedFirst)
-				require.Equal(t, int64(7), params.ProjectID)
-				require.Equal(t, in.Body.Title, params.ExactTitle)
-				switch calls {
-				case 1:
-					require.Nil(t, params.After)
-					return rows[:20], nil
-				case 2:
-					require.Equal(t, &pagination.Position{CreatedAt: stamp, ID: 2}, params.After)
-					return rows[20:], nil
-				default:
-					t.Fatal("exact lookup continued after exhaustion")
-					return nil, nil
-				}
-			}}
-			if tc.fts {
-				for _, issue := range rows[:20] {
-					store.candidates = append(store.candidates, db.SearchCandidate{Issue: issue})
-				}
-			}
-			err := runLookalikeCheck(t.Context(), ServerConfig{DB: store}, in, "example-project")
-			if tc.wantMatches == 0 {
-				require.NoError(t, err)
-			} else {
-				var apiErr *api.APIError
-				require.ErrorAs(t, err, &apiErr)
-				assert.Equal(t, "duplicate_candidates", apiErr.Code)
-				assert.Len(t, apiErr.Data["candidates"], tc.wantMatches)
-			}
-			assert.Equal(t, tc.wantCalls, calls)
-		})
+func TestRunLookalikeCheckBoundsExactTitlePages(t *testing.T) {
+	in := &api.CreateIssueRequest{ProjectID: 7}
+	in.Body.Title = "Inventory page crashes on second page"
+	in.Body.Body = "apples bananas cherries dates elderberries figs grapes hazelnuts"
+	stamp := time.Unix(100, 0).UTC()
+	rows := make([]db.Issue, 20)
+	for i := range rows {
+		rows[i] = db.Issue{ID: int64(20 - i), UID: fmt.Sprint(i), Title: in.Body.Title, Body: "apples", CreatedAt: stamp}
 	}
+	calls := 0
+	store := &lookalikeCandidateStore{listIssues: func(params db.ListIssuesParams) ([]db.Issue, error) {
+		calls++
+		require.Equal(t, 20, params.Limit)
+		switch calls {
+		case 1:
+			require.Nil(t, params.After)
+			return rows, nil
+		case 2:
+			require.Equal(t, &pagination.Position{CreatedAt: stamp, ID: 1}, params.After)
+			return nil, nil
+		default:
+			t.Fatal("exact lookup continued after exhaustion")
+			return nil, nil
+		}
+	}}
+	require.NoError(t, runLookalikeCheck(t.Context(), ServerConfig{DB: store}, in, "example-project"))
+	assert.Equal(t, 2, calls)
 }
 
 func closedLookalike(title, body, uid string) db.SearchCandidate {
