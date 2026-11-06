@@ -68,11 +68,11 @@ func TestReadCloseTranscriptConfig_EnabledEnvironment(t *testing.T) {
 enabled = false
 agentsview_url = "https://agentsview.example"
 [close.transcript.session_id_env]
-omp = "PI_SESSION_ID"
+pi = "PI_SESSION_ID"
 `), 0600))
 		cfg, err := ReadCloseTranscriptConfig()
 		require.NoError(t, err)
-		assert.Equal(t, CloseTranscriptConfig{Enabled: true, AgentsViewURL: "https://agentsview.example", SessionIDEnv: map[string]string{"omp": "PI_SESSION_ID"}}, cfg)
+		assert.Equal(t, CloseTranscriptConfig{Enabled: true, AgentsViewURL: "https://agentsview.example", SessionIDEnv: map[string]string{"pi": "PI_SESSION_ID"}}, cfg)
 	})
 	t.Run("false ignores the file's invalid session settings", func(t *testing.T) {
 		home := t.TempDir()
@@ -82,6 +82,14 @@ omp = "PI_SESSION_ID"
 		cfg, err := ReadCloseTranscriptConfig()
 		require.NoError(t, err)
 		assert.False(t, cfg.Enabled)
+	})
+	t.Run("an invalid value is an error naming the variable", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("KATA_HOME", home)
+		t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", "sometimes")
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled = true\n"), 0600))
+		_, err := ReadCloseTranscriptConfig()
+		require.ErrorContains(t, err, "KATA_CLOSE_TRANSCRIPT_ENABLED")
 	})
 }
 

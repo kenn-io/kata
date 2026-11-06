@@ -23,22 +23,23 @@ type CloseTranscriptConfig struct {
 // KATA_CLOSE_TRANSCRIPT_ENABLED overrides the file's enabled flag for one
 // process; false skips the file, so its transcript settings cannot warn.
 func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
-	override := strings.TrimSpace(os.Getenv("KATA_CLOSE_TRANSCRIPT_ENABLED"))
-	var enabled bool
-	if override != "" {
-		var err error
-		if enabled, err = strconv.ParseBool(override); err != nil {
-			return CloseTranscriptConfig{}, errors.New("KATA_CLOSE_TRANSCRIPT_ENABLED must be true or false")
-		}
-		if !enabled {
-			return CloseTranscriptConfig{}, nil
-		}
+	value := strings.TrimSpace(os.Getenv("KATA_CLOSE_TRANSCRIPT_ENABLED"))
+	if value == "" {
+		return readCloseTranscriptFile()
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return CloseTranscriptConfig{}, errors.New("KATA_CLOSE_TRANSCRIPT_ENABLED must be true or false")
+	}
+	if !enabled {
+		return CloseTranscriptConfig{}, nil
 	}
 	cfg, err := readCloseTranscriptFile()
-	if err == nil && enabled {
-		cfg.Enabled = true
+	if err != nil {
+		return CloseTranscriptConfig{}, err
 	}
-	return cfg, err
+	cfg.Enabled = true
+	return cfg, nil
 }
 
 func readCloseTranscriptFile() (CloseTranscriptConfig, error) {
