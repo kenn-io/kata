@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -2102,6 +2103,65 @@ func TestCreate_LookalikeSoftBlock(t *testing.T) {
 	require.Equal(t, 409, second.status, string(second.body))
 	assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
 	assert.Contains(t, string(second.body), `"candidates"`)
+}
+
+func TestCreate_LookalikeMissingBody(t *testing.T) {
+	for _, tc := range []struct {
+		name, title, secondTitle string
+		wantConflict             bool
+	}{
+		{"identical title", "Inventory page crashes on second page", "Inventory page crashes on second page", true},
+		{"different full titles", "Phase 1", "Phase 2", false},
+		{"punctuation only", "!!!", "!!!", true},
+		{"past search prefix", strings.Repeat("x", 501), strings.Repeat("x", 501), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, pid := bootstrapProject(t)
+			ts := h.ts.(*httptest.Server)
+			path := issuesURL(pid)
+			first := postWithHeader(t, ts, path, nil, map[string]any{"actor": "agent-1", "title": tc.title})
+			requireOK(t, first)
+			var created struct {
+				Issue struct {
+					ShortID string `json:"short_id"`
+				} `json:"issue"`
+			}
+			require.NoError(t, json.Unmarshal(first.body, &created))
+			require.NotEmpty(t, created.Issue.ShortID)
+
+			second := postWithHeader(t, ts, path, nil, map[string]any{"actor": "agent-1", "title": tc.secondTitle})
+			if !tc.wantConflict {
+				requireOK(t, second)
+				return
+			}
+			require.Equal(t, http.StatusConflict, second.status, string(second.body))
+			var conflict struct {
+				Error struct {
+					Code string `json:"code"`
+					Data struct {
+						Candidates []struct {
+							ShortID string `json:"short_id"`
+						} `json:"candidates"`
+					} `json:"data"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(second.body, &conflict))
+			assert.Equal(t, "duplicate_candidates", conflict.Error.Code)
+			require.Len(t, conflict.Error.Data.Candidates, 1)
+			assert.Equal(t, created.Issue.ShortID, conflict.Error.Data.Candidates[0].ShortID)
+
+			forced := postWithHeader(t, ts, path, nil, map[string]any{"actor": "agent-1", "title": tc.title, "force_new": true})
+			requireOK(t, forced)
+			var forcedOut struct {
+				Issue struct {
+					ShortID string `json:"short_id"`
+				} `json:"issue"`
+			}
+			require.NoError(t, json.Unmarshal(forced.body, &forcedOut))
+			assert.NotEmpty(t, forcedOut.Issue.ShortID)
+			assert.NotEqual(t, created.Issue.ShortID, forcedOut.Issue.ShortID)
+		})
+	}
 }
 
 // TestCreate_ForceNewBypassesLookalike verifies that force_new=true on a body
