@@ -442,6 +442,14 @@ type daemonErrorTransport struct {
 	timeout time.Duration
 }
 
+// CloseIdleConnections lets http.Client.CloseIdleConnections reach the
+// wrapped transport.
+func (t daemonErrorTransport) CloseIdleConnections() {
+	if closer, ok := t.RoundTripper.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	state := daemonBudgetFromContext(req.Context())
 	if state == nil {

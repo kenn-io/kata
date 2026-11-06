@@ -225,14 +225,12 @@ all_projects = true
 						wantActor = "token-agent"
 					}
 					require.Equal(t, wantActor, issue["author"])
-					if !tt.identity {
-						//nolint:kennlint // sleeptest: Tool-use reporting finishes asynchronously through the daemon REST API.
-						require.Eventually(t, func() bool {
-							capture.mu.Lock()
-							defer capture.mu.Unlock()
-							return slices.Contains(capture.events, "agent_active")
-						}, 5*time.Second, time.Millisecond)
-					}
+					//nolint:kennlint // sleeptest: Tool-use reporting finishes asynchronously through the daemon REST API.
+					require.Eventually(t, func() bool {
+						capture.mu.Lock()
+						defer capture.mu.Unlock()
+						return slices.Contains(capture.events, "agent_active")
+					}, 5*time.Second, time.Millisecond)
 				}
 			}
 		})

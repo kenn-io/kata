@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -214,4 +217,76 @@ func TestDaemonMCPIdentityRequests(t *testing.T) {
 	require.Equal(t, map[string]string{
 		"Granted root": "seed-author", "Outside grant": "seed-author", "member-one issue": "member-one", "member-two issue": "member-two",
 	}, authors)
+}
+
+// Contract: ending an identity session releases the connections its REST
+// clients opened to the daemon. The daemon's Unix listener never times out
+// idle connections, so anything a closed session keeps open stays open.
+func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix sockets are not supported on Windows")
+	}
+	home := deploymentHome(t)
+	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "member-one-token", Actor: "member-one", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	auth := config.AuthConfig{Token: "bootstrap-token", RequireTokenIdentity: true}
+	backend := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: auth})
+	t.Cleanup(func() { require.NoError(t, backend.Close()) })
+	dir, err := os.MkdirTemp("", "kmcp")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "d.sock")
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", socket)
+	require.NoError(t, err)
+	var open atomic.Int64
+	rest := &http.Server{
+		Handler: backend.Handler(), ReadHeaderTimeout: 10 * time.Second,
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			switch state {
+			case http.StateNew:
+				open.Add(1)
+			case http.StateClosed, http.StateHijacked:
+				open.Add(-1)
+			}
+		},
+	}
+	go func() { _ = rest.Serve(listener) }()
+	t.Cleanup(func() { _ = rest.Close() })
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	handler, err := newDaemonMCPHandler(ctx, store, config.MCPConfig{
+		Projects: []string{project.Name}, StartupSections: []string{"issue_discovery"},
+	}, "", kitdaemon.Endpoint{Network: kitdaemon.NetworkUnix, Address: socket}, auth)
+	require.NoError(t, err)
+	gateway := httptest.NewServer(handler)
+	t.Cleanup(gateway.Close)
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = nil
+	t.Cleanup(base.CloseIdleConnections)
+	callCtx, stop := context.WithTimeout(ctx, 15*time.Second)
+	defer stop()
+	for range 4 {
+		transport := newAuthenticatedMCPHTTPTestTransport(gateway.URL + "/mcp")
+		transport.HTTPClient.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			clone := request.Clone(request.Context())
+			clone.Header.Set("Authorization", "Bearer member-one-token")
+			return base.RoundTrip(clone)
+		})
+		session, err := newMCPHTTPTestClient().Connect(callCtx, transport, nil)
+		require.NoError(t, err)
+		listed, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "kata.list", Arguments: map[string]any{"project": project.Name}})
+		require.NoError(t, err)
+		require.False(t, listed.IsError, "%v", listed.Content)
+		require.Positive(t, open.Load(), "the session's tool call reaches the daemon")
+		require.NoError(t, session.Close())
+	}
+	//nolint:kennlint // sleeptest: session teardown and connection close finish asynchronously after DELETE.
+	require.Eventually(t, func() bool { return open.Load() == 0 }, 5*time.Second, 10*time.Millisecond,
+		"closed sessions left %d daemon connections open", open.Load())
 }
