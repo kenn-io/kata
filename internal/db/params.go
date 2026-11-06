@@ -109,9 +109,10 @@ type CloseIssueParams struct {
 
 // ListIssuesParams filters single-project list output.
 type ListIssuesParams struct {
-	PriorityUnset bool                 // only issues with no priority
-	CreatedFirst  bool                 // created_at DESC; OldestFirst selects ASC
-	After         *pagination.Position // stable keyset boundary
+	PriorityUnset     bool                 // only issues with no priority
+	CreatedFirst      bool                 // created_at DESC; OldestFirst selects ASC
+	ShortestBodyFirst bool                 // body length ASC, id ASC
+	After             *pagination.Position // stable keyset boundary
 
 	ProjectID     int64
 	ExactTitle    string       // empty = no filter; otherwise identical full title text

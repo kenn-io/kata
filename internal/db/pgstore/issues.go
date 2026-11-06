@@ -423,6 +423,9 @@ func buildListIssuesQuery(ctx context.Context, params db.ListIssuesParams, count
 	if params.OldestFirst {
 		order = `i.created_at ASC, i.id ASC`
 	}
+	if params.ShortestBodyFirst {
+		order = `length(i.body), i.id`
+	}
 	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY ` + order
 	if params.Limit > 0 {
 		args = append(args, params.Limit)

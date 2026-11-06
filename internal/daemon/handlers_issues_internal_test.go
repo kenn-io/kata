@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/pagination"
 )
 
 type lookalikeQueryRecordingStore struct {
@@ -69,33 +67,24 @@ func (s *lookalikeCandidateStore) SearchFTSAny(_ context.Context, _ db.SearchFTS
 	return s.candidates, nil
 }
 
-func TestRunLookalikeCheckBoundsExactTitlePages(t *testing.T) {
+func TestRunLookalikeCheckBoundsExactTitleQuery(t *testing.T) {
 	in := &api.CreateIssueRequest{ProjectID: 7}
 	in.Body.Title = "Inventory page crashes on second page"
 	in.Body.Body = "apples bananas cherries dates elderberries figs grapes hazelnuts"
-	stamp := time.Unix(100, 0).UTC()
 	rows := make([]db.Issue, 20)
 	for i := range rows {
-		rows[i] = db.Issue{ID: int64(20 - i), UID: fmt.Sprint(i), Title: in.Body.Title, Body: "apples", CreatedAt: stamp}
+		rows[i] = db.Issue{UID: fmt.Sprint(i), Title: in.Body.Title, Body: "apples"}
 	}
 	calls := 0
 	store := &lookalikeCandidateStore{listIssues: func(params db.ListIssuesParams) ([]db.Issue, error) {
 		calls++
 		require.Equal(t, 20, params.Limit)
-		switch calls {
-		case 1:
-			require.Nil(t, params.After)
-			return rows, nil
-		case 2:
-			require.Equal(t, &pagination.Position{CreatedAt: stamp, ID: 1}, params.After)
-			return nil, nil
-		default:
-			t.Fatal("exact lookup continued after exhaustion")
-			return nil, nil
-		}
+		require.True(t, params.ShortestBodyFirst)
+		require.Nil(t, params.After)
+		return rows, nil
 	}}
 	require.NoError(t, runLookalikeCheck(t.Context(), ServerConfig{DB: store}, in, "example-project"))
-	assert.Equal(t, 2, calls)
+	assert.Equal(t, 1, calls)
 }
 
 func closedLookalike(title, body, uid string) db.SearchCandidate {

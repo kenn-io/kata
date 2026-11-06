@@ -1151,7 +1151,9 @@ func buildListIssuesQuery(ctx context.Context, p db.ListIssuesParams, count bool
 		args = append(args, stamp, stamp, stamp, p.After.ID)
 	}
 
-	if p.OldestFirst {
+	if p.ShortestBodyFirst {
+		q.WriteString(" ORDER BY length(i.body), i.id")
+	} else if p.OldestFirst {
 		q.WriteString(" ORDER BY " + creationKeySQL("i") + " ASC, i.id ASC")
 	} else if p.CreatedFirst {
 		q.WriteString(" ORDER BY " + creationKeySQL("i") + " DESC, i.id DESC")

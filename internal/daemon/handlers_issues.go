@@ -1611,22 +1611,18 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 	}
 	seen := make(map[string]bool, len(candidates))
 	for _, c := range candidates {
-		if !seen[c.Issue.UID] {
-			seen[c.Issue.UID] = true
-			addMatch(c.Issue)
-		}
+		seen[c.Issue.UID] = true
+		addMatch(c.Issue)
 	}
-	var after *pagination.Position
-	for len(matched) < 20 {
+	if len(matched) < 20 {
 		exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
 			ProjectID: in.ProjectID, ExactTitle: in.Body.Title, Limit: 20,
-			CreatedFirst: true, After: after, IssueScope: issueScopeFromContext(ctx),
+			ShortestBodyFirst: true, IssueScope: issueScopeFromContext(ctx),
 		})
 		if err != nil {
 			return internalAPIError(err)
 		}
 		for _, issue := range exact {
-			// Exact-title pages don't overlap; only FTS rows need deduplication.
 			if !seen[issue.UID] {
 				addMatch(issue)
 				if len(matched) == 20 {
@@ -1634,11 +1630,6 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 				}
 			}
 		}
-		if len(exact) < 20 {
-			break
-		}
-		last := exact[len(exact)-1]
-		after = &pagination.Position{CreatedAt: last.CreatedAt, ID: last.ID}
 	}
 	if len(matched) == 0 {
 		return nil
