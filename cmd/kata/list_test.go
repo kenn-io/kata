@@ -591,6 +591,12 @@ func TestList_EmptyStatusHintRequests(t *testing.T) {
 					assert.Equal(t, "2", query.Get("max_priority"))
 					assert.Equal(t, "work.attention=stuck", query.Get("meta"))
 					if query.Get("status") == "closed" {
+						assert.Equal(t, "/api/v1/issues", r.URL.Path)
+						if scenario == "global" {
+							assert.Empty(t, query.Get("project_id"))
+						} else {
+							assert.Equal(t, "1", query.Get("project_id"))
+						}
 						assert.Equal(t, "1", query.Get("limit"))
 						assert.Equal(t, "true", query.Get("include_total"))
 						if scenario == "count-failed" {
