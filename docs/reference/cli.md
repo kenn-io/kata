@@ -10,6 +10,31 @@ This page summarizes the command surface. Run `kata <command> --help` for the
 current flag list in your installed binary. Root help includes the agent workflow,
 ref syntax, output modes, environment variables, and exit codes.
 
+## Find a command
+
+Describe a task to find the most relevant commands in your installed binary:
+
+```sh
+kata cli search "add a comment to an issue"
+kata cli search create a bug --limit 3 --json
+```
+
+Command discovery runs locally without a daemon, workspace binding, config,
+credentials, or network. It searches command names, summaries, flags and
+keywords. It excludes hidden and deprecated commands, interactive UI commands,
+and protocol or agent-hook runners. Hook management remains searchable.
+`kata search` continues to search issues.
+
+Results default to five commands; `--limit` accepts 1–20. Text prints one
+command and summary per line, followed by a help hint. `--agent` adds an
+`OK search results=N` status line. `--json` (or `--format json`) returns
+`kata_api_version`, `query`, and `results`; each result has `command`,
+`summary`, and `usage`. Results contain no scores. No matches is a success
+with an empty results array and a text hint pointing to `kata --help`.
+An empty task or an invalid limit is a usage error (exit 2).
+
+Run `kata cli` for the discovery group's help.
+
 ## Command groups
 
 Root help groups commands into find/read, issue changes, agent coordination,
