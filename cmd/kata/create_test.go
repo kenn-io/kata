@@ -785,6 +785,13 @@ func TestCreateDefaultPriorityRequest(t *testing.T) {
 	}
 }
 
+func TestCreateHelpDoesNotRepeatPriorityNoneDescription(t *testing.T) {
+	stdout, _, err := executeRootCapture(t, t.Context(), "create", "--help")
+	require.NoError(t, err)
+	require.Contains(t, stdout, "none = unset", "the priority flag should explain the none value")
+	assert.NotContains(t, stdout, "Pass --priority none to leave it unset even with a configured default.")
+}
+
 func TestCreateDefaultPriorityValidationBeforeNetwork(t *testing.T) {
 	for _, tc := range []struct {
 		name, config, wantErr string

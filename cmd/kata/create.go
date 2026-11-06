@@ -49,7 +49,7 @@ Relationship flags take refs. --parent groups work and does not gate
 readiness; --blocked-by does. --meta key=value stores a string.
 When --priority is omitted, [create].default_priority in the invoking client's
 <KATA_HOME>/config.toml supplies the priority. Without either setting, priority
-stays unset. Pass --priority none to leave it unset even with a configured default.
+stays unset.
 --agent prints "OK create <ref>"; --json has .issue.short_id.`,
 		Example: `  kata create "fix login race" --body "Safari double-submits the callback." --idempotency-key login-race-2026-10-09 --agent
   kata create "write retry test" --parent abc4 --blocked-by d4ex --idempotency-key retry-test-abc4 --agent
