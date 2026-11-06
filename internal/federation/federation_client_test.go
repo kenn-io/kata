@@ -46,6 +46,27 @@ func TestFederationClientPollProjectEvents(t *testing.T) {
 	assert.Equal(t, int64(8), body.NextAfterID)
 }
 
+func TestFederationClientPollProjectEventsSendsLargeCursorsAsIntegers(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query().Get("after_id")
+		assert.Equal(t, "/api/v1/projects/42/federation/events", r.URL.Path)
+		assert.Equal(t, "2", r.URL.Query().Get("limit"))
+		require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+			Events:      []api.EventEnvelope{},
+			NextAfterID: 1251852,
+		}))
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(t.Context(), srv.URL, "hub-token", clientpkg.Opts{})
+	require.NoError(t, err)
+	_, err = client.PollProjectEvents(t.Context(), 42, 1251852, 2)
+	require.NoError(t, err)
+
+	assert.Equal(t, "1251852", gotQuery)
+}
+
 func TestFederationClientSignsRelayBatchAbovePreviousBodyLimit(t *testing.T) {
 	t.Setenv("TEST_RELAY_BATCH_SIGNING_KEY", strings.Repeat("k", 64))
 	var receivedBodyBytes int64

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"reflect"
 
@@ -20,7 +21,8 @@ type Client struct {
 }
 
 // NewPathEscapingAPIClient wraps apiClient so string path params are URL path
-// escaped before request construction. Wrapping is idempotent.
+// escaped and numeric query params use decimal notation before request
+// construction. Wrapping is idempotent.
 func NewPathEscapingAPIClient(apiClient runtime.APIClient) runtime.APIClient {
 	if apiClient == nil {
 		return nil
@@ -92,7 +94,29 @@ func (o pathEscapingRequestOptions) GetQuery() (map[string]any, error) {
 	if o.RequestOptions == nil {
 		return nil, nil
 	}
-	return o.RequestOptions.GetQuery()
+	params, err := o.RequestOptions.GetQuery()
+	if err != nil || len(params) == 0 {
+		return params, err
+	}
+	for key, value := range params {
+		params[key] = integerSafeParam(value)
+	}
+	return params, nil
+}
+
+func integerSafeParam(v any) any {
+	switch value := v.(type) {
+	case float64:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	case []any:
+		result := make([]any, len(value))
+		for i, item := range value {
+			result[i] = integerSafeParam(item)
+		}
+		return result
+	default:
+		return v
+	}
 }
 
 func (o pathEscapingRequestOptions) GetBody() any {
