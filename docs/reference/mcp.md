@@ -236,7 +236,7 @@ and handle syntax.
 An empty first page of a lexical multi-word `kata.search` includes
 `hints: [{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "retry_with": {"query": "<longest word>"}}]`.
 Merge `retry_with` into the original arguments to retry with the same scope and
-filters. A request with `cursor` gets no hint.
+filters.
 
 `kata.search` accepts optional `status: "open"` or `status: "closed"`; omit
 it to search both statuses. It combines with labels and the selected search

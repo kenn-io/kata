@@ -12,10 +12,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Open long web UI lists with the first 150 rows and add more as you scroll. The
   browser's own Find sees only rendered rows. End and deep links to late rows
   still draw the remaining rows once.
-- Read empty multi-word search reasons in CLI JSON and MCP, with a suggested
-  single-word retry that keeps your scope and filters. Empty lists now report
-  matching issues hidden by the status filter and suggest a
-  `kata list --status all` command with the same filters.
+- Read empty multi-word search reasons in CLI JSON and MCP, with a one-word
+  retry that keeps your scope and filters. Empty lists report matching issues
+  of the other status and a `kata list --status all` retry.
 - Give coding agents a shorter kata contract. The text that hooks inject,
   `kata init --with-agents` writes, and the MCP `workflow` guide serves now
   covers one agent's loop in plain prose: skip kata for questions, search with

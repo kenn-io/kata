@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/csv"
 	"encoding/json/v2"
 	"fmt"
 	"slices"
@@ -28,29 +27,17 @@ func reportHint(cmd *cobra.Command, body []byte, hint cliHint) ([]byte, error) {
 		_, err := fmt.Fprintln(cmd.ErrOrStderr(), "Hint: "+hint.Message)
 		return body, err
 	}
-	body = bytes.TrimSpace(body)
 	encoded, err := json.Marshal([]cliHint{hint})
-	if err != nil {
-		return nil, err
-	}
-	var out bytes.Buffer
-	out.Write(body[:len(body)-1])
-	out.WriteString(`,"hints":`)
-	out.Write(encoded)
-	out.WriteByte('}')
-	return out.Bytes(), nil
+	body = bytes.TrimSpace(body)
+	return slices.Concat(body[:len(body)-1], []byte(`,"hints":`), encoded, []byte("}")), err
 }
 
-// retryFlags are the daemon, scope, and output flags every retry keeps. Actor
-// flags such as --as and --teammate stay out of a suggested command.
-var retryFlags = []string{"daemon", "project", "workspace", "format", "json", "agent", "quiet"}
-
 // retryCommand returns a shell command that runs kata command with set, then
-// each flag from retryFlags and keep that the caller changed, then args after
-// "--". It omits every other flag.
-func retryCommand(cmd *cobra.Command, command string, set, keep []string, args ...string) string {
+// each daemon, scope, output, and keep flag the caller changed, then term
+// after "--". Actor flags such as --as and --teammate stay out of it.
+func retryCommand(cmd *cobra.Command, command string, set, keep []string, term string) string {
 	parts := append([]string{"kata", command}, set...)
-	for _, name := range slices.Concat(retryFlags, keep) {
+	for _, name := range slices.Concat([]string{"daemon", "project", "workspace", "format", "json", "agent", "quiet"}, keep) {
 		f := cmd.Flags().Lookup(name)
 		if f == nil || !f.Changed {
 			continue
@@ -60,31 +47,15 @@ func retryCommand(cmd *cobra.Command, command string, set, keep []string, args .
 			values = slice.GetSlice()
 		}
 		for _, value := range values {
-			switch f.Value.Type() {
-			case "bool":
-				if value == "true" {
-					parts = append(parts, "--"+name)
-				} else {
-					parts = append(parts, "--"+name+"=false")
-				}
-				continue
-			case "stringSlice":
-				// pflag reads each occurrence as CSV, so a value holding a
-				// comma or quote must be encoded to arrive whole.
-				var field strings.Builder
-				w := csv.NewWriter(&field)
-				_ = w.Write([]string{value}) // writes to memory, which cannot fail
-				w.Flush()
-				value = strings.TrimSuffix(field.String(), "\n")
+			if f.Value.Type() != "bool" {
+				parts = append(parts, "--"+name, shellQuoteArg(value))
+			} else if value == "true" {
+				parts = append(parts, "--"+name)
 			}
-			parts = append(parts, "--"+name, shellQuoteArg(value))
 		}
 	}
-	if len(args) > 0 {
-		parts = append(parts, "--")
-		for _, arg := range args {
-			parts = append(parts, shellQuoteArg(arg))
-		}
+	if term != "" {
+		parts = append(parts, "--", shellQuoteArg(term))
 	}
 	return strings.Join(parts, " ")
 }

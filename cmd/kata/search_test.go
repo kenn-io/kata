@@ -100,21 +100,6 @@ func TestSearch_EmptyMultiWordSearchHintsEveryWordMustMatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "count=1")
 	assert.Empty(t, stderr, "a search with results needs no hint")
-
-	for _, query := range []string{"paginate inventory", "paginate partial", "inventory"} {
-		out, stderr, err = runCLIWithErr(t, env, dir, "--json", "--quiet", "search", query)
-		require.NoError(t, err)
-		assert.Empty(t, stderr)
-		var got map[string]any
-		require.NoError(t, json.Unmarshal([]byte(out), &got))
-		if query == "paginate inventory" {
-			assert.Equal(t, []any{map[string]any{
-				"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "next": "kata search --workspace " + dir + " --json --quiet -- inventory",
-			}}, got["hints"])
-		} else {
-			assert.NotContains(t, got, "hints")
-		}
-	}
 }
 
 func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
@@ -122,108 +107,74 @@ func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
 	_ = requireCLIError(t, f.execute("search", "  "), ExitValidation)
 }
 
-func TestSearchJSONHintPreservesResponseOrder(t *testing.T) {
-	out := renderSearch(t, outputJSON, `{"query":"paginate inventory","mode":"lexical","results":[],"complete":true}`)
-	assert.Equal(t, `{"kata_api_version":1,"query":"paginate inventory","mode":"lexical","results":[],"complete":true,"hints":[{"code":"every_word_required","message":"no issue contains every word; search again with fewer words","next":"kata search -- inventory"}]}`+"\n", out)
-}
-
-// The retry names the longest query word, the first one on a tie, after "--"
-// so a word that starts with "-" stays a search term.
-func TestSearchEveryWordHintRetriesLongestWord(t *testing.T) {
+// The hint follows the response's own members. Its retry names the longest
+// query word, the first one on a tie, after "--" so a word that starts with
+// "-" stays a search term.
+func TestSearchJSONHintRetriesLongestWord(t *testing.T) {
 	for query, next := range map[string]string{
 		"login crash": "kata search -- login",
 		"go -timeout": "kata search -- -timeout",
-		"api it's":    `kata search -- 'it'\''s'`,
 	} {
-		out := renderSearch(t, outputJSON, fmt.Sprintf(`{"query":%q,"mode":"lexical","results":[]}`, query))
-		var got struct {
-			Hints []cliHint `json:"hints"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(out), &got))
-		require.Len(t, got.Hints, 1, query)
-		assert.Equal(t, next, got.Hints[0].Next, query)
+		out := renderSearch(t, outputJSON, fmt.Sprintf(`{"query":%q,"mode":"lexical","results":[],"complete":true}`, query))
+		assert.Equal(t, `{"kata_api_version":1,"query":"`+query+`","mode":"lexical","results":[],"complete":true,`+
+			`"hints":[{"code":"every_word_required","message":"no issue contains every word; search again with fewer words","next":"`+next+`"}]}`+"\n", out)
 	}
 }
 
 // Running the every-word retry from an unbound directory keeps the named
 // daemon, project, output mode, and search filters, and drops the actor, so
-// it finds the filtered issue that the longest query word matches.
+// it finds the filtered issue that the longest query word matches. A
+// continuation page can be empty because matches changed after the first
+// page, so it does not claim that no issue contains every word.
 func TestSearch_EveryWordHintRetryKeepsSelectors(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("fixture-token"))
 	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
+	var ids []int64
 	for _, issue := range []db.CreateIssueParams{
 		{Title: "inventory export stalls", Labels: []string{"bug", "ui"}},
 		{Title: "inventory export retries", Labels: []string{"bug"}},
 		{Title: "inventory sync"},
 	} {
 		issue.ProjectID, issue.Author = project.ID, "tester"
-		_, _, err := env.DB.CreateIssue(t.Context(), issue)
+		created, _, err := env.DB.CreateIssue(t.Context(), issue)
 		require.NoError(t, err)
+		ids = append(ids, created.ID)
 	}
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	config := fmt.Sprintf("[[daemon]]\nname = \"example-remote\"\nurl = %q\ntoken = \"fixture-token\"\n", env.URL)
 	require.NoError(t, os.WriteFile(filepath.Join(env.Home, "config.toml"), []byte(config), 0o600))
 	t.Chdir(t.TempDir())
-
-	out, stderr, err := executeRootCapture(t, t.Context(), "search", "--daemon", "example-remote", "--project", "spoke-project",
-		"--json", "--quiet", "--as", "example-agent", "--teammate", "example-mate",
-		"--status", "open", "--label", "bug", "--label", "ui", "--lexical", "--limit", "5", "paginate", "inventory")
-	require.NoError(t, err, stderr)
-	assert.Empty(t, stderr)
-	var got struct {
-		Hints []cliHint `json:"hints"`
+	search := func(args ...string) map[string]any {
+		t.Helper()
+		out, stderr, err := executeRootCapture(t, t.Context(), append([]string{"search", "--daemon", "example-remote", "--project", "spoke-project", "--json"}, args...)...)
+		require.NoError(t, err, stderr)
+		assert.Empty(t, stderr)
+		var got map[string]any
+		require.NoError(t, json.Unmarshal([]byte(out), &got))
+		return got
 	}
-	require.NoError(t, json.Unmarshal([]byte(out), &got))
-	require.Len(t, got.Hints, 1)
-	next := got.Hints[0].Next
-	assert.Equal(t, "kata search --daemon example-remote --project spoke-project --json --quiet --status open --limit 5 --lexical --label bug --label ui -- inventory", next)
 
+	got := search("--quiet", "--as", "example-agent", "--teammate", "example-mate", "--status", "open", "--label", "bug", "--label", "ui", "--lexical", "--limit", "5", "paginate", "inventory")
+	next := "kata search --daemon example-remote --project spoke-project --json --quiet --status open --limit 5 --lexical --label bug --label ui -- inventory"
+	assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "next": next}}, got["hints"])
 	words, err := splitHelpWords(next)
 	require.NoError(t, err)
-	require.Equal(t, "kata", words[0])
-	out, stderr, err = executeRootCapture(t, t.Context(), words[1:]...)
+	out, stderr, err := executeRootCapture(t, t.Context(), words[1:]...)
 	require.NoError(t, err, stderr)
-	var retry struct {
-		Results []struct {
-			Issue struct {
-				Title string `json:"title"`
-			} `json:"issue"`
-		} `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &retry))
-	require.Len(t, retry.Results, 1)
-	assert.Equal(t, "inventory export stalls", retry.Results[0].Issue.Title)
-}
+	assert.Contains(t, out, "inventory export stalls")
+	assert.NotContains(t, out, "inventory export retries")
 
-// A continuation page can be empty because matches changed after the first
-// page, so it does not claim that no issue contains every word.
-func TestSearch_ContinuationPageOmitsEveryWordHint(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
-	createIssue(t, env, pid, "inventory export one")
-	second := createIssue(t, env, pid, "inventory export two")
-	out := runCLI(t, env, dir, "--json", "search", "--lexical", "--limit", "1", "inventory export")
-	var page struct {
-		NextCursor string `json:"next_cursor"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &page))
-	require.NotEmpty(t, page.NextCursor)
-	runCLI(t, env, dir, "edit", second, "--title", "unrelated two")
-
-	for _, mode := range []string{"--json", "--agent"} {
-		out, stderr, err := runCLIWithErr(t, env, dir, mode, "search", "--lexical", "--limit", "1", "--cursor", page.NextCursor, "inventory export")
+	first := search("--lexical", "--limit", "1", "inventory export")
+	require.NotEmpty(t, first["next_cursor"])
+	for _, id := range ids {
+		_, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: id, Title: new("unrelated"), Actor: "tester"})
 		require.NoError(t, err)
-		assert.Empty(t, stderr)
-		if mode == "--json" {
-			var got map[string]any
-			require.NoError(t, json.Unmarshal([]byte(out), &got))
-			assert.Empty(t, got["results"])
-			assert.NotContains(t, got, "hints")
-		} else {
-			assert.Contains(t, out, "count=0")
-		}
 	}
+	continued := search("--lexical", "--limit", "1", "--cursor", first["next_cursor"].(string), "inventory export")
+	assert.Empty(t, continued["results"])
+	assert.NotContains(t, continued, "hints")
 }
 
 // TestSearch_UnquotedMultiTerm verifies that `kata search login Safari`

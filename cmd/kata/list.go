@@ -132,13 +132,8 @@ For what to work on next, use kata ready or kata next instead.`,
 			if owner != "" {
 				params.Owner = &owner
 			}
-			opposite := "closed"
-			if status == "closed" {
-				opposite = "open"
-			}
 			var empty bool
 			var countProjectID *int64
-			var excluded int64
 			allQuery := generated.ListAllIssuesQuery{
 				Status: new(generated.ListAllIssuesQueryStatus(apiStatus)), Priority: params.Priority, MaxPriority: params.MaxPriority,
 				Limit: params.Limit, Sort: allSort, Cursor: params.Cursor, IncludeTotal: params.IncludeTotal, Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
@@ -176,26 +171,23 @@ For what to work on next, use kata ready or kata next instead.`,
 				bs = response.Body
 				empty = response.JSON200 != nil && len(response.JSON200.Issues) == 0
 			}
-			if empty && cursor == "" && (status == "open" || status == "closed") {
+			opposite := map[string]string{"open": "closed", "closed": "open"}[status]
+			if empty && cursor == "" && opposite != "" {
 				probe := allQuery
 				probe.ProjectID, probe.Status, probe.Limit, probe.IncludeTotal = countProjectID, new(generated.ListAllIssuesQueryStatus(opposite)), new(int64(1)), new(true)
 				count, err := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &probe})
-				if err == nil && count != nil && count.JSON200 != nil && count.JSON200.Total != nil {
-					excluded = *count.JSON200.Total
-				}
-			}
-			if excluded > 0 {
-				next := retryCommand(cmd, "list", []string{"--status", "all"}, []string{"all", "sort", "limit", "include-total",
-					"priority", "max-priority", "priority-unset", "unowned", "owner", "label", "no-label", "meta"})
-				message := fmt.Sprintf("no %s issues; %d %s; see %s", status, excluded, opposite, next)
-				// The count applies the same filters, so it says nothing about
-				// issues outside them.
-				if params.Priority != nil || params.MaxPriority != nil || unowned || owner != "" || len(labels)+len(noLabels)+len(meta) > 0 {
-					message = fmt.Sprintf("no %s issues match the filters; %d %s match; see %s", status, excluded, opposite, next)
-				}
-				bs, err = reportHint(cmd, bs, cliHint{Code: "excluded_" + opposite, Message: message, Next: next})
-				if err != nil {
-					return err
+				if err == nil && count.JSON200 != nil && count.JSON200.Total != nil && *count.JSON200.Total > 0 {
+					next := retryCommand(cmd, "list", []string{"--status", "all"}, []string{"all", "sort", "limit", "include-total",
+						"priority", "max-priority", "priority-unset", "unowned", "owner", "label", "no-label", "meta"}, "")
+					message := fmt.Sprintf("no %s issues; %d %s; see %s", status, *count.JSON200.Total, opposite, next)
+					// The count applies the same filters, so it says nothing about
+					// issues outside them.
+					if params.Priority != nil || params.MaxPriority != nil || unowned || owner != "" || len(labels)+len(noLabels)+len(meta) > 0 {
+						message = fmt.Sprintf("no %s issues match the filters; %d %s match; see %s", status, *count.JSON200.Total, opposite, next)
+					}
+					if bs, err = reportHint(cmd, bs, cliHint{Code: "excluded_" + opposite, Message: message, Next: next}); err != nil {
+						return err
+					}
 				}
 			}
 			mode := currentOutputMode()
