@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/similarity"
 )
@@ -115,18 +116,59 @@ func TestSearchFTSAny_LookalikePageBudget(t *testing.T) {
 	}
 }
 
+func TestSearchFTSAny_LookalikeSizeAndOrder(t *testing.T) {
+	for _, count := range []int{0, 5_100} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			ctx := t.Context()
+			store, path := openTestDBWithPath(t)
+			project, err := store.CreateProject(ctx, "example-project")
+			require.NoError(t, err)
+			raw, err := sql.Open("sqlite", path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, raw.Close()) })
+			tx, err := raw.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = tx.Rollback() })
+			for n := range count {
+				_, err = tx.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,body,author) VALUES(?,?,?,?,?,'tester')`, fmt.Sprintf("%026d", n+1), project.ID, fmt.Sprintf("%08d", n+1), "unrelated issue", "other content")
+				require.NoError(t, err)
+			}
+			require.NoError(t, tx.Commit())
+			const title = "login callback session timeout"
+			const body = "request response token account"
+			weaker := createTesterIssueWithBody(ctx, t, store, project.ID, title+" extra", body+" extra")
+			bodyChanged := createTesterIssueWithBody(ctx, t, store, project.ID, title, body+" extra")
+			exact := createTesterIssueWithBody(ctx, t, store, project.ID, title, body)
+			params := db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), Limit: 1}
+			baseline, err := store.SearchFTSAny(ctx, params)
+			require.NoError(t, err)
+			require.Equal(t, exact.ID, baseline[0].Issue.ID)
+			params.TitleQuery = title
+			hits, err := store.SearchFTSAny(ctx, params)
+			require.NoError(t, err)
+			if count == 0 {
+				require.Equal(t, baseline, hits, "small stores keep their ranking, limit, and metadata")
+			} else {
+				require.Len(t, hits, 3)
+				require.Equal(t, exact.ID, hits[0].Issue.ID, "best duplicate comes first")
+				require.Equal(t, bodyChanged.ID, hits[1].Issue.ID, "body overlap breaks equal-title ties")
+				require.Equal(t, weaker.ID, hits[2].Issue.ID)
+			}
+		})
+	}
+}
+
 // Title retrieval must retain scorer-equivalent titles and stay cheap on common words.
 func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 	cases := []struct {
 		name, title, originalTitle      string
-		matchedIn                       []string
 		commonTitles, commonTitlePrefix bool
 	}{
-		{name: "stemmed", title: "logins callbacks drops sessions", originalTitle: "login callback drop session", matchedIn: []string{"body"}},
-		{name: "stopwords", title: "the and of to with login callback", originalTitle: "login callback", matchedIn: []string{"title", "body"}},
-		{name: "punctuation", title: "login-callback drops-session", originalTitle: "session drop callback login", matchedIn: []string{"body"}},
-		{name: "rare title prefixes", title: "response token login", originalTitle: "response token login", matchedIn: []string{"title", "body"}, commonTitlePrefix: true},
-		{name: "common title words", title: "request response server client token account", originalTitle: "request response server client token account", matchedIn: []string{"title", "body"}, commonTitles: true},
+		{name: "stemmed", title: "logins callbacks drops sessions", originalTitle: "login callback drop session"},
+		{name: "stopwords", title: "the and of to with login callback", originalTitle: "login callback"},
+		{name: "punctuation", title: "login-callback drops-session", originalTitle: "session drop callback login"},
+		{name: "rare title prefixes", title: "response token login", originalTitle: "response token login", commonTitlePrefix: true},
+		{name: "common title words", title: "request response server client token account", originalTitle: "request response server client token account", commonTitles: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,10 +177,7 @@ func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 			project, err := store.CreateProject(ctx, "example-project")
 			require.NoError(t, err)
 			title := tc.title
-			const common = "request response server client token account"
-			const rare = "amber birch cedar delta elm fir grove hazel"
-			const retained = "iris juniper maple oak"
-			const body = common + " " + rare + " " + retained
+			body, originalBody, distractors := dbtest.RewrittenBodyFixture(title, 5_100)
 			raw, err := sql.Open("sqlite", path)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, raw.Close()) })
@@ -146,29 +185,20 @@ func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 			tx, err := raw.BeginTx(ctx, nil)
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = tx.Rollback() })
-			for n := range 5_100 {
-				distractorTitle, distractorBody := "unrelated issue", common
-				words := strings.Fields(title)
-				if n < len(words)*100 {
-					distractorTitle = words[n/100] + " unrelated issue"
-				}
+			n := 0
+			for distractorTitle, distractorBody := range distractors {
 				if tc.commonTitlePrefix {
 					distractorTitle = "response unrelated issue"
 				}
 				if tc.commonTitles {
 					distractorTitle = title + " alpha beta gamma delta epsilon zeta theta iota"
 				}
-				if n >= 400 && n < 424 {
-					distractorBody += " " + rare + " " + strings.Repeat("padding ", 120)
-				}
-				if n >= 800 && n < 900 {
-					distractorBody += " " + retained + " " + strings.Repeat("padding ", 120)
-				}
 				_, err = tx.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,body,author) VALUES(?,?,?,?,?,'tester')`, fmt.Sprintf("%026d", n+1), project.ID, fmt.Sprintf("%08d", n+1), distractorTitle, distractorBody)
 				require.NoError(t, err)
+				n++
 			}
 			require.NoError(t, tx.Commit())
-			original := createTesterIssueWithBody(ctx, t, store, project.ID, tc.originalTitle, common+" "+retained+" rewritten narrative")
+			original := createTesterIssueWithBody(ctx, t, store, project.ID, tc.originalTitle, originalBody)
 			require.GreaterOrEqual(t, similarity.Score(title, body, original.Title, original.Body), 0.7)
 			searchStore := &sqlitestore.Store{DB: raw}
 			params := db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), Limit: 20}
@@ -196,7 +226,6 @@ func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 			for _, hit := range hits {
 				if hit.Issue.ID == original.ID {
 					found = true
-					require.Equal(t, tc.matchedIn, hit.MatchedIn)
 				}
 			}
 			t.Logf("rewritten body: %d page fetches, %.3f ms", count, float64(elapsed)/float64(time.Millisecond))
@@ -213,7 +242,7 @@ func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 				require.NoError(t, err)
 				t.Cleanup(func() { _ = tx.Rollback() })
 				for n := range 201 {
-					_, err = tx.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,body,author) VALUES(?,?,?,?,?,'tester')`, fmt.Sprintf("%026d", n+10_000), project.ID, fmt.Sprintf("%08d", n+10_000), title, common)
+					_, err = tx.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,body,author) VALUES(?,?,?,?,?,'tester')`, fmt.Sprintf("%026d", n+10_000), project.ID, fmt.Sprintf("%08d", n+10_000), title, originalBody)
 					require.NoError(t, err)
 				}
 				require.NoError(t, tx.Commit())

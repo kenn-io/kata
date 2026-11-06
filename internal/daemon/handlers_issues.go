@@ -1479,12 +1479,8 @@ func loadLinkOuts(ctx context.Context, store db.Storage, issueID int64) ([]api.L
 	return out, nil
 }
 
-const (
-	// idempotencyWindow is the 7-day lookback per spec §3.6.
-	idempotencyWindow = 7 * 24 * time.Hour
-	// similarityThreshold is the soft-block trigger per spec §3.7.
-	similarityThreshold = 0.7
-)
+// idempotencyWindow is the 7-day lookback per spec §3.6.
+const idempotencyWindow = 7 * 24 * time.Hour
 
 // tryIdempotencyMatch runs the §3.6 idempotency lookup. Returns the fingerprint
 // (so the caller can fold it into the issue.created event payload) and, when a
@@ -1600,7 +1596,7 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 	matched := []map[string]any{}
 	addMatch := func(issue db.Issue) {
 		score := similarity.Score(in.Body.Title, in.Body.Body, issue.Title, issue.Body)
-		if score >= similarityThreshold {
+		if score >= similarity.Threshold {
 			matched = append(matched, map[string]any{
 				"uid":          issue.UID,
 				"short_id":     issue.ShortID,

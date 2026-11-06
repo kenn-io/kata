@@ -142,6 +142,9 @@ func TestScore_WeightedSum(t *testing.T) {
 	assertScore(t, 0.4,
 		"fix login crash", "shared body text",
 		"unrelated title", "shared body text")
+	assertScore(t, 0.7,
+		"alpha beta", "shared body text",
+		"alpha", "shared body text")
 	assertScore(t, 0.0,
 		"alpha", "beta", "gamma", "delta")
 }

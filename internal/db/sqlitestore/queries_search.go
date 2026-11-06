@@ -27,9 +27,9 @@ func (d *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.Searc
 // SearchFTSAny finds at least one query term in title and body documents only.
 // Look-alike checks score title and body overlap, so comments don't contribute
 // candidates, scores, or MatchedIn flags. A single OR match sums BM25 relevance
-// across query words for each issue. With TitleQuery, SQLite retrieves only
-// titles that can meet the duplicate threshold, falling back to full ranking
-// when more than 200 qualify.
+// across query words for each issue. With TitleQuery on stores of 5k+ issues,
+// SQLite retrieves titles that can meet the duplicate threshold, orders by
+// similarity, and omits MatchedIn. More than 200 qualifying titles use full ranking.
 func (d *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAny})
 }
@@ -106,7 +106,13 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		filterArgs = append(filterArgs, stamp, stamp, r.params.After.ID)
 	}
 
+	var maxIssueID int64
 	if r.mode == searchAny && r.params.TitleQuery != "" {
+		if err := d.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM issues`).Scan(&maxIssueID); err != nil {
+			return nil, err
+		}
+	}
+	if maxIssueID >= 5_000 {
 		titleMatch, err := d.lookalikeMatch(ctx, r.params.TitleQuery)
 		if err != nil {
 			return nil, err
@@ -114,8 +120,8 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		if titleMatch == "" {
 			return nil, nil
 		}
-		// A 0.7 score requires title Jaccard >= 0.5. Walk title postings
-		// without BM25, then hydrate only titles that can reach that threshold.
+		// Walk title postings without BM25, then hydrate only titles that
+		// can reach the duplicate threshold.
 		titleArgs := append([]any{titleMatch, r.params.ProjectID}, filterArgs...)
 		rows, err := d.QueryContext(ctx, `SELECT i.id, i.title FROM issues_fts
  CROSS JOIN issues i ON i.id = issues_fts.rowid
@@ -132,7 +138,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 				_ = rows.Close()
 				return nil, err
 			}
-			if similarity.Jaccard(titleTokens, similarity.Tokenize(similarity.TitlePrefix(title))) >= 0.5 {
+			if similarity.Jaccard(titleTokens, similarity.Tokenize(similarity.TitlePrefix(title))) >= similarity.MinTitleJaccard {
 				ids = append(ids, id)
 				if len(ids) > 200 {
 					break
@@ -158,9 +164,17 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 			if err != nil {
 				return nil, err
 			}
-			if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
-				return nil, fmt.Errorf("search fts: %w", err)
+			// Query is the title prefix followed by the body prefix.
+			body := strings.TrimSpace(strings.TrimPrefix(q, strings.TrimSpace(r.params.TitleQuery)))
+			for i := range out {
+				out[i].Score = similarity.Score(r.params.TitleQuery, body, out[i].Issue.Title, out[i].Issue.Body)
 			}
+			slices.SortFunc(out, func(a, b db.SearchCandidate) int {
+				if order := cmp.Compare(b.Score, a.Score); order != 0 {
+					return order
+				}
+				return cmp.Compare(a.Issue.ID, b.Issue.ID)
+			})
 			return out, nil
 		}
 	}

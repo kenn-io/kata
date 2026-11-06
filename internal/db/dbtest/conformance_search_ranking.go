@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"iter"
 	"strings"
 	"testing"
 
@@ -47,25 +48,13 @@ func checkLookalikeKeepsRewrittenBodyDuplicate(t *testing.T, store db.Storage) e
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
-	const common = "request response server client token account"
-	const rare = "amber birch cedar delta elm fir grove hazel"
-	const retained = "iris juniper maple oak"
-	const body = common + " " + rare + " " + retained
-	words := strings.Fields(title)
-	for n := range 1_024 {
-		title, body := "unrelated issue", common
-		if n < 24 {
-			body += " " + rare + " " + strings.Repeat("padding ", 120)
-		} else if n < 124 {
-			body += " " + retained + " " + strings.Repeat("padding ", 120)
-		} else if n < 124+len(words)*10 {
-			title = words[(n-124)/10] + " unrelated issue"
-		}
+	body, originalBody, distractors := RewrittenBodyFixture(title, 5_100)
+	for title, body := range distractors {
 		_, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: "tester", Title: title, Body: body})
 		require.NoError(t, err)
 	}
 	original, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: project.ID, Author: "tester", Title: title, Body: common + " " + retained + " rewritten narrative",
+		ProjectID: project.ID, Author: "tester", Title: title, Body: originalBody,
 	})
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, similarity.Score(title, body, original.Title, original.Body), 0.7)
@@ -79,4 +68,30 @@ func checkLookalikeKeepsRewrittenBodyDuplicate(t *testing.T, store db.Storage) e
 		require.Contains(t, ids, original.ID, "rewritten-body duplicate must survive with title query %q", titleQuery)
 	}
 	return nil
+}
+
+// RewrittenBodyFixture produces a duplicate whose rewritten body loses rare
+// query words, among distractors that compete for title and body relevance.
+func RewrittenBodyFixture(title string, count int) (body, originalBody string, distractors iter.Seq2[string, string]) {
+	const common = "request response server client token account"
+	const rare = "amber birch cedar delta elm fir grove hazel"
+	const retained = "iris juniper maple oak"
+	return common + " " + rare + " " + retained, common + " " + retained + " rewritten narrative", func(yield func(string, string) bool) {
+		words := strings.Fields(title)
+		for n := range count {
+			title, body := "unrelated issue", common
+			if n < len(words)*100 {
+				title = words[n/100] + " unrelated issue"
+			}
+			if n >= 400 && n < 424 {
+				body += " " + rare + " " + strings.Repeat("padding ", 120)
+			}
+			if n >= 800 && n < 900 {
+				body += " " + retained + " " + strings.Repeat("padding ", 120)
+			}
+			if !yield(title, body) {
+				return
+			}
+		}
+	}
 }
