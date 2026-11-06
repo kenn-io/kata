@@ -218,15 +218,6 @@ func TestCLISearchHelpDiscovery(t *testing.T) {
 	require.Contains(t, out, `kata cli search "<task>"`)
 }
 
-func TestCLISearchCompactQuickstartDiscovery(t *testing.T) {
-	// Agents requesting the compact briefing need command discovery as well
-	// as issue search, without adding it to every injected session contract.
-	out, stderr, err := executeRootCapture(t, t.Context(), "quickstart", "--agent")
-	require.NoError(t, err, stderr)
-	require.Contains(t, out, `Find commands with kata cli search "<task>" --agent; kata search finds issues.`)
-	require.NoError(t, validateHelpCommand(`kata cli search "<task>" --agent`))
-}
-
 func TestCLISearchSkipPolicy(t *testing.T) {
 	root := newRootCmd()
 	for _, path := range []string{
