@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -1614,7 +1615,11 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 		seen[c.Issue.UID] = true
 		addMatch(c.Issue)
 	}
-	if len(matched) < 20 {
+	titleHasWord := strings.ContainsFunc(similarity.TitlePrefix(in.Body.Title), func(r rune) bool {
+		return unicode.IsLetter(r) || unicode.IsDigit(r)
+	})
+	// An underfull FTS page already includes every issue sharing a title token.
+	if len(matched) < 20 && (len(candidates) == 20 || !titleHasWord) {
 		exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
 			ProjectID: in.ProjectID, ExactTitle: in.Body.Title, Limit: 20,
 			ShortestBodyFirst: true, IssueScope: issueScopeFromContext(ctx),

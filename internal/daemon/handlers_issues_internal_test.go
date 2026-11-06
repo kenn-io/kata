@@ -83,8 +83,34 @@ func TestRunLookalikeCheckBoundsExactTitleQuery(t *testing.T) {
 		require.Nil(t, params.After)
 		return rows, nil
 	}}
+	for _, row := range rows {
+		store.candidates = append(store.candidates, db.SearchCandidate{Issue: row})
+	}
 	require.NoError(t, runLookalikeCheck(t.Context(), ServerConfig{DB: store}, in, "example-project"))
 	assert.Equal(t, 1, calls)
+}
+
+func TestRunLookalikeCheckSkipsCompleteFTSPage(t *testing.T) {
+	for _, tc := range []struct {
+		title string
+		hits  int
+	}{{"Inventory page crashes", 0}, {"Inventory page crashes", 19}, {"the", 0}, {"1", 0}} {
+		t.Run(fmt.Sprintf("%s/%d", tc.title, tc.hits), func(t *testing.T) {
+			in := &api.CreateIssueRequest{ProjectID: 7}
+			in.Body.Title = tc.title
+			in.Body.Body = "apples bananas cherries dates elderberries figs grapes hazelnuts"
+			store := &lookalikeCandidateStore{listIssues: func(db.ListIssuesParams) ([]db.Issue, error) {
+				t.Fatal("exact-title lookup repeated a complete FTS result")
+				return nil, nil
+			}}
+			for i := range tc.hits {
+				store.candidates = append(store.candidates, db.SearchCandidate{Issue: db.Issue{
+					UID: fmt.Sprint(i), Title: tc.title, Body: "apples",
+				}})
+			}
+			require.NoError(t, runLookalikeCheck(t.Context(), ServerConfig{DB: store}, in, "example-project"))
+		})
+	}
 }
 
 func closedLookalike(title, body, uid string) db.SearchCandidate {
