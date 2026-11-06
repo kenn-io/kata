@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 # Federation
@@ -1936,8 +1936,15 @@ events that can change endpoint resolution still run the full reconciliation.
 
 Federation push and poll requests have a 60-second default budget, separate
 from the shorter interactive CLI default. `KATA_HTTP_TIMEOUT` overrides that
-budget when a large, healthy hub needs more time. A timed-out request leaves
-the cursor unchanged and retries through the normal sync loop.
+budget when a large, healthy hub needs more time. Set it in the environment
+that starts the daemon; local-profile autostart preserves the value. A running
+daemon keeps the environment it started with. To apply a changed value, stop
+that daemon and let the next command autostart it. For a profile with its own
+home, run `KATA_HOME=/absolute/profile-home kata daemon stop`; the stop command
+rejects `--daemon` (see
+[Local daemon profiles](local-daemon-profiles.md#reboots-idle-shutdown-and-clients)).
+A timed-out
+request leaves the cursor unchanged and retries through the normal sync loop.
 
 If a response is lost after the hub commits, retrying the same batch is safe.
 Permanent validation failures or hash conflicts record a quarantine on the
