@@ -78,7 +78,7 @@ func TestUICommandMissingBrowserPrintsReachableURL(t *testing.T) {
 
 	require.NoError(t, cmd.Execute())
 	assert.Equal(t, "Opening "+env.URL+"/kata\n", stdout.String())
-	assert.Equal(t, "Could not open a browser. Open the URL above.\n", stderr.String())
+	assert.Equal(t, "Could not open a browser: exec: \"xdg-open\": executable file not found in $PATH. Open the URL above.\n", stderr.String())
 	printedURL := strings.TrimSpace(strings.TrimPrefix(stdout.String(), "Opening "))
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, printedURL, nil)
 	require.NoError(t, err)
@@ -119,7 +119,7 @@ func TestUICommandOutputModesBeforeBrowser(t *testing.T) {
 			}
 			require.NoError(t, cmd.Execute())
 			assert.Equal(t, tc.want, stdout.String())
-			assert.Equal(t, "Could not open a browser. Open the URL above.\n", stderr.String())
+			assert.Equal(t, "Could not open a browser: exec: \"xdg-open\": executable file not found in $PATH. Open the URL above.\n", stderr.String())
 		})
 	}
 }

@@ -1762,7 +1762,7 @@ Before launching the browser, Kata prints `Opening <url>` to stdout. With
 `--json`, it prints `{"kata_api_version":1,"url":"<url>"}` instead; with
 `--agent`, it prints `OK ui url=<url>`. The URL is printed even with `-q`.
 If the browser cannot open, the command exits 0 and prints
-`Could not open a browser. Open the URL above.` to stderr. Open the printed
+`Could not open a browser: <error>. Open the URL above.` to stderr. Open the printed
 URL manually.
 
 Kata resolves the ref before launching and opens the stable
