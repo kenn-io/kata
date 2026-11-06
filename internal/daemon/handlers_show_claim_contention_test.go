@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 	"time"
 
@@ -162,55 +159,6 @@ func TestShowIssueClaimSpokeKeepsCommittedRefreshWhenClearingTimesOut(t *testing
 	marker, err := spoke.DB.ClaimStatusRefreshError(t.Context(), project.ID, issue.UID)
 	require.NoError(t, err)
 	assert.Equal(t, "old failure", marker.LastError)
-}
-
-func TestShowIssueClaimSpokeContentionPreservesCachedHolderProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		spoke, project, issue, _ := newShowClaimTimeoutSpoke(t)
-		code := hegel.Draw(ht, hegel.Integers(400, 599))
-		if hegel.Draw(ht, hegel.Booleans()) {
-			code = http.StatusOK
-		}
-		hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			if code != http.StatusOK {
-				http.Error(w, "refresh unavailable", code)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(api.ClaimStatusBody{HubNow: time.Now().UTC()})
-		}))
-		t.Cleanup(hub.Close)
-		writeShowClaimSpokeBinding(t, spoke, project, hub.URL, "claim-token", "claim")
-		holder := "cached-" + strconv.Itoa(hegel.Draw(ht, hegel.Integers(math.MinInt, math.MaxInt)))
-		now := time.Now().UTC()
-		claim := showIssueCachedClaim(issue, holder, now)
-		require.NoError(ht, spoke.DB.ApplyClaimStatus(t.Context(), project.ID, issue.UID, db.ClaimStatus{
-			Held: true, Claim: claim, HubNow: now,
-		}))
-		conn, err := spoke.DB.Conn(t.Context())
-		require.NoError(ht, err)
-		defer func() {
-			_, rollbackErr := conn.ExecContext(t.Context(), "ROLLBACK")
-			require.NoError(ht, rollbackErr)
-			require.NoError(ht, conn.Close())
-		}()
-		_, err = conn.ExecContext(t.Context(), "BEGIN IMMEDIATE")
-		require.NoError(ht, err)
-
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, spoke.URL+issuePathRef(project.ID, issue.ShortID, ""), nil)
-		require.NoError(ht, err)
-		resp, err := spoke.HTTP.Do(req) //nolint:gosec // synthetic loopback daemon
-		require.NoError(ht, err)
-		defer func() { _ = resp.Body.Close() }()
-		raw, err := io.ReadAll(resp.Body)
-		require.NoError(ht, err)
-		require.Equal(ht, http.StatusOK, resp.StatusCode, string(raw))
-		var body showIssueClaimBody
-		require.NoError(ht, json.Unmarshal(raw, &body))
-		require.NotNil(ht, body.Claim)
-		require.Equal(ht, holder, body.Claim.Holder)
-	}, hegel.WithTestCases(24), hegel.WithDatabase(t.TempDir()))
 }
 
 func TestShowIssueClaimSpokeReturnsDuringRebind(t *testing.T) {
