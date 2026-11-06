@@ -276,7 +276,16 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
         run: |
           cache=$(go env GOCACHE)
-          mkdir -p "$cache"
+          modules=$(go env GOMODCACHE)
+          mkdir -p "$cache" "$modules/cache/download"
+          echo 'Restored Go cache sizes:'
+          du -sh "$cache" "$modules"
+          mv "$modules" "$RUNNER_TEMP/go-mod-cache"
+          mkdir -p "$modules/cache/download"
+          if [ -d "$RUNNER_TEMP/go-mod-cache/cache/download/sumdb" ]; then
+            cp -a "$RUNNER_TEMP/go-mod-cache/cache/download/sumdb" "$modules/cache/download/"
+          fi
+          printf 'GOPROXY=file://%s/go-mod-cache/cache/download|%s\n' "$RUNNER_TEMP" "$GOPROXY" >> "$GITHUB_ENV"
           # Go refreshes entry mtimes at most hourly; age them so every use is recorded.
           find "$cache" -mindepth 2 -maxdepth 2 -path "$cache/[0-9a-f][0-9a-f]/*" \( -name '*-a' -o -name '*-d' \) \
             -exec touch -d '2 hours ago' -- {} +
