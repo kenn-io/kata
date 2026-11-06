@@ -34,7 +34,7 @@ func TestIssueUIDPrefixIndexMigrationUpgradesVersion44(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
-	dropReadyPriorityIndexes(ctx, t, admin, schema)
+	dropLaterReadyAndEventIndexes(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `DROP INDEX uid_prefix_upgrade.idx_issues_uid_prefix;
 DROP INDEX uid_prefix_upgrade.idx_issues_project_uid_prefix;
 UPDATE uid_prefix_upgrade.meta SET value='44' WHERE key='schema_version'`)

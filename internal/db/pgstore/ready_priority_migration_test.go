@@ -29,7 +29,7 @@ func TestReadyIndexMigrationUpgrades(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = admin.Close() })
 			if sourceVersion == 45 {
-				dropReadyPriorityIndexes(ctx, t, admin, schema)
+				dropLaterReadyAndEventIndexes(ctx, t, admin, schema)
 			} else if sourceVersion == 46 {
 				_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS ready_priority_upgrade.idx_issues_ready_updated; DROP INDEX ready_priority_upgrade.idx_events_moved_from_id`)
 				require.NoError(t, err)
@@ -49,6 +49,9 @@ func TestReadyIndexMigrationUpgrades(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, fresh.Close())
 			for _, targetSchema := range []string{schema, "ready_priority_fresh"} {
+				var definition string
+				require.NoError(t, admin.QueryRowContext(ctx, `SELECT replace(indexdef, schemaname || '.', '') FROM pg_indexes WHERE schemaname=$1 AND indexname='idx_events_moved_from_id'`, targetSchema).Scan(&definition))
+				require.Equal(t, `CREATE INDEX idx_events_moved_from_id ON events USING btree ((((payload)::jsonb ->> 'from_project_uid'::text)), id) WHERE (type = 'issue.moved'::text)`, definition)
 				for name, columns := range map[string]string{
 					"idx_issues_project_ready_priority": "project_id, COALESCE(priority, 5), updated_at DESC, id DESC",
 					"idx_issues_ready_priority":         "COALESCE(priority, 5), updated_at DESC, id DESC",
@@ -63,7 +66,7 @@ func TestReadyIndexMigrationUpgrades(t *testing.T) {
 	}
 }
 
-func dropReadyPriorityIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+func dropLaterReadyAndEventIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_project_ready_priority; DROP INDEX IF EXISTS %s.idx_issues_ready_priority; DROP INDEX IF EXISTS %s.idx_issues_ready_updated; DROP INDEX IF EXISTS %s.idx_events_moved_from_id`, schema, schema, schema, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)

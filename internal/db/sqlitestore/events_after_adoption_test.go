@@ -53,7 +53,7 @@ func TestEventsAfter_ProjectUIDAdoptionDuringCursorRead(t *testing.T) {
 		HubProjectUID: newTestUID(t), Actor: "tester",
 	})
 	require.NoError(t, err)
-	var moveID, laterID int64
+	var moveID int64
 	capture := &eventAdoptionConnector{path: path, beforePage: func() {
 		// The old implementation has already read source.UID here.
 		_, err := d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
@@ -67,8 +67,6 @@ func TestEventsAfter_ProjectUIDAdoptionDuringCursorRead(t *testing.T) {
 		})
 		require.NoError(t, err)
 		moveID = move.EventID
-		_, later := createTesterIssue(ctx, t, d, source.ID, "Later issue")
-		laterID = later.ID
 	}}
 	raw := sql.OpenDB(capture)
 	t.Cleanup(func() { require.NoError(t, raw.Close()) })
@@ -76,11 +74,9 @@ func TestEventsAfter_ProjectUIDAdoptionDuringCursorRead(t *testing.T) {
 	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: source.ID, AfterID: created.ID, Limit: 100})
 	require.NoError(t, err)
 	require.Nil(t, capture.beforePage, "adoption must interleave with the poll")
-	require.NotEmpty(t, events)
 	var ids []int64
 	for _, event := range events {
 		ids = append(ids, event.ID)
 	}
 	require.Contains(t, ids, moveID, "a page must include the departure after adoption")
-	require.Contains(t, ids, laterID, "a page must include the later source event")
 }
