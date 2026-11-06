@@ -136,42 +136,64 @@ func TestSearchFTSAny_LookalikeSizeAndOrder(t *testing.T) {
 			require.NoError(t, tx.Commit())
 			const title = "login callback session timeout"
 			const body = "request response token account"
-			createTesterIssueWithBody(ctx, t, store, project.ID, title+" extra", body+" extra")
-			createTesterIssueWithBody(ctx, t, store, project.ID, title, body+" extra")
+			weaker := createTesterIssueWithBody(ctx, t, store, project.ID, title+" extra", body+" extra")
+			bodyChanged := createTesterIssueWithBody(ctx, t, store, project.ID, title, body+" extra")
 			exact := createTesterIssueWithBody(ctx, t, store, project.ID, title, body)
 			params := db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), Limit: 1}
 			baseline, err := store.SearchFTSAny(ctx, params)
 			require.NoError(t, err)
 			require.Equal(t, exact.ID, baseline[0].Issue.ID)
 			params.TitleQuery = title
+			params.TitleBody = body
 			hits, err := store.SearchFTSAny(ctx, params)
 			require.NoError(t, err)
 			if count == 0 {
 				require.Equal(t, baseline, hits, "small stores keep their ranking, limit, and metadata")
 			} else {
-				require.Equal(t, baseline, hits, "the title path keeps base ranking, limit, scores, and match flags")
+				require.Equal(t, baseline, hits, "more warnings than Limit keep base ranking")
+				params.Limit = 3
+				hits, err = store.SearchFTSAny(ctx, params)
+				require.NoError(t, err)
+				require.Len(t, hits, 3)
+				require.Equal(t, []int64{exact.ID, bodyChanged.ID, weaker.ID}, []int64{hits[0].Issue.ID, hits[1].Issue.ID, hits[2].Issue.ID})
+				require.Equal(t, 1.0, hits[0].Score)
+				require.InDelta(t, 0.92, hits[1].Score, 1e-12)
+				require.InDelta(t, 0.8, hits[2].Score, 1e-12)
+				require.Equal(t, []string{"title", "body"}, hits[0].MatchedIn)
 				t.Run("twenty candidate limit", func(t *testing.T) {
 					ctx := t.Context()
 					for range 28 {
-						createTesterIssueWithBody(ctx, t, store, project.ID, title, body+" "+strings.Repeat("padding ", 120))
+						createTesterIssueWithBody(ctx, t, store, project.ID, title, body+" alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon")
 					}
 					last := createTesterIssueWithBody(ctx, t, store, project.ID, title, body)
 					params.Limit = 20
 					hits, err := store.SearchFTSAny(ctx, params)
 					require.NoError(t, err)
 					require.Len(t, hits, 20)
-					var found bool
-					for _, hit := range hits {
-						found = found || hit.Issue.ID == last.ID
+					require.Equal(t, []int64{exact.ID, last.ID}, []int64{hits[0].Issue.ID, hits[1].Issue.ID}, "exact duplicates rank first, with ID breaking ties")
+				})
+				t.Run("twenty-one warnings keep base ranking", func(t *testing.T) {
+					ctx := t.Context()
+					const title = "archive export cursor checksum"
+					const body = "payload destination"
+					for range 21 {
+						createTesterIssueWithBody(ctx, t, store, project.ID, title, body)
 					}
-					require.True(t, found, "the duplicate created last must survive ranking")
+					p := db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), Limit: 20}
+					base, err := store.SearchFTSAny(ctx, p)
+					require.NoError(t, err)
+					require.Len(t, base, 20)
+					p.TitleQuery, p.TitleBody = title, body
+					hits, err := store.SearchFTSAny(ctx, p)
+					require.NoError(t, err)
+					require.Equal(t, base, hits, "21 warnings must retain base's top 20, scores, and flags")
 				})
 				for _, change := range []string{"project move", "subtree removal", "deletion"} {
 					t.Run(change+" before hydration", func(t *testing.T) {
 						ctx := t.Context()
 						candidate := createTesterIssueWithBody(ctx, t, store, project.ID, title, body)
-						params := db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, AllowedIssueIDs: []int64{candidate.ID}}
-						capture := &beforeQueryConnector{path: path, contains: "WITH candidates AS ("}
+						params := db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, TitleBody: body, AllowedIssueIDs: []int64{candidate.ID}}
+						capture := &beforeQueryConnector{path: path, contains: "WHERE i.id IN (SELECT value FROM json_each(?))"}
 						switch change {
 						case "project move":
 							target := createProject(ctx, t, store, "target-project")
@@ -198,7 +220,13 @@ func TestSearchFTSAny_LookalikeSizeAndOrder(t *testing.T) {
 						hits, err := (&sqlitestore.Store{DB: hooked}).SearchFTSAny(ctx, params)
 						require.NoError(t, err)
 						require.Nil(t, capture.beforeQuery, "the mutation must run after selection and before hydration")
-						require.Empty(t, hits, "hydration must recheck the selected issue's visibility")
+						require.Len(t, hits, 1, "selection and hydration must share one snapshot")
+						require.Equal(t, candidate.ID, hits[0].Issue.ID)
+						require.Equal(t, project.ID, hits[0].Issue.ProjectID)
+						require.Nil(t, hits[0].Issue.DeletedAt)
+						current, err := store.SearchFTSAny(ctx, params)
+						require.NoError(t, err)
+						require.Empty(t, current, "a later snapshot must see the committed visibility change")
 					})
 				}
 				t.Run("non-ASCII title keeps base ranking", func(t *testing.T) {
@@ -293,6 +321,7 @@ func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 				hooked := sql.OpenDB(capture)
 				t.Cleanup(func() { require.NoError(t, hooked.Close()) })
 				params.TitleQuery = title
+				params.TitleBody = body
 				hits, err := (&sqlitestore.Store{DB: hooked}).SearchFTSAny(ctx, params)
 				require.NoError(t, err)
 				require.Equal(t, baseline, hits)
@@ -303,7 +332,7 @@ func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 			sqlitePageFetches(t, conn, true)
 			require.NoError(t, conn.Close())
 			started := time.Now()
-			hits, err := searchStore.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, Limit: 20})
+			hits, err := searchStore.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, TitleBody: body, Limit: 20})
 			require.NoError(t, err)
 			require.Len(t, hits, 1, "only titles that can reach the duplicate threshold need hydration")
 			elapsed := time.Since(started)
@@ -336,6 +365,7 @@ func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 				full, err := searchStore.SearchFTSAny(ctx, params)
 				require.NoError(t, err)
 				params.TitleQuery = title
+				params.TitleBody = body
 				reduced, err := searchStore.SearchFTSAny(ctx, params)
 				require.NoError(t, err)
 				require.Equal(t, full, reduced)

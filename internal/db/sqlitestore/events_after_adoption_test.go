@@ -34,6 +34,10 @@ type beforeQueryConn struct {
 	capture *beforeQueryConnector
 }
 
+func (c *beforeQueryConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
+}
+
 func (c *beforeQueryConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	if strings.Contains(query, c.capture.contains) && c.capture.beforeQuery != nil {
 		before := c.capture.beforeQuery

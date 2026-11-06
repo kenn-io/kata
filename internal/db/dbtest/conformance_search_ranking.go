@@ -58,7 +58,7 @@ func checkLookalikeKeepsRewrittenBodyDuplicate(t *testing.T, store db.Storage) e
 	})
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, similarity.Score(title, body, original.Title, original.Body), 0.7)
-	hits, err := store.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, Limit: 20})
+	hits, err := store.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, TitleBody: body, Limit: 20})
 	require.NoError(t, err)
 	ids := make([]int64, 0, len(hits))
 	for _, hit := range hits {

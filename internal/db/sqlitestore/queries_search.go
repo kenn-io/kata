@@ -29,8 +29,8 @@ func (d *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.Searc
 // Look-alike checks score title and body overlap, so comments don't contribute
 // candidates, scores, or MatchedIn flags. A single OR match sums BM25 relevance
 // across query words for each issue. With TitleQuery on stores of 5k+ issues,
-// SQLite can narrow ranking to titles that can meet the duplicate threshold.
-// BM25 scores, order, Limit, and match flags retain their usual meaning.
+// SQLite can rank eligible titles by similarity score, then ID. When more
+// than Limit rows reach the warning threshold, it retains BM25 ranking.
 func (d *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAny})
 }
@@ -109,6 +109,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 
 	var issueCount int
 	var eligibleIDs []int64
+	var searchQ readQuerier = d
 	if r.mode == searchAny && r.params.TitleQuery != "" && strings.IndexFunc(r.params.TitleQuery, func(r rune) bool { return r > unicode.MaxASCII }) < 0 {
 		if err := d.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT 1 FROM issues LIMIT 5000)`).Scan(&issueCount); err != nil {
 			return nil, err
@@ -123,10 +124,15 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 			return nil, nil
 		}
 		if !common {
-			// Walk title postings without BM25, then hydrate only titles that
-			// can reach the duplicate threshold.
+			tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+			if err != nil {
+				return nil, err
+			}
+			defer func() { _ = tx.Rollback() }()
+			searchQ = tx
+			// Selection and hydration read the same visibility snapshot.
 			titleArgs := append([]any{titleMatch, r.params.ProjectID}, filterArgs...)
-			rows, err := d.QueryContext(ctx, `SELECT i.id, i.title FROM issues_fts
+			rows, err := tx.QueryContext(ctx, `SELECT i.id, i.title FROM issues_fts
 	 CROSS JOIN issues i ON i.id = issues_fts.rowid
 	 WHERE issues_fts MATCH ? AND i.project_id = ? `+rowFilter, titleArgs...)
 			if err != nil {
@@ -158,6 +164,39 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 				return nil, nil
 			}
 			if len(ids) <= 200 {
+				encoded, err := json.Marshal(ids)
+				if err != nil {
+					return nil, err
+				}
+				hydrationArgs := append([]any{string(encoded), r.params.ProjectID}, filterArgs...)
+				out, err := searchCandidates(ctx, tx, `SELECT `+issueColumns+`, 0, 0
+ FROM issues i JOIN projects p ON p.id = i.project_id
+ WHERE i.id IN (SELECT value FROM json_each(?)) AND i.project_id = ? `+rowFilter, hydrationArgs...)
+				if err != nil {
+					return nil, err
+				}
+				warnings := 0
+				for i := range out {
+					out[i].Score = similarity.Score(r.params.TitleQuery, r.params.TitleBody, out[i].Issue.Title, out[i].Issue.Body)
+					if out[i].Score >= similarity.Threshold {
+						warnings++
+					}
+				}
+				if warnings <= limit {
+					slices.SortFunc(out, func(a, b db.SearchCandidate) int {
+						if order := cmp.Compare(b.Score, a.Score); order != 0 {
+							return order
+						}
+						return cmp.Compare(a.Issue.ID, b.Issue.ID)
+					})
+					if len(out) > limit {
+						out = out[:limit]
+					}
+					if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
+						return nil, fmt.Errorf("search fts: %w", err)
+					}
+					return out, nil
+				}
 				eligibleIDs = ids
 			}
 		}
@@ -260,7 +299,18 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
  ORDER BY %s`, pageOrder, order)
 	args = append(args, limit)
 
-	rows, err := d.QueryContext(ctx, query, args...)
+	out, err := searchCandidates(ctx, searchQ, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
+	}
+	return out, nil
+}
+
+func searchCandidates(ctx context.Context, q readQuerier, query string, args ...any) ([]db.SearchCandidate, error) {
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
 	}
@@ -295,9 +345,6 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
 	}
 	return out, nil
 }
