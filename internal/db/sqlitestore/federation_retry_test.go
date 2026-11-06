@@ -14,9 +14,10 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// Slow preparation must still reach the writer-held fallback after concurrent
-// commits invalidate both optimistic snapshots. Fake time crosses the generic
-// retry budget without making the real SQLite fixture wait thirty seconds.
+// Slow preparation must still reach the writer-held fallback after a concurrent
+// commit invalidates its optimistic snapshot, without repeating the slow work
+// optimistically. Fake time crosses the generic retry budget without making the
+// real SQLite fixture wait thirty seconds.
 func TestFederationSlowPreparationReachesLockedFallback(t *testing.T) {
 	for _, direction := range []string{"push", "pull"} {
 		t.Run(direction, func(t *testing.T) {
@@ -51,7 +52,7 @@ func TestFederationSlowPreparationReachesLockedFallback(t *testing.T) {
 				} else {
 					require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
 				}
-				require.Equal(t, 2, competingWrites, "optimistic retries must be bounded")
+				require.Equal(t, 1, competingWrites, "a slow invalidated preparation must take the writer next")
 				got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 				require.NoError(t, err)
 				require.Equal(t, "updated", got.Title)
@@ -60,7 +61,7 @@ func TestFederationSlowPreparationReachesLockedFallback(t *testing.T) {
 				require.Equal(t, 1, count, "retries must not duplicate the event")
 				project, err := d.ProjectByID(ctx, other.ID)
 				require.NoError(t, err)
-				require.JSONEq(t, `{"write":2}`, string(project.Metadata))
+				require.JSONEq(t, `{"write":1}`, string(project.Metadata))
 			})
 		})
 	}

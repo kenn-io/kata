@@ -1,6 +1,15 @@
 package sqlitestore
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+// federationSlowOptimisticPreparation is how long an invalidated optimistic
+// preparation may take before the next attempt acquires the writer first.
+// Steady writes that invalidated a slow snapshot will likely invalidate the
+// next one too, so a second optimistic attempt would only repeat slow work.
+const federationSlowOptimisticPreparation = time.Second
 
 // retryFederationPreparation gives optimistic snapshots a bounded number of
 // attempts outside the generic elapsed-time budget. Slow preparation can use
@@ -8,17 +17,13 @@ import "context"
 // writer-held fallback. Only that fallback uses the normal contention backoff.
 func (d *Store) retryFederationPreparation(ctx context.Context, op func(locked bool) error) error {
 	for range federationIngestOptimisticAttempts {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
+		started := time.Now()
 		if err := op(false); err == nil || !IsTransient(err) {
 			return err
 		}
-	}
-	return d.RetryTransient(ctx, func() error {
-		if err := ctx.Err(); err != nil {
-			return err
+		if time.Since(started) >= federationSlowOptimisticPreparation {
+			break
 		}
-		return op(true)
-	})
+	}
+	return d.RetryTransient(ctx, func() error { return op(true) })
 }
