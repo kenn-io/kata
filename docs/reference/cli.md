@@ -1767,6 +1767,7 @@ kata daemon recover [--expect-project-uid <uid>] [--json | --agent]
 kata daemon stop
 kata daemon restart [--listen <host:port>] [--insecure-readonly]
 kata daemon reload
+kata daemon local-embeddings [--yes]
 kata daemon logs --hooks [--tail]
 kata health
 kata doctor [--json | --agent] [--workspace <path>] [--project <name>] [--daemon <name>]
@@ -1894,6 +1895,29 @@ it. Configuration validation errors leave the daemon serving; listener binding
 happens during replacement startup. Explicit restart flags override startup
 options and persist through later restarts. `kata daemon stop` followed by
 `kata daemon start` clears these overrides and uses the current startup settings.
+
+`kata daemon local-embeddings` configures semantic search for the current
+`KATA_HOME` and rejects `--daemon`. A home without embeddings configured uses
+a running Ollama without a download. Run the command again to switch that
+home to the built-in server. Otherwise, it shows the missing download size, about
+290 MB on a fresh install, and asks before downloading files shared by all
+Kenn apps. Use `--yes` without a terminal. It keeps compatible Nomic vectors,
+config comments, and formatting outside the rewritten settings. Widths below
+768 are kept only with `request_dimensions = true`. Other recipes get a rebuild warning.
+If this daemon shares embeddings, replicas need the same recipe before they
+can reuse its vectors. Running daemons must support restart before the command
+writes the config. It waits for every restart; rerun the command to retry a
+failed restart. A refused restart restores the configuration file. Older Kata
+releases reject the `local` config key.
+
+When the shared files are already installed, a fresh home needs no prompt;
+switching an existing provider still asks before starting the server. To return
+to Ollama, set `local = false`, delete each setting that has a commented copy
+below it, uncomment the copies, and run `kata daemon restart`.
+
+The result includes `index`, one of `new`, `kept`, or `rebuilt`, and `progress`,
+the command `kata health --json` for watching indexing progress. JSON and agent
+output use those field names.
 
 Start and restart keep waiting while an SQLite migration runs and report that
 progress on stderr.

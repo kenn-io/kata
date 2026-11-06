@@ -1812,10 +1812,10 @@ components:
           format: int64
           type: integer
         last_error:
-          description: Sanitized credential rejection; cleared after the next successful embedding call.
+          description: Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call.
           type: string
         last_error_at:
-          description: Time of the credential rejection; cleared after the next successful embedding call.
+          description: Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call.
           format: date-time
           type: string
         last_error_status:

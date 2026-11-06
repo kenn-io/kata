@@ -57,6 +57,10 @@ section is authorizing that data flow. The docs recommend a local endpoint
 
 Credential handling follows the existing bearer-token trust model:
 
+The built-in server (`local = true` without a configured `base_url`) is keyless
+and ignores API key settings. A configured endpoint from any source takes
+precedence and uses the credential rules below.
+
 - The embedding API key is attached only to requests whose origin exactly
   matches the configured `base_url` origin. The client reuses the
   origin-pinned transport machinery from `internal/config/bearer.go`
@@ -114,9 +118,9 @@ model    = "nomic-embed-text"
 # timeout_seconds, batch_size, dims  # defaulted; override rarely
 ```
 
-- Presence of the section enables the feature. `base_url` and `model` are
-  both required once the section exists: partial configuration is a startup
-  error, not a silent disable.
+- `local = true` enables the shared built-in Nomic server. A configured
+  `base_url` takes precedence, and requires `model`; partial external provider
+  configuration is a startup error.
 - `api_key` / `api_key_env` are mutually exclusive, mirroring the daemon
   catalog's `token` / `token_env` pair
   (`internal/config/daemon_config.go`). There is no additional hardcoded
