@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 # CLI reference
@@ -29,6 +29,9 @@ compactly; `kata --help` has their full descriptions.
 | `--json` | Emit the full JSON envelope for scripts. |
 | `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
 | `--quiet` | Suppress non-essential output. |
+
+Human-mode `kata create` look-alike refusals include matching issues' qualified
+refs, as agent mode does.
 
 `kata --version` prints the same build identity as the `version` command below
 and honors `--json`/`--agent`. It is a root-level flag, so it is not accepted
