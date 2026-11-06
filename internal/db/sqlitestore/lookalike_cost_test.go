@@ -149,10 +149,25 @@ func TestSearchFTSAny_LookalikeSizeAndOrder(t *testing.T) {
 			if count == 0 {
 				require.Equal(t, baseline, hits, "small stores keep their ranking, limit, and metadata")
 			} else {
+				require.Len(t, hits, 1, "the title path must honor Limit")
+				require.Equal(t, bodyChanged.ID, hits[0].Issue.ID, "title overlap ranks first, with ID breaking ties")
+				params.Limit = 3
+				hits, err = store.SearchFTSAny(ctx, params)
+				require.NoError(t, err)
 				require.Len(t, hits, 3)
-				require.Equal(t, exact.ID, hits[0].Issue.ID, "best duplicate comes first")
-				require.Equal(t, bodyChanged.ID, hits[1].Issue.ID, "body overlap breaks equal-title ties")
-				require.Equal(t, weaker.ID, hits[2].Issue.ID)
+				require.Equal(t, []int64{bodyChanged.ID, exact.ID, weaker.ID}, []int64{hits[0].Issue.ID, hits[1].Issue.ID, hits[2].Issue.ID})
+				require.Equal(t, 1.0, hits[0].Score)
+				require.InDelta(t, 0.8, hits[2].Score, 1e-12)
+				t.Run("twenty candidate limit", func(t *testing.T) {
+					ctx := t.Context()
+					for range 28 {
+						createTesterIssueWithBody(ctx, t, store, project.ID, title, body)
+					}
+					params.Limit = 20
+					hits, err := store.SearchFTSAny(ctx, params)
+					require.NoError(t, err)
+					require.Len(t, hits, 20)
+				})
 				for _, change := range []string{"project move", "subtree removal", "deletion"} {
 					t.Run(change+" before hydration", func(t *testing.T) {
 						ctx := t.Context()

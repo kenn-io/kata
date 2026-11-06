@@ -28,8 +28,8 @@ func (d *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.Searc
 // Look-alike checks score title and body overlap, so comments don't contribute
 // candidates, scores, or MatchedIn flags. A single OR match sums BM25 relevance
 // across query words for each issue. With TitleQuery on stores of 5k+ issues,
-// SQLite retrieves titles that can meet the duplicate threshold, orders by
-// similarity, and omits MatchedIn. More than 200 qualifying titles use full ranking.
+// SQLite returns up to Limit titles ordered by title overlap, without MatchedIn.
+// More than 200 titles that can meet the duplicate threshold use full ranking.
 func (d *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAny})
 }
@@ -130,6 +130,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 			return nil, fmt.Errorf("search titles: %w", err)
 		}
 		var ids []int64
+		titleScores := make(map[int64]float64)
 		titleTokens := similarity.Tokenize(r.params.TitleQuery)
 		for rows.Next() {
 			var id int64
@@ -138,8 +139,10 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 				_ = rows.Close()
 				return nil, err
 			}
-			if similarity.Jaccard(titleTokens, similarity.Tokenize(similarity.TitlePrefix(title))) >= similarity.MinTitleJaccard {
+			titleScore := similarity.Jaccard(titleTokens, similarity.Tokenize(similarity.TitlePrefix(title)))
+			if titleScore >= similarity.MinTitleJaccard {
 				ids = append(ids, id)
+				titleScores[id] = titleScore
 				if len(ids) > 200 {
 					break
 				}
@@ -165,10 +168,8 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 			if err != nil {
 				return nil, err
 			}
-			// Query is the title prefix followed by the body prefix.
-			body := strings.TrimSpace(strings.TrimPrefix(q, strings.TrimSpace(r.params.TitleQuery)))
 			for i := range out {
-				out[i].Score = similarity.Score(r.params.TitleQuery, body, out[i].Issue.Title, out[i].Issue.Body)
+				out[i].Score = titleScores[out[i].Issue.ID]
 			}
 			slices.SortFunc(out, func(a, b db.SearchCandidate) int {
 				if order := cmp.Compare(b.Score, a.Score); order != 0 {
@@ -176,6 +177,9 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 				}
 				return cmp.Compare(a.Issue.ID, b.Issue.ID)
 			})
+			if len(out) > limit {
+				out = out[:limit]
+			}
 			return out, nil
 		}
 	}
