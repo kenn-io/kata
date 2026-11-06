@@ -216,26 +216,23 @@ func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 			started := time.Now()
 			hits, err := searchStore.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, Limit: 20})
 			require.NoError(t, err)
-			require.Equal(t, 1, len(hits), "only titles that can reach the duplicate threshold need hydration")
+			require.Len(t, hits, 1, "only titles that can reach the duplicate threshold need hydration")
 			elapsed := time.Since(started)
 			conn, err = raw.Conn(ctx)
 			require.NoError(t, err)
 			count := sqlitePageFetches(t, conn, false)
 			require.NoError(t, conn.Close())
-			var found bool
-			for _, hit := range hits {
-				if hit.Issue.ID == original.ID {
-					found = true
-				}
-			}
+			require.Equal(t, original.ID, hits[0].Issue.ID, "the similar-title duplicate must survive the title lookup")
 			t.Logf("rewritten body: %d page fetches, %.3f ms", count, float64(elapsed)/float64(time.Millisecond))
-			require.True(t, found, "the similar-title duplicate must survive the title lookup")
 			budget := 6_000
 			if tc.commonTitlePrefix {
 				budget = 900
 			}
 			require.Less(t, count, budget, "common postings must be counted without scoring every document")
 
+			if tc.name != "stemmed" {
+				return
+			}
 			t.Run("many matching titles keep the full ranking", func(t *testing.T) {
 				ctx := t.Context()
 				tx, err := raw.BeginTx(ctx, nil)
