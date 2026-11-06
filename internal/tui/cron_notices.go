@@ -15,6 +15,7 @@ const cronNoticeWindow = 2 * time.Second
 
 type cronRunEvent struct {
 	seq        uint64     // m.cron.events when this event arrived; reads that captured it describe it
+	settledGen uint64     // newest qualifying page or refresh read that settled the event
 	UID        string     `json:"uid"`
 	JobUID     string     `json:"job_uid"`
 	ProjectUID string     `json:"project_uid"`
@@ -69,7 +70,7 @@ func (m Model) cronNoticeSuppressed(r cronRunEvent) bool {
 // sees, so only a row read after the run's latest event, which settles its
 // change mark, resolves it; an older in-flight read or a bare event does not.
 func (m Model) cronNoticeNewest(r cronRunEvent) generated.CronRun {
-	if m.cron.data != nil && m.cron.data.events >= r.seq && m.cron.changed[r.UID].at == 0 {
+	if m.cron.data != nil && m.cron.data.events >= r.seq && m.cron.data.generation >= r.settledGen && m.cron.changed[r.UID].at == 0 {
 		if known, ok := m.cron.data.fetched(r.UID); ok {
 			return known
 		}
@@ -102,25 +103,35 @@ func (p cronData) fetched(uid string) (generated.CronRun, bool) {
 }
 
 // settle takes a qualifying read's evidence; seq stays the event's.
-func (r cronRunEvent) settle(row generated.CronRun) cronRunEvent {
+func (r cronRunEvent) settle(row generated.CronRun, generation uint64) cronRunEvent {
 	r.Status, r.Revision, r.EndedAt, r.UpdatedAt = row.Status, row.Revision, row.EndedAt, row.UpdatedAt
+	r.settledGen = generation
 	return r
 }
 
 // A read that settled a pending or announced run outlives the refresh that
 // carried it, so later refreshes that skip the run keep that read.
 func (m Model) cronNoticeResolve() Model {
+	data := m.cron.data
+	if data == nil {
+		return m
+	}
 	for _, notices := range []*map[string]cronRunEvent{&m.cronNotices.pending, &m.cronNotices.announced} {
 		*notices = maps.Clone(*notices)
 		for uid, r := range *notices {
-			(*notices)[uid] = r.settle(m.cronNoticeNewest(r))
+			if data.events < r.seq || data.generation < r.settledGen || m.cron.changed[uid].at != 0 {
+				continue
+			}
+			if row, ok := data.fetched(uid); ok {
+				(*notices)[uid] = r.settle(row, data.generation)
+			}
 		}
 	}
 	return m
 }
 
-// A page requested after a notice's event, and before any later event, read the
-// store's current row, so it settles that run as a fresh refresh read would.
+// A page requested after a notice's event reads the store's current row. Its
+// request generation prevents a late older page from replacing newer evidence.
 func (m Model) cronNoticePage(msg cronPageMsg) Model {
 	if msg.events != m.cron.events {
 		return m
@@ -128,8 +139,8 @@ func (m Model) cronNoticePage(msg cronPageMsg) Model {
 	for _, notices := range []*map[string]cronRunEvent{&m.cronNotices.pending, &m.cronNotices.announced} {
 		*notices = maps.Clone(*notices)
 		for _, row := range msg.runs {
-			if r, ok := (*notices)[row.UID]; ok && r.seq <= msg.events {
-				(*notices)[row.UID] = r.settle(row)
+			if r, ok := (*notices)[row.UID]; ok && r.seq <= msg.events && msg.gen >= r.settledGen {
+				(*notices)[row.UID] = r.settle(row, msg.gen)
 			}
 		}
 	}

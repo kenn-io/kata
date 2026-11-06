@@ -619,6 +619,76 @@ func TestCronNoticeOlderPageSettlement(t *testing.T) {
 	}
 }
 
+func TestCronNoticeJobPageSettlementBeatsOlderHeadRefresh(t *testing.T) {
+	T := snapshotFixedNow
+	m := cronNoticeFixture(t)
+	job := m.cron.data.jobs[0].UID
+	failed := m.cron.data.runs[0]
+	failed.UID, failed.JobUID, failed.Status, failed.Revision = "r", &job, "failed", 6
+	failed.CreatedAt, failed.UpdatedAt, failed.EndedAt = T, T, new(T)
+	m.cron.data.runs = []generated.CronRun{failed}
+	m.cron.data.lookup = map[string]generated.CronRun{"r": failed}
+	m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{failed}, ready: true}
+	m.cron.events++
+	m.cron.data.events = 0
+	a := &cronReadTestAPI{data: cronData{jobs: m.cron.data.jobs, runs: []generated.CronRun{failed}}}
+	m.api = a
+	m, cmd := m.cronNoticeEvent(cronNoticeEvent("r", job, T))
+	require.NotNil(t, cmd)
+	m, headCmd := m.cronSync()
+	require.NotNil(t, headCmd)
+	reads := m.cron.reads
+	defer reads.stop()
+	olderHead := headCmd().(cronLoadedMsg)
+	require.Equal(t, "failed", olderHead.runs[0].Status)
+
+	corrected := failed
+	corrected.Status, corrected.Revision = "succeeded", 7
+	corrected.UpdatedAt, corrected.EndedAt = T.Add(time.Second), new(T.Add(time.Second))
+	a.data.runs = []generated.CronRun{corrected}
+	m, pageCmd := m.cronRequestPage(job, true)
+	require.NotNil(t, pageCmd)
+	page := pageCmd().(cronPageMsg)
+	require.Equal(t, job, page.job)
+	require.Greater(t, page.gen, olderHead.generation)
+	m = m.cronPageLoaded(page)
+	require.Equal(t, "succeeded", m.cronNotices.pending["r"].Status)
+
+	m = m.cronLoaded(cronLoadedMsg(olderHead))
+	require.Equal(t, "succeeded", m.cronNotices.pending["r"].Status, "a full refresh started before the page cannot replace its newer settlement")
+	require.Equal(t, "succeeded", m.cronNoticeNewest(m.cronNotices.pending["r"]).Status)
+	row, ok := m.cron.data.run("r")
+	require.True(t, ok)
+	require.Equal(t, "succeeded", row.Status, "the displayed history also retains the corrected row")
+	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+	require.Nil(t, m.toast, "the corrected page must prevent a stale failure notice")
+}
+
+func TestCronNoticeOlderPageCannotReplaceNewerRefresh(t *testing.T) {
+	T := snapshotFixedNow
+	m := cronNoticeFixture(t)
+	job := m.cron.data.jobs[0].UID
+	failed := m.cron.data.runs[0]
+	failed.UID, failed.JobUID, failed.Status, failed.Revision = "r", &job, "failed", 6
+	m.cron.data.runs = []generated.CronRun{failed}
+	m.cron.events++
+	m, cmd := m.cronNoticeEvent(cronNoticeEvent("r", job, T))
+	require.NotNil(t, cmd)
+
+	corrected := failed
+	corrected.Status, corrected.Revision = "succeeded", 7
+	corrected.UpdatedAt, corrected.EndedAt = T.Add(time.Second), new(T.Add(time.Second))
+	data := *m.cron.data
+	data.events, data.generation, data.runs = m.cron.events, 13, []generated.CronRun{corrected}
+	m.cron.data = &data
+	m = m.cronNoticeResolve()
+	require.EqualValues(t, 13, m.cronNotices.pending["r"].settledGen)
+
+	olderPage := cronPageMsg{gen: 12, events: m.cron.events, runs: []generated.CronRun{failed}}
+	m = m.cronNoticePage(olderPage)
+	require.Equal(t, "succeeded", m.cronNotices.pending["r"].Status, "a page requested before the refresh cannot replace its newer settlement")
+}
+
 // A read that settled an announced failure outlives the history that showed
 // it: once a later head no longer carries the run, a corrected failure still
 // releases its job and an uncorrected one still suppresses it.

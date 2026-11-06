@@ -217,7 +217,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	noun := []string{"", "job", "run", "workflow"}[m.cron.tab]
 	title := cronCount(len(lines), noun)
-	if m.cron.tab == cronJobs && m.cron.data != nil {
+	if m.cron.tab == cronJobs && m.cron.data != nil && (len(m.cron.stack) > 0 || len(lines) < len(m.cron.data.jobs)) {
 		for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "blocked", "running", "failing", "missed", "never ran"} {
 			if count := healthCounts[state]; count > 0 {
 				title += fmt.Sprintf(" · %d %s", count, state)
@@ -535,7 +535,7 @@ func renderCron(m Model) string {
 			right += " · " + chip
 		}
 	}
-	if count := m.cronUnseenCount(); count > 0 {
+	if count := m.cronUnseenCount(); count > 0 && (m.cron.tab != cronRuns || !m.cron.unseenOnly || len(m.cron.stack) > 0 || len(lines) != count) {
 		right += errorStyle.Render(fmt.Sprintf(" · %d unseen failed", count))
 	}
 	body := []string{

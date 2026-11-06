@@ -157,7 +157,15 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 	p.deferred = deferred
 	var held []cronEnrichment
 	reading := map[string]bool{}
+	seen := map[string]bool{}
 	for _, r := range subjects {
+		if seen[r.UID] {
+			if old, ok := p.lookup[r.UID]; ok && r.Revision > old.Revision {
+				p.lookup[r.UID] = r
+			}
+			continue
+		}
+		seen[r.UID] = true
 		p.lookup[r.UID] = r
 		if fresh, ok := head[r.UID]; ok {
 			p.lookup[r.UID] = fresh

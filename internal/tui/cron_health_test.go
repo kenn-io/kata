@@ -241,6 +241,9 @@ func cronHealthFixture(t *testing.T) Model {
 func TestCronHealthColumnRollupAndReason(t *testing.T) {
 	defer snapshotInit(t)()
 	m := cronHealthFixture(t)
+	unfilteredTitle, _, unfilteredLines := cronScreen(m)
+	require.Len(t, unfilteredLines, len(m.cron.data.jobs))
+	require.NotContains(t, unfilteredTitle, " failing", "visible Health cells already show every loaded job's state")
 	m = m.cronFilter("job-ok")
 	title, _, lines := cronScreen(m)
 	require.Len(t, lines, 1)
@@ -264,9 +267,10 @@ func TestCronHealthColumnRollupAndReason(t *testing.T) {
 		m.width = 140
 		m.cron.data.waits["issue-example"] = cronParent{open: true, metadata: map[string]any{"work.attention": "stuck"}}
 		m.cron.data.jobs[0].Definition.TimeoutSeconds = new(int64(1))
-		title, _, _ := cronScreen(m)
-		require.Contains(t, title, "1 overdue")
-		require.NotContains(t, title, "1 blocked")
+		_, _, lines := cronScreen(m)
+		require.Len(t, lines, 1)
+		require.Contains(t, lines[0].text, "overdue")
+		require.NotContains(t, lines[0].text, "blocked")
 	})
 
 	assertGolden(t, "cron-jobs-health", cronHealthFixture(t).viewBody())

@@ -217,7 +217,7 @@ func (m Model) cronRememberPage(msg cronPageMsg, runs []generated.CronRun) Model
 	data.lookup = maps.Clone(lookup)
 	maps.DeleteFunc(data.lookup, func(uid string, _ generated.CronRun) bool {
 		err, read := data.runErr[uid]
-		return !keep[uid] && !(read && err == nil)
+		return !keep[uid] && (!read || err != nil)
 	})
 	return m.cronRemember(runs)
 }

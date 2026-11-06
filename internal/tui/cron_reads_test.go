@@ -356,6 +356,24 @@ func TestCronEventRefreshCoalescesQuietJobFills(t *testing.T) {
 	require.False(t, m.cron.out, "a settled burst must not schedule another refresh")
 }
 
+func TestCronEnrichmentDeduplicatesInspectedRuns(t *testing.T) {
+	m, a := cronRefreshFixture(t, 1)
+	r := m.cron.runPage.runs[0]
+	fresh := r
+	fresh.Status = "failed"
+	fresh.Revision++
+	a.exact = func(context.Context, string) (generated.CronRun, error) {
+		return fresh, nil
+	}
+	p := cronData{inspectedRuns: []generated.CronRun{r, r}}
+
+	cronEnrich(t.Context(), a, 7, &p)
+
+	require.Equal(t, []string{r.UID}, a.reads, "one exact read per UID keeps a duplicate failure from overwriting accepted evidence")
+	require.NoError(t, p.runErr[r.UID])
+	require.Equal(t, fresh, p.lookup[r.UID])
+}
+
 type cronFanoutAPI struct {
 	*cronReadTestAPI
 	fills atomic.Int64

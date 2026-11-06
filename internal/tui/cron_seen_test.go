@@ -189,6 +189,15 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 			require.Contains(t, stripANSI(renderCron(m)), "2 unseen failed")
 		}
 	})
+	t.Run("unseen-only list does not repeat its count", func(t *testing.T) {
+		m, _ := fixture(t)
+		m.width = 160
+		m.cron.tab = cronRuns
+		m.cron.unseenOnly = true
+		_, _, lines := cronScreen(m)
+		require.Len(t, lines, m.cronUnseenCount())
+		require.NotContains(t, stripANSI(renderCron(m)), "2 unseen failed", "the list count and unseen-only badge already identify these runs")
+	})
 	t.Run("review and clear keys", func(t *testing.T) {
 		t.Run("active notice preserves unseen filter", func(t *testing.T) {
 			m := cronNoticeFixture(t)
