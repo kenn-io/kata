@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,9 +17,17 @@ import (
 const firstCatalogBudget = 24_000
 const loadedCatalogBudget = 289_000
 
+func catalogJSONSize(value any) int {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(value)
+	return buffer.Len() - 1 // Exclude the encoder's trailing newline, like the SDK.
+}
+
 func catalogOverBudget(result *sdkmcp.ListToolsResult, budget int) string {
-	encoded, _ := json.Marshal(result)
-	if len(encoded) <= budget {
+	size := catalogJSONSize(result)
+	if size <= budget {
 		return ""
 	}
 	type toolSize struct {
@@ -27,12 +36,11 @@ func catalogOverBudget(result *sdkmcp.ListToolsResult, budget int) string {
 	}
 	sizes := make([]toolSize, 0, len(result.Tools))
 	for _, tool := range result.Tools {
-		encoded, _ := json.Marshal(tool)
-		sizes = append(sizes, toolSize{tool.Name, len(encoded)})
+		sizes = append(sizes, toolSize{tool.Name, catalogJSONSize(tool)})
 	}
 	slices.SortFunc(sizes, func(a, b toolSize) int { return b.bytes - a.bytes })
 	var report strings.Builder
-	fmt.Fprintf(&report, "tools/list is %d bytes, over the %d budget", len(encoded), budget)
+	fmt.Fprintf(&report, "tools/list is %d bytes, over the %d budget", size, budget)
 	for _, size := range sizes {
 		fmt.Fprintf(&report, "\n%s %d", size.name, size.bytes)
 	}
@@ -57,6 +65,16 @@ func TestToolCatalogStaysWithinBudget(t *testing.T) {
 	}
 }
 
+func TestToolCatalogBudgetUsesWireEncoding(t *testing.T) {
+	const toolJSON = `{"name":"fixture","description":"<>&","inputSchema":{"type":"object"}}`
+	result := &sdkmcp.ListToolsResult{Tools: []*sdkmcp.Tool{{
+		Name: "fixture", Description: "<>&", InputSchema: map[string]any{"type": "object"},
+	}}}
+	budget := len(`{"ttlMs":0,"cacheScope":"","tools":[` + toolJSON + `]}`)
+	require.Empty(t, catalogOverBudget(result, budget))
+	require.Contains(t, catalogOverBudget(result, budget-1), fmt.Sprintf("fixture %d", len(toolJSON)))
+}
+
 func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
 	fixture := toolSections(false, false)[1]
 	catalog := func(padding int) *sdkmcp.ListToolsResult {
@@ -72,16 +90,14 @@ func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
 		require.NoError(t, err)
 		return result
 	}
-	base, _ := json.Marshal(catalog(0))
-	padding := firstCatalogBudget - len(base)
+	padding := firstCatalogBudget - catalogJSONSize(catalog(0))
 	require.GreaterOrEqual(t, padding, 0)
 	over := catalog(padding + 1)
 	report := catalogOverBudget(over, firstCatalogBudget)
 	require.Contains(t, report, fixture.loader)
 	largest := 0
 	for _, tool := range over.Tools {
-		encoded, _ := json.Marshal(tool)
-		largest = max(largest, len(encoded))
+		largest = max(largest, catalogJSONSize(tool))
 	}
 	_, tools, _ := strings.Cut(report, "\n")
 	first, _, _ := strings.Cut(tools, "\n")
