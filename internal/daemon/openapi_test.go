@@ -342,6 +342,14 @@ func TestOpenAPICronRunObservationTeammateIsNullable(t *testing.T) {
 	require.True(t, teammate.Nullable, "explicit null freezes an absent teammate attribution")
 }
 
+func TestOpenAPICronRunStalenessIsOptional(t *testing.T) {
+	schema := OpenAPIDocument().Components.Schemas.Map()["CronRun"]
+	require.NotNil(t, schema)
+	require.Contains(t, schema.Properties, "uid", "existing fields remain flat")
+	require.Contains(t, schema.Properties, "staleness")
+	require.NotContains(t, schema.Required, "staleness", "older daemons omit the verdict")
+}
+
 func TestOpenAPIDocumentDefinesIdleShutdownHealthStates(t *testing.T) {
 	doc := OpenAPIDocument()
 	health := doc.Components.Schemas.Map()["HealthResponseBody"]

@@ -663,6 +663,23 @@ func (r RelayAckRequestBodyStream) Validate() error {
 	}
 }
 
+type RunStalenessBasis string
+
+const (
+	Default        RunStalenessBasis = "default"
+	TimeoutSeconds RunStalenessBasis = "timeout_seconds"
+)
+
+// Validate checks if the RunStalenessBasis value is valid
+func (r RunStalenessBasis) Validate() error {
+	switch r {
+	case Default, TimeoutSeconds:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid RunStalenessBasis value, got: %v", r))
+	}
+}
+
 type SetProjectAccessRequestBodyVisibility string
 
 const (
