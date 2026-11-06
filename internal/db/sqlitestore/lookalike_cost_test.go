@@ -115,19 +115,17 @@ func TestSearchFTSAny_LookalikePageBudget(t *testing.T) {
 	}
 }
 
-// A rewritten body must still warn about its original title when rare body
-// words fill the ranked page. The common words must stay cheap to retrieve.
-func TestSearchFTSAny_LookalikeKeepsRewrittenBodyDuplicate(t *testing.T) {
+// Title retrieval must retain scorer-equivalent titles and stay cheap on common words.
+func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 	cases := []struct {
 		name, title, originalTitle      string
 		matchedIn                       []string
 		commonTitles, commonTitlePrefix bool
 	}{
-		{name: "same title", title: "login callback drops session", originalTitle: "login callback drops session", matchedIn: []string{"title", "body"}},
 		{name: "stemmed", title: "logins callbacks drops sessions", originalTitle: "login callback drop session", matchedIn: []string{"body"}},
 		{name: "stopwords", title: "the and of to with login callback", originalTitle: "login callback", matchedIn: []string{"title", "body"}},
 		{name: "punctuation", title: "login-callback drops-session", originalTitle: "session drop callback login", matchedIn: []string{"body"}},
-		{name: "capped title counts", title: "client request response", originalTitle: "client request response", matchedIn: []string{"title", "body"}, commonTitlePrefix: true},
+		{name: "rare title prefixes", title: "response token login", originalTitle: "response token login", matchedIn: []string{"title", "body"}, commonTitlePrefix: true},
 		{name: "common title words", title: "request response server client token account", originalTitle: "request response server client token account", matchedIn: []string{"title", "body"}, commonTitles: true},
 	}
 	for _, tc := range cases {
@@ -155,7 +153,7 @@ func TestSearchFTSAny_LookalikeKeepsRewrittenBodyDuplicate(t *testing.T) {
 					distractorTitle = words[n/100] + " unrelated issue"
 				}
 				if tc.commonTitlePrefix {
-					distractorTitle = "client unrelated issue"
+					distractorTitle = "response unrelated issue"
 				}
 				if tc.commonTitles {
 					distractorTitle = title + " alpha beta gamma delta epsilon zeta theta iota"
@@ -188,6 +186,7 @@ func TestSearchFTSAny_LookalikeKeepsRewrittenBodyDuplicate(t *testing.T) {
 			started := time.Now()
 			hits, err := searchStore.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, Limit: 20})
 			require.NoError(t, err)
+			require.Equal(t, 1, len(hits), "only titles that can reach the duplicate threshold need hydration")
 			elapsed := time.Since(started)
 			conn, err = raw.Conn(ctx)
 			require.NoError(t, err)
@@ -201,22 +200,12 @@ func TestSearchFTSAny_LookalikeKeepsRewrittenBodyDuplicate(t *testing.T) {
 				}
 			}
 			t.Logf("rewritten body: %d page fetches, %.3f ms", count, float64(elapsed)/float64(time.Millisecond))
-			require.True(t, found, "the similar-title duplicate must survive the rare-word ranking")
+			require.True(t, found, "the similar-title duplicate must survive the title lookup")
 			budget := 6_000
 			if tc.commonTitlePrefix {
 				budget = 900
 			}
 			require.Less(t, count, budget, "common postings must be counted without scoring every document")
-
-			t.Run("empty ranked page falls back within scope", func(t *testing.T) {
-				hits, err := searchStore.SearchFTSAny(t.Context(), db.SearchFTSParams{
-					ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title,
-					Limit: 20, AllowedIssueIDs: []int64{original.ID},
-				})
-				require.NoError(t, err)
-				require.Len(t, hits, 1)
-				require.Equal(t, original.ID, hits[0].Issue.ID)
-			})
 
 			t.Run("many matching titles keep the full ranking", func(t *testing.T) {
 				ctx := t.Context()

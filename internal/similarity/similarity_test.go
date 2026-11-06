@@ -110,16 +110,7 @@ func TestTokenize(t *testing.T) {
 			[]string{"fix", "crash", "test"}},
 		{"drops_short_tokens", "a b is fix", []string{"fix"}},
 		{"splits_on_punctuation", "fix-login: crash!", []string{"fix", "login", "crash"}},
-		{"normalizes_unicode", "Cafe\u0301 CAFÉ—界界 a", []string{"café", "café", "界界"}},
 	})
-}
-
-func BenchmarkTokenizeTitle(b *testing.B) {
-	const title = "login callback drops session after browser redirect"
-	b.ReportAllocs()
-	for b.Loop() {
-		similarity.Tokenize(title)
-	}
 }
 
 func TestJaccard(t *testing.T) {

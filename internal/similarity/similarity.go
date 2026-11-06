@@ -50,30 +50,39 @@ func Tokenize(s string) []string {
 	s = norm.NFC.String(s)
 	s = strings.ToLower(s)
 
-	words := strings.FieldsFunc(s, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-	n := 0
-	for _, tok := range words {
+	var out []string
+	var cur strings.Builder
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		// snapshot before Reset — strings.Builder.String() returns a view that
+		// would be invalidated otherwise.
+		tok := cur.String()
+		cur.Reset()
 		// Filter by rune count, not byte length, so a single non-ASCII rune
 		// (e.g. "é") is treated as a one-rune token and dropped.
 		if utf8.RuneCountInString(tok) < 2 {
-			continue
+			return
 		}
 		if _, isStop := stopWords[tok]; isStop {
-			continue
+			return
 		}
 		tok = stem(tok)
 		if utf8.RuneCountInString(tok) < 2 {
+			return
+		}
+		out = append(out, tok)
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			cur.WriteRune(r)
 			continue
 		}
-		words[n] = tok
-		n++
+		flush()
 	}
-	if n == 0 {
-		return nil
-	}
-	return words[:n]
+	flush()
+	return out
 }
 
 // stem strips a small set of English suffixes. Order matters: longer suffixes
