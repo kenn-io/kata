@@ -101,6 +101,7 @@ var storageScenarios = []scenario{
 	{name: "issues by uids", methods: []string{"CreateProject", "CreateIssue", "SoftDeleteIssue", "IssueByUID", "IssuesByUIDs"}, run: checkIssuesByUIDs},
 	{name: "comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "CommentsByIssue"}, run: checkCommentReplies},
 	{name: "creation pagination precision", methods: []string{"ListIssues", "ListAllIssues", "SearchFTS"}, run: checkCreationPaginationPrecision},
+	{name: "list exact title", methods: []string{"ListIssues"}, run: checkListExactTitle},
 	{name: "list pagination", methods: []string{"ListIssues", "ListAllIssues", "CountIssues", "CountAllIssues"}, run: checkListPagination},
 	{name: "search pagination", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchPagination},
 	{name: "relay ingress", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "LinksByIssue", "MaterializeFederatedProject", "PinRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {

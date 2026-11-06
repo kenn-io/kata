@@ -1083,6 +1083,10 @@ func buildListIssuesQuery(ctx context.Context, p db.ListIssuesParams, count bool
 	appendAllowedIssueIDsSQLite(&q, &args, p.AllowedIssueIDs)
 	q.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopeSQLite(&q, &args, p.IssueScope)
+	if p.ExactTitle != "" {
+		q.WriteString(` AND i.title = ? COLLATE BINARY`)
+		args = append(args, p.ExactTitle)
+	}
 	if p.Status != "" {
 		q.WriteString(` AND i.status = ?`)
 		args = append(args, p.Status)
@@ -1147,7 +1151,9 @@ func buildListIssuesQuery(ctx context.Context, p db.ListIssuesParams, count bool
 		args = append(args, stamp, stamp, stamp, p.After.ID)
 	}
 
-	if p.OldestFirst {
+	if p.ShortestBodyFirst {
+		q.WriteString(" ORDER BY length(i.body), i.id")
+	} else if p.OldestFirst {
 		q.WriteString(" ORDER BY " + creationKeySQL("i") + " ASC, i.id ASC")
 	} else if p.CreatedFirst {
 		q.WriteString(" ORDER BY " + creationKeySQL("i") + " DESC, i.id DESC")

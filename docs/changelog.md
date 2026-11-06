@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Prevent duplicate creates with identical full title text when either issue's
+  body has no searchable words. `--force-new` still creates a separate issue.
 - Enable search by meaning with `kata daemon local-embeddings`. A fresh home uses a running Ollama; otherwise, it asks before downloading the shared built-in server. Switching keeps compatible Nomic indexes and warns before changing a federation recipe.
 - Open long web UI lists with the first 150 rows and add more as you scroll. The
   browser's own Find sees only rendered rows. End and deep links to late rows

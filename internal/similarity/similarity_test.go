@@ -154,6 +154,25 @@ func TestScore_Body500CharLimit(t *testing.T) {
 		"divergence past 500 chars must not affect the score")
 }
 
+func TestScore_MissingBody(t *testing.T) {
+	for _, tc := range []struct {
+		name, titleA, bodyA, titleB, bodyB string
+		want                               float64
+	}{
+		{"first empty", "fix login crash", "", "fix login crash", "stack trace here", 1},
+		{"second empty", "fix login crash", "stack trace here", "fix login crash", "", 1},
+		{"case differs", "fix LOGIN crash", "", "fix login crash", "", 0.6},
+		{"whitespace differs", " fix\tlogin crash ", "", "fix login crash", "", 0.6},
+		{"empty bounded body", "fix login crash", strings.Repeat(" ", 500) + "trace", "fix login crash", "trace", 1},
+		{"punctuation only", "!!!", "", "!!!", "", 1},
+		{"suffix past rune limit", strings.Repeat("界", 500) + "alpha", "", strings.Repeat("界", 500) + "beta", "", 0.6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertScore(t, tc.want, tc.titleA, tc.bodyA, tc.titleB, tc.bodyB)
+		})
+	}
+}
+
 func TestScore_Title500RuneLimit(t *testing.T) {
 	prefix := strings.Repeat("x", 500)
 	assertScore(t, 1.0,
