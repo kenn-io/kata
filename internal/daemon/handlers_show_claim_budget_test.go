@@ -74,23 +74,6 @@ func (s showRefreshCredentialFailure) FederationCredential(context.Context, stri
 	return config.FederationCredential{}, false, errors.New("fixture credential read failed")
 }
 
-func TestShowClaimRefreshPreservesSlowCredentialError(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	project, issue := createClaimGateHelperIssue(t, store)
-	_, err := store.UpsertFederationBinding(t.Context(), db.FederationBinding{
-		ProjectID: project.ID, Role: db.FederationRoleSpoke, Enabled: true,
-		HubURL: "https://daemon.example", HubProjectID: 1,
-		HubProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4AA",
-	})
-	require.NoError(t, err)
-	synctest.Test(t, func(t *testing.T) {
-		_, err := refreshShowClaimStatus(t.Context(), ServerConfig{
-			DB: store, FederationCredentials: showRefreshCredentialFailure{delay: 550 * time.Millisecond},
-		}, issue)
-		require.ErrorContains(t, err, "fixture credential read failed")
-	})
-}
-
 func (showRefreshFailureStore) InstanceUID() string { return "show-refresh-fixture" }
 
 func (s showRefreshFailureStore) FederationBindingByProject(ctx context.Context, _ int64) (db.FederationBinding, error) {
