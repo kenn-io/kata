@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,8 +50,8 @@ func TestReady_FiltersBlocked(t *testing.T) {
 func TestReady_RespectsLimit(t *testing.T) {
 	env := testenv.New(t)
 	pid := initLocalWorkspace(t, env, "kata")
-	for range 3 {
-		createIssueViaHTTP(t, env, pid, "x")
+	for i := range 3 {
+		createIssueViaHTTP(t, env, pid, fmt.Sprintf("issue %d", i))
 	}
 
 	out := getReady(t, env, pid, "?limit=2")
@@ -204,9 +205,9 @@ func TestReadyGlobal_LimitCapsTotalRows(t *testing.T) {
 	env := testenv.New(t)
 	pid1 := initLocalWorkspace(t, env, "kata")
 	pid2 := initLocalWorkspace(t, env, "other")
-	for range 3 {
-		createIssueViaHTTP(t, env, pid1, "p1")
-		createIssueViaHTTP(t, env, pid2, "p2")
+	for i := range 3 {
+		createIssueViaHTTP(t, env, pid1, fmt.Sprintf("p1 issue %d", i))
+		createIssueViaHTTP(t, env, pid2, fmt.Sprintf("p2 issue %d", i))
 	}
 
 	out := getReadyGlobal(t, env, "?limit=2")
