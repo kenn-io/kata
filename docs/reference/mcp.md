@@ -317,6 +317,11 @@ loader, then refresh the tool list when the server sends the standard
 typed tools needed for the current task instead of placing every detailed tool in the
 model context at startup.
 
+The first `tools/list` from `kata mcp serve` is about 21 KB for 19 tools.
+With every section available by default loaded, it is about 263 KB for 110 tools;
+output schemas account for about two thirds. A test keeps these catalogs under
+24 KB and 289 KB. Storage, teams, and tokens require startup flags and aren't counted.
+
 | Loader | Detailed tools |
 | --- | --- |
 | `kata.load_issue_discovery` | `kata.search`, `kata.list`, `kata.show`, `kata.ready`, `kata.next`, `kata.labels`, `kata.graph` |

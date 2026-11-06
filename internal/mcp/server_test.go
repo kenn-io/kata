@@ -1299,7 +1299,11 @@ func connectRawTestServerWithClientOptions(t *testing.T, options Options, client
 	t.Helper()
 	server, err := New(options)
 	require.NoError(t, err)
+	return connectServerSession(t, server, clientOptions)
+}
 
+func connectServerSession(t *testing.T, server *sdkmcp.Server, clientOptions *sdkmcp.ClientOptions) *sdkmcp.ClientSession {
+	t.Helper()
 	serverConn, clientConn := net.Pipe()
 	ctx, cancel := context.WithCancel(t.Context())
 	serverDone := make(chan error, 1)
