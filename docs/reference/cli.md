@@ -2581,3 +2581,12 @@ kata docbank attachments rm <issue> <attachment>
 ```
 
 `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
+
+Point the current `KATA_HOME`'s daemon at a Docbank:
+
+```sh
+kata docbank setup [--port N] [--folder PATH] [--yes]
+kata docbank setup --url URL --key-file PATH [--folder PATH] [--yes]
+```
+
+Without `--url`, setup gives the Docbank on this machine a fixed loopback port and API key. With `--url`, it uses a Docbank that runs elsewhere and reads the key from `--key-file`. Both check the key against Docbank, add `[docbank]` to `config.toml`, and restart running daemons. They reject `--daemon`. JSON and agent output report `url`, `folder`, `key_file` and `changed`. See [Configure the daemon](../guide/attachments.md#configure-the-daemon) for what setup writes and when it refuses.

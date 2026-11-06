@@ -1505,8 +1505,9 @@ for access tokens, field ownership, completion writeback, and recovery limits.
 ## Docbank attachments
 
 Kata 0.21.0 and later: `[docbank]` enables issue file uploads and reads through a
-separately hosted Docbank. See [Issue attachments](../guide/attachments.md) for
-setup and the shared-vault trust boundary.
+separately hosted Docbank. `kata docbank setup` writes this section and checks
+the key; see [Configure the daemon](../guide/attachments.md#configure-the-daemon)
+for setup and the shared-vault trust boundary.
 
 | Key | Default | Meaning |
 | --- | --- | --- |

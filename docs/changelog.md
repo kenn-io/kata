@@ -36,6 +36,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Create unprioritized issues with `kata create --priority none` even when the
   invoking client has a default priority. Keyed automation can keep its original
   request stable across changes to that preference.
+- Turn on issue attachments with `kata docbank setup`. Without `--url`, it gives
+  the Docbank on this machine a fixed port and API key, so attachments keep
+  working after Docbank restarts; with `--url` and `--key-file`, it uses a
+  Docbank that runs elsewhere. It checks the key against Docbank before adding
+  `[docbank]` to `config.toml`, then restarts running daemons.
 - Prevent duplicate creates with identical full title text when either issue's
   body has no searchable words. `--force-new` still creates a separate issue.
 - Turn close transcripts on or off for one process with

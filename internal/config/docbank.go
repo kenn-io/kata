@@ -30,6 +30,15 @@ func NormalizeDocbankConfig(c DocbankConfig) (DocbankConfig, error) {
 	return c, err
 }
 
+// ParseDocbankFile reads [docbank] as written, without environment overrides or defaults.
+func ParseDocbankFile(data []byte) (DocbankConfig, error) {
+	var file struct {
+		Docbank DocbankConfig `toml:"docbank"`
+	}
+	err := decodeSectionData(data, "docbank", &file)
+	return file.Docbank, err
+}
+
 // ResolveKey reads the selected secret on every request, permitting key rotation.
 func (c DocbankConfig) ResolveKey() (string, error) {
 	key, _, err := ResolveSecret(c.APIKey, c.APIKeyFile, c.APIKeyEnv)

@@ -1,7 +1,7 @@
 ---
 title: Issue attachments
 description: Attach files through Docbank and view images and videos in Kata.
-last_edited: 2026-11-04
+last_edited: 2026-11-06
 ---
 
 # Issue attachments
@@ -13,7 +13,35 @@ Kata stores one reference per file in issue metadata. [Docbank](https://github.c
 
 Choose a Docbank vault whose contents may be shared with every issue reader and metadata writer served by this daemon. A metadata writer can reference any content version in that vault, and a reader can fetch it through Kata. Folders organize files; use separate vaults for different audiences.
 
-Add this to `<KATA_HOME>/config.toml` on each daemon that uploads or serves files:
+`kata docbank setup` configures the current `KATA_HOME` and restarts its running daemons. Run it on each daemon that uploads or serves files.
+
+For a Docbank on the same machine:
+
+```sh
+kata docbank setup [--port 8080] [--folder /kata]
+```
+
+Without a fixed address, Docbank's daemon picks a new port and API key each time it starts. Setup adds a `[server]` section to `<DOCBANK_HOME>/config.toml` with `bind_addr = "127.0.0.1"`, the port (default `8080`) and a new random key, then restarts Docbank. It stores the same key in `<KATA_HOME>/docbank.key` with mode `0600` and never prints it. An existing `[server]` section with `api_port` and `api_key` is reused, and Docbank keeps running if it already serves that port. Setup finds Docbank's home with `docbank vault info`, so `docbank` must be on `PATH`.
+
+For a Docbank that runs elsewhere:
+
+```sh
+kata docbank setup --url https://docbank.example --key-file /path/to/docbank-key
+```
+
+Both forms read Docbank's root folder with the key before adding `[docbank]` to `<KATA_HOME>/config.toml`. They ask once before changing configuration; pass `--yes` without a terminal. Running setup again prints that attachments are already set up and changes nothing. Running daemons must support restart, and a refused restart restores `config.toml`.
+
+Setup changes nothing when:
+
+- `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE` or `KATA_DOCBANK_FOLDER` is set, because it would override the new section;
+- `config.toml` already has a different `[docbank]` section;
+- Docbank rejects the key or can't be reached;
+- the port is in use by another program, `--port` differs from Docbank's `api_port`, or Docbank's `[server]` section lacks `api_port` or `api_key`;
+- `<KATA_HOME>/docbank.key` holds a different key than Docbank's `[server]` section.
+
+If Docbank restarts on another port, for example because `DOCBANK_API_PORT` or `DOCBANK_BIND_ADDR` is set in its environment, setup stops after Docbank's changes and leaves kata's config alone.
+
+To configure the daemon by hand, add this to `<KATA_HOME>/config.toml`:
 
 ```toml
 [docbank]
