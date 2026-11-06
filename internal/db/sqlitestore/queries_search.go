@@ -465,7 +465,7 @@ func (d *Store) anchorWord(ctx context.Context, words []byte) (anchor string, no
 	if err != nil {
 		return "", false, err
 	}
-	var phrases []string
+	phrases := make([]string, 0)
 	if err := json.Unmarshal(words, &phrases); err != nil {
 		return "", false, err
 	}
