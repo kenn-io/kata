@@ -181,7 +181,7 @@ func registerIssueDiscoveryTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.list", "List issues", "List compact issue summaries in the selected project scope with bounded filters.", read, handlers.list)
 	addTool(server, "kata.next", "Next issue", "Select the highest-priority ready issue.", read, handlers.next)
 	addTool(server, "kata.ready", "List ready issues", "List open issues with no open blocking predecessor in the selected project scope.", read, handlers.ready)
-	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work.", searchRead, handlers.search)
+	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work. Lexical results contain every query word, so use one or two distinctive words.", searchRead, handlers.search)
 	addTool(server, "kata.show", "Show issue", "Read one issue with its body, metadata, relationships, and a bounded comment history.", read, handlers.show)
 }
 
