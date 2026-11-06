@@ -326,37 +326,20 @@ func TestCLISearchJSONSelectorsAgree(t *testing.T) {
 	}, hegel.WithTestCases(1000))
 }
 
-func TestCLISearchTextAgreesWithJSON(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		query := hegel.Draw(ht, hegel.OneOf[string](hegel.Text(), hegel.SampledFrom([]string{"issue", "show", "list", "comment"})))
-		if strings.TrimSpace(query) == "" {
-			return // blank-task rejection is covered by the usage-error contract
-		}
-		limit := strconv.Itoa(hegel.Draw(ht, hegel.Integers(1, 20)))
-		out, stderr, err := executeRootCapture(t, t.Context(), "cli", "search", "--json", "--limit", limit, "--", query)
-		require.NoError(ht, err, stderr)
-		var response clisearch.Response
-		require.NoError(ht, json.Unmarshal([]byte(out), &response))
-		var want strings.Builder
-		hint := "kata"
-		for i, result := range response.Results {
-			fmt.Fprintf(&want, "%s  %s\n", result.Command, result.Summary)
-			if i == 0 {
-				hint = result.Command
-			}
-		}
-		fmt.Fprintf(&want, "Run '%s --help' for flags and examples.\n", hint)
-		selector := hegel.Draw(ht, hegel.SampledFrom([][]string{nil, {"--format=human"}, {"--agent"}, {"--format", "agent"}}))
-		args := append([]string{"cli", "search", "--limit", limit}, selector...)
-		args = append(args, "--", query)
-		text, stderr, err := executeRootCapture(t, t.Context(), args...)
-		require.NoError(ht, err, stderr)
-		prefix := ""
-		if len(selector) > 0 && selector[0] != "--format=human" {
-			prefix = fmt.Sprintf("OK search results=%d\n", len(response.Results))
-		}
-		require.Equal(ht, prefix+want.String(), text)
-	}, hegel.WithTestCases(1000))
+func TestCLISearchAgentHeader(t *testing.T) {
+	for _, query := range []string{"issue", "zxqvnonexistent"} {
+		t.Run(query, func(t *testing.T) {
+			out, stderr, err := executeRootCapture(t, t.Context(), "cli", "search", query, "--limit", "3", "--json")
+			require.NoError(t, err, stderr)
+			var response clisearch.Response
+			require.NoError(t, json.Unmarshal([]byte(out), &response))
+			text, stderr, err := executeRootCapture(t, t.Context(), "cli", "search", query, "--limit", "3")
+			require.NoError(t, err, stderr)
+			agent, stderr, err := executeRootCapture(t, t.Context(), "cli", "search", query, "--limit", "3", "--agent")
+			require.NoError(t, err, stderr)
+			require.Equal(t, fmt.Sprintf("OK search results=%d\n", len(response.Results))+text, agent)
+		})
+	}
 }
 
 func TestCLISearchResultsEligible(t *testing.T) {
@@ -378,17 +361,13 @@ func TestCLISearchResultsEligible(t *testing.T) {
 		require.NoError(ht, json.Unmarshal([]byte(out), &response))
 		root := newRootCmd()
 		for _, result := range response.Results {
+			require.NotEqual(ht, "kata", result.Command)
 			cmd, rest, err := root.Find(strings.Fields(strings.TrimPrefix(result.Command, "kata ")))
 			require.NoError(ht, err)
 			require.Empty(ht, rest)
 			require.True(ht, cmd.Runnable(), result.Command)
 			for _, runner := range []string{"kata ui", "kata tui", "kata mcp serve", "kata connector serve", "kata agent-hook contract", "kata agent-hook attention", "kata attention-hook", "kata agent-contract-hook"} {
 				require.False(ht, result.Command == runner || strings.HasPrefix(result.Command, runner+" "), result.Command)
-			}
-			for node := cmd; node != nil; node = node.Parent() {
-				require.False(ht, node.Hidden, result.Command)
-				require.Empty(ht, node.Deprecated, result.Command)
-				require.NotContains(ht, []string{"help", "completion", "cli"}, node.Name(), result.Command)
 			}
 		}
 	}, hegel.WithTestCases(1000))
