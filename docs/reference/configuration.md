@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 # Configuration
@@ -35,6 +35,16 @@ transcripts need HTTP API `0.26.0` or newer. Other agents need HTTP API
 Before attaching a transcript, `kata close` checks the daemon's API version. An older daemon
 causes a warning on stderr, and the close proceeds without the transcript.
 With attachment disabled, close requests remain unchanged.
+
+To turn attachment on or off for one process without editing the file, set
+`KATA_CLOSE_TRANSCRIPT_ENABLED` to a boolean. `true` attaches transcripts even
+without a config file; `agentsview_url` and `session_id_env` still come from
+the file. `false` attaches nothing, even when the file enables attachment, and
+doesn't read the file. Any other value warns on stderr, and the close proceeds
+without a transcript. Unset or empty leaves the file in charge. An agent
+integration can set it with `KATA_TRANSCRIPT_AGENT` and
+`KATA_TRANSCRIPT_SESSION_ID` to attach its own sessions without changing
+transcripts for other agents on the machine.
 
 When `kata close` supplies evidence, it attaches a separate `transcript` object
 to the same durable `issue.closed` event. Evidence and substantive-message
@@ -144,6 +154,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
+| `KATA_CLOSE_TRANSCRIPT_ENABLED` | Overrides `[close.transcript].enabled` for the process that runs `kata close`. Takes a boolean; `false` skips the config file. An invalid value warns and the close proceeds without a transcript. |
 | `KATA_TRANSCRIPT_AGENT` | Agent name for an explicit `KATA_TRANSCRIPT_SESSION_ID`, using the token rules above; setting it skips variable discovery, and an agent alone warns and skips attachment. Preserves the original agent when replaying a keyed close from another shell. |
 | `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session ID. Used only when close transcript attachment is enabled; overrides the configured session variables. |
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted and the TUI Attention view (`T`), which otherwise falls back to the authenticated actor. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |

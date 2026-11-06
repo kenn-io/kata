@@ -29,6 +29,7 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 			t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 			t.Setenv("KATA_TRANSCRIPT_AGENT", "")
 			t.Setenv("KATA_TRANSCRIPT_SESSION_ID", "")
+			t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", "")
 			if enabled {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled = true\nagentsview_url = \"https://agentsview.example/archive/\"\n"), 0600))
 			}
@@ -69,6 +70,58 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 	}
 }
 
+func TestCloseTranscript_EnabledEnvironmentOverridesFile(t *testing.T) {
+	for _, tc := range []struct {
+		name, enabled, config, warning string
+		attach                         bool
+	}{
+		{name: "true attaches without a config file", enabled: "true", attach: true},
+		{name: "false keeps an enabled file from attaching", enabled: "false", config: "[close.transcript]\nenabled = true\n"},
+		{name: "invalid value warns and closes without a transcript", enabled: "sometimes", config: "[close.transcript]\nenabled = true\n", warning: "KATA_CLOSE_TRANSCRIPT_ENABLED must be true or false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, dir, _, ref := setupWorkspaceWithIssue(t, "Completed example work")
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			if tc.config != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0600))
+			}
+			for name, value := range map[string]string{
+				"KATA_CLOSE_TRANSCRIPT_ENABLED": tc.enabled,
+				"KATA_TRANSCRIPT_AGENT":         "omp",
+				"KATA_TRANSCRIPT_SESSION_ID":    transcriptSessionOne,
+				"CODEX_THREAD_ID":               "",
+				"CODEX_SESSION_ID":              "",
+				"CLAUDE_CODE_SESSION_ID":        "",
+			} {
+				t.Setenv(name, value)
+			}
+			out, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", ref,
+				"--done", "--message", "Implemented the example behavior and ran the focused tests.", "--test", "go test ./internal/example")
+			require.NoError(t, err)
+			var response struct {
+				Event struct {
+					Payload string `json:"payload"`
+				} `json:"event"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &response))
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal([]byte(response.Event.Payload), &payload))
+			if tc.attach {
+				assert.Equal(t, map[string]any{"agent": "omp", "session_id": transcriptSessionOne}, payload["transcript"])
+			} else {
+				assert.NotContains(t, payload, "transcript")
+			}
+			if tc.warning == "" {
+				assert.Empty(t, stderr)
+			} else {
+				assert.Contains(t, stderr, tc.warning)
+				assert.Contains(t, stderr, "skipping attachment")
+			}
+		})
+	}
+}
+
 func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 	for _, tc := range []struct {
 		name, id, thread, session, claude, pi, variables, base, wantID, agent, wantAgent, warning string
@@ -100,7 +153,7 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 				variables = "[close.transcript.session_id_env]\n" + tc.variables + "\n"
 			}
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled=true\nagentsview_url="+fmt.Sprintf("%q", tc.base)+"\n"+variables), 0600))
-			for name, value := range map[string]string{"KATA_TRANSCRIPT_AGENT": tc.agent, "PI_SESSION_ID": tc.pi, "KATA_TRANSCRIPT_SESSION_ID": tc.id, "CODEX_THREAD_ID": tc.thread, "CODEX_SESSION_ID": tc.session, "CLAUDE_CODE_SESSION_ID": tc.claude} {
+			for name, value := range map[string]string{"KATA_CLOSE_TRANSCRIPT_ENABLED": "", "KATA_TRANSCRIPT_AGENT": tc.agent, "PI_SESSION_ID": tc.pi, "KATA_TRANSCRIPT_SESSION_ID": tc.id, "CODEX_THREAD_ID": tc.thread, "CODEX_SESSION_ID": tc.session, "CLAUDE_CODE_SESSION_ID": tc.claude} {
 				t.Setenv(name, value)
 			}
 			cmd := &cobra.Command{}
@@ -145,7 +198,7 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 				config += "[close.transcript.session_id_env]\npi = \"PI_SESSION_ID\"\n"
 			}
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600))
-			for _, name := range []string{"CODEX_THREAD_ID", "PI_SESSION_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "KATA_TRANSCRIPT_AGENT", "KATA_TRANSCRIPT_SESSION_ID"} {
+			for _, name := range []string{"KATA_CLOSE_TRANSCRIPT_ENABLED", "CODEX_THREAD_ID", "PI_SESSION_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "KATA_TRANSCRIPT_AGENT", "KATA_TRANSCRIPT_SESSION_ID"} {
 				t.Setenv(name, "")
 			}
 			t.Setenv(tc.variable, tc.id)
@@ -188,6 +241,7 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 func TestCloseTranscript_MalformedConfigurationNamesFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript\n"), 0600))
 	cmd := &cobra.Command{}
 	var stderr bytes.Buffer

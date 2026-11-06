@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -14,6 +14,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   page defaults for each surface.
 - Prevent duplicate creates with identical full title text when either issue's
   body has no searchable words. `--force-new` still creates a separate issue.
+- Turn close transcripts on or off for one process with
+  `KATA_CLOSE_TRANSCRIPT_ENABLED`, without editing `<KATA_HOME>/config.toml`.
+  An agent integration can attach its own sessions while other agents on the
+  machine keep the file's setting. `false` overrides a file that enables
+  attachment; an invalid value warns and the close proceeds without a
+  transcript. See
+  [Closing-session transcripts](reference/configuration.md#closing-session-transcripts).
 - Enable search by meaning with `kata daemon local-embeddings`. A fresh home uses a running Ollama; otherwise, it asks before downloading the shared built-in server. Switching keeps compatible Nomic indexes and warns before changing a federation recipe.
 - Open long web UI lists with the first 150 rows and add more as you scroll. The
   browser's own Find sees only rendered rows. End and deep links to late rows
