@@ -81,6 +81,7 @@ func TestRunLookalikeCheckExactTitleGate(t *testing.T) {
 		{"Unicode", "𞤢", 0, 0, true, 20},
 		{"mixed Unicode", "Inventory 𞤢", 0, 0, true, 20},
 		{"punctuation", "!!!", 0, 0, true, 20},
+		{"title past search prefix", strings.Repeat("x", 501), 0, 0, true, 20},
 		{"twenty qualifying FTS hits", "Inventory page crashes", 20, 20, false, 20},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

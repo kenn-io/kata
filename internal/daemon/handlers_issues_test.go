@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -2103,49 +2102,6 @@ func TestCreate_LookalikeSoftBlock(t *testing.T) {
 	require.Equal(t, 409, second.status, string(second.body))
 	assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
 	assert.Contains(t, string(second.body), `"candidates"`)
-}
-
-func TestCreate_LookalikeTitlePastSearchPrefix(t *testing.T) {
-	h, pid := bootstrapProject(t)
-	ts := h.ts.(*httptest.Server)
-	body := map[string]any{"actor": "agent-1", "title": strings.Repeat("x", 501)}
-	first := postWithHeader(t, ts, issuesURL(pid), nil, body)
-	requireOK(t, first)
-	second := postWithHeader(t, ts, issuesURL(pid), nil, body)
-	require.Equal(t, http.StatusConflict, second.status, string(second.body))
-	assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
-	assert.Contains(t, string(second.body), `"short_id":"`+issueShortIDFromCreate(t, first.body)+`"`)
-}
-
-func TestCreate_LookalikeExactTitleOutsideFTS(t *testing.T) {
-	for _, tc := range []struct {
-		title    string
-		variants int
-	}{{"!!!", 0}, {"Inventory page crashes on second page", 25}} {
-		t.Run(tc.title, func(t *testing.T) {
-			h, pid := bootstrapProject(t)
-			ts := h.ts.(*httptest.Server)
-			first := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
-				"actor": "agent-1", "title": tc.title, "body": strings.Repeat("unrelated ", 2000),
-			})
-			requireOK(t, first)
-			for i := range tc.variants {
-				requireOK(t, postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
-					"actor": "agent-1", "title": fmt.Sprintf("%s %d", tc.title, i), "force_new": true,
-				}))
-			}
-			shortID := issueShortIDFromCreate(t, first.body)
-			candidates, err := h.DB().SearchFTSAny(t.Context(), db.SearchFTSParams{ProjectID: pid, Query: tc.title, Limit: 20})
-			require.NoError(t, err)
-			for _, candidate := range candidates {
-				require.NotEqual(t, shortID, candidate.Issue.ShortID)
-			}
-			second := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{"actor": "agent-1", "title": tc.title})
-			require.Equal(t, http.StatusConflict, second.status, string(second.body))
-			assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
-			assert.Contains(t, string(second.body), `"short_id":"`+shortID+`"`)
-		})
-	}
 }
 
 // TestCreate_ForceNewBypassesLookalike verifies that force_new=true on a body
