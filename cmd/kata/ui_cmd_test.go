@@ -81,12 +81,12 @@ func TestUICommandMissingBrowserPrintsReachableURL(t *testing.T) {
 func TestUICommandOutputModesBeforeBrowser(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		flag string
+		args []string
 		want string
 	}{
-		{"json", "--json", "{\"kata_api_version\":1,\"url\":\"https://daemon.example/kata#login=1&return_path=%2Fkata\"}\n"},
-		{"agent", "--agent", "OK ui url=https://daemon.example/kata#login=1&return_path=%2Fkata\n"},
-		{"quiet", "-q", "Opening https://daemon.example/kata#login=1&return_path=%2Fkata\n"},
+		{"json", []string{"--json"}, "{\"kata_api_version\":1,\"url\":\"https://daemon.example/kata#login=1&return_path=%2Fkata\"}\n"},
+		{"agent", []string{"--agent"}, "OK ui url=https://daemon.example/kata#login=1&return_path=%2Fkata\n"},
+		{"human", nil, "Opening https://daemon.example/kata#login=1&return_path=%2Fkata\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: "https://daemon.example", ConfiguredRemote: true})
@@ -95,7 +95,7 @@ func TestUICommandOutputModesBeforeBrowser(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			cmd.SetOut(&stdout)
 			cmd.SetErr(&stderr)
-			cmd.SetArgs([]string{"ui", tc.flag})
+			cmd.SetArgs(append([]string{"ui"}, tc.args...))
 			cmd.SetContext(t.Context())
 			openWebBrowserForCommand = func(_ context.Context, launch client.WebUILaunch) error {
 				assert.Equal(t, "https://daemon.example/kata#login=1&return_path=%2Fkata", launch.PublicURL)
