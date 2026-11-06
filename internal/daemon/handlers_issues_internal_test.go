@@ -113,6 +113,22 @@ func TestRunLookalikeCheckSkipsCompleteFTSPage(t *testing.T) {
 	}
 }
 
+func TestRunLookalikeCheckKeepsUnicodeTitleFallback(t *testing.T) {
+	for _, title := range []string{"𞤢", "Inventory 𞤢"} {
+		t.Run(title, func(t *testing.T) {
+			in := &api.CreateIssueRequest{ProjectID: 7}
+			in.Body.Title = title
+			calls := 0
+			store := &lookalikeCandidateStore{listIssues: func(db.ListIssuesParams) ([]db.Issue, error) {
+				calls++
+				return nil, nil
+			}}
+			require.NoError(t, runLookalikeCheck(t.Context(), ServerConfig{DB: store}, in, "example-project"))
+			assert.Equal(t, 1, calls)
+		})
+	}
+}
+
 func closedLookalike(title, body, uid string) db.SearchCandidate {
 	done := "done"
 	return db.SearchCandidate{

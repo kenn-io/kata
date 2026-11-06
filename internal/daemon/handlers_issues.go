@@ -1615,9 +1615,7 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 		seen[c.Issue.UID] = true
 		addMatch(c.Issue)
 	}
-	titleHasWord := strings.ContainsFunc(similarity.TitlePrefix(in.Body.Title), func(r rune) bool {
-		return unicode.IsLetter(r) || unicode.IsDigit(r)
-	})
+	titleHasWord := titleHasPortableToken(similarity.TitlePrefix(in.Body.Title))
 	// An underfull FTS page already includes every issue sharing a title token.
 	if len(matched) < 20 && (len(candidates) == 20 || !titleHasWord) {
 		exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
@@ -1643,6 +1641,14 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 		formatDuplicateMessage(matched),
 		"comment on an existing issue, or pass --force-new to create anyway",
 		map[string]any{"candidates": matched})
+}
+
+// titleHasPortableToken reports whether title is ASCII and has a letter or
+// digit, so SQLite unicode61 and PostgreSQL simple search both index one of
+// its tokens. Other titles keep the exact-title fallback.
+func titleHasPortableToken(title string) bool {
+	return !strings.ContainsFunc(title, func(r rune) bool { return r > unicode.MaxASCII }) &&
+		strings.ContainsFunc(title, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) })
 }
 
 // formatDuplicateMessage produces a singular/plural-aware human message for
