@@ -345,9 +345,6 @@ describe('IssueCollection', () => {
                 parent: {
                   uid: root.uid,
                   short_id: root.short_id,
-                  qualified_id: root.qualified_id,
-                  title: root.title,
-                  status: root.status,
                 },
               }
             : { parent_short_id: root.short_id }),
