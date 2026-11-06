@@ -35,6 +35,22 @@ type RestoreCronJobHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 
+type FederatedDocbankCapabilitiesHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type LinkFederatedDocbankHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type UploadFederatedDocbankHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type FederatedDocbankContentHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
 type PollFederationProjectEventsHeaders struct {
 	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
 	Authorization      *string `json:"Authorization,omitempty"`
@@ -59,15 +75,18 @@ type SkipFederationQuarantineHeaders struct {
 }
 
 type OfferRelayDeliveriesHeaders struct {
-	Authorization *string `json:"Authorization,omitempty"`
+	Authorization      *string `json:"Authorization,omitempty"`
+	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
 }
 
 type GetRelayResetHeaders struct {
-	Authorization *string `json:"Authorization,omitempty"`
+	Authorization      *string `json:"Authorization,omitempty"`
+	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
 }
 
 type AcceptRelayDeliveriesHeaders struct {
-	Authorization *string `json:"Authorization,omitempty"`
+	Authorization      *string `json:"Authorization,omitempty"`
+	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
 }
 
 type AckRelayDeliveriesHeaders struct {

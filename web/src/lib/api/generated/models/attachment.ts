@@ -6,6 +6,7 @@ export interface Attachment {
   docbank_version: string
   media_type: string
   name: string
+  origin?: string
   size: number
   [key: string]: unknown
 }

@@ -3385,6 +3385,232 @@ func (c *Client) GetProjectFederationWithResponse(ctx context.Context, options *
 	}
 }
 
+func (c *Client) FederatedDocbankCapabilitiesWithResponse(ctx context.Context, options *FederatedDocbankCapabilitiesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankCapabilitiesResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/docbank/capabilities",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/docbank/capabilities")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &FederatedDocbankCapabilitiesResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(FederatedDocbankCapabilitiesResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "FederatedDocbankCapabilitiesResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(FederatedDocbankCapabilitiesErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) LinkFederatedDocbankWithResponse(ctx context.Context, options *LinkFederatedDocbankRequestOptions, reqEditors ...runtime.RequestEditorFn) (*LinkFederatedDocbankResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/docbank/issues/{ref}/links",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/docbank/issues/{ref}/links")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &LinkFederatedDocbankResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(LinkFederatedDocbankResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "LinkFederatedDocbankResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(LinkFederatedDocbankErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) UploadFederatedDocbankWithResponse(ctx context.Context, options *UploadFederatedDocbankRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UploadFederatedDocbankResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/docbank/issues/{ref}/uploads",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/octet-stream",
+	}
+
+	// Keep binary bodies out of the runtime's JSON encoder.
+	if options != nil {
+		reqParams.Options = binaryRequestOptions{RequestOptions: options}
+	}
+	reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
+		if options == nil || options.Body == nil {
+			return nil
+		}
+		body, err := options.Body.Reader()
+		if err != nil {
+			return err
+		}
+		req.Body = body
+		req.ContentLength = options.Body.FileSize()
+		req.GetBody = options.Body.Reader
+		return nil
+	}}, reqEditors...)
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/docbank/issues/{ref}/uploads")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &UploadFederatedDocbankResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(UploadFederatedDocbankResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "UploadFederatedDocbankResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(UploadFederatedDocbankErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) FederatedDocbankContentWithResponse(ctx context.Context, options *FederatedDocbankContentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankContentResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/docbank/versions/{version_id}/content",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/docbank/versions/{version_id}/content")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &FederatedDocbankContentResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(FederatedDocbankContentErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
 func (c *Client) EnableProjectFederationWithResponse(ctx context.Context, options *EnableProjectFederationRequestOptions, reqEditors ...runtime.RequestEditorFn) (*EnableProjectFederationResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
@@ -3776,6 +4002,10 @@ func (c *Client) OfferRelayDeliveriesWithResponse(ctx context.Context, options *
 				}
 			}
 		}
+		out.Headers200 = &OfferRelayDeliveriesResp200Headers{
+			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
+		}
 		return out, nil
 	default:
 		if len(resp.Content) > 0 {
@@ -3830,6 +4060,10 @@ func (c *Client) GetRelayResetWithResponse(ctx context.Context, options *GetRela
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &GetRelayResetResp200Headers{
+			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
 		}
 		return out, nil
 	default:
