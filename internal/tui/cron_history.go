@@ -31,10 +31,10 @@ func cronProjectObservations(runs []generated.CronRun, ref cronRef) []generated.
 // cronObservationSummary describes observations, not occurrences or a complete
 // time window. Sort a copy for the strip so navigation keeps its existing order.
 func cronObservationSummary(runs []generated.CronRun) string {
-	sample := "Sample: " + cronCount(len(runs), "observation")
 	if len(runs) == 0 {
-		return sample + "\nno matching loaded observations"
+		return "no matching loaded observations"
 	}
+	sample := "Sample: " + cronCount(len(runs), "observation")
 	ordered := slices.Clone(runs)
 	slices.SortFunc(ordered, func(a, b generated.CronRun) int {
 		if n := a.CreatedAt.Compare(b.CreatedAt); n != 0 {

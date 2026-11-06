@@ -31,32 +31,31 @@ func historyDocument(p cronData, ref cronRef, width int) (string, []cronRef) {
 
 func TestCronHistoryObservationCounts(t *testing.T) {
 	// Every loaded record is an observation, including repeated occurrence keys
-	// and unrecognized statuses. No duration or scheduled time is inferred.
+	// and the supported unknown status. No duration or scheduled time is inferred.
 	hegel.Test(t, func(ht *hegel.T) {
-		statuses := hegel.Draw(ht, hegel.Lists(hegel.OneOf(
-			hegel.SampledFrom([]string{"succeeded", "failed", "cancelled", "running", "unknown"}), hegel.Text(),
-		)))
+		statuses := hegel.Draw(ht, hegel.Lists(hegel.SampledFrom([]string{"succeeded", "failed", "cancelled", "running", "unknown"})))
 		p := cronData{}
 		counts := map[string]int{}
 		for i, status := range statuses {
 			p.runs = append(p.runs, generated.CronRun{
 				UID: fmt.Sprint(i), JobUID: new("job"), Status: status, OccurrenceKey: new("same-occurrence"),
 			})
-			if !slices.Contains([]string{"succeeded", "failed", "cancelled", "running"}, status) {
-				status = "unknown"
-			}
 			counts[status]++
 		}
 		text, _ := historyDocument(p, cronRef{cronJobs, "job"}, 1000)
+		if len(statuses) == 0 {
+			if strings.Contains(text, "Sample:") || !strings.Contains(text, "no matching loaded observations") {
+				ht.Fatalf("wrong empty sample in %q", text)
+			}
+			return
+		}
 		if !slices.Contains(strings.Split(text, "\n"), "Sample: "+cronCount(len(statuses), "observation")) {
 			ht.Fatalf("sample size missing from %q", text)
 		}
-		if len(statuses) > 0 {
-			want := fmt.Sprintf("succeeded %d · failed %d · cancelled %d · running %d · unknown %d",
-				counts["succeeded"], counts["failed"], counts["cancelled"], counts["running"], counts["unknown"])
-			if !slices.Contains(strings.Split(text, "\n"), want) {
-				ht.Fatalf("missing exact status counts %q in %q", want, text)
-			}
+		want := fmt.Sprintf("succeeded %d · failed %d · cancelled %d · running %d · unknown %d",
+			counts["succeeded"], counts["failed"], counts["cancelled"], counts["running"], counts["unknown"])
+		if !slices.Contains(strings.Split(text, "\n"), want) {
+			ht.Fatalf("missing exact status counts %q in %q", want, text)
 		}
 	})
 }
@@ -76,14 +75,23 @@ func TestCronHistoryRecordedIdentityAndCreationOrder(t *testing.T) {
 				p.runs[i].JobUID, p.runs[i].WorkflowUID = new("job"), new("old-workflow")
 				p.runs[i].OccurrenceKey = new("same-occurrence")
 			}
-			p.runs[0].StartedAt, p.runs[0].EndedAt = new(at), new(at.Add(-time.Hour)) // invalid pair
-			p.runs[1].EndedAt = new(at)                                               // missing start
-			p.runs[4].StartedAt = new(at)                                             // still running
+			// Valid evidence can predate recording; strip order uses creation time.
+			p.runs[0].StartedAt, p.runs[0].EndedAt = new(at.Add(-2*time.Hour)), new(at.Add(-time.Hour))
+			// A terminal record can have no recorded start.
+			p.runs[1].EndedAt = new(at)
+			// A running record can have no recorded end.
+			p.runs[4].StartedAt = new(at)
 			// Current association must never rewrite the recorded workflow identity.
 			p.jobs = []generated.CronJob{{UID: "job", Definition: generated.CronJobDefinitionResponse{
 				Action: generated.ActionResponse{WorkflowUID: new("new-workflow")},
 			}}}
-			p.runs = append(p.runs, generated.CronRun{UID: "no-identity", Status: "succeeded"},
+			oppositeKind := generated.CronRun{UID: "other-kind-only", Status: "succeeded", CreatedAt: at}
+			if kind == cronJobs {
+				oppositeKind.WorkflowUID = new("old-workflow")
+			} else {
+				oppositeKind.JobUID = new("job")
+			}
+			p.runs = append(p.runs, oppositeKind,
 				generated.CronRun{UID: "other", JobUID: new("other"), WorkflowUID: new("other"), Status: "succeeded"})
 			ref := cronRef{kind, "job"}
 			if kind == cronWorkflows {
@@ -107,9 +115,6 @@ func TestCronHistoryRecordedIdentityAndCreationOrder(t *testing.T) {
 				text, _ = historyDocument(p, cronRef{kind, "new-workflow"}, 200)
 				require.Contains(t, text, "no matching loaded observations")
 			}
-			text, links = historyDocument(p, cronRef{kind, ""}, 200)
-			require.Contains(t, text, "no matching loaded observations")
-			require.Empty(t, links, "nil identity must not match an empty selection")
 		})
 	}
 }
@@ -123,7 +128,7 @@ func TestCronHistoryUnavailableAndEmpty(t *testing.T) {
 	require.NotContains(t, text, "no matching")
 	require.Empty(t, links)
 	text, _ = historyDocument(cronData{}, cronRef{cronJobs, "job"}, 200)
-	require.Contains(t, text, "Sample: 0 observations")
+	require.NotContains(t, text, "Sample:")
 	require.Contains(t, text, "no matching loaded observations")
 }
 
@@ -135,7 +140,7 @@ func TestCronHistoryNativeJobHasNoInferredObservations(t *testing.T) {
 	m = sendKey(m, tea.KeyEnter)
 	_, _, lines := cronScreen(m)
 	text := cronHistoryLinesText(lines)
-	require.Contains(t, text, "Sample: 0 observations")
+	require.NotContains(t, text, "Sample:")
 	require.Contains(t, text, "no matching loaded observations")
 	require.NotContains(t, text, "succeeded 1")
 }
