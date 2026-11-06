@@ -267,6 +267,55 @@ describe('IssueCollection', () => {
       }
     })
 
+    it('resets focused rows when the list key changes', async () => {
+      const issues = manyTasks(400)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        resultsKey: 'first',
+        onSelect: vi.fn(),
+      }
+      const { rerender } = render(IssueCollection, { props })
+      await fireEvent.keyDown(visibleRows()[0]!, { key: 'End' })
+      expect(visibleRows()).toHaveLength(400)
+      expect(document.activeElement).toBe(visibleRows()[399])
+
+      await rerender({ ...props, resultsKey: 'second' })
+      expect(visibleRows()).toHaveLength(150)
+    })
+
+    it('retains graph button focus when a refresh adds 160 earlier roots', async () => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: 'title', direction: 'asc' }),
+      )
+      const issues = manyTasks(400)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        onSelect: vi.fn(),
+        onOpenGraph: vi.fn(),
+      }
+      const { container, rerender } = render(IssueCollection, { props })
+      const focused = container.querySelectorAll<HTMLButtonElement>('.graph-action')[5]!
+      focused.focus()
+      expect(document.activeElement).toBe(focused)
+      const leading = manyTasks(160).map((issue, index) => ({
+        ...issue,
+        uid: `leading-${index}`,
+        short_id: `leading-${index}`,
+        title: `Ahead ${index}`,
+      }))
+      const refreshed = [...leading, ...issues]
+      await rerender({
+        ...props,
+        currentView: viewWithIssues(refreshed),
+        issueCatalog: refreshed,
+      })
+
+      expect(document.activeElement).toBe(focused)
+    })
+
     it.each(['focused', 'other'])(
       'retains focus through a snapshot with new leading roots when the %s row is selected',
       async (selection) => {

@@ -288,15 +288,13 @@
   }
 
   let pinnedRows = $derived.by(() => {
-    void rootIndexByUID
-    const selectedIndex = rootIndexOf(selectedIssueUID)
+    const key = listKey
     const focusedUID = untrack(() => {
       const active = typeof document === 'undefined' ? null : document.activeElement
-      return active instanceof HTMLElement && tableBody?.contains(active)
-        ? active.dataset.uid
-        : undefined
+      const row = active?.closest('.row-frame')?.querySelector<HTMLButtonElement>('button.row')
+      return row?.dataset.listKey === key && tableBody?.contains(row) ? row.dataset.uid : undefined
     })
-    return Math.max(selectedIndex, rootIndexOf(focusedUID)) + 1
+    return Math.max(rootIndexOf(selectedIssueUID), rootIndexOf(focusedUID)) + 1
   })
   let renderedLimit = $derived(Math.max(rowLimit, pinnedRows))
   let rowSentinel: HTMLDivElement | null = $state(null)
@@ -1077,6 +1075,7 @@
       aria-current={isSelected(issue) ? 'true' : undefined}
       aria-expanded={expandable ? isExpanded : undefined}
       data-uid={issue.uid}
+      data-list-key={listKey}
       onclick={() => selectNow(issue)}
     >
       <span class="cell cell-id"
