@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -170,7 +171,8 @@ func TestAgentHooksCLIStatusConfiguredCapabilities(t *testing.T) {
 
 func TestAgentHooksCLIExtraNativeContract(t *testing.T) {
 	resetFlags(t)
-	out, _, err := executeAgentHook(t, strings.NewReader(`{"session_id":"one","hook_event_name":"SessionStart","cwd":"/example"}`), "agent-hook", "contract", "droid")
+	payload := fmt.Sprintf(`{"session_id":"one","hook_event_name":"SessionStart","cwd":%q}`, writeKataWorkspace(t, t.TempDir()))
+	out, _, err := executeAgentHook(t, strings.NewReader(payload), "agent-hook", "contract", "droid")
 	require.NoError(t, err)
 	var result struct {
 		Hook struct {

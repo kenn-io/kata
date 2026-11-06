@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-21
+last_edited: 2026-11-05
 ---
 
 # Quickstart
@@ -153,7 +153,8 @@ and both authentication options.
 
 ## Load the contract in every session
 
-Load Kata's contract in every coding-agent session on this machine:
+Load Kata's contract in every coding-agent session that starts inside a kata
+workspace on this machine. Sessions in other directories stay silent:
 
 ```sh
 kata agent-hook install
