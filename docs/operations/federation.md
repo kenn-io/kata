@@ -1937,7 +1937,9 @@ events that can change endpoint resolution still run the full reconciliation.
 Federation push and poll requests have a 60-second default budget, separate
 from the shorter interactive CLI default. `KATA_HTTP_TIMEOUT` overrides that
 budget when a large, healthy hub needs more time. Set it in the environment
-that starts the daemon; local-profile autostart preserves the value. A timed-out
+that starts the daemon; local-profile autostart preserves the value. A running
+daemon keeps the environment it started with, so run `kata daemon stop` and let
+the next command autostart it to apply a changed value. A timed-out
 request leaves the cursor unchanged and retries through the normal sync loop.
 
 If a response is lost after the hub commits, retrying the same batch is safe.
