@@ -523,14 +523,21 @@ Missing or archived configured projects disable `/mcp` (503, reason logged); RES
 and the web UI keep serving. Create or restore the project, then restart.
 `kata daemon status` reports the endpoint as `serving` or `unavailable`.
 
-Set `token_file` or `token_env` for the separate MCP bearer. The file wins; secrets resolve at startup.
+Outside identity mode, set `token_file` or `token_env` for the separate MCP
+bearer. The file wins; secrets resolve at startup.
 Set `startup_sections` to existing section IDs to publish their typed tools in
 the first `tools/list` after every restart. An omitted or empty array preserves
 loader-only progressive loading. Loaders remain available in both modes.
 Unknown, duplicate, or unavailable sections disable `/mcp` (503, reason logged);
 REST and the web UI keep serving. Correct the setting and restart. See
 [Startup sections](mcp.md#startup-sections) for IDs and availability rules.
-Identity mode (`[auth] require_token_identity`) requires `kata mcp serve --http` with a user token.
+On unreleased `main`, identity mode (`[auth] require_token_identity = true`)
+uses each caller's identity bearer at `/mcp`. Remove `[mcp] token_file` and
+`token_env`; either setting stops startup in identity mode. The token determines
+the actor, so `[mcp] actor` is ignored. See
+[Daemon mount with identity tokens](mcp.md#daemon-mount-with-identity-tokens-unreleased)
+for authentication and session behavior. Kata 0.21.0 requires
+`kata mcp serve --http` with a user token in this mode.
 Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header. The sidecar must reach the daemon through a REST listener outside `trusted_proxy_listeners` or through the proxy that sets the actor header.
 See [MCP transport](mcp.md#transport) for gateway setup and scope.
 
