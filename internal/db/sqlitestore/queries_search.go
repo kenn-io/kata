@@ -158,9 +158,10 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 			if err != nil {
 				return nil, err
 			}
+			hydrationArgs := append([]any{string(encoded), r.params.ProjectID}, filterArgs...)
 			out, err := d.searchCandidates(ctx, `SELECT `+issueColumns+`, 0, 0
  FROM issues i JOIN projects p ON p.id = i.project_id
- WHERE i.id IN (SELECT value FROM json_each(?)) ORDER BY i.id`, string(encoded))
+ WHERE i.id IN (SELECT value FROM json_each(?)) AND i.project_id = ? `+rowFilter+` ORDER BY i.id`, hydrationArgs...)
 			if err != nil {
 				return nil, err
 			}

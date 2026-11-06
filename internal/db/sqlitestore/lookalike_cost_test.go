@@ -153,6 +153,41 @@ func TestSearchFTSAny_LookalikeSizeAndOrder(t *testing.T) {
 				require.Equal(t, exact.ID, hits[0].Issue.ID, "best duplicate comes first")
 				require.Equal(t, bodyChanged.ID, hits[1].Issue.ID, "body overlap breaks equal-title ties")
 				require.Equal(t, weaker.ID, hits[2].Issue.ID)
+				for _, change := range []string{"project move", "subtree removal", "deletion"} {
+					t.Run(change+" before hydration", func(t *testing.T) {
+						ctx := t.Context()
+						candidate := createTesterIssueWithBody(ctx, t, store, project.ID, title, body)
+						params := db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, AllowedIssueIDs: []int64{candidate.ID}}
+						capture := &beforeQueryConnector{path: path, contains: "WHERE i.id IN (SELECT value FROM json_each(?))"}
+						switch change {
+						case "project move":
+							target := createProject(ctx, t, store, "target-project")
+							capture.beforeQuery = func() {
+								_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: candidate.ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: candidate.Revision, Actor: "tester"})
+								require.NoError(t, err)
+							}
+						case "subtree removal":
+							root := createTesterIssueWithBody(ctx, t, store, project.ID, "subtree root", "")
+							link, err := store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: candidate.ID, ToIssueID: root.ID, Type: "parent", Author: "tester"})
+							require.NoError(t, err)
+							params.IssueScope = &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, RootIssueUID: root.UID, ProjectUID: project.UID}
+							capture.beforeQuery = func() {
+								require.NoError(t, store.DeleteLinkByID(ctx, link.ID))
+							}
+						case "deletion":
+							capture.beforeQuery = func() {
+								_, _, _, err := store.SoftDeleteIssue(ctx, candidate.ID, "tester")
+								require.NoError(t, err)
+							}
+						}
+						hooked := sql.OpenDB(capture)
+						t.Cleanup(func() { require.NoError(t, hooked.Close()) })
+						hits, err := (&sqlitestore.Store{DB: hooked}).SearchFTSAny(ctx, params)
+						require.NoError(t, err)
+						require.Nil(t, capture.beforeQuery, "the mutation must run after selection and before hydration")
+						require.Empty(t, hits, "hydration must recheck the selected issue's visibility")
+					})
+				}
 			}
 		})
 	}
