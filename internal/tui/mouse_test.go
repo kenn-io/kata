@@ -154,6 +154,30 @@ func TestMousePersistentSearch(t *testing.T) {
 	}
 }
 
+func TestMouseSearchHitTargetsFollowRenderedHeaders(t *testing.T) {
+	t.Run("healthy cron search row", func(t *testing.T) {
+		m := resizeModel(newTestModel(), 120, 30)
+		m.opts.Mouse = true
+		m.view = viewCron
+		m.cron.tab = cronJobs
+
+		next, _ := updateModel(m, mouseLeftClick(0, 1))
+		require.True(t, next.cron.filtering, "cron search is rendered on row 1 without a connection banner")
+	})
+
+	t.Run("issue search below connection attention row", func(t *testing.T) {
+		m := resizeModel(newTestModel(), 120, 30)
+		m.opts.Mouse = true
+		m.layout = splitlayout.Stacked
+		m.authCapabilitiesRequired = true
+		m.authCapabilitiesReady = false
+		require.Equal(t, 1, m.connectionHeaderRows())
+
+		next, _ := updateModel(m, mouseLeftClick(0, 2))
+		require.Equal(t, inputSearchBar, next.input.kind, "connection attention row shifts issue search down one row")
+	})
+}
+
 func TestMouseSearchCancelsPendingPriority(t *testing.T) {
 	m := resizeModel(newTestModel(), 80, 24)
 	m.opts.Mouse = true

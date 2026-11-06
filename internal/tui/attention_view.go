@@ -253,7 +253,7 @@ func (m Model) prepareAttentionListNavigation() (Model, tea.Cmd) {
 func (m Model) routeAttentionViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if m.keymap.PageUp.matches(msg) || m.keymap.PageDown.matches(msg) {
 		if len(m.attention.rows) > 0 {
-			lines, height := attentionMessageViewport(m.attention, max(m.width, 1), attentionBodyBudget(m))
+			lines, height := attentionMessageViewport(m.attention, max(m.width, 1), attentionBodyBudget(m.withContentHeight()))
 			step := max(height, 1)
 			if m.keymap.PageUp.matches(msg) {
 				step = -step

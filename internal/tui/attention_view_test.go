@@ -1175,6 +1175,32 @@ func TestAttentionMessagePaging(t *testing.T) {
 	require.Contains(t, stripANSI(m.View().Content), lines[0], "a new selection starts at the top")
 }
 
+func TestAttentionMessagePagingAccountsForConnectionHeader(t *testing.T) {
+	m, a := attentionFixture(t)
+	m = resizeModel(m, 80, 18)
+	m.authCapabilitiesRequired = true
+	m.authCapabilitiesReady = false
+	var lines []string
+	for i := range 8 {
+		lines = append(lines, fmt.Sprintf("connection-page-line-%02d", i+1))
+	}
+	a.rows = []attentionRequest{{issue: testIssue("abc4"), from: "sam", message: strings.Join(lines, "\n")}}
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	footer := renderFooterHelpTable(modalFirstHelpRows(m.modal, attentionHelpRows(m)), m.width)
+	footerRows := len(strings.Split(footer, "\n"))
+	m.height = 3 + 1 + footerRows + 12 // full-height paging gives four lines; rendered content gives three.
+
+	_, pagingRows := attentionMessageViewport(m.attention, m.width, attentionBodyBudget(m))
+	_, renderedRows := attentionMessageViewport(m.attention, m.width, attentionBodyBudget(m.withContentHeight()))
+	require.Greater(t, pagingRows, renderedRows)
+	require.Equal(t, 1, m.connectionHeaderRows())
+	for range 3 {
+		m = sendKey(m, tea.KeyPgDown)
+	}
+	require.Contains(t, stripANSI(m.viewContent()), lines[len(lines)-1], "PageDown must reach the final line rendered below the connection row")
+}
+
 func TestAttentionMessagePagingAfterReplacement(t *testing.T) {
 	m, a := attentionFixture(t)
 	m = resizeModel(m, 80, 24)

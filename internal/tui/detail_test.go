@@ -143,7 +143,7 @@ func TestDetail_CompactSheetDoesNotRenderUID(t *testing.T) {
 		Status:  "open",
 	}
 	dm := detailModel{issue: &iss, uidFormat: uidDisplayFull}
-	out := stripANSI(dm.renderTinyFallback(32))
+	out := stripANSI(dm.renderTinyFallback(32, 4))
 	if strings.Contains(out, "01JZ0000000000000000000001") ||
 		strings.Contains(out, "~01JZ0000") {
 		t.Fatalf("compact sheet rendered UID:\n%s", out)
@@ -1168,14 +1168,26 @@ func TestDetail_OpenWithNilAPI_NoCrash(t *testing.T) {
 
 // TestDetail_TinyTerminal_RendersWithoutPanic: very small terminals
 // fall through to the bare-render fallback so the user sees something
-// rather than a panic from negative budgets. After M3.5 the body+tab
-// split is computed inline in View; the floors detailMinBodyRows and
-// detailMinTabRows still cap the inner allocations.
+// rather than a panic from negative budgets.
 func TestDetail_TinyTerminal_RendersWithoutPanic(t *testing.T) {
 	dm := detailFixture()
 	out := dm.View(80, 4, viewChrome{})
 	if out == "" {
 		t.Fatal("tiny render must produce some output")
+	}
+}
+
+func TestDetailTinyViewportCanReachDocumentEnd(t *testing.T) {
+	issue := Issue{
+		UID: "01TEST-tiny", ShortID: "tiny", Title: "tiny detail", Status: "open",
+		Body: strings.Repeat("body line\n", 12) + "tiny-end-marker",
+	}
+	dm := detailModel{issue: &issue, scroll: 1_000}
+	for height := 2; height <= 4; height++ {
+		got := stripANSI(dm.View(80, height, viewChrome{}))
+		if !strings.Contains(got, "tiny-end-marker") {
+			t.Errorf("height %d cannot reach the final body line:\n%s", height, got)
+		}
 	}
 }
 

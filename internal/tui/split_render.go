@@ -194,7 +194,7 @@ func (dm detailModel) ViewSplit(width, height int, chrome viewChrome) string {
 		return statusStyle.Render("no issue selected")
 	}
 	if width <= 0 || height < 6 {
-		return dm.renderTinyFallback(width)
+		return dm.renderTinyFallback(width, height)
 	}
 	docLines, _ := dm.detailDocumentLines(width, chrome)
 	scroll := clampScroll(dm.scroll, len(docLines), height)

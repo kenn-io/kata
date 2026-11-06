@@ -8,8 +8,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
-
-	"go.kenn.io/kata/internal/api"
 )
 
 // Every view shows the connection status when it needs attention.
@@ -23,8 +21,13 @@ func TestActiveConnectionHeaderEveryView(t *testing.T) {
 			m.activeDaemon = daemonTarget{Name: "shared-hub"}
 			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: "token", Actor: "member", TokenAuditRead: false}})
 			m.sseStatus = sseReconnecting
-			header := connectionAttentionRow(t, m)
-			require.Contains(t, header, "Hub: shared-hub")
+			rows := strings.Split(stripANSI(m.viewContent()), "\n")
+			header := rows[1]
+			if strings.Contains(rows[0], "Daemon: shared-hub") {
+				require.NotContains(t, header, "Hub: shared-hub")
+			} else {
+				require.Contains(t, header, "Hub: shared-hub")
+			}
 			require.Contains(t, header, "Reconnecting")
 			m.width = 60
 			narrow := connectionAttentionRow(t, m)
@@ -55,50 +58,58 @@ func TestActiveConnectionHeaderFencesStaleReplies(t *testing.T) {
 	require.NotContains(t, stripANSI(m.viewContent()), "Hub:")
 }
 
-// The attention row preserves project context at narrow widths and keeps
-// daemon/version context when room remains. Navigation has its own row.
-func TestActiveConnectionHeaderKeepsTitleBarContent(t *testing.T) {
-	defer snapshotInit(t)()
+// The status row keeps only context that the adjacent tab header truncates.
+func TestActiveConnectionHeaderDoesNotRepeatVisibleTitleContext(t *testing.T) {
 	priorVersion := kataVersion
 	kataVersion = "v0.1.0"
 	t.Cleanup(func() { kataVersion = priorVersion })
-	model := func(width int, hub string) Model {
-		m := newTestModel()
-		m.width = width
-		m.height = 24
-		m.scope = scope{projectID: 7, projectName: "example-project"}
-		m.activeDaemon = daemonTarget{Name: hub, URL: "http://100.64.0.5:7777"}
-		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{
-			Kind:  "db_token",
-			Actor: strings.Repeat("long-actor-", 12),
-			Scope: &api.TokenScopeOut{
-				Kind: "issue_subtree", ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
-			},
-			ExpiresAt:             new(time.Now().UTC().Add(time.Hour)),
-			AllowedActions:        []string{"issue.read"},
-			CloseRequiresEvidence: true,
-		}})
-		return m
+	m := newTestModel()
+	m.width = 240
+	m.height = 24
+	m.scope = scope{projectID: 7, projectName: "example-project"}
+	m.activeDaemon = daemonTarget{Name: "shared-hub", URL: "http://100.64.0.5:7777"}
+	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: "token", Actor: "member"}})
+	m.sseStatus = sseReconnecting
+	rows := strings.Split(stripANSI(m.viewContent()), "\n")
+	first, status := rows[0], rows[1]
+	for _, visible := range []string{"Project: example-project", "Daemon: shared-hub", "kata カタ", kataVersion} {
+		require.Contains(t, first, visible)
+		require.NotContains(t, status, visible)
 	}
-	var rows []string
-	for _, tc := range []struct {
-		width int
-		hub   string
-	}{
-		{80, strings.Repeat("long-hub-", 12)},
-		{100, strings.Repeat("long-hub-", 12)},
-		{240, "shared-hub"},
-	} {
-		m := model(tc.width, tc.hub)
-		header := connectionAttentionRow(t, m)
-		if tc.width < 240 {
-			require.NotContains(t, header, m.activeDaemon.Name)
-			require.NotContains(t, header, m.activeAuth.Actor)
+	require.NotContains(t, status, "Hub: shared-hub")
+	require.Contains(t, status, "Reconnecting")
+	require.Contains(t, status, "Account: —")
+}
+
+func TestActiveConnectionHeaderKeepsTruncatedTitleContext(t *testing.T) {
+	priorVersion := kataVersion
+	kataVersion = "v0.1.0"
+	t.Cleanup(func() { kataVersion = priorVersion })
+	m := newTestModel()
+	m.width = 60
+	m.height = 24
+	m.scope = scope{projectID: 7, projectName: "p"}
+	m.activeDaemon = daemonTarget{Name: "d"}
+	m.authCapabilitiesRequired = true
+	m.authCapabilitiesReady = true
+	m.activeAuth = AuthInfo{Kind: "token", Actor: "member"}
+	m.sseStatus = sseDisconnected
+	rows := strings.Split(stripANSI(m.viewContent()), "\n")
+	first, status := rows[0], rows[1]
+	for _, context := range []string{"kata カタ", kataVersion} {
+		if !strings.Contains(first, context) {
+			require.Contains(t, status, context)
+		} else {
+			require.NotContains(t, status, context)
 		}
-		rows = append(rows, header)
 	}
-	require.Contains(t, rows[2], "Daemon: shared-hub · kata カタ · v0.1.0")
-	assertGolden(t, "active-connection-header", strings.Join(rows, "\n"))
+	if strings.Contains(first, "Daemon: d") {
+		require.NotContains(t, status, "Hub: d")
+	} else {
+		require.Contains(t, status, "Hub: d")
+	}
+	require.Contains(t, status, "Disconnected")
+	require.Contains(t, status, "Account: —")
 }
 
 // A healthy connection must leave the title bar exactly as it renders
@@ -147,7 +158,9 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 			m.activeAuthError = tc.err
 			m.sseStatus = tc.sse
 			header := connectionAttentionRow(t, m)
-			require.True(t, strings.HasPrefix(header, tc.status+" · Hub: shared-hub · Account: — · Project: example-project"), "header: %s", header)
+			require.True(t, strings.HasPrefix(header, tc.status+" · Hub: shared-hub · Account: —") ||
+				strings.HasPrefix(header, tc.status+" · Account: —"), "header: %s", header)
+			require.NotContains(t, header, "Project: example-project")
 			if tc.absent != "" {
 				require.NotContains(t, header, tc.absent)
 			}
@@ -170,7 +183,8 @@ func TestActiveConnectionHeaderReadOnlyAccount(t *testing.T) {
 			m.height = 24
 			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: tc.kind}})
 			header := connectionAttentionRow(t, m)
-			require.True(t, strings.HasPrefix(header, "Read-only · Hub: Local daemon · Account: "+tc.account+" · "), "header: %s", header)
+			require.True(t, strings.HasPrefix(header, "Read-only · Hub: Local daemon · Account: "+tc.account) ||
+				strings.HasPrefix(header, "Read-only · Account: "+tc.account), "header: %s", header)
 		})
 	}
 }

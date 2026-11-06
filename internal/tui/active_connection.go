@@ -96,7 +96,10 @@ func (m Model) withActiveConnectionHeader(body string) string {
 	}
 	first, rest, more := strings.Cut(body, "\n")
 	chrome := m.chrome()
-	left, right := titleBarLeft(chrome.scope), titleBarRight(chrome.version, chrome.daemon)
+	left, showHub, right := missingConnectionHeaderContext(first, chrome)
+	if !showHub {
+		hub = ""
+	}
 	summary := m.connectionSummaryRow(status, hub, account, left, right)
 	summary = lipgloss.NewStyle().Background(lipgloss.Color("#fff3bb")).Foreground(lipgloss.Color("#493800")).Render(summary)
 	if more {
@@ -105,20 +108,55 @@ func (m Model) withActiveConnectionHeader(body string) string {
 	return first + "\n" + summary
 }
 
-// connectionSummaryRow fits one row in priority order: status, project,
-// hub and account, then the version cluster.
+// missingConnectionHeaderContext returns only title-bar context not already
+// visible on the adjacent navigation row. The Hub field carries daemon
+// context when that label was truncated from the row.
+func missingConnectionHeaderContext(header string, chrome viewChrome) (left string, showHub bool, right string) {
+	visible := ansi.Strip(header)
+	left = titleBarLeft(chrome.scope)
+	if strings.Contains(visible, left) {
+		left = ""
+	}
+	daemon := sanitizeForLine(chrome.daemon)
+	showHub = daemon == "" || !strings.Contains(visible, "Daemon: "+daemon)
+	rightContext := []string{}
+	if !strings.Contains(visible, "kata カタ") {
+		rightContext = append(rightContext, "kata カタ")
+	}
+	version := sanitizeForLine(chrome.version)
+	if version != "" && !strings.Contains(visible, version) {
+		rightContext = append(rightContext, version)
+	}
+	right = strings.Join(rightContext, " · ")
+	return left, showHub, right
+}
+
+// connectionSummaryRow fits status, missing project context, hub/account,
+// then any remaining brand/version context into one row.
 func (m Model) connectionSummaryRow(status, hub, account, left, right string) string {
 	width := m.width
 	tail := ""
 	if left != "" {
 		tail = ansi.Truncate(" · "+left, max(width-ansi.StringWidth(status), 0), "…")
 	}
-	labelBudget := max(width-ansi.StringWidth(status+tail+" · Hub:  · Account: "), 0)
-	accountWidth := min(ansi.StringWidth(account), labelBudget-labelBudget/2)
-	hubWidth := min(ansi.StringWidth(hub), labelBudget-accountWidth)
-	accountWidth = min(ansi.StringWidth(account), labelBudget-hubWidth)
-	summary := status + " · Hub: " + ansi.Truncate(hub, hubWidth, "…") +
-		" · Account: " + ansi.Truncate(account, accountWidth, "…")
+	hubLabel := ""
+	if hub != "" {
+		hubLabel = " · Hub: "
+	}
+	accountLabel := " · Account: "
+	labelBudget := max(width-ansi.StringWidth(status+hubLabel+accountLabel+tail), 0)
+	hubWidth := 0
+	accountWidth := labelBudget
+	if hub != "" {
+		accountWidth = min(ansi.StringWidth(account), labelBudget-labelBudget/2)
+		hubWidth = min(ansi.StringWidth(hub), max(labelBudget-accountWidth, 0))
+		accountWidth = min(ansi.StringWidth(account), max(labelBudget-hubWidth, 0))
+	}
+	summary := status
+	if hub != "" {
+		summary += hubLabel + ansi.Truncate(hub, hubWidth, "…")
+	}
+	summary += accountLabel + ansi.Truncate(account, accountWidth, "…")
 	row := ansi.Truncate(summary, max(width-ansi.StringWidth(tail), 0), "…") + tail
 	if room := width - ansi.StringWidth(row) - 1; right != "" && room > 0 {
 		right = ansi.Truncate(right, room, "…")

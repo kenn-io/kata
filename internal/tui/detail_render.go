@@ -41,11 +41,11 @@ func (dm detailModel) View(width, height int, chrome viewChrome) string {
 		return titleBar + "\n" + statusStyle.Render("no issue selected")
 	}
 	if width <= 0 || height < listMinHeight {
-		body := strings.Split(dm.renderTinyFallback(width), "\n")
-		if height > 0 {
-			body = body[:min(len(body), height-1)]
+		body := dm.renderTinyFallback(width, max(height-1, 0))
+		if body == "" {
+			return titleBar
 		}
-		return strings.Join(append([]string{titleBar}, body...), "\n")
+		return titleBar + "\n" + body
 	}
 	helpRows := detailHelpRows(dm, chrome)
 	footerLines := helpLines(helpRows, width)
@@ -63,15 +63,15 @@ func (dm detailModel) View(width, height int, chrome viewChrome) string {
 }
 
 // renderTinyFallback is the degraded render for terminals below the
-// minimum height. Window the document with whatever space is left so
-// the user still sees something instead of an error or blank screen.
-func (dm detailModel) renderTinyFallback(width int) string {
+// minimum height. Window only the rows the caller can actually display.
+func (dm detailModel) renderTinyFallback(width, visible int) string {
 	if width <= 0 {
 		width = 1
 	}
+	visible = max(visible, 0)
 	docLines, _ := dm.detailDocumentLines(width, viewChrome{})
-	scroll := clampScroll(dm.scroll, len(docLines), detailMinBodyRows)
-	return strings.Join(windowDocLines(docLines, scroll, detailMinBodyRows, width), "\n")
+	scroll := clampScroll(dm.scroll, len(docLines), visible)
+	return strings.Join(windowDocLines(docLines, scroll, visible, width), "\n")
 }
 
 // clampScroll keeps dm.scroll within [0, viewportMaxStart) for the
@@ -453,12 +453,7 @@ func renderInfoPrompt(s inputState, innerWidth int) string {
 	return ansi.Truncate(body, innerWidth, "…")
 }
 
-// detailMinBodyRows / detailMinTabRows are the floors so neither
-// pane collapses to zero on small terminals.
-const (
-	detailMinBodyRows = 4
-	detailMinTabRows  = 3
-)
+const detailMinTabRows = 3
 
 // detailAnchors records the document row index where each section
 // begins, plus the document row of the section cursor. Tab and j/k
