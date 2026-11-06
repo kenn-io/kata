@@ -120,7 +120,7 @@ func missingConnectionHeaderContext(header string, chrome viewChrome) (left stri
 	daemon := sanitizeForLine(chrome.daemon)
 	showHub = daemon == "" || !strings.Contains(visible, "Daemon: "+daemon)
 	rightContext := []string{}
-	if !strings.Contains(visible, "kata カタ") {
+	if !strings.Contains(visible, "kata カタ") && !strings.Contains(visible, "[kata] カタ") {
 		rightContext = append(rightContext, "kata カタ")
 	}
 	version := sanitizeForLine(chrome.version)

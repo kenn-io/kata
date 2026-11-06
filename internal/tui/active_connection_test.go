@@ -72,10 +72,11 @@ func TestActiveConnectionHeaderDoesNotRepeatVisibleTitleContext(t *testing.T) {
 	m.sseStatus = sseReconnecting
 	rows := strings.Split(stripANSI(m.viewContent()), "\n")
 	first, status := rows[0], rows[1]
-	for _, visible := range []string{"Project: example-project", "Daemon: shared-hub", "kata カタ", kataVersion} {
+	for _, visible := range []string{"Project: example-project", "Daemon: shared-hub", "[kata] カタ", kataVersion} {
 		require.Contains(t, first, visible)
 		require.NotContains(t, status, visible)
 	}
+	require.NotContains(t, status, "kata カタ")
 	require.NotContains(t, status, "Hub: shared-hub")
 	require.Contains(t, status, "Reconnecting")
 	require.Contains(t, status, "Account: —")
@@ -96,7 +97,13 @@ func TestActiveConnectionHeaderKeepsTruncatedTitleContext(t *testing.T) {
 	m.sseStatus = sseDisconnected
 	rows := strings.Split(stripANSI(m.viewContent()), "\n")
 	first, status := rows[0], rows[1]
-	for _, context := range []string{"kata カタ", kataVersion} {
+	brandVisible := strings.Contains(first, "kata カタ") || strings.Contains(first, "[kata] カタ")
+	if brandVisible {
+		require.NotContains(t, status, "kata カタ")
+	} else {
+		require.Contains(t, status, "kata カタ")
+	}
+	for _, context := range []string{kataVersion} {
 		if !strings.Contains(first, context) {
 			require.Contains(t, status, context)
 		} else {

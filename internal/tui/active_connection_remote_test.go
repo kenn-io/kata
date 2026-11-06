@@ -2,6 +2,7 @@ package tui
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,9 +18,11 @@ func TestActiveConnectionDirectRemoteAndRevoked(t *testing.T) {
 		m.activeDaemon = daemonTarget{URL: "https://daemon.example"}
 		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: "member"}})
 		m.sseStatus = sseReconnecting
-		header := connectionAttentionRow(t, m)
-		require.Contains(t, header, "Hub: daemon.example")
-		require.NotContains(t, header, "Local daemon")
+		rows := strings.Split(stripANSI(m.viewContent()), "\n")
+		require.Contains(t, rows[0], "Daemon: daemon.example")
+		require.Contains(t, rows[1], "Reconnecting")
+		require.NotContains(t, rows[1], "Hub: daemon.example")
+		require.NotContains(t, rows[1], "Local daemon")
 	})
 	t.Run("revoked", func(t *testing.T) {
 		m := newTestModel()

@@ -1179,7 +1179,8 @@ func TestAttentionMessagePagingAccountsForConnectionHeader(t *testing.T) {
 	m, a := attentionFixture(t)
 	m = resizeModel(m, 80, 18)
 	m.authCapabilitiesRequired = true
-	m.authCapabilitiesReady = false
+	m.authCapabilitiesReady = true
+	m.sseStatus = sseReconnecting
 	var lines []string
 	for i := range 8 {
 		lines = append(lines, fmt.Sprintf("connection-page-line-%02d", i+1))
