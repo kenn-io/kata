@@ -211,6 +211,23 @@ func (c CreateLinkRequestBodyType) Validate() error {
 	}
 }
 
+type DocbankBrowseNodeKind string
+
+const (
+	Dir  DocbankBrowseNodeKind = "dir"
+	File DocbankBrowseNodeKind = "file"
+)
+
+// Validate checks if the DocbankBrowseNodeKind value is valid
+func (d DocbankBrowseNodeKind) Validate() error {
+	switch d {
+	case Dir, File:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid DocbankBrowseNodeKind value, got: %v", d))
+	}
+}
+
 // EmbeddingsHealthCredential Embedding credential state; an advisory warning that does not change health.ok.
 type EmbeddingsHealthCredential string
 

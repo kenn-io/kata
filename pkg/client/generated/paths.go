@@ -269,6 +269,14 @@ type DigestProjectPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type DocbankChildrenPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type DocbankResolvePath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type PollProjectEventsPath struct {
 	ProjectID int64 `json:"project_id"`
 }
@@ -278,6 +286,10 @@ type GetProjectFederationPath struct {
 }
 
 type FederatedDocbankCapabilitiesPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type FederatedDocbankChildrenPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
@@ -297,6 +309,10 @@ type UploadFederatedDocbankPath struct {
 
 func (u UploadFederatedDocbankPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type FederatedDocbankResolvePath struct {
+	ProjectID int64 `json:"project_id"`
 }
 
 type FederatedDocbankContentPath struct {

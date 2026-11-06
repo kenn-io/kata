@@ -1934,6 +1934,95 @@ type DisconnectRelayResponseBody struct {
 	Revoked bool `json:"revoked"`
 }
 
+type DocbankBrowseNode struct {
+	CurrentVersionID *uuid.UUID            `json:"current_version_id,omitempty"`
+	ID               int64                 `json:"id" validate:"gte=1"`
+	Kind             DocbankBrowseNodeKind `json:"kind" validate:"required"`
+	Name             string                `json:"name" validate:"required"`
+	Path             string                `json:"path" validate:"required,max=4096"`
+	Size             int64                 `json:"size" validate:"gte=0"`
+}
+
+func (d DocbankBrowseNode) Validate() error {
+	var errors runtime.ValidationErrors
+	if d.CurrentVersionID != nil {
+		if v, ok := any(d.CurrentVersionID).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("CurrentVersionID", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(d.ID, "gte=1"); err != nil {
+		errors = errors.Append("ID", err)
+	}
+	if v, ok := any(d.Kind).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Kind", err)
+		}
+	}
+	if err := typesValidator.Var(d.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if err := typesValidator.Var(d.Path, "required,max=4096"); err != nil {
+		errors = errors.Append("Path", err)
+	}
+	if err := typesValidator.Var(d.Size, "gte=0"); err != nil {
+		errors = errors.Append("Size", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type DocbankChildrenBody struct {
+	Directory  DocbankBrowseNode   `json:"directory"`
+	Items      []DocbankBrowseNode `json:"items" validate:"required"`
+	Limit      int64               `json:"limit" validate:"gte=1,lte=200"`
+	Offset     int64               `json:"offset" validate:"gte=0"`
+	Origin     string              `json:"origin" validate:"required"`
+	ProjectUID string              `json:"project_uid" validate:"required"`
+	Total      int64               `json:"total" validate:"gte=0"`
+}
+
+func (d DocbankChildrenBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(d.Directory).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Directory", err)
+		}
+	}
+	if err := typesValidator.Var(d.Items, "required"); err != nil {
+		errors = errors.Append("Items", err)
+	}
+	for i, item := range d.Items {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Items[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(d.Limit, "gte=1,lte=200"); err != nil {
+		errors = errors.Append("Limit", err)
+	}
+	if err := typesValidator.Var(d.Offset, "gte=0"); err != nil {
+		errors = errors.Append("Offset", err)
+	}
+	if err := typesValidator.Var(d.Origin, "required"); err != nil {
+		errors = errors.Append("Origin", err)
+	}
+	if err := typesValidator.Var(d.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if err := typesValidator.Var(d.Total, "gte=0"); err != nil {
+		errors = errors.Append("Total", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type DocbankDescriptor struct {
 	Attachment Attachment `json:"attachment"`
 	ProjectUID string     `json:"project_uid" validate:"required"`
@@ -1955,7 +2044,33 @@ func (d DocbankDescriptor) Validate() error {
 	return errors
 }
 
+type DocbankResolveBody struct {
+	Node       DocbankBrowseNode `json:"node"`
+	Origin     string            `json:"origin" validate:"required"`
+	ProjectUID string            `json:"project_uid" validate:"required"`
+}
+
+func (d DocbankResolveBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(d.Node).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Node", err)
+		}
+	}
+	if err := typesValidator.Var(d.Origin, "required"); err != nil {
+		errors = errors.Append("Origin", err)
+	}
+	if err := typesValidator.Var(d.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type DocbankServiceCapabilities struct {
+	Browse     *bool  `json:"browse,omitempty"`
 	Origin     string `json:"origin" validate:"required"`
 	ProjectUID string `json:"project_uid" validate:"required"`
 	Version    int64  `json:"version"`

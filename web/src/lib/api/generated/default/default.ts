@@ -86,7 +86,13 @@ import type {
   DisconnectRelayEnrollmentPathParameters,
   DisconnectRelayRequestBody,
   DisconnectRelayResponseBody,
+  DocbankChildrenBody,
+  DocbankChildrenParams,
+  DocbankChildrenPathParameters,
   DocbankDescriptor,
+  DocbankResolveBody,
+  DocbankResolveParams,
+  DocbankResolvePathParameters,
   DocbankServiceCapabilities,
   DoctorResponseBody,
   EditCommentPathParameters,
@@ -105,8 +111,12 @@ import type {
   ExternalRootRunOut,
   FederatedDocbankCapabilitiesParams,
   FederatedDocbankCapabilitiesPathParameters,
+  FederatedDocbankChildrenParams,
+  FederatedDocbankChildrenPathParameters,
   FederatedDocbankContentParams,
   FederatedDocbankContentPathParameters,
+  FederatedDocbankResolveParams,
+  FederatedDocbankResolvePathParameters,
   FederationBridgeBody,
   FederationBridgeDisconnectResult,
   FederationBridgeStatusBody,
@@ -2927,6 +2937,104 @@ export const digestProject = async (
   })
 }
 
+export type docbankChildrenResponse200 = {
+  data: DocbankChildrenBody
+  status: 200
+}
+
+export type docbankChildrenResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type docbankChildrenResponseSuccess = docbankChildrenResponse200 & {
+  headers: Headers
+}
+export type docbankChildrenResponseError = docbankChildrenResponseDefault & {
+  headers: Headers
+}
+
+export type docbankChildrenResponse = docbankChildrenResponseSuccess | docbankChildrenResponseError
+
+export const getDocbankChildrenUrl = (
+  { projectId }: DocbankChildrenPathParameters,
+  params?: DocbankChildrenParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/docbank/children?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/docbank/children`
+}
+
+export const docbankChildren = async (
+  { projectId }: DocbankChildrenPathParameters,
+  params?: DocbankChildrenParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<docbankChildrenResponse> => {
+  return orvalFetch<docbankChildrenResponse>(getDocbankChildrenUrl({ projectId }, params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type docbankResolveResponse200 = {
+  data: DocbankResolveBody
+  status: 200
+}
+
+export type docbankResolveResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type docbankResolveResponseSuccess = docbankResolveResponse200 & {
+  headers: Headers
+}
+export type docbankResolveResponseError = docbankResolveResponseDefault & {
+  headers: Headers
+}
+
+export type docbankResolveResponse = docbankResolveResponseSuccess | docbankResolveResponseError
+
+export const getDocbankResolveUrl = (
+  { projectId }: DocbankResolvePathParameters,
+  params: DocbankResolveParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/docbank/resolve?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/docbank/resolve`
+}
+
+export const docbankResolve = async (
+  { projectId }: DocbankResolvePathParameters,
+  params: DocbankResolveParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<docbankResolveResponse> => {
+  return orvalFetch<docbankResolveResponse>(getDocbankResolveUrl({ projectId }, params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
 export type pollProjectEventsResponse200 = {
   data: PollEventsBody
   status: 200
@@ -3088,6 +3196,60 @@ export const federatedDocbankCapabilities = async (
   )
 }
 
+export type federatedDocbankChildrenResponse200 = {
+  data: DocbankChildrenBody
+  status: 200
+}
+
+export type federatedDocbankChildrenResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type federatedDocbankChildrenResponseSuccess = federatedDocbankChildrenResponse200 & {
+  headers: Headers
+}
+export type federatedDocbankChildrenResponseError = federatedDocbankChildrenResponseDefault & {
+  headers: Headers
+}
+
+export type federatedDocbankChildrenResponse =
+  | federatedDocbankChildrenResponseSuccess
+  | federatedDocbankChildrenResponseError
+
+export const getFederatedDocbankChildrenUrl = (
+  { projectId }: FederatedDocbankChildrenPathParameters,
+  params: FederatedDocbankChildrenParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/children?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/children`
+}
+
+export const federatedDocbankChildren = async (
+  { projectId }: FederatedDocbankChildrenPathParameters,
+  params: FederatedDocbankChildrenParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<federatedDocbankChildrenResponse> => {
+  return orvalFetch<federatedDocbankChildrenResponse>(
+    getFederatedDocbankChildrenUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
 export type linkFederatedDocbankResponse200 = {
   data: DocbankDescriptor
   status: 200
@@ -3214,6 +3376,60 @@ export const uploadFederatedDocbank = async (
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream', ...getHeaders(options?.headers) },
       body: uploadFederatedDocbankBody,
+    },
+  )
+}
+
+export type federatedDocbankResolveResponse200 = {
+  data: DocbankResolveBody
+  status: 200
+}
+
+export type federatedDocbankResolveResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type federatedDocbankResolveResponseSuccess = federatedDocbankResolveResponse200 & {
+  headers: Headers
+}
+export type federatedDocbankResolveResponseError = federatedDocbankResolveResponseDefault & {
+  headers: Headers
+}
+
+export type federatedDocbankResolveResponse =
+  | federatedDocbankResolveResponseSuccess
+  | federatedDocbankResolveResponseError
+
+export const getFederatedDocbankResolveUrl = (
+  { projectId }: FederatedDocbankResolvePathParameters,
+  params: FederatedDocbankResolveParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/resolve?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/docbank/resolve`
+}
+
+export const federatedDocbankResolve = async (
+  { projectId }: FederatedDocbankResolvePathParameters,
+  params: FederatedDocbankResolveParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<federatedDocbankResolveResponse> => {
+  return orvalFetch<federatedDocbankResolveResponse>(
+    getFederatedDocbankResolveUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
     },
   )
 }

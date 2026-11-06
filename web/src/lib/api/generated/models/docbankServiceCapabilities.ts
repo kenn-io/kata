@@ -3,6 +3,7 @@
  */
 
 export interface DocbankServiceCapabilities {
+  browse?: boolean
   origin: string
   project_uid: string
   version: number
