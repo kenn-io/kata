@@ -2105,6 +2105,18 @@ func TestCreate_LookalikeSoftBlock(t *testing.T) {
 	assert.Contains(t, string(second.body), `"candidates"`)
 }
 
+func TestCreate_LookalikeTitlePastSearchPrefix(t *testing.T) {
+	h, pid := bootstrapProject(t)
+	ts := h.ts.(*httptest.Server)
+	body := map[string]any{"actor": "agent-1", "title": strings.Repeat("x", 501)}
+	first := postWithHeader(t, ts, issuesURL(pid), nil, body)
+	requireOK(t, first)
+	second := postWithHeader(t, ts, issuesURL(pid), nil, body)
+	require.Equal(t, http.StatusConflict, second.status, string(second.body))
+	assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
+	assert.Contains(t, string(second.body), `"short_id":"`+issueShortIDFromCreate(t, first.body)+`"`)
+}
+
 func TestCreate_LookalikeExactTitleOutsideFTS(t *testing.T) {
 	for _, tc := range []struct {
 		title    string

@@ -1615,7 +1615,7 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 		seen[c.Issue.UID] = true
 		addMatch(c.Issue)
 	}
-	titleHasWord := titleHasPortableToken(similarity.TitlePrefix(in.Body.Title))
+	titleHasWord := similarity.TitlePrefix(in.Body.Title) == in.Body.Title && titleHasPortableToken(in.Body.Title)
 	// An underfull FTS page already includes every issue sharing a title token.
 	if len(matched) < 20 && (len(candidates) == 20 || !titleHasWord) {
 		exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
