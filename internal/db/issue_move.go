@@ -245,6 +245,10 @@ func MovedIssueUID(ctx context.Context, q interface {
 	if len(shortID) == shortid.MaxLength {
 		moveMatch = "e.issue_uid=upper($2)"
 		resetMatch = "reset.issue_uid=upper($2)"
+		if !postgres {
+			// Keep UID lookups on idx_events_issue_uid rather than the departure index.
+			fromProject = "+" + fromProject
+		}
 	}
 	// Bind the project UID: SQLite cannot search an expression index with a
 	// value produced by a subquery.
