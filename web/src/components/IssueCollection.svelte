@@ -157,15 +157,23 @@
   let lastRevealGeneration: number | null = null
   let anchorMeasurementGeneration = 0
   let catalogByUID = $derived(new Map(issueCatalog.map((issue) => [issue.uid, issue])))
+  let catalogByHierarchyKey = $derived(
+    new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue])),
+  )
+
+  function parentUIDOf(issue: KataTaskSummary): string | undefined {
+    return (
+      issue.parent?.uid ??
+      (issue.parent_short_id
+        ? catalogByHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
+        : undefined)
+    )
+  }
+
   let childrenByParentUID = $derived.by(() => {
-    const byHierarchyKey = new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue]))
     const children = new Map<string, KataTaskSummary[]>()
     for (const issue of issueCatalog) {
-      const parentUID =
-        issue.parent?.uid ??
-        (issue.parent_short_id
-          ? byHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
-          : undefined)
+      const parentUID = parentUIDOf(issue)
       if (!parentUID) continue
       const siblings = children.get(parentUID)
       if (siblings) siblings.push(issue)
@@ -263,11 +271,39 @@
     return ROW_LIMIT_STEP
   })
 
+  let rootIndexByUID = $derived(
+    new Map(visibleRootIssues.map((issue, index) => [issue.uid, index])),
+  )
+
+  function rootIndexOf(uid: string | null | undefined): number {
+    const seen = new Set<string>()
+    while (uid && !seen.has(uid)) {
+      const index = rootIndexByUID.get(uid)
+      if (index !== undefined) return index
+      seen.add(uid)
+      const issue = catalogByUID.get(uid)
+      uid = issue ? parentUIDOf(issue) : undefined
+    }
+    return -1
+  }
+
+  let pinnedRows = $derived.by(() => {
+    void rootIndexByUID
+    const selectedIndex = rootIndexOf(selectedIssueUID)
+    const focusedUID = untrack(() => {
+      const active = typeof document === 'undefined' ? null : document.activeElement
+      return active instanceof HTMLElement && tableBody?.contains(active)
+        ? active.dataset.uid
+        : undefined
+    })
+    return Math.max(selectedIndex, rootIndexOf(focusedUID)) + 1
+  })
+  let renderedLimit = $derived(Math.max(rowLimit, pinnedRows))
   let rowSentinel: HTMLDivElement | null = $state(null)
-  let hasHiddenRows = $derived(visibleRootIssues.length > rowLimit)
-  let renderedRoots = $derived(visibleRootIssues.slice(0, rowLimit))
+  let hasHiddenRows = $derived(visibleRootIssues.length > renderedLimit)
+  let renderedRoots = $derived(visibleRootIssues.slice(0, renderedLimit))
   let renderedGroups = $derived.by(() => {
-    let remaining = rowLimit
+    let remaining = renderedLimit
     const groups = []
     for (const group of sortedGroups) {
       if (remaining <= 0) break
@@ -637,7 +673,7 @@
           // Past the rendered prefix: render the next chunk, then move.
           event.preventDefault()
           heldNavKeys.add(event.code)
-          showRows(rowLimit + ROW_LIMIT_STEP)
+          showRows(renderedLimit + ROW_LIMIT_STEP)
           void tick().then(() => {
             const nextRows = Array.from(
               tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [],
@@ -767,24 +803,17 @@
     }
   })
 
-  $effect(() => {
-    const index = visibleRootIssues.findIndex((issue) => issue.uid === selectedIssueUID)
-    untrack(() => {
-      if (index >= rowLimit) showRows(index + ROW_LIMIT_STEP)
-    })
-  })
-
   // Grow when the end sentinel comes within a few screens of the viewport.
   $effect(() => {
     const body = tableBody
     const sentinel = rowSentinel
     // A fresh observer reports the sentinel's current state, so a sentinel
     // that is still near the viewport after a chunk lands asks for another.
-    void rowLimit
+    void renderedLimit
     if (!body || !sentinel || typeof IntersectionObserver === 'undefined') return
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) showRows(rowLimit + ROW_LIMIT_STEP)
+        if (entries.some((entry) => entry.isIntersecting)) showRows(renderedLimit + ROW_LIMIT_STEP)
       },
       { root: body, rootMargin: '1500px 0px' },
     )
