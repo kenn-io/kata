@@ -105,8 +105,8 @@ type EmbeddingsHealth struct {
 	Credential       string     `json:"credential,omitempty" enum:"missing,rejected,ok" doc:"Embedding credential state; an advisory warning that does not change health.ok."`
 	CredentialSource string     `json:"credential_source,omitempty" doc:"Selected credential source: inline, file:<path>, env:<NAME>, or none; never the key value."`
 	CredentialReason string     `json:"credential_reason,omitempty" doc:"Readable missing or rejected credential reason, without provider response bodies."`
-	LastError        string     `json:"last_error,omitempty" doc:"Sanitized credential rejection; cleared after the next successful embedding call."`
-	LastErrorAt      *time.Time `json:"last_error_at,omitempty" doc:"Time of the credential rejection; cleared after the next successful embedding call."`
+	LastError        string     `json:"last_error,omitempty" doc:"Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call."`
+	LastErrorAt      *time.Time `json:"last_error_at,omitempty" doc:"Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call."`
 	Configured       bool       `json:"configured"`
 	LastSuccessAt    *time.Time `json:"last_success_at,omitempty" doc:"Time of the last successful reconciliation, including cycles with no pending issues; query requests do not update it."`
 	LastErrorStatus  int        `json:"last_error_status,omitempty,omitzero"`

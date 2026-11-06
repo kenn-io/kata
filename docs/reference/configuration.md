@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 # Configuration
@@ -968,11 +968,29 @@ widen authority. Structural guards still apply to every transport.
 This section is the field reference; see the
 [Semantic search guide](../guide/semantic-search.md) for setup and behavior.
 
-Semantic (vector) search is opt-in. With no `[search.embeddings]` section,
-`kata search` behaves exactly as before (lexical FTS only) and the daemon
-makes no embedding network calls. Adding the section enables hybrid search: the
-daemon embeds each issue's title and body through an OpenAI-compatible
-`/embeddings` endpoint and fuses vector results with the lexical leg.
+Semantic search is opt-in. Run `kata daemon local-embeddings` to use a running
+Ollama in a home without embeddings configured, or download the shared
+built-in server with your consent. Running it again switches a configured
+provider to the built-in server:
+
+```toml
+[search.embeddings]
+local = true
+```
+
+`local` uses `nomic-embed-text` with 768 dimensions by default. It accepts
+`nomic-embed-text`, `nomic-embed-text:latest`, and `nomic-embed-text:v1.5`, and
+widths up to 768. Widths below 768 require `request_dimensions = true`. A
+`base_url` from any source, including `KATA_SEARCH_EMBEDDINGS_BASE_URL`, takes
+precedence over `local = true`. API key settings are ignored only while the
+built-in server is selected. The setup command refuses while that environment
+variable is set and restores the config if a daemon refuses its restart.
+The daemon reuses
+installed files and asks you to run the setup command if a download is needed.
+Older Kata releases reject the `local` key.
+
+With embeddings disabled, search matches words only. To use an external
+OpenAI-compatible provider, set `local = false` and configure its endpoint and model:
 
 ```toml
 [search.embeddings]
@@ -995,7 +1013,7 @@ model    = "nomic-embed-text"
 # trust_private_network = false # allow plaintext HTTP to literal non-public IPs
 ```
 
-`base_url` and `model` are both required once the section exists; setting only
+For an external provider, `base_url` and `model` are both required; setting only
 one is a startup error rather than a silent disable. With no credential source
 configured, requests omit the `Authorization` header. Keyless local providers
 such as Ollama need only `base_url` and `model`.

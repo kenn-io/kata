@@ -788,10 +788,19 @@ the filters, belongs to another project, or fell outside `--limit`, its child
 stays visible as a top-level row. JSON and agent output remain flat in the
 server's order. This grouping applies when `--sort` is omitted or empty.
 
+When the first page of an open or closed `kata list` is empty, it counts
+matching issues with the other status and prints, for example,
+`Hint: no open issues; 4 closed; see kata list --status all` to stderr.
+`--quiet` suppresses it. JSON carries a `hints` entry with code
+`excluded_closed` or `excluded_open`, the message, and `next`. Each `next`
+keeps the scope, output, and filter flags, and omits `--as` and `--cursor`.
+Retry commands use POSIX syntax on Unix and PowerShell syntax on Windows.
+
 Lexical search returns only issues whose title, body, or comments contain every
-query word. When a multi-word lexical search finds nothing, `kata search` prints
-`Hint: no issue contains every word; search again with fewer words` to stderr;
-`--quiet` suppresses it.
+query word. When the first page of a multi-word lexical search finds nothing,
+`kata search` prints `Hint: no issue contains every word; search again with fewer words`
+to stderr, including when status or label filters are set. `--quiet` suppresses
+it. JSON adds a `hints` entry with code `every_word_required` and that message.
 
 By default `kata search` runs lexical (FTS) search. When the daemon has
 [semantic search](../guide/semantic-search.md) configured, search
@@ -1772,6 +1781,7 @@ kata daemon recover [--expect-project-uid <uid>] [--json | --agent]
 kata daemon stop
 kata daemon restart [--listen <host:port>] [--insecure-readonly]
 kata daemon reload
+kata daemon local-embeddings [--yes]
 kata daemon logs --hooks [--tail]
 kata health
 kata doctor [--json | --agent] [--workspace <path>] [--project <name>] [--daemon <name>]
@@ -1899,6 +1909,29 @@ it. Configuration validation errors leave the daemon serving; listener binding
 happens during replacement startup. Explicit restart flags override startup
 options and persist through later restarts. `kata daemon stop` followed by
 `kata daemon start` clears these overrides and uses the current startup settings.
+
+`kata daemon local-embeddings` configures semantic search for the current
+`KATA_HOME` and rejects `--daemon`. A home without embeddings configured uses
+a running Ollama without a download. Run the command again to switch that
+home to the built-in server. Otherwise, it shows the missing download size, about
+290 MB on a fresh install, and asks before downloading files shared by all
+Kenn apps. Use `--yes` without a terminal. It keeps compatible Nomic vectors,
+config comments, and formatting outside the rewritten settings. Widths below
+768 are kept only with `request_dimensions = true`. Other recipes get a rebuild warning.
+If this daemon shares embeddings, replicas need the same recipe before they
+can reuse its vectors. Running daemons must support restart before the command
+writes the config. It waits for every restart; rerun the command to retry a
+failed restart. A refused restart restores the configuration file. Older Kata
+releases reject the `local` config key.
+
+When the shared files are already installed, a fresh home needs no prompt;
+switching an existing provider still asks before starting the server. To return
+to Ollama, set `local = false`, delete each setting that has a commented copy
+below it, uncomment the copies, and run `kata daemon restart`.
+
+The result includes `index`, one of `new`, `kept`, or `rebuilt`, and `progress`,
+the command `kata health --json` for watching indexing progress. JSON and agent
+output use those field names.
 
 Start and restart keep waiting while an SQLite migration runs and report that
 progress on stderr.

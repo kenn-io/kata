@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -140,6 +141,13 @@ per match.`,
 				return err
 			}
 			bs := response.Body
+			if r := response.JSON200; r != nil {
+				for _, hint := range searchhint.EmptyLexical(r.Query, r.Mode, len(r.Results), cursor == "") {
+					if bs, err = reportHint(cmd, bs, cliHint{Code: hint.Code, Message: hint.Message}); err != nil {
+						return err
+					}
+				}
+			}
 			if err := printSearchResults(cmd, bs); err != nil {
 				return err
 			}
@@ -202,14 +210,6 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	// rather than emitting a bare "# mode=" / "mode=" line.
 	if b.Mode == "" {
 		b.Mode = "lexical"
-	}
-	// Lexical search returns only issues containing every word. Say so when a
-	// multi-word query finds nothing, so a caller retries with fewer words
-	// instead of concluding that no related issue exists.
-	if !flags.Quiet && len(b.Results) == 0 && b.Mode == "lexical" && len(strings.Fields(b.Query)) > 1 {
-		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Hint: no issue contains every word; search again with fewer words"); err != nil {
-			return err
-		}
 	}
 	if mode == outputAgent {
 		out := cmd.OutOrStdout()
