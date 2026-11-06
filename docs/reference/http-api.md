@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 # HTTP API schema
@@ -251,6 +251,8 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.43.0` | Adds project-scoped Docbank `children` and `resolve` GET routes, corresponding federation pull reads, and the optional recursive `browse` capability. CLI browsing refuses older daemons; every hop must support browse. |
+| `0.42.0` | Adds absolute attachment origins and project-scoped forwarded Docbank writes/content. Optional `client_kind` preserves the initiating CLI lease label. |
 | `0.41.0` | Adds `sort=priority` to both ready routes. `kata next` and MCP `kata.next` request one priority-ordered row; older daemons retain the full-queue fetch and client-side selection. |
 | `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |
 | `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |

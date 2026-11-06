@@ -21,6 +21,7 @@ const (
 	apiVersionOtherAgentCloseTranscript = "0.34.0"
 	apiVersionDocbankAttachmentLink     = "0.38.0"
 	apiVersionDocbankOrigin             = "0.42.0"
+	apiVersionDocbankBrowse             = "0.43.0"
 	apiVersionEffectiveCloseEventUID    = "0.40.0"
 	apiVersionCommentLinks              = "0.28.0"
 	apiVersionRecurrenceIfMatch         = "0.37.0"

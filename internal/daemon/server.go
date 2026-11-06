@@ -743,6 +743,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerRecurrences(humaAPI, cfg)
 	registerMetadata(humaAPI, cfg)
 	registerAttachmentHandlers(humaAPI, cfg)
+	registerDocbankBrowseHandlers(humaAPI, cfg)
 	registerMove(humaAPI, cfg)
 	registerEventsHandlers(humaAPI, mux, cfg)
 	registerFederationHandlers(humaAPI, cfg)

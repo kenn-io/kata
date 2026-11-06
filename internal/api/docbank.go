@@ -16,6 +16,7 @@ type DocbankServiceRequest struct {
 
 // DocbankServiceCapabilities is computed through the complete upstream path.
 type DocbankServiceCapabilities struct {
+	Browse     bool   `json:"browse,omitempty"`
 	Version    int    `json:"version"`
 	ProjectUID string `json:"project_uid"`
 	Origin     string `json:"origin"`

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,6 +53,9 @@ func (f *Fake) Seed(path string, node docbank.Node, versions map[uuid.UUID][]byt
 	node.Path = path
 	f.nodes[node.ID] = node
 	f.paths[path] = node.ID
+	if node.Kind == "dir" {
+		f.dirs[path] = node.ID
+	}
 	for id, content := range versions {
 		f.content[id.String()] = content
 		f.metadata[id.String()] = docbank.Version{ID: id, NodeID: node.ID, Size: int64(len(content))}
@@ -100,7 +104,53 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		send(map[string]any{"id": id, "kind": "dir"})
+		value := r.URL.Query().Get("path")
+		send(docbank.Node{ID: id, Name: path.Base(value), Kind: "dir", Path: value})
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/nodes/") && strings.HasSuffix(r.URL.Path, "/children"):
+		id, _ := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/nodes/"), "/children"), 10, 64)
+		var directory docbank.Node
+		for name, candidate := range f.dirs {
+			if candidate == id {
+				directory = docbank.Node{ID: id, Name: path.Base(name), Kind: "dir", Path: name}
+				break
+			}
+		}
+		if directory.ID == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		items := []docbank.Node{}
+		for _, child := range f.nodes {
+			if child.Path != directory.Path && path.Dir(child.Path) == directory.Path && child.TrashedAt == "" {
+				items = append(items, child)
+			}
+		}
+		for name, candidate := range f.dirs {
+			if _, seeded := f.nodes[candidate]; !seeded && name != directory.Path && path.Dir(name) == directory.Path {
+				items = append(items, docbank.Node{ID: candidate, Name: path.Base(name), Kind: "dir"})
+			}
+		}
+		slices.SortFunc(items, func(a, b docbank.Node) int {
+			if a.Kind != b.Kind {
+				if a.Kind == "dir" {
+					return -1
+				}
+				return 1
+			}
+			return strings.Compare(a.Name, b.Name)
+		})
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		if limit < 1 || limit > 5000 || offset < 0 {
+			http.Error(w, "fixture pagination", http.StatusUnprocessableEntity)
+			return
+		}
+		start := min(offset, len(items))
+		page := append([]docbank.Node{}, items[start:start+min(limit, len(items)-start)]...)
+		for i := range page {
+			page[i].Path = ""
+		}
+		send(docbank.ChildrenPage{Directory: directory, Items: page, Total: len(items), Limit: limit, Offset: offset})
 	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/nodes/"):
 		id, _ := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/v1/nodes/"), 10, 64)
 		node, ok := f.nodes[id]

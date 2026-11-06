@@ -33,6 +33,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Create unprioritized issues with `kata create --priority none` even when the
   invoking client has a default priority. Keyed automation can keep its original
   request stable across changes to that preference.
+- Browse a project's origin Docbank folder with `kata docbank ls` and resolve
+  files with `kata docbank resolve`, without sharing the origin's key. These
+  bounded reads require daemon API 0.43.0, project-wide read access and browse
+  support on every relay hop.
 - Prevent duplicate creates with identical full title text when either issue's
   body has no searchable words. `--force-new` still creates a separate issue.
 - Turn close transcripts on or off for one process with

@@ -30,6 +30,8 @@ var federationTransportOperations = map[string]HostFederationOperation{
 	"uploadFederatedDocbank":       {ID: "uploadFederatedDocbank", Mutation: true},
 	"linkFederatedDocbank":         {ID: "linkFederatedDocbank", Mutation: true},
 	"federatedDocbankContent":      {ID: "federatedDocbankContent"},
+	"federatedDocbankResolve":      {ID: "federatedDocbankResolve"},
+	"federatedDocbankChildren":     {ID: "federatedDocbankChildren"},
 	"createCronJob":                {ID: "createCronJob", Mutation: true},
 	"replaceCronJob":               {ID: "replaceCronJob", Mutation: true},
 	"archiveCronJob":               {ID: "archiveCronJob", Mutation: true},
