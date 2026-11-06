@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -149,6 +150,14 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := setContentReleaseValidator(ctx, func() error {
+			// Bypass cached admission: enrollment, binding and host authority can
+			// change while waiting for the next content chunk.
+			_, err := evaluateFederationRequest(ctx, cfg, in.Authorization, project.ID, "pull", federationTransportOperation("federatedDocbankContent"))
+			return err
+		}); err != nil {
+			return nil, err
+		}
 		e := metadata.Attachment{Origin: in.Origin, DocbankVersion: in.VersionID}
 		resp, err := originDocbankContent(ctx, cfg, project, e)
 		if err != nil {
@@ -161,7 +170,13 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 			}
 			hctx.SetHeader("Content-Type", "application/octet-stream")
 			hctx.SetHeader("X-Content-Type-Options", "nosniff")
-			if _, err := io.Copy(hctx.BodyWriter(), resp.Body); err != nil {
+			writer := hctx.BodyWriter()
+			n, err := io.Copy(writer, resp.Body)
+			if err == nil && n == 0 {
+				// Release empty headers while signing's request context is alive.
+				_, err = writer.Write(nil)
+			}
+			if err != nil {
 				panic(http.ErrAbortHandler)
 			}
 		}}, nil
@@ -178,6 +193,16 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 		if attachment.Origin != cfg.DB.InstanceUID() {
 			return nil, attachmentError(410, "attachment_origin_unavailable")
 		}
+		// A relay's own instance UID does not make its local Docbank the
+		// project's origin. Confirm the configured origin before using local
+		// storage.
+		caps, err := docbankOriginCapabilities(ctx, cfg, project)
+		if err != nil {
+			return nil, err
+		}
+		if caps.Origin != attachment.Origin {
+			return nil, attachmentError(409, "attachment_origin_mismatch")
+		}
 		if cfg.Docbank == nil {
 			return nil, attachmentError(503, "docbank_not_configured")
 		}
@@ -192,9 +217,16 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 		if err := exposedDocbankNode(cfg, node); err != nil {
 			return nil, err
 		}
-		resp, err := cfg.Docbank.Content(ctx, attachment.DocbankVersion)
+		resp, err := cfg.Docbank.OriginContent(ctx, attachment.DocbankVersion)
 		if err != nil {
+			if errors.Is(err, docbank.ErrContentIntegrity) {
+				return nil, attachmentError(502, "attachment_content_invalid")
+			}
 			return nil, docbankError(err, docbankContentErrors)
+		}
+		if resp.ContentLength != version.Size {
+			_ = resp.Body.Close()
+			return nil, attachmentError(502, "attachment_content_invalid")
 		}
 		return resp, nil
 	}
@@ -209,5 +241,9 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 	if err != nil {
 		return nil, err
 	}
-	return docbank.VerifyContentResponse(resp)
+	verified, err := docbank.VerifyContentResponse(resp)
+	if err != nil {
+		return nil, attachmentError(502, "attachment_content_invalid")
+	}
+	return verified, nil
 }

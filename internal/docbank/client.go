@@ -140,18 +140,11 @@ func (c *Client) Content(ctx context.Context, version uuid.UUID) (*http.Response
 	return verifiedContent(c.request(ctx, "GET", "/api/v1/versions/"+version.String()+"/content", nil, nil))
 }
 
-// VerifyContentResponse verifies an origin response again at a relay boundary.
-// The caller must preserve the blob hash and size headers for its downstream.
-func VerifyContentResponse(resp *http.Response) (*http.Response, error) {
-	return verifiedContent(resp, nil)
-}
-
 func verifiedContent(resp *http.Response, err error) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := sha256.New()
-	resp.Body = &contentStream{ReadCloser: resp.Body, reader: bufio.NewReader(io.TeeReader(resp.Body, h)), hash: h, expected: resp.Header.Get("X-Docbank-Blob-Hash")}
+	resp.Body = newContentStream(resp.Body, resp.Header.Get("X-Docbank-Blob-Hash"), -1)
 	if size, err := strconv.ParseInt(resp.Header.Get("X-Docbank-Blob-Size"), 10, 64); err == nil {
 		resp.ContentLength = size
 	}
@@ -163,15 +156,29 @@ type contentStream struct {
 	reader   *bufio.Reader
 	hash     hash.Hash
 	expected string
+	size     int64
+	count    int64
+}
+
+func newContentStream(body io.ReadCloser, expected string, size int64) *contentStream {
+	h := sha256.New()
+	return &contentStream{ReadCloser: body, reader: bufio.NewReader(io.TeeReader(body, h)), hash: h, expected: expected, size: size}
 }
 
 func (s *contentStream) Read(p []byte) (int, error) {
 	n, err := s.reader.Read(p)
+	s.count += int64(n)
 	if err == nil {
 		_, err = s.reader.Peek(1)
 	}
 	if err != nil && err != io.EOF {
 		return 0, err
+	}
+	// Withhold the declared final chunk if lookahead proves there are more
+	// bytes. A downstream HTTP reader may stop at Content-Length without ever
+	// requesting another chunk, so an EOF-only count check would be too late.
+	if s.size >= 0 && (s.count > s.size || s.count == s.size && err == nil || err == io.EOF && s.count != s.size) {
+		return 0, ErrContentIntegrity
 	}
 	// Withhold the last chunk until the complete stream matches Docbank's blob hash.
 	if err == io.EOF && s.expected != hex.EncodeToString(s.hash.Sum(nil)) {

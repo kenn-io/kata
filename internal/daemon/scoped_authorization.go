@@ -108,6 +108,12 @@ func withScopedPrincipalRevalidation(store db.Storage, next http.Handler) http.H
 			next.ServeHTTP(w, r)
 			return
 		}
+		if r.Method == http.MethodGet && isAttachmentTransfer(r) {
+			serveRevalidatedContent(w, r, next, func() error {
+				return validateScopedResponse(r.Context(), store, *principal.Scope)
+			})
+			return
+		}
 		response := newBufferedScopedResponse(w)
 		defer func() { _ = response.close() }()
 		next.ServeHTTP(response, r)

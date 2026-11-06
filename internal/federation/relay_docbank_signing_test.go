@@ -1,26 +1,34 @@
 package federation_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
+	"uuid"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // Every fixture origin has an explicit in-memory transport. Unknown origins
@@ -54,6 +62,16 @@ func (r *docbankFixtureRoutes) replace(t *testing.T, old *httptest.Server, host 
 // verifier, root Docbank and immediate content route. Generic body wrappers
 // must not turn an unknown client length into an exact empty body.
 func TestRelayDocbankSignedUploadThroughBothHops(t *testing.T) {
+	testRelayDocbankSignedTransfer(t, 0)
+}
+
+// A content response may arrive beyond the ordinary ten-second control budget.
+func TestRelayDocbankSignedContentTransferBudget(t *testing.T) {
+	testRelayDocbankSignedTransfer(t, 11*time.Second)
+}
+
+func testRelayDocbankSignedTransfer(t *testing.T, contentDelay time.Duration) {
+	t.Helper()
 	synctest.Test(t, func(t *testing.T) {
 		routes := new(docbankFixtureRoutes)
 		previous := http.DefaultTransport
@@ -106,11 +124,41 @@ func TestRelayDocbankSignedUploadThroughBothHops(t *testing.T) {
 		var uploaded api.AddAttachmentResponseBody
 		require.NoError(t, json.Unmarshal(raw, &uploaded))
 		require.Equal(t, root.store.InstanceUID(), uploaded.Attachment.Origin)
-		status, raw = relayDocbankRequest(t, leaf, http.MethodGet, endpoint+"/"+uploaded.ID+"/content", "", "")
-		require.Equal(t, http.StatusOK, status, string(raw))
-		require.Equal(t, "signed fixture bytes", string(raw))
+		vaults[root].BeforeResponse = func(method, path string) {
+			if method == http.MethodGet && strings.HasSuffix(path, "/content") {
+				time.Sleep(contentDelay)
+			}
+		}
+		readSignedDocbankContent(t, leaf, endpoint+"/"+uploaded.ID+"/content", "signed fixture bytes")
+		// Empty content still needs a live authorized header release; io.Copy
+		// makes no body Write in this case.
+		emptyVersion := uuid.MustParse("6f1c2e8a-3333-4333-8333-333333333319")
+		vaults[root].Seed("/kata/empty.pdf", docbank.Node{ID: 501, Name: "empty.pdf", Kind: "file", CurrentVersionID: emptyVersion}, map[uuid.UUID][]byte{emptyVersion: nil})
+		emptyReference, err := json.Marshal(metadata.Attachment{Origin: root.store.InstanceUID(), Name: "empty.pdf", MediaType: "application/pdf", Size: 0, DocbankVersion: emptyVersion})
+		require.NoError(t, err)
+		_, err = leaf.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issueIDForRelayMatrix(t, leaf, issue.UID), Actor: leaf.account, Patch: map[string]jsontext.Value{"attachment.empty": emptyReference}})
+		require.NoError(t, err)
+		readSignedDocbankContent(t, leaf, endpoint+"/empty/content", "")
 		require.NotEmpty(t, vaults[root].Requests())
 		require.Empty(t, vaults[relay].Requests())
 		require.Empty(t, vaults[leaf].Requests())
 	})
+}
+
+func readSignedDocbankContent(t *testing.T, leaf *relayMatrixNode, endpoint, want string) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, leaf.http.URL+endpoint, nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+leaf.userToken)
+	resp, err := leaf.http.Client().Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Equal(t, want, string(body))
+	digest := sha256.Sum256([]byte(want))
+	require.Equal(t, hex.EncodeToString(digest[:]), resp.Header.Get("X-Docbank-Blob-Hash"))
+	require.Equal(t, strconv.Itoa(len(want)), resp.Header.Get("X-Docbank-Blob-Size"))
+	require.Empty(t, resp.Header.Get("Set-Cookie"), "Docbank response cookies must not cross the service boundary")
 }
