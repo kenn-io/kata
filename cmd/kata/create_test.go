@@ -419,12 +419,27 @@ func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
 					"fix login crash", "--body", "login crashes on startup", "--force-new")
 				refs = append(refs, "example-project#"+strings.TrimSpace(second))
 			}
-			for _, mode := range []string{"agent", "json"} {
+			for _, mode := range []string{"agent", "json", "human"} {
 				t.Run(mode, func(t *testing.T) {
-					stdout, stderr, err := executeRootCapture(t, ctx, append(args, "--"+mode)...)
+					stdout, stderr, err := executeRootCapture(t, ctx, append(args, "--format", mode)...)
 					cli := requireCLIError(t, err, ExitConflict)
 					assert.Equal(t, code, cli.Code)
 					assert.Empty(t, stdout)
+					if mode == "human" {
+						line, _, _ := strings.Cut(stderr, "\n")
+						assert.True(t, strings.HasPrefix(line, "kata: "), line)
+						if code == "idempotency_mismatch" {
+							assert.NotContains(t, line, "(")
+							assert.NotContains(t, stderr, refs[0])
+							return
+						}
+						assert.Contains(t, line, " (")
+						assert.True(t, strings.HasSuffix(line, ")"), line)
+						for _, ref := range refs {
+							assert.Contains(t, line, ref)
+						}
+						return
+					}
 					if mode == "agent" {
 						assert.True(t, strings.HasPrefix(stderr, "ERR create conflict: "), stderr)
 						lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
