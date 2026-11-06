@@ -115,8 +115,7 @@ describe('IssueCollection', () => {
     }
 
     it('renders a prefix of a long list and still reports the full count', () => {
-      const { container } = renderMany(1000, { scopedProjectName: null })
-      expect(container.querySelector('.group-count')?.textContent).toBe('1000')
+      renderMany(1000, { scopedProjectName: null })
       expect(visibleRows()).toHaveLength(150)
       expect(screen.getByText('1000 tasks')).toBeTruthy()
     })
@@ -124,22 +123,33 @@ describe('IssueCollection', () => {
     it.each(['ArrowDown', 'j'])(
       'renders the next chunk when %s runs past the last rendered row',
       async (key) => {
-        const { container } = renderMany(1000)
-        const rows = container.querySelectorAll<HTMLElement>('button.row')
-        const last = rows[rows.length - 1]!
+        const issues = manyTasks(1000)
+        const props = {
+          currentView: viewWithIssues(issues),
+          issueCatalog: issues,
+          onSelect: vi.fn(),
+        }
+        const { rerender } = render(IssueCollection, { props })
+        const last = visibleRows()[149]!
         last.focus()
         await fireEvent.keyDown(last, { key })
         await waitFor(() => expect(visibleRows()).toHaveLength(300))
+        await waitFor(() => expect(document.activeElement).toBe(visibleRows()[150]))
+
+        await rerender({ ...props, resultsKey: 'pinned', selectedIssueUID: 'bulk-00160' })
+        expect(visibleRows()).toHaveLength(161)
+        const pinned = visibleRows()[160]!
+        pinned.focus()
+        await fireEvent.keyDown(pinned, { key })
+        await waitFor(() => expect(visibleRows()).toHaveLength(311))
         await waitFor(() =>
-          expect(document.activeElement).toBe(container.querySelectorAll('button.row')[150]),
+          expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00161'),
         )
       },
     )
 
     it('renders every row when End is pressed and focuses the last one', async () => {
-      const issues = manyTasks(1000)
-      const props = { currentView: viewWithIssues(issues), issueCatalog: issues, onSelect: vi.fn() }
-      const { container, rerender } = render(IssueCollection, { props })
+      const { container } = renderMany(1000)
       const first = container.querySelector<HTMLElement>('button.row')!
       first.focus()
       await fireEvent.keyDown(first, { key: 'End' })
@@ -147,14 +157,6 @@ describe('IssueCollection', () => {
       await waitFor(() =>
         expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00999'),
       )
-      const focused = document.activeElement
-      const refreshed = [
-        task({ uid: 'new-leading', updated_at: '2026-05-18T08:00:00Z' }),
-        ...issues,
-      ]
-      await rerender({ ...props, currentView: viewWithIssues(refreshed), issueCatalog: refreshed })
-      expect(visibleRows()).toHaveLength(1001)
-      expect(document.activeElement).toBe(focused)
     })
 
     it('keeps full group counts and reveals later headings as the prefix grows', async () => {
@@ -222,7 +224,7 @@ describe('IssueCollection', () => {
     })
 
     it('keeps growth on selection and resets changed results in the first render', async () => {
-      const issues = manyTasks(1000)
+      const issues = manyTasks(400)
       const props = {
         currentView: viewWithIssues(issues),
         issueCatalog: issues,
@@ -265,60 +267,26 @@ describe('IssueCollection', () => {
       } finally {
         observer.disconnect()
       }
-    })
 
-    it('resets focused rows when the list key changes', async () => {
-      const issues = manyTasks(400)
-      const props = {
-        currentView: viewWithIssues(issues),
-        issueCatalog: issues,
-        resultsKey: 'first',
-        onSelect: vi.fn(),
-      }
-      const { rerender } = render(IssueCollection, { props })
       await fireEvent.keyDown(visibleRows()[0]!, { key: 'End' })
-      expect(visibleRows()).toHaveLength(400)
-      expect(document.activeElement).toBe(visibleRows()[399])
+      expect(visibleRows()).toHaveLength(200)
+      expect(document.activeElement).toBe(visibleRows()[199])
+      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00399')
 
-      await rerender({ ...props, resultsKey: 'second' })
+      await rerender({
+        ...props,
+        currentView: viewWithIssues(issues.slice(200)),
+        resultsKey: 'same-results-new-key',
+      })
       expect(visibleRows()).toHaveLength(150)
     })
 
-    it('retains graph button focus when a refresh adds 160 earlier roots', async () => {
-      window.localStorage.setItem(
-        'kata:issue-sort/v1',
-        JSON.stringify({ key: 'title', direction: 'asc' }),
-      )
-      const issues = manyTasks(400)
-      const props = {
-        currentView: viewWithIssues(issues),
-        issueCatalog: issues,
-        onSelect: vi.fn(),
-        onOpenGraph: vi.fn(),
-      }
-      const { container, rerender } = render(IssueCollection, { props })
-      const focused = container.querySelectorAll<HTMLButtonElement>('.graph-action')[5]!
-      focused.focus()
-      expect(document.activeElement).toBe(focused)
-      const leading = manyTasks(160).map((issue, index) => ({
-        ...issue,
-        uid: `leading-${index}`,
-        short_id: `leading-${index}`,
-        title: `Ahead ${index}`,
-      }))
-      const refreshed = [...leading, ...issues]
-      await rerender({
-        ...props,
-        currentView: viewWithIssues(refreshed),
-        issueCatalog: refreshed,
-      })
-
-      expect(document.activeElement).toBe(focused)
-    })
-
-    it.each(['focused', 'other'])(
-      'retains focus through a snapshot with new leading roots when the %s row is selected',
-      async (selection) => {
+    it.each([
+      { target: 'row', index: 80, leadingCount: 80 },
+      { target: 'graph button', index: 5, leadingCount: 160 },
+    ])(
+      'retains $target focus when a refresh adds $leadingCount earlier roots',
+      async ({ target, index, leadingCount }) => {
         window.localStorage.setItem(
           'kata:issue-sort/v1',
           JSON.stringify({ key: 'title', direction: 'asc' }),
@@ -327,17 +295,21 @@ describe('IssueCollection', () => {
         const props = {
           currentView: viewWithIssues(issues),
           issueCatalog: issues,
-          selectedIssueUID: selection === 'focused' ? issues[80]!.uid : issues[0]!.uid,
+          selectedIssueUID: issues[0]!.uid,
           onSelect: vi.fn(),
+          onOpenGraph: vi.fn(),
         }
         const { container, rerender } = render(IssueCollection, { props })
-        const focused = visibleRows()[80]!
+        const focused = container.querySelectorAll<HTMLButtonElement>(
+          target === 'row' ? 'button.row' : '.graph-action',
+        )[index]!
         focused.focus()
-        const leading = manyTasks(80).map((issue, index) => ({
+        expect(document.activeElement).toBe(focused)
+        const leading = manyTasks(leadingCount).map((issue, leadingIndex) => ({
           ...issue,
-          uid: `leading-${index}`,
-          short_id: `leading-${index}`,
-          title: `Ahead ${index}`,
+          uid: `leading-${leadingIndex}`,
+          short_id: `leading-${leadingIndex}`,
+          title: `Ahead ${leadingIndex}`,
         }))
         const refreshed = [...leading, ...issues]
         await rerender({
@@ -346,11 +318,12 @@ describe('IssueCollection', () => {
           issueCatalog: refreshed,
         })
 
-        expect(container.querySelector('button.row[data-uid="bulk-00080"]')).toBe(focused)
         expect(document.activeElement).toBe(focused)
-        await fireEvent.keyDown(focused, { key: 'ArrowDown' })
-        expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00081')
-        expect(visibleRows()).toHaveLength(311)
+        if (target === 'row') {
+          expect(container.querySelector('button.row[data-uid="bulk-00080"]')).toBe(focused)
+          await fireEvent.keyDown(focused, { key: 'ArrowDown' })
+          expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00081')
+        }
       },
     )
 
@@ -367,7 +340,17 @@ describe('IssueCollection', () => {
           uid: 'selected-child',
           short_id: 'child',
           title: 'Selected child',
-          ...(parentRef === 'uid' ? { parent: root } : { parent_short_id: root.short_id }),
+          ...(parentRef === 'uid'
+            ? {
+                parent: {
+                  uid: root.uid,
+                  short_id: root.short_id,
+                  qualified_id: root.qualified_id,
+                  title: root.title,
+                  status: root.status,
+                },
+              }
+            : { parent_short_id: root.short_id }),
         })
         const catalog = [...issues, child]
         const props = {

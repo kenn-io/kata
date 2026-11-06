@@ -1193,7 +1193,7 @@ describe('AppShell', () => {
     expect(container.querySelectorAll('button.row')).toHaveLength(400)
     await rerender({
       ...props,
-      route: { ...props.route, filters: { ...props.route.filters, label: ['c', 'd'] } },
+      route: { ...props.route, filters: { ...props.route.filters, label: ['a', 'd'] } },
     })
     expect(container.querySelectorAll('button.row')).toHaveLength(150)
   })
