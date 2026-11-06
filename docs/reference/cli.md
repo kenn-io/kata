@@ -1029,6 +1029,11 @@ variable. See the configuration reference for session ID requirements, agent nam
 and daemon API compatibility.
 Session provenance supplies no completion evidence on its own.
 
+Per-project targets can replace the global locator and
+opt into a bounded exact-session upload after a new confirmed close. Upload
+failure preserves the close; dry runs, no-ops, and keyed replays never upload.
+See [closing-session configuration](configuration.md#project-specific-targets-and-optional-upload).
+
 Evidence is validated against the close reason:
 
 | Reason | Evidence rule |

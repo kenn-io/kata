@@ -9,6 +9,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"hegel.dev/go/hegel"
 )
 
 func TestReadCloseTranscriptConfig_InvalidAgentNamesKey(t *testing.T) {
@@ -69,4 +70,72 @@ pi = "PI_SESSION_ID"
 `), 0600))
 	_, err := ReadDaemonConfig()
 	require.NoError(t, err)
+}
+
+func TestReadCloseTranscriptProjectTargets(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`[close.transcript]
+enabled = true
+agentsview_url = "https://default.example"
+[close.transcript.project."team-project"]
+agentsview_url = "https://team.example/archive"
+push = true
+token_env = "MISSING_TRANSCRIPT_TOKEN"
+[close.transcript.project."disabled-project"]
+enabled = false
+`), 0600))
+	cfg, err := ReadCloseTranscriptConfig()
+	require.NoError(t, err)
+	target := cfg.Target("team-project")
+	require.NotNil(t, target.Enabled)
+	assert.True(t, *target.Enabled)
+	assert.Equal(t, "https://team.example/archive", target.AgentsViewURL)
+	assert.True(t, target.Push)
+	assert.Equal(t, "MISSING_TRANSCRIPT_TOKEN", target.TokenEnv)
+	assert.False(t, *cfg.Target("disabled-project").Enabled)
+	assert.Empty(t, cfg.Target("disabled-project").AgentsViewURL)
+	assert.Equal(t, "https://default.example", cfg.Target("other-project").AgentsViewURL)
+	_, err = ReadDaemonConfig()
+	require.NoError(t, err, "client preferences must not resolve AgentsView secrets at daemon startup")
+}
+
+func TestCloseTranscriptTargetURLIsolation(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		name := hegel.Draw(ht, hegel.Text())
+		globalURL := hegel.Draw(ht, hegel.Text())
+		targetURL := hegel.Draw(ht, hegel.Text())
+		push := hegel.Draw(ht, hegel.Booleans())
+		cfg := CloseTranscriptConfig{AgentsViewURL: globalURL, Project: map[string]CloseTranscriptTarget{
+			name: {AgentsViewURL: targetURL, Push: push, TokenEnv: "SELECTED_TOKEN"},
+		}}
+		got := cfg.Target(name)
+		if got.AgentsViewURL != targetURL || got.Push != push || got.TokenEnv != "SELECTED_TOKEN" {
+			ht.Fatalf("selected target changed: %#v", got)
+		}
+		other := cfg.Target(name + "\x00")
+		if other.AgentsViewURL != globalURL || other.Push || other.TokenEnv != "" {
+			ht.Fatalf("unmatched project inherited another project's upload authority: %#v", other)
+		}
+	}, hegel.WithTestCases(2000))
+}
+
+func TestCloseTranscriptTargetEnabledInheritance(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		global := hegel.Draw(ht, hegel.Booleans())
+		override := hegel.Draw(ht, hegel.Booleans())
+		present := hegel.Draw(ht, hegel.Booleans())
+		name := hegel.Draw(ht, hegel.Text())
+		target := CloseTranscriptTarget{}
+		want := global
+		if present {
+			target.Enabled = &override
+			want = override
+		}
+		cfg := CloseTranscriptConfig{Enabled: global, Project: map[string]CloseTranscriptTarget{name: target}}
+		got := cfg.Target(name)
+		if got.Enabled == nil || *got.Enabled != want || cfg.Project[name].Enabled != target.Enabled {
+			ht.Fatalf("enabled inheritance mutated configuration or changed the selected value")
+		}
+	}, hegel.WithTestCases(2000))
 }

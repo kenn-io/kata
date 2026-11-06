@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-04
+last_edited: 2026-11-06
 ---
 
 # Configuration
@@ -59,7 +59,7 @@ for the link to open. Names must match `^[a-z0-9][a-z0-9-]*$` and contain
 at most 32 characters. Any other name makes `kata close` warn that the
 configuration is unavailable, naming the key, and skip attachment. Each nonempty variable supplies both its agent and
 session ID. Different agents are ambiguous even when their IDs match.
-Variables for the same agent must agree on the ID case-insensitively.
+Variables for the same agent must agree on the exact ID, including its case.
 Ambiguous context warns and skips attachment.
 
 Setting either `KATA_TRANSCRIPT_AGENT` or `KATA_TRANSCRIPT_SESSION_ID` skips
@@ -100,11 +100,94 @@ If multiple archives contain that session ID, lookup reports ambiguity; use
 the archive's canonical ID or a verified locator. Kata doesn't infer an import
 namespace.
 
-Kata makes no AgentsView request during close. A generated URL is a locator,
-not an availability receipt: offline hosting, delayed indexing, authentication,
-or a session excluded from the archive can prevent it from opening. The
-identifier remains useful for lookup after indexing catches up. Retry the
-AgentsView lookup, not the close, when indexing lags.
+### Project-specific targets and optional upload
+
+Set a project's own target in the invoking client's configuration:
+
+```toml
+[close.transcript]
+enabled = true
+agentsview_url = "https://default-agentsview.example"
+
+[close.transcript.project."team-project"]
+agentsview_url = "https://team-agentsview.example"
+push = true
+token_env = "TEAM_AGENTSVIEW_PUSH_TOKEN"
+```
+
+The exact canonical name of the issue's current project selects the entry.
+Qualified references override the workspace and `--project`; historical
+references follow the issue to its current project before selecting a target.
+An entry applies to that name on whichever daemon the client selects. Use
+separate client configurations when same-named projects on different daemons
+need different targets.
+
+Only `enabled` inherits from the global table; an entry can set it to `true`
+or `false`. Its own `agentsview_url` replaces the global URL, including when
+empty or invalid: Kata then records the session identifier only. It never
+falls back to another archive. Projects without an entry retain the global
+locator behavior. Session-variable mappings remain global. If optional project
+lookup fails, close warns and records the identifier without guessing a URL.
+This fallback uses global `enabled`; it cannot apply an unknown project's
+override, including `enabled = false`. For strict opt-in that records no
+session identity when lookup fails, set global `enabled = false` and enable
+each intended project explicitly.
+
+`push` defaults to `false`. With `push = true`, Kata invokes the installed
+`agentsview push` command after the daemon confirms a new close event with
+the same project, native session, and locator. This requires a companion
+AgentsView release supporting single-session push and an authenticated hosted
+instance explicitly accepting it. Kata does not install, start, or configure
+AgentsView. Automatic upload requires HTTPS; HTTP targets remain locator-only.
+The companion must reject redirects and keep credentials at the configured
+origin.
+
+Set the named token variable in the child environment running Kata, using an
+independent AgentsView credential. Tokens never go in command arguments,
+project files, close events, or output. An explicit `token_env` is required;
+Kata never falls back to an ambient default token or forwards Kata credentials.
+Environment names used for Kata or archive/OS settings cannot be token sources.
+The subprocess receives only normal OS/archive settings and that selected
+token. `AGENTSVIEW_DATA_DIR` (or legacy `AGENT_VIEWER_DATA_DIR`) selects the
+local archive; otherwise AgentsView uses its normal home-derived archive.
+
+Only the exact closing session is sent. Kata preserves its native ID in the
+event and converts it once to AgentsView's exact archive ID for the command:
+Claude's UUID is unchanged; other agents use `<agent>:<native-id>` (for example,
+`codex:<UUID>` or `pi:<ID>`). The command also checks the stored agent. Kata
+never enumerates an archive, syncs it, tries alternative IDs, or falls back to
+a parent, sibling, manager, or related issue's session.
+
+The attempt has a ten-second timeout with process-tree cleanup. A missing CLI,
+unsupported push command, missing exact local session or selected token,
+disabled ingest, unreachable target, or upload failure leaves the close
+successful. Stderr states that the recorded locator is URL-only and upload
+is unavailable or unconfirmed; JSON and agent stdout stay parseable. A session
+identifier without a valid URL remains identifier-only. No upload occurs for
+`--dry`, rejected closes, already-closed no-ops, older daemons that omit the
+transcript, or keyed replays. A keyed first close may upload. Follow-up comment
+failure does not undo a close or its upload attempt.
+
+A project move between the client lookup and the close can leave a stale
+recorded locator. A mismatched project in the close confirmation suppresses
+upload and warns; it does not rewrite the committed event. Use explicit
+`--if-match` when you need a revision guard. Kata does not synthesize revision
+headers or alter keyed retry identity.
+
+A generated URL is a locator, not an availability receipt: offline hosting,
+delayed indexing, authentication, or a missing session can prevent it from
+opening. Successful upload does not promise immediate indexing. Retry lookup
+when indexing lags. To recover an unavailable upload, run the exact-session
+command manually with the original native ID converted as above:
+
+```sh
+agentsview push codex:00000000-0000-4000-8000-000000000001 \
+  --to https://team-agentsview.example --agent codex \
+  --token-env TEAM_AGENTSVIEW_PUSH_TOKEN --json
+```
+
+Do not reopen/reclose to retry upload. There is no background queue or automatic
+retry, and only the one named session may leave the machine.
 
 An unkeyed close of an already closed issue adds no event and cannot replace
 its provenance. Reopen/reclose records a new session on a new close event and

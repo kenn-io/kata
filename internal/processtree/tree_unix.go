@@ -34,15 +34,17 @@ func (t *platformTree) close() error {
 	return signal(-pgid, syscall.SIGKILL)
 }
 
-func (platformTree) terminate(cmd *exec.Cmd) error {
+// Keep these receivers as pointers: exec's cancellation watcher can run while
+// start records pgid.
+func (*platformTree) terminate(cmd *exec.Cmd) error {
 	return terminate(cmd)
 }
 
-func (platformTree) kill(cmd *exec.Cmd) error {
+func (*platformTree) kill(cmd *exec.Cmd) error {
 	return kill(cmd)
 }
 
-func (platformTree) alive(cmd *exec.Cmd) bool {
+func (*platformTree) alive(cmd *exec.Cmd) bool {
 	return alive(cmd)
 }
 

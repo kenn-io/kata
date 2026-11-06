@@ -152,11 +152,6 @@ The close message has a minimum length that depends on the reason:
 				"evidence": parsed,
 				"dry_run":  dryRun,
 			}
-			if len(parsed) > 0 {
-				if ref := closeTranscript(cmd); ref != nil {
-					extra["transcript"] = ref
-				}
-			}
 			// Route the dry-run banner to stderr only in human mode so
 			// machine-parseable output modes stay unprefixed.
 			if dryRun && currentOutputMode() == outputHuman && !flags.Quiet {
@@ -303,14 +298,21 @@ func runActionWithHeaders(
 	if err != nil {
 		return err
 	}
-	if action == "close" && body["transcript"] != nil {
-		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {
-			return err
-		}
-	}
 	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
+	}
+	var attachment closeTranscriptAttachment
+	if action == "close" {
+		if evidence, ok := body["evidence"].([]api.Evidence); ok && len(evidence) > 0 {
+			attachment = prepareCloseTranscript(ctx, cmd, apiClient, pid, issue)
+			if attachment.ref != nil {
+				body["transcript"] = attachment.ref
+			}
+		}
+		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {
+			return err
+		}
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -344,6 +346,7 @@ func runActionWithHeaders(
 			return err
 		}
 		bs = response.Body
+		attachment.finish(ctx, cmd, body, bs)
 	case "reopen":
 		var payload generated.ReopenIssueBody
 		if err := json.Unmarshal(encoded, &payload); err != nil {

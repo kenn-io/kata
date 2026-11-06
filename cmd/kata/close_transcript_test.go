@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 )
 
 const transcriptSessionOne = "00000000-0000-4000-8000-000000000001"
@@ -106,7 +107,9 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 			cmd := &cobra.Command{}
 			var stderr bytes.Buffer
 			cmd.SetErr(&stderr)
-			ref := closeTranscript(cmd)
+			cfg, err := config.ReadCloseTranscriptConfig()
+			require.NoError(t, err)
+			ref := closeTranscript(cmd, cfg, cfg.Target(""))
 			if tc.wantID == "" {
 				assert.Nil(t, ref)
 			} else {
@@ -192,7 +195,7 @@ func TestCloseTranscript_MalformedConfigurationNamesFile(t *testing.T) {
 	cmd := &cobra.Command{}
 	var stderr bytes.Buffer
 	cmd.SetErr(&stderr)
-	assert.Nil(t, closeTranscript(cmd))
+	assert.Nil(t, prepareCloseTranscript(t.Context(), cmd, nil, 0, resolvedIssueRef{}).ref)
 	assert.Contains(t, stderr.String(), filepath.Join(home, "config.toml"))
 	assert.Contains(t, stderr.String(), "skipping attachment")
 }

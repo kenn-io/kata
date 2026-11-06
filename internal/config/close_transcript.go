@@ -12,9 +12,33 @@ import (
 // CloseTranscriptConfig is a client preference, read from the invoking
 // client's Kata home even when it targets a remote daemon.
 type CloseTranscriptConfig struct {
-	Enabled       bool              `toml:"enabled"`
-	AgentsViewURL string            `toml:"agentsview_url"`
-	SessionIDEnv  map[string]string `toml:"session_id_env"`
+	Enabled       bool                             `toml:"enabled"`
+	AgentsViewURL string                           `toml:"agentsview_url"`
+	SessionIDEnv  map[string]string                `toml:"session_id_env"`
+	Project       map[string]CloseTranscriptTarget `toml:"project"`
+}
+
+// CloseTranscriptTarget owns its locator and explicit upload settings. Only
+// Enabled inherits from the global preference when omitted.
+type CloseTranscriptTarget struct {
+	Enabled       *bool  `toml:"enabled"`
+	AgentsViewURL string `toml:"agentsview_url"`
+	Push          bool   `toml:"push"`
+	TokenEnv      string `toml:"token_env"`
+}
+
+// Target selects an exact canonical project name, without resolving secrets.
+// The returned Enabled is always non-nil. An empty project URL is intentional
+// and must never fall back to the global archive.
+func (cfg CloseTranscriptConfig) Target(project string) CloseTranscriptTarget {
+	target, ok := cfg.Project[project]
+	if !ok {
+		target.AgentsViewURL = cfg.AgentsViewURL
+	}
+	if target.Enabled == nil {
+		target.Enabled = &cfg.Enabled
+	}
+	return target
 }
 
 // ReadCloseTranscriptConfig avoids daemon policy and credential resolution.
