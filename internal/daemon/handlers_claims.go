@@ -1475,14 +1475,19 @@ func refreshShowClaimStatusWithinBudget(ctx context.Context, cfg ServerConfig, i
 	if err := cfg.DB.ApplyClaimStatus(ctx, binding.ProjectID, issue.UID, claimStatusFromAPI(resp)); err != nil {
 		return nil, err
 	}
+	var hubNow *time.Time
+	if !resp.HubNow.IsZero() {
+		hubNow = &resp.HubNow
+	}
 	if err := cfg.DB.ClearClaimStatusRefreshError(ctx, issue.ProjectID, issue.UID); err != nil {
+		// The cache already holds the hub's status, so its clock must survive an
+		// expired budget; a leftover marker only delays the next optional refresh.
+		if ctx.Err() != nil && showClaimStatusContextError(err) {
+			return hubNow, nil
+		}
 		return nil, err
 	}
-	if resp.HubNow.IsZero() {
-		return nil, nil
-	}
-	hubNow := resp.HubNow
-	return &hubNow, nil
+	return hubNow, nil
 }
 
 func skipRecentShowClaimStatusError(ctx context.Context, store db.Storage, issue db.Issue, now time.Time) (bool, error) {

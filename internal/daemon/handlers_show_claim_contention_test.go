@@ -161,6 +161,42 @@ func TestShowIssueClaimSpokeKeepsCommittedRefreshWhenClearingTimesOut(t *testing
 	assert.Equal(t, "old failure", marker.LastError)
 }
 
+// A refresh that committed the hub's lease must report the hub's clock even
+// when clearing the old failure marker runs out of budget; otherwise a spoke
+// clock ahead of the hub shows the active lease as expired.
+func TestShowIssueClaimSpokeKeepsHubClockWhenClearingTimesOut(t *testing.T) {
+	spoke := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.DB = showClaimClearWaitStore{Storage: cfg.DB}
+	})
+	project, issue := createShowClaimSpokeProject(t, spoke)
+	hubNow := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	expiresAt := hubNow.Add(time.Hour)
+	require.NoError(t, spoke.DB.MarkClaimStatusRefreshError(t.Context(), project.ID, issue.UID,
+		http.StatusServiceUnavailable, "old failure", time.Now().UTC().Add(-time.Hour)))
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(api.ClaimStatusBody{
+			Held: true,
+			Holder: api.ClaimPrincipalOut{
+				HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD", Holder: "hub-holder", ClientKind: "cli",
+			},
+			Lease: &api.IssueClaimOut{
+				ClaimUID: "01HZNQ7VFPK1XGD8R5MABCD4AA", IssueUID: issue.UID, Holder: "hub-holder",
+				HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD", ClientKind: "cli", ClaimKind: "timed",
+				AcquiredAt: hubNow, ExpiresAt: &expiresAt, Revision: 1, UpdatedAt: hubNow,
+			},
+			HubNow: hubNow,
+		})
+	}))
+	t.Cleanup(hub.Close)
+	writeShowClaimSpokeBinding(t, spoke, project, hub.URL, "claim-token", "claim")
+
+	body := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, time.Second)
+	require.NotNil(t, body.Claim)
+	assert.Equal(t, "hub-holder", body.Claim.Holder)
+	require.NotNil(t, body.ClaimHubNow, "the committed refresh must keep the hub's clock")
+	assert.True(t, hubNow.Equal(*body.ClaimHubNow), "got %s, want %s", body.ClaimHubNow, hubNow)
+}
+
 func TestShowIssueClaimSpokeReturnsDuringRebind(t *testing.T) {
 	spoke, project, issue, _ := newShowClaimTimeoutSpoke(t)
 	writeShowClaimSpokeBinding(t, spoke, project, fastFailClaimHubURL(t), "claim-token", "claim")
