@@ -413,6 +413,33 @@ describe('IssueCollection', () => {
       await waitFor(() => expect(body.scrollTop).toBe(12000))
     })
 
+    it.each([
+      { action: 'clearing the selection', selectedIssueUID: null },
+      { action: 'selecting an earlier row', selectedIssueUID: 'bulk-00005' },
+    ])('keeps the deep-linked prefix after $action', async ({ selectedIssueUID }) => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: 'title', direction: 'asc' }),
+      )
+      const issues = manyTasks(400)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        selectedIssueUID: 'bulk-00300',
+        onSelect: vi.fn(),
+      }
+      const { container, rerender } = render(IssueCollection, { props })
+      expect(visibleRows()).toHaveLength(301)
+      const lastRow = visibleRows()[300]!
+      expect(lastRow.dataset.uid).toBe('bulk-00300')
+      expect(container.contains(document.activeElement)).toBe(false)
+
+      await rerender({ ...props, selectedIssueUID })
+
+      expect(visibleRows()).toHaveLength(301)
+      expect(visibleRows()[300]).toBe(lastRow)
+    })
+
     it('renders the prefix that holds a selected issue beyond the cap', async () => {
       const { container } = renderMany(1000, { selectedIssueUID: 'bulk-00500' })
       await waitFor(() =>

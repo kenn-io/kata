@@ -321,6 +321,11 @@
     if (count > rowLimit) rowLimit = count
   }
 
+  // Rows revealed by a pin stay rendered after selection or focus moves away.
+  $effect(() => {
+    showRows(pinnedRows)
+  })
+
   function loadSort(): KataTaskSort {
     if (typeof window === 'undefined') return DEFAULT_KATA_TASK_SORT
     try {
