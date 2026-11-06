@@ -9,6 +9,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Give coding agents a shorter kata contract. The text that hooks inject,
+  `kata init --with-agents` writes, and the MCP `workflow` guide serves now
+  covers one agent's loop in plain prose: skip kata for questions, search with
+  one or two distinctive words, reuse or create one issue, claim it, and close
+  it with evidence. Attention signals, branch stamps, fan-out and join, inboxes,
+  and planning dates moved to `kata quickstart` and the MCP `teammates` guide.
+  In Codex runs, agents now reuse an existing issue instead of filing a
+  duplicate, and recording a bug no longer sets attention metadata.
 - Keep coding agents focused outside kata workspaces. User-scope contract hooks
   installed by `kata agent-hook install` now inject the contract only when the
   session starts under a `.kata.toml`; elsewhere they return an empty response
