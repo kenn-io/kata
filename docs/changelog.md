@@ -29,6 +29,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   file in charge. See
   [Closing-session transcripts](reference/configuration.md#closing-session-transcripts).
 - Enable search by meaning with `kata daemon local-embeddings`. A fresh home uses a running Ollama; otherwise, it asks before downloading the shared built-in server. Switching keeps compatible Nomic indexes and warns before changing a federation recipe.
+- Read spoke issues with cached lease state when a busy local writer or a federation endpoint change prevents the optional lease refresh from finishing.
 - Open long web UI lists with the first 150 rows and add more as you scroll. The
   browser's own Find sees only rendered rows. End and deep links to late rows
   still draw the remaining rows once.
