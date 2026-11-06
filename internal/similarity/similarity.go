@@ -5,7 +5,6 @@
 package similarity
 
 import (
-	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -94,25 +93,6 @@ func stem(t string) string {
 func Jaccard(a, b []string) float64 {
 	if len(a) == 0 || len(b) == 0 {
 		return 0
-	}
-	// Short titles are compared many times during look-alike retrieval.
-	// Linear scans avoid allocating maps for each comparison.
-	if len(a) <= 10 && len(b) <= 10 {
-		var sizeA, sizeB, intersect int
-		for i, word := range a {
-			if !slices.Contains(a[:i], word) {
-				sizeA++
-				if slices.Contains(b, word) {
-					intersect++
-				}
-			}
-		}
-		for i, word := range b {
-			if !slices.Contains(b[:i], word) {
-				sizeB++
-			}
-		}
-		return float64(intersect) / float64(sizeA+sizeB-intersect)
 	}
 	setA := make(map[string]struct{}, len(a))
 	for _, t := range a {
