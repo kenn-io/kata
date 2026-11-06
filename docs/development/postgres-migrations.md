@@ -383,3 +383,23 @@ immutable migration chain first.
 Start the matching schema 46 binary after migration. Older binaries cannot open
 schema 46. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 47: cross-project ready update-order index
+
+Limited cross-project ready lists can read issues in update order without
+sorting every open issue. The 46→47 migration adds `idx_issues_ready_updated`
+on `issues(updated_at DESC, id DESC)` for open issues where
+`deleted_at IS NULL`, then runs `ANALYZE issues`. It supports
+`kata ready --all --limit N`, MCP `kata.ready`, and `GET /api/v1/ready`.
+Fresh PostgreSQL and SQLite databases include the index.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads `issues` and blocks issue writes; allow an offline window that
+fits the table's size. Existing table grants remain sufficient. Validation-only
+runtime credentials cannot migrate. Earlier versions follow the existing
+migration chain first. SQLite uses its normal JSONL cutover.
+
+Start the matching schema 47 binary after migration. Older binaries cannot open
+schema 47. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

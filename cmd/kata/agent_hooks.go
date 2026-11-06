@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -29,7 +30,8 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 		Use:   "contract <harness>",
 		Short: "Read stdin and emit a harness-native contract response",
 		Long: "Read a finite native SessionStart JSON payload from stdin through EOF\n" +
-			"and emit the kata contract in the harness's native response.\n\n" +
+			"and emit the kata contract in the harness's native response.\n" +
+			"Sessions outside a kata workspace (no .kata.toml) get an empty response.\n\n" +
 			"Hermes uses pre_llm_call instead, injecting only when extra.is_first_turn is true.\n" +
 			"Kit v0.26.0 requires a nonempty text extra.user_message; empty or multimodal messages fail.\n" +
 			"Command harnesses: claude, codex, copilot, cursor, gemini, hermes, qwen, droid, antigravity, kimi-code, muse, zcode.\n" +
@@ -58,6 +60,19 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 			if isTerminal(input) {
 				return agentHookUsage("contract requires a finite JSON payload on stdin; use kata quickstart --format contract for plain text")
 			}
+			// Peek at the payload for its session directory, then hand the
+			// renderer the same bytes followed by anything left unread.
+			const peekLimit = 1024 * 1024
+			peeked, err := io.ReadAll(io.LimitReader(input, peekLimit+1))
+			if err != nil {
+				return &cliError{Message: firstLine(err.Error()), Kind: kindInternal, ExitCode: ExitInternal}
+			}
+			input = io.MultiReader(bytes.NewReader(peeked), input)
+			dir := flags.Workspace
+			if dir == "" {
+				dir = contractPayloadDir(peeked)
+			}
+			text = contractForDir(dir, text)
 			var renderErr error
 			if agentHookUsesKit(capability.Name) {
 				renderErr = writeNativeAgentContract(cmd.Context(), agenthook.Agent(capability.Name), input, cmd.OutOrStdout(), text)

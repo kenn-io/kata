@@ -17,7 +17,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
   and planning dates moved to `kata quickstart` and the MCP `teammates` guide.
   In Codex runs, agents now reuse an existing issue instead of filing a
   duplicate, and recording a bug no longer sets attention metadata.
+- Keep coding agents focused outside kata workspaces. User-scope contract hooks
+  installed by `kata agent-hook install` now inject the contract only when the
+  session starts under a `.kata.toml`; elsewhere they return an empty response
+  instead of telling the agent to search, create, and close kata issues in a
+  repository that does not use kata.
+- Create issues faster on large SQLite stores by reading look-alike match flags from the returned page.
 - Load web UI suggestions faster on large SQLite stores with unrestricted local owner access; scoped and account-bound access keep today's speed.
+- Fetch cross-project ready lists with a limit quickly as stores grow. SQLite and PostgreSQL use an ordered index for `kata ready --all --limit N`, MCP `kata.ready`, and `GET /api/v1/ready` without changing their filters or order. Existing stores upgrade to schema 47 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index).
 - Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
 - Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.

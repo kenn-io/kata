@@ -15,8 +15,8 @@ import (
 // SearchFTS finds terms across issues and their comments and returns the top
 // p.Limit issues scoped to the project. Score sums each word's best negated
 // document BM25 (higher is better). Soft-deleted
-// issues are filtered unless p.IncludeDeleted is set. MatchedIn uses MATCH
-// subqueries since FTS5 highlight() returns NULL on contentless tables.
+// issues are filtered unless p.IncludeDeleted is set. AND search reads MatchedIn
+// from index MATCH subqueries; OR search matches the returned page text.
 func (d *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAll})
 }
@@ -52,9 +52,8 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	if limit <= 0 {
 		limit = 20
 	}
-	// Cap unbounded callers — the per-column subqueries make a huge limit
-	// expensive, and the HTTP layer is the natural enforcer but defending
-	// here is cheap.
+	// Cap unbounded callers: AND search reads flags from index subqueries,
+	// while OR search tokenizes the returned page text.
 	if limit > 200 && !r.params.StableOrder {
 		limit = 200
 	}
@@ -153,20 +152,27 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
   SELECT issue_id AS doc_key, count(*) AS matched_words, sum(score) AS score, max(in_comments) AS in_comments
   FROM word_hits GROUP BY issue_id HAVING count(*) >= ?`, rowFilter, rowFilter)
 	}
+	flags := "0 AS in_title, 0 AS in_body"
+	if r.mode != searchAny {
+		flags = `(i.id IN (SELECT rowid FROM issues_fts WHERE title MATCH ?)) AS in_title,
+        (i.id IN (SELECT rowid FROM issues_fts WHERE body MATCH ?)) AS in_body`
+	}
 	query := candidates + fmt.Sprintf(`
  ), page AS MATERIALIZED (
   SELECT * FROM candidates ORDER BY %s LIMIT ?
  )
  SELECT `+issueColumns+`,
         candidates.score,
-        (i.id IN (SELECT rowid FROM issues_fts WHERE title MATCH ?)) AS in_title,
-        (i.id IN (SELECT rowid FROM issues_fts WHERE body MATCH ?)) AS in_body,
+        %s,
         candidates.in_comments
  FROM page AS candidates
  JOIN issues i ON i.id = candidates.doc_key
  JOIN projects p ON p.id = i.project_id
- ORDER BY %s`, pageOrder, order)
-	args = append(args, limit, colPhrase, colPhrase)
+ ORDER BY %s`, pageOrder, flags, order)
+	args = append(args, limit)
+	if r.mode != searchAny {
+		args = append(args, colPhrase, colPhrase)
+	}
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -210,7 +216,63 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if r.mode == searchAny {
+		if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
+			return nil, fmt.Errorf("search fts: %w", err)
+		}
+	}
 	return out, nil
+}
+
+// pageMatchedIn matches only the returned page with the index tokenizer,
+// avoiding another read of every query word's postings in the store.
+func pageMatchedIn(ctx context.Context, match string, page []db.SearchCandidate) error {
+	if len(page) == 0 {
+		return nil
+	}
+	probe, err := initializedSearchProbe(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := probe.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, c := range page {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO page_fts(rowid, title, body) VALUES (?, ?, ?)`, c.Issue.ID, c.Issue.Title, c.Issue.Body); err != nil {
+			return err
+		}
+	}
+	matched := make(map[int64][]string, len(page))
+	for _, field := range []struct{ column, query string }{
+		{"title", `SELECT rowid FROM page_fts WHERE title MATCH ?`},
+		{"body", `SELECT rowid FROM page_fts WHERE body MATCH ?`},
+	} {
+		rows, err := tx.QueryContext(ctx, field.query, match)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			matched[id] = append(matched[id], field.column)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+	}
+	for i := range page {
+		page[i].MatchedIn = append(page[i].MatchedIn[:0], matched[page[i].Issue.ID]...)
+	}
+	return nil
 }
 
 // The probe shares the index tokenizer without writing to the store, including
@@ -223,6 +285,20 @@ var searchProbe = sync.OnceValues(func() (*sql.DB, error) {
 	probe.SetMaxOpenConns(1)
 	return probe, nil
 })
+
+func initializedSearchProbe(ctx context.Context) (*sql.DB, error) {
+	probe, err := searchProbe()
+	if err != nil {
+		return nil, err
+	}
+	const ftsConfig = "unicode61 remove_diacritics 2"
+	if _, err := probe.ExecContext(ctx, `CREATE VIRTUAL TABLE IF NOT EXISTS query_fts USING fts5(text, tokenize='`+ftsConfig+`');
+ CREATE VIRTUAL TABLE IF NOT EXISTS query_vocab USING fts5vocab(query_fts, instance);
+ CREATE VIRTUAL TABLE IF NOT EXISTS page_fts USING fts5(title, body, tokenize='`+ftsConfig+`')`); err != nil {
+		return nil, err
+	}
+	return probe, nil
+}
 
 // searchablePhrases deduplicates words and drops those unicode61 leaves empty.
 // Its Unicode 6.1 categories differ from Go's Unicode tables.
@@ -247,12 +323,8 @@ func searchablePhrases(ctx context.Context, query string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	probe, err := searchProbe()
+	probe, err := initializedSearchProbe(ctx)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := probe.ExecContext(ctx, `CREATE VIRTUAL TABLE IF NOT EXISTS query_fts USING fts5(text, tokenize='unicode61 remove_diacritics 2');
- CREATE VIRTUAL TABLE IF NOT EXISTS query_vocab USING fts5vocab(query_fts, instance)`); err != nil {
 		return nil, err
 	}
 	tx, err := probe.BeginTx(ctx, nil)
