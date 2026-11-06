@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/similarity"
@@ -28,8 +29,8 @@ func (d *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.Searc
 // Look-alike checks score title and body overlap, so comments don't contribute
 // candidates, scores, or MatchedIn flags. A single OR match sums BM25 relevance
 // across query words for each issue. With TitleQuery on stores of 5k+ issues,
-// SQLite returns up to Limit titles ordered by title overlap, without MatchedIn.
-// More than 200 titles that can meet the duplicate threshold use full ranking.
+// SQLite can narrow ranking to titles that can meet the duplicate threshold.
+// BM25 scores, order, Limit, and match flags retain their usual meaning.
 func (d *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAny})
 }
@@ -106,81 +107,59 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		filterArgs = append(filterArgs, stamp, stamp, r.params.After.ID)
 	}
 
-	var maxIssueID int64
-	if r.mode == searchAny && r.params.TitleQuery != "" {
-		if err := d.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM issues`).Scan(&maxIssueID); err != nil {
+	var issueCount int
+	var eligibleIDs []int64
+	if r.mode == searchAny && r.params.TitleQuery != "" && strings.IndexFunc(r.params.TitleQuery, func(r rune) bool { return r > unicode.MaxASCII }) < 0 {
+		if err := d.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT 1 FROM issues LIMIT 5000)`).Scan(&issueCount); err != nil {
 			return nil, err
 		}
 	}
-	if maxIssueID >= 5_000 {
-		titleMatch, err := d.lookalikeMatch(ctx, r.params.TitleQuery)
+	if issueCount == 5_000 {
+		titleMatch, common, err := d.lookalikeMatch(ctx, r.params.TitleQuery)
 		if err != nil {
 			return nil, err
 		}
-		if titleMatch == "" {
+		if titleMatch == "" && !common {
 			return nil, nil
 		}
-		// Walk title postings without BM25, then hydrate only titles that
-		// can reach the duplicate threshold.
-		titleArgs := append([]any{titleMatch, r.params.ProjectID}, filterArgs...)
-		rows, err := d.QueryContext(ctx, `SELECT i.id, i.title FROM issues_fts
- CROSS JOIN issues i ON i.id = issues_fts.rowid
- WHERE issues_fts MATCH ? AND i.project_id = ? `+rowFilter, titleArgs...)
-		if err != nil {
-			return nil, fmt.Errorf("search titles: %w", err)
-		}
-		var ids []int64
-		titleScores := make(map[int64]float64)
-		titleTokens := similarity.Tokenize(r.params.TitleQuery)
-		for rows.Next() {
-			var id int64
-			var title string
-			if err := rows.Scan(&id, &title); err != nil {
-				_ = rows.Close()
-				return nil, err
+		if !common {
+			// Walk title postings without BM25, then hydrate only titles that
+			// can reach the duplicate threshold.
+			titleArgs := append([]any{titleMatch, r.params.ProjectID}, filterArgs...)
+			rows, err := d.QueryContext(ctx, `SELECT i.id, i.title FROM issues_fts
+	 CROSS JOIN issues i ON i.id = issues_fts.rowid
+	 WHERE issues_fts MATCH ? AND i.project_id = ? `+rowFilter, titleArgs...)
+			if err != nil {
+				return nil, fmt.Errorf("search titles: %w", err)
 			}
-			titleScore := similarity.Jaccard(titleTokens, similarity.Tokenize(similarity.TitlePrefix(title)))
-			if titleScore >= similarity.MinTitleJaccard {
-				ids = append(ids, id)
-				titleScores[id] = titleScore
-				if len(ids) > 200 {
-					break
+			var ids []int64
+			titleTokens := similarity.Tokenize(r.params.TitleQuery)
+			for rows.Next() {
+				var id int64
+				var title string
+				if err := rows.Scan(&id, &title); err != nil {
+					_ = rows.Close()
+					return nil, err
+				}
+				titleScore := similarity.Jaccard(titleTokens, similarity.Tokenize(similarity.TitlePrefix(title)))
+				if titleScore >= similarity.MinTitleJaccard {
+					ids = append(ids, id)
+					if len(ids) > 200 {
+						break
+					}
 				}
 			}
-		}
-		err = rows.Err()
-		_ = rows.Close()
-		if err != nil {
-			return nil, err
-		}
-		if len(ids) == 0 {
-			return nil, nil
-		}
-		if len(ids) <= 200 {
-			encoded, err := json.Marshal(ids)
+			err = rows.Err()
+			_ = rows.Close()
 			if err != nil {
 				return nil, err
 			}
-			hydrationArgs := append([]any{string(encoded), r.params.ProjectID}, filterArgs...)
-			out, err := d.searchCandidates(ctx, `SELECT `+issueColumns+`, 0, 0
- FROM issues i JOIN projects p ON p.id = i.project_id
- WHERE i.id IN (SELECT value FROM json_each(?)) AND i.project_id = ? `+rowFilter+` ORDER BY i.id`, hydrationArgs...)
-			if err != nil {
-				return nil, err
+			if len(ids) == 0 {
+				return nil, nil
 			}
-			for i := range out {
-				out[i].Score = titleScores[out[i].Issue.ID]
+			if len(ids) <= 200 {
+				eligibleIDs = ids
 			}
-			slices.SortFunc(out, func(a, b db.SearchCandidate) int {
-				if order := cmp.Compare(b.Score, a.Score); order != 0 {
-					return order
-				}
-				return cmp.Compare(a.Issue.ID, b.Issue.ID)
-			})
-			if len(out) > limit {
-				out = out[:limit]
-			}
-			return out, nil
 		}
 	}
 
@@ -200,6 +179,15 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
   WHERE issues_fts MATCH ? AND i.project_id = ? %s`, rowFilter)
 		args = append(args, colPhrase, r.params.ProjectID)
 		args = append(args, filterArgs...)
+		if len(eligibleIDs) > 0 {
+			encoded, err := json.Marshal(eligibleIDs)
+			if err != nil {
+				return nil, err
+			}
+			// As in AND search, filter the MATCH scan instead of seeking each rowid.
+			candidates += " AND issues_fts.rowid + 0 IN (SELECT value FROM json_each(?))"
+			args = append(args, string(encoded))
+		}
 	} else {
 		// Match words as rows with a fixed statement shape and one JSON parameter.
 		words, err := json.Marshal(phrases)
@@ -272,18 +260,6 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
  ORDER BY %s`, pageOrder, order)
 	args = append(args, limit)
 
-	out, err := d.searchCandidates(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
-	}
-	return out, nil
-}
-
-func (d *Store) searchCandidates(ctx context.Context, query string, args ...any) ([]db.SearchCandidate, error) {
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
@@ -319,6 +295,9 @@ func (d *Store) searchCandidates(ctx context.Context, query string, args ...any)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
 	}
 	return out, nil
 }
@@ -507,23 +486,23 @@ func (d *Store) postingCounts(ctx context.Context, words []byte, limit int, comm
 	return counts, rows.Err()
 }
 
-func (d *Store) lookalikeMatch(ctx context.Context, titleQuery string) (string, error) {
+func (d *Store) lookalikeMatch(ctx context.Context, titleQuery string) (string, bool, error) {
 	titles := similarity.Tokenize(titleQuery)
 	slices.Sort(titles)
 	titles = slices.Compact(titles)
 	if len(titles) == 0 {
-		return "", nil
+		return "", false, nil
 	}
 	for i, token := range titles {
 		titles[i] = `{title} : "` + token + `"*`
 	}
 	words, err := json.Marshal(titles)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	counts, err := d.postingCounts(ctx, words, 5_000, false)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	frequencies := make(map[string]int, len(titles))
 	for i, title := range titles {
@@ -536,5 +515,8 @@ func (d *Store) lookalikeMatch(ctx context.Context, titleQuery string) (string, 
 		// Prefer longer prefixes when the bounded probe can't distinguish them.
 		return cmp.Compare(len(b), len(a))
 	})
-	return strings.Join(titles[:len(titles)/2+1], " OR "), nil
+	if frequencies[titles[0]] == 5_000 {
+		return "", true, nil
+	}
+	return strings.Join(titles[:len(titles)/2+1], " OR "), false, nil
 }

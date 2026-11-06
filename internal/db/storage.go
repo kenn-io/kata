@@ -243,8 +243,8 @@ type Storage interface {
 	// SearchFTSAny finds at least one query term in title and body documents only
 	// for look-alike checks. Comments don't contribute candidates, scores, or MatchedIn flags.
 	// With TitleQuery on stores of 5k+ issues, SQLite retrieves title matches that
-	// can reach the similarity threshold, capped at Limit and ordered by title
-	// overlap without MatchedIn. Above 200 matches it uses full ranking.
+	// can reach the similarity threshold, preserving the usual ranking, Limit,
+	// scores, and match flags. Above 200 matches it uses full ranking.
 	SearchFTSAny(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
 
 	// embeddings (semantic search)
