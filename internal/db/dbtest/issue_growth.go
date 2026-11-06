@@ -47,7 +47,8 @@ func RunCreateIssueHistoryGrowth(t *testing.T, open func(*testing.T) db.Storage,
 }
 
 // RunIssueUIDPrefixGrowth checks bounded candidate lookup across project scopes.
-func RunIssueUIDPrefixGrowth(t *testing.T, open func(*testing.T) db.Storage, seed func(*testing.T, db.Storage, int, int, string, int64, int64)) {
+// The caller chooses the cost measure and its minimum meaningful value.
+func RunIssueUIDPrefixGrowth(t *testing.T, open func(*testing.T) db.Storage, seed func(*testing.T, db.Storage, int, int, string, int64, int64), measure growthtest.Measure, floor float64) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("growthtest: growth checks skip under -short")
@@ -90,8 +91,8 @@ func RunIssueUIDPrefixGrowth(t *testing.T, open func(*testing.T) db.Storage, see
 				t.Run(kind, func(t *testing.T) {
 					growthtest.Run(t, growthtest.Check{
 						Small: 10_000, Large: 100_000,
-						MaxRatio: 2, Floor: float64(32 * time.Microsecond),
-						Measure: growthtest.Fastest(9),
+						MaxRatio: 2, Floor: floor,
+						Measure: measure,
 						Build: func(_ testing.TB, size int) (run, reset func()) {
 							fixture := fixtures[size]
 							ctx := t.Context()
