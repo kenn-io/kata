@@ -59,7 +59,18 @@ func newUICmd() *cobra.Command {
 				}
 			}
 			return openWebUIForCommand(ctx, prepared, returnPath, func(ctx context.Context, launch client.WebUILaunch) error {
-				fmt.Fprintf(cmd.OutOrStdout(), "Opening %s\n", launch.PublicURL)
+				var outputErr error
+				switch currentOutputMode() {
+				case outputJSON:
+					outputErr = emitJSON(cmd.OutOrStdout(), map[string]string{"url": launch.PublicURL})
+				case outputAgent:
+					outputErr = writeAgentOKLine(cmd.OutOrStdout(), "ui", agentRowField("url", launch.PublicURL))
+				default:
+					_, outputErr = fmt.Fprintf(cmd.OutOrStdout(), "Opening %s\n", launch.PublicURL)
+				}
+				if outputErr != nil {
+					return outputErr
+				}
 				if err := openWebBrowserForCommand(ctx, launch); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "Could not open a browser. Open the URL above.")
 				}

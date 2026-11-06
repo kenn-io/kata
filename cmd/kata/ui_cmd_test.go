@@ -93,6 +93,37 @@ func TestUICommandMissingBrowserPrintsReachableURL(t *testing.T) {
 	assert.Contains(t, string(body), "<!doctype html>")
 }
 
+func TestUICommandOutputModesBeforeBrowser(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		flag string
+		want string
+	}{
+		{"json", "--json", "{\"kata_api_version\":1,\"url\":\"https://daemon.example/kata#login=1&return_path=%2Fkata\"}\n"},
+		{"agent", "--agent", "OK ui url=https://daemon.example/kata#login=1&return_path=%2Fkata\n"},
+		{"quiet", "-q", "Opening https://daemon.example/kata#login=1&return_path=%2Fkata\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: "https://daemon.example", ConfiguredRemote: true})
+			resetFlags(t)
+			cmd := newRootCmd()
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			cmd.SetArgs([]string{"ui", tc.flag})
+			cmd.SetContext(t.Context())
+			openWebBrowserForCommand = func(_ context.Context, launch client.WebUILaunch) error {
+				assert.Equal(t, "https://daemon.example/kata#login=1&return_path=%2Fkata", launch.PublicURL)
+				assert.Equal(t, tc.want, stdout.String())
+				return &exec.Error{Name: "xdg-open", Err: exec.ErrNotFound}
+			}
+			require.NoError(t, cmd.Execute())
+			assert.Equal(t, tc.want, stdout.String())
+			assert.Equal(t, "Could not open a browser. Open the URL above.\n", stderr.String())
+		})
+	}
+}
+
 func TestUICommandResolvesRefsToCanonicalUIDRoutes(t *testing.T) {
 	env := testenv.New(t)
 	workspace, _ := initLocalBoundWorkspace(t, env, "example-project")
