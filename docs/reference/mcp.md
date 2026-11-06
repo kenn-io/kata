@@ -320,7 +320,8 @@ model context at startup.
 The first `tools/list` from the workspace-bound default `kata mcp serve` is about 21 KB for 19 tools.
 With every section available by default loaded, it is about 263 KB for 110 tools;
 output schemas account for about two thirds. A test keeps these catalogs under
-24 KB and 289 KB. Storage, teams, and tokens require startup flags and aren't counted.
+24 KB and 289 KB, including every section loader. Detailed storage, team, and token tools
+require startup flags and fall outside these default catalogs.
 
 | Loader | Detailed tools |
 | --- | --- |
