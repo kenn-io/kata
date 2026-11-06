@@ -73,8 +73,7 @@ func TestToolCatalogStaysWithinBudget(t *testing.T) {
 
 func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
 	catalog := func(description string) *sdkmcp.ListToolsResult {
-		server, err := New(defaultCatalogOptions(t))
-		require.NoError(t, err)
+		server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-server", Version: "1"}, nil)
 		addTool(server, "kata.load_fixture", "Load fixture", description, toolHints(true, false, false),
 			func(context.Context, *sdkmcp.CallToolRequest, ToolSectionInput) (*sdkmcp.CallToolResult, ToolSectionOutput, error) {
 				return successResult(), ToolSectionOutput{}, nil
