@@ -227,6 +227,63 @@ func TestSearchFTS_MultiTermImplicitAND(t *testing.T) {
 	assert.Equal(t, "fix login crash on Safari", got[0].Issue.Title)
 }
 
+func TestSearchFTS_RareWordAND(t *testing.T) {
+	t.Parallel()
+	d, ctx, p := setupTestProject(t)
+	var wantIDs []int64
+	wantFlags := make(map[int64][]string)
+	for _, fixture := range []struct {
+		title, body string
+		comments    []string
+		flags       []string
+	}{
+		{"quasar login browser", "", nil, []string{"title"}},
+		{"ordinary task", "quasar login browser", nil, []string{"body"}},
+		{"login", "browser", []string{"quasar", "login browser"}, []string{"title", "body", "comments"}},
+		{"ordinary task", "", []string{"quasar", "login", "browser"}, []string{"comments"}},
+	} {
+		issue := createTesterIssueWithBody(ctx, t, d, p.ID, fixture.title, fixture.body)
+		for _, comment := range fixture.comments {
+			addTesterComment(ctx, t, d, issue.ID, comment)
+		}
+		wantIDs = append(wantIDs, issue.ID)
+		wantFlags[issue.ID] = fixture.flags
+	}
+	// Common words have many postings in both indexes; the rare word also
+	// occurs on an issue missing one required word.
+	createTesterIssueWithBody(ctx, t, d, p.ID, "quasar login", "")
+	for range 20 {
+		issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login browser", "")
+		addTesterComment(ctx, t, d, issue.ID, "login browser")
+	}
+
+	wantScores := make(map[int64]float64)
+	for _, word := range []string{"quasar", "login", "browser"} {
+		hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: word, Limit: 200})
+		require.NoError(t, err)
+		for _, hit := range hits {
+			wantScores[hit.Issue.ID] += hit.Score
+		}
+	}
+	for _, query := range []string{"login browser quasar", "quasar browser login"} {
+		t.Run(query, func(t *testing.T) {
+			hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query, StableOrder: true})
+			require.NoError(t, err)
+			require.Len(t, hits, len(wantIDs))
+			for i, hit := range hits {
+				assert.Equal(t, wantIDs[i], hit.Issue.ID)
+				assert.Equal(t, wantFlags[hit.Issue.ID], hit.MatchedIn)
+				assert.InDelta(t, wantScores[hit.Issue.ID], hit.Score, 1e-12)
+			}
+		})
+	}
+	for _, query := range []string{"login absentword browser", "absentword"} {
+		hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query})
+		require.NoError(t, err)
+		assert.Empty(t, hits)
+	}
+}
+
 func TestSearchFTS_QueryEscaping(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupTestProject(t)
