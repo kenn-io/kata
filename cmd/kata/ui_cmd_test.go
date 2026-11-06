@@ -1,15 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/web"
 )
@@ -37,10 +42,54 @@ func TestUICommandNoArgOpensInbox(t *testing.T) {
 		ConfiguredRemote: true,
 	})
 
-	_, err := runCmdOutput(t, nil, "ui")
+	out, err := runCmdOutput(t, nil, "ui")
 	require.NoError(t, err)
 	assert.Equal(t, "/kata", openedUIReturnPath)
 	assert.Contains(t, openedUIURL, "https://daemon.example/kata#")
+	assert.Equal(t, "Opening "+openedUIURL+"\n", out)
+}
+
+func TestUICommandMissingBrowserPrintsReachableURL(t *testing.T) {
+	handler, err := web.NewEmbeddedHandler()
+	require.NoError(t, err)
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.WebHandler = handler
+	})
+	stubUICommandLaunch(t, client.PreparedWebUI{
+		BaseURL: env.URL,
+		Client:  env.HTTP,
+		Runtime: client.DiscoveredWebRuntime{
+			Origin: env.URL, OriginStable: true,
+			Capabilities: []string{"loopback", "sse"},
+		},
+	})
+	resetFlags(t)
+	cmd := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"ui"})
+	cmd.SetContext(t.Context())
+	openWebBrowserForCommand = func(_ context.Context, launch client.WebUILaunch) error {
+		assert.Equal(t, env.URL+"/kata", launch.PublicURL)
+		assert.Equal(t, "Opening "+env.URL+"/kata\n", stdout.String())
+		return &exec.Error{Name: "xdg-open", Err: exec.ErrNotFound}
+	}
+
+	require.NoError(t, cmd.Execute())
+	assert.Equal(t, "Opening "+env.URL+"/kata\n", stdout.String())
+	assert.Equal(t, "Could not open a browser. Open the URL above.\n", stderr.String())
+	printedURL := strings.TrimSpace(strings.TrimPrefix(stdout.String(), "Opening "))
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, printedURL, nil)
+	require.NoError(t, err)
+	response, err := env.HTTP.Do(request)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	assert.Equal(t, http.StatusOK, response.StatusCode)
+	assert.Contains(t, response.Header.Get("Content-Type"), "text/html")
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "<!doctype html>")
 }
 
 func TestUICommandResolvesRefsToCanonicalUIDRoutes(t *testing.T) {
@@ -61,9 +110,10 @@ func TestUICommandResolvesRefsToCanonicalUIDRoutes(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			openedUIReturnPath = ""
-			_, err := runCmdOutput(t, nil, args...)
+			out, err := runCmdOutput(t, nil, args...)
 			require.NoError(t, err)
 			assert.Equal(t, "/kata?scope="+created.ProjectUID+"&issue="+created.UID, openedUIReturnPath)
+			assert.Equal(t, "Opening "+openedUIURL+"\n", out)
 		})
 	}
 }
