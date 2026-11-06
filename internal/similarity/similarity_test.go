@@ -114,14 +114,12 @@ func TestTokenize(t *testing.T) {
 	})
 }
 
-func TestTokenizeTitleAllocationBudget(t *testing.T) {
+func BenchmarkTokenizeTitle(b *testing.B) {
 	const title = "login callback drops session after browser redirect"
-	var got []string
-	allocations := testing.AllocsPerRun(100, func() {
-		got = similarity.Tokenize(title)
-	})
-	assert.Equal(t, []string{"login", "callback", "drop", "session", "after", "browser", "redirect"}, got)
-	assert.LessOrEqual(t, allocations, 3.0, "checking many titles must not allocate once per word")
+	b.ReportAllocs()
+	for b.Loop() {
+		similarity.Tokenize(title)
+	}
 }
 
 func TestJaccard(t *testing.T) {

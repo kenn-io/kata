@@ -530,13 +530,28 @@ func (d *Store) lookalikeMatch(ctx context.Context, phrases []string, titleQuery
 	}
 	less := func(a, b string) int { return cmp.Compare(byWord[a], byWord[b]) }
 	slices.SortStableFunc(rare, less)
-	titles, err := searchablePhrases(ctx, titleQuery)
-	if err != nil {
-		return "", "", err
-	}
+	titles := similarity.Tokenize(titleQuery)
+	slices.Sort(titles)
+	titles = slices.Compact(titles)
 	needed := len(titles)/2 + 1
-	titles = slices.DeleteFunc(titles, func(word string) bool { return byWord[word] == 0 })
-	slices.SortStableFunc(titles, less)
+	// Reuse the probe's raw-word frequencies to choose scorer tokens. Prefixes
+	// also cover the suffix variants that Tokenize folds into the same token.
+	frequencies := make(map[string]int, len(phrases))
+	for i, phrase := range phrases {
+		for _, token := range similarity.Tokenize(phrase) {
+			frequencies[token] += counts[i]
+		}
+	}
+	slices.SortStableFunc(titles, func(a, b string) int {
+		if n := cmp.Compare(frequencies[a], frequencies[b]); n != 0 {
+			return n
+		}
+		// Prefer longer prefixes when the bounded probe can't distinguish them.
+		return cmp.Compare(len(b), len(a))
+	})
+	for i, token := range titles {
+		titles[i] = `"` + token + `"*`
+	}
 	titleMatch := ""
 	if len(titles) > 0 {
 		titleMatch = "{title} : (" + strings.Join(titles[:min(needed, len(titles))], " OR ") + ")"
