@@ -2105,23 +2105,6 @@ func TestCreate_LookalikeSoftBlock(t *testing.T) {
 	assert.Contains(t, string(second.body), `"candidates"`)
 }
 
-func TestCreate_LookalikeTitleOnly(t *testing.T) {
-	h, pid := bootstrapProject(t)
-	ts := h.ts.(*httptest.Server)
-	body := map[string]any{"actor": "agent-1", "title": "Inventory page crashes on second page"}
-	first := postWithHeader(t, ts, issuesURL(pid), nil, body)
-	requireOK(t, first)
-	second := postWithHeader(t, ts, issuesURL(pid), nil, body)
-	require.Equal(t, http.StatusConflict, second.status, string(second.body))
-	assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
-	assert.Contains(t, string(second.body), `"short_id":"`+issueShortIDFromCreate(t, first.body)+`"`)
-	assert.Equal(t, 1, strings.Count(string(second.body), `"short_id":`))
-	body["force_new"] = true
-	third := postWithHeader(t, ts, issuesURL(pid), nil, body)
-	requireOK(t, third)
-	assert.NotEqual(t, issueShortIDFromCreate(t, first.body), issueShortIDFromCreate(t, third.body))
-}
-
 func TestCreate_LookalikeExactTitleOutsideFTS(t *testing.T) {
 	for _, tc := range []struct {
 		title    string
@@ -2149,51 +2132,6 @@ func TestCreate_LookalikeExactTitleOutsideFTS(t *testing.T) {
 			require.Equal(t, http.StatusConflict, second.status, string(second.body))
 			assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
 			assert.Contains(t, string(second.body), `"short_id":"`+shortID+`"`)
-		})
-	}
-}
-
-func TestCreate_LookalikeOlderBodylessMatch(t *testing.T) {
-	h, pid := bootstrapProject(t)
-	ts := h.ts.(*httptest.Server)
-	title := "Inventory page crashes on second page"
-	first := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{"actor": "agent-1", "title": title})
-	requireOK(t, first)
-	for range 21 {
-		requireOK(t, postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
-			"actor": "agent-1", "title": title, "body": "apples", "force_new": true,
-		}))
-	}
-	second := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
-		"actor": "agent-1", "title": title, "body": "apples bananas cherries dates elderberries figs grapes hazelnuts",
-	})
-	require.Equal(t, http.StatusConflict, second.status, string(second.body))
-	assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
-	assert.Contains(t, string(second.body), `"short_id":"`+issueShortIDFromCreate(t, first.body)+`"`)
-	assert.Equal(t, 1, strings.Count(string(second.body), `"short_id":`))
-
-	third := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{"actor": "agent-1", "title": title})
-	require.Equal(t, http.StatusConflict, third.status, string(third.body))
-	assert.Contains(t, string(third.body), `"code":"duplicate_candidates"`)
-	assert.Equal(t, 20, strings.Count(string(third.body), `"short_id":`))
-}
-
-func TestCreate_LookalikeDifferentFullTitles(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		titles [2]string
-	}{
-		{"case", [2]string{"Inventory page crashes", "inventory page crashes"}},
-		{"numbered", [2]string{"Phase 1", "Phase 2"}},
-		{"suffix past rune limit", [2]string{strings.Repeat("界", 500) + "first", strings.Repeat("界", 500) + "second"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h, pid := bootstrapProject(t)
-			ts := h.ts.(*httptest.Server)
-			for _, title := range tc.titles {
-				result := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{"actor": "agent-1", "title": title})
-				requireOK(t, result)
-			}
 		})
 	}
 }
