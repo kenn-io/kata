@@ -403,9 +403,10 @@ default_priority = 3
 ```
 
 Values are integers from `0` (highest) through `4` (lowest). An explicit
-`--priority` overrides the default, including `--priority 0`. Remove or comment
-out `default_priority` to leave priority unset when the flag is omitted; TOML
-has no `null` value. With no setting, creation keeps its existing behavior.
+`--priority` overrides the default, including `--priority 0`. Use
+`--priority none` to leave one creation unprioritized without changing the
+default. Remove or comment out `default_priority` to leave priority unset when
+the flag is omitted; TOML has no `null` value. With no setting, creation keeps its existing behavior.
 
 The CLI reads this setting for each creation, so no daemon restart is needed.
 It uses the invoking client's config even when connecting to a remote or named
