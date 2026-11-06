@@ -1,7 +1,7 @@
 ---
 title: Issue attachments
 description: Attach files through Docbank and view images and videos in Kata.
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 # Issue attachments

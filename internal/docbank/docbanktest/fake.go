@@ -9,12 +9,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"uuid"
+
+	kitdaemon "go.kenn.io/kit/daemon"
 
 	"go.kenn.io/kata/internal/docbank"
 )
@@ -63,7 +66,24 @@ func (f *Fake) Requests() []string {
 	defer f.mu.Unlock()
 	return append([]string(nil), f.requests...)
 }
+
+// Publish writes a runtime record for this fake into home, replacing any record
+// this test process already published there.
+func (f *Fake) Publish(t testing.TB, home string) {
+	t.Helper()
+	rec := kitdaemon.NewRuntimeRecord("docbank", "test", kitdaemon.Endpoint{Network: "tcp", Address: f.Server.Listener.Addr().String()})
+	rec.Metadata = map[string]string{"api_key": "test-key"}
+	if _, err := (kitdaemon.RuntimeStore{Dir: home}).Write(rec); err != nil {
+		t.Fatalf("publish docbank runtime record: %v", err)
+	}
+}
+
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/ping" && r.Method == "GET" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.MarshalWrite(w, map[string]any{"ok": true, "service": "docbank", "version": "test", "pid": os.Getpid()})
+		return
+	}
 	f.mu.Lock()
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
 	before := f.BeforeResponse

@@ -28,6 +28,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   integer query values such as `kata events --after` cursors go out as plain
   numbers.
 - Open the web UI manually over SSH or in a container: `kata ui` and `kata ui <issue-ref>` print the browser URL in the selected output format before launching the browser and exit 0 with a manual-open hint if no browser opens. Cancelling the command still returns an error.
+- Attach files through a Docbank running on the same machine with
+  `[docbank] local = true`, without copying its URL or API key. Kata reads the
+  current address and key on every request, so Docbank restarts and updates need
+  no change, and starts Docbank with `docbank daemon start` when it is not
+  running, which needs `docbank` on the daemon's `PATH`. A `url` or
+  `KATA_DOCBANK_URL` still selects that Docbank instead. See
+  [Issue attachments](guide/attachments.md#configure-the-daemon).
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the
