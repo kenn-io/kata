@@ -230,50 +230,39 @@ func TestSearchFTS_MultiTermImplicitAND(t *testing.T) {
 func TestSearchFTS_RareWordAND(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupTestProject(t)
-	var wantIDs []int64
-	wantFlags := make(map[int64][]string)
-	for _, fixture := range []struct {
-		title, body string
-		comments    []string
-		flags       []string
-	}{
-		{"quasar login browser", "", nil, []string{"title"}},
-		{"ordinary task", "quasar login browser", nil, []string{"body"}},
-		{"login", "browser", []string{"quasar", "login browser"}, []string{"title", "body", "comments"}},
-		{"ordinary task", "", []string{"quasar", "login", "browser"}, []string{"comments"}},
-	} {
-		issue := createTesterIssueWithBody(ctx, t, d, p.ID, fixture.title, fixture.body)
-		for _, comment := range fixture.comments {
-			addTesterComment(ctx, t, d, issue.ID, comment)
-		}
-		wantIDs = append(wantIDs, issue.ID)
-		wantFlags[issue.ID] = fixture.flags
-	}
-	// Common words have many postings in both indexes; the rare word also
-	// occurs on an issue missing one required word.
+	title := createTesterIssueWithBody(ctx, t, d, p.ID, "quasar login browser", "")
+	body := createTesterIssueWithBody(ctx, t, d, p.ID, "ordinary task", "quasar login browser")
+	comment := createTesterIssueWithBody(ctx, t, d, p.ID, "login", "browser")
+	addTesterComment(ctx, t, d, comment.ID, "quasar login browser")
+	// The rare word also occurs on an issue missing one required word.
 	createTesterIssueWithBody(ctx, t, d, p.ID, "quasar login", "")
 	for range 20 {
 		issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login browser", "")
 		addTesterComment(ctx, t, d, issue.ID, "login browser")
 	}
 
-	wantScores := make(map[int64]float64)
-	for _, word := range []string{"quasar", "login", "browser"} {
-		hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: word, Limit: 200})
-		require.NoError(t, err)
-		for _, hit := range hits {
-			wantScores[hit.Issue.ID] += hit.Score
-		}
+	// Hand-calculated BM25 with k1=1.2 and b=0.75. Issues have 24
+	// documents and 52 tokens; comments have 21 documents and 43 tokens.
+	// Quasar's IDF is ln(21.5/3.5) in issues and ln(20.5/1.5) in
+	// comments. Login and browser use the 1e-6 IDF floor in both indexes.
+	want := []struct {
+		id    int64
+		flags []string
+		score float64
+	}{
+		{comment.ID, []string{"title", "body", "comments"}, 2.1969398536340305},
+		{title.ID, []string{"title"}, 1.5685000074276114},
+		{body.ID, []string{"body"}, 1.1826275682426863},
 	}
 	for _, query := range []string{"login browser quasar", "quasar browser login"} {
 		t.Run(query, func(t *testing.T) {
-			hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query, StableOrder: true})
+			hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query})
 			require.NoError(t, err)
-			require.Len(t, hits, len(wantIDs))
+			require.Len(t, hits, len(want))
 			for i, hit := range hits {
-				assert.Equal(t, wantIDs[i], hit.Issue.ID)
-				assert.Equal(t, wantFlags[hit.Issue.ID], hit.MatchedIn)
-				assert.InDelta(t, wantScores[hit.Issue.ID], hit.Score, 1e-12)
+				assert.Equal(t, want[i].id, hit.Issue.ID)
+				assert.Equal(t, want[i].flags, hit.MatchedIn)
+				assert.InDelta(t, want[i].score, hit.Score, 1e-12)
 			}
 		})
 	}

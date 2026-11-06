@@ -126,7 +126,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		// Every match contains every word, so the rarest word bounds the issues
 		// worth scoring. Scoring walks each posting of a word, while skipping
 		// postings outside that set is far cheaper.
-		anchor, none, err := d.anchorWord(ctx, phrases)
+		anchor, none, err := d.anchorWord(ctx, words)
 		if err != nil {
 			return nil, fmt.Errorf("search fts: %w", err)
 		}
@@ -139,11 +139,9 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
   SELECT rowid AS id FROM issues_fts WHERE issues_fts MATCH ?1
   UNION
   SELECT c.issue_id FROM comments_fts CROSS JOIN comments c ON c.id = comments_fts.rowid WHERE comments_fts MATCH ?1
- ), anchor_comments AS MATERIALIZED (
-  SELECT id FROM comments WHERE issue_id IN (SELECT id FROM anchor)
  ), `
 			issueIn = " AND issues_fts.rowid + 0 IN (SELECT id FROM anchor)"
-			commentIn = " AND comments_fts.rowid + 0 IN (SELECT id FROM anchor_comments)"
+			commentIn = " AND c.issue_id + 0 IN (SELECT id FROM anchor)"
 			args = append(args, anchor)
 		}
 		args = append(args, string(words), r.params.ProjectID)
@@ -174,19 +172,17 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
   SELECT issue_id AS doc_key, count(*) AS matched_words, sum(score) AS score, max(in_comments) AS in_comments
   FROM word_hits GROUP BY issue_id HAVING count(*) >= ?`, anchorCTE, issueIn, rowFilter, commentIn, rowFilter)
 	}
-	flags := "0 AS in_title, 0 AS in_body"
 	query := candidates + fmt.Sprintf(`
  ), page AS MATERIALIZED (
   SELECT * FROM candidates ORDER BY %s LIMIT ?
  )
  SELECT `+issueColumns+`,
         candidates.score,
-        %s,
         candidates.in_comments
  FROM page AS candidates
  JOIN issues i ON i.id = candidates.doc_key
  JOIN projects p ON p.id = i.project_id
- ORDER BY %s`, pageOrder, flags, order)
+ ORDER BY %s`, pageOrder, order)
 	args = append(args, limit)
 
 	rows, err := d.QueryContext(ctx, query, args...)
@@ -196,29 +192,30 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	defer func() { _ = rows.Close() }()
 
 	var out []db.SearchCandidate
-	commentHits := map[int64]bool{}
 	for rows.Next() {
 		var (
-			i                           db.Issue
-			score                       float64
-			inTitle, inBody, inComments bool // in_title and in_body are placeholders; pageMatchedIn sets the flags
+			i          db.Issue
+			score      float64
+			inComments bool
 		)
 		if err := rows.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status,
 			&i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision,
 			&i.RecurrenceID, &i.OccurrenceKey,
 			&i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView,
-			&score, &inTitle, &inBody, &inComments); err != nil {
+			&score, &inComments); err != nil {
 			return nil, fmt.Errorf("scan search row: %w", err)
 		}
 		handle, _ := db.IssueTeammate(i.Metadata)
 		i.SourceFallback(i.Author, handle)
 		db.RecordExposedIssue(ctx, i.ID)
+		var matched []string
 		if inComments {
-			commentHits[i.ID] = true
+			matched = []string{"comments"}
 		}
 		out = append(out, db.SearchCandidate{
-			Issue: i,
-			Score: score,
+			Issue:     i,
+			Score:     score,
+			MatchedIn: matched,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -227,16 +224,12 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
 	}
-	for i := range out {
-		if commentHits[out[i].Issue.ID] {
-			out[i].MatchedIn = append(out[i].MatchedIn, "comments")
-		}
-	}
 	return out, nil
 }
 
 // pageMatchedIn matches only the returned page with the index tokenizer,
 // avoiding another read of every query word's postings in the store.
+// It prepends title and body flags to the existing comments flag.
 func pageMatchedIn(ctx context.Context, match string, page []db.SearchCandidate) error {
 	if len(page) == 0 {
 		return nil
@@ -281,7 +274,7 @@ func pageMatchedIn(ctx context.Context, match string, page []db.SearchCandidate)
 		}
 	}
 	for i := range page {
-		page[i].MatchedIn = append(page[i].MatchedIn[:0], matched[page[i].Issue.ID]...)
+		page[i].MatchedIn = append(matched[page[i].Issue.ID], page[i].MatchedIn...)
 	}
 	return nil
 }
@@ -376,14 +369,7 @@ const anchorCap = 10_000 // postings counted per word and table
 // comments when that count stays under anchorCap. It returns "" when every word
 // is common, and none when a word has no postings, since AND search then
 // matches nothing.
-func (d *Store) anchorWord(ctx context.Context, phrases []string) (anchor string, none bool, err error) {
-	if len(phrases) == 0 {
-		return "", false, nil
-	}
-	words, err := json.Marshal(phrases)
-	if err != nil {
-		return "", false, err
-	}
+func (d *Store) anchorWord(ctx context.Context, words []byte) (anchor string, none bool, err error) {
 	rows, err := d.QueryContext(ctx, `SELECT j.value,
  (SELECT count(*) FROM (SELECT 1 FROM issues_fts WHERE issues_fts MATCH j.value LIMIT ?1)) +
  (SELECT count(*) FROM (SELECT 1 FROM comments_fts WHERE comments_fts MATCH j.value LIMIT ?1))
@@ -392,7 +378,7 @@ func (d *Store) anchorWord(ctx context.Context, phrases []string) (anchor string
 		return "", false, err
 	}
 	defer func() { _ = rows.Close() }()
-	best := 2 * anchorCap
+	best := anchorCap
 	for rows.Next() {
 		var word string
 		var n int
@@ -402,7 +388,7 @@ func (d *Store) anchorWord(ctx context.Context, phrases []string) (anchor string
 		if n == 0 {
 			return "", true, nil
 		}
-		if n < best && n < anchorCap {
+		if n < best {
 			anchor, best = word, n
 		}
 	}
