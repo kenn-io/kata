@@ -53,6 +53,12 @@ func TestCronRunDistinctSameOccurrence(t *testing.T) {
 	}
 	runs := cronOK(t, f.session, "cron_runs", map[string]any{"job_uid": job["uid"]})["runs"].([]any)
 	require.Len(t, runs, 2)
+	for _, run := range runs {
+		value := run.(map[string]any)
+		require.Equal(t, "default", value["staleness"].(map[string]any)["basis"])
+		shown := cronRecord(t, f.session, "cron_run", map[string]any{"uid": value["uid"]}, "run")
+		require.Equal(t, value["staleness"], shown["staleness"])
+	}
 	require.NotEqual(t, runs[0].(map[string]any)["uid"], runs[1].(map[string]any)["uid"])
 }
 func TestCronRunTeammateAttribution(t *testing.T) {

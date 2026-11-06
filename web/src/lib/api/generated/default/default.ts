@@ -224,6 +224,9 @@ import type {
   ReadyIssuesParams,
   ReadyIssuesPathParameters,
   ReadyResponseBody,
+  ReapCronRunBody,
+  ReapCronRunPathParameters,
+  ReapCronRunResponseBody,
   RebindFederationReplicaPathParameters,
   RebindFederationReplicaRequestBody,
   RebindFederationReplicaResponseBody,
@@ -2568,6 +2571,50 @@ export const observeCronRun = async (
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(observeCronRunBody),
+  })
+}
+
+export type reapCronRunResponse200 = {
+  data: ReapCronRunResponseBody
+  status: 200
+}
+
+export type reapCronRunResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type reapCronRunResponseSuccess = reapCronRunResponse200 & {
+  headers: Headers
+}
+export type reapCronRunResponseError = reapCronRunResponseDefault & {
+  headers: Headers
+}
+
+export type reapCronRunResponse = reapCronRunResponseSuccess | reapCronRunResponseError
+
+export const getReapCronRunUrl = ({ projectId, runUid }: ReapCronRunPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runs/${encodeURIComponent(String(runUid))}/reap`
+}
+
+export const reapCronRun = async (
+  { projectId, runUid }: ReapCronRunPathParameters,
+  reapCronRunBody: ReapCronRunBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<reapCronRunResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<reapCronRunResponse>(getReapCronRunUrl({ projectId, runUid }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(reapCronRunBody),
   })
 }
 

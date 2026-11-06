@@ -1232,6 +1232,8 @@ components:
         revision:
           format: int64
           type: integer
+        staleness:
+          $ref: "#/components/schemas/RunStaleness"
         started_at:
           format: date-time
           type: string
@@ -5347,6 +5349,35 @@ components:
       required:
         - issues
       type: object
+    ReapCronRunBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        expected_revision:
+          format: int64
+          minimum: 1
+          type: integer
+        force:
+          type: boolean
+        message:
+          maxLength: 1024
+          type: string
+      required:
+        - expected_revision
+      type: object
+    ReapCronRunResponseBody:
+      properties:
+        events:
+          items:
+            $ref: "#/components/schemas/Event"
+          type: array
+        run:
+          $ref: "#/components/schemas/CronRun"
+      required:
+        - run
+        - events
+      type: object
     RebindFederationReplicaRequestBody:
       additionalProperties: false
       properties:
@@ -6154,6 +6185,23 @@ components:
         - binding
         - status
         - import
+      type: object
+    RunStaleness:
+      properties:
+        basis:
+          enum:
+            - timeout_seconds
+            - default
+          type: string
+        stale:
+          type: boolean
+        stale_at:
+          format: date-time
+          type: string
+      required:
+        - stale
+        - stale_at
+        - basis
       type: object
     SearchHit:
       properties:
@@ -8592,6 +8640,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ObserveCronRunResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/runs/{run_uid}/reap:
+    post:
+      operationId: reapCronRun
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: run_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReapCronRunBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReapCronRunResponseBody"
           description: OK
         default:
           content:

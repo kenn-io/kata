@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -521,8 +521,9 @@ occurrence key and issue. No occurrence is reserved by logging a run.
 UID, project, definition references, occurrence key, issue UID, attributed actor,
 teammate, executor label, and server-created time are immutable. Status, summary,
 start time, and end time are mutable evidence. Supported statuses are `running`,
-`succeeded`, `failed`, `cancelled`, and `unknown`; they impose no transition or
-launch protocol. Summary version 1 permits a message and nonnegative integer
+`succeeded`, `failed`, `cancelled`, and `unknown`. Kata recommends the
+[advisory state machine](#advisory-run-state-machine) below; the store still
+accepts any supported status transition. Summary version 1 permits a message and nonnegative integer
 input/output token counts and is bounded to 64 KiB. The whole observation and
 its event are bounded to 96 KiB. Unknown fields are rejected. Times are RFC3339
 instants; an end cannot precede a start. An occurrence key is at most 1024
@@ -543,6 +544,95 @@ orders by creation time and UID descending. Use `next_before_uid` with `--before
 page. Ordinary federation publishes observations from spokes, folds evidence
 by original event provenance per run UID, and preserves independent runs in
 baselines and backup. Run identity conflicts fail rather than replacing a run.
+
+### Stale running runs
+
+`kata cron run list --json` and `kata cron run show <run-uid> --json` include
+`staleness` on running runs:
+
+```json
+{
+  "staleness": {
+    "stale": true,
+    "stale_at": "2026-11-03T14:15:00Z",
+    "basis": "timeout_seconds"
+  }
+}
+```
+
+A run becomes stale at `updated_at` plus the current job's positive
+`timeout_seconds` and a 15-minute reporting margin. Without a timeout, including
+workflow-only runs and missing jobs, the deadline is `updated_at` plus 24 hours
+and `basis` is `default`. Retained job tombstones still supply their timeout.
+Changing a job's timeout changes the warning for existing runs. Deadlines beyond
+the RFC3339 UTC range saturate at its nearest endpoint (`0000-01-01T00:00:00Z`
+or `9999-12-31T23:59:59.999999999Z`).
+
+Staleness is an advisory age warning, never a run status or proof a process
+stopped. Reading it changes no evidence, revision, or events. Kata does not stop
+processes or enforce an execution timeout. The margin allows for reporting
+latency and modest clock skew. Replicas evaluate their local clock and current
+job definition against replicated `updated_at`; verdicts can differ while
+replication catches up or clocks disagree.
+
+An identical observation retry does not refresh `updated_at`. An adapter that
+reports progress must send changed evidence, such as a new summary message.
+The TUI marks these runs `running · stale` and shows the deadline in run detail;
+loaded deadlines keep aging as the view redraws. CLI and MCP reads return the
+server's verdict at request time. Older daemons omit `staleness`, which means
+it was not evaluated. Completed runs omit the field too.
+
+### Reap abandoned evidence
+
+Preview stale running runs before recording an operator decision:
+
+```sh
+kata cron run reap --json
+kata cron run reap --job-uid <job-uid> --scan-limit 1000 --json
+kata cron run reap <run-uid> --apply --message "Runtime stopped" --json
+```
+
+Without `--apply`, reap writes nothing. Named UIDs are read directly and
+deduplicated. Otherwise, the command scans at most 1000 history records, newest
+first, in pages of at most 100; `--scan-limit` changes that bound. The bound
+counts all scanned statuses, so older running runs can remain outside it.
+`scan_limit_reached` indicates that more history may remain. `--job-uid` filters
+both scanned and named runs. Use `--force` to include running runs before their
+deadline; it does not bypass revision checks or write authorization.
+
+Reap records `unknown` using each run's read revision. It preserves the starter,
+identity, token counts and existing start/end evidence; it does not invent an
+end time or stop a process. Its ordinary `cron.run.observed` event names the
+operator. The summary adds an audit message, the optional operator note, then
+previous message text, truncated to the existing encoded summary limit. Operator
+notes are at most 1024 bytes; new operator actor/note input cannot contain U+0000,
+which PostgreSQL JSONB cannot represent.
+
+The result reports each candidate's `run_uid`, read `revision`, `staleness` and
+`action`. Revision, status or age conflicts become `skipped: changed`,
+`not_running` or `not_stale`; the command never retries them. Unexpected API or
+transport failures stop further writes, return nonzero and retain completed
+results. Rerun after inspecting the result. An old daemon's unevaluated running
+run or missing reap route produces an upgrade hint; a missing resource remains
+a resource error.
+
+Prefer the project's hub, where observations converge. Reap and adapter evidence
+written on different replicas still fold by the ordinary event clock. A late
+adapter can report the true outcome after refreshing the run's revision.
+
+### Advisory run state machine
+
+Adapters should follow these transitions. Kata stores evidence without
+starting processes or enforcing this protocol.
+
+| From | To | Reported by |
+| --- | --- | --- |
+| New run | `running` | Adapter at launch |
+| `running` | `running` with changed evidence | Adapter progress; advances `updated_at` |
+| `running` | `succeeded`, `failed`, `cancelled`, or `unknown` | Adapter after execution |
+| `running` | `unknown` | Operator through `reap` |
+| `unknown` | `succeeded`, `failed`, or `cancelled` | Adapter with late evidence and the current revision |
+| Terminal outcome | Any supported status | Store permits it; adapters should preserve a known outcome |
 
 An adapter with a machine-readable cause for a run's outcome starts
 `summary.message` with the line `reason: <code>`, then puts any detail on the
@@ -674,3 +764,13 @@ Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `workflow` or `workflows`; job actions and run observations use `workflow_uid`,
 and run observations pair it with `workflow_definition_event_uid`. Events use
 `cron.workflow.*`, and JSONL workflow records use `cron_workflow`.
+
+
+Run reads use `GET /api/v1/projects/{project_id}/cron/runs` (`listCronRuns`) and
+`GET .../cron/runs/{run_uid}` (`showCronRun`). Operator reap uses
+`POST .../cron/runs/{run_uid}/reap` (`reapCronRun`) with
+`expected_revision`, optional request `actor`, optional `message`, and `force`.
+It uses ordinary project write authorization; authenticated identity overrides
+the request actor. A stale revision returns `409 cron_conflict` with `current`;
+a terminal run returns `409 cron_run_not_running`, and a fresh run returns
+`409 cron_run_not_stale` with `stale_at`. Missing runs return `404 not_found`.

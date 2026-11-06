@@ -21,6 +21,7 @@ func cronRunAPIError(ctx context.Context, cfg ServerConfig, err error, projectID
 	return cronAPIError(ctx, cfg, err, projectID, "", true)
 }
 func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
+	registerCronReapHandler(h, cfg)
 	base := "/api/v1/projects/{project_id}/cron"
 	huma.Register(h, huma.Operation{OperationID: "getCronCapabilities", Method: http.MethodGet, Path: base + "/capabilities"}, func(ctx context.Context, in *api.CronProjectRequest) (*api.CronCapabilitiesResponse, error) {
 		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
@@ -60,7 +61,10 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, in.RunUID)
 		}
 		out := &api.CronRunResponse{}
-		out.Body.Run = api.CronRunFrom(run)
+		out.Body.Run, err = cronRunWithStaleness(ctx, cfg, run)
+		if err != nil {
+			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, in.RunUID)
+		}
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "listCronRuns", Method: http.MethodGet, Path: base + "/runs"}, func(ctx context.Context, in *api.CronRunsRequest) (*api.CronRunsResponse, error) {
@@ -72,9 +76,9 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, "")
 		}
 		out := &api.CronRunsResponse{}
-		out.Body.Runs = []api.CronRun{}
-		for _, run := range runs {
-			out.Body.Runs = append(out.Body.Runs, api.CronRunFrom(run))
+		out.Body.Runs, err = cronRunsWithStaleness(ctx, cfg, in.ProjectID, runs)
+		if err != nil {
+			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, "")
 		}
 		limit := in.Limit
 		if limit == 0 || limit > 100 {

@@ -1518,6 +1518,7 @@ type CronRun struct {
 	OccurrenceKey              *string         `json:"occurrence_key,omitempty"`
 	ProjectID                  int64           `json:"project_id"`
 	Revision                   int64           `json:"revision"`
+	Staleness                  *RunStaleness   `json:"staleness,omitempty"`
 	StartedAt                  *time.Time      `json:"started_at,omitempty"`
 	Status                     string          `json:"status" validate:"required"`
 	Summary                    SummaryResponse `json:"summary"`
@@ -1535,6 +1536,13 @@ func (c CronRun) Validate() error {
 	}
 	if err := typesValidator.Var(c.CreatedAt, "required"); err != nil {
 		errors = errors.Append("CreatedAt", err)
+	}
+	if c.Staleness != nil {
+		if v, ok := any(c.Staleness).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Staleness", err)
+			}
+		}
 	}
 	if err := typesValidator.Var(c.Status, "required"); err != nil {
 		errors = errors.Append("Status", err)
@@ -5630,6 +5638,45 @@ func (r ReadyResponseBody) Validate() error {
 	return errors
 }
 
+type ReapCronRunBody struct {
+	Actor            *string `json:"actor,omitempty"`
+	ExpectedRevision int64   `json:"expected_revision" validate:"gte=1"`
+	Force            *bool   `json:"force,omitempty"`
+	Message          *string `json:"message,omitempty" validate:"omitempty,max=1024"`
+}
+
+func (r ReapCronRunBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ReapCronRunResponseBody struct {
+	Events []Event `json:"events" validate:"required"`
+	Run    CronRun `json:"run"`
+}
+
+func (r ReapCronRunResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
+	}
+	for i, item := range r.Events {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Events[%d]", i), err)
+			}
+		}
+	}
+	if v, ok := any(r.Run).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Run", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type RebindFederationReplicaRequestBody struct {
 	HubCatalog string `json:"hub_catalog" validate:"required"`
 }
@@ -6365,6 +6412,28 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Status", err)
 		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type RunStaleness struct {
+	Basis   RunStalenessBasis `json:"basis" validate:"required"`
+	Stale   bool              `json:"stale"`
+	StaleAt time.Time         `json:"stale_at" validate:"required"`
+}
+
+func (r RunStaleness) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(r.Basis).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Basis", err)
+		}
+	}
+	if err := typesValidator.Var(r.StaleAt, "required"); err != nil {
+		errors = errors.Append("StaleAt", err)
 	}
 	if len(errors) == 0 {
 		return nil

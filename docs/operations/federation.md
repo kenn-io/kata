@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # Federation
@@ -15,6 +15,8 @@ roles and walks through preview, connection and recovery. Project relays
 require Kata 0.19.0 or later. Direct-spoke enrollment uses daemon-owner
 credentials. In identity mode, the owner uses the bootstrap token and names an
 existing hub account with `--actor`.
+
+For abandoned adapter evidence, see [stale running runs](../reference/cron.md#stale-running-runs).
 
 Use this page for operator details:
 

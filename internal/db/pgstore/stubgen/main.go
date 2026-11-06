@@ -52,6 +52,7 @@ var alreadyImplemented = map[string]bool{
 	"ClaimScreenView":     true, // store.go
 	"ReleaseScreenView":   true, // store.go
 	"ObserveCronRun":      true,
+	"ReapCronRun":         true,
 	"IssuePlanningDates":  true,
 	"CronRun":             true,
 	"ListCronRuns":        true,
