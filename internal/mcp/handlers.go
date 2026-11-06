@@ -18,6 +18,7 @@ import (
 
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -190,8 +191,13 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		results = results[:limit]
 		truncated = true
 	}
+	var hints []searchhint.Hint
+	if len(searches) > 0 {
+		hints = searchhint.EmptyLexical(query, effectiveMode, len(results), input.Cursor == "")
+	}
 	project, outputProjects := outputProjectScope(projects)
 	return successResult(), SearchOutput{
+		Hints:          hints,
 		Project:        project,
 		Projects:       outputProjects,
 		Query:          query,

@@ -158,7 +158,9 @@ func TestListAllDefaultsToUnlimited(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		sentLimit.Store(r.URL.Query().Has("limit"))
+		if r.URL.Query().Get("include_total") == "" { // Skip the empty-list status count.
+			sentLimit.Store(r.URL.Query().Has("limit"))
+		}
 		_, _ = w.Write([]byte(`{"issues":[]}`))
 	}))
 	t.Cleanup(server.Close)
@@ -205,8 +207,10 @@ func TestListSortDaemonCompatibility(t *testing.T) {
 					}
 					_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"` + tt.version + `"}`))
 				case "/api/v1/issues":
-					listCalls.Add(1)
-					observedSort = r.URL.Query().Get("sort")
+					if r.URL.Query().Get("include_total") == "" { // Skip the empty-list status count.
+						listCalls.Add(1)
+						observedSort = r.URL.Query().Get("sort")
+					}
 					_, _ = w.Write([]byte(`{"issues":[]}`))
 				default:
 					http.NotFound(w, r)

@@ -783,10 +783,19 @@ the filters, belongs to another project, or fell outside `--limit`, its child
 stays visible as a top-level row. JSON and agent output remain flat in the
 server's order. This grouping applies when `--sort` is omitted or empty.
 
+When the first page of an open or closed `kata list` is empty, it counts
+matching issues with the other status and prints, for example,
+`Hint: no open issues; 4 closed; see kata list --status all` to stderr.
+`--quiet` suppresses it. JSON carries a `hints` entry with code
+`excluded_closed` or `excluded_open`, the message, and `next`. Each `next`
+keeps the scope, output, and filter flags, and omits `--as` and `--cursor`.
+Retry commands use POSIX syntax on Unix and PowerShell syntax on Windows.
+
 Lexical search returns only issues whose title, body, or comments contain every
-query word. When a multi-word lexical search finds nothing, `kata search` prints
-`Hint: no issue contains every word; search again with fewer words` to stderr;
-`--quiet` suppresses it.
+query word. When the first page of a multi-word lexical search finds nothing,
+`kata search` prints `Hint: no issue contains every word; search again with fewer words`
+to stderr, including when status or label filters are set. `--quiet` suppresses
+it. JSON adds a `hints` entry with code `every_word_required` and that message.
 
 By default `kata search` runs lexical (FTS) search. When the daemon has
 [semantic search](../guide/semantic-search.md) configured, search
