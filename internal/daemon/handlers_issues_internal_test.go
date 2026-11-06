@@ -2,23 +2,22 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/pagination"
 )
 
 type lookalikeQueryRecordingStore struct {
-	db.Storage
+	lookalikeCandidateStore
 	query string
-}
-
-func (s *lookalikeQueryRecordingStore) ListIssues(_ context.Context, _ db.ListIssuesParams) ([]db.Issue, error) {
-	return nil, nil
 }
 
 func (s *lookalikeQueryRecordingStore) SearchFTSAny(_ context.Context, params db.SearchFTSParams) ([]db.SearchCandidate, error) {
@@ -56,14 +55,77 @@ func TestRunLookalikeCheckBoundsSearchQuery(t *testing.T) {
 type lookalikeCandidateStore struct {
 	db.Storage
 	candidates []db.SearchCandidate
+	listIssues func(db.ListIssuesParams) ([]db.Issue, error)
 }
 
-func (s *lookalikeCandidateStore) ListIssues(_ context.Context, _ db.ListIssuesParams) ([]db.Issue, error) {
+func (s *lookalikeCandidateStore) ListIssues(_ context.Context, params db.ListIssuesParams) ([]db.Issue, error) {
+	if s.listIssues != nil {
+		return s.listIssues(params)
+	}
 	return nil, nil
 }
 
 func (s *lookalikeCandidateStore) SearchFTSAny(_ context.Context, _ db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return s.candidates, nil
+}
+
+func TestRunLookalikeCheckExactTitlePaging(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		body        string
+		fts         bool
+		wantCalls   int
+		wantMatches int
+	}{
+		{"bodyless stops at twenty", "", false, 1, 20},
+		{"nonmatches exhaust short page", "apples bananas cherries dates elderberries figs grapes hazelnuts", false, 2, 0},
+		{"full FTS skips exact lookup", "apples", true, 0, 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &api.CreateIssueRequest{ProjectID: 7}
+			in.Body.Title = "Inventory page crashes on second page"
+			in.Body.Body = tc.body
+			stamp := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			rows := make([]db.Issue, 21)
+			for i := range rows {
+				rows[i] = db.Issue{ID: int64(21 - i), UID: fmt.Sprintf("issue-%d", i), Title: in.Body.Title, Body: "apples", CreatedAt: stamp}
+			}
+			calls := 0
+			store := &lookalikeCandidateStore{listIssues: func(params db.ListIssuesParams) ([]db.Issue, error) {
+				calls++
+				require.Equal(t, 20, params.Limit)
+				require.True(t, params.CreatedFirst)
+				require.Equal(t, int64(7), params.ProjectID)
+				require.Equal(t, in.Body.Title, params.ExactTitle)
+				switch calls {
+				case 1:
+					require.Nil(t, params.After)
+					return rows[:20], nil
+				case 2:
+					require.Equal(t, &pagination.Position{CreatedAt: stamp, ID: 2}, params.After)
+					return rows[20:], nil
+				default:
+					t.Fatal("exact lookup continued after exhaustion")
+					return nil, nil
+				}
+			}}
+			if tc.fts {
+				for _, issue := range rows[:20] {
+					store.candidates = append(store.candidates, db.SearchCandidate{Issue: issue})
+				}
+			}
+			err := runLookalikeCheck(t.Context(), ServerConfig{DB: store}, in, "example-project")
+			if tc.wantMatches == 0 {
+				require.NoError(t, err)
+			} else {
+				var apiErr *api.APIError
+				require.ErrorAs(t, err, &apiErr)
+				assert.Equal(t, "duplicate_candidates", apiErr.Code)
+				assert.Len(t, apiErr.Data["candidates"], tc.wantMatches)
+			}
+			assert.Equal(t, tc.wantCalls, calls)
+		})
+	}
 }
 
 func closedLookalike(title, body, uid string) db.SearchCandidate {

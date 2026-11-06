@@ -2116,6 +2116,10 @@ func TestCreate_LookalikeTitleOnly(t *testing.T) {
 	assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
 	assert.Contains(t, string(second.body), `"short_id":"`+issueShortIDFromCreate(t, first.body)+`"`)
 	assert.Equal(t, 1, strings.Count(string(second.body), `"short_id":`))
+	body["force_new"] = true
+	third := postWithHeader(t, ts, issuesURL(pid), nil, body)
+	requireOK(t, third)
+	assert.NotEqual(t, issueShortIDFromCreate(t, first.body), issueShortIDFromCreate(t, third.body))
 }
 
 func TestCreate_LookalikeExactTitleOutsideFTS(t *testing.T) {

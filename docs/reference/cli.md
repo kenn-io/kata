@@ -634,12 +634,12 @@ Before creating an issue, the daemon checks existing non-deleted look-alikes,
 including closed ones, using the first 500 Unicode code points of the title
 and body. When either body has no searchable words, the check requires
 identical full title text. In that case, case, whitespace, and punctuation
-changes make titles different. `--force-new` bypasses that check; idempotency still wins
-when an idempotency key matches. If create times out, the request is canceled
-or the connection drops before the response arrives, or the response is cut
-off before it completes, the CLI reports `create_outcome_unknown`: check whether
-the issue exists before retrying, and use `--force-new` only after confirming
-that no issue was created.
+changes make titles different. `--force-new` bypasses that check; idempotency
+still wins when an idempotency key matches. If create times out, the request
+is canceled or the connection drops before the response arrives, or the
+response is cut off before it completes, the CLI reports
+`create_outcome_unknown`: check whether the issue exists before retrying,
+and use `--force-new` only after confirming that no issue was created.
 
 Create conflicts identify existing issues. With `--json`, `error.data` carries
 the prior issue's `uid`, `short_id`, and `qualified_id` for an idempotency

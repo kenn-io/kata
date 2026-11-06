@@ -199,7 +199,7 @@ func checkListExactTitle(t *testing.T, store db.Storage) error {
 	other, err := store.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
 	create := func(projectID int64, title string) db.Issue {
-		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projectID, Title: title, Author: "tester"})
+		issue, err := createFixtureIssue(ctx, store, projectID, title, "tester", nil)
 		require.NoError(t, err)
 		return issue
 	}
@@ -225,6 +225,29 @@ func checkListExactTitle(t *testing.T, store db.Storage) error {
 	require.Equal(t, first.UID, rows[0].UID)
 	params.IssueScope = nil
 	rows, err = store.ListIssues(db.WithAuthorizedProjects(ctx, []string{other.UID}), params)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+
+	stamp := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	imported, _, err := store.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: project.ID, Source: "fixture", Actor: "tester",
+		Items: []db.ImportItem{
+			{ExternalID: "first", Title: "Tied title", Author: "tester", Status: "open", CreatedAt: stamp, UpdatedAt: stamp},
+			{ExternalID: "second", Title: "Tied title", Author: "tester", Status: "open", CreatedAt: stamp, UpdatedAt: stamp},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, imported.Items, 2)
+	params = db.ListIssuesParams{ProjectID: project.ID, ExactTitle: "Tied title", CreatedFirst: true, Limit: 1}
+	for i := 1; i >= 0; i-- {
+		rows, err = store.ListIssues(ctx, params)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		require.Equal(t, imported.Items[i].IssueShortID, rows[0].ShortID)
+		require.True(t, stamp.Equal(rows[0].CreatedAt))
+		params.After = &pagination.Position{CreatedAt: rows[0].CreatedAt, ID: rows[0].ID}
+	}
+	rows, err = store.ListIssues(ctx, params)
 	require.NoError(t, err)
 	require.Empty(t, rows)
 	return nil

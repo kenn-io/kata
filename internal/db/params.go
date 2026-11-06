@@ -113,8 +113,8 @@ type ListIssuesParams struct {
 	CreatedFirst  bool                 // created_at DESC; OldestFirst selects ASC
 	After         *pagination.Position // stable keyset boundary
 
-	ExactTitle    string // empty = no filter; otherwise identical full title text
 	ProjectID     int64
+	ExactTitle    string       // empty = no filter; otherwise identical full title text
 	Status        string       // "open" | "closed" | "" (any)
 	Priority      *int64       // nil = no filter; non-nil = exactly this value
 	MaxPriority   *int64       // nil = no filter; non-nil = priority <= MaxPriority

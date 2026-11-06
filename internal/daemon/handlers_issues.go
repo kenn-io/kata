@@ -1596,36 +1596,49 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 	if err != nil {
 		return internalAPIError(err)
 	}
-	exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
-		ProjectID: in.ProjectID, ExactTitle: in.Body.Title,
-		CreatedFirst: true, IssueScope: issueScopeFromContext(ctx),
-	})
-	if err != nil {
-		return internalAPIError(err)
-	}
-	for _, issue := range exact {
-		candidates = append(candidates, db.SearchCandidate{Issue: issue})
-	}
-	seen := make(map[string]bool, len(candidates))
 	matched := []map[string]any{}
-	for _, c := range candidates {
-		if seen[c.Issue.UID] {
-			continue
-		}
-		seen[c.Issue.UID] = true
-		score := similarity.Score(in.Body.Title, in.Body.Body, c.Issue.Title, c.Issue.Body)
+	addMatch := func(issue db.Issue) {
+		score := similarity.Score(in.Body.Title, in.Body.Body, issue.Title, issue.Body)
 		if score >= similarityThreshold {
 			matched = append(matched, map[string]any{
-				"uid":          c.Issue.UID,
-				"short_id":     c.Issue.ShortID,
-				"qualified_id": qualifiedID(projectName, c.Issue.ShortID),
-				"title":        c.Issue.Title,
+				"uid":          issue.UID,
+				"short_id":     issue.ShortID,
+				"qualified_id": qualifiedID(projectName, issue.ShortID),
+				"title":        issue.Title,
 				"score":        score,
 			})
-			if len(matched) == 20 {
-				break
+		}
+	}
+	seen := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		if !seen[c.Issue.UID] {
+			seen[c.Issue.UID] = true
+			addMatch(c.Issue)
+		}
+	}
+	var after *pagination.Position
+	for len(matched) < 20 {
+		exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
+			ProjectID: in.ProjectID, ExactTitle: in.Body.Title, Limit: 20,
+			CreatedFirst: true, After: after, IssueScope: issueScopeFromContext(ctx),
+		})
+		if err != nil {
+			return internalAPIError(err)
+		}
+		for _, issue := range exact {
+			// Exact-title pages don't overlap; only FTS rows need deduplication.
+			if !seen[issue.UID] {
+				addMatch(issue)
+				if len(matched) == 20 {
+					break
+				}
 			}
 		}
+		if len(exact) < 20 {
+			break
+		}
+		last := exact[len(exact)-1]
+		after = &pagination.Position{CreatedAt: last.CreatedAt, ID: last.ID}
 	}
 	if len(matched) == 0 {
 		return nil
