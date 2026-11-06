@@ -412,6 +412,7 @@ func initialFilter(_ Options) ListFilter {
 // the user's cursor and filter state across the round trip.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	previousReads := m.detail.reads
+	previousDetailNavDepth := len(m.detail.navStack)
 	previousConn, previousScope := m.connGen, m.scopeGen
 	next, cmd := m.update(msg)
 	m = next.(Model)
@@ -419,6 +420,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connectionRows = rows
 		m.detail = m.applyDetailViewportCache(m.detail)
 		m = m.applyListViewportCache()
+	} else if len(m.detail.navStack) < previousDetailNavDepth {
+		// Back restores a saved detail model whose viewport cache may
+		// predate connection or terminal changes made while its child was open.
+		m.detail = m.applyDetailViewportCache(m.detail)
 	}
 	query := strings.TrimSpace(m.list.filter.Search)
 	if query != m.searchQuery {

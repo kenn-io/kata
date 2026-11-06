@@ -1880,6 +1880,47 @@ func TestDetail_EscFromStackedDetail_PopsToPrior(t *testing.T) {
 	}
 }
 
+func TestModel_LinkedDetailEscRefreshesViewportAfterConnectionBanner(t *testing.T) {
+	const finalLine = "restored-detail-final-line"
+	m := setupDetailScenario(t, 80, 24, strings.Repeat("body line\n", 40)+finalLine)
+	m.api = NewClient("http://daemon.example", nil)
+	m.sseStatus = sseConnected
+	m.connectionRows = m.connectionHeaderRows()
+	m.detail = m.applyDetailViewportCache(m.detail)
+
+	m, _ = updateModel(m, jumpDetailMsg{ref: "11bb"})
+	if len(m.detail.navStack) != 1 {
+		t.Fatalf("navStack length = %d, want 1 after linked issue jump", len(m.detail.navStack))
+	}
+	priorHeight := m.detail.navStack[0].lastTermHeight
+
+	m, _ = updateModel(m, sseStatusMsg{gen: m.connGen, state: sseReconnecting})
+	if m.connectionRows != 1 {
+		t.Fatal("reconnecting state did not add a connection banner row")
+	}
+	if m.detail.lastTermHeight != m.contentHeight() {
+		t.Fatalf("linked detail height = %d, want current content height %d", m.detail.lastTermHeight, m.contentHeight())
+	}
+	if m.detail.navStack[0].lastTermHeight != priorHeight {
+		t.Fatalf("saved detail height = %d, want stale snapshot height %d", m.detail.navStack[0].lastTermHeight, priorHeight)
+	}
+
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if len(m.detail.navStack) != 0 {
+		t.Fatalf("navStack length = %d, want 0 after Esc", len(m.detail.navStack))
+	}
+	if m.detail.lastTermHeight != m.contentHeight() {
+		t.Fatalf("restored detail height = %d, want current content height %d", m.detail.lastTermHeight, m.contentHeight())
+	}
+	if strings.Contains(m.viewContent(), finalLine) {
+		t.Fatal("final detail line should not be visible before jumping to the document end")
+	}
+	m = sendRune(m, 'G')
+	if !strings.Contains(m.viewContent(), finalLine) {
+		t.Fatal("G after linked-detail restore did not reach the final document line")
+	}
+}
+
 // TestDetail_EscFromTopLevelDetail_ReturnsToList: with an empty nav
 // stack, Esc emits popDetailMsg as before.
 func TestDetail_EscFromTopLevelDetail_ReturnsToList(t *testing.T) {
