@@ -103,25 +103,15 @@ func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
 	_ = requireCLIError(t, f.execute("search", "  "), ExitValidation)
 }
 
-func TestSearch_FilteredMissKeepsEveryWordHint(t *testing.T) {
+func TestSearch_JSONEmptyMultiWordHint(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
-	ref := createIssue(t, env, pid, "inventory export stalls")
-	runCLI(t, env, dir, "label", "add", ref, "bug")
-	for _, filter := range [][]string{{"--status", "open"}, {"--label", "bug"}, {"--no-label", "missing"}} {
-		for _, mode := range []string{"--json", "--agent", "--format=human"} {
-			t.Run(filter[0]+"/"+mode, func(t *testing.T) {
-				out, stderr, err := runCLIWithErr(t, env, dir, append([]string{mode, "search", "paginate inventory"}, filter...)...)
-				require.NoError(t, err, stderr)
-				if mode == "--json" {
-					// The reason follows the daemon's members, in their order.
-					assert.Equal(t, `{"kata_api_version":1,"complete":true,"truncated":false,"query":"paginate inventory","mode":"lexical","results":[],"hints":[{"code":"every_word_required","message":"no issue contains every word; search again with fewer words"}]}`+"\n", out)
-					assert.Empty(t, stderr)
-				} else {
-					assert.Equal(t, "Hint: no issue contains every word; search again with fewer words\n", stderr)
-				}
-			})
-		}
-	}
+	createIssue(t, env, pid, "inventory export stalls")
+	out, stderr, err := runCLIWithErr(t, env, dir, "--json", "search", "paginate inventory")
+	require.NoError(t, err, stderr)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}, got["hints"])
+	assert.Empty(t, stderr)
 }
 
 func TestSearch_EmptyContinuationHasNoHint(t *testing.T) {

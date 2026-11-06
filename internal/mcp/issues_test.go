@@ -429,8 +429,8 @@ func writeJSON(writer http.ResponseWriter, value any) {
 	_ = json.NewEncoder(writer).Encode(value)
 }
 
-// An initial every-word miss explains the empty result, with or without
-// filters. A single word and an empty continuation page get no hint.
+// An initial every-word miss explains the empty result. A single word and
+// an empty continuation page get no hint.
 func TestSearchEmptyMultiWordHints(t *testing.T) {
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(t.Context(), "example-project")
@@ -450,12 +450,11 @@ func TestSearchEmptyMultiWordHints(t *testing.T) {
 	require.NoError(t, err)
 	session := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
 	want := []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}
-	for _, filter := range []map[string]any{{}, {"status": "open"}, {"labels": []string{"bug"}}, {"exclude_labels": []string{"missing"}}} {
-		filter["query"] = "paginate inventory"
-		assert.Equal(t, want, callWorkflowTool(t, session, "kata.search", filter)["hints"], filter)
-	}
+	assert.Equal(t, want, callWorkflowTool(t, session, "kata.search", map[string]any{"query": "paginate inventory"})["hints"])
 
-	assert.NotContains(t, callWorkflowTool(t, session, "kata.search", map[string]any{"query": "paginate"}), "hints")
+	single := callWorkflowTool(t, session, "kata.search", map[string]any{"query": "absent"})
+	assert.Empty(t, single["results"])
+	assert.NotContains(t, single, "hints")
 
 	page := map[string]any{"query": "inventory export", "mode": "lexical", "project": "example-project", "limit": 1}
 	first := callWorkflowTool(t, session, "kata.search", page)

@@ -548,9 +548,8 @@ func TestList_EmptyStatusHints(t *testing.T) {
 	assert.Equal(t, "Hint: no open issues; 4 closed; see "+next+agentFlag+"\n", stderr)
 }
 
-// Running the filtered list retry from an unbound directory keeps the scope,
-// output mode, limit, and membership filters. Without them, the newer
-// unrelated issues would fill the one-row page and hide the counted issue.
+// The retry retains the scope, output mode, limit, and membership filters.
+// Executing it from an unbound directory finds the counted issue.
 // The quoted comma filter excludes one nonexistent label. Splitting it would
 // exclude the counted issue's "wont" label. The workspace's apostrophe must
 // survive this platform's shell.
@@ -637,7 +636,7 @@ func TestList_EmptyStatusHintRequests(t *testing.T) {
 					query := r.URL.Query()
 					if query.Get("status") != "closed" {
 						if tt.name == "nonempty" {
-							_, _ = fmt.Fprint(w, `{"issues":[{"short_id":"abcd","title":"a match","status":"open"}],"complete":true}`)
+							_, _ = fmt.Fprint(w, `{"issues":[{"id":1,"project_id":1,"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","short_id":"abcd","qualified_id":"spoke-project#abcd","title":"a match","body":"matching issue body","status":"open","author":"tester","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","revision":1,"metadata":{}}],"complete":true,"truncated":false}`)
 						} else {
 							_, _ = fmt.Fprint(w, `{"issues":[],"complete":true}`)
 						}
@@ -673,6 +672,10 @@ func TestList_EmptyStatusHintRequests(t *testing.T) {
 			}
 			var got map[string]any
 			require.NoError(t, json.Unmarshal([]byte(out), &got))
+			if tt.name == "nonempty" {
+				require.Len(t, got["issues"], 1)
+				assert.Equal(t, "abcd", got["issues"].([]any)[0].(map[string]any)["short_id"])
+			}
 			if tt.next == nil {
 				assert.NotContains(t, got, "hints")
 				return
