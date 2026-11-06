@@ -58,7 +58,7 @@ func TestToolCatalogStaysWithinBudget(t *testing.T) {
 }
 
 func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
-	fixture := toolSections(false, false)[0]
+	fixture := toolSections(false, false)[1]
 	catalog := func(padding int) *sdkmcp.ListToolsResult {
 		server, err := New(defaultCatalogOptions(inertTestClient(t)))
 		require.NoError(t, err)
@@ -76,6 +76,15 @@ func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
 	padding := firstCatalogBudget - len(base)
 	require.GreaterOrEqual(t, padding, 0)
 	over := catalog(padding + 1)
-	require.Contains(t, catalogOverBudget(over, firstCatalogBudget), fixture.loader)
+	report := catalogOverBudget(over, firstCatalogBudget)
+	require.Contains(t, report, fixture.loader)
+	largest := 0
+	for _, tool := range over.Tools {
+		encoded, _ := json.Marshal(tool)
+		largest = max(largest, len(encoded))
+	}
+	_, tools, _ := strings.Cut(report, "\n")
+	first, _, _ := strings.Cut(tools, "\n")
+	require.True(t, strings.HasSuffix(first, fmt.Sprintf(" %d", largest)), "largest tool should be first:\n%s", report)
 	require.Empty(t, catalogOverBudget(catalog(padding), firstCatalogBudget))
 }
