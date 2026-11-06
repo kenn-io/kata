@@ -66,13 +66,26 @@ func TestToolCatalogStaysWithinBudget(t *testing.T) {
 }
 
 func TestToolCatalogBudgetUsesWireEncoding(t *testing.T) {
-	const toolJSON = `{"name":"fixture","description":"<>&","inputSchema":{"type":"object"}}`
-	result := &sdkmcp.ListToolsResult{Tools: []*sdkmcp.Tool{{
-		Name: "fixture", Description: "<>&", InputSchema: map[string]any{"type": "object"},
-	}}}
-	budget := len(`{"ttlMs":0,"cacheScope":"","tools":[` + toolJSON + `]}`)
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "fixture", Version: "1"}, nil)
+	addTool(server, "fixture", "Fixture", "<>&", toolHints(true, false, false),
+		func(context.Context, *sdkmcp.CallToolRequest, ToolSectionInput) (*sdkmcp.CallToolResult, ToolSectionOutput, error) {
+			return successResult(), ToolSectionOutput{}, nil
+		})
+	var wire bytes.Buffer
+	session := connectServerSession(t, server, nil, &wire)
+	result, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	lines := bytes.Split(bytes.TrimSpace(wire.Bytes()), []byte("\n"))
+	var response wireResponse
+	require.NoError(t, json.Unmarshal(lines[len(lines)-1], &response))
+	var raw struct {
+		Tools []json.RawMessage `json:"tools"`
+	}
+	require.NoError(t, json.Unmarshal(response.Result, &raw))
+	require.Len(t, raw.Tools, 1)
+	budget := len(response.Result)
 	require.Empty(t, catalogOverBudget(result, budget))
-	require.Contains(t, catalogOverBudget(result, budget-1), fmt.Sprintf("fixture %d", len(toolJSON)))
+	require.Contains(t, catalogOverBudget(result, budget-1), fmt.Sprintf("fixture %d", len(raw.Tools[0])))
 }
 
 func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
@@ -85,7 +98,7 @@ func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
 			func(context.Context, *sdkmcp.CallToolRequest, ToolSectionInput) (*sdkmcp.CallToolResult, ToolSectionOutput, error) {
 				return successResult(), ToolSectionOutput{}, nil
 			})
-		session := connectServerSession(t, server, nil)
+		session := connectServerSession(t, server, nil, nil)
 		result, err := session.ListTools(t.Context(), nil)
 		require.NoError(t, err)
 		return result
