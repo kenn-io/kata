@@ -245,7 +245,8 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	_, _, lines := cronScreen(m)
+	_, header, lines := cronScreen(m)
+	pageRows := cronListViewportRows(m, header, cronRenderErrors(m))
 	cursor := m.cronCursor()
 	*cursor = min(max(*cursor, 0), max(len(lines)-1, 0))
 	switch {
@@ -258,9 +259,9 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case m.keymap.End.matches(msg):
 		*cursor = len(lines) - 1
 	case m.keymap.PageUp.matches(msg):
-		*cursor -= max(m.height-8, 1)
+		*cursor -= pageRows
 	case m.keymap.PageDown.matches(msg):
-		*cursor += max(m.height-8, 1)
+		*cursor += pageRows
 	case key == "n", key == "e":
 		next, cmd, handled := m.routeCronJobKey(key, lines, *cursor)
 		if handled {

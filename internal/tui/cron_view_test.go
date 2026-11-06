@@ -327,6 +327,46 @@ func TestCronDocumentContentAndCursor(t *testing.T) {
 	require.Equal(t, len(lines)-2, m.cron.stack[0].cursor)
 }
 
+func TestCronPageDownMatchesVisibleRunRowsWithConnectionNotice(t *testing.T) {
+	m := cronFixture(t)
+	data := *m.cron.data
+	runs := make([]generated.CronRun, 100)
+	for i := range runs {
+		run := data.runs[0]
+		run.UID = fmt.Sprintf("01ARZ3NDEKTSV4RRFFQ69G5FAY%03d", i)
+		run.ID = int64(i + 1)
+		label := fmt.Sprintf("run-%03d", i+1)
+		run.Summary.Message = &label
+		runs[i] = run
+	}
+	data.runs = runs
+	m.cron.data = &data
+	m = sendRune(m, '3')
+	m.sseStatus = sseReconnecting
+	m.cron.lists[cronRuns].cursor = 15
+
+	visibleRuns := func(m Model) []int {
+		rendered := stripANSI(renderCron(m))
+		visible := []int{}
+		for i := 1; i <= len(runs); i++ {
+			if strings.Contains(rendered, fmt.Sprintf("run-%03d", i)) {
+				visible = append(visible, i)
+			}
+		}
+		return visible
+	}
+
+	firstPage := visibleRuns(m)
+	require.Len(t, firstPage, 15)
+	require.Equal(t, 11, firstPage[0])
+	require.Equal(t, 25, firstPage[len(firstPage)-1])
+
+	m = sendKey(m, tea.KeyPgDown)
+	secondPage := visibleRuns(m)
+	require.Len(t, secondPage, 15)
+	require.Equal(t, firstPage[len(firstPage)-1]+1, secondPage[0], "PageDown must not skip a run when the connection notice uses a row")
+}
+
 // Only the read boundary is doubled; assertions exercise Update and rendering.
 type cronReadTestAPI struct {
 	KataAPI

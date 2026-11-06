@@ -404,17 +404,8 @@ func cronNoticeRows(m Model) int {
 	}
 	return 0
 }
-func renderCron(m Model) string {
-	if m.scope.allProjects || m.scope.projectID == 0 {
-		body := []string{renderTabHeader(m.width, m.cron.tab, m.scope, kataVersion, m.chrome().daemon), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
-		help := cronHelpRows(m)
-		for range max(m.height-len(body)-helpLines(help, m.width)-cronNoticeRows(m), 1) {
-			body = append(body, "")
-		}
-		return strings.Join(append(body, renderFooterHelpTable(help, m.width)), "\n")
-	}
-	title, header, lines := cronScreen(m)
-	help := cronHelpRows(m)
+
+func cronRenderErrors(m Model) []string {
 	errors := []string{}
 	if m.cron.data != nil {
 		for _, read := range []struct {
@@ -430,6 +421,29 @@ func renderCron(m Model) string {
 			}
 		}
 	}
+	return errors
+}
+
+func cronListViewportRows(m Model, header string, errors []string) int {
+	bodyRows := 3 // tab header, stats line, and the spacer below them
+	if header != "" {
+		bodyRows++
+	}
+	return max(m.height-bodyRows-max(len(errors), 1)-helpLines(cronHelpRows(m), m.width)-cronNoticeRows(m), 1)
+}
+
+func renderCron(m Model) string {
+	if m.scope.allProjects || m.scope.projectID == 0 {
+		body := []string{renderTabHeader(m.width, m.cron.tab, m.scope, kataVersion, m.chrome().daemon), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
+		help := cronHelpRows(m)
+		for range max(m.height-len(body)-helpLines(help, m.width)-cronNoticeRows(m), 1) {
+			body = append(body, "")
+		}
+		return strings.Join(append(body, renderFooterHelpTable(help, m.width)), "\n")
+	}
+	title, header, lines := cronScreen(m)
+	help := cronHelpRows(m)
+	errors := cronRenderErrors(m)
 	query := m.cron.lists[m.cron.tab].query
 	left, right := title, ""
 	if len(m.cron.stack) == 0 {
@@ -459,7 +473,7 @@ func renderCron(m Model) string {
 	if header != "" {
 		body = append(body, tableHeaderStyle.Render("  "+header))
 	}
-	budget := max(m.height-len(body)-max(len(errors), 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
+	budget := cronListViewportRows(m, header, errors)
 	cursor := min(max(*m.cronCursor(), 0), max(len(lines)-1, 0))
 	start, end := windowBounds(len(lines), cursor, budget)
 	if len(lines) == 0 {
