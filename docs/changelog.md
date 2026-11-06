@@ -18,6 +18,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Read empty multi-word search reasons in CLI JSON and MCP, including filtered
   searches. Empty lists report matching issues of the other status and a retry
   that keeps scope and filters, with PowerShell syntax on Windows.
+- Search faster on large SQLite stores when a query combines rare and common words, preserving results, ranking, and match flags.
 - Give coding agents a shorter kata contract. The text that hooks inject,
   `kata init --with-agents` writes, and the MCP `workflow` guide serves now
   covers one agent's loop in plain prose: skip kata for questions, search with
