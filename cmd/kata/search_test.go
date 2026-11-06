@@ -117,6 +117,11 @@ func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
 	_ = requireCLIError(t, f.execute("search", "  "), ExitValidation)
 }
 
+func TestSearchJSONHintPreservesResponseOrder(t *testing.T) {
+	out := renderSearch(t, outputJSON, `{"query":"paginate inventory","mode":"lexical","results":[],"complete":true}`)
+	assert.Equal(t, `{"kata_api_version":1,"query":"paginate inventory","mode":"lexical","results":[],"complete":true,"hints":[{"code":"every_word_required","message":"no issue contains every word; search again with fewer words","next":"kata search paginate"}]}`+"\n", out)
+}
+
 // TestSearch_UnquotedMultiTerm verifies that `kata search login Safari`
 // (no quotes) joins the args with spaces and matches the same way as the
 // quoted form. Required by the BM25 implicit-AND contract.

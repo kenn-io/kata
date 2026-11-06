@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json/jsontext"
+	"bytes"
 	"encoding/json/v2"
 	"fmt"
 
@@ -24,14 +24,21 @@ func reportHint(cmd *cobra.Command, body []byte, hint cliHint) ([]byte, error) {
 		_, err := fmt.Fprintln(cmd.ErrOrStderr(), "Hint: "+hint.Message)
 		return body, err
 	}
-	var fields map[string]jsontext.Value
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return nil, err
+	body = bytes.TrimSpace(body)
+	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
+		return nil, fmt.Errorf("hint response must be a JSON object")
 	}
 	encoded, err := json.Marshal([]cliHint{hint})
 	if err != nil {
 		return nil, err
 	}
-	fields["hints"] = encoded
-	return json.Marshal(fields, json.Deterministic(true))
+	var out bytes.Buffer
+	out.Write(body[:len(body)-1])
+	if len(bytes.TrimSpace(body[1:len(body)-1])) > 0 {
+		out.WriteByte(',')
+	}
+	out.WriteString(`"hints":`)
+	out.Write(encoded)
+	out.WriteByte('}')
+	return out.Bytes(), nil
 }
