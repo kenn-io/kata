@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 # Model Context Protocol server
@@ -232,6 +232,9 @@ Endpoint identities and backlinks remain within the server's fixed startup
 project UID scope, including after project moves or renames. See the
 [CLI reference](cli.md#issue-lifecycle) for selector behavior, reply validation,
 and handle syntax.
+
+An empty lexical multi-word `kata.search` result includes
+`hints: [{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "retry_with": {"query": "<first word>"}}]`.
 
 `kata.search` accepts optional `status: "open"` or `status: "closed"`; omit
 it to search both statuses. It combines with labels and the selected search

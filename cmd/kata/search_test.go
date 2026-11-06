@@ -95,6 +95,21 @@ func TestSearch_EmptyMultiWordSearchHintsEveryWordMustMatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "count=1")
 	assert.Empty(t, stderr, "a search with results needs no hint")
+
+	for _, query := range []string{"paginate inventory", "paginate partial", "inventory"} {
+		out, stderr, err = runCLIWithErr(t, env, dir, "--json", "--quiet", "search", query)
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+		var got map[string]any
+		require.NoError(t, json.Unmarshal([]byte(out), &got))
+		if query == "paginate inventory" {
+			assert.Equal(t, []any{map[string]any{
+				"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "next": "kata search paginate",
+			}}, got["hints"])
+		} else {
+			assert.NotContains(t, got, "hints")
+		}
+	}
 }
 
 func TestSearch_EmptyQueryIsValidationError(t *testing.T) {

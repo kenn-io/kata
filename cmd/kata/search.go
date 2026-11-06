@@ -165,14 +165,6 @@ per match.`,
 // JSON envelope, human-readable list, or "no matches" when empty.
 func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	mode := currentOutputMode()
-	if mode == outputJSON {
-		var buf bytes.Buffer
-		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
-			return err
-		}
-		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
-		return err
-	}
 	var b struct {
 		Complete       *bool  `json:"complete"`
 		NextCursor     string `json:"next_cursor"`
@@ -206,10 +198,20 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	// Lexical search returns only issues containing every word. Say so when a
 	// multi-word query finds nothing, so a caller retries with fewer words
 	// instead of concluding that no related issue exists.
-	if !flags.Quiet && len(b.Results) == 0 && b.Mode == "lexical" && len(strings.Fields(b.Query)) > 1 {
-		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Hint: no issue contains every word; search again with fewer words"); err != nil {
+	if words := strings.Fields(b.Query); len(b.Results) == 0 && b.Mode == "lexical" && len(words) > 1 {
+		var err error
+		bs, err = reportHint(cmd, bs, cliHint{Code: "every_word_required", Message: "no issue contains every word; search again with fewer words", Next: "kata search " + shellQuoteArg(words[0])})
+		if err != nil {
 			return err
 		}
+	}
+	if mode == outputJSON {
+		var buf bytes.Buffer
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+		return err
 	}
 	if mode == outputAgent {
 		out := cmd.OutOrStdout()

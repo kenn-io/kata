@@ -852,10 +852,18 @@ type SearchHit struct {
 	MatchedIn []string     `json:"matched_in"`
 }
 
+// SearchHint explains an empty search and supplies retry arguments.
+type SearchHint struct {
+	Code      string            `json:"code"`
+	Message   string            `json:"message"`
+	RetryWith map[string]string `json:"retry_with"`
+}
+
 // SearchOutput reports the effective mode and any semantic fallback.
 type SearchOutput struct {
-	Complete   bool    `json:"complete"`
-	NextCursor *string `json:"next_cursor,omitempty"`
+	Hints      []SearchHint `json:"hints,omitempty"`
+	Complete   bool         `json:"complete"`
+	NextCursor *string      `json:"next_cursor,omitempty"`
 
 	Project        *ProjectIdentity  `json:"project,omitempty"`
 	Projects       []ProjectIdentity `json:"projects,omitempty"`

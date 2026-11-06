@@ -426,3 +426,26 @@ func globalIssueJSON(projectID int64, projectUID, projectName, shortID string) m
 func writeJSON(writer http.ResponseWriter, value any) {
 	_ = json.NewEncoder(writer).Encode(value)
 }
+
+func TestSearchEmptyMultiWordHints(t *testing.T) {
+	for _, query := range []string{"paginate inventory", "inventory"} {
+		t.Run(query, func(t *testing.T) {
+			session, _ := connectMultiProjectServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
+				if !strings.HasSuffix(request.URL.Path, "/search") {
+					return false
+				}
+				writeJSON(writer, map[string]any{"query": query, "mode": "lexical", "results": []any{}})
+				return true
+			})
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": query}})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+			got := result.StructuredContent.(map[string]any)
+			if query == "paginate inventory" {
+				assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "retry_with": map[string]any{"query": "paginate"}}}, got["hints"])
+			} else {
+				assert.NotContains(t, got, "hints")
+			}
+		})
+	}
+}

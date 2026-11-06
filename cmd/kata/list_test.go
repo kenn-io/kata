@@ -2,8 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -513,4 +517,131 @@ func TestList_JSONOmitsHint(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 	assert.Len(t, got.Issues, 2)
+}
+
+func TestList_EmptyStatusHints(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"first", "second", "third", "fourth"} {
+		ref := createIssue(t, env, pid, title)
+		runCLI(t, env, dir, "close", ref, "--done", "--message", "completed the work for this closed issue fixture", "--commit", "abc1234")
+	}
+	t.Chdir(dir)
+	const message = "no open issues; 4 closed; see kata list --status all"
+	for _, mode := range []string{"human", "--agent", "--json", "--quiet"} {
+		args := []string{"list"}
+		if mode != "human" {
+			args = append(args, mode)
+		}
+		out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
+		require.NoError(t, err)
+		switch mode {
+		case "--json":
+			var got map[string]any
+			require.NoError(t, json.Unmarshal([]byte(out), &got))
+			assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": message, "next": "kata list --status all"}}, got["hints"])
+			assert.Empty(t, stderr)
+		case "--quiet":
+			assert.Empty(t, out)
+			assert.Empty(t, stderr)
+		default:
+			assert.Equal(t, "Hint: "+message+"\n", stderr)
+			if mode == "human" {
+				assert.Empty(t, out)
+			} else {
+				assert.Equal(t, "OK list count=0 complete=true\n", out)
+			}
+		}
+	}
+	ref := createIssue(t, env, pid, "open match")
+	runCLI(t, env, dir, "label", "add", ref, "bug")
+	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--json", "--quiet", "list", "--status", "closed", "--label", "bug")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.Equal(t, []any{map[string]any{"code": "excluded_open", "message": "no closed issues; 1 open; see kata list --status all", "next": "kata list --status all"}}, got["hints"])
+	for _, args := range [][]string{{"list", "--status", "all"}, {"list"}, {"list", "--label", "missing"}} {
+		_, stderr, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+	}
+	out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--json", "--workspace", dir, "list", "--status", "closed", "--label", "bug")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.Equal(t, "kata list --status all --workspace "+dir, got["hints"].([]any)[0].(map[string]any)["next"])
+}
+
+func TestList_EmptyStatusHintRequests(t *testing.T) {
+	for _, scenario := range []string{"filtered", "global", "nonempty", "all-status", "cursor", "count-failed"} {
+		t.Run(scenario, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/v1/health":
+					_, _ = fmt.Fprint(w, `{"ok":true,"api_schema_version":"0.27.0"}`)
+				case "/api/v1/projects/resolve":
+					_, _ = fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"}}`)
+				case "/api/v1/projects/1/issues", "/api/v1/issues":
+					calls.Add(1)
+					query := r.URL.Query()
+					assert.Equal(t, []string{"bug", "urgent"}, query["label"])
+					assert.Equal(t, "stale", query.Get("exclude_label"))
+					assert.Equal(t, "alice", query.Get("owner"))
+					assert.Equal(t, "2", query.Get("max_priority"))
+					assert.Equal(t, "work.attention=stuck", query.Get("meta"))
+					if query.Get("status") == "closed" {
+						assert.Equal(t, "1", query.Get("limit"))
+						assert.Equal(t, "true", query.Get("include_total"))
+						if scenario == "count-failed" {
+							w.WriteHeader(http.StatusServiceUnavailable)
+							_, _ = fmt.Fprint(w, `{"error":{"code":"unavailable","message":"count unavailable"}}`)
+							return
+						}
+						_, _ = fmt.Fprint(w, `{"issues":[],"complete":true,"total":4}`)
+					} else if scenario == "nonempty" {
+						_, _ = fmt.Fprint(w, `{"issues":[{"short_id":"abcd","title":"a match","status":"open"}],"complete":true}`)
+					} else {
+						_, _ = fmt.Fprint(w, `{"issues":[],"complete":true}`)
+					}
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			args := []string{"--json", "list", "--label", "bug", "--label", "urgent", "--no-label", "stale", "--owner", "alice", "--max-priority", "2", "--meta", "work.attention=stuck"}
+			if scenario == "global" {
+				args = append(args, "--all")
+			} else {
+				args = append(args, "--project", "spoke-project")
+			}
+			switch scenario {
+			case "cursor":
+				args = append(args, "--sort", "created", "--cursor", "next-page")
+			case "all-status":
+				args = append(args, "--status", "all")
+			}
+			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
+			require.NoError(t, err)
+			assert.Empty(t, stderr)
+			var got map[string]any
+			require.NoError(t, json.Unmarshal([]byte(out), &got))
+			if scenario == "filtered" || scenario == "global" {
+				assert.EqualValues(t, 2, calls.Load())
+				assert.Equal(t, "excluded_closed", got["hints"].([]any)[0].(map[string]any)["code"])
+				next := "kata list --status all --project spoke-project"
+				if scenario == "global" {
+					next = "kata list --status all --all"
+				}
+				assert.Equal(t, next, got["hints"].([]any)[0].(map[string]any)["next"])
+			} else {
+				assert.NotContains(t, got, "hints")
+				wantCalls := int32(1)
+				if scenario == "count-failed" {
+					wantCalls = 2
+				}
+				assert.Equal(t, wantCalls, calls.Load())
+			}
+		})
+	}
 }

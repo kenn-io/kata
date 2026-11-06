@@ -190,8 +190,13 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		results = results[:limit]
 		truncated = true
 	}
+	var hints []SearchHint
+	if words := strings.Fields(query); len(results) == 0 && effectiveMode == "lexical" && len(words) > 1 {
+		hints = []SearchHint{{Code: "every_word_required", Message: "no issue contains every word; search again with fewer words", RetryWith: map[string]string{"query": words[0]}}}
+	}
 	project, outputProjects := outputProjectScope(projects)
 	return successResult(), SearchOutput{
+		Hints:          hints,
 		Project:        project,
 		Projects:       outputProjects,
 		Query:          query,
