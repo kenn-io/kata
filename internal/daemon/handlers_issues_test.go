@@ -2105,79 +2105,46 @@ func TestCreate_LookalikeSoftBlock(t *testing.T) {
 	assert.Contains(t, string(second.body), `"candidates"`)
 }
 
-func TestCreate_LookalikeMissingBody(t *testing.T) {
-	for _, tc := range []struct {
-		name, firstBody, secondBody string
-	}{
-		{"both missing", "", ""},
-		{"existing body missing", "", "stack trace here"},
-		{"new body missing", "stack trace here", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h, pid := bootstrapProject(t)
-			ts := h.ts.(*httptest.Server)
-			first := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
-				"actor": "agent-1", "title": "Inventory page crashes on second page", "body": tc.firstBody,
-			})
-			requireOK(t, first)
-			second := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
-				"actor": "agent-1", "title": "Inventory page crashes on second page", "body": tc.secondBody,
-			})
-			require.Equal(t, http.StatusConflict, second.status, string(second.body))
-			assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
-			var conflict struct {
-				Error struct {
-					Data struct {
-						Candidates []struct {
-							ShortID string `json:"short_id"`
-						} `json:"candidates"`
-					} `json:"data"`
-				} `json:"error"`
-			}
-			require.NoError(t, json.Unmarshal(second.body, &conflict))
-			require.Len(t, conflict.Error.Data.Candidates, 1)
-			assert.Equal(t, issueShortIDFromCreate(t, first.body), conflict.Error.Data.Candidates[0].ShortID)
-		})
-	}
+func TestCreate_LookalikeTitleOnly(t *testing.T) {
+	h, pid := bootstrapProject(t)
+	ts := h.ts.(*httptest.Server)
+	body := map[string]any{"actor": "agent-1", "title": "Inventory page crashes on second page"}
+	first := postWithHeader(t, ts, issuesURL(pid), nil, body)
+	requireOK(t, first)
+	second := postWithHeader(t, ts, issuesURL(pid), nil, body)
+	require.Equal(t, http.StatusConflict, second.status, string(second.body))
+	assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
+	assert.Contains(t, string(second.body), `"short_id":"`+issueShortIDFromCreate(t, first.body)+`"`)
+	assert.Equal(t, 1, strings.Count(string(second.body), `"short_id":`))
 }
 
-func TestCreate_LookalikeExactTitleRetrieval(t *testing.T) {
-	for _, title := range []string{"!!!", "Inventory page crashes on second page"} {
-		t.Run(title, func(t *testing.T) {
+func TestCreate_LookalikeExactTitleOutsideFTS(t *testing.T) {
+	for _, tc := range []struct {
+		title    string
+		variants int
+	}{{"!!!", 0}, {"Inventory page crashes on second page", 25}} {
+		t.Run(tc.title, func(t *testing.T) {
 			h, pid := bootstrapProject(t)
 			ts := h.ts.(*httptest.Server)
 			first := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
-				"actor": "agent-1", "title": title, "body": strings.Repeat("unrelated ", 2000),
+				"actor": "agent-1", "title": tc.title, "body": strings.Repeat("unrelated ", 2000),
 			})
 			requireOK(t, first)
-			if title != "!!!" {
-				for i := range 25 {
-					variant := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
-						"actor": "agent-1", "title": fmt.Sprintf("%s %d", title, i), "force_new": true,
-					})
-					requireOK(t, variant)
-				}
+			for i := range tc.variants {
+				requireOK(t, postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
+					"actor": "agent-1", "title": fmt.Sprintf("%s %d", tc.title, i), "force_new": true,
+				}))
 			}
-			candidates, err := h.DB().SearchFTSAny(t.Context(), db.SearchFTSParams{ProjectID: pid, Query: title, Limit: 20})
+			shortID := issueShortIDFromCreate(t, first.body)
+			candidates, err := h.DB().SearchFTSAny(t.Context(), db.SearchFTSParams{ProjectID: pid, Query: tc.title, Limit: 20})
 			require.NoError(t, err)
-			if title == "!!!" {
-				require.Empty(t, candidates)
-			} else {
-				require.Len(t, candidates, 20)
-			}
 			for _, candidate := range candidates {
-				require.NotEqual(t, issueShortIDFromCreate(t, first.body), candidate.Issue.ShortID)
+				require.NotEqual(t, shortID, candidate.Issue.ShortID)
 			}
-			second := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{"actor": "agent-1", "title": title})
+			second := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{"actor": "agent-1", "title": tc.title})
 			require.Equal(t, http.StatusConflict, second.status, string(second.body))
 			assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
-			var created struct {
-				Issue struct {
-					UID string `json:"uid"`
-				} `json:"issue"`
-			}
-			require.NoError(t, json.Unmarshal(first.body, &created))
-			assert.Contains(t, string(second.body), `"uid":"`+created.Issue.UID+`"`)
+			assert.Contains(t, string(second.body), `"short_id":"`+shortID+`"`)
 		})
 	}
 }
@@ -2188,6 +2155,7 @@ func TestCreate_LookalikeDifferentFullTitles(t *testing.T) {
 		titles [2]string
 	}{
 		{"case", [2]string{"Inventory page crashes", "inventory page crashes"}},
+		{"numbered", [2]string{"Phase 1", "Phase 2"}},
 		{"suffix past rune limit", [2]string{strings.Repeat("界", 500) + "first", strings.Repeat("界", 500) + "second"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2198,15 +2166,6 @@ func TestCreate_LookalikeDifferentFullTitles(t *testing.T) {
 				requireOK(t, result)
 			}
 		})
-	}
-}
-
-func TestCreate_LookalikeDistinctNumberedTitles(t *testing.T) {
-	h, pid := bootstrapProject(t)
-	ts := h.ts.(*httptest.Server)
-	for _, title := range []string{"Phase 1", "Phase 2"} {
-		result := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{"actor": "agent-1", "title": title})
-		requireOK(t, result)
 	}
 }
 

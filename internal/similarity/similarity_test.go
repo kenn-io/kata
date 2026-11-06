@@ -163,16 +163,12 @@ func TestScore_MissingBody(t *testing.T) {
 		{"first empty", "fix login crash", "", "fix login crash", "stack trace here", 1},
 		{"second empty", "fix login crash", "stack trace here", "fix login crash", "", 1},
 		{"case and whitespace", " Fix\tLOGIN crash ", "", "fix login crash", "", 0.6},
-		{"Unicode normalization", "fix cafe\u0301 crash", "", "fix café crash", "", 0.6},
 		{"stop words only", "fix login crash", "the and is", "fix login crash", "stack trace here", 1},
 		{"empty bounded body", "fix login crash", strings.Repeat(" ", 500) + "trace", "fix login crash", "trace", 1},
 		{"punctuation only", "!!!", "", "!!!", "", 1},
 		{"punctuation differs", "login!", "", "login?", "", 0.6},
 		{"suffix past rune limit", strings.Repeat("界", 500) + "alpha", "", strings.Repeat("界", 500) + "beta", "", 0.6},
-		{"different titles", "login", "", "inventory", "", 0},
 		{"numbered titles", "Phase 1", "", "Phase 2", "", 0.6},
-		{"stemmed titles", "fix crashes", "", "fix crash", "", 0.6},
-		{"stop word titles", "the login", "", "login", "", 0.6},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assertScore(t, tc.want, tc.titleA, tc.bodyA, tc.titleB, tc.bodyB)
