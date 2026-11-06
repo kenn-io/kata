@@ -346,7 +346,7 @@ func TestCronPageDownMatchesVisibleRunRowsWithConnectionNotice(t *testing.T) {
 	m.cron.lists[cronRuns].cursor = 15
 
 	visibleRuns := func(m Model) []int {
-		rendered := stripANSI(renderCron(m))
+		rendered := stripANSI(m.viewContent())
 		visible := []int{}
 		for i := 1; i <= len(runs); i++ {
 			if strings.Contains(rendered, fmt.Sprintf("run-%03d", i)) {
@@ -357,13 +357,13 @@ func TestCronPageDownMatchesVisibleRunRowsWithConnectionNotice(t *testing.T) {
 	}
 
 	firstPage := visibleRuns(m)
-	require.Len(t, firstPage, 15)
-	require.Equal(t, 11, firstPage[0])
+	require.Len(t, firstPage, 14)
+	require.Equal(t, 12, firstPage[0])
 	require.Equal(t, 25, firstPage[len(firstPage)-1])
 
 	m = sendKey(m, tea.KeyPgDown)
 	secondPage := visibleRuns(m)
-	require.Len(t, secondPage, 15)
+	require.Len(t, secondPage, 14)
 	require.Equal(t, firstPage[len(firstPage)-1]+1, secondPage[0], "PageDown must not skip a run when the connection notice uses a row")
 }
 

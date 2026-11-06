@@ -246,7 +246,7 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	_, header, lines := cronScreen(m)
-	pageRows := cronListViewportRows(m, header, cronRenderErrors(m))
+	pageRows := cronListViewportRows(m.withContentHeight(), header, cronRenderErrors(m))
 	cursor := m.cronCursor()
 	*cursor = min(max(*cursor, 0), max(len(lines)-1, 0))
 	switch {
