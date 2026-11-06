@@ -7,6 +7,8 @@ import {
   within,
 } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
+import { tick } from 'svelte'
+import { fromStore, writable } from 'svelte/store'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { KataTaskSummary } from '../lib/kata/types'
@@ -327,56 +329,89 @@ describe('IssueCollection', () => {
       },
     )
 
-    it.each(['uid', 'short_id'])(
-      'keeps a selected child and its scroll anchor when its root moves past the cap using parent %s',
-      async (parentRef) => {
-        window.localStorage.setItem(
-          'kata:issue-sort/v1',
-          JSON.stringify({ key: 'title', direction: 'asc' }),
-        )
-        const issues = manyTasks(400)
-        const root = issues[80]!
-        const child = task({
-          uid: 'selected-child',
-          short_id: 'child',
-          title: 'Selected child',
-          ...(parentRef === 'uid'
-            ? {
-                parent: {
-                  uid: root.uid,
-                  short_id: root.short_id,
-                },
-              }
-            : { parent_short_id: root.short_id }),
-        })
-        const catalog = [...issues, child]
-        const props = {
-          currentView: viewWithIssues(catalog),
-          issueCatalog: catalog,
-          selectedIssueUID: child.uid,
+    it('retains row focus without a selection when a refresh moves it past the cap', async () => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: 'title', direction: 'asc' }),
+      )
+      const issues = manyTasks(400)
+      const snapshots = writable(issues)
+      const snapshot = fromStore(snapshots)
+      // Update snapshot props alone; rerender also invalidates the unchanged selection prop.
+      const { container } = renderComponent(IssueCollection, {
+        props: {
+          get currentView() {
+            return viewWithIssues(snapshot.current)
+          },
+          get issueCatalog() {
+            return snapshot.current
+          },
+          selectedIssueUID: null,
           onSelect: vi.fn(),
-        }
-        const { container, rerender } = render(IssueCollection, { props })
-        await fireEvent.click(visibleRows()[80]!.querySelector('.chevron')!)
-        const childRow = container.querySelector<HTMLElement>('button.row.selected')!
-        expect(childRow.dataset.uid).toBe(child.uid)
-        const body = container.querySelector<HTMLDivElement>('.table-body')!
-        body.scrollTop = 2400
-        vi.spyOn(body, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 600 } as DOMRect)
-        const rootRow = visibleRows()[80]!
-        vi.spyOn(childRow, 'getBoundingClientRect').mockImplementation(() => {
-          const top = rootRow.textContent?.includes('ZZ last root') ? 9700 : 100
-          return { top, bottom: top + 30 } as DOMRect
-        })
-        const moved = catalog.map((issue) =>
-          issue.uid === root.uid ? { ...issue, title: 'ZZ last root' } : issue,
-        )
-        await rerender({ ...props, currentView: viewWithIssues(moved), issueCatalog: moved })
+        },
+      })
+      const focused = visibleRows()[80]!
+      focused.focus()
+      expect(document.activeElement).toBe(focused)
+      const leading = manyTasks(80).map((issue, index) => ({
+        ...issue,
+        uid: `leading-${index}`,
+        short_id: `leading-${index}`,
+        title: `Ahead ${index}`,
+      }))
+      snapshots.set([...leading, ...issues])
+      await tick()
 
-        expect(container.querySelector('button.row.selected')).toBe(childRow)
-        await waitFor(() => expect(body.scrollTop).toBe(12000))
-      },
-    )
+      expect(container.querySelector('button.row[data-uid="bulk-00080"]')).toBe(focused)
+      expect(document.activeElement).toBe(focused)
+      await fireEvent.keyDown(focused, { key: 'ArrowDown' })
+      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00081')
+    })
+
+    it('keeps a selected child and its scroll anchor when its root moves past the cap', async () => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: 'title', direction: 'asc' }),
+      )
+      const issues = manyTasks(400)
+      const root = issues[80]!
+      const child = task({
+        uid: 'selected-child',
+        short_id: 'child',
+        title: 'Selected child',
+        parent: {
+          uid: root.uid,
+          short_id: root.short_id,
+        },
+        parent_short_id: root.short_id,
+      })
+      const catalog = [...issues, child]
+      const props = {
+        currentView: viewWithIssues(catalog),
+        issueCatalog: catalog,
+        selectedIssueUID: child.uid,
+        onSelect: vi.fn(),
+      }
+      const { container, rerender } = render(IssueCollection, { props })
+      await fireEvent.click(visibleRows()[80]!.querySelector('.chevron')!)
+      const childRow = container.querySelector<HTMLElement>('button.row.selected')!
+      expect(childRow.dataset.uid).toBe(child.uid)
+      const body = container.querySelector<HTMLDivElement>('.table-body')!
+      body.scrollTop = 2400
+      vi.spyOn(body, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 600 } as DOMRect)
+      const rootRow = visibleRows()[80]!
+      vi.spyOn(childRow, 'getBoundingClientRect').mockImplementation(() => {
+        const top = rootRow.textContent?.includes('ZZ last root') ? 9700 : 100
+        return { top, bottom: top + 30 } as DOMRect
+      })
+      const moved = catalog.map((issue) =>
+        issue.uid === root.uid ? { ...issue, title: 'ZZ last root' } : issue,
+      )
+      await rerender({ ...props, currentView: viewWithIssues(moved), issueCatalog: moved })
+
+      expect(container.querySelector('button.row.selected')).toBe(childRow)
+      await waitFor(() => expect(body.scrollTop).toBe(12000))
+    })
 
     it('renders the prefix that holds a selected issue beyond the cap', async () => {
       const { container } = renderMany(1000, { selectedIssueUID: 'bulk-00500' })

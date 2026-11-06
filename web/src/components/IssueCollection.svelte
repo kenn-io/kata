@@ -288,6 +288,8 @@
   }
 
   let pinnedRows = $derived.by(() => {
+    // Refresh focus pins even when there is no selection to look up.
+    void rootIndexByUID
     const key = listKey
     const focusedUID = untrack(() => {
       const active = typeof document === 'undefined' ? null : document.activeElement
