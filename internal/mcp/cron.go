@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -90,6 +91,12 @@ func cronExpected(value string) (string, error) {
 // and exact int64 evidence. Validate separately, then decode the original.
 func addCronTool[In, Out any](server *sdkmcp.Server, name, title, description string, hints *sdkmcp.ToolAnnotations, handler sdkmcp.ToolHandlerFor[In, Out]) {
 	inputSchema, outputSchema := inputSchemaFor[In](name), schemaFor[Out]()
+	// Generated response pointers infer a nullable root. MCP requires an
+	// object outputSchema; handler failures return IsError instead.
+	if len(outputSchema.Types) == 2 && slices.Contains(outputSchema.Types, "object") && slices.Contains(outputSchema.Types, "null") {
+		outputSchema.Type = "object"
+		outputSchema.Types = nil
+	}
 	resolved, err := inputSchema.Resolve(nil)
 	if err != nil {
 		panic(err)
