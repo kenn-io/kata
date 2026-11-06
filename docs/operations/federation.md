@@ -1931,8 +1931,9 @@ materializes the batch, and returns the advanced push cursor.
 
 Ingest work is bounded by the accepted batch: metadata, comment, label,
 status, and claim-only batches skip the federation group's link rebuild because
-they cannot change link state. Link mutations, snapshots, and issue lifecycle
-events that can change endpoint resolution still run the full reconciliation.
+they cannot change link state. Link mutations,
+snapshots, and issue lifecycle events that can change endpoint resolution
+still run the full reconciliation.
 
 Federation push and poll requests have a 60-second default budget, separate
 from the shorter interactive CLI default. `KATA_HTTP_TIMEOUT` overrides that
@@ -1945,6 +1946,15 @@ rejects `--daemon` (see
 [Local daemon profiles](local-daemon-profiles.md#reboots-idle-shutdown-and-clients)).
 A timed-out
 request leaves the cursor unchanged and retries through the normal sync loop.
+
+SQLite push and pull application first prepare without holding the writer.
+If a concurrent write invalidates that snapshot, Kata tries once more the same
+way, unless the invalidated preparation took a second or longer. After that,
+the next attempt acquires the writer before preparing. Optimistic preparation
+time does not consume that fallback's contention retry budget; caller
+cancellation and deadlines still stop the operation. While the fallback holds
+the writer, other local writes wait, so a slow preparation can make local CLI
+writes time out until it commits.
 
 If a response is lost after the hub commits, retrying the same batch is safe.
 Permanent validation failures or hash conflicts record a quarantine on the
