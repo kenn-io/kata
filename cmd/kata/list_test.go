@@ -559,11 +559,14 @@ func TestList_EmptyStatusHints(t *testing.T) {
 // Running the filtered list retry from an unbound directory keeps the scope,
 // output mode, limit, and membership filters. Without them, the newer
 // unrelated issues would fill the one-row page and hide the counted issue.
+// The quoted comma filter excludes one nonexistent label. Splitting it would
+// exclude the counted issue's "wont" label.
 func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	hidden := createIssue(t, env, pid, "hidden match")
 	runCLI(t, env, dir, "label", "add", hidden, "bug")
 	runCLI(t, env, dir, "label", "add", hidden, "ui")
+	runCLI(t, env, dir, "label", "add", hidden, "wont")
 	runCLI(t, env, dir, "meta", "set", hidden, "work.attention", "needs review")
 	for _, title := range []string{"unrelated open", "unrelated closed"} {
 		ref := createIssue(t, env, pid, title)
@@ -578,7 +581,7 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	ctx := contextWithBaseURL(t.Context(), env.URL)
 
 	out, stderr, err := executeRootCapture(t, ctx, "list", "--project", "kata", "--workspace", workspace, "--json", "--quiet", "--as", "example-agent",
-		"--status", "closed", "--label", "bug", "--label", "ui", "--meta", "work.attention=needs review", "--limit", "1")
+		"--status", "closed", "--label", "bug", "--label", "ui", "--no-label", `"wont,fix"`, "--meta", "work.attention=needs review", "--limit", "1")
 	require.NoError(t, err, stderr)
 	assert.Empty(t, stderr)
 	var got struct {
@@ -586,10 +589,10 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	require.Len(t, got.Hints, 1)
-	next := "kata list --status all --project kata --workspace '" + workspace + "' --json --quiet --limit 1 --label bug --label ui --meta 'work.attention=needs review'"
+	next := "kata list --status all --project kata --workspace '" + workspace + "' --json --quiet --limit 1 --label bug --label ui --no-label '\"wont,fix\"' --meta 'work.attention=needs review'"
 	assert.Equal(t, cliHint{Code: "excluded_open", Message: "no closed issues match the filters; 1 open match; see " + next, Next: next}, got.Hints[0])
 
-	words, err := splitHelpWords(next)
+	words, err := splitHelpWords(got.Hints[0].Next)
 	require.NoError(t, err)
 	out, stderr, err = executeRootCapture(t, ctx, words[1:]...)
 	require.NoError(t, err, stderr)

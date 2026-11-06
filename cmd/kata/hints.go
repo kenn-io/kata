@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json/v2"
 	"fmt"
 	"slices"
@@ -47,6 +48,13 @@ func retryCommand(cmd *cobra.Command, command string, set, keep []string, term s
 			values = slice.GetSlice()
 		}
 		for _, value := range values {
+			if f.Value.Type() == "stringSlice" {
+				var field strings.Builder
+				w := csv.NewWriter(&field)
+				_ = w.Write([]string{value}) // strings.Builder writes cannot fail.
+				w.Flush()
+				value = strings.TrimSuffix(field.String(), "\n")
+			}
 			if f.Value.Type() != "bool" {
 				parts = append(parts, "--"+name, shellQuoteArg(value))
 			} else if value == "true" {
