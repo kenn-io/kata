@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strconv"
 	"testing"
-	"testing/quick"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"go.kenn.io/kata/internal/api"
 )
@@ -126,26 +126,22 @@ func TestMarkTransitiveBlockLayoutOracleEquivalence(t *testing.T) {
 	})
 
 	t.Run("property", func(t *testing.T) {
-		if err := quick.Check(func(rawCount uint8, choices [12][12]uint8) bool {
-			return t.Run("case", func(t *testing.T) {
-				count := 1 + int(rawCount%12)
-				var edges []api.ReachableGraphEdge
-				for from := range count {
-					for to := range count {
-						if from == to {
-							continue
-						}
-						kind := []string{"", "", "", "blocks", "blocks", "parent", "related"}[choices[from][to]%7]
-						if kind != "" && (kind != "related" || from < to) {
-							edges = append(edges, api.ReachableGraphEdge{FromUID: strconv.Itoa(from), ToUID: strconv.Itoa(to), Kind: kind, Layout: true})
-						}
+		rapid.Check(t, func(t *rapid.T) {
+			count := rapid.IntRange(1, 12).Draw(t, "count")
+			var edges []api.ReachableGraphEdge
+			for from := range count {
+				for to := range count {
+					if from == to {
+						continue
+					}
+					kind := rapid.SampledFrom([]string{"", "", "", "blocks", "blocks", "parent", "related"}).Draw(t, fmt.Sprintf("%d->%d", from, to))
+					if kind != "" && (kind != "related" || from < to) {
+						edges = append(edges, api.ReachableGraphEdge{FromUID: strconv.Itoa(from), ToUID: strconv.Itoa(to), Kind: kind, Layout: true})
 					}
 				}
-				check(t, edges, nil)
-			})
-		}, nil); err != nil {
-			t.Fatal(err)
-		}
+			}
+			check(t, edges, nil)
+		})
 	})
 }
 

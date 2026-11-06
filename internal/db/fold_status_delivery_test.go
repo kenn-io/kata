@@ -3,8 +3,10 @@ package db_test
 import (
 	"cmp"
 	"encoding/json/jsontext"
+	"math"
 	"testing"
-	"testing/quick"
+
+	"pgregory.net/rapid"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -40,42 +42,38 @@ func TestReconcileFoldStatusIntent(t *testing.T) {
 // The independent oracle is lexicographic writer order. Generation deliberately
 // includes tied prefixes, so all four clock components and equality are reached.
 func TestReconcileFoldStatusIntentWriterFence(t *testing.T) {
-	if err := quick.Check(func(previousPhysical, previousCounter, incomingPhysical, incomingCounter uint64, previousOrigin, previousEvent, incomingOrigin, incomingEvent string, tiePhysical, tieCounter, tieOrigin, tieEvent bool) bool {
-		return t.Run("case", func(t *testing.T) {
-			previousClock := db.FoldClock{HLCPhysicalMS: int64(previousPhysical & (1<<63 - 1)), HLCCounter: int64(previousCounter & (1<<63 - 1)), OriginInstanceUID: "origin-" + previousOrigin, EventUID: "event-" + previousEvent}
-			incomingClock := db.FoldClock{HLCPhysicalMS: int64(incomingPhysical & (1<<63 - 1)), HLCCounter: int64(incomingCounter & (1<<63 - 1)), OriginInstanceUID: "origin-" + incomingOrigin, EventUID: "event-" + incomingEvent}
-			if tiePhysical {
-				incomingClock.HLCPhysicalMS = previousClock.HLCPhysicalMS
+	rapid.Check(t, func(t *rapid.T) {
+		previousClock := db.FoldClock{HLCPhysicalMS: rapid.Int64Range(0, math.MaxInt64).Draw(t, "previous physical"), HLCCounter: rapid.Int64Range(0, math.MaxInt64).Draw(t, "previous counter"), OriginInstanceUID: "origin-" + rapid.String().Draw(t, "previous origin"), EventUID: "event-" + rapid.String().Draw(t, "previous event")}
+		incomingClock := db.FoldClock{HLCPhysicalMS: rapid.Int64Range(0, math.MaxInt64).Draw(t, "incoming physical"), HLCCounter: rapid.Int64Range(0, math.MaxInt64).Draw(t, "incoming counter"), OriginInstanceUID: "origin-" + rapid.String().Draw(t, "incoming origin"), EventUID: "event-" + rapid.String().Draw(t, "incoming event")}
+		if rapid.Bool().Draw(t, "tie physical") {
+			incomingClock.HLCPhysicalMS = previousClock.HLCPhysicalMS
+		}
+		if rapid.Bool().Draw(t, "tie counter") {
+			incomingClock.HLCCounter = previousClock.HLCCounter
+		}
+		if rapid.Bool().Draw(t, "tie origin") {
+			incomingClock.OriginInstanceUID = previousClock.OriginInstanceUID
+		}
+		if rapid.Bool().Draw(t, "tie event") {
+			incomingClock.EventUID = previousClock.EventUID
+		}
+		order := []int{cmp.Compare(incomingClock.HLCPhysicalMS, previousClock.HLCPhysicalMS), cmp.Compare(incomingClock.HLCCounter, previousClock.HLCCounter), cmp.Compare(incomingClock.OriginInstanceUID, previousClock.OriginInstanceUID), cmp.Compare(incomingClock.EventUID, previousClock.EventUID)}
+		newer := false
+		for _, component := range order {
+			if component != 0 {
+				newer = component > 0
+				break
 			}
-			if tieCounter {
-				incomingClock.HLCCounter = previousClock.HLCCounter
-			}
-			if tieOrigin {
-				incomingClock.OriginInstanceUID = previousClock.OriginInstanceUID
-			}
-			if tieEvent {
-				incomingClock.EventUID = previousClock.EventUID
-			}
-			order := []int{cmp.Compare(incomingClock.HLCPhysicalMS, previousClock.HLCPhysicalMS), cmp.Compare(incomingClock.HLCCounter, previousClock.HLCCounter), cmp.Compare(incomingClock.OriginInstanceUID, previousClock.OriginInstanceUID), cmp.Compare(incomingClock.EventUID, previousClock.EventUID)}
-			newer := false
-			for _, component := range order {
-				if component != 0 {
-					newer = component > 0
-					break
-				}
-			}
-			previous := db.FoldIssue{UID: "task", Status: "closed", StatusClock: previousClock}
-			current := db.FoldIssue{UID: "task", Status: "closed"}
-			want := "pending-close"
-			if newer {
-				current.Status = "open"
-				current.StatusIntentUID = incomingClock.EventUID
-				want = incomingClock.EventUID
-			}
-			incoming := db.FoldEvent{UID: incomingClock.EventUID, OriginInstanceUID: incomingClock.OriginInstanceUID, IssueUID: "task", Type: "issue.reopened", HLCPhysicalMS: incomingClock.HLCPhysicalMS, HLCCounter: incomingClock.HLCCounter, Payload: jsontext.Value(`{}`)}
-			require.Equal(t, want, db.ReconcileFoldStatusIntent(previous, current, "pending-close", []db.FoldEvent{incoming}))
-		})
-	}, nil); err != nil {
-		t.Fatal(err)
-	}
+		}
+		previous := db.FoldIssue{UID: "task", Status: "closed", StatusClock: previousClock}
+		current := db.FoldIssue{UID: "task", Status: "closed"}
+		want := "pending-close"
+		if newer {
+			current.Status = "open"
+			current.StatusIntentUID = incomingClock.EventUID
+			want = incomingClock.EventUID
+		}
+		incoming := db.FoldEvent{UID: incomingClock.EventUID, OriginInstanceUID: incomingClock.OriginInstanceUID, IssueUID: "task", Type: "issue.reopened", HLCPhysicalMS: incomingClock.HLCPhysicalMS, HLCCounter: incomingClock.HLCCounter, Payload: jsontext.Value(`{}`)}
+		require.Equal(t, want, db.ReconcileFoldStatusIntent(previous, current, "pending-close", []db.FoldEvent{incoming}))
+	})
 }

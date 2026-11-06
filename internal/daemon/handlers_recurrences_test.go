@@ -3,21 +3,20 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"math"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"sync"
 	"testing"
-	"testing/quick"
 	"time"
 	_ "time/tzdata"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
@@ -531,91 +530,85 @@ func assertLocalTimezoneError(t require.TestingT, status int, raw []byte) {
 
 // Generate valid schedules and nonblank Unicode titles. The date/interval
 // subset keeps recurrence evaluation cheap; text is capped at materialization.
-type recurrenceFields struct{ Rule, Date, Title string }
-
-func (recurrenceFields) Generate(r *rand.Rand, _ int) reflect.Value {
+func drawRecurrenceFields(t *rapid.T) (rule, date, title string) {
 	first := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	last := time.Date(2100, 12, 31, 0, 0, 0, 0, time.UTC)
-	days := int(last.Sub(first)/(24*time.Hour)) + 1
-	date := first.AddDate(0, 0, r.Intn(days)).Format("2006-01-02")
-	frequencies := []string{"DAILY", "WEEKLY", "MONTHLY", "YEARLY"}
-	rule := fmt.Sprintf("FREQ=%s;INTERVAL=%d", frequencies[r.Intn(len(frequencies))], 1+r.Intn(30))
-	var title []rune
-	for range 3 {
-		text, _ := quick.Value(reflect.TypeFor[string](), r)
-		title = append(title, []rune(text.String())...)
+	days := int(last.Sub(first) / (24 * time.Hour))
+	date = first.AddDate(0, 0, rapid.IntRange(0, days).Draw(t, "start date offset")).Format("2006-01-02")
+	frequency := rapid.SampledFrom([]string{"DAILY", "WEEKLY", "MONTHLY", "YEARLY"}).Draw(t, "frequency")
+	interval := rapid.IntRange(1, 30).Draw(t, "interval")
+	rule = fmt.Sprintf("FREQ=%s;INTERVAL=%d", frequency, interval)
+	text := []rune(rapid.String().Draw(t, "title"))
+	if len(text) > 128 {
+		text = text[:128]
 	}
-	if len(title) > 128 {
-		title = title[:128]
-	}
-	return reflect.ValueOf(recurrenceFields{Rule: rule, Date: date, Title: "Review " + string(title)})
+	return rule, date, "Review " + string(text)
 }
 
 func TestPatchRecurrenceLocalCompatibilityProperty(t *testing.T) {
+	// Rapid configures case counts per process; keep this test's existing budget.
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "24"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "example-project")
-	if err := quick.Check(func(fields recurrenceFields) bool {
-		return t.Run("case", func(t *testing.T) {
-			rule, date, title := fields.Rule, fields.Date, fields.Title
-			for _, echo := range []bool{false, true} {
-				rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "1999-01-01", "Local", "Old title")
-				body := map[string]any{"actor": "tester", "rrule": rule, "dtstart": date, "template": map[string]any{"title": title}}
-				if echo {
-					body["timezone"] = "Local"
-				}
-				raw, err := json.Marshal(body)
-				require.NoError(t, err)
-				url := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID)
-				resp := doPatch(t, env, url, string(raw), `"rev-1"`)
-				require.Equal(t, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
-				require.Equal(t, `"rev-2"`, resp.Header.Get("ETag"))
-				// Read via HTTP too: historical values remain visible unchanged.
-				resp = doGet(t, env, url)
-				var out struct {
-					Recurrence db.Recurrence `json:"recurrence"`
-				}
-				require.Equal(t, http.StatusOK, resp.StatusCode)
-				require.NoError(t, json.Unmarshal(readClose(t, resp), &out))
-				require.Equal(t, "Local", out.Recurrence.Timezone)
-				require.Equal(t, rule, out.Recurrence.RRule)
-				require.Equal(t, date, out.Recurrence.DTStart)
-				require.Equal(t, title, out.Recurrence.TemplateTitle)
-				require.Equal(t, int64(2), out.Recurrence.Revision)
-				require.Equal(t, &date, out.Recurrence.NextOccurrenceKey)
+	rapid.Check(t, func(rt *rapid.T) {
+		rule, date, title := drawRecurrenceFields(rt)
+		for _, echo := range []bool{false, true} {
+			rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "1999-01-01", "Local", "Old title")
+			body := map[string]any{"actor": "tester", "rrule": rule, "dtstart": date, "template": map[string]any{"title": title}}
+			if echo {
+				body["timezone"] = "Local"
 			}
-		})
-	}, &quick.Config{MaxCount: 24}); err != nil {
-		t.Fatal(err)
-	}
+			raw, err := json.Marshal(body)
+			require.NoError(rt, err)
+			url := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID)
+			resp := doPatch(t, env, url, string(raw), `"rev-1"`)
+			require.Equal(rt, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
+			require.Equal(rt, `"rev-2"`, resp.Header.Get("ETag"))
+			// Read via HTTP too: historical values remain visible unchanged.
+			resp = doGet(t, env, url)
+			var out struct {
+				Recurrence db.Recurrence `json:"recurrence"`
+			}
+			require.Equal(rt, http.StatusOK, resp.StatusCode)
+			require.NoError(rt, json.Unmarshal(readClose(t, resp), &out))
+			require.Equal(rt, "Local", out.Recurrence.Timezone)
+			require.Equal(rt, rule, out.Recurrence.RRule)
+			require.Equal(rt, date, out.Recurrence.DTStart)
+			require.Equal(rt, title, out.Recurrence.TemplateTitle)
+			require.Equal(rt, int64(2), out.Recurrence.Revision)
+			require.Equal(rt, &date, out.Recurrence.NextOccurrenceKey)
+		}
+	})
 }
 
 func TestPostRecurrenceAcceptedTimezoneProperty(t *testing.T) {
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "24"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "example-project")
-	if err := quick.Check(func(fields recurrenceFields) bool {
-		return t.Run("case", func(t *testing.T) {
-			rule, date, title := fields.Rule, fields.Date, fields.Title
-			// Enumerate the supported value classes; generate their schedules.
-			for _, zone := range []string{"UTC", "America/New_York", "Europe/London", "Asia/Kathmandu", "US/Eastern", "Etc/GMT+5", ""} {
-				body, err := json.Marshal(map[string]any{"actor": "tester", "rrule": rule, "dtstart": date, "timezone": zone, "template": map[string]any{"title": title}})
-				require.NoError(t, err)
-				resp := doPost(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, p.ID), string(body))
-				var out struct {
-					Recurrence db.Recurrence `json:"recurrence"`
-				}
-				raw := readClose(t, resp)
-				require.Equal(t, http.StatusCreated, resp.StatusCode, string(raw))
-				require.NoError(t, json.Unmarshal(raw, &out))
-				require.Equal(t, zone, out.Recurrence.Timezone)
-				require.Equal(t, rule, out.Recurrence.RRule)
-				require.Equal(t, date, out.Recurrence.DTStart)
-				require.Equal(t, title, out.Recurrence.TemplateTitle)
-				require.Equal(t, &date, out.Recurrence.NextOccurrenceKey)
+	rapid.Check(t, func(rt *rapid.T) {
+		rule, date, title := drawRecurrenceFields(rt)
+		// Enumerate the supported value classes; generate their schedules.
+		for _, zone := range []string{"UTC", "America/New_York", "Europe/London", "Asia/Kathmandu", "US/Eastern", "Etc/GMT+5", ""} {
+			body, err := json.Marshal(map[string]any{"actor": "tester", "rrule": rule, "dtstart": date, "timezone": zone, "template": map[string]any{"title": title}})
+			require.NoError(rt, err)
+			resp := doPost(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, p.ID), string(body))
+			var out struct {
+				Recurrence db.Recurrence `json:"recurrence"`
 			}
-		})
-	}, &quick.Config{MaxCount: 24}); err != nil {
-		t.Fatal(err)
-	}
+			raw := readClose(t, resp)
+			require.Equal(rt, http.StatusCreated, resp.StatusCode, string(raw))
+			require.NoError(rt, json.Unmarshal(raw, &out))
+			require.Equal(rt, zone, out.Recurrence.Timezone)
+			require.Equal(rt, rule, out.Recurrence.RRule)
+			require.Equal(rt, date, out.Recurrence.DTStart)
+			require.Equal(rt, title, out.Recurrence.TemplateTitle)
+			require.Equal(rt, &date, out.Recurrence.NextOccurrenceKey)
+		}
+	})
 }
 
 func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
@@ -655,40 +648,39 @@ func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
 }
 
 func TestPatchRecurrenceLocalSwitchAwayAndBackProperty(t *testing.T) {
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "24"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "example-project")
-	if err := quick.Check(func(fields recurrenceFields) bool {
-		return t.Run("case", func(t *testing.T) {
-			rule, date, title := fields.Rule, fields.Date, fields.Title
-			for _, zone := range []string{"UTC", "America/New_York", "Europe/London", "Asia/Kathmandu", "US/Eastern", "Etc/GMT+5", ""} {
-				rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "1999-01-01", "Local", "Old title")
-				body, err := json.Marshal(map[string]any{"actor": "tester", "rrule": rule, "dtstart": date, "timezone": zone, "template": map[string]any{"title": title}})
-				require.NoError(t, err)
-				resp := doPatch(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID), string(body), `"rev-1"`)
-				var out struct {
-					Recurrence db.Recurrence `json:"recurrence"`
-				}
-				raw := readClose(t, resp)
-				require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-				require.NoError(t, json.Unmarshal(raw, &out))
-				require.Equal(t, zone, out.Recurrence.Timezone)
-				require.Equal(t, rule, out.Recurrence.RRule)
-				require.Equal(t, date, out.Recurrence.DTStart)
-				require.Equal(t, title, out.Recurrence.TemplateTitle)
-				require.Equal(t, &date, out.Recurrence.NextOccurrenceKey)
-				before := recurrenceWriteCursor(t, env)
-				resp = doPatch(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID),
-					`{"actor":"tester","timezone":"Local"}`, fmt.Sprintf(`"rev-%d"`, out.Recurrence.Revision))
-				assertLocalTimezoneError(t, resp.StatusCode, readClose(t, resp))
-				after, err := env.DB.GetRecurrenceByUID(t.Context(), rec.UID)
-				require.NoError(t, err)
-				require.Equal(t, out.Recurrence, after)
-				require.Equal(t, before, recurrenceWriteCursor(t, env))
+	rapid.Check(t, func(rt *rapid.T) {
+		rule, date, title := drawRecurrenceFields(rt)
+		for _, zone := range []string{"UTC", "America/New_York", "Europe/London", "Asia/Kathmandu", "US/Eastern", "Etc/GMT+5", ""} {
+			rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "1999-01-01", "Local", "Old title")
+			body, err := json.Marshal(map[string]any{"actor": "tester", "rrule": rule, "dtstart": date, "timezone": zone, "template": map[string]any{"title": title}})
+			require.NoError(rt, err)
+			resp := doPatch(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID), string(body), `"rev-1"`)
+			var out struct {
+				Recurrence db.Recurrence `json:"recurrence"`
 			}
-		})
-	}, &quick.Config{MaxCount: 24}); err != nil {
-		t.Fatal(err)
-	}
+			raw := readClose(t, resp)
+			require.Equal(rt, http.StatusOK, resp.StatusCode, string(raw))
+			require.NoError(rt, json.Unmarshal(raw, &out))
+			require.Equal(rt, zone, out.Recurrence.Timezone)
+			require.Equal(rt, rule, out.Recurrence.RRule)
+			require.Equal(rt, date, out.Recurrence.DTStart)
+			require.Equal(rt, title, out.Recurrence.TemplateTitle)
+			require.Equal(rt, &date, out.Recurrence.NextOccurrenceKey)
+			before := recurrenceWriteCursor(rt, env)
+			resp = doPatch(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID),
+				`{"actor":"tester","timezone":"Local"}`, fmt.Sprintf(`"rev-%d"`, out.Recurrence.Revision))
+			assertLocalTimezoneError(rt, resp.StatusCode, readClose(t, resp))
+			after, err := env.DB.GetRecurrenceByUID(t.Context(), rec.UID)
+			require.NoError(rt, err)
+			require.Equal(rt, out.Recurrence, after)
+			require.Equal(rt, before, recurrenceWriteCursor(rt, env))
+		}
+	})
 }
 
 func TestPostRecurrenceRejectsLocalBeforeClaimRefresh(t *testing.T) {

@@ -27,6 +27,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	gitcmd "go.kenn.io/kit/git/cmd"
+	"pgregory.net/rapid"
 )
 
 const federationStressPullInterval = 25 * time.Millisecond
@@ -268,53 +269,44 @@ func (fx *federationStressFixture) pendingPushBacklogs(t federationStressTB) []s
 	return pending
 }
 
-// Each choice is resolved against the resources available when the action runs.
-// No action keeps a stale issue or claim reference from sequence generation.
-type federationStressAction struct {
-	Operation                        uint8
-	Spoke, Issue, Claim              uint64
-	Actor, EditKind, Priority, Label uint8
-	CommentOnHub                     bool
-}
-
-func (fx *federationStressFixture) applyOperation(t *testing.T, action federationStressAction) {
+func (fx *federationStressFixture) applyRandomOperation(t *rapid.T) {
 	t.Helper()
 	fx.opSeq++
-	switch action.Operation % 6 {
+	switch rapid.IntRange(0, 5).Draw(t, "operation") {
 	case 0:
 		fx.createIssueOnNode(t, fx.hub, "hub-create")
 	case 1:
-		if spoke, ok := fx.selectRunningSpoke(t, action.Spoke); ok {
+		if spoke, ok := fx.drawRunningSpoke(t, "create-spoke"); ok {
 			fx.createIssueOnNode(t, spoke, "spoke-create")
 		}
 	case 2:
-		fx.acquireSpokeHardClaim(t, action)
+		fx.acquireSpokeHardClaim(t)
 	case 3:
-		fx.releaseSpokeClaim(t, action)
+		fx.releaseSpokeClaim(t)
 	case 4:
-		fx.editClaimedIssue(t, action)
+		fx.editClaimedIssue(t)
 	case 5:
-		fx.commentClaimedIssue(t, action)
+		fx.commentClaimedIssue(t)
 	}
 }
 
-func (fx *federationStressFixture) acquireSpokeHardClaim(t *testing.T, action federationStressAction) {
+func (fx *federationStressFixture) acquireSpokeHardClaim(t *rapid.T) {
 	t.Helper()
-	spoke, issue, ok := fx.selectSpokeLiveIssue(t, action.Spoke, action.Issue)
+	spoke, issue, ok := fx.drawSpokeLiveIssue(t, "claim")
 	if !ok {
 		return
 	}
-	actor := fx.selectActor(t, action.Actor)
+	actor := fx.drawActor(t, "claim-actor")
 	_ = fx.acquireClaim(t, spoke, issue.ShortID, actor)
 }
 
-func (fx *federationStressFixture) releaseSpokeClaim(t *testing.T, action federationStressAction) {
+func (fx *federationStressFixture) releaseSpokeClaim(t *rapid.T) {
 	t.Helper()
-	spoke, ok := fx.selectRunningSpoke(t, action.Spoke)
+	spoke, ok := fx.drawRunningSpoke(t, "release-spoke")
 	if !ok {
 		return
 	}
-	claim, ok := fx.selectLiveClaim(t, spoke, action.Claim)
+	claim, ok := fx.drawLiveClaim(t, spoke, "release-claim")
 	if !ok {
 		return
 	}
@@ -324,17 +316,17 @@ func (fx *federationStressFixture) releaseSpokeClaim(t *testing.T, action federa
 	})
 }
 
-func (fx *federationStressFixture) editClaimedIssue(t *testing.T, action federationStressAction) {
+func (fx *federationStressFixture) editClaimedIssue(t *rapid.T) {
 	t.Helper()
-	spoke, issue, ok := fx.selectSpokeLiveIssue(t, action.Spoke, action.Issue)
+	spoke, issue, ok := fx.drawSpokeLiveIssue(t, "edit")
 	if !ok {
 		return
 	}
-	actor := fx.selectActor(t, action.Actor)
+	actor := fx.drawActor(t, "edit-actor")
 	if !fx.acquireClaim(t, spoke, issue.ShortID, actor) {
 		return
 	}
-	switch action.EditKind % 4 {
+	switch rapid.IntRange(0, 3).Draw(t, "edit-kind") {
 	case 0:
 		fx.patchIssue(t, spoke, issue.ShortID, map[string]any{
 			"actor": actor,
@@ -342,7 +334,7 @@ func (fx *federationStressFixture) editClaimedIssue(t *testing.T, action federat
 			"body":  fmt.Sprintf("stress body %03d", fx.opSeq),
 		})
 	case 1:
-		priority := int64(action.Priority % 4)
+		priority := int64(rapid.IntRange(0, 3).Draw(t, "priority"))
 		fx.patchIssue(t, spoke, issue.ShortID, map[string]any{
 			"actor":        actor,
 			"set_priority": priority,
@@ -354,15 +346,15 @@ func (fx *federationStressFixture) editClaimedIssue(t *testing.T, action federat
 		})
 	case 3:
 		fx.addLabel(t, spoke, issue.ShortID, actor,
-			fmt.Sprintf("stress:%d", action.Label%6))
+			fmt.Sprintf("stress:%d", rapid.IntRange(0, 5).Draw(t, "label")))
 	}
 }
 
-func (fx *federationStressFixture) commentClaimedIssue(t *testing.T, action federationStressAction) {
+func (fx *federationStressFixture) commentClaimedIssue(t *rapid.T) {
 	t.Helper()
-	actor := fx.selectActor(t, action.Actor)
-	if action.CommentOnHub {
-		issue, ok := fx.selectIssue(t, fx.hub, false, action.Issue)
+	actor := fx.drawActor(t, "comment-actor")
+	if rapid.Bool().Draw(t, "comment-on-hub") {
+		issue, ok := fx.drawIssue(t, fx.hub, false, "hub-comment")
 		if !ok {
 			return
 		}
@@ -372,7 +364,7 @@ func (fx *federationStressFixture) commentClaimedIssue(t *testing.T, action fede
 		fx.commentOnNode(t, fx.hub, issue.ShortID, actor)
 		return
 	}
-	spoke, issue, ok := fx.selectSpokeLiveIssue(t, action.Spoke, action.Issue)
+	spoke, issue, ok := fx.drawSpokeLiveIssue(t, "spoke-comment")
 	if !ok {
 		return
 	}
@@ -474,13 +466,13 @@ func (fx *federationStressFixture) commentOnNode(
 	require.Equalf(t, http.StatusOK, status, "comment body: %s", raw)
 }
 
-func (fx *federationStressFixture) selectActor(t *testing.T, choice uint8) string {
+func (fx *federationStressFixture) drawActor(t *rapid.T, label string) string {
 	t.Helper()
 	actors := []string{"alice", "bob", "charlie", "dana"}
-	return actors[int(choice)%len(actors)]
+	return actors[rapid.IntRange(0, len(actors)-1).Draw(t, label)]
 }
 
-func (fx *federationStressFixture) selectRunningSpoke(t *testing.T, choice uint64) (*federationStressNode, bool) {
+func (fx *federationStressFixture) drawRunningSpoke(t *rapid.T, label string) (*federationStressNode, bool) {
 	t.Helper()
 	var running []*federationStressNode
 	for _, spoke := range fx.spokes {
@@ -491,12 +483,12 @@ func (fx *federationStressFixture) selectRunningSpoke(t *testing.T, choice uint6
 	if len(running) == 0 {
 		return nil, false
 	}
-	return running[choice%uint64(len(running))], true
+	return running[rapid.IntRange(0, len(running)-1).Draw(t, label)], true
 }
 
-func (fx *federationStressFixture) selectSpokeLiveIssue(t *testing.T, spokeChoice, issueChoice uint64) (*federationStressNode, federationStressIssue, bool) {
+func (fx *federationStressFixture) drawSpokeLiveIssue(t *rapid.T, label string) (*federationStressNode, federationStressIssue, bool) {
 	t.Helper()
-	spoke, ok := fx.selectRunningSpoke(t, spokeChoice)
+	spoke, ok := fx.drawRunningSpoke(t, label+"-spoke")
 	if !ok {
 		return nil, federationStressIssue{}, false
 	}
@@ -510,22 +502,22 @@ func (fx *federationStressFixture) selectSpokeLiveIssue(t *testing.T, spokeChoic
 	if len(hubKnown) == 0 {
 		return nil, federationStressIssue{}, false
 	}
-	issue := hubKnown[issueChoice%uint64(len(hubKnown))]
+	issue := hubKnown[rapid.IntRange(0, len(hubKnown)-1).Draw(t, label+"-issue")]
 	return spoke, issue, true
 }
 
-func (fx *federationStressFixture) selectIssue(
-	t *testing.T,
+func (fx *federationStressFixture) drawIssue(
+	t *rapid.T,
 	node *federationStressNode,
 	includeDeleted bool,
-	choice uint64,
+	label string,
 ) (federationStressIssue, bool) {
 	t.Helper()
 	issues := fx.issuesOnNode(t, node, includeDeleted)
 	if len(issues) == 0 {
 		return federationStressIssue{}, false
 	}
-	return issues[choice%uint64(len(issues))], true
+	return issues[rapid.IntRange(0, len(issues)-1).Draw(t, label)], true
 }
 
 type federationStressLiveClaim struct {
@@ -533,10 +525,10 @@ type federationStressLiveClaim struct {
 	Holder   string
 }
 
-func (fx *federationStressFixture) selectLiveClaim(
-	t *testing.T,
+func (fx *federationStressFixture) drawLiveClaim(
+	t *rapid.T,
 	node *federationStressNode,
-	choice uint64,
+	label string,
 ) (federationStressLiveClaim, bool) {
 	t.Helper()
 	rows, err := node.db.QueryContext(t.Context(), `
@@ -559,7 +551,7 @@ func (fx *federationStressFixture) selectLiveClaim(
 	if len(claims) == 0 {
 		return federationStressLiveClaim{}, false
 	}
-	return claims[choice%uint64(len(claims))], true
+	return claims[rapid.IntRange(0, len(claims)-1).Draw(t, label)], true
 }
 
 func (fx *federationStressFixture) issuesOnNode(
@@ -762,7 +754,7 @@ func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eD
 
 func assertNoDuplicateLiveClaimsOnNode(t federationStressTB, node *federationStressNode) {
 	t.Helper()
-	rows, err := node.db.QueryContext(context.Background(), `
+	rows, err := node.db.QueryContext(t.Context(), `
 		SELECT issue_uid, COUNT(*)
 		  FROM issue_claims
 		 WHERE released_at IS NULL

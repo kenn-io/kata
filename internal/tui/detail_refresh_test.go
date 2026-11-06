@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"slices"
 	"testing"
-	"testing/quick"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
+	"pgregory.net/rapid"
 )
 
 func TestDetailLiveRefreshTickIsFencedByNavigation(t *testing.T) {
@@ -242,58 +242,62 @@ func TestDetailLiveRefreshSettlesEveryCompletionOrder(t *testing.T) {
 	for _, readErrors := range []bool{false, true} {
 		for orderIndex, order := range detailCompletionOrders(4) {
 			t.Run(fmt.Sprintf("%t/%d", readErrors, orderIndex), func(t *testing.T) {
-				check := func(counts [4]uint8, boundaries bool) bool {
-					return t.Run("case", func(t *testing.T) {
-						m := sseDetailFixture(7, "abc4", "01UID-OPEN")
-						api := &fakeDetailAPI{}
-						if readErrors {
-							api.getIssueErr = errors.New("read failed")
-							api.commentsErr = api.getIssueErr
-							api.eventsErr = api.getIssueErr
-							api.linksErr = api.getIssueErr
-						}
-						batch := m.detail.refetch(api)().(tea.BatchMsg)
-						floor := m.detail.reads.floor
-						messages := make([]tea.Msg, 0, 4)
-						for _, work := range batch {
-							messages = append(messages, work())
-						}
-						dirty, trailing := false, 0
-						for completion, index := range order {
-							msg := messages[index]
-							count := counts[completion]
-							if boundaries {
-								count = []uint8{0, 1, 31, 32, 33, 255}[count%6]
-							}
-							for range min(int(count), 32) {
-								dirty = true
-								if m.maybeRefetchOpenDetail(eventReceivedMsg{projectID: 7, issueUID: "01UID-OPEN"}) != nil {
-									t.Fatal("active batch started overlapping reads")
-								}
-							}
-							if m.detail.reads.floor != floor || m.detail.reads.canceled {
-								t.Fatal("events replaced the active batch")
-							}
-							next, cmd := m.Update(msg)
-							m = next.(Model)
-							if cmd != nil {
-								trailing++
+				check := func(t rapid.TB, counts [4]uint8) {
+					m := sseDetailFixture(7, "abc4", "01UID-OPEN")
+					defer m.detail.cancelReads()
+					api := &fakeDetailAPI{}
+					if readErrors {
+						api.getIssueErr = errors.New("read failed")
+						api.commentsErr = api.getIssueErr
+						api.eventsErr = api.getIssueErr
+						api.linksErr = api.getIssueErr
+					}
+					batch := m.detail.refetch(api)().(tea.BatchMsg)
+					floor := m.detail.reads.floor
+					messages := make([]tea.Msg, 0, 4)
+					for _, work := range batch {
+						messages = append(messages, work())
+					}
+					dirty, trailing := false, 0
+					for completion, index := range order {
+						msg := messages[index]
+						count := counts[completion]
+						for range min(int(count), 32) {
+							dirty = true
+							if m.maybeRefetchOpenDetail(eventReceivedMsg{projectID: 7, issueUID: "01UID-OPEN"}) != nil {
+								t.Fatal("active batch started overlapping reads")
 							}
 						}
-						want := 0
-						if dirty {
-							want = 1
+						if m.detail.reads.floor != floor || m.detail.reads.canceled {
+							t.Fatal("events replaced the active batch")
 						}
-						if trailing != want {
-							t.Fatalf("trailing refreshes=%d, want %d", trailing, want)
+						next, cmd := m.Update(msg)
+						m = next.(Model)
+						if cmd != nil {
+							trailing++
 						}
-						m.detail.cancelReads()
-					})
+					}
+					want := 0
+					if dirty {
+						want = 1
+					}
+					if trailing != want {
+						t.Fatalf("trailing refreshes=%d, want %d", trailing, want)
+					}
 				}
-				check([4]uint8{}, false)
-				if err := quick.Check(check, nil); err != nil {
-					t.Fatal(err)
-				}
+				check(t, [4]uint8{})
+				rapid.Check(t, func(rt *rapid.T) {
+					boundaries := rapid.Bool().Draw(rt, "boundary bursts")
+					var counts [4]uint8
+					for i := range counts {
+						if boundaries {
+							counts[i] = rapid.SampledFrom([]uint8{0, 1, 31, 32, 33, 255}).Draw(rt, "events before completion")
+						} else {
+							counts[i] = rapid.Uint8().Draw(rt, "events before completion")
+						}
+					}
+					check(rt, counts)
+				})
 			})
 		}
 	}

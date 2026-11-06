@@ -2,14 +2,15 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
-	"testing/quick"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"go.kenn.io/kata/internal/agentguide"
 	"go.kenn.io/kata/internal/storageadmin"
@@ -32,50 +33,50 @@ func TestSkillFragmentsArePartitioned(t *testing.T) {
 	require.Empty(t, assigned, "unknown fragment IDs")
 }
 
+func mutatedNameGen(names []string) *rapid.Generator[string] {
+	return rapid.Custom(func(t *rapid.T) string {
+		name := rapid.SampledFrom(names).Draw(t, "guide")
+		return rapid.SampledFrom([]string{
+			strings.ToUpper(name), " " + name + "\t", "\u00a0" + name + "\u2003",
+			name[:1] + " " + name[1:], "../" + name, "/" + name, name + ".md", "x" + name, name + "x",
+		}).Draw(t, "mutation")
+	})
+}
+
 func TestSkillsLookupOutcomes(t *testing.T) {
+	// Rapid configures case counts per process; keep this test's existing budget.
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	names := []string{"workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events"}
-	if err := quick.Check(func(arbitrary string, branch, selected, mutation uint8) bool {
-		return t.Run("case", func(t *testing.T) {
-			name := names[int(selected)%len(names)]
-			raw := arbitrary
-			switch branch % 4 {
-			case 1:
-				raw = name
-			case 2:
-				variants := []string{strings.ToUpper(name), " " + name + "\t", "\u00a0" + name + "\u2003", name[:1] + " " + name[1:], "../" + name, "/" + name, name + ".md", "x" + name, name + "x"}
-				raw = variants[int(mutation)%len(variants)]
-			case 3:
-				edges := []string{"", "\t\n\u2003", "/tmp/guide.md", "..", "workflow\x00"}
-				raw = edges[int(selected)%len(edges)]
+	gen := rapid.OneOf(rapid.String(), rapid.SampledFrom(names), mutatedNameGen(names), rapid.SampledFrom([]string{"", "\t\n\u2003", "/tmp/guide.md", "..", "workflow\x00"}))
+	rapid.Check(t, func(rt *rapid.T) {
+		raw := gen.Draw(rt, "name")
+		res, out, err := (toolHandlers{}).skills(t.Context(), nil, SkillsInput{Name: raw})
+		name := strings.TrimSpace(raw)
+		if name != "" && !slices.Contains(names, name) {
+			require.EqualError(rt, err, fmt.Sprintf("unknown guide %q; available: %s", name, strings.Join(names, ", ")))
+			require.Nil(rt, res)
+			require.Empty(rt, out.Skills)
+			return
+		}
+		require.NoError(rt, err)
+		require.Len(rt, res.Content, 1)
+		text := res.Content[0].(*sdkmcp.TextContent).Text
+		if name == "" {
+			var got []string
+			for _, summary := range out.Skills {
+				got = append(got, summary.Name)
+				require.Contains(rt, text, "- "+summary.Name+": "+summary.Title+". "+summary.Summary)
 			}
-			res, out, err := (toolHandlers{}).skills(t.Context(), nil, SkillsInput{Name: raw})
-			name = strings.TrimSpace(raw)
-			if name != "" && !slices.Contains(names, name) {
-				require.EqualError(t, err, fmt.Sprintf("unknown guide %q; available: %s", name, strings.Join(names, ", ")))
-				require.Nil(t, res)
-				require.Empty(t, out.Skills)
-				return
-			}
-			require.NoError(t, err)
-			require.Len(t, res.Content, 1)
-			text := res.Content[0].(*sdkmcp.TextContent).Text
-			if name == "" {
-				var got []string
-				for _, summary := range out.Skills {
-					got = append(got, summary.Name)
-					require.Contains(t, text, "- "+summary.Name+": "+summary.Title+". "+summary.Summary)
-				}
-				require.Equal(t, names, got)
-			} else {
-				require.Len(t, out.Skills, 1)
-				require.Equal(t, name, out.Skills[0].Name)
-				md, _ := SkillMarkdown(name)
-				require.Equal(t, md, text)
-			}
-		})
-	}, &quick.Config{MaxCount: 1000}); err != nil {
-		t.Fatal(err)
-	}
+			require.Equal(rt, names, got)
+		} else {
+			require.Len(rt, out.Skills, 1)
+			require.Equal(rt, name, out.Skills[0].Name)
+			md, _ := SkillMarkdown(name)
+			require.Equal(rt, md, text)
+		}
+	})
 }
 
 func TestSkillsSchemaBoundary(t *testing.T) {

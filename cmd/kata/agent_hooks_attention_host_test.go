@@ -10,14 +10,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
-	"testing/quick"
+
+	"pgregory.net/rapid"
 )
 
 func TestPiChildDoesNotTakeOverLeadAttention(t *testing.T) {
 	testPiChildAttention(t, "lead-ref", "lead-ref", "unix:///tmp/kata.sock", "unix:///tmp/kata.sock")
 }
 
-func attentionHostFixture(t *testing.T) func(*testing.T, any, any) {
+func attentionHostFixture(t *testing.T) func(*rapid.T, any, any) {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -49,7 +50,7 @@ func attentionHostFixture(t *testing.T) func(*testing.T, any, any) {
 		}
 	})
 	decoder := jsontext.NewDecoder(stdout)
-	return func(rt *testing.T, input, verdict any) {
+	return func(rt *rapid.T, input, verdict any) {
 		// Node readline treats Unicode JS line separators as record boundaries.
 		data, err := json.Marshal(input, jsontext.EscapeForJS(true))
 		if err != nil {
@@ -70,65 +71,58 @@ func attentionHostFixture(t *testing.T) func(*testing.T, any, any) {
 
 func TestAttentionHostMarkerProperty(t *testing.T) {
 	exchange := attentionHostFixture(t)
-	if err := quick.Check(func(rawMarkerPID, rawOwnPID uint32, samePID bool, markerChoice, identityChoice uint8, alive, malformed, denied bool) bool {
-		return t.Run("case", func(t *testing.T) {
-			markerPid := 1 + int(rawMarkerPID%2147483647)
-			ownPid := 1 + int(rawOwnPID%2147483647)
-			if samePID {
-				ownPid = markerPid
-			}
-			identities := []string{
-				`{"daemon":"local","project":42,"issue":"lead"}`,
-				`{"daemon":"remote","project":42,"issue":"lead"}`,
-				`{"daemon":"local","project":43,"issue":"lead"}`,
-			}
-			markerIdentity, identity := identities[markerChoice%3], identities[identityChoice%3]
-
-			input := map[string]any{
-				"marker": map[string]any{"pid": markerPid, "identity": markerIdentity},
-				"ownPid": ownPid, "identity": identity, "alive": alive, "malformed": malformed,
-				"denied": denied,
-			}
-			if malformed && markerPid%22 == 0 {
-				delete(input, "marker")
-			}
-			var verdict struct {
-				Skip bool `json:"skip"`
-			}
-			exchange(t, input, &verdict)
-			want := !malformed && markerPid != ownPid && alive && markerIdentity == identity
-			if verdict.Skip != want {
-				t.Fatalf("skip = %v, want %v for %+v", verdict.Skip, want, input)
-			}
+	rapid.Check(t, func(rt *rapid.T) {
+		markerPid := rapid.IntRange(1, 2147483647).Draw(rt, "marker pid")
+		ownPid := rapid.IntRange(1, 2147483647).Draw(rt, "own pid")
+		if rapid.Bool().Draw(rt, "same pid") {
+			ownPid = markerPid
+		}
+		identities := rapid.SampledFrom([]string{
+			`{"daemon":"local","project":42,"issue":"lead"}`,
+			`{"daemon":"remote","project":42,"issue":"lead"}`,
+			`{"daemon":"local","project":43,"issue":"lead"}`,
 		})
-	}, nil); err != nil {
-		t.Fatal(err)
-	}
+		markerIdentity, identity := identities.Draw(rt, "marker identity"), identities.Draw(rt, "identity")
+		alive := rapid.Bool().Draw(rt, "alive")
+		malformed := rapid.Bool().Draw(rt, "malformed")
+		input := map[string]any{
+			"marker": map[string]any{"pid": markerPid, "identity": markerIdentity},
+			"ownPid": ownPid, "identity": identity, "alive": alive, "malformed": malformed,
+			"denied": rapid.Bool().Draw(rt, "denied"),
+		}
+		if malformed && markerPid%22 == 0 {
+			delete(input, "marker")
+		}
+		var verdict struct {
+			Skip bool `json:"skip"`
+		}
+		exchange(rt, input, &verdict)
+		want := !malformed && markerPid != ownPid && alive && markerIdentity == identity
+		if verdict.Skip != want {
+			rt.Fatalf("skip = %v, want %v for %+v", verdict.Skip, want, input)
+		}
+	})
 }
 
 func TestAttentionHostClaimReleaseProperty(t *testing.T) {
 	exchange := attentionHostFixture(t)
-	if err := quick.Check(func(rawPID uint32, identity string, choice uint8) bool {
-		return t.Run("case", func(t *testing.T) {
-			pid := 1 + int(rawPID%2147483647)
-
-			replacement := []string{"own", "pid", "identity", "reordered", "extended", "malformed", "absent"}[choice%7]
-			var verdict struct {
-				PID       int    `json:"pid"`
-				Identity  string `json:"identity"`
-				Released  bool   `json:"released"`
-				Unchanged bool   `json:"unchanged"`
-				KataRef   string `json:"kataRef"`
-			}
-			exchange(t, map[string]any{"operation": "claim-release", "ownPid": pid, "identity": identity, "replacement": replacement}, &verdict)
-			released := replacement == "own" || replacement == "absent"
-			if verdict.PID != pid || verdict.Identity != identity || verdict.KataRef != "preserved-ref" || verdict.Released != released || (!released && !verdict.Unchanged) {
-				t.Fatalf("claim/release changed the wrong environment value: replacement=%s verdict=%+v", replacement, verdict)
-			}
-		})
-	}, nil); err != nil {
-		t.Fatal(err)
-	}
+	rapid.Check(t, func(rt *rapid.T) {
+		pid := rapid.IntRange(1, 2147483647).Draw(rt, "pid")
+		identity := rapid.String().Draw(rt, "identity")
+		replacement := rapid.SampledFrom([]string{"own", "pid", "identity", "reordered", "extended", "malformed", "absent"}).Draw(rt, "replacement")
+		var verdict struct {
+			PID       int    `json:"pid"`
+			Identity  string `json:"identity"`
+			Released  bool   `json:"released"`
+			Unchanged bool   `json:"unchanged"`
+			KataRef   string `json:"kataRef"`
+		}
+		exchange(rt, map[string]any{"operation": "claim-release", "ownPid": pid, "identity": identity, "replacement": replacement}, &verdict)
+		released := replacement == "own" || replacement == "absent"
+		if verdict.PID != pid || verdict.Identity != identity || verdict.KataRef != "preserved-ref" || verdict.Released != released || (!released && !verdict.Unchanged) {
+			rt.Fatalf("claim/release changed the wrong environment value: replacement=%s verdict=%+v", replacement, verdict)
+		}
+	})
 }
 
 func TestPiChildWithDifferentRefTracksOwnIssue(t *testing.T) {

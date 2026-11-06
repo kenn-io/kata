@@ -8,12 +8,12 @@ import (
 	"math"
 	"strings"
 	"testing"
-	"testing/quick"
 	"time"
 
 	"go.kenn.io/kata/internal/config"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 )
 
 func artifactTestHash(s string) string {
@@ -150,33 +150,29 @@ func consistentManifest(chunks, dimensions int) ArtifactManifest {
 // Exact portable float32 bits survive round trips across finite input values,
 // including negative zero; changing any vector bytes invalidates the digest.
 func TestEmbeddingArtifactFiniteRoundTrips(t *testing.T) {
-	if err := quick.Check(func(rawSign, rawExponent, rawMantissa uint32, rawDimensions uint16) bool {
-		return t.Run("case", func(t *testing.T) {
-			sign := rawSign % 2
-			exponent := rawExponent % 255
-			mantissa := rawMantissa & 0x7fffff
-			for _, bits := range []uint32{sign<<31 | exponent<<23 | mantissa, 0, 1 << 31, 1, 0x007fffff, 0x00800000, 0x7f7fffff, 0xff7fffff} {
-				x := math.Float32frombits(bits)
-				dimensions := 1 + int(rawDimensions%32768)
-				identity := artifactTestIdentity()
-				identity.Dimensions = dimensions
-				identity.Normalization = "none"
-				values := make([]float32, dimensions)
-				for i := range values {
-					values[i] = 1
-				}
-				values[0] = x
-				artifact, err := NewArtifact(identity, "Input", [][]float32{values})
-				require.NoError(t, err)
-				require.NoError(t, ValidateArtifact(artifact, "Input", strings.Repeat("a", 64)))
-				require.Equal(t, math.Float32bits(x), binary.LittleEndian.Uint32(artifact.Chunks[0].VectorBytes))
-				artifact.Chunks[0].VectorBytes[0] ^= 1
-				require.Error(t, ValidateArtifact(artifact, "Input", strings.Repeat("a", 64)))
+	rapid.Check(t, func(t *rapid.T) {
+		sign := rapid.Uint32Range(0, 1).Draw(t, "sign")
+		exponent := rapid.Uint32Range(0, 254).Draw(t, "finite exponent")
+		mantissa := rapid.Uint32Range(0, 0x7fffff).Draw(t, "mantissa")
+		dimensions := rapid.IntRange(1, 32768).Draw(t, "dimensions")
+		for _, bits := range []uint32{sign<<31 | exponent<<23 | mantissa, 0, 1 << 31, 1, 0x007fffff, 0x00800000, 0x7f7fffff, 0xff7fffff} {
+			x := math.Float32frombits(bits)
+			identity := artifactTestIdentity()
+			identity.Dimensions = dimensions
+			identity.Normalization = "none"
+			values := make([]float32, dimensions)
+			for i := range values {
+				values[i] = 1
 			}
-		})
-	}, nil); err != nil {
-		t.Fatal(err)
-	}
+			values[0] = x
+			artifact, err := NewArtifact(identity, "Input", [][]float32{values})
+			require.NoError(t, err)
+			require.NoError(t, ValidateArtifact(artifact, "Input", strings.Repeat("a", 64)))
+			require.Equal(t, math.Float32bits(x), binary.LittleEndian.Uint32(artifact.Chunks[0].VectorBytes))
+			artifact.Chunks[0].VectorBytes[0] ^= 1
+			require.Error(t, ValidateArtifact(artifact, "Input", strings.Repeat("a", 64)))
+		}
+	})
 }
 
 func FuzzEmbeddingArtifactValidation(f *testing.F) {

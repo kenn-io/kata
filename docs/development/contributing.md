@@ -148,16 +148,15 @@ migrations](postgres-migrations.md) before proposing a schema change.
 `make test-stress` runs randomized and failpoint tests through gotestsum. It
 reruns a failed test up to twice, lists those reruns in its summary, and writes
 the test events to `gotestsum/`. The target sets
-`KATA_FEDERATION_STRESS_CHECKS=5`; a direct test run defaults to 100 generated
-cases. The workload prints a replay seed. Reproduce a failure with that seed
-and the same case count:
+`RAPID_CHECKS=5`; a direct test run defaults to 100 generated cases. Rapid
+shrinks failing inputs, saves them for replay, and prints a failing seed.
+Reproduce a failure with that seed and the same case count:
 
 ```sh
-KATA_FEDERATION_STRESS_CHECKS=5 go test -tags federation_stress ./e2e \
+RAPID_CHECKS=5 RAPID_SEED=<seed> go test -tags federation_stress ./e2e \
   -run TestFederationStressRandomizedWorkload \
   -count=1 \
-  -timeout 2m \
-  -federation-stress-seed=<seed>
+  -timeout 2m
 ```
 
 ## Documentation checks
