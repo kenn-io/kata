@@ -11,6 +11,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Prevent duplicate creates with identical full title text when either issue's
   body has no searchable words. `--force-new` still creates a separate issue.
+- Open long web UI lists with the first 150 rows and add more as you scroll. The
+  browser's own Find sees only rendered rows. End and deep links to late rows
+  still draw the remaining rows once.
 - Give coding agents a shorter kata contract. The text that hooks inject,
   `kata init --with-agents` writes, and the MCP `workflow` guide serves now
   covers one agent's loop in plain prose: skip kata for questions, search with
