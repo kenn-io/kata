@@ -57,6 +57,17 @@ returns `federation_offline`; a missing or changed route is an explicit origin
 error; a missing version at a reachable origin remains
 `attachment_content_missing`.
 
+Origin content requires valid blob hash and size headers. The root checks the
+size against its immutable version catalog, and the serving daemon checks it
+against the saved reference before sending headers. Each hop verifies the hash
+and actual byte count while streaming, withholding the final chunk until both
+match. Invalid headers or a size disagreement return `attachment_content_invalid`.
+A failure after streaming starts aborts the response; it does not publish a
+complete successful file. Legacy unmarked references retain local resolution.
+Downloads check access before each chunk. Revoking project access, an
+issue-scoped token, or a federation enrollment interrupts the stream. Cancelling
+the request also stops the origin read.
+
 Signed uploads use bounded temporary disk files for digest verification at
 each hop. The 256 MiB file limit remains. Transfer failures or a denied final
 metadata write can leave an unreferenced Docbank version; Docbank retention

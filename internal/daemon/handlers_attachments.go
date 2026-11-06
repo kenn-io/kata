@@ -193,6 +193,10 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
+			if resp.ContentLength != e.Size {
+				_ = resp.Body.Close()
+				return nil, attachmentError(502, "attachment_content_invalid")
+			}
 		}
 		typ, disposition := "application/octet-stream", "attachment"
 		if inlineAttachmentType(e.MediaType) {

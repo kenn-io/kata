@@ -278,6 +278,21 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 		// rechecks each frame instead, so it keeps no registry for its lifetime.
 		ctx = db.WithExposedIssues(ctx)
 		r = r.WithContext(ctx)
+		if r.Method == http.MethodGet && isAttachmentTransfer(r) {
+			validator := &contentReleaseValidator{}
+			ctx = context.WithValue(ctx, contentReleaseValidatorKey{}, validator)
+			r = r.WithContext(ctx)
+			serveRevalidatedContent(w, r, next, func() error {
+				if err := decision.revalidateRelease(ctx); err != nil {
+					return err
+				}
+				if validator.validate != nil {
+					return validator.validate()
+				}
+				return nil
+			})
+			return
+		}
 		response := newBufferedScopedResponse(w)
 		defer func() { _ = response.close() }()
 		next.ServeHTTP(response, r)
