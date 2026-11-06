@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -73,7 +74,7 @@ func TestUICommandMissingBrowserPrintsReachableURL(t *testing.T) {
 	request.Header.Set("Accept", "text/html")
 	response, err := env.HTTP.Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusOK, response.StatusCode)
 }
 
@@ -99,11 +100,11 @@ func TestUICommandOutputModesBeforeBrowser(t *testing.T) {
 			openWebBrowserForCommand = func(_ context.Context, launch client.WebUILaunch) error {
 				assert.Equal(t, "https://daemon.example/kata#login=1&return_path=%2Fkata", launch.PublicURL)
 				assert.Equal(t, tc.want, stdout.String())
-				return &exec.Error{Name: "xdg-open", Err: exec.ErrNotFound}
+				return errors.New("browser launcher unavailable")
 			}
 			require.NoError(t, cmd.Execute())
 			assert.Equal(t, tc.want, stdout.String())
-			assert.Equal(t, "Could not open a browser: exec: \"xdg-open\": executable file not found in $PATH. Open the URL above.\n", stderr.String())
+			assert.Equal(t, "Could not open a browser: browser launcher unavailable. Open the URL above.\n", stderr.String())
 		})
 	}
 }

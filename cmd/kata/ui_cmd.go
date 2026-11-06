@@ -72,7 +72,7 @@ func newUICmd() *cobra.Command {
 					return outputErr
 				}
 				if err := openWebBrowserForCommand(ctx, launch); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Could not open a browser: %v. Open the URL above.\n", err)
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Could not open a browser: %v. Open the URL above.\n", err)
 				}
 				return nil
 			})
