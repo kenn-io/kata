@@ -1,6 +1,7 @@
 package sqlitestore_test
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,14 +11,41 @@ import (
 )
 
 func TestIssueUIDPrefixGrowth(t *testing.T) {
-	dbtest.RunIssueUIDPrefixGrowth(t, func(t *testing.T) db.Storage { return openTestDB(t) }, func(t *testing.T, store db.Storage, size, offset int, prefix string, evenProject, oddProject int64) {
+	var stores []*sql.DB
+	pages := func(reset bool) int {
+		total := 0
+		for _, store := range stores {
+			conn, err := store.Conn(t.Context())
+			require.NoError(t, err)
+			total += sqlitePageFetches(t, conn, reset)
+			require.NoError(t, conn.Close())
+		}
+		return total
+	}
+	dbtest.RunIssueUIDPrefixGrowth(t, func(t *testing.T) db.Storage {
+		store, path := openTestDBWithPath(t)
+		// The write-queue wrapper doesn't expose the driver's page counters.
+		raw, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, raw.Close()) })
+		raw.SetMaxOpenConns(1)
+		stores = append(stores, raw)
+		measured := *store
+		measured.DB = raw
+		return &measured
+	}, func(t *testing.T, store db.Storage, size, offset int, prefix string, evenProject, oddProject int64) {
 		_, err := store.(*sqlitestore.Store).ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (
     VALUES(1+?) UNION ALL SELECT x+1 FROM n WHERE x<?
 )
 INSERT INTO issues(uid,short_id,project_id,title,author)
 SELECT ?||printf('%022d',x),printf('%06d',x),CASE x%2 WHEN 0 THEN ? ELSE ? END,'Unrelated issue','agent' FROM n`, offset, size+offset, prefix, evenProject, oddProject)
 		require.NoError(t, err)
-	})
+	}, func(run, _ func()) float64 {
+		// Count database work instead of elapsed time, which varies with CI load.
+		pages(true)
+		run()
+		return float64(pages(false))
+	}, 1)
 }
 
 func TestIssueUIDPrefixMatchCaseMatching(t *testing.T) {

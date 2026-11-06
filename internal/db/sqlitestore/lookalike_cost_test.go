@@ -15,6 +15,11 @@ import (
 // Look-alike retrieval runs on issue creation and must stay cheap as comments grow.
 func TestSearchFTSAny_LookalikePageBudget(t *testing.T) {
 	const common = "login browser timeout session request response server client token account password reset"
+	wideWords := make([]string, 140)
+	for i := range wideWords {
+		wideWords[i] = fmt.Sprintf("word%03d", i)
+	}
+	wideBody := strings.Join(wideWords, " ")
 	cases := []struct {
 		name          string
 		title         string
@@ -45,6 +50,16 @@ func TestSearchFTSAny_LookalikePageBudget(t *testing.T) {
 			originalTitle: "distinctive callback failure",
 			budget:        20_000,
 			budgetReason:  "look-alike retrieval must score each issue once",
+		},
+		{
+			name:          "wide_dense_postings",
+			title:         "shared issue",
+			body:          wideBody,
+			query:         wideBody + " distinctive callback failure",
+			wordCount:     143,
+			originalTitle: "distinctive callback failure",
+			budget:        20_000,
+			budgetReason:  "look-alike match flags must not re-read every match's postings",
 		},
 	}
 	for _, tc := range cases {

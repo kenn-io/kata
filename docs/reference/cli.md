@@ -780,6 +780,11 @@ the filters, belongs to another project, or fell outside `--limit`, its child
 stays visible as a top-level row. JSON and agent output remain flat in the
 server's order. This grouping applies when `--sort` is omitted or empty.
 
+Lexical search returns only issues whose title, body, or comments contain every
+query word. When a multi-word lexical search finds nothing, `kata search` prints
+`Hint: no issue contains every word; search again with fewer words` to stderr;
+`--quiet` suppresses it.
+
 By default `kata search` runs lexical (FTS) search. When the daemon has
 [semantic search](../guide/semantic-search.md) configured, search
 automatically fuses lexical and vector results. The mode flags are mutually
