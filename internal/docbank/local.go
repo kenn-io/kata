@@ -1,0 +1,143 @@
+package docbank
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	kitdaemon "go.kenn.io/kit/daemon"
+
+	"go.kenn.io/kata/internal/config"
+)
+
+const docbankService = "docbank"
+
+// New returns the client for cfg, or nil when Docbank is not configured.
+// cfg must already be normalized.
+func New(cfg config.DocbankConfig) *Client {
+	switch {
+	case !cfg.Enabled():
+		return nil
+	case cfg.UsesLocal():
+		return NewLocalClient(Local{})
+	default:
+		return NewClient(cfg.URL, cfg.ResolveKey)
+	}
+}
+
+// LocalHome returns Docbank's home: DOCBANK_HOME when set, else ~/.docbank.
+func LocalHome() (string, error) {
+	if h := os.Getenv("DOCBANK_HOME"); h != "" {
+		abs, err := filepath.Abs(h)
+		if err != nil {
+			return "", fmt.Errorf("resolve DOCBANK_HOME: %w", err)
+		}
+		return abs, nil
+	}
+	user, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("find home directory for the Docbank home: %w", err)
+	}
+	return filepath.Join(user, ".docbank"), nil
+}
+
+// Local finds the Docbank running on this machine through its runtime record.
+type Local struct {
+	// Home is Docbank's home directory; empty resolves LocalHome on each call.
+	Home string
+	// Start launches Docbank in home; nil runs `docbank daemon start`.
+	Start func(ctx context.Context, home string) error
+}
+
+// Target returns the running Docbank's current address and API key, starting
+// Docbank first when it is not running.
+func (l Local) Target(ctx context.Context) (base, key string, err error) {
+	home := l.Home
+	if home == "" {
+		if home, err = LocalHome(); err != nil {
+			return "", "", err
+		}
+	}
+	rec, found, err := discoverDocbank(ctx, home)
+	if err != nil {
+		return "", "", err
+	}
+	if !found {
+		start := l.Start
+		if start == nil {
+			start = startDocbank
+		}
+		if err := start(ctx, home); err != nil {
+			return "", "", fmt.Errorf("start docbank in %s: %w", home, err)
+		}
+		if rec, found, err = discoverDocbank(ctx, home); err != nil {
+			return "", "", err
+		}
+		if !found {
+			return "", "", fmt.Errorf("docbank is not running in %s after starting it", home)
+		}
+	}
+	key = rec.Metadata["api_key"]
+	if key == "" {
+		return "", "", fmt.Errorf("docbank runtime record in %s has no api_key", home)
+	}
+	return rec.Endpoint().BaseURL(), key, nil
+}
+
+// discoverDocbank reports a missing home or an unreachable record as not
+// running; List would create the missing home, so it is never asked.
+func discoverDocbank(ctx context.Context, home string) (kitdaemon.RuntimeRecord, bool, error) {
+	if _, err := os.Stat(home); errors.Is(err, os.ErrNotExist) {
+		return kitdaemon.RuntimeRecord{}, false, nil
+	}
+	rec, _, found, err := kitdaemon.Discover(ctx, kitdaemon.RuntimeStore{Dir: home}, kitdaemon.DiscoverOptions{
+		RequirePIDAlive: true,
+		Probe:           kitdaemon.ProbeOptions{ExpectedService: docbankService},
+	})
+	if errors.Is(err, kitdaemon.ErrDaemonUnreachable) {
+		return kitdaemon.RuntimeRecord{}, false, nil
+	}
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("look for docbank in %s: %w", home, err)
+	}
+	return rec, found, nil
+}
+
+func startDocbank(ctx context.Context, home string) error {
+	bin, err := exec.LookPath("docbank")
+	if err != nil {
+		return errors.New("docbank is not running and the docbank command is not on PATH; install Docbank or start it yourself")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "daemon", "start") //nolint:gosec // bin is the docbank binary found on PATH; the arguments are constant
+	cmd.Env = append(os.Environ(), "DOCBANK_HOME="+home)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docbank daemon start: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// NewLocalClient follows the local Docbank on every request, so a restart with
+// a new port and key is picked up by the next call.
+func NewLocalClient(l Local) *Client {
+	var mu sync.Mutex
+	return newClient(func(ctx context.Context) (string, string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		base, key, err := l.Target(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "local docbank unavailable", "error", err)
+			return "", "", &Error{}
+		}
+		return base, key, nil
+	})
+}

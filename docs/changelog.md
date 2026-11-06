@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Attach files through a Docbank running on the same machine with
+  `[docbank] local = true`, without copying its URL or API key. Kata reads the
+  current address and key on every request, so Docbank restarts and updates need
+  no change, and starts Docbank with `docbank daemon start` when it is not
+  running, which needs `docbank` on the daemon's `PATH`. A `url` or
+  `KATA_DOCBANK_URL` still selects that Docbank instead. See
+  [Issue attachments](guide/attachments.md#configure-the-daemon).
 - Turn on search by meaning from the web's Settings page. Watch the download, then run `kata daemon restart` to finish. Reopen `kata ui` to watch indexing. Other viewers can read the status. Unconfigured `kata search` results point to Settings and the CLI setup command on stderr; `--quiet` and `--agent` suppress the line.
 - Keep local writes responsive during SQLite cron-only federation pulls by looking up only the runs carried by each page and their complete observation history. Schema 49 adds a cron event index on SQLite and PostgreSQL.
 - Keep large task lists responsive when an unchanged refresh arrives, while Inbox and Scheduled still update at midnight.

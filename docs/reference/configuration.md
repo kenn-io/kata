@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 # Configuration
@@ -1505,8 +1505,9 @@ for access tokens, field ownership, completion writeback, and recovery limits.
 ## Docbank attachments
 
 Kata 0.21.0 and later: `[docbank]` enables issue file uploads and reads through a
-separately hosted Docbank. See [Issue attachments](../guide/attachments.md) for
-setup and the shared-vault trust boundary.
+Docbank, either separately hosted (`url`) or running on the same machine
+(`local`). See [Issue attachments](../guide/attachments.md#configure-the-daemon)
+for setup and the shared-vault trust boundary.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -1515,10 +1516,18 @@ setup and the shared-vault trust boundary.
 | `api_key_file` | empty | Mode-0600 key file, preferred over the environment source. |
 | `api_key_env` | empty | Name of the environment variable containing the key. |
 | `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
+| `local` | `false` | Use the Docbank running on this machine, found through its runtime record; the daemon runs `docbank daemon start` when none is running. |
 
 A configured URL requires a key source. A broken selected credential
 source fails explicitly; Kata does not fall back to another source. Keys are
 resolved on each request.
+
+With `local = true` and no URL, Kata reads the current address and API key from
+the runtime record in `DOCBANK_HOME` (default `~/.docbank`) on every request, so
+Docbank restarts need no change. `docbank` must be on the daemon's `PATH` for
+autostart. A `url` in the file or `KATA_DOCBANK_URL` wins over `local`, and
+`api_key`, `api_key_file`, and `api_key_env` are unused in local mode. `folder`
+still applies.
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.
