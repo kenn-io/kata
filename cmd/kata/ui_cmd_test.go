@@ -82,6 +82,7 @@ func TestUICommandMissingBrowserPrintsReachableURL(t *testing.T) {
 	printedURL := strings.TrimSpace(strings.TrimPrefix(stdout.String(), "Opening "))
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, printedURL, nil)
 	require.NoError(t, err)
+	request.Header.Set("Accept", "text/html")
 	response, err := env.HTTP.Do(request)
 	require.NoError(t, err)
 	defer response.Body.Close()
