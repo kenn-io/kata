@@ -30,6 +30,7 @@ func applyRootHelp(root *cobra.Command) {
 }
 
 var kataCommandGroups = map[string]string{
+	"cli":                 "find",
 	"search":              "find",
 	"list":                "find",
 	"ready":               "find",
@@ -105,7 +106,9 @@ func kataGlobalFlags(cmd *cobra.Command) string {
 	return strings.Join(names, ", ")
 }
 
-const kataRootHelp = `Kata is an issue tracker for coding agents and the people who direct them.
+const kataRootHelp = `Agents: find the right command with: kata cli search "<what you want to do>"
+
+Kata is an issue tracker for coding agents and the people who direct them.
 Commands talk to a kata daemon (local and auto-started by default;
 KATA_SERVER selects a remote one) and act on the project bound to the
 current directory.

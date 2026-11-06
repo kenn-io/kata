@@ -170,6 +170,7 @@ func newRootCmd() *cobra.Command {
 		newWebAssetsCheckCmd(),
 	}
 	cmd.AddCommand(subs...)
+	cmd.AddCommand(newCLICmd(cmd))
 	applyRootHelp(cmd)
 	return cmd
 }

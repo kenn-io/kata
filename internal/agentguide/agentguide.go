@@ -102,7 +102,11 @@ const fragIntro = `# kata agent quickstart
 
 Use kata as the shared issue ledger for this workspace.
 
-1. Run from the workspace (--workspace overrides; --project picks
+1. Find the right command by describing the task:
+
+      kata cli search "<task>"
+
+   Run from the workspace (--workspace overrides; --project picks
    another). Author = $KATA_AUTHOR > $USER > git user.name.
    No bound workspace: use <project>#<id> refs or --project <project>.
    Issue refs are short_ids derived from each issue's ULID (e.g. abc4).
