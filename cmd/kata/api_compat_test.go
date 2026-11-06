@@ -159,7 +159,7 @@ func TestListAllDefaultsToUnlimited(t *testing.T) {
 			return
 		}
 		sentLimit.Store(r.URL.Query().Has("limit"))
-		_, _ = w.Write([]byte(`{"issues":[]}`))
+		_, _ = w.Write([]byte(`{"issues":[{"short_id":"abc1","qualified_id":"example-project#abc1","title":"example","status":"open"}]}`))
 	}))
 	t.Cleanup(server.Close)
 
@@ -207,7 +207,7 @@ func TestListSortDaemonCompatibility(t *testing.T) {
 				case "/api/v1/issues":
 					listCalls.Add(1)
 					observedSort = r.URL.Query().Get("sort")
-					_, _ = w.Write([]byte(`{"issues":[]}`))
+					_, _ = w.Write([]byte(`{"issues":[{"short_id":"abc1","qualified_id":"example-project#abc1","title":"example","status":"open"}]}`))
 				default:
 					http.NotFound(w, r)
 				}

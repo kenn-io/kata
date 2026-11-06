@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -140,7 +142,7 @@ per match.`,
 				return err
 			}
 			bs := response.Body
-			if err := printSearchResults(cmd, bs); err != nil {
+			if err := printSearchResults(cmd, bs, cursor == ""); err != nil {
 				return err
 			}
 			if cursor == "" && response.JSON200 != nil && len(response.JSON200.Results) == 0 {
@@ -162,8 +164,9 @@ per match.`,
 }
 
 // printSearchResults renders a search response in the active output mode:
-// JSON envelope, human-readable list, or "no matches" when empty.
-func printSearchResults(cmd *cobra.Command, bs []byte) error {
+// JSON envelope, human-readable list, or "no matches" when empty. firstPage
+// reports that the request carried no cursor.
+func printSearchResults(cmd *cobra.Command, bs []byte, firstPage bool) error {
 	mode := currentOutputMode()
 	var b struct {
 		Complete       *bool  `json:"complete"`
@@ -197,10 +200,13 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	}
 	// Lexical search returns only issues containing every word. Say so when a
 	// multi-word query finds nothing, so a caller retries with fewer words
-	// instead of concluding that no related issue exists.
-	if words := strings.Fields(b.Query); len(b.Results) == 0 && b.Mode == "lexical" && len(words) > 1 {
+	// instead of concluding that no related issue exists. A continuation page
+	// can be empty after earlier pages matched, so only the first page hints.
+	if words := strings.Fields(b.Query); firstPage && len(b.Results) == 0 && b.Mode == "lexical" && len(words) > 1 {
+		longest := slices.MaxFunc(words, func(x, y string) int { return cmp.Compare(utf8.RuneCountInString(x), utf8.RuneCountInString(y)) })
+		next := retryCommand(cmd, "search", nil, []string{"status", "limit", "include-deleted", "lexical", "hybrid", "semantic", "label", "no-label"}, longest)
 		var err error
-		bs, err = reportHint(cmd, bs, cliHint{Code: "every_word_required", Message: "no issue contains every word; search again with fewer words", Next: "kata search " + shellQuoteArg(words[0])})
+		bs, err = reportHint(cmd, bs, cliHint{Code: "every_word_required", Message: "no issue contains every word; search again with fewer words", Next: next})
 		if err != nil {
 			return err
 		}

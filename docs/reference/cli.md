@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 # CLI reference
@@ -784,13 +784,20 @@ Lexical search returns only issues whose title, body, or comments contain every
 query word. When a multi-word lexical search finds nothing, `kata search` prints
 `Hint: no issue contains every word; search again with fewer words` to stderr;
 `--quiet` suppresses it. JSON carries a `hints` entry with code
-`every_word_required`, the same message, and `next: "kata search <first word>"`.
+`every_word_required`, the same message, and a `next` command that searches
+for the longest query word, for example `kata search --status open -- inventory`.
+A continuation page (`--cursor`) gets no hint.
 
-When `kata list` finds nothing, it counts matching issues with the other
-status and prints, for example,
-`Hint: no open issues; 4 closed; see kata list --status all` to stderr.
+When the first page of an open or closed `kata list` is empty, it counts
+matching issues with the other status and prints, for example,
+`Hint: no open issues; 4 closed; see kata list --status all` to stderr. With
+label, metadata, owner, or priority filters, it reads
+`Hint: no open issues match the filters; 1 closed match; see kata list --status all --label bug`.
 `--quiet` suppresses it. JSON carries a `hints` entry with code
 `excluded_closed` or `excluded_open`, the message, and `next`.
+
+A `next` command keeps the original daemon, project, workspace, output, and
+filter flags, and omits `--as`, `--teammate`, and `--cursor`.
 
 By default `kata search` runs lexical (FTS) search. When the daemon has
 [semantic search](../guide/semantic-search.md) configured, search

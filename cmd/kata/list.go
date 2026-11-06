@@ -139,12 +139,13 @@ For what to work on next, use kata ready or kata next instead.`,
 			var empty bool
 			var countProjectID *int64
 			var excluded int64
+			allQuery := generated.ListAllIssuesQuery{
+				Status: new(generated.ListAllIssuesQueryStatus(apiStatus)), Priority: params.Priority, MaxPriority: params.MaxPriority,
+				Limit: params.Limit, Sort: allSort, Cursor: params.Cursor, IncludeTotal: params.IncludeTotal, Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
+			}
 			var bs []byte
 			if all {
-				response, callErr := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{
-					Status: new(generated.ListAllIssuesQueryStatus(apiStatus)), Priority: params.Priority, MaxPriority: params.MaxPriority,
-					Limit: params.Limit, Sort: allSort, Cursor: params.Cursor, IncludeTotal: params.IncludeTotal, Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
-				}})
+				response, callErr := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &allQuery})
 				if err := externalCLITransportError(response, callErr); err != nil {
 					return err
 				}
@@ -176,25 +177,23 @@ For what to work on next, use kata ready or kata next instead.`,
 				empty = response.JSON200 != nil && len(response.JSON200.Issues) == 0
 			}
 			if empty && cursor == "" && (status == "open" || status == "closed") {
-				count, err := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{
-					ProjectID: countProjectID, Status: new(generated.ListAllIssuesQueryStatus(opposite)), Priority: params.Priority, MaxPriority: params.MaxPriority,
-					Limit: new(int64(1)), IncludeTotal: new(true), Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
-				}})
+				probe := allQuery
+				probe.ProjectID, probe.Status, probe.Limit, probe.IncludeTotal = countProjectID, new(generated.ListAllIssuesQueryStatus(opposite)), new(int64(1)), new(true)
+				count, err := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &probe})
 				if err == nil && count != nil && count.JSON200 != nil && count.JSON200.Total != nil {
 					excluded = *count.JSON200.Total
 				}
 			}
 			if excluded > 0 {
-				next := "kata list --status all"
-				switch {
-				case all:
-					next += " --all"
-				case cmd.Flags().Changed("project"):
-					next += " --project " + shellQuoteArg(flags.Project)
-				case cmd.Flags().Changed("workspace"):
-					next += " --workspace " + shellQuoteArg(flags.Workspace)
+				next := retryCommand(cmd, "list", []string{"--status", "all"}, []string{"all", "sort", "limit", "include-total",
+					"priority", "max-priority", "priority-unset", "unowned", "owner", "label", "no-label", "meta"})
+				message := fmt.Sprintf("no %s issues; %d %s; see %s", status, excluded, opposite, next)
+				// The count applies the same filters, so it says nothing about
+				// issues outside them.
+				if params.Priority != nil || params.MaxPriority != nil || unowned || owner != "" || len(labels)+len(noLabels)+len(meta) > 0 {
+					message = fmt.Sprintf("no %s issues match the filters; %d %s match; see %s", status, excluded, opposite, next)
 				}
-				bs, err = reportHint(cmd, bs, cliHint{Code: "excluded_" + opposite, Message: fmt.Sprintf("no %s issues; %d %s; see %s", status, excluded, opposite, next), Next: next})
+				bs, err = reportHint(cmd, bs, cliHint{Code: "excluded_" + opposite, Message: message, Next: next})
 				if err != nil {
 					return err
 				}

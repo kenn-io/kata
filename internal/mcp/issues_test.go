@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -427,25 +430,64 @@ func writeJSON(writer http.ResponseWriter, value any) {
 	_ = json.NewEncoder(writer).Encode(value)
 }
 
+// An initial every-word miss returns a retry that, merged into the original
+// arguments, keeps the label filter and finds the issues with the longest
+// query word. A single word and an empty continuation page get no hint.
 func TestSearchEmptyMultiWordHints(t *testing.T) {
-	for _, query := range []string{"paginate inventory", "inventory"} {
-		t.Run(query, func(t *testing.T) {
-			session, _ := connectMultiProjectServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
-				if !strings.HasSuffix(request.URL.Path, "/search") {
-					return false
-				}
-				writeJSON(writer, map[string]any{"query": query, "mode": "lexical", "results": []any{}})
-				return true
-			})
-			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": query}})
-			require.NoError(t, err)
-			require.False(t, result.IsError)
-			got := result.StructuredContent.(map[string]any)
-			if query == "paginate inventory" {
-				assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "retry_with": map[string]any{"query": "paginate"}}}, got["hints"])
-			} else {
-				assert.NotContains(t, got, "hints")
-			}
-		})
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	ids := map[string]int64{}
+	for _, issue := range []db.CreateIssueParams{
+		{Title: "inventory export stalls", Labels: []string{"bug"}},
+		{Title: "inventory export retries", Labels: []string{"bug"}},
+		{Title: "inventory sync"},
+	} {
+		issue.ProjectID, issue.Author = project.ID, "example-agent"
+		created, _, err := env.DB.CreateIssue(t.Context(), issue)
+		require.NoError(t, err)
+		ids[issue.Title] = created.ID
 	}
+	client, err := kataclient.NewWithHTTPClient(env.URL, env.HTTP)
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
+	search := func(args map[string]any) map[string]any {
+		t.Helper()
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: args})
+		require.NoError(t, err)
+		require.False(t, result.IsError, "%s", mustJSON(t, result))
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &out))
+		return out
+	}
+	titles := func(out map[string]any) []string {
+		var got []string
+		for _, hit := range out["results"].([]any) {
+			got = append(got, hit.(map[string]any)["issue"].(map[string]any)["title"].(string))
+		}
+		return got
+	}
+
+	args := map[string]any{"query": "paginate inventory", "labels": []string{"bug"}}
+	out := search(args)
+	assert.Equal(t, []any{map[string]any{
+		"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "retry_with": map[string]any{"query": "inventory"},
+	}}, out["hints"])
+	maps.Copy(args, out["hints"].([]any)[0].(map[string]any)["retry_with"].(map[string]any))
+	assert.ElementsMatch(t, []string{"inventory export stalls", "inventory export retries"}, titles(search(args)))
+
+	assert.NotContains(t, search(map[string]any{"query": "paginate"}), "hints")
+
+	page := map[string]any{"query": "inventory export", "mode": "lexical", "project": "example-project", "limit": 1}
+	first := search(page)
+	require.Len(t, titles(first), 1)
+	require.NotEmpty(t, first["next_cursor"])
+	for _, id := range ids {
+		_, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: id, Title: new("unrelated"), Actor: "example-agent"})
+		require.NoError(t, err)
+	}
+	page["cursor"] = first["next_cursor"]
+	continued := search(page)
+	assert.Empty(t, continued["results"])
+	assert.NotContains(t, continued, "hints")
 }

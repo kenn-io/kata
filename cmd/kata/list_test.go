@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -538,18 +540,17 @@ func TestList_EmptyStatusHints(t *testing.T) {
 		case "--json":
 			var got map[string]any
 			require.NoError(t, json.Unmarshal([]byte(out), &got))
-			assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": message, "next": "kata list --status all"}}, got["hints"])
+			assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": message + " --json", "next": "kata list --status all --json"}}, got["hints"])
 			assert.Empty(t, stderr)
 		case "--quiet":
 			assert.Empty(t, out)
 			assert.Empty(t, stderr)
+		case "--agent":
+			assert.Equal(t, "Hint: "+message+" --agent\n", stderr)
+			assert.Equal(t, "OK list count=0 complete=true\n", out)
 		default:
 			assert.Equal(t, "Hint: "+message+"\n", stderr)
-			if mode == "human" {
-				assert.Empty(t, out)
-			} else {
-				assert.Equal(t, "OK list count=0 complete=true\n", out)
-			}
+			assert.Empty(t, out)
 		}
 	}
 	ref := createIssue(t, env, pid, "open match")
@@ -559,7 +560,11 @@ func TestList_EmptyStatusHints(t *testing.T) {
 	assert.Empty(t, stderr)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
-	assert.Equal(t, []any{map[string]any{"code": "excluded_open", "message": "no closed issues; 1 open; see kata list --status all", "next": "kata list --status all"}}, got["hints"])
+	assert.Equal(t, []any{map[string]any{
+		"code":    "excluded_open",
+		"message": "no closed issues match the filters; 1 open match; see kata list --status all --json --quiet --label bug",
+		"next":    "kata list --status all --json --quiet --label bug",
+	}}, got["hints"])
 	for _, args := range [][]string{{"list", "--status", "all"}, {"list"}, {"list", "--label", "missing"}} {
 		_, stderr, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
 		require.NoError(t, err)
@@ -568,7 +573,60 @@ func TestList_EmptyStatusHints(t *testing.T) {
 	out, _, err = executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--json", "--workspace", dir, "list", "--status", "closed", "--label", "bug")
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
-	assert.Equal(t, "kata list --status all --workspace "+dir, got["hints"].([]any)[0].(map[string]any)["next"])
+	assert.Equal(t, "kata list --status all --workspace "+dir+" --json --label bug", got["hints"].([]any)[0].(map[string]any)["next"])
+}
+
+// Running the list retry from an unbound directory keeps the scope, output
+// mode, limit, and membership filters. Without them, the newer unrelated
+// issues would fill the one-row page and hide the counted issue. The quoted
+// --no-label value excludes one nonexistent label; split, it would exclude the
+// counted issue's "fix" label.
+func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	hidden := createIssue(t, env, pid, "hidden match")
+	runCLI(t, env, dir, "label", "add", hidden, "bug")
+	runCLI(t, env, dir, "label", "add", hidden, "ui")
+	runCLI(t, env, dir, "label", "add", hidden, "fix")
+	runCLI(t, env, dir, "meta", "set", hidden, "work.attention", "needs review")
+	runCLI(t, env, dir, "close", hidden, "--done", "--message", "completed the work for this closed issue fixture", "--commit", "abc1234")
+	for _, title := range []string{"unrelated closed", "unrelated open"} {
+		ref := createIssue(t, env, pid, title)
+		runCLI(t, env, dir, "label", "add", ref, "bug")
+		if title == "unrelated closed" {
+			runCLI(t, env, dir, "close", ref, "--done", "--message", "completed the work for this closed issue fixture", "--commit", "abc1234")
+		}
+	}
+	workspace := filepath.Join(t.TempDir(), "example workspace")
+	require.NoError(t, os.Mkdir(workspace, 0o700))
+	t.Chdir(t.TempDir())
+	ctx := contextWithBaseURL(t.Context(), env.URL)
+
+	out, stderr, err := executeRootCapture(t, ctx, "list", "--project", "kata", "--workspace", workspace, "--json", "--quiet", "--as", "example-agent",
+		"--label", "bug", "--label", "ui", "--no-label", `"wont,fix"`, "--meta", "work.attention=needs review", "--limit", "1")
+	require.NoError(t, err, stderr)
+	assert.Empty(t, stderr)
+	var got struct {
+		Hints []cliHint `json:"hints"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Len(t, got.Hints, 1)
+	next := got.Hints[0].Next
+	assert.Equal(t, "no open issues match the filters; 1 closed match; see "+next, got.Hints[0].Message)
+	assert.NotContains(t, next, "--as")
+
+	words, err := splitHelpWords(next)
+	require.NoError(t, err)
+	require.Equal(t, "kata", words[0])
+	out, stderr, err = executeRootCapture(t, ctx, words[1:]...)
+	require.NoError(t, err, stderr)
+	var retry struct {
+		Issues []struct {
+			Title string `json:"title"`
+		} `json:"issues"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &retry))
+	require.Len(t, retry.Issues, 1)
+	assert.Equal(t, "hidden match", retry.Issues[0].Title)
 }
 
 func TestList_EmptyStatusHintRequests(t *testing.T) {
@@ -635,9 +693,10 @@ func TestList_EmptyStatusHintRequests(t *testing.T) {
 			if scenario == "filtered" || scenario == "global" {
 				assert.EqualValues(t, 2, calls.Load())
 				assert.Equal(t, "excluded_closed", got["hints"].([]any)[0].(map[string]any)["code"])
-				next := "kata list --status all --project spoke-project"
+				const filters = " --max-priority 2 --owner alice --label bug --label urgent --no-label stale --meta work.attention=stuck"
+				next := "kata list --status all --project spoke-project --json" + filters
 				if scenario == "global" {
-					next = "kata list --status all --all"
+					next = "kata list --status all --json --all" + filters
 				}
 				assert.Equal(t, next, got["hints"].([]any)[0].(map[string]any)["next"])
 			} else {
