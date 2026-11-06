@@ -110,7 +110,18 @@ func TestTokenize(t *testing.T) {
 			[]string{"fix", "crash", "test"}},
 		{"drops_short_tokens", "a b is fix", []string{"fix"}},
 		{"splits_on_punctuation", "fix-login: crash!", []string{"fix", "login", "crash"}},
+		{"normalizes_unicode", "Cafe\u0301 CAFÉ—界界 a", []string{"café", "café", "界界"}},
 	})
+}
+
+func TestTokenizeTitleAllocationBudget(t *testing.T) {
+	const title = "login callback drops session after browser redirect"
+	var got []string
+	allocations := testing.AllocsPerRun(100, func() {
+		got = similarity.Tokenize(title)
+	})
+	assert.Equal(t, []string{"login", "callback", "drop", "session", "after", "browser", "redirect"}, got)
+	assert.LessOrEqual(t, allocations, 3.0, "checking many titles must not allocate once per word")
 }
 
 func TestJaccard(t *testing.T) {
@@ -124,12 +135,23 @@ func TestJaccard(t *testing.T) {
 		{"identical", []string{"a", "b"}, []string{"a", "b"}, 1.0},
 		{"half_overlap", []string{"a", "b"}, []string{"b", "c"}, 1.0 / 3.0},
 		{"dedupes_inputs", []string{"a", "a", "b"}, []string{"a", "b", "b"}, 1.0},
+		{"dedupes_partial_overlap", []string{"a", "a", "b"}, []string{"b", "b", "c"}, 1.0 / 3.0},
+		{"long_titles", []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}, []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}, 10.0 / 11.0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.InDelta(t, tc.want, similarity.Jaccard(tc.a, tc.b), epsilon)
 		})
 	}
+}
+
+func TestJaccardTitleAllocationBudget(t *testing.T) {
+	a := []string{"one", "two", "three", "four", "five", "six", "seven", "eight", "nine"}
+	b := []string{"one", "two", "three", "four", "five", "six", "seven", "eight", "ten"}
+	var got float64
+	allocations := testing.AllocsPerRun(100, func() { got = similarity.Jaccard(a, b) })
+	assert.InDelta(t, 0.8, got, epsilon)
+	assert.Zero(t, allocations, "comparing short titles must not allocate sets per row")
 }
 
 func TestScore_WeightedSum(t *testing.T) {
