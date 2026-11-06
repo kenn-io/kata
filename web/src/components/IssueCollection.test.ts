@@ -137,7 +137,9 @@ describe('IssueCollection', () => {
     )
 
     it('renders every row when End is pressed and focuses the last one', async () => {
-      const { container } = renderMany(1000)
+      const issues = manyTasks(1000)
+      const props = { currentView: viewWithIssues(issues), issueCatalog: issues, onSelect: vi.fn() }
+      const { container, rerender } = render(IssueCollection, { props })
       const first = container.querySelector<HTMLElement>('button.row')!
       first.focus()
       await fireEvent.keyDown(first, { key: 'End' })
@@ -145,25 +147,44 @@ describe('IssueCollection', () => {
       await waitFor(() =>
         expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00999'),
       )
+      const focused = document.activeElement
+      const refreshed = [
+        task({ uid: 'new-leading', updated_at: '2026-05-18T08:00:00Z' }),
+        ...issues,
+      ]
+      await rerender({ ...props, currentView: viewWithIssues(refreshed), issueCatalog: refreshed })
+      expect(visibleRows()).toHaveLength(1001)
+      expect(document.activeElement).toBe(focused)
     })
 
-    it('resets the grown prefix after narrowing and restoring the list', async () => {
+    it('keeps full group counts and reveals later headings as the prefix grows', async () => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: 'title', direction: 'asc' }),
+      )
       const issues = manyTasks(1000)
-      const props = {
-        currentView: viewWithIssues(issues),
-        issueCatalog: issues,
-        onSelect: vi.fn(),
-      }
-      const { rerender } = render(IssueCollection, { props })
-      const first = visibleRows()[0]!
-      first.focus()
-      await fireEvent.keyDown(first, { key: 'End' })
-      await waitFor(() => expect(visibleRows()).toHaveLength(1000))
-
-      await rerender({ ...props, currentView: viewWithIssues(issues.slice(0, 1)) })
-      expect(visibleRows()).toHaveLength(1)
-      await rerender(props)
+      const { container } = render(IssueCollection, {
+        props: {
+          currentView: {
+            ...viewWithIssues(issues),
+            groups: [
+              { id: 'first', title: 'First group', issues: issues.slice(0, 200) },
+              { id: 'second', title: 'Second group', issues: issues.slice(200) },
+            ],
+          },
+          onSelect: vi.fn(),
+        },
+      })
       expect(visibleRows()).toHaveLength(150)
+      expect(container.querySelector('.group-count')?.textContent).toBe('200')
+      expect(screen.queryByText('Second group')).toBeNull()
+      await fireEvent.keyDown(visibleRows()[149]!, { key: 'ArrowDown' })
+      expect(visibleRows()).toHaveLength(300)
+      expect(screen.getByText('Second group')).toBeTruthy()
+      expect(
+        Array.from(container.querySelectorAll('.group-count'), (node) => node.textContent),
+      ).toEqual(['200', '800'])
+      expect(visibleRows()[299]?.dataset.uid).toBe('bulk-00299')
     })
 
     it('grows once when the sentinel intersects and re-arms the observer', async () => {
@@ -200,13 +221,14 @@ describe('IssueCollection', () => {
       }
     })
 
-    it('keeps the grown prefix when row selection bumps navigation generation', async () => {
+    it('keeps growth on selection and resets changed results in the first render', async () => {
       const issues = manyTasks(1000)
       const props = {
         currentView: viewWithIssues(issues),
         issueCatalog: issues,
         onSelect: vi.fn(),
         navigationGeneration: 0,
+        resultsKey: 'all',
       }
       const { container, rerender } = render(IssueCollection, { props })
       await fireEvent.keyDown(container.querySelectorAll('button.row')[149]!, { key: 'ArrowDown' })
@@ -216,6 +238,33 @@ describe('IssueCollection', () => {
       expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
         'bulk-00150',
       )
+
+      const addedRows: string[] = []
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (!(node instanceof HTMLElement)) continue
+            const rows = node.matches('button.row')
+              ? [node]
+              : node.querySelectorAll<HTMLElement>('button.row')
+            for (const row of rows) addedRows.push(row.dataset.uid!)
+          }
+        }
+      })
+      observer.observe(container, { childList: true, subtree: true })
+      try {
+        await rerender({
+          ...props,
+          resultsKey: 'search',
+          currentView: viewWithIssues(issues.slice(200)),
+        })
+        expect(visibleRows()).toHaveLength(150)
+        expect(visibleRows()[149]?.dataset.uid).toBe('bulk-00349')
+        expect(addedRows).toContain('bulk-00349')
+        expect(addedRows.every((uid) => Number(uid.slice(5)) < 350)).toBe(true)
+      } finally {
+        observer.disconnect()
+      }
     })
 
     it('renders and scrolls to a revealed child whose root is beyond the cap', async () => {

@@ -38,6 +38,7 @@
 
   interface Props {
     currentView: KataCurrentView
+    resultsKey?: string
     issueCatalog: readonly KataTaskSummary[]
     scopeLabel?: string
     scopedProjectName?: string | null
@@ -56,6 +57,7 @@
 
   let {
     currentView,
+    resultsKey = '',
     issueCatalog,
     scopeLabel = undefined,
     scopedProjectName = null,
@@ -155,23 +157,15 @@
   let lastRevealGeneration: number | null = null
   let anchorMeasurementGeneration = 0
   let catalogByUID = $derived(new Map(issueCatalog.map((issue) => [issue.uid, issue])))
-  let parentUIDOf = $derived.by(() => {
+  let childrenByParentUID = $derived.by(() => {
     const byHierarchyKey = new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue]))
-    const parents = new Map<string, string>()
+    const children = new Map<string, KataTaskSummary[]>()
     for (const issue of issueCatalog) {
       const parentUID =
         issue.parent?.uid ??
         (issue.parent_short_id
           ? byHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
           : undefined)
-      if (parentUID) parents.set(issue.uid, parentUID)
-    }
-    return parents
-  })
-  let childrenByParentUID = $derived.by(() => {
-    const children = new Map<string, KataTaskSummary[]>()
-    for (const issue of issueCatalog) {
-      const parentUID = parentUIDOf.get(issue.uid)
       if (!parentUID) continue
       const siblings = children.get(parentUID)
       if (siblings) siblings.push(issue)
@@ -262,7 +256,9 @@
   let hasAnyExpandedRows = $derived(Object.values(expanded).some(Boolean))
 
   const ROW_LIMIT_STEP = 150
-  let rowLimit = $state(ROW_LIMIT_STEP)
+  let listKey = $derived(JSON.stringify([currentView.name, resultsKey]))
+  let grown = $state({ key: '', limit: ROW_LIMIT_STEP })
+  let rowLimit = $derived(grown.key === listKey ? grown.limit : ROW_LIMIT_STEP)
   let rowSentinel: HTMLDivElement | null = $state(null)
   let hasHiddenRows = $derived(visibleRootIssues.length > rowLimit)
   let renderedRoots = $derived(visibleRootIssues.slice(0, rowLimit))
@@ -281,24 +277,12 @@
     return groups
   })
 
-  function growRows(): void {
-    rowLimit = Math.min(visibleRootIssues.length, rowLimit + ROW_LIMIT_STEP)
+  function showRows(count: number): void {
+    if (count > rowLimit) grown = { key: listKey, limit: count }
   }
 
-  function ensureRowRendered(uid: string): void {
-    const limit = untrack(() => rowLimit)
-    const positions = new Map(visibleRootIssues.map((issue, index) => [issue.uid, index]))
-    const seen = new Set<string>()
-    let current: string | undefined = uid
-    while (current && !seen.has(current)) {
-      const position = positions.get(current)
-      if (position !== undefined) {
-        if (position >= limit) rowLimit = position + ROW_LIMIT_STEP
-        return
-      }
-      seen.add(current)
-      current = parentUIDOf.get(current)
-    }
+  function rootIndexOf(uid: string): number {
+    return visibleRootIssues.findIndex((issue) => issue.uid === uid)
   }
 
   function loadSort(): KataTaskSort {
@@ -653,7 +637,7 @@
           // Past the rendered prefix: render the next chunk, then move.
           event.preventDefault()
           heldNavKeys.add(event.code)
-          growRows()
+          showRows(rowLimit + ROW_LIMIT_STEP)
           void tick().then(() => {
             const grown = Array.from(tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [])
             const at = grown.indexOf(target)
@@ -677,7 +661,7 @@
           // End means the last row of the whole list, so render all of it.
           event.preventDefault()
           heldNavKeys.add(event.code)
-          rowLimit = visibleRootIssues.length
+          showRows(Infinity)
           void tick().then(() => {
             const all = Array.from(tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [])
             focusRow(all[all.length - 1] ?? null)
@@ -781,20 +765,11 @@
     }
   })
 
-  let lastRowLimitKey: string | null = null
   $effect(() => {
-    const key = JSON.stringify([currentView.name, scopedProjectName, statusFilter, resetGeneration])
-    if (key !== lastRowLimitKey) {
-      lastRowLimitKey = key
-      rowLimit = ROW_LIMIT_STEP
-    }
-    if (visibleRootIssues.length < untrack(() => rowLimit))
-      rowLimit = Math.max(ROW_LIMIT_STEP, visibleRootIssues.length)
-  })
-
-  $effect(() => {
-    void rowLimit
-    if (selectedIssueUID) ensureRowRendered(selectedIssueUID)
+    const index = selectedIssueUID ? rootIndexOf(selectedIssueUID) : -1
+    untrack(() => {
+      if (index >= rowLimit) showRows(index + ROW_LIMIT_STEP)
+    })
   })
 
   // Grow when the end sentinel comes within a few screens of the viewport.
@@ -807,7 +782,7 @@
     if (!body || !sentinel || typeof IntersectionObserver === 'undefined') return
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) growRows()
+        if (entries.some((entry) => entry.isIntersecting)) showRows(rowLimit + ROW_LIMIT_STEP)
       },
       { root: body, rootMargin: '1500px 0px' },
     )
@@ -844,7 +819,8 @@
         document.activeElement instanceof HTMLElement &&
         document.activeElement.dataset.uid === revealRequest.uid)
     temporaryRevealChain = statusFilter === 'ready' || revealChain.length > 1 ? revealChain : []
-    ensureRowRendered(revealChain[0]?.uid ?? revealRequest.uid)
+    const index = rootIndexOf(revealChain[0]?.uid ?? revealRequest.uid)
+    untrack(() => showRows(index + ROW_LIMIT_STEP))
     void (async () => {
       const request = revealRequest
       for (const issue of revealChain.slice(0, -1)) {

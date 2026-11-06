@@ -760,6 +760,7 @@
         onSubmitSearch={submitSearch}
       />
       <IssueCollection
+        resultsKey={JSON.stringify(searchFilters)}
         {navigationGeneration}
         currentView={{
           name: currentView.view,
