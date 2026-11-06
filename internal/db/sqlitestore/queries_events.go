@@ -35,43 +35,40 @@ func (d *Store) MaxEventID(ctx context.Context) (int64, error) {
 // project filter: a link event's related issue may live in another project,
 // and `kata move` rehomes an issue while its historical events stay put.
 func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.Event, error) {
-	sharedConditions := func() (string, []any) {
-		conds := []string{"e.id > ?", "p.name <> ?"}
-		args := []any{p.AfterID, db.SystemProjectName}
-		conds = append(conds, authorizedEventStreamPredicate(ctx, &args))
-		if p.ThroughID != 0 {
-			conds = append(conds, "e.id <= ?")
-			args = append(args, p.ThroughID)
-		}
-		if p.IssueUID != "" {
-			conds = append(conds, db.FederationReadIssueUIDExpr(false)+" = ?")
-			args = append(args, p.IssueUID)
-		}
-		if len(p.Types) > 0 {
-			placeholders := make([]string, len(p.Types))
-			for i, eventType := range p.Types {
-				placeholders[i] = "?"
-				args = append(args, eventType)
-			}
-			conds = append(conds, "e.type IN ("+strings.Join(placeholders, ",")+")")
-		}
-		return strings.Join(conds, " AND "), args
+	conds := []string{"e.id > ?", "p.name <> ?"}
+	args := []any{p.AfterID, db.SystemProjectName}
+	conds = append(conds, authorizedEventStreamPredicate(ctx, &args))
+	if p.ThroughID != 0 {
+		conds = append(conds, "e.id <= ?")
+		args = append(args, p.ThroughID)
 	}
-	where, args := sharedConditions()
+	if p.IssueUID != "" {
+		conds = append(conds, db.FederationReadIssueUIDExpr(false)+" = ?")
+		args = append(args, p.IssueUID)
+	}
+	if len(p.Types) > 0 {
+		placeholders := make([]string, len(p.Types))
+		for i, eventType := range p.Types {
+			placeholders[i] = "?"
+			args = append(args, eventType)
+		}
+		conds = append(conds, "e.type IN ("+strings.Join(placeholders, ",")+")")
+	}
+	where := strings.Join(conds, " AND ")
 	var q string
 	if p.ProjectID != 0 {
+		sharedArgs := args
 		q = eventSelect + " WHERE " + where + " AND e.project_id = ?"
 		args = append(args, p.ProjectID)
-		movedWhere, movedArgs := sharedConditions()
 		// Keep the moved-from expression searchable through idx_events_moved_from_id.
 		// Read the UID in this snapshot; unary + removes its column affinity so
 		// SQLite can seek the expression index even before ANALYZE.
 		// An inner ORDER BY/LIMIT on this leg can select a rowid walk after ANALYZE.
-		q += " UNION ALL " + eventSelect + " WHERE " + movedWhere + `
+		q += " UNION ALL " + eventSelect + " WHERE " + where + `
  AND e.type='issue.moved'
  AND json_extract(e.payload,'$.from_project_uid') = (SELECT +uid FROM projects WHERE id = ?)
  AND e.project_id <> ? ORDER BY 1 LIMIT ?`
-		args = append(args, movedArgs...)
+		args = append(args, sharedArgs...)
 		args = append(args, p.ProjectID, p.ProjectID)
 	} else {
 		q = eventSelect + " WHERE " + where + " ORDER BY e.id ASC LIMIT ?"
