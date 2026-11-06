@@ -1758,6 +1758,13 @@ kata ui example-project#abc4
 kata ui 01HZNQ7VFPK1XGD8R5MABCD4EX
 ```
 
+Before launching the browser, Kata prints `Opening <url>` to stdout. With
+`--json`, it prints `{"kata_api_version":1,"url":"<url>"}` instead; with
+`--agent`, it prints `OK ui url=<url>`. The URL is printed even with `-q`.
+If the browser cannot open, the command exits 0 and prints
+`Could not open a browser. Open the URL above.` to stderr. Open the printed
+URL manually.
+
 Kata resolves the ref before launching and opens the stable
 `/kata?scope=<project-uid>&issue=<issue-uid>` route. A default loopback daemon
 opens directly; the browser transparently creates its local-web session on that
