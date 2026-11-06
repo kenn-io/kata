@@ -39,6 +39,8 @@ var signingCapabilities = map[string][]string{
 	"linkFederatedDocbank":          {"push"},
 	"federatedDocbankCapabilities":  {"pull", "push"},
 	"federatedDocbankContent":       {"pull"},
+	"federatedDocbankResolve":       {"pull"},
+	"federatedDocbankChildren":      {"pull"},
 }
 
 func isCronJobWriteOperation(operation string) bool {

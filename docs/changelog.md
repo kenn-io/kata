@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Browse a project's origin Docbank folder with `kata docbank ls` and resolve
+  files with `kata docbank resolve`, without sharing the origin's key. These
+  bounded reads require daemon API 0.43.0, project-wide read access and browse
+  support on every relay hop.
 - Prevent duplicate creates with identical full title text when either issue's
   body has no searchable words. `--force-new` still creates a separate issue.
 - Enable search by meaning with `kata daemon local-embeddings`. A fresh home uses a running Ollama; otherwise, it asks before downloading the shared built-in server. Switching keeps compatible Nomic indexes and warns before changing a federation recipe.

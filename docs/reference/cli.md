@@ -2528,6 +2528,21 @@ Legacy numeric refs no longer resolve.
 
 ## Issue attachments
 
+Browse the current project's origin Docbank folder before selecting a file:
+
+```sh
+kata docbank ls [path] [--limit 1..200] [--offset N]
+kata docbank resolve <path>
+```
+
+Browse requires daemon API 0.43.0 and support on every relay hop. `ls` defaults
+to the origin's configured folder and a 100-entry page. Paths are canonical
+absolute paths inside that folder; offsets are nonnegative. JSON includes
+explicit pagination and empty arrays. The usual project selector and
+human/JSON/agent output modes apply. Issue-subtree tokens cannot browse this
+project-wide catalog. See [the browse guide](../guide/attachments.md#browse-the-projects-docbank-folder)
+for scope, limits and failure behavior.
+
 Attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
 
 ```sh

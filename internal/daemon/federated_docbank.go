@@ -51,7 +51,7 @@ func docbankOriginCapabilities(ctx context.Context, cfg ServerConfig, project db
 		if cfg.Docbank == nil {
 			return api.DocbankServiceCapabilities{}, attachmentError(503, "docbank_not_configured")
 		}
-		return api.DocbankServiceCapabilities{Version: 1, ProjectUID: project.UID, Origin: cfg.DB.InstanceUID()}, nil
+		return api.DocbankServiceCapabilities{Version: 1, ProjectUID: project.UID, Origin: cfg.DB.InstanceUID(), Browse: true}, nil
 	}
 	resp, err := docbankForwardRequest(ctx, cfg, *binding, http.MethodGet, "capabilities", url.Values{"project_uid": {project.UID}}, nil)
 	if err != nil {

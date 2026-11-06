@@ -48,7 +48,7 @@ func buildHostAccessRules() map[string]hostAccessRule {
 	}, "disconnectRelayEnrollment")
 	registerHostAccessRules(rules, hostAccessRule{
 		SelfAuthenticated: true, AcceptsFederationBearer: true,
-	}, "federatedDocbankCapabilities", "uploadFederatedDocbank", "linkFederatedDocbank", "federatedDocbankContent")
+	}, "federatedDocbankCapabilities", "uploadFederatedDocbank", "linkFederatedDocbank", "federatedDocbankContent", "federatedDocbankResolve", "federatedDocbankChildren")
 	registerHostAccessRules(rules, hostAccessRule{
 		SelfAuthenticated: true, AcceptsFederationBearer: true,
 	}, "getRelayReset", "offerRelayDeliveries", "acceptRelayDeliveries", "ackRelayDeliveries", "getFederationProjectMetadata", "pollFederationProjectEvents",

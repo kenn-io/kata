@@ -73,6 +73,38 @@ each hop. The 256 MiB file limit remains. Transfer failures or a denied final
 metadata write can leave an unreferenced Docbank version; Docbank retention
 owns those bytes. A lost upload response can create another reference on retry.
 
+## Browse the project's Docbank folder
+
+Browse files before selecting one to link or cite:
+
+```sh
+kata docbank ls
+kata docbank ls /kata/reports --limit 25 --offset 25 --json
+kata docbank resolve /kata/reports/report.pdf --agent
+kata --project example-project docbank ls
+```
+
+These commands require daemon API 0.43.0 or newer and browse support on every
+relay hop. They use the current project and require project-wide read access;
+issue-subtree tokens cannot browse the shared catalog. An issue claim is not
+required. Only the origin needs a Docbank key or configuration.
+
+With no path, `ls` lists the origin's configured `folder`. Explicit paths must
+be canonical absolute paths inside that folder, up to 4096 UTF-8 bytes, with
+no backslash, NUL or dot traversal. Listing is nonrecursive: the default page
+has at most 100 entries, `--limit` accepts 1–200, and `--offset` is nonnegative.
+JSON includes `total`, `limit`, `offset` and an `items` array, including empty
+pages. Changes between separate page requests can change their contents.
+
+Results contain node identity, name, kind, size, canonical path and current
+version when present. The vault root's display name is `/`. Results omit
+Docbank source metadata and credentials.
+Projected catalog data is limited to 1 MiB per response; malformed or oversized
+pages fail as a whole. Reads never create a missing folder. An unavailable,
+unsupported or changed origin returns an explicit error and never consults a
+different local vault. Browse applies the configured folder boundary to native
+projects too; legacy attachment references retain their existing semantics.
+
 ## Add, read, and remove files
 
 ```sh

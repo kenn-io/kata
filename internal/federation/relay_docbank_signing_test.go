@@ -139,6 +139,15 @@ func testRelayDocbankSignedTransfer(t *testing.T, contentDelay time.Duration) {
 		_, err = leaf.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issueIDForRelayMatrix(t, leaf, issue.UID), Actor: leaf.account, Patch: map[string]jsontext.Value{"attachment.empty": emptyReference}})
 		require.NoError(t, err)
 		readSignedDocbankContent(t, leaf, endpoint+"/empty/content", "")
+		// Browse uses ordinary signed JSON reads through the same two hops.
+		status, raw = relayDocbankRequest(t, leaf, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/docbank/resolve?path=/kata/empty.pdf", leaf.project.ID), "", "")
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var resolved api.DocbankResolveBody
+		require.NoError(t, json.Unmarshal(raw, &resolved))
+		require.Equal(t, root.store.InstanceUID(), resolved.Origin)
+		require.Equal(t, "/kata/empty.pdf", resolved.Node.Path)
+		status, raw = relayDocbankRequest(t, leaf, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/docbank/children", leaf.project.ID), "", "")
+		require.Equal(t, http.StatusOK, status, string(raw))
 		require.NotEmpty(t, vaults[root].Requests())
 		require.Empty(t, vaults[relay].Requests())
 		require.Empty(t, vaults[leaf].Requests())

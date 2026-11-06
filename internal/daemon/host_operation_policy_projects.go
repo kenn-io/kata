@@ -3,7 +3,7 @@ package daemon
 func registerProjectOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationProjectRead, Capability: hostCapabilityRead,
-	}, "listProjects", "showProject")
+	}, "listProjects", "showProject", "docbankResolve", "docbankChildren")
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationProjectAdministration, Capability: hostCapabilityManage,
