@@ -1,25 +1,19 @@
 // Package searchhint explains empty lexical searches for CLI and MCP callers.
 package searchhint
 
-import (
-	"cmp"
-	"slices"
-	"strings"
-	"unicode/utf8"
-)
+import "strings"
 
-// Hint describes an empty search and a shorter query to try.
+// Hint explains an empty search.
 type Hint struct {
-	Code, Message, Term string
+	Code, Message string
 }
 
-// EmptyLexical reports an every-word miss only on an unfiltered first page. A missing
+// EmptyLexical reports an every-word miss only on the first page. A missing
 // mode comes from older daemons that only supported lexical search.
-func EmptyLexical(query, mode string, resultCount int, firstPage, filtered bool) *Hint {
+func EmptyLexical(query, mode string, resultCount int, firstPage bool) *Hint {
 	words := strings.Fields(query)
-	if filtered || !firstPage || resultCount != 0 || (mode != "lexical" && mode != "") || len(words) < 2 {
+	if !firstPage || resultCount != 0 || (mode != "lexical" && mode != "") || len(words) < 2 {
 		return nil
 	}
-	longest := slices.MaxFunc(words, func(x, y string) int { return cmp.Compare(utf8.RuneCountInString(x), utf8.RuneCountInString(y)) })
-	return &Hint{Code: "every_word_required", Message: "no issue contains every word; search again with fewer words", Term: longest}
+	return &Hint{Code: "every_word_required", Message: "no issue contains every word; search again with fewer words"}
 }

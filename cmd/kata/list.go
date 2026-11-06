@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -177,8 +178,15 @@ For what to work on next, use kata ready or kata next instead.`,
 				probe.ProjectID, probe.Status, probe.Limit, probe.IncludeTotal = countProjectID, new(generated.ListAllIssuesQueryStatus(opposite)), new(int64(1)), new(true)
 				count, err := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &probe})
 				if err == nil && count.JSON200 != nil && count.JSON200.Total != nil && *count.JSON200.Total > 0 {
-					next := retryCommand(cmd, "list", []string{"--status", "all"}, []string{"all", "sort", "limit", "include-total",
-						"priority", "max-priority", "priority-unset", "unowned", "owner", "label", "no-label", "meta"}, "")
+					commands, err := retryCommand(cmd, "list", []string{"--status", "all"}, []string{"all", "sort", "limit", "include-total",
+						"priority", "max-priority", "priority-unset", "unowned", "owner", "label", "no-label", "meta"})
+					if err != nil {
+						return err
+					}
+					next := commands.POSIX
+					if runtime.GOOS == "windows" {
+						next = commands.PowerShell
+					}
 					message := fmt.Sprintf("no %s issues; %d %s; see %s", status, *count.JSON200.Total, opposite, next)
 					// The count applies the same filters, so it says nothing about
 					// issues outside them.

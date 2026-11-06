@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -530,7 +532,12 @@ func TestList_EmptyStatusHints(t *testing.T) {
 		runCLI(t, env, dir, "close", ref, "--done", "--message", "completed the work for this closed issue fixture", "--commit", "abc1234")
 	}
 	t.Chdir(dir)
-	const message = "no open issues; 4 closed; see kata list --status all"
+	message := "no open issues; 4 closed; see kata list --status all"
+	jsonFlags, agentFlag := " --json --quiet", " --agent"
+	if runtime.GOOS == "windows" {
+		message = "no open issues; 4 closed; see & 'kata' 'list' '--status' 'all'"
+		jsonFlags, agentFlag = " '--json' '--quiet'", " '--agent'"
+	}
 	for _, args := range [][]string{{"list"}, {"--agent", "list"}, {"--json", "--quiet", "list"}, {"--quiet", "list"}, {"list", "--label", "missing"}} {
 		out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
 		require.NoError(t, err)
@@ -538,10 +545,10 @@ func TestList_EmptyStatusHints(t *testing.T) {
 		case "--json":
 			var got map[string]any
 			require.NoError(t, json.Unmarshal([]byte(out), &got))
-			assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": message + " --json --quiet", "next": "kata list --status all --json --quiet"}}, got["hints"])
+			assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": message + jsonFlags, "next": strings.TrimPrefix(message, "no open issues; 4 closed; see ") + jsonFlags}}, got["hints"])
 			assert.Empty(t, stderr)
 		case "--agent":
-			assert.Equal(t, "Hint: "+message+" --agent\n", stderr)
+			assert.Equal(t, "Hint: "+message+agentFlag+"\n", stderr)
 			assert.Equal(t, "OK list count=0 complete=true\n", out)
 		case "--quiet":
 			assert.Empty(t, out+stderr)
@@ -590,20 +597,53 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	require.Len(t, got.Hints, 1)
 	next := "kata list --status all --project kata --workspace '" + workspace + "' --json --quiet --limit 1 --label bug --label ui --no-label '\"wont,fix\"' --meta 'work.attention=needs review'"
+	if runtime.GOOS == "windows" {
+		next = "& 'kata' 'list' '--status' 'all' '--project' 'kata' '--workspace' '" + workspace + "' '--json' '--quiet' '--limit' '1' '--label' 'bug' '--label' 'ui' '--no-label' '\"wont,fix\"' '--meta' 'work.attention=needs review'"
+	}
 	assert.Equal(t, cliHint{Code: "excluded_open", Message: "no closed issues match the filters; 1 open match; see " + next, Next: next}, got.Hints[0])
 
 	words, err := splitHelpWords(got.Hints[0].Next)
 	require.NoError(t, err)
+	if runtime.GOOS == "windows" {
+		words = words[1:] // PowerShell's call operator precedes the executable.
+	}
 	out, stderr, err = executeRootCapture(t, ctx, words[1:]...)
 	require.NoError(t, err, stderr)
 	assert.Contains(t, out, "hidden match")
 	assert.NotContains(t, out, "unrelated")
 }
 
+func TestList_PowerShellRetryPreservesApostrophes(t *testing.T) {
+	pwsh, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("pwsh is unavailable")
+	}
+	env, _, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "hidden match")
+	workspace := filepath.Join(t.TempDir(), "reader's workspace")
+	require.NoError(t, os.Mkdir(workspace, 0o700))
+	cmd := newListCmd()
+	cmd.Flags().String("workspace", "", "")
+	cmd.Flags().String("project", "", "")
+	require.NoError(t, cmd.Flags().Set("workspace", workspace))
+	require.NoError(t, cmd.Flags().Set("project", "kata"))
+	commands, err := retryCommand(cmd, "list", []string{"--status", "all"}, nil)
+	require.NoError(t, err)
+	// Run the emitted command through PowerShell, then replay its arguments
+	// against the fixture daemon.
+	output, err := exec.CommandContext(t.Context(), pwsh, "-NoProfile", "-Command", "function kata { ConvertTo-Json -Compress -InputObject @($args) }; "+commands.PowerShell).CombinedOutput() //nolint:gosec // G204: controlled fixture values exercise the emitted shell command.
+	require.NoError(t, err, "%s", output)
+	var args []string
+	require.NoError(t, json.Unmarshal(output, &args))
+	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
+	require.NoError(t, err, stderr)
+	assert.Contains(t, out, "hidden match")
+}
+
 // The count runs once, scoped to the listed project, only for an empty first
 // page with one status; a failed count keeps the empty list.
 func TestList_EmptyStatusHintRequests(t *testing.T) {
-	for _, scenario := range []string{"scoped", "global", "nonempty", "all-status", "cursor", "count-failed", "quiet-text", "quiet-agent", "quiet-json"} {
+	for _, scenario := range []string{"scoped", "global", "nonempty", "all-status", "cursor", "count-failed", "missing-total", "quiet-text", "quiet-agent", "quiet-json"} {
 		t.Run(scenario, func(t *testing.T) {
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -634,6 +674,10 @@ func TestList_EmptyStatusHintRequests(t *testing.T) {
 					if scenario == "count-failed" {
 						w.WriteHeader(http.StatusServiceUnavailable)
 						_, _ = fmt.Fprint(w, `{"error":{"code":"unavailable","message":"count unavailable"}}`)
+						return
+					}
+					if scenario == "missing-total" {
+						_, _ = fmt.Fprint(w, `{"issues":[],"complete":true}`)
 						return
 					}
 					_, _ = fmt.Fprint(w, `{"issues":[],"complete":true,"total":4}`)
@@ -673,8 +717,11 @@ func TestList_EmptyStatusHintRequests(t *testing.T) {
 				if scenario == "quiet-json" {
 					next = "kata list --status all --project spoke-project --json --quiet"
 				}
+				if runtime.GOOS == "windows" {
+					next = map[string]string{"scoped": "& 'kata' 'list' '--status' 'all' '--project' 'spoke-project' '--json'", "global": "& 'kata' 'list' '--status' 'all' '--json' '--all'", "quiet-json": "& 'kata' 'list' '--status' 'all' '--project' 'spoke-project' '--json' '--quiet'"}[scenario]
+				}
 				assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": "no open issues; 4 closed; see " + next, "next": next}}, got["hints"])
-			case "count-failed":
+			case "count-failed", "missing-total":
 				assert.EqualValues(t, 2, calls.Load())
 				assert.NotContains(t, got, "hints")
 			default:

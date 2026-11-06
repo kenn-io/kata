@@ -193,9 +193,8 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	}
 	var hints []SearchHint
 	if len(searches) > 0 {
-		filtered := input.Status != nil || len(compactStrings(input.Labels)) > 0 || len(compactStrings(input.ExcludeLabels)) > 0
-		if hint := searchhint.EmptyLexical(query, effectiveMode, len(results), input.Cursor == "", filtered); hint != nil {
-			hints = []SearchHint{{Code: hint.Code, Message: hint.Message, RetryWith: map[string]string{"query": hint.Term}}}
+		if hint := searchhint.EmptyLexical(query, effectiveMode, len(results), input.Cursor == ""); hint != nil {
+			hints = []SearchHint{{Code: hint.Code, Message: hint.Message}}
 		}
 	}
 	project, outputProjects := outputProjectScope(projects)

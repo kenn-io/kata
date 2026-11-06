@@ -234,9 +234,9 @@ project UID scope, including after project moves or renames. See the
 and handle syntax.
 
 An empty first page of a lexical multi-word `kata.search` includes
-`hints: [{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "retry_with": {"query": "<longest word>"}}]`.
-Merge `retry_with` into the original arguments to retry with the same scope and
-filters.
+`hints: [{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}]`,
+including when status or label filters are set. Search hints contain a reason
+only; choose fewer words for the retry.
 
 `kata.search` accepts optional `status: "open"` or `status: "closed"`; omit
 it to search both statuses. It combines with labels and the selected search

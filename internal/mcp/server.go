@@ -852,11 +852,10 @@ type SearchHit struct {
 	MatchedIn []string     `json:"matched_in"`
 }
 
-// SearchHint explains an empty search and supplies retry arguments.
+// SearchHint explains an empty search.
 type SearchHint struct {
-	Code      string            `json:"code"`
-	Message   string            `json:"message"`
-	RetryWith map[string]string `json:"retry_with"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // SearchOutput reports the effective mode and any semantic fallback.

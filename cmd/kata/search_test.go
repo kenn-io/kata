@@ -3,10 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 // renderSearch drives printSearchResults directly: it sets the active output
@@ -108,121 +103,54 @@ func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
 	_ = requireCLIError(t, f.execute("search", "  "), ExitValidation)
 }
 
-// The hint follows the response's own members. Its retry names the longest
-// query word, the first one on a tie, after "--" so a word that starts with
-// "-" stays a search term.
-func TestSearchJSONHintRetriesLongestWord(t *testing.T) {
-	for query, next := range map[string]string{
-		"login crash": "kata search -- login",
-		"go -timeout": "kata search -- -timeout",
-	} {
-		out := renderSearch(t, outputJSON, fmt.Sprintf(`{"query":%q,"mode":"lexical","results":[],"complete":true}`, query))
-		assert.Equal(t, `{"kata_api_version":1,"query":"`+query+`","mode":"lexical","results":[],"complete":true,`+
-			`"hints":[{"code":"every_word_required","message":"no issue contains every word; search again with fewer words","next":"`+next+`"}]}`+"\n", out)
-	}
+// Adding the reason keeps the daemon's existing JSON members in order.
+func TestSearchJSONHintPreservesResponseOrder(t *testing.T) {
+	out := renderSearch(t, outputJSON, `{"query":"paginate inventory","mode":"lexical","results":[],"complete":true}`)
+	assert.Equal(t, `{"kata_api_version":1,"query":"paginate inventory","mode":"lexical","results":[],"complete":true,"hints":[{"code":"every_word_required","message":"no issue contains every word; search again with fewer words"}]}`+"\n", out)
 }
 
-func TestSearch_FilteredMissHasNoEveryWordHint(t *testing.T) {
+func TestSearch_FilteredMissKeepsEveryWordHint(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
-	ref := createIssue(t, env, pid, "inventory export")
+	ref := createIssue(t, env, pid, "inventory export stalls")
 	runCLI(t, env, dir, "label", "add", ref, "bug")
-	for _, filter := range [][]string{{"--status", "closed"}, {"--label", "missing"}, {"--no-label", "bug"}} {
-		t.Run(filter[0], func(t *testing.T) {
-			out, stderr, err := runCLIWithErr(t, env, dir, append([]string{"--json", "search", "inventory export"}, filter...)...)
-			require.NoError(t, err, stderr)
-			var got map[string]any
-			require.NoError(t, json.Unmarshal([]byte(out), &got))
-			assert.Empty(t, got["results"])
-			assert.NotContains(t, got, "hints")
-		})
+	for _, filter := range [][]string{{"--status", "open"}, {"--label", "bug"}, {"--no-label", "missing"}} {
+		for _, mode := range []string{"--json", "--agent", "--format=human"} {
+			t.Run(filter[0]+"/"+mode, func(t *testing.T) {
+				out, stderr, err := runCLIWithErr(t, env, dir, append([]string{mode, "search", "paginate inventory"}, filter...)...)
+				require.NoError(t, err, stderr)
+				if mode == "--json" {
+					var got map[string]any
+					require.NoError(t, json.Unmarshal([]byte(out), &got))
+					assert.Empty(t, got["results"])
+					assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}, got["hints"])
+					assert.Empty(t, stderr)
+				} else {
+					assert.Equal(t, "Hint: no issue contains every word; search again with fewer words\n", stderr)
+				}
+			})
+		}
 	}
 }
 
-func TestReportHintEmptyJSONObject(t *testing.T) {
-	resetFlags(t)
-	flags.Mode = outputJSON
-	got, err := reportHint(&cobra.Command{}, []byte("{}"), cliHint{Code: "excluded_closed", Message: "4 closed", Next: "kata list --status all"})
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"hints":[{"code":"excluded_closed","message":"4 closed","next":"kata list --status all"}]}`, string(got))
-}
-
-func TestSearch_PowerShellRetryPreservesApostrophes(t *testing.T) {
-	pwsh, err := exec.LookPath("pwsh")
-	if err != nil {
-		t.Skip("pwsh is unavailable")
-	}
+func TestSearch_EmptyContinuationHasNoHint(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
-	createIssue(t, env, pid, "reader's inventory")
-	workspace := filepath.Join(filepath.Dir(dir), "reader's workspace")
-	require.NoError(t, os.Rename(dir, workspace))
-	resetFlags(t)
-	cmd := newSearchCmd()
-	cmd.Flags().String("workspace", "", "")
-	require.NoError(t, cmd.Flags().Set("workspace", workspace))
-	// Capture the command arguments PowerShell passes, then run that argument
-	// vector through the real CLI against the fixture daemon.
-	next := retryCommandForOS(cmd, "search", nil, nil, "reader's", "windows")
-	output, err := exec.CommandContext(t.Context(), pwsh, "-NoProfile", "-Command", "function kata { ConvertTo-Json -Compress -InputObject @($args) }; "+next).CombinedOutput() //nolint:gosec // G204: controlled fixture values exercise the emitted shell command.
-	require.NoError(t, err, "%s", output)
-	var args []string
-	require.NoError(t, json.Unmarshal(output, &args))
-	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
-	require.NoError(t, err, stderr)
-	assert.Contains(t, out, "reader's inventory")
-}
-
-// Running the every-word retry from an unbound directory keeps the named
-// daemon, project, and output mode, and drops the actor, so it finds the
-// issues that the longest query word matches. A
-// continuation page can be empty because matches changed after the first
-// page, so it does not claim that no issue contains every word.
-func TestSearch_EveryWordHintRetryKeepsSelectors(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("fixture-token"))
-	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
 	var ids []int64
-	for _, issue := range []db.CreateIssueParams{
-		{Title: "inventory export stalls", Labels: []string{"bug", "ui"}},
-		{Title: "inventory export retries", Labels: []string{"bug"}},
-		{Title: "inventory sync"},
-	} {
-		issue.ProjectID, issue.Author = project.ID, "tester"
-		created, _, err := env.DB.CreateIssue(t.Context(), issue)
+	for _, title := range []string{"inventory export stalls", "inventory export retries"} {
+		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Author: "tester", Title: title})
 		require.NoError(t, err)
-		ids = append(ids, created.ID)
+		ids = append(ids, issue.ID)
 	}
-	t.Setenv("KATA_SERVER", "")
-	t.Setenv("KATA_AUTH_TOKEN", "")
-	config := fmt.Sprintf("[[daemon]]\nname = \"example-remote\"\nurl = %q\ntoken = \"fixture-token\"\n", env.URL)
-	require.NoError(t, os.WriteFile(filepath.Join(env.Home, "config.toml"), []byte(config), 0o600))
-	t.Chdir(t.TempDir())
-	search := func(args ...string) map[string]any {
-		t.Helper()
-		out, stderr, err := executeRootCapture(t, t.Context(), append([]string{"search", "--daemon", "example-remote", "--project", "spoke-project", "--json"}, args...)...)
-		require.NoError(t, err, stderr)
-		assert.Empty(t, stderr)
-		var got map[string]any
-		require.NoError(t, json.Unmarshal([]byte(out), &got))
-		return got
-	}
-
-	got := search("--quiet", "--as", "example-agent", "--teammate", "example-mate", "--lexical", "--limit", "5", "paginate", "inventory")
-	next := "kata search --daemon example-remote --project spoke-project --json --quiet --limit 5 --lexical -- inventory"
-	assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words", "next": next}}, got["hints"])
-	words, err := splitHelpWords(next)
-	require.NoError(t, err)
-	out, stderr, err := executeRootCapture(t, t.Context(), words[1:]...)
-	require.NoError(t, err, stderr)
-	assert.Contains(t, out, "inventory export stalls")
-	assert.Contains(t, out, "inventory export retries")
-
-	first := search("--lexical", "--limit", "1", "inventory export")
+	out := runCLI(t, env, dir, "--json", "search", "--lexical", "--limit", "1", "inventory export")
+	var first map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &first))
 	require.NotEmpty(t, first["next_cursor"])
 	for _, id := range ids {
 		_, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: id, Title: new("unrelated"), Actor: "tester"})
 		require.NoError(t, err)
 	}
-	continued := search("--lexical", "--limit", "1", "--cursor", first["next_cursor"].(string), "inventory export")
+	out = runCLI(t, env, dir, "--json", "search", "--lexical", "--limit", "1", "--cursor", first["next_cursor"].(string), "inventory export")
+	var continued map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &continued))
 	assert.Empty(t, continued["results"])
 	assert.NotContains(t, continued, "hints")
 }
