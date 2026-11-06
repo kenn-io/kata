@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 # CLI reference
@@ -634,7 +634,10 @@ Before creating an issue, the daemon checks existing non-deleted look-alikes,
 including closed ones, using the first 500 Unicode code points of the title
 and body. When either body has no searchable words, the check requires
 identical full title text. In that case, case, whitespace, and punctuation
-changes make titles different. `--force-new` bypasses that check; idempotency
+changes make titles different. The exact-title lookup checks at most 20
+issues with the shortest bodies. It may miss a longer body with no
+searchable words if 20 shorter same-title issues come first and full-text
+search also misses it. `--force-new` bypasses that check; idempotency
 still wins when an idempotency key matches. If create times out, the request
 is canceled or the connection drops before the response arrives, or the
 response is cut off before it completes, the CLI reports
