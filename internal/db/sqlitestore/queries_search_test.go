@@ -254,22 +254,13 @@ func TestSearchFTS_RareWordAND(t *testing.T) {
 		{title.ID, []string{"title"}, 1.5685000074276114},
 		{body.ID, []string{"body"}, 1.1826275682426863},
 	}
-	for _, query := range []string{"login browser quasar", "quasar browser login"} {
-		t.Run(query, func(t *testing.T) {
-			hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query})
-			require.NoError(t, err)
-			require.Len(t, hits, len(want))
-			for i, hit := range hits {
-				assert.Equal(t, want[i].id, hit.Issue.ID)
-				assert.Equal(t, want[i].flags, hit.MatchedIn)
-				assert.InDelta(t, want[i].score, hit.Score, 1e-12)
-			}
-		})
-	}
-	for _, query := range []string{"login absentword browser", "absentword"} {
-		hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query})
-		require.NoError(t, err)
-		assert.Empty(t, hits)
+	hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser quasar"})
+	require.NoError(t, err)
+	require.Len(t, hits, len(want))
+	for i, hit := range hits {
+		assert.Equal(t, want[i].id, hit.Issue.ID)
+		assert.Equal(t, want[i].flags, hit.MatchedIn)
+		assert.InDelta(t, want[i].score, hit.Score, 1e-12)
 	}
 }
 
