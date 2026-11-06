@@ -335,6 +335,12 @@ type ClientInterface interface {
 	DigestProject(ctx context.Context, options *DigestProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DigestProjectResponse, error)
 	DigestProjectWithResponse(ctx context.Context, options *DigestProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DigestProjectResp, error)
 
+	DocbankChildren(ctx context.Context, options *DocbankChildrenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DocbankChildrenResponse, error)
+	DocbankChildrenWithResponse(ctx context.Context, options *DocbankChildrenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DocbankChildrenResp, error)
+
+	DocbankResolve(ctx context.Context, options *DocbankResolveRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DocbankResolveResponse, error)
+	DocbankResolveWithResponse(ctx context.Context, options *DocbankResolveRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DocbankResolveResp, error)
+
 	PollProjectEvents(ctx context.Context, options *PollProjectEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollProjectEventsResponse, error)
 	PollProjectEventsWithResponse(ctx context.Context, options *PollProjectEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollProjectEventsResp, error)
 
@@ -344,11 +350,17 @@ type ClientInterface interface {
 	FederatedDocbankCapabilities(ctx context.Context, options *FederatedDocbankCapabilitiesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankCapabilitiesResponse, error)
 	FederatedDocbankCapabilitiesWithResponse(ctx context.Context, options *FederatedDocbankCapabilitiesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankCapabilitiesResp, error)
 
+	FederatedDocbankChildren(ctx context.Context, options *FederatedDocbankChildrenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankChildrenResponse, error)
+	FederatedDocbankChildrenWithResponse(ctx context.Context, options *FederatedDocbankChildrenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankChildrenResp, error)
+
 	LinkFederatedDocbank(ctx context.Context, options *LinkFederatedDocbankRequestOptions, reqEditors ...runtime.RequestEditorFn) (*LinkFederatedDocbankResponse, error)
 	LinkFederatedDocbankWithResponse(ctx context.Context, options *LinkFederatedDocbankRequestOptions, reqEditors ...runtime.RequestEditorFn) (*LinkFederatedDocbankResp, error)
 
 	UploadFederatedDocbank(ctx context.Context, options *UploadFederatedDocbankRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UploadFederatedDocbankResponse, error)
 	UploadFederatedDocbankWithResponse(ctx context.Context, options *UploadFederatedDocbankRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UploadFederatedDocbankResp, error)
+
+	FederatedDocbankResolve(ctx context.Context, options *FederatedDocbankResolveRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankResolveResponse, error)
+	FederatedDocbankResolveWithResponse(ctx context.Context, options *FederatedDocbankResolveRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankResolveResp, error)
 
 	FederatedDocbankContent(ctx context.Context, options *FederatedDocbankContentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankContentResponse, error)
 	FederatedDocbankContentWithResponse(ctx context.Context, options *FederatedDocbankContentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankContentResp, error)
@@ -4362,6 +4374,142 @@ func (c *Client) DigestProject(ctx context.Context, options *DigestProjectReques
 	return responseParser(ctx, resp)
 }
 
+func (c *Client) DocbankChildren(ctx context.Context, options *DocbankChildrenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DocbankChildrenResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"limit":  {Style: "form", Explode: &[]bool{false}[0]},
+		"offset": {Style: "form", Explode: &[]bool{false}[0]},
+		"path":   {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/docbank/children",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*DocbankChildrenResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(DocbankChildrenErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "DocbankChildrenErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(DocbankChildrenResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "DocbankChildrenResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/docbank/children")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) DocbankResolve(ctx context.Context, options *DocbankResolveRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DocbankResolveResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"path": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/docbank/resolve",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*DocbankResolveResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(DocbankResolveErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "DocbankResolveErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(DocbankResolveResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "DocbankResolveResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/docbank/resolve")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
 func (c *Client) PollProjectEvents(ctx context.Context, options *PollProjectEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollProjectEventsResponse, error) {
 	var err error
 
@@ -4566,6 +4714,77 @@ func (c *Client) FederatedDocbankCapabilities(ctx context.Context, options *Fede
 	return responseParser(ctx, resp)
 }
 
+func (c *Client) FederatedDocbankChildren(ctx context.Context, options *FederatedDocbankChildrenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankChildrenResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"limit":       {Style: "form", Explode: &[]bool{false}[0]},
+		"offset":      {Style: "form", Explode: &[]bool{false}[0]},
+		"origin":      {Style: "form", Explode: &[]bool{false}[0]},
+		"path":        {Style: "form", Explode: &[]bool{false}[0]},
+		"project_uid": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/docbank/children",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*FederatedDocbankChildrenResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(FederatedDocbankChildrenErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "FederatedDocbankChildrenErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(FederatedDocbankChildrenResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "FederatedDocbankChildrenResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/docbank/children")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
 func (c *Client) LinkFederatedDocbank(ctx context.Context, options *LinkFederatedDocbankRequestOptions, reqEditors ...runtime.RequestEditorFn) (*LinkFederatedDocbankResponse, error) {
 	var err error
 
@@ -4719,6 +4938,75 @@ func (c *Client) UploadFederatedDocbank(ctx context.Context, options *UploadFede
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/docbank/issues/{ref}/uploads")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) FederatedDocbankResolve(ctx context.Context, options *FederatedDocbankResolveRequestOptions, reqEditors ...runtime.RequestEditorFn) (*FederatedDocbankResolveResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"origin":      {Style: "form", Explode: &[]bool{false}[0]},
+		"path":        {Style: "form", Explode: &[]bool{false}[0]},
+		"project_uid": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/docbank/resolve",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*FederatedDocbankResolveResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(FederatedDocbankResolveErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "FederatedDocbankResolveErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(FederatedDocbankResolveResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "FederatedDocbankResolveResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/docbank/resolve")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

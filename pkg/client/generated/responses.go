@@ -239,6 +239,14 @@ type DigestProjectResponse = DigestResponseBody
 
 type DigestProjectErrorResponse = ErrorEnvelope
 
+type DocbankChildrenResponse = DocbankChildrenBody
+
+type DocbankChildrenErrorResponse = ErrorEnvelope
+
+type DocbankResolveResponse = DocbankResolveBody
+
+type DocbankResolveErrorResponse = ErrorEnvelope
+
 type PollProjectEventsResponse = PollEventsBody
 
 type PollProjectEventsErrorResponse = ErrorEnvelope
@@ -251,6 +259,10 @@ type FederatedDocbankCapabilitiesResponse = DocbankServiceCapabilities
 
 type FederatedDocbankCapabilitiesErrorResponse = ErrorEnvelope
 
+type FederatedDocbankChildrenResponse = DocbankChildrenBody
+
+type FederatedDocbankChildrenErrorResponse = ErrorEnvelope
+
 type LinkFederatedDocbankResponse = DocbankDescriptor
 
 type LinkFederatedDocbankErrorResponse = ErrorEnvelope
@@ -258,6 +270,10 @@ type LinkFederatedDocbankErrorResponse = ErrorEnvelope
 type UploadFederatedDocbankResponse = DocbankDescriptor
 
 type UploadFederatedDocbankErrorResponse = ErrorEnvelope
+
+type FederatedDocbankResolveResponse = DocbankResolveBody
+
+type FederatedDocbankResolveErrorResponse = ErrorEnvelope
 
 type FederatedDocbankContentResponse = []byte
 
@@ -1089,6 +1105,22 @@ type DigestProjectResp struct {
 	JSONDefault  *DigestProjectErrorResponse
 }
 
+type DocbankChildrenResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *DocbankChildrenResponse
+	JSONDefault  *DocbankChildrenErrorResponse
+}
+
+type DocbankResolveResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *DocbankResolveResponse
+	JSONDefault  *DocbankResolveErrorResponse
+}
+
 type PollProjectEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
@@ -1126,6 +1158,14 @@ type FederatedDocbankCapabilitiesResp struct {
 	JSONDefault  *FederatedDocbankCapabilitiesErrorResponse
 }
 
+type FederatedDocbankChildrenResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *FederatedDocbankChildrenResponse
+	JSONDefault  *FederatedDocbankChildrenErrorResponse
+}
+
 type LinkFederatedDocbankResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -1140,6 +1180,14 @@ type UploadFederatedDocbankResp struct {
 	StatusCode   int
 	JSON200      *UploadFederatedDocbankResponse
 	JSONDefault  *UploadFederatedDocbankErrorResponse
+}
+
+type FederatedDocbankResolveResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *FederatedDocbankResolveResponse
+	JSONDefault  *FederatedDocbankResolveErrorResponse
 }
 
 type FederatedDocbankContentResp struct {

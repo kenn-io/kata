@@ -39,11 +39,19 @@ type FederatedDocbankCapabilitiesHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 
+type FederatedDocbankChildrenHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
 type LinkFederatedDocbankHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 
 type UploadFederatedDocbankHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type FederatedDocbankResolveHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 

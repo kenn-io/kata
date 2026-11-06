@@ -174,6 +174,24 @@ func (d DigestProjectQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
+type DocbankChildrenQuery struct {
+	Path   *string `json:"path,omitempty" validate:"omitempty,max=4096"`
+	Limit  *int64  `json:"limit,omitempty" validate:"omitempty,gte=1,lte=200"`
+	Offset *int64  `json:"offset,omitempty" validate:"omitempty,gte=0"`
+}
+
+func (d DocbankChildrenQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
+type DocbankResolveQuery struct {
+	Path string `json:"path" validate:"required,max=4096"`
+}
+
+func (d DocbankResolveQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
 type PollProjectEventsQuery struct {
 	// Issue Filter subject history by issue short ID, qualified ref, or UID.
 	Issue   *string `json:"issue,omitempty"`
@@ -201,6 +219,18 @@ func (f FederatedDocbankCapabilitiesQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
+type FederatedDocbankChildrenQuery struct {
+	ProjectUID string  `json:"project_uid" validate:"required"`
+	Path       *string `json:"path,omitempty" validate:"omitempty,max=4096"`
+	Limit      *int64  `json:"limit,omitempty" validate:"omitempty,gte=1,lte=200"`
+	Offset     *int64  `json:"offset,omitempty" validate:"omitempty,gte=0"`
+	Origin     string  `json:"origin" validate:"required"`
+}
+
+func (f FederatedDocbankChildrenQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
 type LinkFederatedDocbankQuery struct {
 	Origin     string  `json:"origin" validate:"required"`
 	ProjectUID string  `json:"project_uid" validate:"required"`
@@ -220,6 +250,16 @@ type UploadFederatedDocbankQuery struct {
 
 func (u UploadFederatedDocbankQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type FederatedDocbankResolveQuery struct {
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Origin     string `json:"origin" validate:"required"`
+	Path       string `json:"path" validate:"required,max=4096"`
+}
+
+func (f FederatedDocbankResolveQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
 type FederatedDocbankContentQuery struct {

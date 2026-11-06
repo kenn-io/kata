@@ -2653,6 +2653,112 @@ func (o *DigestProjectRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
+// DocbankChildrenRequestOptions is the options needed to make a request to DocbankChildren.
+type DocbankChildrenRequestOptions struct {
+	PathParams *DocbankChildrenPath
+	Query      *DocbankChildrenQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *DocbankChildrenRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *DocbankChildrenRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *DocbankChildrenRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *DocbankChildrenRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *DocbankChildrenRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// DocbankResolveRequestOptions is the options needed to make a request to DocbankResolve.
+type DocbankResolveRequestOptions struct {
+	PathParams *DocbankResolvePath
+	Query      *DocbankResolveQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *DocbankResolveRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *DocbankResolveRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *DocbankResolveRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *DocbankResolveRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *DocbankResolveRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // PollProjectEventsRequestOptions is the options needed to make a request to PollProjectEvents.
 type PollProjectEventsRequestOptions struct {
 	PathParams *PollProjectEventsPath
@@ -2821,6 +2927,68 @@ func (o *FederatedDocbankCapabilitiesRequestOptions) GetHeader() (map[string]str
 	return runtime.AsMap[string](o.Header)
 }
 
+// FederatedDocbankChildrenRequestOptions is the options needed to make a request to FederatedDocbankChildren.
+type FederatedDocbankChildrenRequestOptions struct {
+	PathParams *FederatedDocbankChildrenPath
+	Query      *FederatedDocbankChildrenQuery
+	Header     *FederatedDocbankChildrenHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *FederatedDocbankChildrenRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *FederatedDocbankChildrenRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *FederatedDocbankChildrenRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *FederatedDocbankChildrenRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *FederatedDocbankChildrenRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
 // LinkFederatedDocbankRequestOptions is the options needed to make a request to LinkFederatedDocbank.
 type LinkFederatedDocbankRequestOptions struct {
 	PathParams *LinkFederatedDocbankPath
@@ -2960,6 +3128,68 @@ func (o *UploadFederatedDocbankRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *UploadFederatedDocbankRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
+// FederatedDocbankResolveRequestOptions is the options needed to make a request to FederatedDocbankResolve.
+type FederatedDocbankResolveRequestOptions struct {
+	PathParams *FederatedDocbankResolvePath
+	Query      *FederatedDocbankResolveQuery
+	Header     *FederatedDocbankResolveHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *FederatedDocbankResolveRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *FederatedDocbankResolveRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *FederatedDocbankResolveRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *FederatedDocbankResolveRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *FederatedDocbankResolveRequestOptions) GetHeader() (map[string]string, error) {
 	return runtime.AsMap[string](o.Header)
 }
 
