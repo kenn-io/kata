@@ -1,14 +1,17 @@
 package sqlitestore
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/similarity"
 	"go.kenn.io/kit/search/lexical"
 )
 
@@ -41,6 +44,7 @@ const (
 type searchFTSReq struct {
 	params db.SearchFTSParams
 	mode   searchMode
+	match  string // overrides retrieval while preserving full-query match flags
 }
 
 func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandidate, error) {
@@ -65,6 +69,17 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		return nil, nil
 	}
 	colPhrase := strings.Join(phrases, " OR ")
+	titleMatch := ""
+	if r.mode == searchAny && r.match == "" {
+		r.match, titleMatch, err = d.lookalikeMatch(ctx, phrases, r.params.TitleQuery)
+		if err != nil {
+			return nil, fmt.Errorf("search fts: %w", err)
+		}
+	}
+	match := r.match
+	if match == "" {
+		match = colPhrase
+	}
 
 	rowFilter := "AND i.deleted_at IS NULL"
 	if r.params.IncludeDeleted {
@@ -115,7 +130,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
   FROM issues_fts
   CROSS JOIN issues i ON i.id = issues_fts.rowid
   WHERE issues_fts MATCH ? AND i.project_id = ? %s`, rowFilter)
-		args = append(args, colPhrase, r.params.ProjectID)
+		args = append(args, match, r.params.ProjectID)
 		args = append(args, filterArgs...)
 	} else {
 		// Match words as rows with a fixed statement shape and one JSON parameter.
@@ -189,6 +204,73 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
  ORDER BY %s`, pageOrder, order)
 	args = append(args, limit)
 
+	out, err := d.searchCandidates(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	if r.match != "" && r.match != colPhrase && len(out) == 0 {
+		r.match = colPhrase
+		return d.searchFTS(ctx, r)
+	}
+	if titleMatch != "" {
+		// A 0.7 score requires title Jaccard >= 0.5. Walk title postings
+		// without BM25 so rewritten bodies can't fall off the ranked page.
+		titleArgs := append([]any{titleMatch, r.params.ProjectID}, filterArgs...)
+		rows, err := d.QueryContext(ctx, `SELECT i.id, i.title FROM issues_fts
+ CROSS JOIN issues i ON i.id = issues_fts.rowid
+ WHERE issues_fts MATCH ? AND i.project_id = ? `+rowFilter, titleArgs...)
+		if err != nil {
+			return nil, fmt.Errorf("search titles: %w", err)
+		}
+		var ids []int64
+		titleTokens := similarity.Tokenize(r.params.TitleQuery)
+		for rows.Next() {
+			var id int64
+			var title string
+			if err := rows.Scan(&id, &title); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			if similarity.Jaccard(titleTokens, similarity.Tokenize(similarity.TitlePrefix(title))) >= 0.5 {
+				ids = append(ids, id)
+				if len(ids) > 200 {
+					break
+				}
+			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) > 200 {
+			r.match = colPhrase
+			return d.searchFTS(ctx, r)
+		}
+		ids = slices.DeleteFunc(ids, func(id int64) bool {
+			return slices.ContainsFunc(out, func(c db.SearchCandidate) bool { return c.Issue.ID == id })
+		})
+		if len(ids) > 0 {
+			encoded, err := json.Marshal(ids)
+			if err != nil {
+				return nil, err
+			}
+			titles, err := d.searchCandidates(ctx, `SELECT `+issueColumns+`, 0, 0
+ FROM issues i JOIN projects p ON p.id = i.project_id
+ WHERE i.id IN (SELECT value FROM json_each(?)) ORDER BY i.id`, string(encoded))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, titles...)
+		}
+	}
+	if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
+	}
+	return out, nil
+}
+
+func (d *Store) searchCandidates(ctx context.Context, query string, args ...any) ([]db.SearchCandidate, error) {
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
@@ -224,9 +306,6 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	if err := pageMatchedIn(ctx, colPhrase, out); err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
 	}
 	return out, nil
 }
@@ -374,27 +453,93 @@ const anchorCap = 10_000 // postings counted per word and table
 // is common, and none when a word has no postings, since AND search then
 // matches nothing.
 func (d *Store) anchorWord(ctx context.Context, words []byte) (anchor string, none bool, err error) {
-	rows, err := d.QueryContext(ctx, `SELECT j.value,
- (SELECT count(*) FROM (SELECT 1 FROM issues_fts WHERE issues_fts MATCH j.value LIMIT ?1)) +
- (SELECT count(*) FROM (SELECT 1 FROM comments_fts WHERE comments_fts MATCH j.value LIMIT ?1))
- FROM json_each(?2) j`, anchorCap, string(words))
+	counts, err := d.postingCounts(ctx, words, anchorCap, true)
 	if err != nil {
 		return "", false, err
 	}
-	defer func() { _ = rows.Close() }()
+	var phrases []string
+	if err := json.Unmarshal(words, &phrases); err != nil {
+		return "", false, err
+	}
 	best := anchorCap
-	for rows.Next() {
-		var word string
-		var n int
-		if err := rows.Scan(&word, &n); err != nil {
-			return "", false, err
-		}
+	for i, n := range counts {
 		if n == 0 {
 			return "", true, nil
 		}
 		if n < best {
-			anchor, best = word, n
+			anchor, best = phrases[i], n
 		}
 	}
-	return anchor, false, rows.Err()
+	return anchor, false, nil
+}
+
+func (d *Store) postingCounts(ctx context.Context, words []byte, limit int, comments bool) ([]int, error) {
+	count := `(SELECT count(*) FROM (SELECT 1 FROM issues_fts WHERE issues_fts MATCH j.value LIMIT ?1))`
+	if comments {
+		count += ` + (SELECT count(*) FROM (SELECT 1 FROM comments_fts WHERE comments_fts MATCH j.value LIMIT ?1))`
+	}
+	rows, err := d.QueryContext(ctx, `SELECT `+count+` FROM json_each(?2) j ORDER BY CAST(j.key AS INTEGER)`, limit, string(words))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var counts []int
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		counts = append(counts, n)
+	}
+	return counts, rows.Err()
+}
+
+func (d *Store) lookalikeMatch(ctx context.Context, phrases []string, titleQuery string) (string, string, error) {
+	const wordCap = 5_000
+	if titleQuery == "" || len(phrases) < 8 {
+		return "", "", nil
+	}
+	var maxID int64
+	if err := d.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM issues`).Scan(&maxID); err != nil {
+		return "", "", err
+	}
+	if maxID < wordCap {
+		return "", "", nil
+	}
+	words, err := json.Marshal(phrases)
+	if err != nil {
+		return "", "", err
+	}
+	counts, err := d.postingCounts(ctx, words, wordCap, false)
+	if err != nil {
+		return "", "", err
+	}
+	byWord := make(map[string]int, len(phrases))
+	var rare []string
+	common := 0
+	for i, n := range counts {
+		byWord[phrases[i]] = n
+		if n >= wordCap {
+			common++
+		} else if n > 0 {
+			rare = append(rare, phrases[i])
+		}
+	}
+	if common < 6 || len(rare) == 0 {
+		return "", "", nil
+	}
+	less := func(a, b string) int { return cmp.Compare(byWord[a], byWord[b]) }
+	slices.SortStableFunc(rare, less)
+	titles, err := searchablePhrases(ctx, titleQuery)
+	if err != nil {
+		return "", "", err
+	}
+	needed := len(titles)/2 + 1
+	titles = slices.DeleteFunc(titles, func(word string) bool { return byWord[word] == 0 })
+	slices.SortStableFunc(titles, less)
+	titleMatch := ""
+	if len(titles) > 0 {
+		titleMatch = "{title} : (" + strings.Join(titles[:min(needed, len(titles))], " OR ") + ")"
+	}
+	return strings.Join(rare[:min(8, len(rare))], " OR "), titleMatch, nil
 }

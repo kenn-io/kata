@@ -1592,7 +1592,7 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssueRequest, projectName string) error {
 	q := similarity.LookalikeQuery(in.Body.Title, in.Body.Body)
 	candidates, err := cfg.DB.SearchFTSAny(ctx, db.SearchFTSParams{
-		ProjectID: in.ProjectID, Query: q, Limit: 20, IssueScope: issueScopeFromContext(ctx),
+		ProjectID: in.ProjectID, Query: q, TitleQuery: similarity.TitlePrefix(in.Body.Title), Limit: 20, IssueScope: issueScopeFromContext(ctx),
 	})
 	if err != nil {
 		return internalAPIError(err)

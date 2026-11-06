@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/similarity"
 )
 
 // Look-alike retrieval runs on issue creation and must stay cheap as comments grow.
@@ -112,4 +113,88 @@ func TestSearchFTSAny_LookalikePageBudget(t *testing.T) {
 			require.LessOrEqual(t, count, tc.budget, tc.budgetReason)
 		})
 	}
+}
+
+// A rewritten body must still warn about its original title when rare body
+// words fill the ranked page. The common words must stay cheap to retrieve.
+func TestSearchFTSAny_LookalikeKeepsRewrittenBodyDuplicate(t *testing.T) {
+	ctx := t.Context()
+	store, path := openTestDBWithPath(t)
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	const title = "login callback drops session"
+	const common = "request response server client token account"
+	const rare = "amber birch cedar delta elm fir grove hazel"
+	const body = common + " " + rare
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	raw.SetMaxOpenConns(1)
+	tx, err := raw.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	for n := range 5_100 {
+		distractorTitle, distractorBody := "unrelated issue", common
+		if n < 400 {
+			distractorTitle = strings.Fields(title)[n/100] + " unrelated issue"
+		}
+		if n >= 400 && n < 424 {
+			distractorBody += " " + rare + " " + strings.Repeat("padding ", 60)
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,body,author) VALUES(?,?,?,?,?,'tester')`, fmt.Sprintf("%026d", n+1), project.ID, fmt.Sprintf("%08d", n+1), distractorTitle, distractorBody)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tx.Commit())
+	original := createTesterIssueWithBody(ctx, t, store, project.ID, title, common+" rewritten narrative")
+	require.GreaterOrEqual(t, similarity.Score(title, body, original.Title, original.Body), 0.7)
+	searchStore := &sqlitestore.Store{DB: raw}
+	conn, err := raw.Conn(ctx)
+	require.NoError(t, err)
+	sqlitePageFetches(t, conn, true)
+	require.NoError(t, conn.Close())
+	hits, err := searchStore.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title, Limit: 20})
+	require.NoError(t, err)
+	conn, err = raw.Conn(ctx)
+	require.NoError(t, err)
+	count := sqlitePageFetches(t, conn, false)
+	require.NoError(t, conn.Close())
+	var found bool
+	for _, hit := range hits {
+		if hit.Issue.ID == original.ID {
+			found = true
+			require.Equal(t, []string{"title", "body"}, hit.MatchedIn)
+		}
+	}
+	t.Logf("rewritten body: %d page fetches", count)
+	require.True(t, found, "the same-title duplicate must survive the rare-word ranking")
+	require.Less(t, count, 6_000, "common postings must be counted without scoring every document")
+
+	t.Run("empty ranked page falls back within scope", func(t *testing.T) {
+		hits, err := searchStore.SearchFTSAny(t.Context(), db.SearchFTSParams{
+			ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), TitleQuery: title,
+			Limit: 20, AllowedIssueIDs: []int64{original.ID},
+		})
+		require.NoError(t, err)
+		require.Len(t, hits, 1)
+		require.Equal(t, original.ID, hits[0].Issue.ID)
+	})
+
+	t.Run("many matching titles keep the full ranking", func(t *testing.T) {
+		ctx := t.Context()
+		tx, err := raw.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = tx.Rollback() })
+		for n := range 201 {
+			_, err = tx.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,body,author) VALUES(?,?,?,?,?,'tester')`, fmt.Sprintf("%026d", n+10_000), project.ID, fmt.Sprintf("%08d", n+10_000), title, common)
+			require.NoError(t, err)
+		}
+		require.NoError(t, tx.Commit())
+		params := db.SearchFTSParams{ProjectID: project.ID, Query: similarity.LookalikeQuery(title, body), Limit: 20}
+		full, err := searchStore.SearchFTSAny(ctx, params)
+		require.NoError(t, err)
+		params.TitleQuery = title
+		reduced, err := searchStore.SearchFTSAny(ctx, params)
+		require.NoError(t, err)
+		require.Equal(t, full, reduced)
+	})
 }

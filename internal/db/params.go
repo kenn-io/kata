@@ -310,6 +310,7 @@ type SearchFTSParams struct {
 	Status          string // "open" | "closed" | "" (any)
 	ProjectID       int64
 	Query           string
+	TitleQuery      string // title prefix in Query; opts into SQLite look-alike retrieval
 	Limit           int
 	IncludeDeleted  bool
 	Labels          []string // issues must have ALL these labels (AND logic)

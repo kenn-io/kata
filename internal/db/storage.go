@@ -242,6 +242,8 @@ type Storage interface {
 	SearchFTS(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
 	// SearchFTSAny finds at least one query term in title and body documents only
 	// for look-alike checks. Comments don't contribute candidates, scores, or MatchedIn flags.
+	// With TitleQuery, reduced SQLite look-alike results may exceed Limit by
+	// additional title matches that can reach the similarity threshold.
 	SearchFTSAny(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
 
 	// embeddings (semantic search)
