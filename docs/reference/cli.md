@@ -30,6 +30,9 @@ compactly; `kata --help` has their full descriptions.
 | `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
 | `--quiet` | Suppress non-essential output. |
 
+Human-mode `kata create` look-alike refusals include matching issues' qualified
+refs, as agent mode does.
+
 `kata --version` prints the same build identity as the `version` command below
 and honors `--json`/`--agent`. It is a root-level flag, so it is not accepted
 on subcommands. There is no `-v` shorthand.

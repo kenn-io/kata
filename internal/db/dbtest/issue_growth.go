@@ -3,7 +3,6 @@ package dbtest
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -11,12 +10,13 @@ import (
 )
 
 // RunCreateIssueHistoryGrowth checks that issue creation stays flat as ordinary history grows.
-func RunCreateIssueHistoryGrowth(t *testing.T, open func(*testing.T) db.Storage, seed func(*testing.T, db.Storage, db.Project, db.Issue, int)) {
+// The caller chooses the cost measure and its minimum meaningful value.
+func RunCreateIssueHistoryGrowth(t *testing.T, open func(*testing.T) db.Storage, seed func(*testing.T, db.Storage, db.Project, db.Issue, int), measure growthtest.Measure, floor float64) {
 	t.Helper()
 	growthtest.Run(t, growthtest.Check{
 		Small: 21_000, Large: 210_000,
-		MaxRatio: 2, Floor: float64(10 * time.Microsecond),
-		Measure: growthtest.Fastest(9),
+		MaxRatio: 2, Floor: floor,
+		Measure: measure,
 		Build: func(_ testing.TB, size int) (run, reset func()) {
 			store := open(t)
 			project, err := store.CreateProject(t.Context(), "example-project")

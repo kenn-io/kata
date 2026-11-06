@@ -302,7 +302,11 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 
 func emitHumanError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
-	_, _ = fmt.Fprintln(w, "kata:", cli.Message) //nolint:gosec // G705: CLI stderr error text, not HTML.
+	message := cli.Message
+	if cli.Code == "duplicate_candidates" {
+		message = appendCreateConflictRefs(message, cli)
+	}
+	_, _ = fmt.Fprintln(w, "kata:", message) //nolint:gosec // G705: CLI stderr error text, not HTML.
 	if cli.Hint != "" {
 		_, _ = fmt.Fprintln(w, "hint:", cli.Hint)
 	}

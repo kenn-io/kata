@@ -2,11 +2,13 @@ package pgstore_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kit/growthtest"
 )
 
 func TestCreateIssueHistoryGrowth(t *testing.T) {
@@ -23,5 +25,5 @@ x,0,lpad(to_hex(x),64,'0') FROM generate_series(1,$6::int) AS n(x)`, store.Insta
 		require.NoError(t, err)
 		_, err = store.ExecContext(t.Context(), "ANALYZE events")
 		require.NoError(t, err)
-	})
+	}, growthtest.Fastest(9), float64(10*time.Microsecond))
 }

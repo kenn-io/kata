@@ -77,6 +77,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   Issue-scoped credentials cannot delete, so they are not offered the key. See
   the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 
+- Find matching issues from human-mode `kata create` look-alike refusals, which
+  now include the existing issues' qualified refs.
+
 ## 0.21.0
 <small>2026-11-04</small>
 
