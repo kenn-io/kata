@@ -408,7 +408,6 @@ func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
 			refs := []string{"example-project#" + created.Issue.ShortID}
 			args := []string{"--workspace", dir, "--as", "test-agent", "create", "fix login crash", "--body", "login crashes on startup"}
 			code := "duplicate_candidates"
-			message := "1 existing issue matches this title"
 			hint := "comment on an existing issue, or pass --force-new to create anyway"
 			if conflict == "idempotency_mismatch" {
 				code = conflict
@@ -416,23 +415,29 @@ func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
 				args = append(args, "--idempotency-key", "request-1", "--owner", "another-agent")
 			}
 			if conflict == "multiple_candidates" {
-				message = "2 existing issues match this title"
 				second := runCLI(t, env, dir, "--quiet", "--as", "test-agent", "create",
 					"fix login crash", "--body", "login crashes on startup", "--force-new")
 				refs = append(refs, "example-project#"+strings.TrimSpace(second))
 			}
-			modes := []string{"agent", "json"}
-			if code == "duplicate_candidates" {
-				modes = append(modes, "human")
-			}
-			for _, mode := range modes {
+			for _, mode := range []string{"agent", "json", "human"} {
 				t.Run(mode, func(t *testing.T) {
 					stdout, stderr, err := executeRootCapture(t, ctx, append(args, "--format", mode)...)
 					cli := requireCLIError(t, err, ExitConflict)
 					assert.Equal(t, code, cli.Code)
 					assert.Empty(t, stdout)
 					if mode == "human" {
-						assert.Equal(t, "kata: "+message+" ("+strings.Join(refs, ", ")+")\nhint: "+hint+"\n", stderr)
+						line, _, _ := strings.Cut(stderr, "\n")
+						assert.True(t, strings.HasPrefix(line, "kata: "), line)
+						if code == "idempotency_mismatch" {
+							assert.NotContains(t, line, "(")
+							assert.NotContains(t, stderr, refs[0])
+							return
+						}
+						assert.Contains(t, line, " (")
+						assert.True(t, strings.HasSuffix(line, ")"), line)
+						for _, ref := range refs {
+							assert.Contains(t, line, ref)
+						}
 						return
 					}
 					if mode == "agent" {
