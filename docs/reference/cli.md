@@ -632,7 +632,9 @@ priority stays unset.
 
 Before creating an issue, the daemon checks existing non-deleted look-alikes,
 including closed ones, using the first 500 Unicode code points of the title
-and body. `--force-new` bypasses that check; idempotency still wins
+and body. A repeated title still triggers the check when either body has no
+searchable words; title comparison ignores case and normalizes Unicode and
+whitespace. `--force-new` bypasses that check; idempotency still wins
 when an idempotency key matches. If create times out, the request is canceled
 or the connection drops before the response arrives, or the response is cut
 off before it completes, the CLI reports `create_outcome_unknown`: check whether

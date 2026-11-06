@@ -2104,6 +2104,44 @@ func TestCreate_LookalikeSoftBlock(t *testing.T) {
 	assert.Contains(t, string(second.body), `"candidates"`)
 }
 
+func TestCreate_LookalikeMissingBody(t *testing.T) {
+	for _, tc := range []struct {
+		name, firstBody, secondBody string
+	}{
+		{"both missing", "", ""},
+		{"existing body missing", "", "stack trace here"},
+		{"new body missing", "stack trace here", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, pid := bootstrapProject(t)
+			ts := h.ts.(*httptest.Server)
+			first := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
+				"actor": "agent-1", "title": "Inventory page crashes on second page", "body": tc.firstBody,
+			})
+			requireOK(t, first)
+			second := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
+				"actor": "agent-1", "title": "inventory page crashes on second page", "body": tc.secondBody,
+			})
+			require.Equal(t, http.StatusConflict, second.status, string(second.body))
+			assert.Contains(t, string(second.body), `"code":"duplicate_candidates"`)
+			forced := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{
+				"actor": "agent-1", "title": "inventory page crashes on second page", "body": tc.secondBody, "force_new": true,
+			})
+			requireOK(t, forced)
+			assert.NotEqual(t, issueShortIDFromCreate(t, first.body), issueShortIDFromCreate(t, forced.body))
+		})
+	}
+}
+
+func TestCreate_LookalikeDistinctNumberedTitles(t *testing.T) {
+	h, pid := bootstrapProject(t)
+	ts := h.ts.(*httptest.Server)
+	for _, title := range []string{"Phase 1", "Phase 2"} {
+		result := postWithHeader(t, ts, issuesURL(pid), nil, map[string]any{"actor": "agent-1", "title": title})
+		requireOK(t, result)
+	}
+}
+
 // TestCreate_ForceNewBypassesLookalike verifies that force_new=true on a body
 // that would otherwise trip the look-alike check creates a new issue (200).
 func TestCreate_ForceNewBypassesLookalike(t *testing.T) {
