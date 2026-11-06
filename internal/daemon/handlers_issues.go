@@ -1597,7 +1597,7 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 		return internalAPIError(err)
 	}
 	exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
-		ProjectID: in.ProjectID, ExactTitle: in.Body.Title, Limit: 20,
+		ProjectID: in.ProjectID, ExactTitle: in.Body.Title,
 		CreatedFirst: true, IssueScope: issueScopeFromContext(ctx),
 	})
 	if err != nil {
@@ -1622,6 +1622,9 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 				"title":        c.Issue.Title,
 				"score":        score,
 			})
+			if len(matched) == 20 {
+				break
+			}
 		}
 	}
 	if len(matched) == 0 {
