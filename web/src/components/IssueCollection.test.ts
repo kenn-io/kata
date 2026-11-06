@@ -113,12 +113,11 @@ describe('IssueCollection', () => {
         },
       })
     }
-    const rowCount = (container: HTMLElement) => container.querySelectorAll('button.row').length
 
     it('renders a prefix of a long list and still reports the full count', () => {
       const { container } = renderMany(1000, { scopedProjectName: null })
       expect(container.querySelector('.group-count')?.textContent).toBe('1000')
-      expect(rowCount(container)).toBe(150)
+      expect(visibleRows()).toHaveLength(150)
       expect(screen.getByText('1000 tasks')).toBeTruthy()
     })
 
@@ -130,7 +129,7 @@ describe('IssueCollection', () => {
         const last = rows[rows.length - 1]!
         last.focus()
         await fireEvent.keyDown(last, { key })
-        await waitFor(() => expect(rowCount(container)).toBe(300))
+        await waitFor(() => expect(visibleRows()).toHaveLength(300))
         await waitFor(() =>
           expect(document.activeElement).toBe(container.querySelectorAll('button.row')[150]),
         )
@@ -142,10 +141,29 @@ describe('IssueCollection', () => {
       const first = container.querySelector<HTMLElement>('button.row')!
       first.focus()
       await fireEvent.keyDown(first, { key: 'End' })
-      await waitFor(() => expect(rowCount(container)).toBe(1000))
+      await waitFor(() => expect(visibleRows()).toHaveLength(1000))
       await waitFor(() =>
         expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00999'),
       )
+    })
+
+    it('resets the grown prefix after narrowing and restoring the list', async () => {
+      const issues = manyTasks(1000)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        onSelect: vi.fn(),
+      }
+      const { rerender } = render(IssueCollection, { props })
+      const first = visibleRows()[0]!
+      first.focus()
+      await fireEvent.keyDown(first, { key: 'End' })
+      await waitFor(() => expect(visibleRows()).toHaveLength(1000))
+
+      await rerender({ ...props, currentView: viewWithIssues(issues.slice(0, 1)) })
+      expect(visibleRows()).toHaveLength(1)
+      await rerender(props)
+      expect(visibleRows()).toHaveLength(150)
     })
 
     it('grows once when the sentinel intersects and re-arms the observer', async () => {
@@ -173,8 +191,8 @@ describe('IssueCollection', () => {
         },
       )
       try {
-        const { container } = renderMany(1000)
-        await waitFor(() => expect(rowCount(container)).toBe(300))
+        renderMany(1000)
+        await waitFor(() => expect(visibleRows()).toHaveLength(300))
         expect(observations).toBe(2)
         expect(disconnect).toHaveBeenCalled()
       } finally {
@@ -192,9 +210,9 @@ describe('IssueCollection', () => {
       }
       const { container, rerender } = render(IssueCollection, { props })
       await fireEvent.keyDown(container.querySelectorAll('button.row')[149]!, { key: 'ArrowDown' })
-      await waitFor(() => expect(rowCount(container)).toBe(300))
+      await waitFor(() => expect(visibleRows()).toHaveLength(300))
       await rerender({ ...props, navigationGeneration: 1, selectedIssueUID: 'bulk-00150' })
-      expect(rowCount(container)).toBe(300)
+      expect(visibleRows()).toHaveLength(300)
       expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
         'bulk-00150',
       )
@@ -220,7 +238,7 @@ describe('IssueCollection', () => {
       await waitFor(() =>
         expect(container.querySelector('button.row[data-uid="bulk-child"]')).toBeTruthy(),
       )
-      expect(rowCount(container)).toBeLessThan(1000)
+      expect(visibleRows().length).toBeLessThan(1000)
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }))
       expect(scrollIntoView.mock.contexts).toContain(
         container.querySelector('button.row[data-uid="bulk-child"]'),
@@ -234,7 +252,7 @@ describe('IssueCollection', () => {
           'bulk-00500',
         ),
       )
-      expect(rowCount(container)).toBeLessThan(1000)
+      expect(visibleRows().length).toBeLessThan(1000)
     })
   })
 

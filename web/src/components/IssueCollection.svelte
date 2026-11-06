@@ -788,6 +788,8 @@
       lastRowLimitKey = key
       rowLimit = ROW_LIMIT_STEP
     }
+    if (visibleRootIssues.length < untrack(() => rowLimit))
+      rowLimit = Math.max(ROW_LIMIT_STEP, visibleRootIssues.length)
   })
 
   $effect(() => {
