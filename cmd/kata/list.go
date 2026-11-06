@@ -172,7 +172,7 @@ For what to work on next, use kata ready or kata next instead.`,
 				empty = response.JSON200 != nil && len(response.JSON200.Issues) == 0
 			}
 			opposite := map[string]string{"open": "closed", "closed": "open"}[status]
-			if empty && cursor == "" && opposite != "" {
+			if empty && cursor == "" && opposite != "" && (!flags.Quiet || currentOutputMode() == outputJSON) {
 				probe := allQuery
 				probe.ProjectID, probe.Status, probe.Limit, probe.IncludeTotal = countProjectID, new(generated.ListAllIssuesQueryStatus(opposite)), new(int64(1)), new(true)
 				count, err := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &probe})

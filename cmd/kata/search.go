@@ -2,16 +2,15 @@ package main
 
 import (
 	"bytes"
-	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -168,6 +167,28 @@ per match.`,
 // reports that the request carried no cursor.
 func printSearchResults(cmd *cobra.Command, bs []byte, firstPage bool) error {
 	mode := currentOutputMode()
+	var response struct {
+		Query   string           `json:"query"`
+		Mode    string           `json:"mode"`
+		Results []jsontext.Value `json:"results"`
+	}
+	if err := json.Unmarshal(bs, &response); err == nil {
+		if hint := searchhint.EmptyLexical(response.Query, response.Mode, len(response.Results), firstPage); hint != nil {
+			next := retryCommand(cmd, "search", nil, []string{"status", "limit", "include-deleted", "lexical", "hybrid", "semantic", "label", "no-label"}, hint.Term)
+			bs, err = reportHint(cmd, bs, cliHint{Code: hint.Code, Message: hint.Message, Next: next})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if mode == outputJSON {
+		var buf bytes.Buffer
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+		return err
+	}
 	var b struct {
 		Complete       *bool  `json:"complete"`
 		NextCursor     string `json:"next_cursor"`
@@ -197,27 +218,6 @@ func printSearchResults(cmd *cobra.Command, bs []byte, firstPage bool) error {
 	// rather than emitting a bare "# mode=" / "mode=" line.
 	if b.Mode == "" {
 		b.Mode = "lexical"
-	}
-	// Lexical search returns only issues containing every word. Say so when a
-	// multi-word query finds nothing, so a caller retries with fewer words
-	// instead of concluding that no related issue exists. A continuation page
-	// can be empty after earlier pages matched, so only the first page hints.
-	if words := strings.Fields(b.Query); firstPage && len(b.Results) == 0 && b.Mode == "lexical" && len(words) > 1 {
-		longest := slices.MaxFunc(words, func(x, y string) int { return cmp.Compare(utf8.RuneCountInString(x), utf8.RuneCountInString(y)) })
-		next := retryCommand(cmd, "search", nil, []string{"status", "limit", "include-deleted", "lexical", "hybrid", "semantic", "label", "no-label"}, longest)
-		var err error
-		bs, err = reportHint(cmd, bs, cliHint{Code: "every_word_required", Message: "no issue contains every word; search again with fewer words", Next: next})
-		if err != nil {
-			return err
-		}
-	}
-	if mode == outputJSON {
-		var buf bytes.Buffer
-		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
-			return err
-		}
-		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
-		return err
 	}
 	if mode == outputAgent {
 		out := cmd.OutOrStdout()

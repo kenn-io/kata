@@ -121,6 +121,15 @@ func TestSearchJSONHintRetriesLongestWord(t *testing.T) {
 	}
 }
 
+func TestSearchJSONPreservesUnrenderableFields(t *testing.T) {
+	for _, test := range []struct{ body, want string }{
+		{`{"query":"login crash","mode":"lexical","results":[],"complete":"unknown"}`, `{"kata_api_version":1,"query":"login crash","mode":"lexical","results":[],"complete":"unknown","hints":[{"code":"every_word_required","message":"no issue contains every word; search again with fewer words","next":"kata search -- login"}]}` + "\n"},
+		{`{"query":"login crash","mode":"lexical","results":[{"score":"unknown"}]}`, `{"kata_api_version":1,"query":"login crash","mode":"lexical","results":[{"score":"unknown"}]}` + "\n"},
+	} {
+		assert.Equal(t, test.want, renderSearch(t, outputJSON, test.body))
+	}
+}
+
 // Running the every-word retry from an unbound directory keeps the named
 // daemon, project, output mode, and search filters, and drops the actor, so
 // it finds the filtered issue that the longest query word matches. A

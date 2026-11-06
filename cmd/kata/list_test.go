@@ -603,7 +603,7 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 // The count runs once, scoped to the listed project, only for an empty first
 // page with one status; a failed count keeps the empty list.
 func TestList_EmptyStatusHintRequests(t *testing.T) {
-	for _, scenario := range []string{"scoped", "global", "nonempty", "all-status", "cursor", "count-failed"} {
+	for _, scenario := range []string{"scoped", "global", "nonempty", "all-status", "cursor", "count-failed", "quiet-text", "quiet-agent", "quiet-json"} {
 		t.Run(scenario, func(t *testing.T) {
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -643,22 +643,36 @@ func TestList_EmptyStatusHintRequests(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			args := map[string][]string{
-				"global":     {"--all"},
-				"cursor":     {"--project", "spoke-project", "--sort", "created", "--cursor", "next-page"},
-				"all-status": {"--project", "spoke-project", "--status", "all"},
+				"quiet-text":  {"--project", "spoke-project", "--quiet"},
+				"quiet-agent": {"--project", "spoke-project", "--quiet", "--agent"},
+				"quiet-json":  {"--project", "spoke-project", "--quiet"},
+				"global":      {"--all"},
+				"cursor":      {"--project", "spoke-project", "--sort", "created", "--cursor", "next-page"},
+				"all-status":  {"--project", "spoke-project", "--status", "all"},
 			}[scenario]
 			if args == nil {
 				args = []string{"--project", "spoke-project"}
 			}
-			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), append([]string{"--json", "list"}, args...)...)
+			command := []string{"--json", "list"}
+			if scenario == "quiet-text" || scenario == "quiet-agent" {
+				command = []string{"list"}
+			}
+			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), append(command, args...)...)
 			require.NoError(t, err)
 			assert.Empty(t, stderr)
+			if scenario == "quiet-text" || scenario == "quiet-agent" {
+				assert.EqualValues(t, 1, calls.Load())
+				return
+			}
 			var got map[string]any
 			require.NoError(t, json.Unmarshal([]byte(out), &got))
 			switch scenario {
-			case "scoped", "global":
+			case "scoped", "global", "quiet-json":
 				assert.EqualValues(t, 2, calls.Load())
 				next := map[string]string{"scoped": "kata list --status all --project spoke-project --json", "global": "kata list --status all --json --all"}[scenario]
+				if scenario == "quiet-json" {
+					next = "kata list --status all --project spoke-project --json --quiet"
+				}
 				assert.Equal(t, []any{map[string]any{"code": "excluded_closed", "message": "no open issues; 4 closed; see " + next, "next": next}}, got["hints"])
 			case "count-failed":
 				assert.EqualValues(t, 2, calls.Load())

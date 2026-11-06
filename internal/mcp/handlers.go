@@ -1,19 +1,16 @@
 package mcpserver
 
 import (
-	"cmp"
 	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
 	"net/http"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/mod/semver"
@@ -21,6 +18,7 @@ import (
 
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -194,11 +192,8 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		truncated = true
 	}
 	var hints []SearchHint
-	// A continuation page can be empty after earlier pages matched, so only
-	// the first page hints.
-	if words := strings.Fields(query); input.Cursor == "" && len(results) == 0 && effectiveMode == "lexical" && len(words) > 1 {
-		longest := slices.MaxFunc(words, func(x, y string) int { return cmp.Compare(utf8.RuneCountInString(x), utf8.RuneCountInString(y)) })
-		hints = []SearchHint{{Code: "every_word_required", Message: "no issue contains every word; search again with fewer words", RetryWith: map[string]string{"query": longest}}}
+	if hint := searchhint.EmptyLexical(query, effectiveMode, len(results), input.Cursor == ""); hint != nil {
+		hints = []SearchHint{{Code: hint.Code, Message: hint.Message, RetryWith: map[string]string{"query": hint.Term}}}
 	}
 	project, outputProjects := outputProjectScope(projects)
 	return successResult(), SearchOutput{
