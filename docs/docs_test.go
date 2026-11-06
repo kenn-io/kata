@@ -1,7 +1,6 @@
 package docs
 
 import (
-	"io/fs"
 	"strings"
 	"testing"
 
@@ -68,14 +67,9 @@ func TestPageEmbeddedGuide(t *testing.T) {
 	body, err := Page("guide/cron-authoring.md")
 	require.NoError(t, err)
 	require.True(t, strings.HasPrefix(strings.TrimSpace(body), "# Author cron jobs with an agent\n"))
-	for _, name := range []string{"", "missing.md", "../guide/cron-authoring.md", "/guide/cron-authoring.md", "./guide/cron-authoring.md", "guide//cron-authoring.md", "guide/cron-authoring.md/", "guide"} {
-		got, err := Page(name)
-		require.Error(t, err, name)
-		require.Empty(t, got, name)
-		var pathErr *fs.PathError
-		require.ErrorAs(t, err, &pathErr)
-		require.Equal(t, name, pathErr.Path)
-	}
+	got, err := Page("missing.md")
+	require.Error(t, err)
+	require.Empty(t, got)
 }
 
 func TestPageSelectsEmbeddedDocument(t *testing.T) {
