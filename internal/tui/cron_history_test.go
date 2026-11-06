@@ -48,14 +48,14 @@ func TestCronHistoryObservationCounts(t *testing.T) {
 			counts[status]++
 		}
 		text, _ := historyDocument(p, cronRef{cronJobs, "job"}, 1000)
-		if !strings.Contains(text, "Sample: "+cronCount(len(statuses), "observation")) {
+		if !slices.Contains(strings.Split(text, "\n"), "Sample: "+cronCount(len(statuses), "observation")) {
 			ht.Fatalf("sample size missing from %q", text)
 		}
 		if len(statuses) > 0 {
-			for _, status := range []string{"succeeded", "failed", "cancelled", "running", "unknown"} {
-				if !strings.Contains(text, fmt.Sprintf("%s %d", status, counts[status])) {
-					ht.Fatalf("wrong %s count in %q", status, text)
-				}
+			want := fmt.Sprintf("succeeded %d · failed %d · cancelled %d · running %d · unknown %d",
+				counts["succeeded"], counts["failed"], counts["cancelled"], counts["running"], counts["unknown"])
+			if !slices.Contains(strings.Split(text, "\n"), want) {
+				ht.Fatalf("missing exact status counts %q in %q", want, text)
 			}
 		}
 	})
@@ -147,6 +147,43 @@ func TestCronHistoryNarrowLayout(t *testing.T) {
 		}
 		require.Equal(t, []cronRef{{cronRuns, m.cron.data.runs[0].UID}}, links)
 	}
+}
+
+func TestCronHistoryFullLoadedWindowNarrowLayout(t *testing.T) {
+	// The client loads at most 100 project observations. Even a full page is
+	// incomplete history; the strip sorts while every link keeps read order.
+	statuses := []string{"succeeded", "failed", "cancelled", "running", "unknown"}
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := cronData{}
+	var wantLinks []cronRef
+	for i := 99; i >= 0; i-- {
+		uid := fmt.Sprintf("run-%03d", i)
+		p.runs = append(p.runs, generated.CronRun{
+			UID: uid, JobUID: new("job"), WorkflowUID: new("workflow"),
+			Status: statuses[i%len(statuses)], CreatedAt: at,
+			OccurrenceKey: new("same-occurrence"),
+		})
+		wantLinks = append(wantLinks, cronRef{cronRuns, uid})
+	}
+	before := slices.Clone(p.runs)
+	for _, ref := range []cronRef{{cronJobs, "job"}, {cronWorkflows, "workflow"}} {
+		for _, width := range []int{12, 40, 80} {
+			text, links := historyDocument(p, ref, width)
+			// Strip wrapping to check provenance and exact sample text at any width.
+			compact := strings.Join(strings.Fields(text), "")
+			require.Contains(t, compact, "Loadedprojectobservations(incomplete)")
+			require.Contains(t, compact, "Sample:100observations")
+			require.Equal(t, wantLinks, links)
+			for line := range strings.SplitSeq(text, "\n") {
+				require.LessOrEqual(t, ansi.StringWidth(line), width)
+			}
+		}
+	}
+	summary := strings.Split(cronObservationSummary(p.runs), "\n")
+	require.Equal(t, "Sample: 100 observations", summary[0])
+	require.Equal(t, "succeeded 20 · failed 20 · cancelled 20 · running 20 · unknown 20", summary[1])
+	require.Equal(t, "Order: "+strings.Repeat("SFCR?", 20), summary[2])
+	require.Equal(t, before, p.runs)
 }
 
 func TestCronHistoryRefreshAndSelection(t *testing.T) {
