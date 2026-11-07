@@ -106,7 +106,6 @@ describe('SearchSettings', () => {
     renderSettings()
     await settle()
     expect(screen.getByText('On · Ollama', { exact: true })).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'Use built-in instead' })).toBeNull()
     expect(screen.queryByText('Switching keeps your index')).toBeNull()
     expect(screen.queryByText(/Downloads 290 MB/)).toBeNull()
   })

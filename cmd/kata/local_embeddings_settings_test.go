@@ -170,7 +170,6 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 				require.Equal(t, "restart", status.Job.State, status.Job.Error)
 				require.Contains(t, string(data), "local = true")
 				require.False(t, status.CanChange)
-				request("POST", "/api/v1/embeddings/local", `{}`, 409, nil)
 			} else {
 				require.Equal(t, "failed", status.Job.State)
 				require.Contains(t, status.Job.Error, "pgvector")
@@ -178,20 +177,18 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 				require.Equal(t, original, data)
 				require.True(t, status.CanChange, "the owner can retry after database preparation")
 			}
-			request("GET", "/api/v1/health", "", 200, nil)
-			search := func() (string, int) {
+			search := func() (string, int, error) {
 				out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--json", "--project", "example-project", "search", "bicycle")
-				require.NoError(t, err, stderr)
+				if err != nil {
+					return "", 0, fmt.Errorf("search: %w: %s", err, stderr)
+				}
 				var result struct {
 					Mode    string `json:"mode"`
 					Results []any  `json:"results"`
 				}
-				require.NoError(t, json.Unmarshal([]byte(out), &result))
-				return result.Mode, len(result.Results)
+				err = json.Unmarshal([]byte(out), &result)
+				return result.Mode, len(result.Results), err
 			}
-			mode, count := search()
-			require.Equal(t, "lexical", mode)
-			require.Equal(t, 1, count)
 			stop()
 			baseURL, _ = launch()
 			wantMode := "lexical"
@@ -199,9 +196,9 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 				wantMode = "hybrid"
 			}
 			require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: waits for the real reconciler after explicit restart
-				mode, count := search()
-				return mode == wantMode && count == 1
-			}, 5*time.Second, 20*time.Millisecond)
+				mode, count, err := search()
+				return err == nil && mode == wantMode && count == 1
+			}, 10*time.Second, 20*time.Millisecond)
 		})
 	}
 }

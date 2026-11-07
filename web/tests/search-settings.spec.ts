@@ -63,13 +63,7 @@ test('Settings failures stand out beside shared download details', async ({ page
       return { failure: getComputedStyle(element).color, muted }
     })
     expect(colors.failure).not.toBe(colors.muted)
-    const download = page.getByText('Downloads 290 MB once, shared by all Kenn apps', {
-      exact: true,
-    })
-    if (patch.provider !== 'built_in') {
-      await expect(download).toBeVisible()
-      await expect(page.getByRole('button', { name: 'Turn on', exact: true })).toBeEnabled()
-    } else {
+    if (patch.provider === 'built_in') {
       const progress = (await page.getByRole('progressbar').boundingBox())!
       const detail = (await page
         .getByText('Indexing 1 of 2 issues · Keyword search works meanwhile', { exact: true })

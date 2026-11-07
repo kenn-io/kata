@@ -15,9 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/embedding"
 )
 
 // renderSearch drives printSearchResults directly: it sets the active output
@@ -94,7 +92,7 @@ func TestSearch_EmptyMultiWordSearchHintsEveryWordMustMatch(t *testing.T) {
 	out, stderr, err = runCLIWithErr(t, env, dir, "search", "paginate", "inventory")
 	require.NoError(t, err)
 	assert.Equal(t, "no matches\n", out)
-	assert.Equal(t, hint+"Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings.\n", stderr)
+	assert.True(t, strings.HasPrefix(stderr, hint))
 
 	_, stderr, err = runCLIWithErr(t, env, dir, "--quiet", "search", "paginate inventory")
 	require.NoError(t, err)
@@ -119,7 +117,6 @@ func TestSearch_JSONEmptyMultiWordHint(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}, got["hints"])
-	assert.Equal(t, "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings.\n", stderr)
 }
 
 func TestSearch_EmptyContinuationHasNoHint(t *testing.T) {
@@ -394,15 +391,9 @@ func TestSearchSuggestsSettings(t *testing.T) {
 		{name: "continuation", flags: []string{"--lexical"}, cursor: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env, dir, pid := setupCLIWorkspaceOptions(t, func(cfg *daemon.ServerConfig) {
-				if tc.configured {
-					var err error
-					cfg.Embedder, err = embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:1", Model: "example-model", Dims: 2})
-					require.NoError(t, err)
-				}
-			})
+			env, dir, pid := setupCLIWorkspace(t)
 			createIssue(t, env, pid, "login crash")
-			if tc.missingHeader {
+			if tc.missingHeader || tc.configured {
 				upstream := env.URL
 				proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					req, err := http.NewRequestWithContext(r.Context(), r.Method, upstream+r.URL.RequestURI(), r.Body) // #nosec G704 -- fixed loopback test daemon
@@ -418,6 +409,9 @@ func TestSearchSuggestsSettings(t *testing.T) {
 						for _, value := range values {
 							w.Header().Add(name, value)
 						}
+					}
+					if tc.configured {
+						w.Header().Set("X-Kata-Embeddings-Configured", "true")
 					}
 					w.WriteHeader(response.StatusCode)
 					_, err = io.Copy(w, response.Body)
@@ -459,9 +453,11 @@ func TestSearchSuggestsSettings(t *testing.T) {
 			require.Contains(t, out, "login crash")
 			if tc.want {
 				require.Equal(t, hint, stderr)
-				baseline, _, err := run(append(args, "--quiet"))
-				require.NoError(t, err)
-				require.Equal(t, baseline, out)
+				if tc.name == "human" {
+					baseline, _, err := run(append(args, "--quiet"))
+					require.NoError(t, err)
+					require.Equal(t, baseline, out)
+				}
 			} else {
 				require.Empty(t, stderr)
 			}

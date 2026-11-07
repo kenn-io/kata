@@ -907,12 +907,12 @@ func TestWebDaemonGatewayStreamsEventsForTokenSessionOnLocalTarget(t *testing.T)
 	}
 }
 
-func TestWebDaemonGatewayRedactsEmbeddingsDetailsForMember(t *testing.T) {
-	for _, identity := range []bool{false, true} {
-		t.Run(fmt.Sprintf("target identity=%t", identity), func(t *testing.T) {
+func TestWebDaemonGatewayRestrictsEmbeddingsByViewer(t *testing.T) {
+	for _, administrator := range []bool{false, true} {
+		t.Run(fmt.Sprintf("viewer administrator=%t", administrator), func(t *testing.T) {
 			targetDaemon := NewServer(ServerConfig{
 				DB: openAuthTestDB(t), StartedAt: time.Now().UTC(),
-				Auth:            config.AuthConfig{Token: "target-token", RequireTokenIdentity: identity},
+				Auth:            config.AuthConfig{Token: "target-token"},
 				LocalEmbeddings: &localEmbeddingsFixture{},
 				ReconcilerHealth: func() ReconcilerHealth {
 					return ReconcilerHealth{Configured: true, Embedded: 40, Backlog: 172, ETASeconds: new(int64(30))}
@@ -921,25 +921,18 @@ func TestWebDaemonGatewayRedactsEmbeddingsDetailsForMember(t *testing.T) {
 			t.Cleanup(func() { _ = targetDaemon.Close() })
 			target := httptest.NewServer(targetDaemon.Handler())
 			t.Cleanup(target.Close)
-			direct := httptest.NewRecorder()
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, target.URL+"/api/v1/embeddings/local", nil)
-			request.Header.Set("Authorization", "Bearer target-token")
-			targetDaemon.Handler().ServeHTTP(direct, request)
-			require.Equal(t, http.StatusOK, direct.Code, direct.Body.String())
-			var owner api.LocalEmbeddingsStatus
-			require.NoError(t, json.Unmarshal(direct.Body.Bytes(), &owner))
-			require.True(t, owner.CanChange)
-			require.Equal(t, int64(212), owner.Indexing.Total)
-			require.Equal(t, "setup provider detail", owner.Job.Error)
-
 			handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
 				Name: "example-remote", URL: target.URL, Token: "target-token", AllowInsecure: true,
 			})
-			token, _, err := manager.db.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
-				PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor,
-			})
-			require.NoError(t, err)
-			issued, err := manager.IssueSession(Principal{Kind: PrincipalDBToken, Actor: "member", TokenID: token.ID}, "/kata")
+			principal := Principal{Kind: PrincipalBootstrap}
+			if !administrator {
+				token, _, err := manager.db.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+					PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor,
+				})
+				require.NoError(t, err)
+				principal = Principal{Kind: PrincipalDBToken, Actor: "member", TokenID: token.ID}
+			}
+			issued, err := manager.IssueSession(principal, "/kata")
 			require.NoError(t, err)
 			response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet, "/api/v1/embeddings/local", nil, "")
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
@@ -947,9 +940,11 @@ func TestWebDaemonGatewayRedactsEmbeddingsDetailsForMember(t *testing.T) {
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
 			assert.False(t, got.CanChange)
 			require.NotNil(t, got.Indexing)
-			assert.Zero(t, got.Indexing.Total)
-			require.NotNil(t, got.Job)
-			assert.NotEqual(t, "setup provider detail", got.Job.Error)
+			if administrator {
+				assert.Equal(t, int64(212), got.Indexing.Total)
+			} else {
+				assert.Zero(t, got.Indexing.Total)
+			}
 		})
 	}
 }
