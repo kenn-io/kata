@@ -1,12 +1,13 @@
 package cron
 
 import (
+	"strconv"
 	"testing"
 	"time"
 	_ "time/tzdata"
 
 	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // A finalized catch-up window partitions its scheduled instants into children
@@ -23,62 +24,69 @@ func TestRecurringSkipConservation(t *testing.T) {
 	require.False(t, b.Skipped.Capped)
 	require.Empty(t, b.Due)
 
-	hegel.Test(t, func(ht *hegel.T) {
-		n := hegel.Draw(ht, hegel.Integers(0, 2500))
-		grace := hegel.Draw(ht, hegel.Integers(1, 3600))
-		calendar := hegel.Draw(ht, hegel.SampledFrom([]bool{false, true}))
-		policy := hegel.Draw(ht, hegel.SampledFrom([]string{"all", "skip", "latest"}))
-		j := nativeJob(t)
-		j.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
-		if calendar {
-			j.Trigger = Trigger{Kind: "cron", Cron: "* * * * *"}
-		}
-		j.Catchup, j.GraceSeconds = policy, int64(grace)
-		anchor := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-		p := RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
-		now := anchor.Add(time.Duration(n)*time.Minute + 17*time.Second)
-		delivered, skipped, capped := 0, 0, false
-		for steps := range 100 {
-			b, err := PlanRecurring(j, definitionUID, p, now)
-			if err != nil {
-				ht.Fatal(err)
-			}
-			delivered += len(b.Due)
-			skipped += b.Skipped.Count
-			capped = capped || b.Skipped.Capped
-			if b.Progress.Scan != nil && b.Skipped.Count != 0 {
-				ht.Fatal("pending scan reported finalized skips")
-			}
-			p = b.Progress
-			if !b.More {
-				break
-			}
-			if steps == 99 {
-				ht.Fatal("planner failed to finish bounded window")
-			}
-		}
-		wantDelivered := n
-		switch policy {
-		case "latest":
-			if n > 0 {
-				wantDelivered = 1
-			}
-		case "skip":
-			wantDelivered = 0
-			for i := 1; i <= n; i++ {
-				if !anchor.Add(time.Duration(i) * time.Minute).Before(now.Add(-time.Duration(grace) * time.Second)) {
-					wantDelivered++
+	// Rapid defaults to 100 cases; keep the original 1,000-case coverage in
+	// independently seeded batches so failures still shrink within each batch.
+	for batch := range 10 {
+		t.Run("batch-"+strconv.Itoa(batch), func(t *testing.T) {
+			rapid.Check(t, func(rt *rapid.T) {
+				n := rapid.IntRange(0, 2500).Draw(rt, "occurrences")
+				grace := rapid.IntRange(1, 3600).Draw(rt, "grace seconds")
+				calendar := rapid.SampledFrom([]bool{false, true}).Draw(rt, "calendar trigger")
+				policy := rapid.SampledFrom([]string{"all", "skip", "latest"}).Draw(rt, "catchup policy")
+				j := nativeJob(t)
+				j.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
+				if calendar {
+					j.Trigger = Trigger{Kind: "cron", Cron: "* * * * *"}
 				}
-			}
-		}
-		if delivered != wantDelivered {
-			ht.Fatalf("delivered=%d want=%d", delivered, wantDelivered)
-		}
-		wantSkipped := n - wantDelivered
-		if (!calendar && capped) || (!capped && skipped != wantSkipped) || (capped && (skipped > wantSkipped || skipped < 1000)) {
-			ht.Fatalf("skipped=%d capped=%v want=%d", skipped, capped, wantSkipped)
-		}
-	}, hegel.WithTestCases(1000))
+				j.Catchup, j.GraceSeconds = policy, int64(grace)
+				anchor := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+				p := RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
+				now := anchor.Add(time.Duration(n)*time.Minute + 17*time.Second)
+				delivered, skipped, capped := 0, 0, false
+				for steps := range 100 {
+					b, err := PlanRecurring(j, definitionUID, p, now)
+					if err != nil {
+						rt.Fatal(err)
+					}
+					delivered += len(b.Due)
+					skipped += b.Skipped.Count
+					capped = capped || b.Skipped.Capped
+
+					if b.Progress.Scan != nil && b.Skipped.Count != 0 {
+						rt.Fatal("pending scan reported finalized skips")
+					}
+					p = b.Progress
+					if !b.More {
+						break
+					}
+					if steps == 99 {
+						rt.Fatal("planner failed to finish bounded window")
+					}
+				}
+				wantDelivered := n
+				switch policy {
+				case "latest":
+					if n > 0 {
+						wantDelivered = 1
+					}
+				case "skip":
+					wantDelivered = 0
+					for i := 1; i <= n; i++ {
+						if !anchor.Add(time.Duration(i) * time.Minute).Before(now.Add(-time.Duration(grace) * time.Second)) {
+							wantDelivered++
+						}
+					}
+				}
+				if delivered != wantDelivered {
+					rt.Fatalf("delivered=%d want=%d", delivered, wantDelivered)
+				}
+				wantSkipped := n - wantDelivered
+				if (!calendar && capped) || (!capped && skipped != wantSkipped) || (capped && (skipped > wantSkipped || skipped < 1000)) {
+					rt.Fatalf("skipped=%d capped=%v want=%d", skipped, capped, wantSkipped)
+				}
+			})
+		})
+	}
 }
 
 func TestRecurringSkipGraceBoundary(t *testing.T) {
