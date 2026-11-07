@@ -154,6 +154,7 @@ case "$command_name" in
     (cd "$docs_root" && "$zensical_bin" build --strict --config-file "$tmp_config_name" "$@")
     (cd "$docs_root" && python3 scripts/copy_public_markdown_sources.py --docs-dir "$tmp_docs_name" --site-dir "$docs_output_dir" --config "$tmp_config_name")
     assemble_site_root
+    (cd "$docs_root" && python3 scripts/embed_first_paint.py --site-dir "$site_dir")
     ;;
   serve)
     (cd "$docs_root" && "$zensical_bin" serve --config-file "$tmp_config_name" "$@")
