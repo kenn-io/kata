@@ -698,17 +698,12 @@ func TestCronNoticeOpenRunDetail(t *testing.T) {
 			require.NotContains(t, content, "cron: 1 run failed:", "the run detail already shows the sole failure")
 		})
 
-		t.Run("wrapped visible status", func(t *testing.T) {
+		t.Run("narrow hidden screen", func(t *testing.T) {
 			m := newDetail(t, 1)
-			m.width, m.height = 18, 80
-			_, header, lines := cronScreen(m)
-			start, end := cronViewport(m, header, lines)
-			wrappedStatus := false
-			for i := start; i+1 < end; i++ {
-				wrappedStatus = wrappedStatus || strings.TrimSpace(lines[i].text) == "Status:" && strings.TrimSpace(lines[i+1].text) == "failed"
-			}
-			require.True(t, wrappedStatus, "the run status wraps but remains visible")
-			require.NotContains(t, stripANSI(m.viewContent()), "cron: 1 run failed:", "a wrapped visible status still covers the notice")
+			m.width = 60
+			content := stripANSI(m.View().Content)
+			require.Contains(t, content, "needs more space", "the narrow-terminal hint covers Cron")
+			require.Contains(t, content, "cron: 1 run failed:", "the hidden status does not suppress the notice")
 		})
 
 		t.Run("status changed", func(t *testing.T) {

@@ -111,6 +111,32 @@ func TestCronIssueReturnAuthorityClears(t *testing.T) {
 	}
 }
 
+func TestCronIssueMouseListNavigationFollowsSelection(t *testing.T) {
+	for _, navigation := range []string{"click", "wheel"} {
+		t.Run(navigation, func(t *testing.T) {
+			m := cronIssueFixture(t, 160)
+			m = sendKey(m, tea.KeyEnter)
+			require.True(t, m.cron.returnToCron)
+			m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &Issue{UID: "issue-example", ShortID: "abcd", ProjectID: 7}})
+			require.Equal(t, "issue-example", m.detail.issue.UID)
+			m.opts.Mouse = true
+			m.list.issues = append(m.list.issues, testIssue("next-example"))
+			m.list.cursor = 0
+			m.list = m.list.syncSelection(m.list.visibleRows())
+
+			switch navigation {
+			case "click":
+				m, _ = updateModel(m, mouseLeftClick(4, 5))
+			case "wheel":
+				m, _ = updateModel(m, mouseWheelDownAt(4))
+			}
+
+			require.False(t, m.cron.returnToCron)
+			require.Equal(t, "next-example", m.detail.issue.UID, "mouse list navigation retargets the split detail")
+		})
+	}
+}
+
 func TestSnapshot_CronIssue(t *testing.T) {
 	defer snapshotInit(t)()
 	m := cronIssueFixture(t, 100)

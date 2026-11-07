@@ -303,7 +303,7 @@ func (m Model) cronStatusNotice() *toast {
 }
 
 func (m Model) cronFailureVisibleInActiveView(t *toast) bool {
-	if t == nil || !t.cronFailure || len(t.cronFailures) == 0 || m.view != viewCron || m.cron.help || m.cron.form != nil ||
+	if t == nil || !t.cronFailure || len(t.cronFailures) == 0 || !m.cronScreenShown() || m.cron.form != nil ||
 		m.scope.allProjects || m.scope.projectID == 0 || m.cron.data == nil {
 		return false
 	}
