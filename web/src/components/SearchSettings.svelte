@@ -42,6 +42,9 @@
   // no progress bar says only that it's turning on.
   const turningOn: SearchByMeaningState = { kind: 'downloaded' }
   const turningOnLabels = { off: 'Turning on', downloaded: 'Keyword search works meanwhile' }
+  // A failure replaces the row's own line, so it reads first and nothing
+  // promises a switch the daemon refused.
+  const failedLabels = { ...labels, download: '', downloadToHost: '', keepsIndex: '', rebuild: '' }
   const megabytes = new Intl.NumberFormat(undefined, {
     style: 'unit',
     unit: 'megabyte',
@@ -74,9 +77,13 @@
   let switchTarget = $derived(
     remoteHost ? `once to ${remoteHost}` : 'once, shared by all Kenn apps',
   )
-  // kit-ui's Off line, for the files a switch from Ollama fetches when it's approved.
+  // kit-ui's Off line, for the files a switch from Ollama fetches when it's
+  // approved, and below a failed setup in place of the row's own, unless the
+  // failure is a setup the daemon can't change.
   let switchDownload = $derived(
-    row?.kind.startsWith('ollama') && status?.download_bytes
+    (failure
+      ? status?.can_change && /^(off|ollama)/.test(row?.kind ?? '')
+      : row?.kind.startsWith('ollama')) && status?.download_bytes
       ? `Downloads ${megabytes.format(status.download_bytes / 1_000_000)} ${switchTarget}`
       : undefined,
   )
@@ -222,15 +229,12 @@
             <SearchByMeaningRow
               state={row}
               itemNoun={count === 1 ? 'issue' : 'issues'}
-              labels={countFree ? turningOnLabels : labels}
+              labels={countFree ? turningOnLabels : failure ? failedLabels : labels}
               {readonly}
               onturnon={turnOn}
               onusebuiltin={turnOn}
             />
           </fieldset>
-          {#if switchDownload}
-            <p class="settings-note">{switchDownload}</p>
-          {/if}
           {#if failure}
             <p class="settings-note" role="alert">{failure}</p>
           {/if}
@@ -238,6 +242,9 @@
             <p class="settings-note" role="alert">
               Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
             </p>
+          {/if}
+          {#if switchDownload}
+            <p class="settings-note">{switchDownload}</p>
           {/if}
         </div>
       {:else if loading}
@@ -301,6 +308,10 @@
     color: var(--text-muted);
     font-size: var(--font-size-xs);
     line-height: 1.45;
+  }
+
+  .settings-note[role='alert'] {
+    color: var(--accent-red);
   }
 
   @media (max-width: 760px) {

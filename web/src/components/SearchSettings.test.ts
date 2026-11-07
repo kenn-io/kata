@@ -93,14 +93,35 @@ describe('SearchSettings', () => {
     expect(screen.getByRole('alert').textContent).toContain('Indexing hit an error')
   })
 
-  test('discloses the missing download before approving a switch from Ollama', async () => {
-    vi.useFakeTimers()
-    setGeneratedFetch(vi.fn(async () => Response.json(status({ provider: 'ollama' }))))
-    renderSettings()
-    await settle()
-    expect(screen.getByRole('button', { name: 'Use built-in instead' })).not.toBeNull()
-    expect(screen.getByText('Downloads 290 MB once, shared by all Kenn apps')).not.toBeNull()
-  })
+  test.each([false, true])(
+    'discloses the download for an available Ollama switch after failure=%s',
+    async (failed) => {
+      vi.useFakeTimers()
+      setGeneratedFetch(
+        vi.fn(async () =>
+          Response.json(
+            status({
+              provider: 'ollama',
+              ...(failed
+                ? {
+                    job: {
+                      state: 'failed' as const,
+                      downloaded: 0,
+                      total: 290_000_000,
+                      error: 'Not enough disk space. Free space and try again.',
+                    },
+                  }
+                : {}),
+            }),
+          ),
+        ),
+      )
+      renderSettings()
+      await settle()
+      expect(screen.getByRole('button', { name: 'Use built-in instead' })).not.toBeNull()
+      expect(screen.getByText('Downloads 290 MB once, shared by all Kenn apps')).not.toBeNull()
+    },
+  )
 
   test('sends one unproxied request per click and shows the download it starts', async () => {
     vi.useFakeTimers()
