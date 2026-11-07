@@ -149,10 +149,6 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := db.ValidateEmbeddingProducerEvent(ev, ""); err != nil {
 			return db.FederationIngestResult{}, err
 		}
-		if boundActor != "" && ev.Actor != boundActor {
-			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s actor %q does not match bound actor",
-				db.ErrFederationIngestValidation, ev.EventUID, ev.Actor)
-		}
 		if err := validateFederationEventHash(ev); err != nil {
 			return db.FederationIngestResult{}, err
 		}
@@ -192,6 +188,13 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		if !errors.Is(err, db.ErrNotFound) {
 			return db.FederationIngestResult{}, err
+		}
+		// Exact retained history may predate an actor rebind. It is already
+		// admitted and must not be rewritten or projected again; fresh intent
+		// still requires the current enrollment's actor.
+		if boundActor != "" && ev.Actor != boundActor {
+			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s actor %q does not match bound actor",
+				db.ErrFederationIngestValidation, ev.EventUID, ev.Actor)
 		}
 		var moveFrom, moveTo int64
 		if ev.Type == "issue.moved" {
@@ -828,7 +831,7 @@ func federationEventHashMatches(
 	if storedHash == ev.ContentHash {
 		return true, nil
 	}
-	if !allowCanonicalSnapshotAuthors {
+	if !allowCanonicalSnapshotAuthors || ev.Actor != boundActor {
 		return false, nil
 	}
 	canonical, err := canonicalizeFederationSnapshotAuthors(ev, boundActor)
