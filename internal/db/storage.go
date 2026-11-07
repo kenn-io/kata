@@ -20,6 +20,8 @@ type Storage interface {
 	ObserveCronRun(context.Context, ObserveCronRun) (CronRunObservationResult, error)
 	CronRun(context.Context, int64, string) (CronRun, error)
 	ListCronRuns(context.Context, CronRunList) ([]CronRun, error)
+	PruneCronRuns(context.Context, PruneCronRuns) (CronRunPruneResult, error)
+	CronRunCounts(context.Context, CronRunCountsQuery) (CronRunCountsResult, error)
 	PutCronJob(context.Context, PutCronJob) (CronJob, []Event, error)
 	PutCronWorkflow(context.Context, PutCronWorkflow) (CronWorkflow, Event, error)
 	CronJob(context.Context, int64, string) (CronJob, error)
@@ -66,6 +68,7 @@ type Storage interface {
 	AnonymousAccessibleProjectUIDs(ctx context.Context) ([]string, error)
 	ProjectAccessRevision(ctx context.Context) (int64, error)
 	ProjectAccessTransactionFence(actor string, projectUIDs []string) TransactionFence
+	ProjectAccessSnapshotCheck(actor string, projectUIDs []string) TransactionFence
 	ExportProjectAccess(ctx context.Context) iter.Seq2[ImportRecord, error]
 	// identity / lifecycle
 	// PrepareSetupFinished saves or reuses a delivery identity, or reports completion.

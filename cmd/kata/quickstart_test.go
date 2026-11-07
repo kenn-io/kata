@@ -66,6 +66,7 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, "Search before creating")
 	assert.Contains(t, out, "Do not create practice, tutorial, example, or scratchpad issues")
 	assert.Contains(t, out, "Do not run delete or purge")
+	assert.Contains(t, out, "kata cron run prune --force")
 	assert.Contains(t, out, "Default to --agent for ordinary kata reads and mutations in agent logs.")
 	assert.Contains(t, out, "Use --json only when your script needs complete structured data")
 	assert.Contains(t, out, `kata search "login race" --agent`)

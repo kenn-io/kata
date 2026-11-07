@@ -333,7 +333,8 @@ const fragMutationComments = `10. To leave context alongside a mutation, pass --
 `
 
 const fragDestructive = `11. Do not run delete or purge unless the user explicitly asks for that exact
-   destructive action and issue ref.
+   destructive action and issue ref. Never run kata cron run prune --force
+   without explicit user authorization for the project.
 
 `
 

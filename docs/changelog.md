@@ -87,6 +87,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Fetch the highest-priority ready issue with flat lookup cost as ready queues grow using `kata next` and MCP `kata.next`. SQLite and PostgreSQL walk priority indexes instead of sorting every ready row; PostgreSQL bounds each request and expands it when scheduled issues fill the batch. Daemons with API `0.41.0` or newer return one priority-ordered row per request; older daemons keep the existing selection behavior. Existing stores upgrade to schema 46 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-46-ready-priority-indexes).
 - CLI crashes now exit 1 with an internal error and bug-report hint in the selected human, JSON, or agent format, instead of exit 2 with a raw panic trace. Foreground daemon crashes keep their trace. See [CLI reference](reference/cli.md). Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
+- Preview and remove old terminal cron run evidence with `kata cron run prune`,
+  and read retained and recorded pruning counts with `kata cron run counts`.
+  Export history first. Deletion requires `--force` and the exact confirmation,
+  runs on the owning hub, and makes replicas rebuild. Pruning records survive
+  backup and federation; they count deletion actions, including repeated pruning
+  of a restored run. See [run retention](reference/cron.md#run-retention).
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.
 - Push ordinary issue changes to large SQLite hubs without replaying every
@@ -96,7 +102,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Pull shared cron updates faster on large SQLite spokes by replaying cron
   history without reconciling unrelated issues and their short IDs.
-
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding

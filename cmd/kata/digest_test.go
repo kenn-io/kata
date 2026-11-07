@@ -128,4 +128,19 @@ func TestDigest_ParseSinceUntil(t *testing.T) {
 
 	_, err = parseSinceUntil("garbage", now)
 	require.Error(t, err)
+
+	got, err = parseSinceUntil("1.5d", now)
+	require.NoError(t, err)
+	assert.Equal(t, now.Add(-36*time.Hour), got)
+
+	got, err = parseSinceUntil("106751d", now)
+	require.NoError(t, err)
+	assert.Equal(t, now.Add(-106751*24*time.Hour), got)
+
+	// The largest whole-day duration is accepted; the next day in either
+	// direction reaches the overflow guard. The huge input exceeds even hours.
+	for _, value := range []string{"106752d", "-106752d", "9223372036854775807d"} {
+		_, err := parseSinceUntil(value, now)
+		require.Error(t, err, value)
+	}
 }

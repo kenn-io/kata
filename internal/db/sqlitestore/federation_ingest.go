@@ -193,6 +193,9 @@ func (d *Store) ingestFederationEventsOnce(
 		if !errors.Is(err, db.ErrNotFound) {
 			return db.FederationIngestResult{}, err
 		}
+		if err := db.ValidateCronTallyDownstreamEvent(ev, adoptionSnapshotAuthorState.allowTallyTransfer); err != nil {
+			return db.FederationIngestResult{}, err
+		}
 		var moveFrom, moveTo int64
 		if ev.Type == "issue.moved" {
 			var err error
@@ -304,6 +307,7 @@ func (d *Store) ingestFederationEventsOnce(
 	if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, prepared, moveSnapshots); err != nil {
 		return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
 	}
+	tallyEvents := []db.RemoteEvent{}
 	for _, in := range prepared {
 		if in.Duplicate {
 			continue
@@ -328,6 +332,7 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 		result.Accepted++
+		tallyEvents = append(tallyEvents, ev)
 		result.InsertedEventUIDs = append(result.InsertedEventUIDs, ev.EventUID)
 		result.Events = append(result.Events, auditEvents...)
 		for _, auditEvent := range auditEvents {
@@ -343,6 +348,24 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		if err != nil {
 			return db.FederationIngestResult{}, err
+		}
+		if adoptionSnapshotAuthorState.allowTallyTransfer {
+			var current db.JSONBlob
+			if err := tx.QueryRowContext(ctx, `SELECT metadata FROM projects WHERE id=$1`, p.ProjectID).Scan(&current); err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			tallyPatch, err := db.CronTallyAdoptionPatch(current, tallyEvents)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			changed, err := d.patchProjectMetadataTxReassert(ctx, tx, db.PatchProjectMetadataIn{ProjectID: p.ProjectID, Actor: p.BoundActor, Patch: tallyPatch}, true)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			if changed.Changed {
+				result.Events = append(result.Events, changed.Event)
+				result.InsertedEventUIDs = append(result.InsertedEventUIDs, changed.Event.UID)
+			}
 		}
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {
 			if err := consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx,
@@ -383,6 +406,7 @@ func (d *Store) ingestFederationEventsOnce(
 }
 
 type federationIngestAdoptionSnapshotAuthorState struct {
+	allowTallyTransfer           bool
 	allowAuthorPreservation      bool
 	shouldDeferMarker            bool
 	deferAuthorPreservationGrant bool
@@ -454,6 +478,7 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 		return state, nil
 	}
 
+	state.allowTallyTransfer = true
 	state.allowAuthorPreservation = true
 	return state, nil
 }
@@ -505,6 +530,7 @@ func computeFederationIngestOpenAdoptionBaselineState(
 	// A transport chunk is not the whole adoption. Preserve the grant until
 	// the recorded terminal cursor commits, including across retries.
 	state := federationIngestAdoptionSnapshotAuthorState{
+		allowTallyTransfer:           true,
 		allowAuthorPreservation:      baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
 		shouldDeferMarker:            true,
 		deferAuthorPreservationGrant: marker.allowSnapshotAuthors,
@@ -545,6 +571,7 @@ func computeFederationIngestCompleteAdoptionBaselineState(
 	adoptionBaselineEndSourceEventID int64,
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
 	state := federationIngestAdoptionSnapshotAuthorState{
+		allowTallyTransfer:      true,
 		allowAuthorPreservation: baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
 		overrideSnapshotAuthors: baselineShape.hasSnapshot && marker.baselineOpen && !marker.allowSnapshotAuthors,
 		endSourceEventID:        adoptionBaselineEndSourceEventID,

@@ -1097,6 +1097,8 @@ func federationIngestError(err error) error {
 		return api.NewError(http.StatusTooManyRequests, "admission_limited", "federation request admission is full", "", nil)
 	case errors.Is(err, errHostFederationAccessUnavailable):
 		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation transaction access decision unavailable", "", nil)
+	case errors.Is(err, db.ErrCronTallyConflict):
+		return api.NewError(http.StatusConflict, "cron_tally_conflict", err.Error(), "", nil)
 	case errors.Is(err, db.ErrRemoteEventConflict):
 		return api.NewError(http.StatusConflict, "remote_event_conflict", err.Error(), "", nil)
 	case errors.Is(err, db.ErrRemoteEventHashMismatch), errors.Is(err, db.ErrFederationIngestValidation):

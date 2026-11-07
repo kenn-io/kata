@@ -84,6 +84,7 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "credential audit", method: http.MethodGet, path: "/api/v1/tokens", want: http.StatusForbidden},
 		{name: "native cron capabilities", method: http.MethodGet, path: "/api/v1/projects/7/cron/capabilities", want: http.StatusForbidden},
 		{name: "native cron definitions", method: http.MethodGet, path: "/api/v1/projects/7/cron/jobs", want: http.StatusForbidden},
+		{name: "cron run pruning", method: http.MethodPost, path: "/api/v1/projects/7/cron/runs/actions/prune", want: http.StatusForbidden},
 		{name: "native cron run observation", method: http.MethodPut, path: "/api/v1/projects/7/cron/runs/01K00000000000000000000001", want: http.StatusForbidden},
 		{name: "issue reference", method: http.MethodGet, path: "/api/v1/ui/issue-reference?project_id=7&ref=abc4", want: http.StatusNoContent},
 		{name: "proxied snapshot", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/ui/snapshot", want: http.StatusNoContent},
@@ -153,6 +154,7 @@ func TestIssueScopedBrowserSessionUsesSameRouteAllowlist(t *testing.T) {
 		want               int
 	}{
 		{name: "ordinary issue read", method: http.MethodGet, path: "/api/v1/projects/1/issues/abc4", want: http.StatusNoContent},
+		{name: "cron run pruning denied", method: http.MethodPost, path: "/api/v1/projects/1/cron/runs/actions/prune", want: http.StatusForbidden},
 		{name: "recurrence denied", method: http.MethodGet, path: "/api/v1/projects/1/recurrences", want: http.StatusForbidden},
 		{name: "project deletion denied", method: http.MethodDelete, path: "/api/v1/projects/2", want: http.StatusForbidden},
 	} {

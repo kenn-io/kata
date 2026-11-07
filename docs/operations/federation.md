@@ -984,6 +984,16 @@ stays in place. New enrollments also use this path when a purge boundary or miss
 history makes ordinary replay incomplete. Uncompacted enrollment keeps the existing small-batch
 replay.
 
+Manual [cron run pruning](../reference/cron.md#run-retention) uses the same durable
+project reset boundary. Each nonempty batch forces direct spokes and relay
+descendants to rebuild without the removed runs. Relay checkpoint validation checks
+that boundary even if the daemon stops before refreshing its baseline.
+Pending deliveries and prepared resets awaiting activation
+block pruning; sync them or explicitly revoke the affected enrollment first.
+Relays bound upstream cannot prune their local replica. See
+[Retained and pruned counts](../reference/cron.md#retained-and-pruned-counts)
+for tally portability, coverage and replay limits.
+
 The signed snapshot includes complete ordered manifests for retained artifacts that
 match each issue's current content, without vector bytes. Reset installation preserves validated
 portable bytes for retained issues, removes bytes for excluded issues, and reconciles unexpired

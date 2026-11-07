@@ -167,6 +167,11 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				}
 				sourceInserted := false
 				if errors.Is(err, db.ErrNotFound) {
+					if grant.ID > 0 {
+						if err := db.ValidateCronTallyDownstreamEvent(source, false); err != nil {
+							return err
+						}
+					}
 					if err := cronValidator.Validate(ctx, projectID, source); err != nil {
 						return err
 					}

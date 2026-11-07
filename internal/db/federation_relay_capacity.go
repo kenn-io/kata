@@ -191,7 +191,7 @@ type RelayCheckpointBaseline struct {
 // root-attributed capture signs for it, plus the receipt of the federation
 // enable marker that capture writes but history does not carry. actor is the
 // account the capture writes with; a longer actor only enlarges the estimate.
-func RelayCheckpointBaselineRecords(project Project, instanceUID, actor string, issues []RelayCheckpointIssue, cron []CronEvent) (RelayCheckpointBaseline, error) {
+func RelayCheckpointBaselineRecords(project Project, instanceUID, actor string, issues []RelayCheckpointIssue, cron []CronEvent, history RelayCheckpointRecords) (RelayCheckpointBaseline, error) {
 	metadata, err := ProjectMetadataAdoptionPayload(project.Metadata)
 	if err != nil {
 		return RelayCheckpointBaseline{}, err
@@ -201,6 +201,18 @@ func RelayCheckpointBaselineRecords(project Project, instanceUID, actor string, 
 		return RelayCheckpointBaseline{}, err
 	}
 	baseline := RelayCheckpointBaseline{Entities: [][]byte{record}}
+	clearPayload, err := CronTallyResetClearPayload(project, history)
+	if err != nil {
+		return RelayCheckpointBaseline{}, err
+	}
+	if clearPayload != "" {
+		clearRecord, err := relayCheckpointEntityRecord(project, instanceUID, actor, "project.metadata_updated", nil, clearPayload)
+		if err != nil {
+			return RelayCheckpointBaseline{}, err
+		}
+		baseline.Entities = append([][]byte{clearRecord}, baseline.Entities...)
+	}
+
 	for _, issue := range issues {
 		issueUID := issue.IssueUID
 		record, err := relayCheckpointEntityRecord(project, instanceUID, actor, "issue.snapshot", &issueUID, issue.Payload)

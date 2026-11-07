@@ -43,12 +43,12 @@ func (b relayResetBackend) InsertFederationBaselineEvents(ctx context.Context, p
 }
 
 func (b relayResetBackend) InsertRelayCheckpointStateEvent(ctx context.Context, state db.RelayCheckpointStateEvent) error {
-	_, err := b.d.insertEventTx(ctx, b.tx, eventInsert{ProjectID: state.Project.ID, ProjectUID: state.Project.UID, ProjectName: state.Project.Name, Type: state.Type, Actor: state.Actor, Payload: state.Payload, HLC: &state.Clock, CreatedAt: state.CreatedAt.UTC().Format(db.EventTimestampFormat)})
+	_, err := b.d.insertEventTx(ctx, b.tx, eventInsert{UID: state.UID, ProjectID: state.Project.ID, ProjectUID: state.Project.UID, ProjectName: state.Project.Name, Type: state.Type, Actor: state.Actor, Payload: state.Payload, HLC: &state.Clock, CreatedAt: state.CreatedAt.UTC().Format(db.EventTimestampFormat)})
 	return err
 }
 
-func (b relayResetBackend) RelayCheckpointRecords(ctx context.Context, project db.Project, boundaryID int64) (db.RelayCheckpointRecords, error) {
-	return b.d.relayCheckpointRecordsTx(ctx, b.tx, project, boundaryID)
+func (b relayResetBackend) RelayCheckpointRecords(ctx context.Context, project db.Project, boundaryID int64, metadataOnly bool) (db.RelayCheckpointRecords, error) {
+	return b.d.relayCheckpointRecordsTx(ctx, b.tx, project, boundaryID, metadataOnly)
 }
 
 func (b relayResetBackend) RelayCheckpointCapacity() int64 {

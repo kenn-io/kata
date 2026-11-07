@@ -62,6 +62,8 @@ import type {
   CronCapabilitiesResponseBody,
   CronDefinitionActionBody,
   CronJobResponseBody,
+  CronRunCountsResult,
+  CronRunPruneResult,
   CronRunResponseBody,
   CronRunsResponseBody,
   CronWorkflowResponseBody,
@@ -114,6 +116,8 @@ import type {
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
   GetCronCapabilitiesPathParameters,
+  GetCronRunCountsParams,
+  GetCronRunCountsPathParameters,
   GetExternalRootBridgeParams,
   GetExternalRootBridgePathParameters,
   GetFederationBridgeStatusPathParameters,
@@ -208,6 +212,8 @@ import type {
   ProjectPurgeRequestBody,
   ProjectPurgeResponseBody,
   ProjectResolveBody,
+  PruneCronRunsBody,
+  PruneCronRunsPathParameters,
   PurgeIssuePathParameters,
   PurgeProjectPathParameters,
   PurgeResponseBody,
@@ -2489,6 +2495,101 @@ export const listCronRuns = async (
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<listCronRunsResponse> => {
   return orvalFetch<listCronRunsResponse>(getListCronRunsUrl({ projectId }, params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type pruneCronRunsResponse200 = {
+  data: CronRunPruneResult
+  status: 200
+}
+
+export type pruneCronRunsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type pruneCronRunsResponseSuccess = pruneCronRunsResponse200 & {
+  headers: Headers
+}
+export type pruneCronRunsResponseError = pruneCronRunsResponseDefault & {
+  headers: Headers
+}
+
+export type pruneCronRunsResponse = pruneCronRunsResponseSuccess | pruneCronRunsResponseError
+
+export const getPruneCronRunsUrl = ({ projectId }: PruneCronRunsPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runs/actions/prune`
+}
+
+export const pruneCronRuns = async (
+  { projectId }: PruneCronRunsPathParameters,
+  pruneCronRunsBody: PruneCronRunsBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<pruneCronRunsResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<pruneCronRunsResponse>(getPruneCronRunsUrl({ projectId }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(pruneCronRunsBody),
+  })
+}
+
+export type getCronRunCountsResponse200 = {
+  data: CronRunCountsResult
+  status: 200
+}
+
+export type getCronRunCountsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getCronRunCountsResponseSuccess = getCronRunCountsResponse200 & {
+  headers: Headers
+}
+export type getCronRunCountsResponseError = getCronRunCountsResponseDefault & {
+  headers: Headers
+}
+
+export type getCronRunCountsResponse =
+  | getCronRunCountsResponseSuccess
+  | getCronRunCountsResponseError
+
+export const getGetCronRunCountsUrl = (
+  { projectId }: GetCronRunCountsPathParameters,
+  params?: GetCronRunCountsParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runs/counts?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runs/counts`
+}
+
+export const getCronRunCounts = async (
+  { projectId }: GetCronRunCountsPathParameters,
+  params?: GetCronRunCountsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getCronRunCountsResponse> => {
+  return orvalFetch<getCronRunCountsResponse>(getGetCronRunCountsUrl({ projectId }, params), {
     ...options,
     method: 'GET',
   })

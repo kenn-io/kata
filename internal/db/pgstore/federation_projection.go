@@ -41,6 +41,10 @@ func (s *Store) enableProjectFederationTx(
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
+	if _, err := db.DecodeCronTallies(project.Metadata); err != nil {
+		return db.FederationBinding{}, err
+	}
+
 	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 	if err == nil {
@@ -206,6 +210,10 @@ func (s *Store) insertFederationBaselineEventsTx(
 	project db.Project,
 	actor string,
 ) (db.Event, error) {
+	if _, err := db.DecodeCronTallies(project.Metadata); err != nil {
+		return db.Event{}, err
+	}
+
 	payload, err := json.Marshal(struct {
 		ProjectUID  string      `json:"project_uid"`
 		ProjectName string      `json:"project_name"`
@@ -627,7 +635,11 @@ func (s *Store) materializeFederatedProjectTxScoped(
 	if err := pruneFederatedIssues(ctx, tx, m, issueIDs); err != nil {
 		return err
 	}
-	if metadata := projection.ProjectMetadata[m.binding.HubProjectUID]; len(metadata) > 0 {
+	metadata, err := db.ProjectedCronTallyMetadata(ctx, tx, projectID, m.binding.Role, projection.ProjectMetadata[m.binding.HubProjectUID])
+	if err != nil {
+		return err
+	}
+	if len(metadata) > 0 {
 		_, err := tx.ExecContext(ctx, `UPDATE projects SET metadata=$1,revision=revision+1
 WHERE id=$2 AND metadata IS DISTINCT FROM $1`, string(metadata), projectID)
 		return mapSQLError(err, nil)

@@ -9,10 +9,15 @@ import (
 type projectQueryScopeKey struct{}
 type unrestrictedProjectWriteKey struct{}
 type projectAccessTransactionCheckKey struct{}
+type projectAccessSnapshotCheckKey struct{}
 
 // ProjectAccessTransactionCheck verifies access to a concrete project inside
 // the domain transaction that will read or mutate one of its issues.
 type ProjectAccessTransactionCheck func(context.Context, Transaction, string) error
+
+// ProjectAccessSnapshotCheck verifies access using the pinned read snapshot
+// that supplies the query result. It must not use a row-locking statement.
+type ProjectAccessSnapshotCheck func(context.Context, Transaction, string) error
 
 // WithUnrestrictedProjectWrites represents the operator's explicit tokenless
 // private-network write grant. It never grants team membership or owner access.
@@ -40,6 +45,24 @@ func WithProjectAccessTransactionCheck(ctx context.Context, check ProjectAccessT
 // request carries a dynamic project authorization check.
 func CheckProjectAccessTransaction(ctx context.Context, tx Transaction, projectUID string) error {
 	check, _ := ctx.Value(projectAccessTransactionCheckKey{}).(ProjectAccessTransactionCheck)
+	if check == nil {
+		return nil
+	}
+	return check(ctx, tx, projectUID)
+}
+
+// WithProjectAccessSnapshotCheck installs the request's project-policy check
+// for reads whose authorization and data must share one pinned snapshot.
+func WithProjectAccessSnapshotCheck(ctx context.Context, check ProjectAccessSnapshotCheck) context.Context {
+	if check == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, projectAccessSnapshotCheckKey{}, check)
+}
+
+// CheckProjectAccessSnapshot authorizes projectUID in tx's read snapshot.
+func CheckProjectAccessSnapshot(ctx context.Context, tx Transaction, projectUID string) error {
+	check, _ := ctx.Value(projectAccessSnapshotCheckKey{}).(ProjectAccessSnapshotCheck)
 	if check == nil {
 		return nil
 	}

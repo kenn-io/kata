@@ -8,7 +8,15 @@ import (
 )
 
 func (d *Store) cronSQL() db.CronSQL {
-	return db.CronSQL{CreateIssueTx: func(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (db.Issue, db.Event, error) {
+	return db.CronSQL{PatchProjectMetadataTx: d.patchProjectMetadataTx, PruneGate: func(ctx context.Context, tx *sql.Tx, project db.Project) error {
+		if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, project.ID); err != nil {
+			return err
+		}
+		return rejectPendingRelayResetTx(ctx, tx, project)
+	}, ReserveResetCursor: func(ctx context.Context, tx *sql.Tx) (int64, error) {
+		cursor, err := reserveEventSequence(ctx, tx, true)
+		return cursor.Int64, err
+	}, CreateIssueTx: func(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (db.Issue, db.Event, error) {
 		id, event, err := d.createIssueTx(ctx, tx, p)
 		if err != nil {
 			return db.Issue{}, db.Event{}, err

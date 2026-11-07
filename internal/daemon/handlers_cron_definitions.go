@@ -10,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 func registerCronDefinitionHandlers(h huma.API, cfg ServerConfig) {
@@ -24,6 +25,8 @@ func cronAPIError(ctx context.Context, cfg ServerConfig, err error, projectID in
 	switch {
 	case errors.Is(err, db.ErrNotFound):
 		return api.NewError(404, "not_found", "cron not found", "", nil)
+	case errors.Is(err, metadata.ErrInvalidValue):
+		return api.NewError(409, "cron_tally_invalid", err.Error(), "upgrade Kata if the tally version is newer; otherwise restore valid project metadata from backup before retrying", nil)
 	case errors.Is(err, cron.ErrInvalid):
 		return api.NewError(400, "validation", err.Error(), "", nil)
 	case errors.Is(err, db.ErrCronConflict):

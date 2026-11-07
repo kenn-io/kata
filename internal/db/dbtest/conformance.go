@@ -19,6 +19,7 @@ import (
 // scenario must fail with the configured error, and unexpectedly passing it
 // fails the suite until the stale entry is removed.
 type Backend struct {
+	CronSQLForTest                      func(db.Storage) db.CronSQL
 	Name                                string
 	SearchIndexesEmoji                  bool
 	Open                                func(t *testing.T) db.Storage
@@ -52,7 +53,30 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
+	{name: "relay adoption reset boundary", run: checkRelayAdoptionResetBoundary},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
+	{name: "cron prune history scale", runWithBackend: checkCronPruneHistoryScale},
+	{name: "cron prune event model", run: checkCronPruneEventModel},
+	{name: "cron prune rollback", runWithBackend: checkCronPruneRollback},
+	{name: "cron prune accepted replay", run: checkCronPruneAcceptedReplay},
+	{name: "cron prune relay reset", runWithBackend: checkCronPruneRelayReset},
+	{name: "cron run prune model", run: checkCronRunPruneModel},
+	{name: "cron run prune", methods: []string{"PruneCronRuns"}, run: checkCronRunPrune},
+	{name: "cron run tally", run: checkCronRunTally},
+	{name: "cron tally timestamp history", runWithBackend: checkCronTallyTimestampHistory},
+	{name: "cron run tally model", run: checkCronRunTallyModel},
+	{name: "cron run tally concurrent", run: checkCronRunTallyConcurrent},
+	{name: "cron run counts", methods: []string{"CronRunCounts", "ProjectAccessSnapshotCheck"}, run: checkCronRunCounts},
+	{name: "cron run counts snapshot", run: checkCronRunCountsSnapshot},
+	{name: "cron tally reset inventory", run: checkCronTallyResetInventory},
+	{name: "cron tally adoption", run: checkCronTallyAdoption},
+	{name: "cron tally legacy duplicate", run: checkCronTallyLegacyDuplicate},
+	{name: "cron tally adoption chunk", run: checkCronTallyAdoptionChunk},
+	{name: "cron tally equal subset replay", run: checkCronTallyEqualSubsetReplay},
+	{name: "cron tally live merge", run: checkCronTallyLiveMerge},
+	{name: "cron tally root refold", run: checkCronTallyRootRefold},
+	{name: "cron tally import and enable", runWithBackend: checkCronTallyImportAndEnable},
+	{name: "cron tally legacy metadata patch", methods: []string{"CreateProject", "PatchProjectMetadata", "ProjectByID"}, run: checkCronTallyLegacyMetadataPatch},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},

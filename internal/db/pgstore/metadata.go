@@ -107,14 +107,14 @@ SET metadata = $1, revision = $2, updated_at = $3 WHERE id = $4`,
 // PatchProjectMetadata applies a validated per-key patch under the project's
 // revision gate and emits the replayable diff in the same transaction.
 func (s *Store) PatchProjectMetadata(ctx context.Context, input db.PatchProjectMetadataIn) (db.PatchProjectMetadataOut, error) {
-	return s.patchProjectMetadata(ctx, input, s.withSerializableTx)
+	if err := db.RejectCronTallyPatch(input.Patch); err != nil {
+		return db.PatchProjectMetadataOut{}, err
+	}
+	return s.patchProjectMetadata(ctx, input, s.withSerializableTx, false)
 }
 
-func (s *Store) patchProjectMetadata(
-	ctx context.Context,
-	input db.PatchProjectMetadataIn,
-	run metadataTxRunner,
-) (db.PatchProjectMetadataOut, error) {
+// Adoption may need a replay correction although the root row is unchanged.
+func (s *Store) patchProjectMetadata(ctx context.Context, input db.PatchProjectMetadataIn, run metadataTxRunner, reassertTallies bool) (db.PatchProjectMetadataOut, error) {
 	var output db.PatchProjectMetadataOut
 	for key, raw := range input.Patch {
 		if err := metadata.Validate(metadata.ProjectRegistry, key, raw); err != nil {
@@ -151,6 +151,12 @@ func (s *Store) patchProjectMetadata(
 		if _, changed := input.Patch[db.ProjectEmbeddingMetadataKey]; changed {
 			if _, err := db.ProjectEmbeddingProducerFromMetadata(db.JSONBlob(string(updated))); err != nil {
 				return fmt.Errorf("%w: invalid embedding producer configuration", metadata.ErrInvalidValue)
+			}
+		}
+		if reassertTallies {
+			for key, value := range input.Patch {
+				// From null reasserts every field under the pre-tally recursive fold.
+				diff[key] = metadataKeyDiffPayload{From: jsontext.Value(`null`), To: value}
 			}
 		}
 		if len(diff) == 0 {

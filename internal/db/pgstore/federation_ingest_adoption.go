@@ -10,6 +10,7 @@ import (
 )
 
 type federationIngestAdoptionSnapshotAuthorState struct {
+	allowTallyTransfer           bool
 	allowAuthorPreservation      bool
 	shouldDeferMarker            bool
 	deferAuthorPreservationGrant bool
@@ -73,6 +74,7 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 		return state, err
 	}
 	if !prior {
+		state.allowTallyTransfer = true
 		state.allowAuthorPreservation = true
 	}
 	return state, nil
@@ -126,6 +128,7 @@ func computeFederationIngestOpenAdoptionBaselineState(
 	// A transport chunk is not the whole adoption. Preserve the grant until
 	// the recorded terminal cursor commits, including across retries.
 	state := federationIngestAdoptionSnapshotAuthorState{
+		allowTallyTransfer:           true,
 		allowAuthorPreservation:      shape.hasSnapshot && marker.allowSnapshotAuthors,
 		shouldDeferMarker:            true,
 		deferAuthorPreservationGrant: marker.allowSnapshotAuthors,
@@ -170,6 +173,7 @@ func computeFederationIngestCompleteAdoptionBaselineState(
 	endSourceEventID int64,
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
 	state := federationIngestAdoptionSnapshotAuthorState{
+		allowTallyTransfer:      true,
 		allowAuthorPreservation: shape.hasSnapshot && marker.allowSnapshotAuthors,
 		overrideSnapshotAuthors: shape.hasSnapshot && marker.baselineOpen && !marker.allowSnapshotAuthors,
 		endSourceEventID:        endSourceEventID,

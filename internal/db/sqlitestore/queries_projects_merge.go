@@ -64,19 +64,27 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 			return db.ProjectMergeResult{}, err
 		}
 	}
-	if err := db.MergeCronProjects(ctx, tx, source, target); err != nil {
+	if err := rejectFederatedProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
-	if err := rejectFederatedProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
+	if err := rejectIssueSyncProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
+	tallyPatch, err := db.MergeCronTallyMetadata(target.Metadata, source.Metadata)
+	if err != nil {
+		return db.ProjectMergeResult{}, err
+	}
+	tallyResult, err := d.patchProjectMetadataTx(ctx, tx, db.PatchProjectMetadataIn{ProjectID: target.ID, Actor: p.Actor, Patch: tallyPatch})
+	if err != nil {
+		return db.ProjectMergeResult{}, err
+	}
+	if err := db.MergeCronProjects(ctx, tx, source, target); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
 	if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, source); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
 	if err := rejectProjectMergeAccessWideningTx(ctx, tx, source.UID, target.UID); err != nil {
-		return db.ProjectMergeResult{}, err
-	}
-	if err := rejectIssueSyncProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
 	if err := lockAndRejectFreshExternalRootClaimsForProjectTx(
@@ -216,6 +224,7 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 		EventsMoved:       eventsMoved,
 		PurgeLogsMoved:    purgeLogsMoved,
 		ShortIDExtensions: extensions,
+		MetadataEvent:     tallyResult.Event,
 		Event:             event,
 	}, nil
 }

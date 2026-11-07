@@ -20,6 +20,19 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
+func TestPatchProjectMetadataRejectsCronTallies(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	for _, patch := range []string{`{"cron.tally.bad":null}`, `{"cron.tally.":null,"ordinary":1}`} {
+		resp, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/metadata", project.ID), json.RawMessage(`{"actor":"operator","patch":`+patch+`}`), map[string]string{"Authorization": "Bearer tok"})
+		require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
+		current, err := env.DB.ProjectByID(t.Context(), project.ID)
+		require.NoError(t, err)
+		require.Equal(t, project.Metadata, current.Metadata)
+		require.Equal(t, project.Revision, current.Revision)
+	}
+}
+
 func seedProjectAndIssue(t *testing.T, env *testenv.Env) (db.Project, db.Issue) {
 	t.Helper()
 	p := seedProject(t, env, "mp")

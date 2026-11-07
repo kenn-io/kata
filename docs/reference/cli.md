@@ -2338,6 +2338,9 @@ kata cron capabilities --json
 kata cron run observe <run-uid> --json-input observation.json --json
 kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
 kata cron run show <run-uid> --json
+kata cron run counts [--job <uid> | --workflow <uid>] [--json | --agent]
+kata cron run prune --older-than 90d [--keep 10] [--limit 5000] [--job <uid> | --workflow <uid>]
+kata cron run prune --older-than 90d --force --confirm "PRUNE example-project cron runs" --json
 kata show <issue-ref> --planning-dates --json
 ```
 

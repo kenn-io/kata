@@ -170,7 +170,9 @@ type RelayResetBackend interface {
 	InsertRelayCheckpointStateEvent(ctx context.Context, state RelayCheckpointStateEvent) error
 	// RelayCheckpointRecords loads the records a checkpoint serializes:
 	// history below boundaryID and current-state records at or above it.
-	RelayCheckpointRecords(ctx context.Context, project Project, boundaryID int64) (RelayCheckpointRecords, error)
+	// metadataOnly restricts the inventory pass to metadata carriers and omits
+	// provenance and artifacts.
+	RelayCheckpointRecords(ctx context.Context, project Project, boundaryID int64, metadataOnly bool) (RelayCheckpointRecords, error)
 	// RelayCheckpointCapacity is the configured checkpoint byte capacity.
 	RelayCheckpointCapacity() int64
 	// MetaValuesWithPrefix lists daemon-local metadata values whose key
