@@ -63,7 +63,14 @@ func discoveryOptions(t *testing.T) Options {
 func TestToolSearchColdStartAndLoadRoutes(t *testing.T) {
 	changed := make(chan struct{}, 1)
 	session := connectRawTestServerWithClientOptions(t, discoveryOptions(t), &sdkmcp.ClientOptions{
-		ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) { changed <- struct{}{} },
+		ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
+			// The test needs a notification signal, not a count. Coalesce repeated
+			// list-changed notifications so the callback cannot block the client.
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		},
 	})
 	before, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
