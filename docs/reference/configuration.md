@@ -1522,12 +1522,10 @@ A configured URL requires a key source. A broken selected credential
 source fails explicitly; Kata does not fall back to another source. Keys are
 resolved on each request.
 
-With `local = true` and no URL, Kata reads the current address and API key from
-the runtime record in `DOCBANK_HOME` (default `~/.docbank`) on every request, so
-Docbank restarts need no change. `docbank` must be on the daemon's `PATH` for
-autostart. A `url` in the file or `KATA_DOCBANK_URL` wins over `local`, and
-`api_key`, `api_key_file`, and `api_key_env` are unused in local mode. `folder`
-still applies.
+A `url` in the file or `KATA_DOCBANK_URL` wins over `local`. With `local`,
+`api_key`, `api_key_file`, and `api_key_env` are unused. `folder` still applies.
+See [Issue attachments](../guide/attachments.md#configure-the-daemon) for which
+vault `local` selects and how the daemon starts Docbank.
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.

@@ -20,9 +20,9 @@ To use a Docbank on the same machine, add this to `<KATA_HOME>/config.toml` on e
 local = true
 ```
 
-The daemon reads the running Docbank's current address and API key from its runtime record on every request. A Docbank restart, reboot, or self-update gives Docbank a new port and key unless Docbank's own config fixes them, and Kata needs no change. When no Docbank is running, the daemon runs `docbank daemon start`, so `docbank` must be on the daemon's `PATH`.
+When `local = true`, the daemon reads the running Docbank's current address and API key on every request, so a Docbank restart, reboot, or self-update needs no Kata change. Kata uses the Docbank in `DOCBANK_HOME` from the daemon's environment, or `~/.docbank` when unset. That is the vault the `docbank` CLI uses for the same user. When no Docbank is running, the daemon runs `docbank daemon start`, so `docbank` must be on the daemon's `PATH`. The shared-vault warning above applies equally.
 
-Kata uses the Docbank in `DOCBANK_HOME` from the daemon's environment, or `~/.docbank` when unset. That is the vault the `docbank` CLI uses for the same user. A `url` in `[docbank]` or `KATA_DOCBANK_URL` selects that Docbank instead. With `local = true`, `api_key`, `api_key_file`, and `api_key_env` are not used. `folder` still applies and defaults to `/kata`. The shared-vault warning above applies equally.
+See [Docbank attachments](../reference/configuration.md#docbank-attachments) for how `local` combines with `url`, key settings, and `folder`.
 
 For a Docbank on another host, set a URL and key instead:
 
