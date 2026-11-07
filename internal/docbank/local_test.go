@@ -1,8 +1,12 @@
 package docbank_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -93,4 +97,25 @@ func TestLocalClientFollowsSymlinkedHome(t *testing.T) {
 
 	_, err := client.ResolvePath(t.Context(), "/")
 	require.NoError(t, err)
+}
+
+func TestLocalClientCarriesAttachmentUploadAndContentOverPinnedConnection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DOCBANK_HOME", home)
+	docbanktest.New(t).Publish(t, home)
+	client := docbank.NewLocalClient(docbank.Local{})
+	payload := bytes.Repeat([]byte("kata attachment "), 64<<10)
+	sum := sha256.Sum256(payload)
+
+	folder, err := client.EnsureFolder(t.Context(), "/kata/p")
+	require.NoError(t, err)
+	// MultiReader hides the length so the request body is streamed.
+	version, err := client.Upload(t.Context(), folder, "shot.bin", io.MultiReader(bytes.NewReader(payload)), int64(len(payload)), hex.EncodeToString(sum[:]))
+	require.NoError(t, err)
+	resp, err := client.Content(t.Context(), version)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(payload, got), "content read back differs from upload")
 }
