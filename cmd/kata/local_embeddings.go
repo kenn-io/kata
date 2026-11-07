@@ -277,7 +277,7 @@ func readLocalEmbeddingsConfig(path string) ([]byte, bool, error) {
 	if _, err := os.Lstat(path); err == nil { // #nosec G703 -- inspect the same operator-selected configuration path
 		return nil, false, fmt.Errorf("configuration %q is a symlink to a missing file; create its target or remove the link, then rerun", path)
 	}
-	return nil, false, nil
+	return []byte{}, false, nil
 }
 
 // Rewrite only the embeddings table, preserving surrounding bytes and its full-line comments.
@@ -569,7 +569,7 @@ func localEmbeddingsIndex(current, next config.EmbeddingsConfig) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if before == nil {
+	if before == nil || after == nil {
 		return "new", nil
 	}
 	oldRecipe, err := before.ArtifactIdentity("", "", "")
