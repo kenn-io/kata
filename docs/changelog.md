@@ -24,6 +24,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   events. Spokes no longer stall with `after_id: invalid integer`, and other large
   integer query values such as `kata events --after` cursors go out as plain
   numbers.
+- Open the web UI manually over SSH or in a container: `kata ui` and `kata ui <issue-ref>` print the browser URL in the selected output format before launching the browser and exit 0 with a manual-open hint if no browser opens. Cancelling the command still returns an error.
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the
