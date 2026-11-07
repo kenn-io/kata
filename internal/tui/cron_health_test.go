@@ -244,6 +244,10 @@ func TestCronHealthColumnRollupAndReason(t *testing.T) {
 	unfilteredTitle, _, unfilteredLines := cronScreen(m)
 	require.Len(t, unfilteredLines, len(m.cron.data.jobs))
 	require.NotContains(t, unfilteredTitle, " failing", "visible Health cells already show every loaded job's state")
+	m.height = 8
+	offscreen := stripANSI(renderCron(m))
+	require.Contains(t, offscreen, "1 failing", "the health roll-up keeps offscreen jobs visible")
+	require.NotContains(t, offscreen, "job-failing", "the failing job is outside the short viewport")
 	m = m.cronFilter("job-ok")
 	title, _, lines := cronScreen(m)
 	require.Len(t, lines, 1)

@@ -217,10 +217,14 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	noun := []string{"", "job", "run", "workflow"}[m.cron.tab]
 	title := cronCount(len(lines), noun)
-	if m.cron.tab == cronJobs && m.cron.data != nil && (len(m.cron.stack) > 0 || len(lines) < len(m.cron.data.jobs)) {
-		for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "blocked", "running", "failing", "missed", "never ran"} {
-			if count := healthCounts[state]; count > 0 {
-				title += fmt.Sprintf(" · %d %s", count, state)
+	header := format(headers)
+	if m.cron.tab == cronJobs && m.cron.data != nil {
+		listBudget := cronListBudget(m, header, len(cronErrorRows(m)), cronHelpRows(m))
+		if len(lines) < len(m.cron.data.jobs) || len(lines) > listBudget {
+			for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "blocked", "running", "failing", "missed", "never ran"} {
+				if count := healthCounts[state]; count > 0 {
+					title += fmt.Sprintf(" · %d %s", count, state)
+				}
 			}
 		}
 	}
@@ -245,7 +249,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	if len(query.tokens) > 0 {
 		title += " · filtered"
 	}
-	return title, format(headers), lines
+	return title, header, lines
 }
 
 // Lists and documents share a line cursor and viewport. Links retain their
@@ -484,17 +488,8 @@ func cronNoticeRows(m Model) int {
 	}
 	return 0
 }
-func renderCron(m Model) string {
-	if m.scope.allProjects || m.scope.projectID == 0 {
-		body := []string{renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon), cronTabs(m.cron.tab), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
-		help := cronHelpRows(m)
-		for range max(m.height-len(body)-helpLines(help, m.width)-cronNoticeRows(m), 1) {
-			body = append(body, "")
-		}
-		return strings.Join(append(body, renderFooterHelpTable(help, m.width)), "\n")
-	}
-	title, header, lines := cronScreen(m)
-	help := cronHelpRows(m)
+
+func cronErrorRows(m Model) []string {
 	errors := []string{}
 	if m.cron.data != nil {
 		for _, tab := range []int{cronJobs, cronWorkflows, cronRuns} {
@@ -509,6 +504,29 @@ func renderCron(m Model) string {
 	if t := m.cronStatusNotice(); t != nil {
 		errors = append(errors, errorStyle.Render(truncate(t.text, m.width)))
 	}
+	return errors
+}
+
+func cronListBudget(m Model, header string, errorCount int, help [][]helplayout.HelpItem) int {
+	bodyRows := 4 // title bar, tabs, list title, and spacer
+	if header != "" {
+		bodyRows++
+	}
+	return max(m.height-bodyRows-max(errorCount, 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
+}
+
+func renderCron(m Model) string {
+	if m.scope.allProjects || m.scope.projectID == 0 {
+		body := []string{renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon), cronTabs(m.cron.tab), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
+		help := cronHelpRows(m)
+		for range max(m.height-len(body)-helpLines(help, m.width)-cronNoticeRows(m), 1) {
+			body = append(body, "")
+		}
+		return strings.Join(append(body, renderFooterHelpTable(help, m.width)), "\n")
+	}
+	title, header, lines := cronScreen(m)
+	help := cronHelpRows(m)
+	errors := cronErrorRows(m)
 	query := m.cron.lists[m.cron.tab].query
 	left, right := title, ""
 	if len(m.cron.stack) == 0 {
@@ -547,7 +565,7 @@ func renderCron(m Model) string {
 	if header != "" {
 		body = append(body, tableHeaderStyle.Render("  "+header))
 	}
-	budget := max(m.height-len(body)-max(len(errors), 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
+	budget := cronListBudget(m, header, len(errors), help)
 	cursor := min(max(*m.cronCursor(), 0), max(len(lines)-1, 0))
 	start, end := windowBounds(len(lines), cursor, budget)
 	if len(lines) == 0 {

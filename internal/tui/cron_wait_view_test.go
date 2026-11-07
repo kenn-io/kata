@@ -44,7 +44,7 @@ func TestCronWaitRendering(t *testing.T) {
 	m := cronBlockedFixture(t)
 	m.width = 140
 	title, _, _ := cronScreen(m)
-	require.Contains(t, title, "1 blocked")
+	require.Equal(t, "1 job", title)
 	require.Contains(t, cronScreenText(m), "blocked")
 	m.cron.tab = cronRuns
 	require.Contains(t, cronScreenText(m), "running · blocked")
@@ -113,7 +113,8 @@ func TestCronMovedRunIssueEventRefreshesCron(t *testing.T) {
 		waiter.wait = wait
 		m.api = &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, waiter: waiter}
 		title, _, _ := cronScreen(m)
-		require.Contains(t, title, "1 blocked")
+		require.Equal(t, "1 job", title)
+		require.Contains(t, cronScreenText(m), "blocked")
 		return m, waiter
 	}
 	cleared := func(context.Context, string) (cronParent, error) {
@@ -139,7 +140,13 @@ func TestCronMovedRunIssueEventRefreshesCron(t *testing.T) {
 			m = cronLoadTest(t, m)
 			require.Equal(t, 1, waiter.waitCalls["issue-example"])
 			title, _, _ := cronScreen(m)
-			require.Equal(t, tc.blocked, strings.Contains(title, "1 blocked"), title)
+			require.Equal(t, "1 job", title)
+			jobRows := cronScreenText(m)
+			if tc.blocked {
+				require.Contains(t, jobRows, "blocked")
+			} else {
+				require.NotContains(t, jobRows, "blocked")
+			}
 			m.cron.tab = cronRuns
 			m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, m.cron.data.runs[0].UID}}}
 			text := cronScreenText(m)
