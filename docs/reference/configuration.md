@@ -1525,8 +1525,6 @@ resolved on each request.
 
 A `url` in the file or `KATA_DOCBANK_URL` wins over `local`. With `local`,
 `api_key`, `api_key_file`, and `api_key_env` are unused. `folder` still applies.
-See [Issue attachments](../guide/attachments.md#configure-the-daemon) for which
-vault `local` selects and how the daemon starts Docbank.
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.
