@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"testing"
@@ -13,7 +14,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // Inject an I/O failure at the binding lookup to exercise deadline races
@@ -40,6 +41,9 @@ func (s showRefreshProjectFailure) ProjectByID(context.Context, int64) (db.Proje
 }
 
 func TestShowClaimRefreshSetupFailureTimingProperty(t *testing.T) {
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	_, err := store.UpsertFederationBinding(t.Context(), db.FederationBinding{
@@ -48,10 +52,10 @@ func TestShowClaimRefreshSetupFailureTimingProperty(t *testing.T) {
 		HubProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4AA",
 	})
 	require.NoError(t, err)
-	hegel.Test(t, func(ht *hegel.T) {
+	rapid.Check(t, func(rt *rapid.T) {
 		// Cover both sides of the remote and outer deadlines with fake time.
-		delay := time.Duration(hegel.Draw(ht, hegel.Integers(0, 1000))) * time.Millisecond
-		projectFails := hegel.Draw(ht, hegel.Booleans())
+		delay := time.Duration(rapid.IntRange(0, 1000).Draw(rt, "delay milliseconds")) * time.Millisecond
+		projectFails := rapid.Bool().Draw(rt, "project lookup fails")
 		var got error
 		synctest.Test(t, func(t *testing.T) {
 			cfg := ServerConfig{DB: store, FederationCredentials: showRefreshCredentialFailure{delay: delay}}
@@ -61,11 +65,11 @@ func TestShowClaimRefreshSetupFailureTimingProperty(t *testing.T) {
 			_, got = refreshShowClaimStatus(t.Context(), cfg, issue)
 		})
 		if projectFails {
-			require.ErrorContains(ht, got, "fixture project read failed")
+			require.ErrorContains(rt, got, "fixture project read failed")
 		} else {
-			require.ErrorContains(ht, got, "fixture credential read failed")
+			require.ErrorContains(rt, got, "fixture credential read failed")
 		}
-	}, hegel.WithTestCases(1000), hegel.WithDatabase(t.TempDir()))
+	})
 }
 
 func (s showRefreshCredentialFailure) FederationCredential(context.Context, string) (config.FederationCredential, bool, error) {
@@ -81,10 +85,13 @@ func (s showRefreshFailureStore) FederationBindingByProject(ctx context.Context,
 }
 
 func TestShowClaimRefreshBudgetErrorProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		kind := hegel.Draw(ht, hegel.Integers(0, 3))
-		wraps := hegel.Draw(ht, hegel.Integers(0, 8))
-		callerCanceled := hegel.Draw(ht, hegel.Booleans())
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(rt *rapid.T) {
+		kind := rapid.IntRange(0, 3).Draw(rt, "error kind")
+		wraps := rapid.IntRange(0, 8).Draw(rt, "error wraps")
+		callerCanceled := rapid.Bool().Draw(rt, "caller canceled")
 		var got error
 		synctest.Test(t, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
@@ -111,20 +118,20 @@ func TestShowClaimRefreshBudgetErrorProperty(t *testing.T) {
 			_, got = refreshShowClaimStatus(ctx, ServerConfig{DB: store}, db.Issue{ProjectID: 1})
 		})
 		if kind == 0 && !callerCanceled {
-			require.NoError(ht, got)
+			require.NoError(rt, got)
 			return
 		}
 		var apiErr *api.APIError
-		require.ErrorAs(ht, got, &apiErr)
+		require.ErrorAs(rt, got, &apiErr)
 		if !callerCanceled {
 			switch kind {
 			case 1:
-				require.Contains(ht, apiErr.Message, "fixture storage failure")
+				require.Contains(rt, apiErr.Message, "fixture storage failure")
 			case 2:
-				require.Equal(ht, http.StatusForbidden, apiErr.Status)
+				require.Equal(rt, http.StatusForbidden, apiErr.Status)
 			case 3:
-				require.Equal(ht, http.StatusServiceUnavailable, apiErr.Status)
+				require.Equal(rt, http.StatusServiceUnavailable, apiErr.Status)
 			}
 		}
-	}, hegel.WithTestCases(1000), hegel.WithDatabase(t.TempDir()))
+	})
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/clisearch"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 var cliSearchTasks = []struct{ query, command string }{
@@ -302,28 +303,31 @@ func TestCLISearchSkipSegmentsAndDescendants(t *testing.T) {
 // Equivalent native selectors must produce identical envelopes for every task,
 // including malformed/empty tasks. -- keeps task words out of flag parsing.
 func TestCLISearchJSONSelectorsAgree(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		query := hegel.Draw(ht, hegel.Text())
-		limit := strconv.Itoa(hegel.Draw(ht, hegel.Integers(1, 20)))
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(rt *rapid.T) {
+		query := rapid.String().Draw(rt, "query")
+		limit := strconv.Itoa(rapid.IntRange(1, 20).Draw(rt, "limit"))
 		out, stderr, err := executeRootCapture(t, t.Context(), "cli", "search", "--json", "--limit", limit, "--", query)
-		selector := hegel.Draw(ht, hegel.SampledFrom([][]string{
+		selector := rapid.SampledFrom([][]string{
 			{"--format", "json"}, {"--format=json"}, {"--json=true"},
 			{"--json=false", "--format", "json"}, {"--agent=false", "--json"},
 			{"--json", "--format", "json", "--format=json"},
-		}))
-		position := hegel.Draw(ht, hegel.Integers(0, 2))
+		}).Draw(rt, "JSON selector")
+		position := rapid.IntRange(0, 2).Draw(rt, "selector position")
 		parts := [][]string{{"cli"}, {"search"}, {"--limit", limit, "--", query}}
 		parts[position] = append(selector, parts[position]...)
 		args := append(append(parts[0], parts[1]...), parts[2]...)
 		other, otherStderr, otherErr := executeRootCapture(t, t.Context(), args...)
-		require.Equal(ht, out, other)
-		require.Equal(ht, stderr, otherStderr)
+		require.Equal(rt, out, other)
+		require.Equal(rt, stderr, otherStderr)
 		if err != nil {
-			require.EqualError(ht, otherErr, err.Error())
+			require.EqualError(rt, otherErr, err.Error())
 		} else {
-			require.NoError(ht, otherErr)
+			require.NoError(rt, otherErr)
 		}
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 func TestCLISearchAgentHeader(t *testing.T) {
@@ -343,34 +347,37 @@ func TestCLISearchAgentHeader(t *testing.T) {
 }
 
 func TestCLISearchResultsEligible(t *testing.T) {
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	queries := make([]string, 0, len(cliSearchTasks))
 	for _, task := range cliSearchTasks {
 		queries = append(queries, task.query)
 	}
 	queries = append(queries, "forgejo", "attention", "contract", "browser", "tui", "serve", "completion", "help")
-	hegel.Test(t, func(ht *hegel.T) {
-		query := hegel.Draw(ht, hegel.OneOf[string](hegel.Text(), hegel.SampledFrom(queries)))
+	rapid.Check(t, func(rt *rapid.T) {
+		query := rapid.OneOf(rapid.String(), rapid.SampledFrom(queries)).Draw(rt, "query")
 		if strings.TrimSpace(query) == "" {
 			return // blank-task rejection is a separate usage contract
 		}
 		out, stderr, err := executeRootCapture(t, t.Context(), "cli", "search", "--json", "--limit", "20", "--", query)
-		require.NoError(ht, err, stderr)
+		require.NoError(rt, err, stderr)
 		var response struct {
 			Results []struct{ Command string } `json:"results"`
 		}
-		require.NoError(ht, json.Unmarshal([]byte(out), &response))
+		require.NoError(rt, json.Unmarshal([]byte(out), &response))
 		root := newRootCmd()
 		for _, result := range response.Results {
-			require.NotEqual(ht, "kata", result.Command)
+			require.NotEqual(rt, "kata", result.Command)
 			cmd, rest, err := root.Find(strings.Fields(strings.TrimPrefix(result.Command, "kata ")))
-			require.NoError(ht, err)
-			require.Empty(ht, rest)
-			require.True(ht, cmd.Runnable(), result.Command)
+			require.NoError(rt, err)
+			require.Empty(rt, rest)
+			require.True(rt, cmd.Runnable(), result.Command)
 			for _, runner := range []string{"kata ui", "kata tui", "kata mcp serve", "kata connector serve", "kata agent-hook contract", "kata agent-hook attention", "kata attention-hook", "kata agent-contract-hook"} {
-				require.False(ht, result.Command == runner || strings.HasPrefix(result.Command, runner+" "), result.Command)
+				require.False(rt, result.Command == runner || strings.HasPrefix(result.Command, runner+" "), result.Command)
 			}
 		}
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 func BenchmarkCLISearch(b *testing.B) {
