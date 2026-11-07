@@ -20,23 +20,23 @@ func registerCronProjectControlTools(server *sdkmcp.Server, h toolHandlers) {
 	addCronTool(server, "kata.cron_project_pause", "Pause project cron", "Stop native cron delivery and ask adapters to launch no new work. Root-only; running work may finish. Repeating retains the original pause reason and timestamp.", toolHints(false, false, false), h.cronProjectPause)
 	addCronTool(server, "kata.cron_project_resume", "Resume project cron", "Resume project cron policy at its owning hub. Preserves per-job flags; missed native children follow each job's catch-up policy.", toolHints(false, true, false), h.cronProjectResume)
 }
-func (h toolHandlers) cronProjectPause(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronProjectPauseInput) (*sdkmcp.CallToolResult, *generated.PauseCronProjectResponse, error) {
+func (h toolHandlers) cronProjectPause(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronProjectPauseInput) (*sdkmcp.CallToolResult, generated.PauseCronProjectResponse, error) {
 	project, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.PauseCronProjectResponse{}, err
 	}
 	return cronResult(h.options.Client.PauseCronProject(ctx, &generated.PauseCronProjectRequestOptions{PathParams: &generated.PauseCronProjectPath{ProjectID: project.ID}, Body: &generated.PauseCronProjectBody{Actor: &h.options.Actor, Reason: &in.Reason}}))
 }
-func (h toolHandlers) cronProjectResume(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronProjectResumeInput) (*sdkmcp.CallToolResult, *generated.ResumeCronProjectResponse, error) {
+func (h toolHandlers) cronProjectResume(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronProjectResumeInput) (*sdkmcp.CallToolResult, generated.ResumeCronProjectResponse, error) {
 	project, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ResumeCronProjectResponse{}, err
 	}
 	options := &generated.ResumeCronProjectRequestOptions{PathParams: &generated.ResumeCronProjectPath{ProjectID: project.ID}, Body: &generated.ResumeCronProjectBody{Actor: &h.options.Actor}}
 	if in.DiscardMissed {
 		revision, capErr := h.cronDiscardCapabilities(ctx, project.ID, true)
 		if capErr != nil {
-			return nil, nil, capErr
+			return nil, generated.ResumeCronProjectResponse{}, capErr
 		}
 		match := fmt.Sprintf("rev-%d", revision)
 		options.Query = &generated.ResumeCronProjectQuery{DiscardMissed: &in.DiscardMissed}

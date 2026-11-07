@@ -14,7 +14,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // Contract: actions change enabled alone, use CAS even for a no-op, and never
@@ -71,7 +71,7 @@ func TestCronJobEnabledPreservationProperty(t *testing.T) {
 	require.NoError(t, err)
 	workflow, _, err := env.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Review workflow", Actor: "operator", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "prompt", Prompt: "Inspect"}}}})
 	require.NoError(t, err)
-	hegel.Test(t, func(ht *hegel.T) {
+	rapid.Check(t, func(ht *rapid.T) {
 		definition := cronEnabledGeneratedDefinition(ht, parent.UID, workflow.UID)
 		job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "operator", Definition: definition})
 		require.NoError(ht, err)
@@ -216,19 +216,19 @@ func TestCronJobEnabledBodylessEnrollment(t *testing.T) {
 
 // Construct valid native, notification, prompt and workflow jobs independently
 // of API conversion fields. Bound only materialized text size for test cost.
-func cronEnabledGeneratedDefinition(ht *hegel.T, parentUID, workflowUID string) cron.JobDefinition {
-	drawText := func() string { r := []rune(hegel.Draw(ht, hegel.Text())); return string(r[:min(len(r), 100)]) }
-	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: hegel.Draw(ht, hegel.SampledFrom([]bool{false, true})), Overlap: hegel.Draw(ht, hegel.SampledFrom([]string{"allow", "forbid"})), Catchup: hegel.Draw(ht, hegel.SampledFrom([]string{"all", "latest", "skip"})), GraceSeconds: int64(hegel.Draw(ht, hegel.Integers(1, 9223372036))), TimeoutSeconds: int64(hegel.Draw(ht, hegel.Integers(0, 9223372036))), SecretRefs: map[string]string{"access": "example-secret", "secondary": "other-secret"}}
-	definition.Trigger = hegel.Draw(ht, hegel.SampledFrom([]cron.Trigger{{Kind: "cron", Cron: "0 9 * * *", Timezone: "UTC"}, {Kind: "interval", IntervalSeconds: 60}, {Kind: "once", At: "2030-01-02T03:04:05Z"}, {Kind: "manual"}, {Kind: "issue-scheduled", IssueUID: parentUID}}))
+func cronEnabledGeneratedDefinition(ht *rapid.T, parentUID, workflowUID string) cron.JobDefinition {
+	drawText := func() string { r := []rune(rapid.String().Draw(ht, "drawText")); return string(r[:min(len(r), 100)]) }
+	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: rapid.SampledFrom([]bool{false, true}).Draw(ht, "definition 1"), Overlap: rapid.SampledFrom([]string{"allow", "forbid"}).Draw(ht, "definition 2"), Catchup: rapid.SampledFrom([]string{"all", "latest", "skip"}).Draw(ht, "definition 3"), GraceSeconds: int64(rapid.IntRange(1, 9223372036).Draw(ht, "definition 4")), TimeoutSeconds: int64(rapid.IntRange(0, 9223372036).Draw(ht, "definition 5")), SecretRefs: map[string]string{"access": "example-secret", "secondary": "other-secret"}}
+	definition.Trigger = rapid.SampledFrom([]cron.Trigger{{Kind: "cron", Cron: "0 9 * * *", Timezone: "UTC"}, {Kind: "interval", IntervalSeconds: 60}, {Kind: "once", At: "2030-01-02T03:04:05Z"}, {Kind: "manual"}, {Kind: "issue-scheduled", IssueUID: parentUID}}).Draw(ht, "trigger")
 	definition.Issue = &cron.IssuePolicy{Kind: "per-run", Title: "Review " + drawText(), Body: drawText()}
-	offset := int64(hegel.Draw(ht, hegel.Integers(-9223372036, 9223372036)))
-	if hegel.Draw(ht, hegel.SampledFrom([]bool{false, true})) {
+	offset := int64(rapid.IntRange(-9223372036, 9223372036).Draw(ht, "offset"))
+	if rapid.SampledFrom([]bool{false, true}).Draw(ht, "scheduled offset") {
 		definition.Issue.ScheduledOffsetSeconds = &offset
 	}
-	if hegel.Draw(ht, hegel.SampledFrom([]bool{false, true})) {
+	if rapid.SampledFrom([]bool{false, true}).Draw(ht, "deadline offset") {
 		definition.Issue.DeadlineOffsetSeconds = &offset
 	}
-	switch hegel.Draw(ht, hegel.Integers(0, 3)) {
+	switch rapid.IntRange(0, 3).Draw(ht, "action kind") {
 	case 0: // Native recurring job.
 		definition.Action = cron.Action{Kind: "notify", Recipient: "current-owner-or-author", Message: drawText()}
 		definition.Issue.ParentUID = parentUID
@@ -237,26 +237,26 @@ func cronEnabledGeneratedDefinition(ht *hegel.T, parentUID, workflowUID string) 
 		definition.Overlap = "allow"
 		definition.TimeoutSeconds = 0
 		definition.SecretRefs = nil
-		definition.Trigger = hegel.Draw(ht, hegel.SampledFrom([]cron.Trigger{{Kind: "interval", IntervalSeconds: 60}, {Kind: "cron", Cron: "0 9 * * *", Timezone: "UTC"}}))
+		definition.Trigger = rapid.SampledFrom([]cron.Trigger{{Kind: "interval", IntervalSeconds: 60}, {Kind: "cron", Cron: "0 9 * * *", Timezone: "UTC"}}).Draw(ht, "execute trigger")
 	case 1: // Adapter notification.
 		definition.Action = cron.Action{Kind: "notify", Recipient: "operator", Message: "Inspect " + drawText()}
 		definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: parentUID}
-		if hegel.Draw(ht, hegel.SampledFrom([]bool{false, true})) {
-			definition.Trigger = cron.Trigger{Kind: "issue-deadline", IssueUID: parentUID, LeadSeconds: int64(hegel.Draw(ht, hegel.Integers(0, 9223372036)))}
+		if rapid.SampledFrom([]bool{false, true}).Draw(ht, "deadline trigger") {
+			definition.Trigger = cron.Trigger{Kind: "issue-deadline", IssueUID: parentUID, LeadSeconds: int64(rapid.IntRange(0, 9223372036).Draw(ht, "lead seconds"))}
 		}
 	default:
 		definition.Action = cron.Action{Kind: "execute", Prompt: "Inspect " + drawText()}
-		definition.CheckoutKey = fmt.Sprintf("checkout-%d", hegel.Draw(ht, hegel.Integers(0, 99999)))
-		if hegel.Draw(ht, hegel.SampledFrom([]bool{false, true})) {
+		definition.CheckoutKey = fmt.Sprintf("checkout-%d", rapid.IntRange(0, 99999).Draw(ht, "checkout number"))
+		if rapid.SampledFrom([]bool{false, true}).Draw(ht, "workflow") {
 			definition.Action.Prompt = ""
 			definition.Action.WorkflowUID = workflowUID
 		}
-		if hegel.Draw(ht, hegel.SampledFrom([]bool{false, true})) {
+		if rapid.SampledFrom([]bool{false, true}).Draw(ht, "existing issue") {
 			definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: parentUID}
 		}
 	}
-	number := hegel.Draw(ht, hegel.Integers(0, 99999))
-	definition.Options = hegel.Draw(ht, hegel.SampledFrom([]jsontext.Value{nil, []byte(`{}`), []byte(fmt.Sprintf(`{"opaque":90071992547%05d,"nested":[null,true,"escaped\ntext",{"n":1.234567890123456789}]}`, number))}))
+	number := rapid.IntRange(0, 99999).Draw(ht, "number")
+	definition.Options = rapid.SampledFrom([]jsontext.Value{nil, []byte(`{}`), []byte(fmt.Sprintf(`{"opaque":90071992547%05d,"nested":[null,true,"escaped\ntext",{"n":1.234567890123456789}]}`, number))}).Draw(ht, "options")
 	if cron.IsRecurringIssueJob(definition) {
 		definition.Options = nil
 	}

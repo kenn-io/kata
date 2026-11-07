@@ -3,12 +3,13 @@ package db
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"flag"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // Contract: any present malformed pause fails closed; absent means unpaused.
@@ -31,8 +32,8 @@ func TestCronProjectPauseDecode(t *testing.T) {
 
 // Reasons vary with a fixed valid actor so actor rejection cannot mask them.
 func TestCronProjectPauseReasonProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		reason := hegel.Draw(ht, hegel.Text())
+	rapid.Check(t, func(ht *rapid.T) {
+		reason := rapid.String().Draw(ht, "reason")
 		wantValid := len(reason) <= 256
 		raw, err := json.Marshal(map[string]any{"cron.pause": map[string]any{"paused_by": "operator", "paused_at": "2026-01-02T03:04:05Z", "reason": reason}})
 		if err != nil {
@@ -51,10 +52,13 @@ func TestCronProjectPauseReasonProperty(t *testing.T) {
 // Contract: valid actor/reason/timestamp values survive byte-for-byte strings and
 // the same timestamp instant; invalid actor/reason values fail closed.
 func TestCronProjectPauseValueProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		actor := hegel.Draw(ht, hegel.Text())
-		reason := hegel.Draw(ht, hegel.Text())
-		instant := time.Unix(hegel.Draw(ht, hegel.Integers[int64](-62135596799, 253402300799)), int64(hegel.Draw(ht, hegel.Integers(0, 999999999)))).UTC()
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		actor := rapid.String().Draw(ht, "actor")
+		reason := rapid.String().Draw(ht, "reason")
+		instant := time.Unix(rapid.Int64Range(-62135596799, 253402300799).Draw(ht, "instant 1"), int64(rapid.IntRange(0, 999999999).Draw(ht, "instant 2"))).UTC()
 		wantValid := strings.TrimSpace(actor) != "" && len(actor) <= 256 && len(reason) <= 256
 		raw, err := json.Marshal(map[string]any{"cron.pause": map[string]any{"paused_by": actor, "paused_at": instant.Format(time.RFC3339Nano), "reason": reason}})
 		require.NoError(ht, err)
@@ -66,7 +70,7 @@ func TestCronProjectPauseValueProperty(t *testing.T) {
 			require.Equal(ht, reason, pause.Reason)
 			require.True(ht, instant.Equal(pause.PausedAt))
 		}
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 // Contract: ingest depends on authenticated provenance and the replacement,
@@ -91,14 +95,17 @@ func TestCronProjectPauseReplacementProperty(t *testing.T) {
 	}
 	require.NoError(t, ValidateCronControlEvent(RemoteEvent{Type: "project.metadata_updated", Payload: jsontext.Value(`{"diff":{"ordinary":{"to":true}}}`)}, ""))
 
-	hegel.Test(t, func(ht *hegel.T) {
-		actor := hegel.Draw(ht, hegel.Text())
-		reason := hegel.Draw(ht, hegel.Text())
-		instant := time.Unix(hegel.Draw(ht, hegel.Integers[int64](-62135596799, 253402300799)), 0).UTC()
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		actor := rapid.String().Draw(ht, "actor")
+		reason := rapid.String().Draw(ht, "reason")
+		instant := time.Unix(rapid.Int64Range(-62135596799, 253402300799).Draw(ht, "instant"), 0).UTC()
 		valid := strings.TrimSpace(actor) != "" && len(actor) <= 256 && len(reason) <= 256
 		next := map[string]any{"paused_by": actor, "paused_at": instant.Format(time.RFC3339), "reason": reason}
-		change := map[string]any{"from": hegel.Draw(ht, hegel.Text()), "to": next}
-		switch hegel.Draw(ht, hegel.Integers(0, 4)) {
+		change := map[string]any{"from": rapid.String().Draw(ht, "change"), "to": next}
+		switch rapid.IntRange(0, 4).Draw(ht, "mutation") {
 		case 1:
 			change["to"] = nil
 			valid = true
@@ -112,11 +119,11 @@ func TestCronProjectPauseReplacementProperty(t *testing.T) {
 			next["reason"] = nil
 			valid = false
 		}
-		if hegel.Draw(ht, hegel.Booleans()) {
+		if rapid.Bool().Draw(ht, "omit from") {
 			delete(change, "from")
 		}
-		origin := hegel.Draw(ht, hegel.SampledFrom([]string{"root", "other", ""}))
-		authority := hegel.Draw(ht, hegel.SampledFrom([]string{"root", "other", ""}))
+		origin := rapid.SampledFrom([]string{"root", "other", ""}).Draw(ht, "origin")
+		authority := rapid.SampledFrom([]string{"root", "other", ""}).Draw(ht, "authority")
 		raw, err := json.Marshal(map[string]any{"diff": map[string]any{"cron.pause": change}})
 		require.NoError(ht, err)
 		err = ValidateCronControlEvent(RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: origin, Payload: raw}, authority)
@@ -125,7 +132,7 @@ func TestCronProjectPauseReplacementProperty(t *testing.T) {
 		} else {
 			require.ErrorIs(ht, err, ErrFederationIngestValidation)
 		}
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 // Contract: only the exact pause key and request-dot prefix are reserved.
@@ -136,10 +143,13 @@ func TestCronProjectPauseReservationProperty(t *testing.T) {
 	}
 	require.NoError(t, CheckCronProjectMetadataWrite(map[string]jsontext.Value{"cron.passovers": a}))
 
-	hegel.Test(t, func(ht *hegel.T) {
-		suffix := hegel.Draw(ht, hegel.Text())
-		key := hegel.Draw(ht, hegel.SampledFrom([]string{suffix, "cron.pause", "cron.pause" + suffix, "cron.request." + suffix, "cron.request" + suffix, "cron.passover", "cron.passover." + suffix, "cron.passover" + suffix}))
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		suffix := rapid.String().Draw(ht, "suffix")
+		key := rapid.SampledFrom([]string{suffix, "cron.pause", "cron.pause" + suffix, "cron.request." + suffix, "cron.request" + suffix, "cron.passover", "cron.passover." + suffix, "cron.passover" + suffix}).Draw(ht, "key")
 		err := CheckCronProjectMetadataWrite(map[string]jsontext.Value{key: jsontext.Value("null")})
 		require.Equal(ht, key == "cron.pause" || strings.HasPrefix(key, "cron.request.") || key == "cron.passover" || strings.HasPrefix(key, "cron.passover."), err != nil)
-	}, hegel.WithTestCases(1000))
+	})
 }

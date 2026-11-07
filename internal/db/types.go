@@ -110,9 +110,8 @@ type Project struct {
 }
 
 // ProjectStats is the per-project aggregate returned by BatchProjectStats.
-// Used by GET /api/v1/projects?include=stats. LastEventAt is nil for a
-// project with zero events; tests pin this so the TUI's "—" rendering
-// is exercised.
+// Used by GET /api/v1/projects?include=stats. LastEventAt is the created_at
+// of the project's newest recorded event (highest id), or nil for zero events.
 type ProjectStats struct {
 	Open        int
 	Closed      int

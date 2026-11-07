@@ -105,8 +105,8 @@ type EmbeddingsHealth struct {
 	Credential       string     `json:"credential,omitempty" enum:"missing,rejected,ok" doc:"Embedding credential state; an advisory warning that does not change health.ok."`
 	CredentialSource string     `json:"credential_source,omitempty" doc:"Selected credential source: inline, file:<path>, env:<NAME>, or none; never the key value."`
 	CredentialReason string     `json:"credential_reason,omitempty" doc:"Readable missing or rejected credential reason, without provider response bodies."`
-	LastError        string     `json:"last_error,omitempty" doc:"Sanitized credential rejection; cleared after the next successful embedding call."`
-	LastErrorAt      *time.Time `json:"last_error_at,omitempty" doc:"Time of the credential rejection; cleared after the next successful embedding call."`
+	LastError        string     `json:"last_error,omitempty" doc:"Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call."`
+	LastErrorAt      *time.Time `json:"last_error_at,omitempty" doc:"Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call."`
 	Configured       bool       `json:"configured"`
 	LastSuccessAt    *time.Time `json:"last_success_at,omitempty" doc:"Time of the last successful reconciliation, including cycles with no pending issues; query requests do not update it."`
 	LastErrorStatus  int        `json:"last_error_status,omitempty,omitzero"`
@@ -278,8 +278,8 @@ type PendingClaimOut struct {
 }
 
 // ProjectStatsOut is the per-project aggregate returned by GET
-// /api/v1/projects?include=stats. LastEventAt is nil for a project with
-// zero events. Spec §7.2.
+// /api/v1/projects?include=stats. LastEventAt is the created_at of the project's
+// newest event by id, or nil for zero events. Spec §7.2.
 type ProjectStatsOut struct {
 	Open        int        `json:"open"`
 	Closed      int        `json:"closed"`
@@ -1253,6 +1253,7 @@ type ClaimResponseBody struct {
 // ReadyRequest is GET /api/v1/projects/{id}/ready.
 type ReadyRequest struct {
 	ProjectID     int64    `path:"project_id" required:"true"`
+	Sort          string   `query:"sort,omitempty" enum:"priority," doc:"priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order"`
 	Limit         int      `query:"limit,omitempty"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
@@ -1272,6 +1273,7 @@ type ReadyResponse struct {
 // ReadyGlobalRequest is GET /api/v1/ready (no project_id; spans every
 // non-archived project).
 type ReadyGlobalRequest struct {
+	Sort          string   `query:"sort,omitempty" enum:"priority," doc:"priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order"`
 	Limit         int      `query:"limit,omitempty"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`

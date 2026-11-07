@@ -74,7 +74,7 @@ func newCronRequestWriteCmd(cancel bool) *cobra.Command {
 
 func newCronRequestListCmd() *cobra.Command {
 	var state string
-	cmd := &cobra.Command{Use: "list", Short: "list retained requests and their current answer state", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "list", Short: "list cron run and cancel requests with their answer state", Args: cobra.NoArgs}
 	cmd.Flags().StringVar(&state, "state", "", "filter pending, answered or expired requests")
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		client, project, _, err := cronRequestClient(cmd)

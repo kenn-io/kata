@@ -938,7 +938,7 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			}
 			return next, cmd, true
 		}
-		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail) {
+		if m.keymap.Undo.matches(msg) && m.undoOffered() {
 			next, cmd := m.startUndo()
 			return next, cmd, true
 		}
@@ -1008,18 +1008,30 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if m.staleConnMsg(msg.connGen) {
 			return m, nil, true
 		}
-		if m.layout != splitlayout.Split {
-			m.detail.cancelReads()
-		}
-		if m.attention.returnToAttention {
-			next, cmd := m.returnFromAttentionDetail()
-			return next, cmd, true
-		}
-		m.view = viewList
-		m.focus = focusList
-		return m, nil, true
+		next, cmd := m.leaveDetail()
+		return next, cmd, true
 	}
 	return m, nil, false
+}
+
+func (m Model) leaveDetail() (Model, tea.Cmd) {
+	if m.layout != splitlayout.Split {
+		m.detail.cancelReads()
+	}
+	if m.attention.returnToAttention {
+		return m.returnFromAttentionDetail()
+	}
+	m.view = viewList
+	m.focus = focusList
+	return m, nil
+}
+
+func (m Model) undoOffered() bool {
+	if m.view == viewAttention {
+		last := len(m.undoHistory.entries) - 1
+		return last >= 0 && m.undoHistory.entries[last].kind == "delete"
+	}
+	return m.view == viewList || m.view == viewDetail
 }
 
 // inboxEntryKeptKey reports whether a keypress while an I-key entry
@@ -3703,7 +3715,7 @@ func (m Model) viewContent() string {
 		case viewCredentials:
 			body = renderCredentials(m)
 		default:
-			if m.modal == modalReopenBacklog || m.modal == modalCronResume || m.modal == modalCronRequest {
+			if m.modal == modalCronResume || m.modal == modalCronRequest {
 				footer := renderFooterHelpTable(m.activeModalHelpRows(), m.width)
 				bodyHeight := max(0, m.height-lipgloss.Height(footer))
 				body = renderTooNarrow(m.width, bodyHeight)
@@ -3742,6 +3754,9 @@ func (m Model) overlayInputAndModal(body string) string {
 		}
 		form := renderCenteredForm(m.input, m.width, m.height, now)
 		body = overlayModal(body, form, m.width, m.height)
+	}
+	if m.modal == modalReopenBacklog {
+		return m.overlayReopenBacklog(body)
 	}
 	if m.modal != modalNone {
 		body = overlayModal(body, m.renderActiveConfirmModal(), m.width, m.height)

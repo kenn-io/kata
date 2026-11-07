@@ -203,21 +203,21 @@ func (s *Store) DetachProjectAlias(ctx context.Context, params db.DetachAliasPar
 	return alias, &event, nil
 }
 
+const batchProjectStatsSQL = `
+SELECT
+  p.id,
+  (SELECT count(*) FROM issues i WHERE i.project_id = p.id AND i.status = 'open' AND i.deleted_at IS NULL),
+  (SELECT count(*) FROM issues i WHERE i.project_id = p.id AND i.status = 'closed' AND i.deleted_at IS NULL),
+  (SELECT e.created_at FROM events e WHERE e.id = (SELECT max(m.id) FROM events m WHERE m.project_id = p.id))
+FROM projects p
+WHERE p.deleted_at IS NULL AND p.name <> $1
+ORDER BY p.id`
+
 // BatchProjectStats returns active-project issue counts and event timestamps.
+// Correlated per-project subqueries cannot multiply rows (spec §6.1).
+// LastEventAt follows the newest event by id, as in readUIProjectStats.
 func (s *Store) BatchProjectStats(ctx context.Context) (map[int64]db.ProjectStats, error) {
-	rows, err := s.QueryContext(ctx, `WITH issue_counts AS (
-      SELECT project_id,
-             COUNT(*) FILTER (WHERE status = 'open') AS open_count,
-             COUNT(*) FILTER (WHERE status = 'closed') AS closed_count
-        FROM issues WHERE deleted_at IS NULL GROUP BY project_id
-    ), event_max AS (
-      SELECT project_id, MAX(created_at) AS last_event_at FROM events GROUP BY project_id
-    )
-    SELECT p.id, COALESCE(i.open_count, 0), COALESCE(i.closed_count, 0), e.last_event_at
-      FROM projects p
-      LEFT JOIN issue_counts i ON i.project_id = p.id
-      LEFT JOIN event_max e ON e.project_id = p.id
-     WHERE p.deleted_at IS NULL AND p.name <> $1 ORDER BY p.id`, db.SystemProjectName)
+	rows, err := s.QueryContext(ctx, batchProjectStatsSQL, db.SystemProjectName)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -235,6 +235,7 @@ func (s *Store) BatchProjectStats(ctx context.Context) (map[int64]db.ProjectStat
 			if err != nil {
 				return nil, err
 			}
+			value = value.UTC()
 			stats.LastEventAt = &value
 		}
 		result[id] = stats

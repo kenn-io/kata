@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"flag"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,13 +12,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // #nosec G101 -- Portable job UID fixture, not a credential.
 const passoverJobUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
-func passoverValue(t testing.TB, at time.Time, by string, paused *time.Time) jsontext.Value {
+func passoverValue(t interface {
+	require.TestingT
+	Helper()
+}, at time.Time, by string, paused *time.Time) jsontext.Value {
 	t.Helper()
 	v := map[string]any{"version": 1, "through": at, "by": by}
 	if paused != nil {
@@ -74,17 +78,20 @@ func TestCronPassoverDecode(t *testing.T) {
 // Whole-value maximum is associative/commutative/idempotent and preserves the
 // winner's attribution, including optional paused_at, across equal timestamps.
 func TestCronPassoverFoldProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		base := time.Unix(hegel.Draw(ht, hegel.Integers[int64](-62135596799, 253402214399)), 0).UTC()
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		base := time.Unix(rapid.Int64Range(-62135596799, 253402214399).Draw(ht, "base"), 0).UTC()
 		values := make([]jsontext.Value, 3)
 		for i := range values {
-			at := base.Add(time.Duration(hegel.Draw(ht, hegel.Integers(0, 5))) * time.Second)
-			actor := hegel.Draw(ht, hegel.Text())
+			at := base.Add(time.Duration(rapid.IntRange(0, 5).Draw(ht, "at")) * time.Second)
+			actor := rapid.String().Draw(ht, "actor")
 			if strings.TrimSpace(actor) == "" || len(actor) > 256 {
 				actor = "operator"
 			}
 			var paused *time.Time
-			if hegel.Draw(ht, hegel.Booleans()) {
+			if rapid.Bool().Draw(ht, "paused") {
 				paused = &base
 			}
 			values[i] = passoverValue(ht, at, actor, paused)
@@ -120,7 +127,7 @@ func TestCronPassoverFoldProperty(t *testing.T) {
 			}
 		}
 		require.True(ht, matched, "attribution is selected whole, never synthesized")
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 func TestCronPassoverProjection(t *testing.T) {
@@ -175,9 +182,12 @@ func TestCronPassoverCodecBoundaryProperty(t *testing.T) {
 	}
 	require.True(t, validCronPassoverTime(time.Date(2026, 1, 2, 3, 4, 5, 0, time.FixedZone("zero", 0))))
 
-	hegel.Test(t, func(ht *hegel.T) {
-		instant := time.Unix(hegel.Draw(ht, hegel.Integers[int64](-62135596799, 253402300799)), int64(hegel.Draw(ht, hegel.Integers(0, 999999999)))).UTC()
-		actor := strings.Repeat("é", hegel.Draw(ht, hegel.Integers(1, 128)))
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		instant := time.Unix(rapid.Int64Range(-62135596799, 253402300799).Draw(ht, "instant 1"), int64(rapid.IntRange(0, 999999999).Draw(ht, "instant 2"))).UTC()
+		actor := strings.Repeat("é", rapid.IntRange(1, 128).Draw(ht, "actor"))
 		value := passoverValue(ht, instant, actor, &instant)
 		decoded, err := decodeCronPassover(value)
 		require.NoError(ht, err)
@@ -187,7 +197,7 @@ func TestCronPassoverCodecBoundaryProperty(t *testing.T) {
 			_, err := decodeCronPassover(passoverValue(ht, instant, invalidActor, nil))
 			require.ErrorIs(ht, err, cron.ErrInvalid)
 		}
-	}, hegel.WithTestCases(1000))
+	})
 	for _, raw := range []string{
 		`{"version":1,"through":"0001-01-01T00:00:00Z","by":"operator"}`,
 		`{"version":1,"through":"0000-12-31T23:59:59Z","by":"operator"}`,
@@ -205,11 +215,14 @@ func TestCronPassoverCodecBoundaryProperty(t *testing.T) {
 }
 
 func TestCronPassoverScopeMatrixProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		pKind := hegel.Draw(ht, hegel.Integers(0, 3))
-		jKind := hegel.Draw(ht, hegel.Integers(0, 3))
-		pAt := time.Unix(1700000000+int64(hegel.Draw(ht, hegel.Integers(0, 3))), 0).UTC()
-		jAt := time.Unix(1700000000+int64(hegel.Draw(ht, hegel.Integers(0, 3))), 0).UTC()
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		pKind := rapid.IntRange(0, 3).Draw(ht, "pKind")
+		jKind := rapid.IntRange(0, 3).Draw(ht, "jKind")
+		pAt := time.Unix(1700000000+int64(rapid.IntRange(0, 3).Draw(ht, "pAt")), 0).UTC()
+		jAt := time.Unix(1700000000+int64(rapid.IntRange(0, 3).Draw(ht, "jAt")), 0).UTC()
 		values := map[string]jsontext.Value{}
 		for _, item := range []struct {
 			key  string
@@ -243,19 +256,22 @@ func TestCronPassoverScopeMatrixProperty(t *testing.T) {
 			want = &CronPassoverState{Through: jAt, Scope: "job"}
 		}
 		require.Equal(ht, want, got, fmt.Sprint(pKind, jKind))
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 // A signed reset may retain malformed history only with the exact later root
 // repair and valid current state; changing any witness fails closed.
 func TestCronPassoverResetRepairProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
 		key := CronPassoverMetadataKey
-		if hegel.Draw(ht, hegel.Booleans()) {
+		if rapid.Bool().Draw(ht, "has repair") {
 			key = CronPassoverMetadataPrefix + passoverJobUID
 		}
-		bad, _ := json.Marshal(hegel.Draw(ht, hegel.Text()))
-		through := time.Unix(hegel.Draw(ht, hegel.Integers[int64](1, 253402300799)), 0).UTC()
+		bad, _ := json.Marshal(rapid.String().Draw(ht, "bad"))
+		through := time.Unix(rapid.Int64Range(1, 253402300799).Draw(ht, "through"), 0).UTC()
 		good := passoverValue(ht, through, "operator", nil)
 		makeEvent := func(id string, at int64, from, to jsontext.Value) RemoteEvent {
 			raw, err := json.Marshal(map[string]any{"diff": map[string]any{key: map[string]jsontext.Value{"from": from, "to": to}}})
@@ -265,11 +281,11 @@ func TestCronPassoverResetRepairProperty(t *testing.T) {
 		legacy := makeEvent("old", 1, jsontext.Value("null"), bad)
 		repair := makeEvent("repair", 2, bad, good)
 		baseline := makeEvent("current", 3, jsontext.Value("null"), good)
-		hasRepair := hegel.Draw(ht, hegel.Booleans())
-		exact := hegel.Draw(ht, hegel.Booleans())
-		later := hegel.Draw(ht, hegel.Booleans())
-		root := hegel.Draw(ht, hegel.Booleans())
-		hasCurrent := hegel.Draw(ht, hegel.Booleans())
+		hasRepair := rapid.Bool().Draw(ht, "hasRepair")
+		exact := rapid.Bool().Draw(ht, "exact")
+		later := rapid.Bool().Draw(ht, "later")
+		root := rapid.Bool().Draw(ht, "root")
+		hasCurrent := rapid.Bool().Draw(ht, "hasCurrent")
 		if !exact {
 			repair = makeEvent("repair", 2, jsontext.Value("false"), good)
 		}
@@ -293,5 +309,5 @@ func TestCronPassoverResetRepairProperty(t *testing.T) {
 		} else {
 			require.Error(ht, err)
 		}
-	}, hegel.WithTestCases(1000))
+	})
 }

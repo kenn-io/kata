@@ -15,7 +15,6 @@ import (
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
-	"hegel.dev/go/hegel"
 )
 
 func TestFederationMoveBackfillAcceptsPayloadIssueIdentity(t *testing.T) {
@@ -103,62 +102,61 @@ func TestSyncFederationMoveBackfillsClaimAuditHistory(t *testing.T) {
 
 func TestFederationMoveBackfillAcceptsIssueScopedAuditEvents(t *testing.T) {
 	ctx := t.Context()
-	hegel.Test(t, func(ht *hegel.T) {
-		issueUID := "01ARZ3NDEKTSV4RRFFQ69AAA11"
-		eventType := hegel.Draw(ht, hegel.SampledFrom([]string{
-			"claim.acquired", "claim.released", "claim.expired", "claim.violated",
-		}))
-		history := api.EventEnvelope{
-			EventID: 8, EventUID: "01ARZ3NDEKTSV4RRFFQ69AAA14", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69AAA15",
-			Type: eventType, ProjectID: 41, ProjectUID: "01ARZ3NDEKTSV4RRFFQ69AAA12",
-			ProjectName: "history-source", Actor: "worker", IssueUID: &issueUID,
-			Payload:   jsontext.Value(`{"issue_uid":"` + issueUID + `"}`),
-			CreatedAt: time.Unix(1, 0).UTC(),
-		}
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			afterID, err := strconv.ParseInt(r.URL.Query().Get("after_id"), 10, 64)
+	for _, eventType := range []string{"claim.acquired", "claim.released", "claim.expired", "claim.violated"} {
+		t.Run(eventType, func(t *testing.T) {
+			issueUID := "01ARZ3NDEKTSV4RRFFQ69AAA11"
+			history := api.EventEnvelope{
+				EventID: 8, EventUID: "01ARZ3NDEKTSV4RRFFQ69AAA14", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69AAA15",
+				Type: eventType, ProjectID: 41, ProjectUID: "01ARZ3NDEKTSV4RRFFQ69AAA12",
+				ProjectName: "history-source", Actor: "worker", IssueUID: &issueUID,
+				Payload:   jsontext.Value(`{"issue_uid":"` + issueUID + `"}`),
+				CreatedAt: time.Unix(1, 0).UTC(),
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				afterID, err := strconv.ParseInt(r.URL.Query().Get("after_id"), 10, 64)
+				if err != nil {
+					http.Error(w, "invalid after_id", http.StatusBadRequest)
+					return
+				}
+				body := api.PollEventsBody{Events: []api.EventEnvelope{}, NextAfterID: afterID}
+				if afterID == 0 {
+					body.Events = []api.EventEnvelope{history}
+					body.NextAfterID = history.EventID
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.MarshalWrite(w, body); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			}))
+			defer server.Close()
+			client, err := NewClient(ctx, server.URL, "token", clientpkg.Opts{})
 			if err != nil {
-				http.Error(w, "invalid after_id", http.StatusBadRequest)
-				return
+				t.Fatalf("create history client: %v", err)
 			}
-			body := api.PollEventsBody{Events: []api.EventEnvelope{}, NextAfterID: afterID}
-			if afterID == 0 {
-				body.Events = []api.EventEnvelope{history}
-				body.NextAfterID = history.EventID
+			moved := api.EventEnvelope{
+				EventID: 9, EventUID: "01ARZ3NDEKTSV4RRFFQ69AAA16", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69AAA15",
+				Type: "issue.moved", ProjectID: 42, ProjectUID: "01ARZ3NDEKTSV4RRFFQ69AAA13",
+				ProjectName: "history-target", IssueUID: &issueUID,
+				CreatedAt: time.Unix(2, 0).UTC(),
 			}
-			w.Header().Set("Content-Type", "application/json")
-			if err := json.MarshalWrite(w, body); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+			backfilled, err := backfillFederationMoveHistory(ctx, client, 42, api.PollEventsBody{
+				Events: []api.EventEnvelope{moved}, NextAfterID: moved.EventID,
+			})
+			if err != nil {
+				t.Fatalf("backfill %s history: %v", eventType, err)
 			}
-		}))
-		defer server.Close()
-		client, err := NewClient(ctx, server.URL, "token", clientpkg.Opts{})
-		if err != nil {
-			ht.Fatalf("create history client: %v", err)
-		}
-		moved := api.EventEnvelope{
-			EventID: 9, EventUID: "01ARZ3NDEKTSV4RRFFQ69AAA16", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69AAA15",
-			Type: "issue.moved", ProjectID: 42, ProjectUID: "01ARZ3NDEKTSV4RRFFQ69AAA13",
-			ProjectName: "history-target", IssueUID: &issueUID,
-			CreatedAt: time.Unix(2, 0).UTC(),
-		}
-		backfilled, err := backfillFederationMoveHistory(ctx, client, 42, api.PollEventsBody{
-			Events: []api.EventEnvelope{moved}, NextAfterID: moved.EventID,
+			found := false
+			for _, event := range backfilled {
+				if event.EventUID == history.EventUID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("backfill omitted issue-scoped %s history", eventType)
+			}
 		})
-		if err != nil {
-			ht.Fatalf("backfill %s history: %v", eventType, err)
-		}
-		found := false
-		for _, event := range backfilled {
-			if event.EventUID == history.EventUID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			ht.Fatalf("backfill omitted issue-scoped %s history", eventType)
-		}
-	}, hegel.WithTestCases(20))
+	}
 }
 
 func TestSyncFederationMoveUsesBaselineAfterLocalMove(t *testing.T) {

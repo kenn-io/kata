@@ -248,6 +248,10 @@ func (f *fakeGitHubSyncCLIFetcher) Comments(context.Context, githubsync.Binding,
 	return nil, errors.New("CLI tests should not fetch GitHub comments")
 }
 
+func (f *fakeGitHubSyncCLIFetcher) RepositoryComments(_ context.Context, _ githubsync.Binding, _ *time.Time) (map[int][]githubsync.Comment, bool, error) {
+	return nil, false, errors.New("CLI tests should not fetch GitHub comments")
+}
+
 func (f *fakeGitHubSyncCLIFetcher) ParentData(context.Context, githubsync.Binding, githubsync.ParentRequest) (githubsync.ParentData, error) {
 	return githubsync.ParentData{}, nil
 }

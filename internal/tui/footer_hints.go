@@ -22,7 +22,7 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 	}
 	switch m.view {
 	case viewDetail:
-		return m.detail.detailHelpRows()
+		return m.detail.detailHelpRows(m.deleteHidden())
 	case viewList:
 		return m.list.queueHelpRows(m.deleteHidden())
 	case viewCredentials:
@@ -48,7 +48,7 @@ func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
 	}
-	return m.detail.detailHelpRows()
+	return m.detail.detailHelpRows(m.deleteHidden())
 }
 
 func (m Model) splitHelpRows() [][]helplayout.HelpItem {
@@ -59,7 +59,7 @@ func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 		return inputHelpRows(m.input)
 	}
 	if m.focus == focusDetail {
-		return m.detail.detailHelpRows()
+		return m.detail.detailHelpRows(m.deleteHidden())
 	}
 	return m.list.queueHelpRows(m.deleteHidden())
 }
@@ -81,7 +81,7 @@ func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return appendUndoHint(dm.detailHelpRows(), chrome.undoAvailable)
+	return appendUndoHint(dm.detailHelpRows(chrome.deleteHidden), chrome.undoAvailable)
 }
 
 func appendUndoHint(rows [][]helplayout.HelpItem, available bool) [][]helplayout.HelpItem {
@@ -219,7 +219,7 @@ func (lm listModel) queueHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 // child / N new child / p parent) but keeps the same action surface
 // because the same mutations apply to the parent issue regardless
 // of which section the cursor is on.
-func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
+func (dm detailModel) detailHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 	actions := []helplayout.HelpItem{
 		{Key: "e", Description: "edit"},
 		{Key: "c", Description: "comment"},
@@ -243,6 +243,10 @@ func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 		{Key: "esc", Description: "back"},
 		{Key: "?", Description: "help"},
 		{Key: "q", Description: "quit"},
+	}
+	if !hideDelete && dm.issue != nil {
+		dates := slices.IndexFunc(actions, func(item helplayout.HelpItem) bool { return item.Key == "d" })
+		actions = slices.Insert(actions, dates+1, helplayout.HelpItem{Key: "X", Description: "delete"})
 	}
 	if dm.detailFocus == focusChildren && len(dm.children) > 0 {
 		nav := []helplayout.HelpItem{

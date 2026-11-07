@@ -24,7 +24,7 @@ func TestIssueCreatedOrderIndexMigrationUpgradesVersion41(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
-	dropIssueCreatedOrderIndexes(ctx, t, admin, schema)
+	dropIssueCreatedAndEventIndexes(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE issue_created_upgrade.meta SET value='41' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})

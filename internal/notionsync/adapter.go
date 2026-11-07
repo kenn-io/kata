@@ -186,21 +186,20 @@ type RunnerConfig struct {
 	DrainAdmission activity.WaitableAdmission
 }
 
-// NewRunner applies the fixed Notion claim, deadline, and import chunk limits.
+// NewRunner applies the fixed Notion claim and deadline limits with the shared import chunk default.
 func NewRunner(c RunnerConfig) *issuesync.Runner {
 	return issuesync.NewRunner(issuesync.RunnerConfig{
-		Store:            c.Store,
-		Adapter:          NewAdapter(c.Store, c.Fetcher),
-		Progress:         c.Progress,
-		Clock:            c.Clock,
-		Logger:           c.Logger,
-		Interval:         c.Interval,
-		Wake:             c.Wake,
-		EventSink:        c.EventSink,
-		EventSinkFrom:    c.EventSinkFrom,
-		DrainAdmission:   c.DrainAdmission,
-		RunTimeout:       runTimeout,
-		StaleLockTTL:     30 * time.Minute,
-		InitialBatchSize: 5000,
+		Store:          c.Store,
+		Adapter:        NewAdapter(c.Store, c.Fetcher),
+		Progress:       c.Progress,
+		Clock:          c.Clock,
+		Logger:         c.Logger,
+		Interval:       c.Interval,
+		Wake:           c.Wake,
+		EventSink:      c.EventSink,
+		EventSinkFrom:  c.EventSinkFrom,
+		DrainAdmission: c.DrainAdmission,
+		RunTimeout:     runTimeout,
+		StaleLockTTL:   30 * time.Minute,
 	})
 }

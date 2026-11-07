@@ -1,20 +1,24 @@
 package cron
 
 import (
+	"flag"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // A cutoff advances only Through, never the interval anchor; advancing clears
 // a frozen latest scan. A nonadvancing cutoff preserves the complete progress.
 func TestApplyPassoverProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		anchor := time.Unix(hegel.Draw(ht, hegel.Integers[int64](0, 2000000000)), 0).UTC()
-		through := anchor.Add(time.Duration(hegel.Draw(ht, hegel.Integers(0, 100000))) * time.Second)
-		cutoff := anchor.Add(time.Duration(hegel.Draw(ht, hegel.Integers(-100000, 200000))) * time.Second)
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		anchor := time.Unix(rapid.Int64Range(0, 2000000000).Draw(ht, "anchor"), 0).UTC()
+		through := anchor.Add(time.Duration(rapid.IntRange(0, 100000).Draw(ht, "through")) * time.Second)
+		cutoff := anchor.Add(time.Duration(rapid.IntRange(-100000, 200000).Draw(ht, "cutoff")) * time.Second)
 		p := RecurringProgress{Version: 1, Anchor: anchor, Through: through, Scan: &RecurringScan{DefinitionEventUID: definitionUID, Cursor: through.Add(time.Hour), Until: through.Add(2 * time.Hour)}}
 		got, e := ApplyPassover(p, cutoff)
 		require.NoError(ht, e)
@@ -29,22 +33,26 @@ func TestApplyPassoverProperty(t *testing.T) {
 		require.NoError(ht, e)
 		require.Equal(ht, got, again)
 		require.NotNil(ht, p.Scan, "input remains unchanged")
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 // Compare complete bounded planner drains to one fixed horizon, rather than
 // comparing individual batches whose pagination can differ after clamping.
 func TestApplyPassoverPlanningProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	base := nativeJob(t)
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
 		p := RecurringProgress{Version: 1, Anchor: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 		p.Through = p.Anchor
-		j := nativeJob(ht)
-		j.Trigger.IntervalSeconds = int64(hegel.Draw(ht, hegel.Integers(60, 3600)))
-		if hegel.Draw(ht, hegel.Booleans()) {
+		j := base
+		j.Trigger.IntervalSeconds = int64(rapid.IntRange(60, 3600).Draw(ht, "interval seconds"))
+		if rapid.Bool().Draw(ht, "cron trigger") {
 			j.Trigger = Trigger{Kind: "cron", Cron: "* * * * *"}
 		}
-		horizon := p.Anchor.Add(time.Duration(hegel.Draw(ht, hegel.Integers(1, 6000))) * time.Minute)
-		cutoff := p.Anchor.Add(time.Duration(hegel.Draw(ht, hegel.Integers(-60, 6100))) * time.Minute)
+		horizon := p.Anchor.Add(time.Duration(rapid.IntRange(1, 6000).Draw(ht, "horizon")) * time.Minute)
+		cutoff := p.Anchor.Add(time.Duration(rapid.IntRange(-60, 6100).Draw(ht, "cutoff")) * time.Minute)
 		clamped, e := ApplyPassover(p, cutoff)
 		require.NoError(ht, e)
 		drain := func(job JobDefinition, progress RecurringProgress) []time.Time {
@@ -76,7 +84,7 @@ func TestApplyPassoverPlanningProperty(t *testing.T) {
 				require.True(ht, at.After(cutoff))
 			}
 		}
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 func TestApplyPassoverInvalid(t *testing.T) {

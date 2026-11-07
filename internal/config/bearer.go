@@ -136,6 +136,13 @@ type bearerTransport struct {
 	policy BearerPolicy
 }
 
+// CloseIdleConnections lets http.Client.CloseIdleConnections reach base.
+func (t *bearerTransport) CloseIdleConnections() {
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.token == "" || req.Header.Get("Authorization") != "" {
 		return t.base.RoundTrip(req)

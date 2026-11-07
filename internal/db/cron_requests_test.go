@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"flag"
 	"maps"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/uid"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // The UID's millisecond timestamp is the sole persisted admission time; TTL is
@@ -95,14 +96,17 @@ func TestCronRequestFreshness(t *testing.T) {
 // Construct valid requests independently across the whole supported TTL range;
 // decoding must preserve identity, exact strings and timestamp instants.
 func TestCronRequestValueProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		ttl := hegel.Draw(ht, hegel.Integers(60, 86400))
-		seconds := hegel.Draw(ht, hegel.Integers[int64](0, 253402214399))
-		now := time.Unix(seconds, int64(hegel.Draw(ht, hegel.Integers(0, 999)))*int64(time.Millisecond)).UTC()
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		ttl := rapid.IntRange(60, 86400).Draw(ht, "ttl")
+		seconds := rapid.Int64Range(0, 253402214399).Draw(ht, "seconds")
+		now := time.Unix(seconds, int64(rapid.IntRange(0, 999).Draw(ht, "now"))*int64(time.Millisecond)).UTC()
 		id, e := uid.FromTime(now)
 		require.NoError(ht, e)
-		actor := hegel.Draw(ht, hegel.Text())
-		kind := hegel.Draw(ht, hegel.SampledFrom([]string{"run", "cancel", "workflow-cancel"}))
+		actor := rapid.String().Draw(ht, "actor")
+		kind := rapid.SampledFrom([]string{"run", "cancel", "workflow-cancel"}).Draw(ht, "kind")
 		fields := map[string]any{"kind": "run", "job_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAW", "requested_by": actor, "requested_at": now, "expires_at": now.Add(time.Duration(ttl) * time.Second)}
 		if kind != "run" {
 			fields["kind"] = "cancel"
@@ -141,7 +145,7 @@ func TestCronRequestValueProperty(t *testing.T) {
 		roundtrip, e := decodeCronRequest(id, encoded)
 		require.NoError(ht, e)
 		require.Equal(ht, got, roundtrip, "production encoder preserves independently constructed values")
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 // Only authenticated roots create/delete immutable request bodies. Baselines
@@ -177,32 +181,38 @@ func TestCronRequestIngestWriteOnce(t *testing.T) {
 // Answered has priority at every deadline, and the deadline is inclusive.
 // Exercise the full timestamp domain, including sub-millisecond read clocks.
 func TestCronRequestStateProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		expiry := time.Unix(hegel.Draw(ht, hegel.Integers[int64](0, 253402214399)), int64(hegel.Draw(ht, hegel.Integers(0, 999999999)))).UTC()
-		distance := time.Duration(hegel.Draw(ht, hegel.Integers[int64](1, int64(24*time.Hour))))
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		expiry := time.Unix(rapid.Int64Range(0, 253402214399).Draw(ht, "expiry 1"), int64(rapid.IntRange(0, 999999999).Draw(ht, "expiry 2"))).UTC()
+		distance := time.Duration(rapid.Int64Range(1, int64(24*time.Hour)).Draw(ht, "distance"))
 		for _, read := range []time.Time{expiry.Add(-distance), expiry, expiry.Add(distance)} {
 			require.Equal(ht, "answered", cronRequestReadState(true, expiry, read))
 		}
 		require.Equal(ht, "pending", cronRequestReadState(false, expiry, expiry.Add(-distance)))
 		require.Equal(ht, "expired", cronRequestReadState(false, expiry, expiry))
 		require.Equal(ht, "expired", cronRequestReadState(false, expiry, expiry.Add(distance)))
-	}, hegel.WithTestCases(1000))
+	})
 }
 
 // Unknown/missing/incorrectly typed fields must reject across both request kinds.
 func TestCronRequestRejectShapeProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		at := time.Unix(hegel.Draw(ht, hegel.Integers[int64](0, 253402214399)), 0).UTC()
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	rapid.Check(t, func(ht *rapid.T) {
+		at := time.Unix(rapid.Int64Range(0, 253402214399).Draw(ht, "at"), 0).UTC()
 		id, e := uid.FromTime(at)
 		require.NoError(ht, e)
-		kind := hegel.Draw(ht, hegel.SampledFrom([]string{"run", "cancel"}))
+		kind := rapid.SampledFrom([]string{"run", "cancel"}).Draw(ht, "kind")
 		fields := map[string]any{"kind": kind, "requested_by": "operator", "requested_at": at, "expires_at": at.Add(time.Minute), "job_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAW"}
 		if kind == "cancel" {
 			fields["run_uid"] = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
 		}
-		switch hegel.Draw(ht, hegel.Integers(0, 5)) {
+		switch rapid.IntRange(0, 5).Draw(ht, "mutation") {
 		case 0:
-			fields["extra:"+hegel.Draw(ht, hegel.Text())] = true
+			fields["extra:"+rapid.String().Draw(ht, "extra member")] = true
 		case 1:
 			delete(fields, "requested_by")
 		case 2:
@@ -212,11 +222,11 @@ func TestCronRequestRejectShapeProperty(t *testing.T) {
 		case 4:
 			delete(fields, "definition_event_uid")
 		case 5:
-			fields["requested_by"] = hegel.Draw(ht, hegel.Integers[int64](-9223372036854775808, 9223372036854775807))
+			fields["requested_by"] = rapid.Int64Range(-9223372036854775808, 9223372036854775807).Draw(ht, "numeric requested_by")
 		}
 		raw, e := json.Marshal(fields)
 		require.NoError(ht, e)
 		_, e = decodeCronRequest(id, raw)
 		require.ErrorIs(ht, e, cron.ErrInvalid)
-	}, hegel.WithTestCases(1000))
+	})
 }
