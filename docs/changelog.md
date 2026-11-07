@@ -9,6 +9,19 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Turn on attachments with `kata docbank setup`: without `--url` it writes
+  `[docbank] local = true` for the Docbank on this machine; with `--url` and
+  `--key-file` it uses one that runs elsewhere. Setup checks the key before
+  writing `config.toml`, restarts running daemons, and changes nothing while a
+  `KATA_DOCBANK_*` variable is set or `config.toml` has a different `[docbank]`
+  section.
+  See [Issue attachments](guide/attachments.md#configure-the-daemon).
+- Attach files through the Docbank on the same machine with
+  `[docbank] local = true`, without copying its URL or API key. Docbank restarts
+  and updates need no Kata change, and the daemon runs `docbank daemon start`
+  when none is running, so `docbank` must be on its `PATH`. Needs Docbank 0.16.0
+  or later. A `url` or `KATA_DOCBANK_URL` still selects that Docbank instead. See
+  [Issue attachments](guide/attachments.md#configure-the-daemon).
 - Turn on search by meaning from the web's Settings page. Watch the download, then run `kata daemon restart` to finish. Reopen `kata ui` to watch indexing. Other viewers can read the status. Unconfigured `kata search` results point to Settings and the CLI setup command on stderr; `--quiet` and `--agent` suppress the line.
 - Keep local writes responsive during SQLite cron-only federation pulls by looking up only the runs carried by each page and their complete observation history. Schema 49 adds a cron event index on SQLite and PostgreSQL.
 - Keep large task lists responsive when an unchanged refresh arrives, while Inbox and Scheduled still update at midnight.
@@ -28,20 +41,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
   integer query values such as `kata events --after` cursors go out as plain
   numbers.
 - Open the web UI manually over SSH or in a container: `kata ui` and `kata ui <issue-ref>` print the browser URL in the selected output format before launching the browser and exit 0 with a manual-open hint if no browser opens. Cancelling the command still returns an error.
-- Turn on issue attachments with `kata docbank setup`. Without `--url`, it
-  writes `[docbank] local = true` for the Docbank on this machine, starting it
-  with `docbank daemon start` when it is not running; with `--url` and
-  `--key-file`, it uses a Docbank that runs elsewhere. It checks the key with
-  an authenticated read before writing `[docbank]` to `config.toml`, then
-  restarts running daemons. It writes nothing when a `KATA_DOCBANK_*`
-  variable is set or `config.toml` already has a different `[docbank]`
-  section. See [Issue attachments](guide/attachments.md#configure-the-daemon).
-- Attach files through the Docbank on the same machine with
-  `[docbank] local = true`, without copying its URL or API key. Docbank restarts
-  and updates need no Kata change, and the daemon runs `docbank daemon start`
-  when none is running, so `docbank` must be on its `PATH`. Needs Docbank 0.16.0
-  or later. A `url` or `KATA_DOCBANK_URL` still selects that Docbank instead. See
-  [Issue attachments](guide/attachments.md#configure-the-daemon).
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the
