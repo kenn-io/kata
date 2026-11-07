@@ -694,7 +694,7 @@ func TestCronNoticeNewestComparesOnlyLocalRevisions(t *testing.T) {
 	job := m.cron.data.jobs[0].UID
 	local := generated.CronRun{
 		UID: "r", JobUID: &job, Status: "succeeded", Revision: 5,
-		CreatedAt: snapshotFixedNow, UpdatedAt: snapshotFixedNow,
+		CreatedAt: snapshotFixedNow, UpdatedAt: snapshotFixedNow, EndedAt: new(snapshotFixedNow),
 	}
 	m.cron.data.runs = []generated.CronRun{local}
 	m.cron.data.lookup = map[string]generated.CronRun{"r": local}
@@ -712,7 +712,14 @@ func TestCronNoticeNewestComparesOnlyLocalRevisions(t *testing.T) {
 	m.cron.data.runs = []generated.CronRun{olderLocal}
 	m.cron.data.lookup = map[string]generated.CronRun{"r": olderLocal}
 	m.cron.data.generation = 2
-	require.Equal(t, local, m.cronNoticeNewest(settled), "a lower later-read revision cannot replace settled local evidence")
+	newest := m.cronNoticeNewest(settled)
+	want := settled.run()
+	const retainedEvidence = "a lower later-read revision cannot replace settled local evidence"
+	require.Equal(t, want.UID, newest.UID, retainedEvidence)
+	require.Equal(t, want.Status, newest.Status, retainedEvidence)
+	require.Equal(t, want.Revision, newest.Revision, retainedEvidence)
+	require.Equal(t, want.EndedAt, newest.EndedAt, retainedEvidence)
+	require.Equal(t, want.UpdatedAt, newest.UpdatedAt, retainedEvidence)
 }
 
 // Contract: local run revisions are monotonic even when overlapping reads
