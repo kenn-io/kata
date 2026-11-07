@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
 	"modernc.org/sqlite"
@@ -21,7 +22,14 @@ func cronPullWorkflow(t testing.TB, p db.Project, name string, clock int64) db.R
 
 func cronPullRun(t testing.TB, p db.Project, workflow db.RemoteEvent, uid, message string, clock int64) db.RemoteEvent {
 	t.Helper()
-	return incrementalRemoteEvent(t, p, "", "cron.run.observed", fmt.Sprintf(`{"project_uid":%q,"uid":%q,"workflow_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","workflow_definition_event_uid":%q,"actor":"tester","status":"succeeded","summary":{"version":1,"message":%q},"revision":1,"created_at":"2026-05-23T12:00:00Z","updated_at":"2026-05-23T12:00:01Z"}`, p.UID, uid, workflow.EventUID, message), clock)
+	at := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	payload, err := json.Marshal(db.NewCronRunObservation(db.CronRun{
+		UID: uid, WorkflowUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAA"), WorkflowDefinitionEventUID: &workflow.EventUID,
+		Actor: "tester", Status: "succeeded", Summary: cron.Summary{Version: 1, Message: message}, Revision: 1,
+		CreatedAt: at, UpdatedAt: at.Add(time.Second),
+	}, p.UID))
+	require.NoError(t, err)
+	return incrementalRemoteEvent(t, p, "", "cron.run.observed", string(payload), clock)
 }
 
 func TestCronPullMaterializesOnlyTouchedRuns(t *testing.T) {

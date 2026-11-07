@@ -22,7 +22,7 @@ func TestCronReferenceOperationalErrorChains(t *testing.T) {
 	body, err := json.Marshal(NewCronRunObservation(run, projectUID))
 	require.NoError(t, err)
 	event := RemoteEvent{Type: "cron.run.observed", EventUID: "01M40000000000000000000005", ProjectUID: projectUID, OriginInstanceUID: "01M40000000000000000000006", HLCPhysicalMS: at.UnixMilli(), Payload: body}
-	_, err = ParseCronRunObservation(FoldEvent{Type: event.Type, UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, Payload: event.Payload})
+	_, err = parseCronRunObservation(FoldEvent{Type: event.Type, UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, Payload: event.Payload})
 	require.NoError(t, err, "faults must exercise a valid observation")
 	callers := []struct {
 		name string

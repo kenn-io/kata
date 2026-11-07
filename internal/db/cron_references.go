@@ -107,7 +107,7 @@ func (idx *cronReferenceIndex) event(projectID int64, e FoldEvent) ([]cronDefini
 		return nil, invalidCronReference(err)
 	}
 	e.ProjectUID = body.ProjectUID
-	value, err := ParseCronRunObservation(e)
+	value, err := parseCronRunObservation(e)
 	if err != nil {
 		return nil, invalidCronReference(err)
 	}
@@ -273,7 +273,7 @@ func (v *CronReplayValidator) PrepareEvents(ctx context.Context, projectID int64
 			}
 			refs = append(refs, cronDefinitionReference{projectID: projectID, kind: kind, uid: value.UID, event: value.DefinitionEventUID})
 		} else if event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot" {
-			value, err := ParseCronRunObservation(e)
+			value, err := parseCronRunObservation(e)
 			if err != nil {
 				return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
 			}
