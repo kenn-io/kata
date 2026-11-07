@@ -123,6 +123,9 @@ type localEmbeddingsRun struct {
 	progress func(int64, int64)
 	notice   func(string) error
 	restart  func(context.Context, func() error) error
+	// keepProvider leaves an already configured external provider in place
+	// rather than switching it to the built-in server.
+	keepProvider bool
 }
 
 func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string, error) {
@@ -132,6 +135,13 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 	current, err := config.ReadSearchConfig()
 	if err != nil {
 		return "", fmt.Errorf("read search configuration, including KATA_SEARCH_EMBEDDINGS_* environment overrides: %w", err)
+	}
+	if run.keepProvider && current.Embeddings.Enabled() && !current.Embeddings.UsesLocal() {
+		// A provider saved since the caller last looked takes effect on restart.
+		if err := run.restart(ctx, func() error { return nil }); err != nil {
+			return "", err
+		}
+		return "kept", nil
 	}
 	prepared, err := prepareLocalEmbeddingsConfig(ctx, current.Embeddings)
 	if err != nil {
@@ -468,11 +478,14 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 			status.Provider = "ollama"
 		}
 	}
-	inspected, err := embedlocal.Inspect(ctx, embedlocal.Options{SkipOllama: status.Provider != "none"})
-	if err != nil {
-		return status, err
+	// Only an unconfigured daemon depends on the shared installation files.
+	if status.Provider == "none" {
+		inspected, err := embedlocal.Inspect(ctx, embedlocal.Options{})
+		if err != nil {
+			return status, err
+		}
+		status.DownloadBytes, status.OllamaAvailable = inspected.DownloadBytes, inspected.OllamaAvailable
 	}
-	status.DownloadBytes, status.OllamaAvailable = inspected.DownloadBytes, inspected.OllamaAvailable
 	s.mu.Lock()
 	if s.job != nil {
 		job := *s.job
@@ -489,6 +502,9 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 	if s.job != nil && s.job.State != "failed" {
 		return daemon.ErrLocalEmbeddingsBusy
 	}
+	if s.embeddings.Enabled() {
+		return daemon.ErrLocalEmbeddingsConfigured
+	}
 	var release func()
 	if s.idle != nil {
 		lease, ok := s.idle.TryForeground()
@@ -503,8 +519,9 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 			defer release()
 		}
 		_, err := enableLocalEmbeddings(ctx, localEmbeddingsRun{
-			confirm: func(context.Context, int64) (bool, error) { return true, nil },
-			notice:  func(string) error { return nil },
+			confirm:      func(context.Context, int64) (bool, error) { return true, nil },
+			notice:       func(string) error { return nil },
+			keepProvider: true,
 			progress: func(downloaded, total int64) {
 				s.mu.Lock()
 				s.job.Downloaded, s.job.Total = downloaded, total

@@ -12,6 +12,9 @@ import (
 // ErrLocalEmbeddingsBusy reports an already active setup job.
 var ErrLocalEmbeddingsBusy = errors.New("local embeddings setup is already running")
 
+// ErrLocalEmbeddingsConfigured reports a daemon already running with a provider.
+var ErrLocalEmbeddingsConfigured = errors.New("search by meaning is already configured")
+
 // LocalEmbeddings provides setup owned by the daemon process.
 type LocalEmbeddings interface {
 	Status(context.Context) (api.LocalEmbeddingsStatus, error)
@@ -67,15 +70,15 @@ func registerLocalEmbeddingsHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}
 	huma.Register(humaAPI, huma.Operation{OperationID: "getLocalEmbeddings", Method: http.MethodGet, Path: "/api/v1/embeddings/local", Errors: []int{404}}, func(ctx context.Context, _ *struct{}) (*api.LocalEmbeddingsResponse, error) { return status(ctx) })
 	huma.Register(humaAPI, huma.Operation{OperationID: "turnOnLocalEmbeddings", Method: http.MethodPost, Path: "/api/v1/embeddings/local", DefaultStatus: http.StatusAccepted, Errors: []int{403, 404, 409}}, func(ctx context.Context, _ *struct{}) (*api.LocalEmbeddingsResponse, error) {
-		snapshot, err := setupStatus(ctx)
-		if err != nil {
-			return nil, err
+		if cfg.LocalEmbeddings == nil {
+			return nil, api.NewError(404, "not_found", "local embeddings setup is unavailable", "", nil)
 		}
-		if !snapshot.CanChange {
+		// Authority is checked apart from setup state, so a busy job reads as a conflict.
+		if !localEmbeddingsAdministrator(ctx, cfg.InsecureReadonly, cfg.WebSessions) {
 			return nil, api.NewError(403, "forbidden", "local embeddings setup requires daemon administration", "", nil)
 		}
 		if err := cfg.LocalEmbeddings.TurnOn(ctx); err != nil {
-			if errors.Is(err, ErrLocalEmbeddingsBusy) {
+			if errors.Is(err, ErrLocalEmbeddingsBusy) || errors.Is(err, ErrLocalEmbeddingsConfigured) {
 				return nil, api.NewError(409, "conflict", err.Error(), "", nil)
 			}
 			return nil, internalAPIError(err)
