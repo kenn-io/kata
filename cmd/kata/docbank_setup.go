@@ -34,10 +34,9 @@ func newDocbankSetupCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "point the daemon at a Docbank for attachments",
-		Long: "Without --url, use the Docbank running on this machine (starting it when it is not running): " +
-			"the daemon finds it through Docbank's runtime record on every request, so its port and key may change. " +
-			"With --url and --key-file, use a Docbank that already runs elsewhere. Either way, check the key " +
-			"against Docbank, add [docbank] to <KATA_HOME>/config.toml and restart running daemons.",
+		Long: "Without --url, use the Docbank on this machine, starting it when needed and following its port and key " +
+			"changes. With --url and --key-file, use a Docbank that already runs elsewhere. Both forms check the key, " +
+			"add [docbank] to <KATA_HOME>/config.toml and restart running daemons.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
