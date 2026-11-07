@@ -130,6 +130,7 @@ func New(options Options) (*sdkmcp.Server, error) {
 		return nil, err
 	}
 	registerSkillsTool(server)
+	registerToolSearch(server, options)
 	return server, nil
 }
 
@@ -285,6 +286,11 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 	}
 
 	switch toolName {
+	case "kata.search_tools":
+		setStringBounds("query", 1, toolSearchQueryBytes)
+		setNumberBounds("limit", 1, toolSearchMaxResults)
+		property("limit").Type = "integer"
+		property("limit").Types = nil
 	case "kata.skills":
 		setStringBounds("name", 0, 64)
 		property("name").Description = "Guide name: " + strings.Join(SkillGuides(), ", ") + "; omit to list the guides"
