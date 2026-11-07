@@ -36,12 +36,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   restarts running daemons. It writes nothing when a `KATA_DOCBANK_*`
   variable is set or `config.toml` already has a different `[docbank]`
   section. See [Issue attachments](guide/attachments.md#configure-the-daemon).
-- Attach files through a Docbank running on the same machine with
-  `[docbank] local = true`, without copying its URL or API key. Kata reads the
-  current address and key on every request, so Docbank restarts and updates need
-  no change, and starts Docbank with `docbank daemon start` when it is not
-  running, which needs `docbank` on the daemon's `PATH`. A `url` or
-  `KATA_DOCBANK_URL` still selects that Docbank instead. See
+- Attach files through the Docbank on the same machine with
+  `[docbank] local = true`, without copying its URL or API key. Docbank restarts
+  and updates need no Kata change, and the daemon runs `docbank daemon start`
+  when none is running, so `docbank` must be on its `PATH`. See
   [Issue attachments](guide/attachments.md#configure-the-daemon).
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.

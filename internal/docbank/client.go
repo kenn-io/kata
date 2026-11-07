@@ -61,13 +61,6 @@ func noRedirectClient(rt http.RoundTripper) *http.Client {
 	return &http.Client{Transport: rt, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
-// closePinned closes only a pinned transport's connections; http.DefaultTransport's pool is shared and must stay open.
-func closePinned(hc *http.Client) {
-	if p, ok := hc.Transport.(*pinnedTransport); ok {
-		p.CloseIdleConnections()
-	}
-}
-
 func (c *Client) request(ctx context.Context, method, endpoint string, body io.Reader, headers http.Header) (*http.Response, error) {
 	base, key, hc, err := c.target(ctx)
 	if err != nil {
@@ -75,7 +68,6 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body io.R
 	}
 	req, err := http.NewRequestWithContext(ctx, method, base+endpoint, body)
 	if err != nil {
-		closePinned(hc)
 		return nil, &Error{}
 	}
 	req.Header = headers.Clone()
@@ -85,8 +77,6 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body io.R
 	req.Header.Set("X-Api-Key", key)
 	resp, err := hc.Do(req)
 	if err != nil {
-		// A request that failed before dialing leaves a local client's proven connection unused.
-		closePinned(hc)
 		return nil, &Error{}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
