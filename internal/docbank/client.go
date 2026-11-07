@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 	"uuid"
+
+	"go.kenn.io/kata/internal/config"
 )
 
 // Error exposes only the upstream status, keeping credentials and response details private.
@@ -30,10 +32,22 @@ type Client struct {
 	target func(context.Context) (base, key string, hc *http.Client, err error)
 }
 
+// New returns the client for cfg, or nil when Docbank is not configured.
+// cfg must already be normalized.
+func New(cfg config.DocbankConfig) *Client {
+	switch {
+	case !cfg.Enabled():
+		return nil
+	case cfg.UsesLocal():
+		return NewLocalClient(Local{})
+	default:
+		return NewClient(cfg.URL, cfg.ResolveKey)
+	}
+}
+
 // NewClient uses the normalized endpoint and resolves credentials on each request.
 func NewClient(base string, key func() (string, error)) *Client {
-	// Own transport: request closes idle connections on failure, which must not touch http.DefaultTransport.
-	hc := noRedirectClient(http.DefaultTransport.(*http.Transport).Clone())
+	hc := noRedirectClient(nil)
 	return &Client{target: func(context.Context) (string, string, *http.Client, error) {
 		k, err := key()
 		if err != nil || k == "" {
@@ -47,6 +61,13 @@ func noRedirectClient(rt http.RoundTripper) *http.Client {
 	return &http.Client{Transport: rt, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
+// closePinned closes only a pinned transport's connections; http.DefaultTransport's pool is shared and must stay open.
+func closePinned(hc *http.Client) {
+	if p, ok := hc.Transport.(*pinnedTransport); ok {
+		p.CloseIdleConnections()
+	}
+}
+
 func (c *Client) request(ctx context.Context, method, endpoint string, body io.Reader, headers http.Header) (*http.Response, error) {
 	base, key, hc, err := c.target(ctx)
 	if err != nil {
@@ -54,7 +75,7 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body io.R
 	}
 	req, err := http.NewRequestWithContext(ctx, method, base+endpoint, body)
 	if err != nil {
-		hc.CloseIdleConnections()
+		closePinned(hc)
 		return nil, &Error{}
 	}
 	req.Header = headers.Clone()
@@ -65,7 +86,7 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body io.R
 	resp, err := hc.Do(req)
 	if err != nil {
 		// A request that failed before dialing leaves a local client's proven connection unused.
-		hc.CloseIdleConnections()
+		closePinned(hc)
 		return nil, &Error{}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

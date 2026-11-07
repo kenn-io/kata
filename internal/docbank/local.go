@@ -22,24 +22,9 @@ import (
 	"time"
 
 	kitdaemon "go.kenn.io/kit/daemon"
-
-	"go.kenn.io/kata/internal/config"
 )
 
 const docbankService = "docbank"
-
-// New returns the client for cfg, or nil when Docbank is not configured.
-// cfg must already be normalized.
-func New(cfg config.DocbankConfig) *Client {
-	switch {
-	case !cfg.Enabled():
-		return nil
-	case cfg.UsesLocal():
-		return NewLocalClient(Local{})
-	default:
-		return NewClient(cfg.URL, cfg.ResolveKey)
-	}
-}
 
 // LocalHome returns Docbank's home: DOCBANK_HOME when set, else ~/.docbank.
 func LocalHome() (string, error) {
