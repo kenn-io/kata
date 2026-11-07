@@ -77,11 +77,11 @@ func (l Local) locate(ctx context.Context) (kitdaemon.Endpoint, string, error) {
 	}
 	key := rec.Metadata["api_key"]
 	if key == "" {
-		return kitdaemon.Endpoint{}, "", fmt.Errorf("docbank runtime record in %s has no api_key", home)
+		return kitdaemon.Endpoint{}, "", fmt.Errorf("the Docbank in %s did not publish an API key", home)
 	}
 	ep := rec.Endpoint()
 	if ep.Network != "tcp" {
-		return kitdaemon.Endpoint{}, "", fmt.Errorf("docbank runtime record in %s uses unsupported network %q", home, ep.Network)
+		return kitdaemon.Endpoint{}, "", fmt.Errorf("the Docbank in %s listens on an unsupported network %q", home, ep.Network)
 	}
 	return ep, key, nil
 }
@@ -130,7 +130,7 @@ func proveKey(ctx context.Context, address, key string) (conn net.Conn, err erro
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("key proof request answered HTTP %d; this is not a Docbank that holds the recorded key", resp.StatusCode)
+		return nil, fmt.Errorf("key check answered HTTP %d; this is not the Docbank that published the key", resp.StatusCode)
 	}
 	if resp.Close {
 		return nil, errors.New("key proof response closes the connection")
@@ -156,7 +156,7 @@ func proveKey(ctx context.Context, address, key string) (conn net.Conn, err erro
 	mac.Write([]byte(keyProofDomain))
 	mac.Write(nonce)
 	if !hmac.Equal(got, mac.Sum(nil)) {
-		return nil, errors.New("listener did not prove it holds the recorded API key; refusing to send the key")
+		return nil, errors.New("the listener did not prove it holds Docbank's API key; refusing to send the key")
 	}
 	if err = conn.SetDeadline(time.Time{}); err != nil {
 		return nil, fmt.Errorf("clear key proof deadline: %w", err)
