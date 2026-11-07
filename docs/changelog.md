@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,11 +9,22 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep federation polls fast on busy hubs by skipping other projects' event history.
 - Attach oh-my-pi sessions to closes by copying the documented
   [closing-session transcript](reference/configuration.md#closing-session-transcripts)
   configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
   `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
   recorded oh-my-pi closes as pi sessions.
+- Upgrade SQLite schemas 41 through 47 to 48 by adding indexes in place, avoiding
+  a full JSONL export/import and its retained database backup. The indexes and
+  version stamp commit together; interrupted upgrades retry on the next start.
+- Create your first project from the web UI's empty task list. **New task**
+  makes that project Inbox and opens task capture when no projects exist.
+- Keep pulling from a federation hub after its event history passes one million
+  events. Spokes no longer stall with `after_id: invalid integer`, and other large
+  integer query values such as `kata events --after` cursors go out as plain
+  numbers.
+- Open the web UI manually over SSH or in a container: `kata ui` and `kata ui <issue-ref>` print the browser URL in the selected output format before launching the browser and exit 0 with a manual-open hint if no browser opens. Cancelling the command still returns an error.
 - Author cron jobs with version-matched decision rules from `kata cron guide`
   or `kata.skills {"name":"cron"}`. The shared guide covers job kinds, known
   identifiers, agent and model selection, staggered schedules, delivery checks

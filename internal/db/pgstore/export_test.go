@@ -40,3 +40,7 @@ func InstallRelayHistoryFullScanObserverForTest(store *Store, observe func()) fu
 	store.relayHistoryFullScanObserver = observe
 	return func() { store.relayHistoryFullScanObserver = previous }
 }
+
+const EventSelectForTest = eventSelect
+
+var ScanEventForTest = scanEvent

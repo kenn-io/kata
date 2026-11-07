@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 # Model Context Protocol server
@@ -309,13 +309,53 @@ scope, sort, and filters. Changing these rejects a cursor. The page size and
 restart a scan after changes to filter membership, project membership, deletion,
 or imported creation timestamps. Stop only when `complete` is true.
 
+## Find tools for a task
+
+On unreleased `main`, call `kata.search_tools` to find an operation without
+knowing its section. For example:
+
+```json
+{"query":"add a comment to an issue","limit":3}
+```
+
+This searches tool metadata. `kata.search` searches issue data. Discovery
+works before loading sections and returns the same ranked results after loading
+them. It does not call issue APIs, run CLI commands, or activate public sections.
+
+Each result gives the exact tool `name`, its `summary`, section `loader`,
+applicable `guides`, and sorted top-level `inputs`. Each input lists its name,
+JSON `types`, and whether it is unconditionally required. An empty types list
+requires consulting the full schema. Call the returned loader if present,
+refresh `tools/list`, and read the tool's `inputSchema` for full constraints,
+conditional requirements, and nested inputs. Loaders are safe to call again.
+For a returned guide name, call `kata.skills` with that `name`.
+
+`query` must be non-blank UTF-8 text of at most 512 bytes. Omit `limit` for five
+results, or supply an integer from 1 through 10. Invalid input returns an MCP
+tool error. Unmatched, punctuation-only, and stopword-only queries return an
+empty `results` array. Results are deterministic; an exact tool name ranks first.
+Structured output is capped at 32 KiB, with `truncated: true` when that byte
+limit prevents returning another result.
+
+Discovery respects the server's startup scope. It omits operations that always
+require daemon-wide scope from project-limited servers. Storage tools also
+require configured host storage; token and team tools require explicit token
+administration. Discovery does not grant permission to invoke a returned tool.
+
 ## Progressive tool catalog
 
-The initial catalog exposes read-only section loaders and `kata.skills`. Call the applicable
+The initial catalog exposes read-only section loaders, `kata.skills`, and, on
+unreleased `main`, `kata.search_tools`. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
 typed tools needed for the current task instead of placing every detailed tool in the
 model context at startup.
+
+The first `tools/list` from the workspace-bound default `kata mcp serve` is about 21 KB for 19 tools.
+With every section available by default loaded, it is about 263 KB for 110 tools;
+output schemas account for about two thirds. A test keeps these catalogs under
+24 KB and 289 KB, including every section loader. Detailed storage, team, and token tools
+require startup flags and fall outside these default catalogs.
 
 | Loader | Detailed tools |
 | --- | --- |
