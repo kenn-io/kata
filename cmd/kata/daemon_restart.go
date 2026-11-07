@@ -388,18 +388,40 @@ func requireRestartable(running []kitdaemon.RuntimeRecord) error {
 	return nil
 }
 
-// restartAddress reuses a previous browser address only for an ephemeral bind.
+// restartAddress reuses a previous browser address only for an ephemeral bind
+// on the same host. A changed bind host, including the separate web
+// listener's loopback default, is authoritative.
 func restartAddress(web config.WebConfig, requested, previous string) string {
 	if previous == "" || web.PublicOrigin != "" {
 		return ""
 	}
+	bind := ""
 	for _, address := range []string{web.Listen, requested} {
 		if address != "" {
 			_, port, err := net.SplitHostPort(address)
 			if err != nil || port != "0" {
 				return ""
 			}
+			bind = address
 		}
 	}
+	if bind == "" {
+		bind = "127.0.0.1:0"
+	}
+	if !sameBindHost(bind, previous) {
+		return ""
+	}
 	return previous
+}
+
+func sameBindHost(a, b string) bool {
+	hostA, _, errA := net.SplitHostPort(a)
+	hostB, _, errB := net.SplitHostPort(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	if ipA, ipB := net.ParseIP(hostA), net.ParseIP(hostB); ipA != nil && ipB != nil {
+		return ipA.Equal(ipB)
+	}
+	return hostA == hostB
 }

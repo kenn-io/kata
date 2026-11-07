@@ -404,3 +404,17 @@ func TestDaemonRestartAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestDaemonRestartAddressHonorsBindHostChanges(t *testing.T) {
+	for _, tc := range []struct{ name, listen, requested, previous string }{
+		{"web wildcard to loopback", "127.0.0.1:0", "", "0.0.0.0:54321"},
+		{"web default to loopback", "", "", "0.0.0.0:54321"},
+		{"main wildcard to loopback", "", "127.0.0.1:0", "0.0.0.0:54321"},
+		{"web IPv4 to IPv6", "[::1]:0", "", "127.0.0.1:54321"},
+		{"main IPv4 to IPv6", "", "[::1]:0", "127.0.0.1:54321"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Empty(t, restartAddress(config.WebConfig{Listen: tc.listen}, tc.requested, tc.previous), "a restart must use the newly configured bind host")
+		})
+	}
+}

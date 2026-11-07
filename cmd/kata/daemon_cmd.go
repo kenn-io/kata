@@ -1389,7 +1389,11 @@ func runDaemonProcess(
 		return err
 	}
 	if restart != nil {
-		restart.webListen = restartAddress(startup.Web, startup.Web.Listen, webEndpoint.Endpoint.Address)
+		requested := startup.Web.Listen
+		if webEndpoint.Shared {
+			requested = endpoint.Address
+		}
+		restart.webListen = restartAddress(startup.Web, requested, webEndpoint.Endpoint.Address)
 	}
 	if webEndpoint.Listener != nil {
 		defer func() { _ = webEndpoint.Listener.Close() }()

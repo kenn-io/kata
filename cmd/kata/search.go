@@ -178,11 +178,11 @@ per match.`,
 // searchByMeaningOffHint names the searched profile's home, since Settings and
 // the setup command both administer whichever KATA_HOME they run under.
 func searchByMeaningOffHint(profile *client.LocalProfileIdentity) string {
-	hint := "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings."
+	hint := "turn it on in Settings (kata ui) or run kata daemon local-embeddings."
 	if profile != nil {
-		hint += " Set KATA_HOME to " + profile.Home + " before running kata ui or kata daemon local-embeddings."
+		return "Search by meaning is off. Set KATA_HOME to " + profile.Home + ", then " + hint
 	}
-	return hint
+	return "Search by meaning is off; " + hint
 }
 
 // printSearchResults renders a search response in the active output mode:

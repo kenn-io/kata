@@ -19,8 +19,20 @@ type LocalEmbeddings interface {
 	TurnOn(context.Context) error
 }
 
-func localEmbeddingsAdministrator(ctx context.Context, cfg ServerConfig) bool {
-	return projectOwnerAuthority(ctx) && !cfg.InsecureReadonly && (cfg.WebSessions == nil || cfg.WebSessions.Writable())
+func localEmbeddingsAdministrator(ctx context.Context, insecureReadonly bool, sessions *WebSessionManager) bool {
+	return projectOwnerAuthority(ctx) && !insecureReadonly && (sessions == nil || sessions.Writable())
+}
+
+// redactLocalEmbeddingsStatus removes the setup detail and indexing counts
+// reserved for daemon administrators while keeping the active indexing state.
+func redactLocalEmbeddingsStatus(snapshot *api.LocalEmbeddingsStatus) {
+	snapshot.CanChange = false
+	if snapshot.Job != nil && snapshot.Job.Error != "" {
+		snapshot.Job.Error = "Search by meaning could not be turned on. Ask a daemon administrator for details."
+	}
+	if snapshot.Indexing != nil {
+		snapshot.Indexing.Done, snapshot.Indexing.Total, snapshot.Indexing.ETASeconds = 0, 0, nil
+	}
 }
 
 func registerLocalEmbeddingsHandlers(humaAPI huma.API, cfg ServerConfig) {
@@ -32,7 +44,7 @@ func registerLocalEmbeddingsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return snapshot, internalAPIError(err)
 		}
-		snapshot.CanChange = snapshot.CanChange && localEmbeddingsAdministrator(ctx, cfg)
+		snapshot.CanChange = snapshot.CanChange && localEmbeddingsAdministrator(ctx, cfg.InsecureReadonly, cfg.WebSessions)
 		return snapshot, nil
 	}
 	status := func(ctx context.Context) (*api.LocalEmbeddingsResponse, error) {
@@ -40,18 +52,17 @@ func registerLocalEmbeddingsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		owner := localEmbeddingsAdministrator(ctx, cfg)
-		if !owner && snapshot.Job != nil && snapshot.Job.Error != "" {
-			snapshot.Job.Error = "Search by meaning could not be turned on. Ask a daemon administrator for details."
-		}
 		if cfg.ReconcilerHealth != nil {
 			h := cfg.ReconcilerHealth()
 			if h.LastSuccessAt == nil || h.Backlog > 0 {
-				snapshot.Indexing = &api.LocalEmbeddingsIndexing{Failed: h.LastError != ""}
-				if owner {
-					snapshot.Indexing.Done, snapshot.Indexing.Total, snapshot.Indexing.ETASeconds = h.Embedded+h.Skipped, h.Embedded+h.Skipped+h.Backlog, h.ETASeconds
+				snapshot.Indexing = &api.LocalEmbeddingsIndexing{
+					Done: h.Embedded + h.Skipped, Total: h.Embedded + h.Skipped + h.Backlog,
+					ETASeconds: h.ETASeconds, Failed: h.LastError != "",
 				}
 			}
+		}
+		if !localEmbeddingsAdministrator(ctx, cfg.InsecureReadonly, cfg.WebSessions) {
+			redactLocalEmbeddingsStatus(&snapshot)
 		}
 		if snapshot.Rebuild {
 			ctx, err = authorizeHostProjectScope(ctx, nil, nil, true)

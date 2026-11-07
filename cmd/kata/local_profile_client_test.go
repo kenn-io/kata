@@ -77,7 +77,7 @@ instance_uid = %q
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"example"})
 	require.NoError(t, cmd.ExecuteContext(t.Context()))
-	require.Contains(t, stderr.String(), "Set KATA_HOME to "+workHome+" before running kata ui or kata daemon local-embeddings.", "both setup paths must target the searched profile with instructions that work on every platform")
+	require.Contains(t, stderr.String(), "Search by meaning is off. Set KATA_HOME to "+workHome+", then turn it on in Settings (kata ui) or run kata daemon local-embeddings.", "both setup paths must target the searched profile with instructions that work on every platform")
 	require.NotContains(t, stderr.String(), personalHome)
 }
 

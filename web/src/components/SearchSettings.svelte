@@ -1,11 +1,6 @@
 <script lang="ts">
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
-  import {
-    PageHeader,
-    SearchByMeaningRow,
-    SettingsSection,
-    type SearchByMeaningState,
-  } from '@kenn-io/kit-ui'
+  import { PageHeader, SearchByMeaningRow, type SearchByMeaningState } from '@kenn-io/kit-ui'
   import { untrack } from 'svelte'
 
   import { orvalFetch } from '../lib/api/client'
@@ -228,49 +223,47 @@
         </button>
       {/snippet}
     </PageHeader>
-    <SettingsSection title="Search">
-      {#if row}
-        <div class="search-row" class:turning-on={countFree}>
-          <!-- Disables Turn on while its request is in flight. -->
-          <fieldset class="row-actions" disabled={posting}>
-            <SearchByMeaningRow
-              state={row}
-              itemNoun={count === 1 ? 'issue' : 'issues'}
-              labels={countFree
-                ? turningOnLabels
-                : failure
-                  ? failedLabels
-                  : movedLine
-                    ? retryLabels
-                    : labels}
-              {readonly}
-              onturnon={turnOn}
-              onusebuiltin={turnOn}
-            />
-          </fieldset>
-          {#if failure}
-            <p class="settings-note" role="alert">{failure}</p>
-          {/if}
-          {#if indexingFailed}
-            <p class="settings-note" role="alert">
-              Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
-            </p>
-          {/if}
-          {#if movedLine}
-            <p class="settings-note">{movedLine}</p>
-          {/if}
-          {#if switchDownload}
-            <p class="settings-note">{switchDownload}</p>
-          {/if}
-        </div>
-      {:else if loading}
-        <p class="settings-note" role="status">Loading…</p>
-      {:else}
-        <p class="settings-note" role="status">
-          Search by meaning status is unavailable for this daemon.
-        </p>
-      {/if}
-    </SettingsSection>
+    {#if row}
+      <div class="search-row" class:turning-on={countFree}>
+        <!-- Disables Turn on while its request is in flight. -->
+        <fieldset class="row-actions" disabled={posting}>
+          <SearchByMeaningRow
+            state={row}
+            itemNoun={count === 1 ? 'issue' : 'issues'}
+            labels={countFree
+              ? turningOnLabels
+              : failure
+                ? failedLabels
+                : movedLine
+                  ? retryLabels
+                  : labels}
+            {readonly}
+            onturnon={turnOn}
+            onusebuiltin={turnOn}
+          />
+        </fieldset>
+        {#if failure}
+          <p class="settings-note" role="alert">{failure}</p>
+        {/if}
+        {#if indexingFailed}
+          <p class="settings-note" role="alert">
+            Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
+          </p>
+        {/if}
+        {#if movedLine}
+          <p class="settings-note">{movedLine}</p>
+        {/if}
+        {#if switchDownload}
+          <p class="settings-note">{switchDownload}</p>
+        {/if}
+      </div>
+    {:else if loading}
+      <p class="settings-note" role="status">Loading…</p>
+    {:else}
+      <p class="settings-note" role="status">
+        Search by meaning status is unavailable for this daemon.
+      </p>
+    {/if}
   </div>
 </section>
 

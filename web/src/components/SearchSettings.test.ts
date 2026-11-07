@@ -54,7 +54,7 @@ describe('SearchSettings', () => {
           Response.json(
             status({
               can_change: false,
-              provider: 'built_in',
+              provider: downloading ? 'ollama' : 'built_in',
               indexing: { done: 0, total: 0, failed: false },
               ...(downloading
                 ? { job: { state: 'downloading', downloaded: 120_000_000, total: 290_000_000 } }
