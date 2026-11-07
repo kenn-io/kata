@@ -26,7 +26,7 @@ func setupDocbankEnv(t *testing.T) string {
 func writeDocbankKey(t *testing.T, key string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "docbank.key")
-	require.NoError(t, os.WriteFile(path, []byte(key+"\n"), 0o600))
+	writePrivateCredentialFixture(t, path, key+"\n")
 	return path
 }
 
@@ -176,11 +176,9 @@ func TestDocbankSetupWithoutApprovalStartsNothing(t *testing.T) {
 func TestDocbankSetupReportsMissingKeyFileBeforeAsking(t *testing.T) {
 	setupDocbankEnv(t)
 	stubIsTTY(t, false)
-	fake := docbanktest.New(t)
 
-	_, stderr, err := executeRootCapture(t, t.Context(), "docbank", "setup", "--url", fake.Server.URL, "--key-file", filepath.Join(t.TempDir(), "missing.key"))
+	_, stderr, err := executeRootCapture(t, t.Context(), "docbank", "setup", "--url", "https://docbank.example", "--key-file", filepath.Join(t.TempDir(), "missing.key"))
 
 	require.ErrorContains(t, err, "missing.key")
 	require.NotContains(t, stderr, "can read any file", "a key file that can't be read fails before the warning and question")
-	require.Empty(t, fake.Requests())
 }

@@ -23,7 +23,7 @@ kata docbank setup [--folder /kata]
 
 Setup prints the shared-vault warning with the vault path and asks once; without a terminal, pass `--yes` to skip the question. A first setup starts Docbank only after that approval. It then checks that the Docbank in `DOCBANK_HOME` (default `~/.docbank`) answers with its API key, starting it with `docbank daemon start` when it is not running, so `docbank` must be on `PATH`. It then adds `[docbank]` with `local = true` and `folder` to `<KATA_HOME>/config.toml`. Setup does not edit Docbank's config or store a key. Setup reads `DOCBANK_HOME` from its own shell while the daemon reads it from its own environment, so they must match; a restart keeps the daemon's environment.
 
-For a Docbank on another host:
+For a Docbank on another host, or a local one whose port and key you already fixed in its config (loopback `http://127.0.0.1:<port>` is allowed):
 
 ```sh
 kata docbank setup --url https://docbank.example --key-file /path/to/docbank-key

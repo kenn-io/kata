@@ -77,8 +77,8 @@ func newDocbankSetupCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("read %s: %w", path, err)
 			}
-			set := have != config.DocbankConfig{}
-			if set {
+			hasSection := have != config.DocbankConfig{}
+			if hasSection {
 				if have, err = config.NormalizeDocbankConfig(have); err != nil || have != want {
 					return fmt.Errorf("%s already has a different [docbank] section; edit or remove it, then rerun", path)
 				}
@@ -93,7 +93,7 @@ func newDocbankSetupCmd() *cobra.Command {
 			} else if key, err = want.ResolveKey(); err != nil {
 				return err
 			}
-			changed := !set
+			changed := !hasSection
 			if changed {
 				warning := "Every issue reader and metadata writer served by this daemon can read any file in the Docbank vault at " + vault
 				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), warning); err != nil {
