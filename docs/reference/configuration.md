@@ -57,13 +57,25 @@ closes do not infer a session from the daemon's environment.
 Kata always checks `CLAUDE_CODE_SESSION_ID` for `claude`, then
 `CODEX_THREAD_ID` and `CODEX_SESSION_ID` for `codex`, in that fixed order.
 The `session_id_env` table maps each additional agent name to one session
-variable:
+variable. pi passes its session ID to shell commands as `PI_SESSION_ID`:
 
 ```toml
 [close.transcript.session_id_env]
 pi = "PI_SESSION_ID"
-omp = "OMP_SESSION_ID"
 ```
+
+oh-my-pi passes its session ID in the same `PI_SESSION_ID` variable, so map
+that variable to `omp` when you close issues from oh-my-pi:
+
+```toml
+[close.transcript.session_id_env]
+omp = "PI_SESSION_ID"
+```
+
+One configuration can't map the variable to both agents: Kata would treat
+every pi or oh-my-pi session as ambiguous and skip attachment. If you use
+both, set `KATA_TRANSCRIPT_AGENT` and `KATA_TRANSCRIPT_SESSION_ID` as shown
+below.
 
 The agent name must match the ID prefix AgentsView uses for the agent's sessions, such as `pi` or `omp`,
 for the link to open. Names must match `^[a-z0-9][a-z0-9-]*$` and contain
