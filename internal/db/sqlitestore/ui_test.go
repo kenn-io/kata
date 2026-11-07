@@ -15,6 +15,13 @@ import (
 	"go.kenn.io/kata/internal/db/dbtest"
 )
 
+func TestUISnapshotGraphReachContract(t *testing.T) {
+	t.Parallel()
+	dbtest.RunUISnapshotGraphReachContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotMutationCursorContract(t *testing.T) {
 	t.Parallel()
 	dbtest.RunUISnapshotMutationCursorContract(t, func(t *testing.T) db.Storage {
@@ -130,50 +137,6 @@ func TestUISnapshotReadsCollectionLinkDetailsInOneBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, snapshot.CollectionLinks, 3)
 	require.Equal(t, 1, detailReads)
-}
-
-func TestReadUIGraphLinksLargeIssueSet(t *testing.T) {
-	store := openUIStore(t)
-	project := createUIProject(t, store, "example-project")
-	_, err := store.ExecContext(t.Context(), `
-		WITH RECURSIVE filler(n) AS (
-			SELECT 1 UNION ALL SELECT n + 1 FROM filler WHERE n < 16386
-		)
-		INSERT INTO issues (uid, project_id, short_id, title, author)
-		SELECT printf('%026d', n), ?, printf('%08d', n), 'Filler issue', 'user-a'
-		FROM filler`, project.ID)
-	require.NoError(t, err)
-	wantIDs := []int64{}
-	for index, endpoints := range [][2]int64{{2, 1}, {1, 3}, {1, 16386}, {16386, 1}, {16386, 16385}} {
-		link, err := store.CreateLink(t.Context(), db.CreateLinkParams{
-			FromIssueID: endpoints[0], ToIssueID: endpoints[1], Type: "blocks", Author: "user-a",
-		})
-		require.NoError(t, err)
-		if index < 2 {
-			wantIDs = append(wantIDs, link.ID)
-		}
-	}
-	// Keep links with one or both endpoints outside the visible snapshot.
-	for _, id := range []int64{16385, 16386} {
-		_, _, _, err := store.SoftDeleteIssue(t.Context(), id, "user-a")
-		require.NoError(t, err)
-	}
-	// Leave ample headroom for slow runners, while catching quadratic ID-pair probes.
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{
-		View: "all-open", IncludeGraph: true,
-	})
-	require.NoError(t, err)
-	require.Len(t, snapshot.Issues, 16384)
-	require.Len(t, snapshot.GraphIssues, 16384)
-	for _, links := range [][]db.UILink{snapshot.CollectionLinks, snapshot.GraphLinks} {
-		gotIDs := make([]int64, 0, len(links))
-		for _, link := range links {
-			gotIDs = append(gotIDs, link.ID)
-		}
-		require.Equal(t, wantIDs, gotIDs)
-	}
 }
 
 func TestUISnapshotReadyAssignmentExpiryContract(t *testing.T) {
@@ -371,14 +334,70 @@ func TestReadUIReferences(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	references, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Query: "example", Limit: 20})
+	statsReads := 0
+	store.uiProjectStatsRead = func() { statsReads++ }
+	references, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Limit: 20})
 	require.NoError(t, err)
+	assert.Zero(t, statsReads)
 	require.Len(t, references.Projects, 2)
 	require.Len(t, references.Issues, 1)
 	assert.Equal(t, "example-project#"+issue.ShortID, references.Issues[0].QualifiedID)
 	assert.Equal(t, []string{"user-a"}, references.Owners)
 	assert.Equal(t, []string{"ready"}, references.Labels)
 	assert.Greater(t, references.Cursor, int64(0))
+
+	references, err = store.ReadUIReferences(ctx, db.UIReferencesQuery{Query: "example", Limit: 20})
+	require.NoError(t, err)
+	assert.Zero(t, statsReads)
+	assert.Equal(t, []db.Project{}, references.Projects)
+	assert.Equal(t, []string{}, references.Owners)
+	assert.Equal(t, []string{}, references.Labels)
+	require.Len(t, references.Issues, 1)
+	assert.Equal(t, issue.UID, references.Issues[0].UID)
+	assert.Greater(t, references.Cursor, int64(0))
+}
+
+func TestReadUIReferencesVisibleRepresentatives(t *testing.T) {
+	ctx := t.Context()
+	store := openUIStore(t)
+	visible := createUIProject(t, store, "example-project")
+	deleted := createUIProject(t, store, "deleted-project")
+	var system db.Project
+	require.NoError(t, store.QueryRowContext(ctx, `SELECT id,uid FROM projects WHERE name=?`, db.SystemProjectName).Scan(&system.ID, &system.UID))
+	// Hidden rows sort between visible choices to exercise recursive-step filters.
+	for _, row := range []struct {
+		id, project  int64
+		owner, label string
+		deleted      bool
+	}{
+		{90, visible.ID, "beta", "beta", false},
+		{80, visible.ID, "alpha", "alpha", false},
+		{10, visible.ID, "alpha", "alpha", false},
+		{20, visible.ID, "beta", "beta", false},
+		{30, visible.ID, "gamma", "gamma", false},
+		{1, visible.ID, "b-deleted", "b-deleted", true},
+		{2, deleted.ID, "b-hidden", "b-hidden", false},
+		{3, system.ID, "b-system", "b-system", false},
+		{4, visible.ID, "", "gamma", false},
+	} {
+		_, err := store.ExecContext(ctx, `INSERT INTO issues(id,uid,project_id,short_id,title,author,owner,deleted_at)
+ VALUES(?,?,?,?, 'ordinary task','tester',?, CASE WHEN ? THEN CURRENT_TIMESTAMP END)`, row.id, fmt.Sprintf("%026d", row.id), row.project, fmt.Sprintf("%08d", row.id), row.owner, row.deleted)
+		require.NoError(t, err)
+		_, err = store.ExecContext(ctx, `INSERT INTO issue_labels(issue_id,label,author) VALUES(?,?,'tester')`, row.id, row.label)
+		require.NoError(t, err)
+	}
+	_, err := store.ExecContext(ctx, `UPDATE projects SET deleted_at=CURRENT_TIMESTAMP WHERE id=?`, deleted.ID)
+	require.NoError(t, err)
+	for _, limit := range []int{2, 20} {
+		query := db.UIReferencesQuery{Limit: limit}
+		unrestricted, err := store.ReadUIReferences(ctx, query)
+		require.NoError(t, err)
+		restricted, err := store.ReadUIReferences(db.WithAuthorizedProjects(ctx, []string{visible.UID, deleted.UID, system.UID}), query)
+		require.NoError(t, err)
+		require.Equal(t, restricted, unrestricted)
+		require.Equal(t, []string{"alpha", "beta", "gamma"}[:min(limit, 3)], unrestricted.Owners)
+		require.Equal(t, unrestricted.Owners, unrestricted.Labels)
+	}
 }
 
 func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {

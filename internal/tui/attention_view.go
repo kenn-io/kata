@@ -323,30 +323,34 @@ func (m Model) handleAttentionLoaded(msg attentionLoadedMsg) (Model, tea.Cmd) {
 	if msg.err != nil {
 		return m, nil
 	}
-	var previous attentionRequest
-	if len(m.attention.rows) > 0 {
-		previous = m.attention.rows[m.attention.cursor]
-	}
-	m.attention.rows = msg.rows
 	m.attention.skipped = msg.skipped
-	m.attention.cursor = min(m.attention.cursor, max(len(msg.rows)-1, 0))
-	for i, row := range msg.rows {
-		if row.issue.UID == m.attention.selectedUID {
-			m.attention.cursor = i
+	m.attention.setRows(msg.rows)
+	return m, nil
+}
+
+func (a *attentionState) setRows(rows []attentionRequest) {
+	var previous attentionRequest
+	if len(a.rows) > 0 {
+		previous = a.rows[a.cursor]
+	}
+	a.rows = rows
+	a.cursor = min(a.cursor, max(len(rows)-1, 0))
+	for i, row := range rows {
+		if row.issue.UID == a.selectedUID {
+			a.cursor = i
 			break
 		}
 	}
-	m.attention.selectedUID = ""
-	if len(msg.rows) > 0 {
-		selected := msg.rows[m.attention.cursor]
-		m.attention.selectedUID = selected.issue.UID
+	a.selectedUID = ""
+	if len(rows) > 0 {
+		selected := rows[a.cursor]
+		a.selectedUID = selected.issue.UID
 		if selected.issue.UID != previous.issue.UID || selected.message != previous.message || string(selected.raw) != string(previous.raw) {
-			m.attention.messageScroll = 0
+			a.messageScroll = 0
 		}
 	} else {
-		m.attention.messageScroll = 0
+		a.messageScroll = 0
 	}
-	return m, nil
 }
 
 func (m Model) openAttentionIssue() (Model, tea.Cmd) {

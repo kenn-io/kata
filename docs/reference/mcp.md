@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-04
+last_edited: 2026-11-06
 ---
 
 # Model Context Protocol server
@@ -48,7 +48,8 @@ without an external request. Whether it appears depends on the client.
 The standalone HTTP listener and the daemon's enabled MCP mount also serve
 the same PNG at `/icon.png` and `/favicon.ico`. These public image routes
 accept GET and HEAD without a bearer token. Listener Host validation still
-applies, and `/mcp` still requires its configured MCP bearer.
+applies, and `/mcp` still requires its configured MCP bearer or, for an
+identity-mode daemon mount on unreleased `main`, the caller's identity token.
 
 ### Discover running HTTP listeners
 
@@ -120,11 +121,38 @@ Choose the mount's scope with `[mcp] projects` or `all_projects = true`; daemon 
 An allowlist limits tools to those projects and rejects project administration operations, including purge. With `all_projects = true`, the mount includes future projects and permits project administration.
 Treat an all-project MCP bearer as equivalent to the daemon's `[auth]` token, or to owner-local access when the daemon has no token.
 The mount never exposes token administration; use `kata mcp serve --all --enable-token-admin` with an identity-mode token.
-The mount uses the actor chosen at startup and has no `/healthz` probe or `kata mcp status` record; `kata daemon status` reports it as `serving` or `unavailable`.
+Outside identity mode, the mount uses the actor chosen at startup.
+The mount has no `/healthz` probe or `kata mcp status` record; `kata daemon status` reports it as `serving` or `unavailable`.
 The daemon's `/api/v1/ping` endpoint works as a container health probe.
 When `actor` is unset, it defaults to `KATA_AUTHOR`, `USER`, or Git `user.name`, then `anonymous`.
 With a TCP daemon `listen`, a gateway using a container hostname needs that authority in `[web].allowed_hosts`.
 With a Unix-socket daemon and `[web] listen`, the gateway's Host must match the web listener's bound address or `public_origin`.
+
+### Daemon mount with identity tokens (unreleased)
+
+On unreleased `main`, a daemon with `[auth] require_token_identity = true`
+accepts each caller's database identity token at `/mcp`. Create the token with
+[`kata tokens create`](../operations/remote-daemon.md#identity-tokens) and
+configure the MCP client to send it as `Authorization: Bearer <token>` on every
+request. The daemon uses that same credential for REST reads and writes, and
+uses the token's stored actor for the session. Project scope, token grants,
+expiration, revocation, and REST authorization still apply.
+
+```toml
+[mcp]
+enabled = true
+projects = ["example-project"] # or all_projects = true
+```
+
+Remove `[mcp] token_file` and `token_env` in identity mode; startup rejects
+either setting. `[mcp] actor` and `KATA_MCP_ACTOR` have no effect in this mode.
+Missing, invalid, expired, revoked, and bootstrap tokens receive HTTP 401.
+Each session is bound to the exact token that initialized it. To switch tokens,
+initialize a new session, even when both tokens name the same actor. Token
+administration remains available only through the explicitly enabled sidecar
+tools. Kata 0.21.0 requires the sidecar in identity mode.
+
+### Separate HTTP process
 
 You can also run a separate MCP process alongside the hub using [Client configuration](#client-configuration).
 Route `/mcp` to this listener through the HTTPS proxy and give the gateway its separate MCP bearer:
@@ -232,6 +260,10 @@ Endpoint identities and backlinks remain within the server's fixed startup
 project UID scope, including after project moves or renames. See the
 [CLI reference](cli.md#issue-lifecycle) for selector behavior, reply validation,
 and handle syntax.
+
+An empty first page of a lexical multi-word `kata.search` includes
+`hints: [{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}]`,
+including when status or label filters are set.
 
 `kata.search` accepts optional `status: "open"` or `status: "closed"`; omit
 it to search both statuses. It combines with labels and the selected search
@@ -432,7 +464,8 @@ preserved. Typed definitions and opaque option objects retain exact JSON numbers
 
 `kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
 and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`
-filters history. `kata.cron_run_observe` requires a caller-retained run UID,
+filters history. See [Run list page size](cron.md#run-list-page-size) for
+the HTTP, CLI and TUI defaults. `kata.cron_run_observe` requires a caller-retained run UID,
 `expected_revision` (`0` for new evidence), a job or workflow reference with its
 definition event UID, status, and a versioned summary. Identical retries return
 `replayed: true`; distinct run UIDs for one scheduled occurrence remain separate

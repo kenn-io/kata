@@ -2,10 +2,10 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
 )
 
 func TestFederationMoveHistoryFillsPageAcrossCoveredHistory(t *testing.T) {
@@ -102,105 +102,106 @@ func TestFederationMoveHistoryUsesLaterCoveringBaseline(t *testing.T) {
 
 func TestFederationMoveHistorySupersedesSnapshotlessMovesAtBaseline(t *testing.T) {
 	ctx := t.Context()
-	hegel.Test(t, func(ht *hegel.T) {
-		interveningUpdates := hegel.Draw(ht, hegel.Integers(0, 8))
-		pool := sql.OpenDB(referenceConnector{&referenceWork{}})
-		pool.SetMaxOpenConns(1)
-		defer func() {
-			if err := pool.Close(); err != nil {
-				ht.Fatalf("close history database: %v", err)
-			}
-		}()
-		for _, query := range []string{
-			`CREATE TABLE events(id INTEGER PRIMARY KEY,issue_uid TEXT,type TEXT,payload TEXT)`,
-			`CREATE INDEX idx_events_issue_uid ON events(issue_uid) WHERE issue_uid IS NOT NULL`,
-			`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,deleted_at TEXT)`,
-			`CREATE TABLE federation_bindings(project_id INTEGER,role TEXT,enabled INTEGER)`,
-			`INSERT INTO projects VALUES
+	for interveningUpdates := range 9 {
+		t.Run(fmt.Sprint(interveningUpdates), func(t *testing.T) {
+			pool := sql.OpenDB(referenceConnector{&referenceWork{}})
+			pool.SetMaxOpenConns(1)
+			defer func() {
+				if err := pool.Close(); err != nil {
+					t.Fatalf("close history database: %v", err)
+				}
+			}()
+			for _, query := range []string{
+				`CREATE TABLE events(id INTEGER PRIMARY KEY,issue_uid TEXT,type TEXT,payload TEXT)`,
+				`CREATE INDEX idx_events_issue_uid ON events(issue_uid) WHERE issue_uid IS NOT NULL`,
+				`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,deleted_at TEXT)`,
+				`CREATE TABLE federation_bindings(project_id INTEGER,role TEXT,enabled INTEGER)`,
+				`INSERT INTO projects VALUES
 			 (1,'01M40000000000000000000001',NULL),
 			 (2,'01M40000000000000000000002',NULL)`,
-			`INSERT INTO federation_bindings VALUES(1,'hub',1)`,
-		} {
-			if _, err := pool.ExecContext(ctx, query); err != nil {
-				ht.Fatalf("prepare history database: %v", err)
-			}
-		}
-
-		type moveCase struct {
-			name          string
-			sourceUID     string
-			issueUID      string
-			snapshot      bool
-			wantMoveEvent bool
-		}
-		cases := []moveCase{
-			{name: "local move from active source", sourceUID: "01M40000000000000000000001", issueUID: "01M40000000000000000000011"},
-			{name: "local move from inactive source", sourceUID: "01M40000000000000000000002", issueUID: "01M40000000000000000000012"},
-			{name: "federated move from active source", sourceUID: "01M40000000000000000000001", issueUID: "01M40000000000000000000013", snapshot: true, wantMoveEvent: true},
-			{name: "federated move from inactive source", sourceUID: "01M40000000000000000000002", issueUID: "01M40000000000000000000014", snapshot: true},
-		}
-		var moveIDs []int64
-		id := int64(1)
-		for _, tc := range cases {
-			moveIDs = append(moveIDs, id)
-			payload := `{"from_project_uid":"` + tc.sourceUID + `"`
-			if tc.snapshot {
-				payload += `,"snapshot":{}`
-			}
-			payload += `}`
-			insert := func(eventType, eventPayload string) {
-				if _, err := pool.ExecContext(ctx,
-					`INSERT INTO events VALUES($1,$2,$3,$4)`, id, tc.issueUID, eventType, eventPayload,
-				); err != nil {
-					ht.Fatalf("insert %s event: %v", tc.name, err)
+				`INSERT INTO federation_bindings VALUES(1,'hub',1)`,
+			} {
+				if _, err := pool.ExecContext(ctx, query); err != nil {
+					t.Fatalf("prepare history database: %v", err)
 				}
-				id++
 			}
-			insert("issue.moved", payload)
-			for range interveningUpdates {
+
+			type moveCase struct {
+				name          string
+				sourceUID     string
+				issueUID      string
+				snapshot      bool
+				wantMoveEvent bool
+			}
+			cases := []moveCase{
+				{name: "local move from active source", sourceUID: "01M40000000000000000000001", issueUID: "01M40000000000000000000011"},
+				{name: "local move from inactive source", sourceUID: "01M40000000000000000000002", issueUID: "01M40000000000000000000012"},
+				{name: "federated move from active source", sourceUID: "01M40000000000000000000001", issueUID: "01M40000000000000000000013", snapshot: true, wantMoveEvent: true},
+				{name: "federated move from inactive source", sourceUID: "01M40000000000000000000002", issueUID: "01M40000000000000000000014", snapshot: true},
+			}
+			var moveIDs []int64
+			id := int64(1)
+			for _, tc := range cases {
+				moveIDs = append(moveIDs, id)
+				payload := `{"from_project_uid":"` + tc.sourceUID + `"`
+				if tc.snapshot {
+					payload += `,"snapshot":{}`
+				}
+				payload += `}`
+				insert := func(eventType, eventPayload string) {
+					if _, err := pool.ExecContext(ctx,
+						`INSERT INTO events VALUES($1,$2,$3,$4)`, id, tc.issueUID, eventType, eventPayload,
+					); err != nil {
+						t.Fatalf("insert %s event: %v", tc.name, err)
+					}
+					id++
+				}
+				insert("issue.moved", payload)
+				for range interveningUpdates {
+					insert("issue.updated", `{}`)
+				}
+				insert("issue.snapshot", `{}`)
 				insert("issue.updated", `{}`)
 			}
-			insert("issue.snapshot", `{}`)
-			insert("issue.updated", `{}`)
-		}
 
-		tx, err := pool.BeginTx(ctx, nil)
-		if err != nil {
-			ht.Fatalf("begin history read: %v", err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		readPage := func(afterID int64, limit int) ([]Event, error) {
-			rows, err := tx.QueryContext(ctx,
-				`SELECT id,issue_uid,type,payload FROM events WHERE id>$1 ORDER BY id LIMIT $2`,
-				afterID, limit,
-			)
+			tx, err := pool.BeginTx(ctx, nil)
 			if err != nil {
-				return nil, err
+				t.Fatalf("begin history read: %v", err)
 			}
-			defer func() { _ = rows.Close() }()
-			var events []Event
-			for rows.Next() {
-				var event Event
-				if err := rows.Scan(&event.ID, &event.IssueUID, &event.Type, &event.Payload); err != nil {
+			defer func() { _ = tx.Rollback() }()
+			readPage := func(afterID int64, limit int) ([]Event, error) {
+				rows, err := tx.QueryContext(ctx,
+					`SELECT id,issue_uid,type,payload FROM events WHERE id>$1 ORDER BY id LIMIT $2`,
+					afterID, limit,
+				)
+				if err != nil {
 					return nil, err
 				}
-				events = append(events, event)
+				defer func() { _ = rows.Close() }()
+				var events []Event
+				for rows.Next() {
+					var event Event
+					if err := rows.Scan(&event.ID, &event.IssueUID, &event.Type, &event.Payload); err != nil {
+						return nil, err
+					}
+					events = append(events, event)
+				}
+				return events, rows.Err()
 			}
-			return events, rows.Err()
-		}
-		page, err := ReadFederationMoveHistory(ctx, tx, 0, int(id), readPage)
-		if err != nil {
-			ht.Fatalf("read federation move history: %v", err)
-		}
-		returned := make(map[int64]bool, len(page))
-		for _, event := range page {
-			returned[event.ID] = true
-		}
-		for i, tc := range cases {
-			if returned[moveIDs[i]] != tc.wantMoveEvent {
-				ht.Fatalf("move event %d included=%t, want %t after %d intervening updates (%s)",
-					moveIDs[i], returned[moveIDs[i]], tc.wantMoveEvent, interveningUpdates, tc.name)
+			page, err := ReadFederationMoveHistory(ctx, tx, 0, int(id), readPage)
+			if err != nil {
+				t.Fatalf("read federation move history: %v", err)
 			}
-		}
-	}, hegel.WithTestCases(32))
+			returned := make(map[int64]bool, len(page))
+			for _, event := range page {
+				returned[event.ID] = true
+			}
+			for i, tc := range cases {
+				if returned[moveIDs[i]] != tc.wantMoveEvent {
+					t.Fatalf("move event %d included=%t, want %t after %d intervening updates (%s)",
+						moveIDs[i], returned[moveIDs[i]], tc.wantMoveEvent, interveningUpdates, tc.name)
+				}
+			}
+		})
+	}
 }

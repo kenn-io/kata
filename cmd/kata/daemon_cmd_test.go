@@ -212,8 +212,10 @@ func TestDaemonLocate_JSONReportsLocalUnixConfigAddress(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "1")
-	socketDir := filepath.Join(t.TempDir(), "socket dir")
-	require.NoError(t, os.Mkdir(socketDir, 0o700))
+	// Keep the socket path below the platform limit while retaining a space.
+	socketDir, err := os.MkdirTemp("", "socket dir-")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
 	socketPath := filepath.Join(socketDir, "kata.sock")
 	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socketPath)
 	require.NoError(t, err)
@@ -2824,6 +2826,12 @@ func (f *daemonGitHubSyncFetcher) Comments(_ context.Context, _ githubsync.Bindi
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]githubsync.Comment(nil), f.comments[issueNumber]...), nil
+}
+
+func (f *daemonGitHubSyncFetcher) RepositoryComments(_ context.Context, _ githubsync.Binding, _ *time.Time) (map[int][]githubsync.Comment, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.comments, true, nil
 }
 
 func (f *daemonGitHubSyncFetcher) ParentData(_ context.Context, _ githubsync.Binding, _ githubsync.ParentRequest) (githubsync.ParentData, error) {

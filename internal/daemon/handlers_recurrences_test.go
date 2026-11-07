@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -15,7 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
@@ -529,14 +530,15 @@ func assertLocalTimezoneError(t require.TestingT, status int, raw []byte) {
 
 // Generate valid schedules and nonblank Unicode titles. The date/interval
 // subset keeps recurrence evaluation cheap; text is capped at materialization.
-func drawRecurrenceFields(ht *hegel.T) (rule, date, title string) {
-	date = hegel.Draw(ht, hegel.Dates().
-		Min(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)).
-		Max(time.Date(2100, 12, 31, 0, 0, 0, 0, time.UTC))).Format("2006-01-02")
-	frequency := hegel.Draw(ht, hegel.SampledFrom([]string{"DAILY", "WEEKLY", "MONTHLY", "YEARLY"}))
-	interval := hegel.Draw(ht, hegel.Integers(1, 30))
+func drawRecurrenceFields(t *rapid.T) (rule, date, title string) {
+	first := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	last := time.Date(2100, 12, 31, 0, 0, 0, 0, time.UTC)
+	days := int(last.Sub(first) / (24 * time.Hour))
+	date = first.AddDate(0, 0, rapid.IntRange(0, days).Draw(t, "start date offset")).Format("2006-01-02")
+	frequency := rapid.SampledFrom([]string{"DAILY", "WEEKLY", "MONTHLY", "YEARLY"}).Draw(t, "frequency")
+	interval := rapid.IntRange(1, 30).Draw(t, "interval")
 	rule = fmt.Sprintf("FREQ=%s;INTERVAL=%d", frequency, interval)
-	text := []rune(hegel.Draw(ht, hegel.Text()))
+	text := []rune(rapid.String().Draw(t, "title"))
 	if len(text) > 128 {
 		text = text[:128]
 	}
@@ -544,10 +546,14 @@ func drawRecurrenceFields(ht *hegel.T) (rule, date, title string) {
 }
 
 func TestPatchRecurrenceLocalCompatibilityProperty(t *testing.T) {
+	// Rapid configures case counts per process; keep this test's existing budget.
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "24"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "example-project")
-	hegel.Test(t, func(ht *hegel.T) {
-		rule, date, title := drawRecurrenceFields(ht)
+	rapid.Check(t, func(rt *rapid.T) {
+		rule, date, title := drawRecurrenceFields(rt)
 		for _, echo := range []bool{false, true} {
 			rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "1999-01-01", "Local", "Old title")
 			body := map[string]any{"actor": "tester", "rrule": rule, "dtstart": date, "template": map[string]any{"title": title}}
@@ -555,51 +561,54 @@ func TestPatchRecurrenceLocalCompatibilityProperty(t *testing.T) {
 				body["timezone"] = "Local"
 			}
 			raw, err := json.Marshal(body)
-			require.NoError(ht, err)
+			require.NoError(rt, err)
 			url := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID)
 			resp := doPatch(t, env, url, string(raw), `"rev-1"`)
-			require.Equal(ht, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
-			require.Equal(ht, `"rev-2"`, resp.Header.Get("ETag"))
+			require.Equal(rt, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
+			require.Equal(rt, `"rev-2"`, resp.Header.Get("ETag"))
 			// Read via HTTP too: historical values remain visible unchanged.
 			resp = doGet(t, env, url)
 			var out struct {
 				Recurrence db.Recurrence `json:"recurrence"`
 			}
-			require.Equal(ht, http.StatusOK, resp.StatusCode)
-			require.NoError(ht, json.Unmarshal(readClose(t, resp), &out))
-			require.Equal(ht, "Local", out.Recurrence.Timezone)
-			require.Equal(ht, rule, out.Recurrence.RRule)
-			require.Equal(ht, date, out.Recurrence.DTStart)
-			require.Equal(ht, title, out.Recurrence.TemplateTitle)
-			require.Equal(ht, int64(2), out.Recurrence.Revision)
-			require.Equal(ht, &date, out.Recurrence.NextOccurrenceKey)
+			require.Equal(rt, http.StatusOK, resp.StatusCode)
+			require.NoError(rt, json.Unmarshal(readClose(t, resp), &out))
+			require.Equal(rt, "Local", out.Recurrence.Timezone)
+			require.Equal(rt, rule, out.Recurrence.RRule)
+			require.Equal(rt, date, out.Recurrence.DTStart)
+			require.Equal(rt, title, out.Recurrence.TemplateTitle)
+			require.Equal(rt, int64(2), out.Recurrence.Revision)
+			require.Equal(rt, &date, out.Recurrence.NextOccurrenceKey)
 		}
-	}, hegel.WithTestCases(24), hegel.WithDatabase(t.TempDir()))
+	})
 }
 
 func TestPostRecurrenceAcceptedTimezoneProperty(t *testing.T) {
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "24"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "example-project")
-	hegel.Test(t, func(ht *hegel.T) {
-		rule, date, title := drawRecurrenceFields(ht)
+	rapid.Check(t, func(rt *rapid.T) {
+		rule, date, title := drawRecurrenceFields(rt)
 		// Enumerate the supported value classes; generate their schedules.
 		for _, zone := range []string{"UTC", "America/New_York", "Europe/London", "Asia/Kathmandu", "US/Eastern", "Etc/GMT+5", ""} {
 			body, err := json.Marshal(map[string]any{"actor": "tester", "rrule": rule, "dtstart": date, "timezone": zone, "template": map[string]any{"title": title}})
-			require.NoError(ht, err)
+			require.NoError(rt, err)
 			resp := doPost(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, p.ID), string(body))
 			var out struct {
 				Recurrence db.Recurrence `json:"recurrence"`
 			}
 			raw := readClose(t, resp)
-			require.Equal(ht, http.StatusCreated, resp.StatusCode, string(raw))
-			require.NoError(ht, json.Unmarshal(raw, &out))
-			require.Equal(ht, zone, out.Recurrence.Timezone)
-			require.Equal(ht, rule, out.Recurrence.RRule)
-			require.Equal(ht, date, out.Recurrence.DTStart)
-			require.Equal(ht, title, out.Recurrence.TemplateTitle)
-			require.Equal(ht, &date, out.Recurrence.NextOccurrenceKey)
+			require.Equal(rt, http.StatusCreated, resp.StatusCode, string(raw))
+			require.NoError(rt, json.Unmarshal(raw, &out))
+			require.Equal(rt, zone, out.Recurrence.Timezone)
+			require.Equal(rt, rule, out.Recurrence.RRule)
+			require.Equal(rt, date, out.Recurrence.DTStart)
+			require.Equal(rt, title, out.Recurrence.TemplateTitle)
+			require.Equal(rt, &date, out.Recurrence.NextOccurrenceKey)
 		}
-	}, hegel.WithTestCases(24), hegel.WithDatabase(t.TempDir()))
+	})
 }
 
 func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
@@ -639,36 +648,39 @@ func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
 }
 
 func TestPatchRecurrenceLocalSwitchAwayAndBackProperty(t *testing.T) {
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "24"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "example-project")
-	hegel.Test(t, func(ht *hegel.T) {
-		rule, date, title := drawRecurrenceFields(ht)
+	rapid.Check(t, func(rt *rapid.T) {
+		rule, date, title := drawRecurrenceFields(rt)
 		for _, zone := range []string{"UTC", "America/New_York", "Europe/London", "Asia/Kathmandu", "US/Eastern", "Etc/GMT+5", ""} {
 			rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "1999-01-01", "Local", "Old title")
 			body, err := json.Marshal(map[string]any{"actor": "tester", "rrule": rule, "dtstart": date, "timezone": zone, "template": map[string]any{"title": title}})
-			require.NoError(ht, err)
+			require.NoError(rt, err)
 			resp := doPatch(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID), string(body), `"rev-1"`)
 			var out struct {
 				Recurrence db.Recurrence `json:"recurrence"`
 			}
 			raw := readClose(t, resp)
-			require.Equal(ht, http.StatusOK, resp.StatusCode, string(raw))
-			require.NoError(ht, json.Unmarshal(raw, &out))
-			require.Equal(ht, zone, out.Recurrence.Timezone)
-			require.Equal(ht, rule, out.Recurrence.RRule)
-			require.Equal(ht, date, out.Recurrence.DTStart)
-			require.Equal(ht, title, out.Recurrence.TemplateTitle)
-			require.Equal(ht, &date, out.Recurrence.NextOccurrenceKey)
-			before := recurrenceWriteCursor(ht, env)
+			require.Equal(rt, http.StatusOK, resp.StatusCode, string(raw))
+			require.NoError(rt, json.Unmarshal(raw, &out))
+			require.Equal(rt, zone, out.Recurrence.Timezone)
+			require.Equal(rt, rule, out.Recurrence.RRule)
+			require.Equal(rt, date, out.Recurrence.DTStart)
+			require.Equal(rt, title, out.Recurrence.TemplateTitle)
+			require.Equal(rt, &date, out.Recurrence.NextOccurrenceKey)
+			before := recurrenceWriteCursor(rt, env)
 			resp = doPatch(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID),
 				`{"actor":"tester","timezone":"Local"}`, fmt.Sprintf(`"rev-%d"`, out.Recurrence.Revision))
-			assertLocalTimezoneError(ht, resp.StatusCode, readClose(t, resp))
+			assertLocalTimezoneError(rt, resp.StatusCode, readClose(t, resp))
 			after, err := env.DB.GetRecurrenceByUID(t.Context(), rec.UID)
-			require.NoError(ht, err)
-			require.Equal(ht, out.Recurrence, after)
-			require.Equal(ht, before, recurrenceWriteCursor(ht, env))
+			require.NoError(rt, err)
+			require.Equal(rt, out.Recurrence, after)
+			require.Equal(rt, before, recurrenceWriteCursor(rt, env))
 		}
-	}, hegel.WithTestCases(24), hegel.WithDatabase(t.TempDir()))
+	})
 }
 
 func TestPostRecurrenceRejectsLocalBeforeClaimRefresh(t *testing.T) {

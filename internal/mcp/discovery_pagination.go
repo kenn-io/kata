@@ -8,21 +8,14 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/pkg/client/generated"
-	"golang.org/x/mod/semver"
 )
 
-// Recheck each call: a long-lived MCP client can outlive a daemon replacement.
-// A cached version could let an older daemon silently ignore new query fields.
 func (h toolHandlers) requireDiscoveryAPI(ctx context.Context) error {
-	health, err := h.options.Client.Health(ctx)
+	supported, err := h.daemonSupportsAPIVersion(ctx, "0.27.0")
 	if err != nil {
 		return err
 	}
-	version := ""
-	if health.APISchemaVersion != nil {
-		version = strings.TrimSpace(*health.APISchemaVersion)
-	}
-	if !semver.IsValid("v"+version) || semver.Compare("v"+version, "v0.27.0") < 0 {
+	if !supported {
 		return errors.New("paginated discovery requires daemon API 0.27.0 or newer")
 	}
 	return nil

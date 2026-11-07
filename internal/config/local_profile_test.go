@@ -264,6 +264,27 @@ func TestLocalProfileEnvironmentPassesThroughTelemetrySettings(t *testing.T) {
 	}
 }
 
+func TestLocalProfileEnvironmentPassesThroughHTTPTimeout(t *testing.T) {
+	for _, timeout := range []string{"15m", "", "invalid"} {
+		t.Run(timeout, func(t *testing.T) {
+			t.Setenv("KATA_HTTP_TIMEOUT", timeout)
+			env, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir()}, true)
+			require.NoError(t, err)
+			require.Contains(t, env, "KATA_HTTP_TIMEOUT="+timeout)
+			require.Equal(t, timeout, os.Getenv("KATA_HTTP_TIMEOUT"))
+		})
+	}
+	t.Run("unset", func(t *testing.T) {
+		t.Setenv("KATA_HTTP_TIMEOUT", "")
+		require.NoError(t, os.Unsetenv("KATA_HTTP_TIMEOUT"))
+		env, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir()}, true)
+		require.NoError(t, err)
+		for _, entry := range env {
+			require.False(t, strings.HasPrefix(entry, "KATA_HTTP_TIMEOUT="))
+		}
+	})
+}
+
 func TestLocalProfileEnvironmentIncludesDefaultGitHubTokenEnv(t *testing.T) {
 	t.Setenv("KATA_GITHUB_TOKEN", "profile-github-token")
 	profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{}}

@@ -8441,6 +8441,7 @@ func (c *Client) ReadyIssues(ctx context.Context, options *ReadyIssuesRequestOpt
 	queryEncoding := map[string]runtime.QueryEncoding{
 		"limit":   {Style: "form", Explode: &[]bool{false}[0]},
 		"owner":   {Style: "form", Explode: &[]bool{false}[0]},
+		"sort":    {Style: "form", Explode: &[]bool{false}[0]},
 		"unowned": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
@@ -8952,6 +8953,7 @@ func (c *Client) ReadyIssuesGlobal(ctx context.Context, options *ReadyIssuesGlob
 	queryEncoding := map[string]runtime.QueryEncoding{
 		"limit":   {Style: "form", Explode: &[]bool{false}[0]},
 		"owner":   {Style: "form", Explode: &[]bool{false}[0]},
+		"sort":    {Style: "form", Explode: &[]bool{false}[0]},
 		"unowned": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{

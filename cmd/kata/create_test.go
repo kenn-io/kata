@@ -419,12 +419,27 @@ func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
 					"fix login crash", "--body", "login crashes on startup", "--force-new")
 				refs = append(refs, "example-project#"+strings.TrimSpace(second))
 			}
-			for _, mode := range []string{"agent", "json"} {
+			for _, mode := range []string{"agent", "json", "human"} {
 				t.Run(mode, func(t *testing.T) {
-					stdout, stderr, err := executeRootCapture(t, ctx, append(args, "--"+mode)...)
+					stdout, stderr, err := executeRootCapture(t, ctx, append(args, "--format", mode)...)
 					cli := requireCLIError(t, err, ExitConflict)
 					assert.Equal(t, code, cli.Code)
 					assert.Empty(t, stdout)
+					if mode == "human" {
+						line, _, _ := strings.Cut(stderr, "\n")
+						assert.True(t, strings.HasPrefix(line, "kata: "), line)
+						if code == "idempotency_mismatch" {
+							assert.NotContains(t, line, "(")
+							assert.NotContains(t, stderr, refs[0])
+							return
+						}
+						assert.Contains(t, line, " (")
+						assert.True(t, strings.HasSuffix(line, ")"), line)
+						for _, ref := range refs {
+							assert.Contains(t, line, ref)
+						}
+						return
+					}
 					if mode == "agent" {
 						assert.True(t, strings.HasPrefix(stderr, "ERR create conflict: "), stderr)
 						lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
@@ -724,6 +739,9 @@ func TestCreateDefaultPriorityRequest(t *testing.T) {
 		{name: "default zero", config: "[create]\ndefault_priority = 0", want: new(int64(0))},
 		{name: "default three", config: "[create]\ndefault_priority = 3", want: new(int64(3))},
 		{name: "explicit zero", config: "[create]\ndefault_priority = 3", args: []string{"--priority", "0"}, want: new(int64(0))},
+		{name: "explicit none", config: "[create]\ndefault_priority = 3", args: []string{"--priority", "none"}},
+		{name: "none without default", args: []string{"--priority", "none"}},
+		{name: "none ignores invalid default", config: "[create]\ndefault_priority = 'invalid'", args: []string{"--priority", "none"}},
 		{name: "ignore invalid default", config: "[create]\ndefault_priority = 'invalid'", args: []string{"--priority", "2"}, want: new(int64(2))},
 	}
 	for _, tc := range cases {

@@ -30,6 +30,7 @@ func applyRootHelp(root *cobra.Command) {
 }
 
 var kataCommandGroups = map[string]string{
+	"cli":                 "find",
 	"search":              "find",
 	"list":                "find",
 	"ready":               "find",
@@ -105,7 +106,9 @@ func kataGlobalFlags(cmd *cobra.Command) string {
 	return strings.Join(names, ", ")
 }
 
-const kataRootHelp = `Kata is an issue tracker for coding agents and the people who direct them.
+const kataRootHelp = `Agents: find the right command with: kata cli search "<what you want to do>"
+
+Kata is an issue tracker for coding agents and the people who direct them.
 Commands talk to a kata daemon (local and auto-started by default;
 KATA_SERVER selects a remote one) and act on the project bound to the
 current directory.
@@ -129,6 +132,7 @@ command-specific details; --json prints the full JSON envelope for scripts.
 Errors go to stderr.
 Exit codes: 0 ok, 1 internal, 2 usage, 3 validation, 4 not found, 5 conflict,
 6 confirmation required, 7 daemon unavailable, 8 wait timeout.
+CLI panics exit 1 as internal errors; daemon and background task panics keep diagnostic traces.
 Environment: KATA_AUTHOR actor; KATA_TEAMMATE teammate attribution;
 KATA_INBOX_USER inbox address (actor or actor/teammate); KATA_SERVER remote
 daemon URL; KATA_HOME local daemon state; KATA_AUTH_TOKEN daemon bearer token.`
