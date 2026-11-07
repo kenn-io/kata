@@ -403,7 +403,7 @@ func TestCronRefreshRestoresIssueSelectionBeforeAcknowledgingRun(t *testing.T) {
 	m.height = 100
 	_, header, _ := cronScreen(m)
 	viewportOverhead := m.height - cronListBudget(m, header, len(cronErrorRows(m)), cronHelpRows(m))
-	m.height = viewportOverhead + 21 // windowBounds keeps seven rows above the cursor
+	m.height = viewportOverhead + 15 // windowBounds keeps five rows above the cursor
 	_, _, before := cronScreen(m)
 	issueRef := cronRef{cronIssue, *r.IssueUID}
 	issueIndex := slices.IndexFunc(before, func(line cronLine) bool { return line.target == issueRef })
