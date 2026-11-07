@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import QuickCapture from './QuickCapture.svelte'
@@ -17,6 +17,21 @@ describe('QuickCapture', () => {
 
     expect(screen.getByRole('button', { name: 'Cancel' }).classList).toContain('kit-button')
     expect(screen.getByRole('button', { name: 'Capture' }).classList).toContain('kit-button')
+  })
+
+  it('focuses the task title when an opening refresh finishes', async () => {
+    const onClose = vi.fn()
+    const view = render(QuickCapture, {
+      props: { open: true, disabled: true, onClose, onSubmit: vi.fn() },
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' })),
+    )
+    await view.rerender({ disabled: false })
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Quick capture' })),
+    )
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('resets a task draft after authentication authority changes', async () => {
