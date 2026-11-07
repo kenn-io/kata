@@ -16,6 +16,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 	"go.kenn.io/kit/clisearch"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -61,13 +62,51 @@ type toolSearchCatalog struct {
 	titles map[string]string
 }
 
+// toolSearchCatalogLoader shares one in-flight build and caches only success,
+// so a transient initialization failure can be retried by a later search.
+type toolSearchCatalogLoader struct {
+	mu      sync.RWMutex
+	catalog *toolSearchCatalog
+	group   singleflight.Group
+	build   func() (*toolSearchCatalog, error)
+}
+
+func (loader *toolSearchCatalogLoader) get() (*toolSearchCatalog, error) {
+	loader.mu.RLock()
+	catalog := loader.catalog
+	loader.mu.RUnlock()
+	if catalog != nil {
+		return catalog, nil
+	}
+	value, err, _ := loader.group.Do("catalog", func() (any, error) {
+		loader.mu.RLock()
+		catalog := loader.catalog
+		loader.mu.RUnlock()
+		if catalog != nil {
+			return catalog, nil
+		}
+		catalog, err := loader.build()
+		if err != nil {
+			return nil, err
+		}
+		loader.mu.Lock()
+		loader.catalog = catalog
+		loader.mu.Unlock()
+		return catalog, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*toolSearchCatalog), nil
+}
+
 func registerToolSearch(server *sdkmcp.Server, options Options) {
 	// A private SDK catalog reuses the actual typed registrations, without
 	// activating public sections or calling any operation. Cancellation of one
 	// search must not poison initialization for later callers.
-	catalog := sync.OnceValues(func() (*toolSearchCatalog, error) {
+	catalog := &toolSearchCatalogLoader{build: func() (*toolSearchCatalog, error) {
 		return newToolSearchCatalog(options)
-	})
+	}}
 	addTool(server, "kata.search_tools", "Find Kata tools", "Find typed MCP tools for a task, with loader, guide and input details. Searches tool metadata only; kata.search searches issues. Available before loading sections.", toolHints(true, false, false),
 		func(_ context.Context, request *sdkmcp.CallToolRequest, input ToolSearchInput) (*sdkmcp.CallToolResult, ToolSearchOutput, error) {
 			// The SDK repairs malformed Unicode while validating its typed
@@ -78,7 +117,7 @@ func registerToolSearch(server *sdkmcp.Server, options Options) {
 			if err := validateToolSearch(input); err != nil {
 				return nil, ToolSearchOutput{}, err
 			}
-			index, err := catalog()
+			index, err := catalog.get()
 			if err != nil {
 				return nil, ToolSearchOutput{}, err
 			}

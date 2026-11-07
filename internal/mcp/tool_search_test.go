@@ -58,6 +58,33 @@ func discoveryOptions(t *testing.T) Options {
 	return Options{Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version"}
 }
 
+// Product contract: a transient failure building the private metadata catalog
+// must not disable task discovery for the rest of the server's lifetime.
+func TestToolSearchCatalogRetriesFailedBuild(t *testing.T) {
+	want := &toolSearchCatalog{tools: map[string]ToolSearchResult{}, titles: map[string]string{}}
+	attempts := 0
+	build := func() (*toolSearchCatalog, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, fmt.Errorf("transient catalog failure")
+		}
+		return want, nil
+	}
+	loader := &toolSearchCatalogLoader{build: build}
+
+	_, err := loader.get()
+	require.EqualError(t, err, "transient catalog failure")
+
+	got, err := loader.get()
+	require.NoError(t, err)
+	require.Same(t, want, got)
+
+	cached, err := loader.get()
+	require.NoError(t, err)
+	require.Same(t, want, cached)
+	require.Equal(t, 2, attempts)
+}
+
 // Product contract: a cold MCP-only client can find real operations without
 // invoking issue APIs or loading every section into its public catalog.
 func TestToolSearchColdStartAndLoadRoutes(t *testing.T) {
