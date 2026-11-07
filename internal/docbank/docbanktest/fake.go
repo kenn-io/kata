@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -82,9 +81,8 @@ func (f *Fake) Publish(t testing.TB, home string) {
 }
 
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/api/ping" && r.Method == "GET" {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.MarshalWrite(w, map[string]any{"ok": true, "service": "docbank", "version": "test", "pid": os.Getpid()})
+	if r.URL.Path == kitdaemon.DefaultPingPath {
+		kitdaemon.NewPingHandler(kitdaemon.PingHandlerOptions{Service: "docbank", Version: "test"}).ServeHTTP(w, r)
 		return
 	}
 	if r.URL.Path == "/api/daemon/key-challenge" && r.Method == "GET" {

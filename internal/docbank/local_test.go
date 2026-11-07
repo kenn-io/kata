@@ -1,18 +1,18 @@
 package docbank_test
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	kitdaemon "go.kenn.io/kit/daemon"
 
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
@@ -104,22 +104,32 @@ func TestLocalClientFollowsSymlinkedHome(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestLocalClientCarriesAttachmentUploadAndContentOverProvenConnection(t *testing.T) {
+func TestLocalClientAbandonsKeyProofWhenRequestEnds(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DOCBANK_HOME", home)
-	docbanktest.New(t).Publish(t, home)
-	client := docbank.NewLocalClient(publishedOnly)
-	payload := bytes.Repeat([]byte("kata attachment "), 64<<10)
-	sum := sha256.Sum256(payload)
+	proofAbandoned := make(chan struct{})
+	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == kitdaemon.DefaultPingPath {
+			kitdaemon.NewPingHandler(kitdaemon.PingHandlerOptions{Service: "docbank", Version: "test"}).ServeHTTP(w, r)
+			return
+		}
+		<-r.Context().Done() // never answers the key challenge
+		close(proofAbandoned)
+	}))
+	t.Cleanup(stalled.Close)
+	rec := kitdaemon.NewRuntimeRecord("docbank", "test", kitdaemon.Endpoint{Network: "tcp", Address: stalled.Listener.Addr().String()})
+	rec.Metadata = map[string]string{"api_key": "test-key"}
+	_, err := (kitdaemon.RuntimeStore{Dir: home}).Write(rec)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
 
-	folder, err := client.EnsureFolder(t.Context(), "/kata/p")
-	require.NoError(t, err)
-	version, err := client.Upload(t.Context(), folder, "shot.bin", bytes.NewReader(payload), int64(len(payload)), hex.EncodeToString(sum[:]))
-	require.NoError(t, err)
-	resp, err := client.Content(t.Context(), version)
-	require.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-	got, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.True(t, bytes.Equal(payload, got), "content read back differs from upload")
+	_, err = docbank.NewLocalClient(publishedOnly).ResolvePath(ctx, "/")
+
+	requireUnreachable(t, err)
+	select {
+	case <-proofAbandoned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the key proof kept its connection open after the request ended")
+	}
 }
