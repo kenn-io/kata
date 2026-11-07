@@ -126,8 +126,8 @@ func (m Model) cronPageLoaded(msg cronPageMsg) Model {
 		}
 	}
 	page.ready = true
-	m = m.cronRememberPage(msg, page.runs).cronMarkOpenSeen().cronNoticePage(msg)
-	return m.cronKeepSelection(previous)
+	m = m.cronRememberPage(msg, page.runs).cronNoticePage(msg).cronKeepSelection(previous)
+	return m.cronMarkOpenSeen()
 }
 
 // A head that shares no loaded row may sit above unloaded runs.

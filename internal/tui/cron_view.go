@@ -248,8 +248,8 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 		}
 	}
 	m = m.cronRemember(append(remembered, retained...))
-	m = m.cronSettleChanged(data).cronMarkOpenSeen().cronNoticeResolve()
-	return m.cronKeepSelection(old)
+	m = m.cronSettleChanged(data).cronNoticeResolve().cronKeepSelection(old)
+	return m.cronMarkOpenSeen()
 }
 
 // Cron counts its project's cron, project and parent events. A loaded running

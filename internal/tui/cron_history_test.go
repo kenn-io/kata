@@ -27,6 +27,22 @@ func (a *cronPagingAPI) ListCronJobRuns(_ context.Context, _ int64, job, before 
 	return slices.Clone(a.page), a.next, a.err
 }
 
+type cronPagingRunRefreshAPI struct {
+	*cronPagingAPI
+	runUID  string
+	readErr error
+}
+
+func (a *cronPagingRunRefreshAPI) readCronRun(ctx context.Context, _ int64, uid string) (generated.CronRun, error) {
+	if err := ctx.Err(); err != nil {
+		return generated.CronRun{}, err
+	}
+	if uid != a.runUID {
+		return generated.CronRun{}, errors.New("wrong run UID")
+	}
+	return generated.CronRun{}, a.readErr
+}
+
 // A cursor-bearing server page is full; rows are newest first.
 func cronHistoryRows(base generated.CronRun, count int) []generated.CronRun {
 	rows := make([]generated.CronRun, count)
@@ -406,12 +422,16 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 		require.Contains(t, cronScreenText(m), "failed")
 	})
 
-	t.Run("inspected page without exact reader", func(t *testing.T) {
+	t.Run("inspected page with failed exact reader", func(t *testing.T) {
 		m := cronFixture(t)
 		j := m.cron.data.jobs[0]
 		old := m.cron.data.runs[0]
 		old.UID, old.Revision = "old-run", 1
-		a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(old, 20)}
+		runReadErr := errors.New("run refresh offline")
+		a := &cronPagingRunRefreshAPI{
+			cronPagingAPI: &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(old, 20)},
+			runUID:        old.UID, readErr: runReadErr,
+		}
 		m.api = a
 		m.cron.jobPage = cronHistoryPage{job: j.UID, runs: a.page, ready: true}
 		m = m.cronRemember(a.page)
@@ -425,7 +445,10 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 				m := m
 				head := old
 				head.UID, head.CreatedAt = "current-head", old.CreatedAt.Add(24*time.Hour)
-				api := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(head, 100)}
+				api := &cronPagingRunRefreshAPI{
+					cronPagingAPI: &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(head, 100)},
+					runUID:        old.UID, readErr: runReadErr,
+				}
 				api.next = api.page[len(api.page)-1].UID
 				if failed {
 					api.err = errors.New("offline")
@@ -434,8 +457,8 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 				data := m.fetchCron()().(cronLoadedMsg)
 				require.NotContains(t, data.runs, old, "the head response excludes the inspected run")
 				require.Equal(t, api.err, data.runsErr)
-				require.EqualError(t, data.runErr[old.UID], "run refresh unavailable")
-				require.Equal(t, old, data.lookup[old.UID], "fetchCron retains the inspected run without an exact reader")
+				require.ErrorIs(t, data.runErr[old.UID], runReadErr)
+				require.Equal(t, old, data.lookup[old.UID], "fetchCron retains the inspected run after an exact-read error")
 				next := m.cronLoaded(data)
 				require.Contains(t, stripANSI(next.viewBody()), old.Status)
 				require.Contains(t, stripANSI(next.viewBody()), "runs / "+old.UID)

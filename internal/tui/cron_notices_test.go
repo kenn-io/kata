@@ -273,7 +273,7 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 		applyColorMode(colorDark, true)
 		m.width, m.height = 120, 26
 		m.view = viewProjects
-		m, _ = updateModel(m, cronNoticeEvent("failure", "job", snapshotFixedNow))
+		m, _ = updateModel(m, cronNoticeEvent("failure", m.cron.data.jobs[0].UID, snapshotFixedNow))
 		m, _ = updateModel(m, cronNoticeTickFor(m))
 		for line := range strings.SplitSeq(m.viewContent(), "\n") {
 			plain := stripANSI(line)

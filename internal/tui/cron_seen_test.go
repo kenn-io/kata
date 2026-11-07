@@ -369,6 +369,63 @@ func TestCronOpenRunStatusBecomesSeenWhenScrolledIntoView(t *testing.T) {
 	require.True(t, m.cronSeen.session[m.cronProjectUID()][r.UID], "scrolling to Status acknowledges the failure")
 }
 
+func TestCronRefreshRestoresIssueSelectionBeforeAcknowledgingRun(t *testing.T) {
+	m := cronSeenFixture(t)
+	r := m.cron.data.runs[0]
+	r.Status = "failed"
+	r.IssueUID = new("issue-example")
+	r.Summary.Message = new(strings.Repeat("failure detail\n", 40))
+	m.cron.data.runs = []generated.CronRun{r}
+	m.cron.data.lookup = map[string]generated.CronRun{r.UID: r}
+	m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{r}, ready: true}
+	m.cron.tab = cronRuns
+	m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
+	m.view = viewCron
+	m.width = 120
+
+	head := r
+	head.UID = "newer-head"
+	head.Status = "succeeded"
+	head.CreatedAt = r.CreatedAt.Add(time.Minute)
+	apiData := *m.cron.data
+	apiData.runs = []generated.CronRun{head}
+	apiData.lastRuns = map[string]generated.CronRun{*head.JobUID: head}
+	api := &cronRunRefreshAPI{
+		cronReadTestAPI: &cronReadTestAPI{data: apiData},
+		run:             r, err: errors.New("run refresh offline"),
+	}
+	m.api = newUndoClient(api)
+	loaded := m.fetchCron()().(cronLoadedMsg)
+	require.ErrorIs(t, loaded.runErr[r.UID], api.err)
+
+	// Choose a height where the stale cursor shows the newly inserted Refresh
+	// row above Status, but restoring the Issue link scrolls Status offscreen.
+	m.height = 100
+	_, header, _ := cronScreen(m)
+	viewportOverhead := m.height - cronListBudget(m, header, len(cronErrorRows(m)), cronHelpRows(m))
+	m.height = viewportOverhead + 21 // windowBounds keeps seven rows above the cursor
+	_, _, before := cronScreen(m)
+	issueRef := cronRef{cronIssue, *r.IssueUID}
+	issueIndex := slices.IndexFunc(before, func(line cronLine) bool { return line.target == issueRef })
+	require.NotEqual(t, -1, issueIndex, "the open run detail has its selected Issue link")
+	m.cron.stack[0].cursor = issueIndex
+
+	staleSelection := m
+	loadedData := cronData(loaded)
+	staleSelection.cron.data = &loadedData
+	require.True(t, staleSelection.cronOpenRunStatusVisible(r.UID, r.Status), "the old cursor temporarily leaves Status visible after Refresh is inserted")
+	restored := staleSelection.cronKeepSelection(m)
+	_, _, restoredLines := cronScreen(restored)
+	require.Equal(t, issueRef, restoredLines[restored.cron.stack[0].cursor].target, "refresh preserves the selected Issue link")
+	require.False(t, restored.cronOpenRunStatusVisible(r.UID, r.Status), "the final viewport scrolls Status offscreen")
+
+	got := m.cronLoaded(loaded)
+	_, _, gotLines := cronScreen(got)
+	require.Equal(t, issueRef, gotLines[got.cron.stack[0].cursor].target)
+	require.False(t, got.cronOpenRunStatusVisible(r.UID, r.Status))
+	require.False(t, got.cronSeen.session[m.cronProjectUID()][r.UID], "an offscreen Status stays unseen after selection restoration")
+}
+
 func TestCronSeenUpdateSchedulesPersistence(t *testing.T) {
 	m := cronSeenFixture(t)
 	r := m.cron.data.runs[0]
