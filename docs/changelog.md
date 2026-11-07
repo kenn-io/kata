@@ -20,6 +20,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   version stamp commit together; interrupted upgrades retry on the next start.
 - Create your first project from the web UI's empty task list. **New task**
   makes that project Inbox and opens task capture when no projects exist.
+- Keep pulling from a federation hub after its event history passes one million
+  events. Spokes no longer stall with `after_id: invalid integer`, and other large
+  integer query values such as `kata events --after` cursors go out as plain
+  numbers.
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the
