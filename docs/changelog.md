@@ -114,6 +114,22 @@ All notable changes to kata, grouped by release. Versioned releases start with
   duplicate retries, missing peers, and cleanup keep their existing behavior.
   See [quarantine recovery](operations/federation.md#quarantine) before skipping
   a refused batch.
+- Spot failing, overdue and missed cron jobs in `kata tui`, with exact last-run
+  evidence, a project health roll-up, and a reason in each job's detail.
+  Page through each job's run history or load older project observations.
+  Native delivery health comes from parent progress; missed is a local display
+  heuristic. See [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Filter loaded cron jobs and runs with field tokens such as
+  `health:missed`, `status:failed`, `actor:operator`, or `issue:none`.
+  Combine fields with free text, or repeat a field to match either value.
+- Open a cron run's linked issue from `kata tui` and return to the same Cron
+  detail. Replica projects show their last successful pull age or a newer sync
+  error, so recent push activity cannot hide an old local copy. See
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Review unseen failed or unknown Cron runs with `u`, clear loaded failures with `U`, and receive grouped notices for published observations in the selected project. Seen state stays in the local Kata home.
+- See running cron jobs that wait for attention in `kata tui`. The blocked
+  health and run details use the issue's attention state and the run actor's
+  pending notification, with overdue taking precedence.
 - Delete an issue from `kata tui` with `X` from the list or detail, including
   Inbox and a detail opened from Attention. Saved views drop the deleted
   issue. Type `DELETE <project>#<id>` to confirm; the selection moves to the

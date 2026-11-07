@@ -68,6 +68,27 @@ func TestSplit_InboxDetailNavEscPopsNavStack(t *testing.T) {
 	require.NotNil(t, cmd, "restored detail needs fresh reads after its prior batch was canceled")
 }
 
+// An issue jump in split detail shows its pending read and, once the read
+// fails, why the pane is empty, instead of asking for a list selection.
+func TestSplit_JumpDetailShowsReadState(t *testing.T) {
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	current := Issue{ProjectID: 7, UID: "01TEST-cur1", ShortID: "cur1", Title: "current issue", Status: "open"}
+	m.detail = detailModel{issue: &current, scopePID: 7, gen: 1}
+	m.nextGen = 1
+	m.focus = focusDetail
+	m, _ = updateModel(m, jumpDetailMsg{ref: "gone", projectID: 7, connGen: m.connGen})
+	require.Nil(t, m.detail.issue)
+	require.True(t, m.detail.loading)
+	body := stripANSI(splitDetailBody(m, 80, 35))
+	require.Contains(t, body, "loading…")
+	require.NotContains(t, body, "select an issue from the list pane")
+	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
+	body = stripANSI(splitDetailBody(m, 80, 35))
+	require.Contains(t, body, "unavailable: issue not found")
+	require.NotContains(t, body, "select an issue from the list pane")
+}
+
 // splitTestSetup boots a Model into split layout (160x40) with the
 // listFixture seeded so the split tests have something to render and
 // drive cursor moves against. Returns the model and a cleanup that

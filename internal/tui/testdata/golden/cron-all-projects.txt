@@ -20,5 +20,5 @@ Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows.
 
 
 
-
- j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit
+ j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ u/U unseen/clear
+ 1-4 tabs▕ ? help  ▕ q quit

@@ -1,0 +1,108 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+)
+
+// Contract: this optional chip describes pulls for the selected project, never
+// recent push traffic, and an unavailable status read does not hide cron data.
+func TestCronReplicaClient(t *testing.T) {
+	for _, pulled := range []bool{true, false} {
+		requests := make(chan *http.Request, 1)
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			requests <- r
+			status := map[string]any{"project_id": 7, "role": "spoke", "last_successful_sync_at": "2026-05-01T11:59:00Z", "last_error_at": "2026-05-01T11:30:00Z", "last_error": "pull failed"}
+			if pulled {
+				status["last_pull_success_at"] = "2026-05-01T11:00:00Z"
+			}
+			respondJSON(t, w, map[string]any{"statuses": []map[string]any{status}})
+		})
+		status, err := c.readCronReplica(t.Context(), 7)
+		require.NoError(t, err)
+		require.Len(t, requests, 1, "the client must issue exactly one request")
+		req := <-requests
+		require.Equal(t, "/api/v1/projects/7/federation/status", req.URL.Path)
+
+		require.Equal(t, "spoke", status.role)
+		if pulled {
+			require.NotNil(t, status.pulledAt)
+			require.Equal(t, snapshotFixedNow.Add(-time.Hour), *status.pulledAt)
+		} else {
+			require.Nil(t, status.pulledAt, "push traffic must not count as a successful pull")
+		}
+		require.Equal(t, "pull failed", status.lastError)
+		require.NotNil(t, status.errorAt)
+		require.Equal(t, snapshotFixedNow.Add(-30*time.Minute), *status.errorAt)
+	}
+}
+
+func TestCronReplicaChip(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, tc := range []struct {
+		name  string
+		value cronReplica
+		want  string
+	}{
+		{"fresh", cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-3 * time.Minute))}, "replica · pulled 3m ago"},
+		{"never", cronReplica{role: "spoke"}, "replica · never pulled"},
+		{"error", cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-time.Hour)), errorAt: new(snapshotFixedNow.Add(-2 * time.Minute)), lastError: "offline"}, "replica · sync error 2m ago"},
+		{"old error", cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-3 * time.Minute)), errorAt: new(snapshotFixedNow.Add(-time.Hour)), lastError: "old"}, "replica · pulled 3m ago"},
+		{"hub", cronReplica{role: "hub"}, ""},
+		{"standalone", cronReplica{}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, stripANSI(cronReplicaChip(tc.value)))
+		})
+	}
+
+	t.Run("title goldens", func(t *testing.T) {
+		m := cronFixture(t)
+		m.width = 120
+		m.cron.data.replica = cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-3 * time.Minute))}
+		assertGolden(t, "cron-jobs-replica", m.viewBody())
+	})
+}
+
+type cronReplicaTestAPI struct {
+	*cronReadTestAPI
+	replica cronReplica
+	err     error
+	project int64
+}
+
+func (a *cronReplicaTestAPI) readCronReplica(ctx context.Context, projectID int64) (cronReplica, error) {
+	a.project = projectID
+	if err := ctx.Err(); err != nil {
+		return cronReplica{}, err
+	}
+	return a.replica, a.err
+}
+func TestCronReplicaRefresh(t *testing.T) {
+	m := cronFixture(t)
+	a := &cronReplicaTestAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, replica: cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-time.Hour))}}
+	p := cronData{}
+	cronFetch(t.Context(), newUndoClient(a), 7, &p)
+	require.Equal(t, int64(7), a.project)
+	require.Equal(t, a.replica, p.replica)
+	a.replica.pulledAt = nil
+	p = cronData{}
+	cronFetch(t.Context(), newUndoClient(a), 7, &p)
+	require.Equal(t, a.replica, p.replica, "a spoke without a successful pull keeps its role")
+	a.err = errors.New("older daemon")
+	p = cronData{}
+	cronFetch(t.Context(), newUndoClient(a), 7, &p)
+	require.Empty(t, p.replica)
+	require.NotEmpty(t, p.jobs)
+	require.NoError(t, p.jobsErr)
+	// A failed status refresh must clear an old chip instead of retaining it.
+	m.cron.data.replica = a.replica
+	m = m.cronLoaded(cronLoadedMsg(p))
+	require.Empty(t, m.cron.data.replica)
+
+}

@@ -1,0 +1,305 @@
+package tui
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"maps"
+	"slices"
+	"sync"
+
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/pkg/client/generated"
+)
+
+// cronReadScope owns and cancels asynchronous work for a TUI lifetime or an
+// active Cron visit. Sharing its pointer across Model values preserves ownership.
+type cronReadScope struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// Bubble Tea callbacks supply the fallback; the TUI lifetime owns live work.
+func (m Model) cronContext(ctx context.Context) context.Context {
+	if m.lifetime != nil {
+		return m.lifetime.ctx
+	}
+	return ctx
+}
+
+func (s *cronReadScope) stop() {
+	if s != nil {
+		s.cancel()
+	}
+}
+
+func cronRead[T any](ctx context.Context, read func(context.Context, int64) (T, error), id int64) (T, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaultHTTPTimeout)
+	defer cancel()
+	return read(ctx, id)
+}
+
+// cronFetch keeps the first three independent reads within one timeout window,
+// leaving a separate bounded budget for per-job enrichment.
+func cronFetch(ctx context.Context, reader cronAPI, id int64, data *cronData) {
+	var wg sync.WaitGroup
+	wg.Go(func() { data.jobs, data.jobsErr = cronRead(ctx, reader.ListCronJobs, id) })
+	wg.Go(func() { data.workflows, data.workflowsErr = cronRead(ctx, reader.ListCronWorkflows, id) })
+	wg.Go(func() {
+		readCtx, cancel := context.WithTimeout(ctx, defaultHTTPTimeout)
+		defer cancel()
+		data.runs, data.nextBefore, data.runsErr = reader.ListCronJobRuns(readCtx, id, "", "", 100)
+	})
+	if optional, ok := reader.(cronReplicaAPI); ok {
+		wg.Go(func() {
+			if replica, err := cronRead(ctx, optional.readCronReplica, id); err == nil {
+				data.replica = replica
+			}
+		})
+	}
+	wg.Wait()
+	cronEnrich(ctx, reader, id, data)
+}
+
+type cronEnrichment struct {
+	uid         string
+	parent, run bool
+	runs        []generated.CronRun
+	value       cronParent
+	err         error
+}
+
+// Open runs are uncapped. Other loaded runs missing from the successful head
+// use at most 100 slots: named runs in queue order, then running, then newest.
+func cronRefreshSubjects(p *cronData, head map[string]generated.CronRun, more bool) ([]generated.CronRun, bool) {
+	subjects := slices.Clone(p.inspectedRuns)
+	if !more {
+		return subjects, false
+	}
+	rank := map[string]int{}
+	for i, uid := range p.changed {
+		rank[uid] = i - len(p.changed)
+	}
+	var older []generated.CronRun
+	for _, r := range p.historyRuns {
+		if _, fresh := head[r.UID]; fresh || slices.ContainsFunc(p.inspectedRuns, func(s generated.CronRun) bool { return s.UID == r.UID }) {
+			continue
+		}
+		if _, named := rank[r.UID]; !named && r.Status != "running" {
+			rank[r.UID] = 1
+		}
+		older = append(older, r)
+	}
+	slices.SortStableFunc(older, func(a, b generated.CronRun) int { return cmp.Compare(rank[a.UID], rank[b.UID]) })
+	n := min(len(older), 100)
+	return append(subjects, older[:n]...), n < len(older) && rank[older[n].UID] < 0
+}
+
+// cronEnrich establishes fresh last-run provenance independently of the display
+// cache. All extra reads share four workers and one deadline, including parents.
+func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
+	ctx, cancel := context.WithTimeout(ctx, defaultHTTPTimeout)
+	defer cancel()
+	p.deferred = false
+	p.lastRuns = map[string]generated.CronRun{}
+	p.lastErr = map[string]error{}
+	p.progress = map[string]cron.RecurringProgress{}
+	p.parentOpen = map[string]bool{}
+	p.runErr = map[string]error{}
+	p.lookup = map[string]generated.CronRun{}
+	p.waits = map[string]cronParent{}
+	p.waitErr = map[string]error{}
+	if p.runsErr == nil {
+		for _, r := range p.runs {
+			if uid := deref(r.JobUID); uid != "" {
+				if _, seen := p.lastRuns[uid]; !seen {
+					p.lastRuns[uid] = r
+				}
+			}
+		}
+	}
+	tasks := []cronEnrichment{}
+	fills := 0
+	issueReads := map[string]bool{}
+	// Enabled health reads take priority over paused display reads. Within each
+	// group, adapters precede native display lookups; parents have their own cap.
+	for _, enabled := range []bool{true, false} {
+		for _, native := range []bool{false, true} {
+			for _, j := range p.jobs {
+				parent := cronNativeParent(j)
+				if (parent != "") != native || j.Definition.Enabled != enabled {
+					continue
+				}
+				if parent != "" && enabled && !issueReads[parent] && len(issueReads) < 200 {
+					issueReads[parent] = true
+					tasks = append(tasks, cronEnrichment{uid: parent, parent: true})
+				}
+				if _, known := p.lastRuns[j.UID]; known {
+					continue
+				}
+				fills++
+				if fills > 200 {
+					p.lastErr[j.UID] = errors.New("last-run lookup limit reached (200 jobs per refresh)")
+					continue
+				}
+				tasks = append(tasks, cronEnrichment{uid: j.UID})
+			}
+		}
+	}
+	runReader, supportsRun := cronRunReader(reader)
+	head := map[string]generated.CronRun{}
+	if p.runsErr == nil {
+		for _, r := range p.runs {
+			head[r.UID] = r
+		}
+	}
+	subjects, deferred := cronRefreshSubjects(p, head, supportsRun && !p.resetPages)
+	p.deferred = deferred
+	var held []cronEnrichment
+	reading := map[string]bool{}
+	seen := map[string]bool{}
+	for _, r := range subjects {
+		if seen[r.UID] {
+			if old, ok := p.lookup[r.UID]; ok && r.Revision > old.Revision {
+				p.lookup[r.UID] = r
+			}
+			continue
+		}
+		seen[r.UID] = true
+		p.lookup[r.UID] = r
+		if fresh, ok := head[r.UID]; ok {
+			p.lookup[r.UID] = fresh
+			continue
+		}
+		if !supportsRun {
+			p.runErr[r.UID] = errors.New("run refresh unavailable")
+			continue
+		}
+		reading[r.UID] = true
+		held = append(held, cronEnrichment{uid: r.UID, run: true})
+	}
+	issues := map[string]bool{}
+	attention := 0
+	waitTasks := func(runs []generated.CronRun) []cronEnrichment {
+		var added []cronEnrichment
+		for _, r := range runs {
+			uid := deref(r.IssueUID)
+			if r.Status != "running" || uid == "" || issues[uid] {
+				continue
+			}
+			if j := p.job(deref(r.JobUID)); j != nil && cronNativeParent(*j) != "" {
+				continue
+			}
+			issues[uid] = true
+			if issueReads[uid] {
+				continue
+			} // share native parent evidence without another read
+			if attention == 20 {
+				p.waitErr[uid] = errors.New("too many running issues (20 attention reads per refresh)")
+				continue
+			}
+			attention++
+			issueReads[uid] = true
+			added = append(added, cronEnrichment{uid: uid, parent: true})
+		}
+		return added
+	}
+	history := p.historyRuns
+	if p.resetPages {
+		history = p.inspectedRuns
+	}
+	current := slices.DeleteFunc(cronMergeRuns(history, p.runs), func(r generated.CronRun) bool { return reading[r.UID] })
+	tasks = append(tasks, waitTasks(current)...)
+	// Fill reads may discover running observations. The coordinator admits those
+	// reads into this same pool before closing it; no new deadline is created.
+	pending := len(tasks) + len(held)
+	queue := make(chan cronEnrichment, pending+20)
+	results := make(chan cronEnrichment, pending+20)
+	for _, task := range tasks {
+		queue <- task
+	}
+	// Exact work enters only a nearly empty queue. Late attention reads have
+	// at most four queued and four in-flight exact reads ahead of them.
+	feed := func() {
+		for len(held) > 0 && len(queue) < 4 {
+			queue <- held[0]
+			held = held[1:]
+		}
+	}
+	feed()
+	var wg sync.WaitGroup
+	for range min(4, pending) {
+		wg.Go(func() {
+			for task := range queue {
+				if task.err = ctx.Err(); task.err == nil {
+					switch {
+					case task.run:
+						var r generated.CronRun
+						r, task.err = runReader.readCronRun(ctx, id, task.uid)
+						if task.err == nil && r.UID != task.uid {
+							task.err = errors.New("received a different run")
+						}
+						task.runs = []generated.CronRun{r}
+					case task.parent:
+						task.value, task.err = reader.readCronParent(ctx, id, task.uid)
+					default:
+						task.runs, _, task.err = reader.ListCronJobRuns(ctx, id, task.uid, "", 1)
+						if task.err == nil {
+							task.err = cronValidateJobPage(task.runs, task.uid)
+						}
+					}
+				}
+				results <- task
+			}
+		})
+	}
+	for pending > 0 {
+		result := <-results
+		pending--
+		switch {
+		case result.run:
+			p.runErr[result.uid] = result.err
+			admit := p.lookup[result.uid] // a failed read keeps independent snapshot attention
+			if result.err == nil {
+				admit = result.runs[0]
+				p.lookup[result.uid] = admit
+			}
+			for _, task := range waitTasks([]generated.CronRun{admit}) {
+				queue <- task
+				pending++
+			}
+		case result.parent:
+			if p.waitErr[result.uid] == nil {
+				p.waitErr[result.uid] = result.err
+				if result.err == nil {
+					p.waits[result.uid] = result.value
+				}
+			}
+			if result.err == nil {
+				p.parentOpen[result.uid] = result.value.open
+				maps.Copy(p.progress, result.value.progress)
+			}
+		default:
+			p.lastErr[result.uid] = result.err
+			if result.err == nil && len(result.runs) > 0 {
+				p.lastRuns[result.uid] = result.runs[0]
+				for _, task := range waitTasks(result.runs) {
+					queue <- task
+					pending++
+				}
+			}
+		}
+		feed()
+	}
+	close(queue)
+	wg.Wait()
+}
+
+func cronValidateJobPage(runs []generated.CronRun, job string) error {
+	for _, r := range runs {
+		if deref(r.JobUID) != job {
+			return errors.New("received runs for a different job")
+		}
+	}
+	return nil
+}

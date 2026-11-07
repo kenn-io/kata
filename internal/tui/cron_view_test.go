@@ -59,8 +59,18 @@ func cronFixture(t *testing.T) Model {
 		CreatedAt: snapshotFixedNow.Add(-time.Hour), StartedAt: new(snapshotFixedNow.Add(-2 * time.Hour)), EndedAt: new(snapshotFixedNow.Add(-time.Hour)),
 		Summary: generated.SummaryResponse{Version: 1, Message: new("Report ready"), InputTokens: new(int64(30)), OutputTokens: new(int64(10))},
 	}}
+	p.lastRuns = map[string]generated.CronRun{p.jobs[0].UID: p.runs[0]}
+	p.lastErr = map[string]error{}
 	m = sendRune(m, '2')
 	p.conn, p.scope = m.connGen, m.scopeGen
+	m, _ = updateModel(m, cronLoadedMsg(p))
+	return m
+}
+
+// cronSettleTest answers the refresh an open requests with the loaded snapshot.
+func cronSettleTest(m Model) Model {
+	p := *m.cron.data
+	p.events, p.generation = m.cron.events, m.cron.readGen
 	m, _ = updateModel(m, cronLoadedMsg(p))
 	return m
 }
@@ -157,6 +167,8 @@ func TestCronFreshness(t *testing.T) {
 				require.NotContains(t, stripANSI(m.viewBody()), "Newest title")
 				require.NotNil(t, cmd, "events during the read request one replacement read")
 				m, cmd = updateModel(m, cmd())
+				require.NotNil(t, cmd, "open job history refreshes after the project head")
+				m, cmd = updateModel(m, cmd())
 				require.Nil(t, cmd)
 				require.Equal(t, 2, a.calls)
 				require.Contains(t, stripANSI(m.viewBody()), "Newest title")
@@ -176,7 +188,17 @@ func TestCronFreshness(t *testing.T) {
 			}
 			if strings.HasPrefix(tc.name, "project merged") {
 				require.Contains(t, stripANSI(sendRune(m, '4').viewBody()), "New workflow")
-				require.Contains(t, stripANSI(sendRune(m, '3').viewBody()), "New run result")
+				runs := sendRune(m, '3')
+				_, _, lines := cronScreen(runs)
+				require.NotEmpty(t, lines)
+				for _, line := range lines {
+					require.LessOrEqual(t, ansi.StringWidth(line.text), 80)
+				}
+				runs = sendKey(runs, tea.KeyEnter)
+				require.Contains(t, stripANSI(runs.viewBody()), "New run result")
+				runs = sendKey(runs, tea.KeyEscape)
+				runs.width = 100
+				require.Contains(t, stripANSI(runs.viewBody()), "New run result")
 			}
 		})
 	}
@@ -285,7 +307,7 @@ func TestCronDocumentContentAndCursor(t *testing.T) {
 	}
 	require.Contains(t, document, `"recipient": "reader"`)
 	require.Contains(t, document, "Weekly digest\nSecond line")
-	require.Contains(t, document, "Loaded runs (1) · newest 100")
+	require.Contains(t, document, "Runs (1)")
 	p.jobs[0].Definition.Action = generated.ActionResponse{
 		Kind: "execute", Prompt: new("Summarize all changes\nInclude follow-up tasks."),
 	}
@@ -352,6 +374,51 @@ func (a *cronReadTestAPI) ListCronRuns(_ context.Context, id int64) ([]generated
 		return nil, fmt.Errorf("unexpected project %d", id)
 	}
 	return slices.Clone(a.data.runs), a.data.runsErr
+}
+
+// The fake honors the same filtering and paging contract as the existing route.
+func (a *cronReadTestAPI) ListCronJobRuns(ctx context.Context, id int64, job, before string, limit int64) ([]generated.CronRun, string, error) {
+	runs, err := a.ListCronRuns(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	var cursor generated.CronRun
+	if before != "" {
+		index := slices.IndexFunc(runs, func(r generated.CronRun) bool { return r.UID == before })
+		if index < 0 {
+			return nil, "", fmt.Errorf("unknown cursor %q", before)
+		}
+		cursor = runs[index]
+	}
+	filtered := []generated.CronRun{}
+	for _, r := range runs {
+		if job != "" && deref(r.JobUID) != job {
+			continue
+		}
+		if before != "" && (r.CreatedAt.After(cursor.CreatedAt) || r.CreatedAt.Equal(cursor.CreatedAt) && r.UID >= cursor.UID) {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	slices.SortFunc(filtered, func(a, b generated.CronRun) int {
+		if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.UID, a.UID)
+	})
+	filtered = filtered[:min(int64(len(filtered)), limit)]
+	next := ""
+	if int64(len(filtered)) == limit {
+		next = filtered[len(filtered)-1].UID
+	}
+	return filtered, next, nil
+}
+
+func (a *cronReadTestAPI) readCronParent(context.Context, int64, string) (cronParent, error) {
+	return cronParent{}, errors.New("issue read unavailable in this fixture")
 }
 
 func TestCronReturnToKata(t *testing.T) {
@@ -434,7 +501,12 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 				require.Contains(t, stripANSI(m.viewBody()), "unknown")
 				require.NotContains(t, stripANSI(m.viewBody()), "0 jobs")
 			}
-			m = sendKey(m, tea.KeyEnter)
+			m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			if tc.tab == '2' {
+				for _, result := range runCmdTree(cmd) {
+					m, _ = updateModel(m, result)
+				}
+			}
 			_, _, lines := cronScreen(m)
 			var document string
 			for _, line := range lines {
@@ -443,6 +515,9 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 			if tc.jobsFail {
 				require.Contains(t, document, "Used by · unavailable")
 				require.NotContains(t, document, "Used by (0)")
+			} else if tc.tab == '2' {
+				require.Contains(t, document, "unavailable: runs read failed")
+				require.NotContains(t, document, "no runs")
 			} else {
 				require.Contains(t, document, "Loaded runs · unavailable")
 				require.NotContains(t, document, "no loaded runs")
@@ -463,6 +538,10 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 	m = sendRune(m, '4')
 	require.Contains(t, stripANSI(m.viewBody()), "Summary flow")
 	m = sendRune(m, '3')
+	m = sendKey(m, tea.KeyEnter)
+	require.Contains(t, stripANSI(m.viewBody()), "Report ready")
+	m = sendKey(m, tea.KeyEscape)
+	m.width = 100
 	require.Contains(t, stripANSI(m.viewBody()), "Report ready")
 	m = sendKey(m, tea.KeyEnter)
 	_, _, lines := cronScreen(m)
@@ -484,6 +563,10 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 	m = sendRune(m, '4')
 	require.Contains(t, stripANSI(m.viewBody()), "unknown")
 	require.NotContains(t, stripANSI(m.viewBody()), "1 job")
+	m = sendKey(sendRune(m, '2'), tea.KeyEnter)
+	require.Contains(t, stripANSI(m.viewBody()), "Health:   unavailable")
+	require.Contains(t, stripANSI(m.viewBody()), "jobs: refresh failed")
+	require.NotContains(t, stripANSI(m.viewBody()), "Reason:", "the jobs error row already says why")
 }
 
 func TestCronFilterAndTabState(t *testing.T) {
@@ -546,7 +629,7 @@ func TestSnapshot_Cron(t *testing.T) {
 				m = sendKey(m, tea.KeyEnter)
 			case "run-detail":
 				m = sendRune(m, '3')
-				m = sendKey(m, tea.KeyEnter)
+				m = cronSettleTest(sendKey(m, tea.KeyEnter))
 			case "workflow-detail":
 				m = sendRune(m, '4')
 				m = sendKey(m, tea.KeyEnter)

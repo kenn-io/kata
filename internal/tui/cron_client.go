@@ -18,7 +18,7 @@ type cronAPI interface {
 	ShowCronJob(ctx context.Context, projectID int64, uid string) (db.CronJob, error)
 	PutCronJob(ctx context.Context, projectID int64, uid string, write kataapi.PutCronJobBody) error
 	ListCronWorkflows(context.Context, int64) ([]generated.CronWorkflow, error)
-	ListCronRuns(context.Context, int64) ([]generated.CronRun, error)
+	ListCronJobRuns(ctx context.Context, projectID int64, jobUID, beforeUID string, limit int64) ([]generated.CronRun, string, error)
 	readCronParent(ctx context.Context, projectID int64, parentUID string) (cronParent, error)
 }
 
@@ -58,24 +58,29 @@ func (c *Client) ListCronWorkflows(ctx context.Context, projectID int64) ([]gene
 	return wire.JSON200.Workflows, nil
 }
 
-// ListCronRuns reads the newest 100 observations.
-func (c *Client) ListCronRuns(ctx context.Context, projectID int64) ([]generated.CronRun, error) {
+// ListCronJobRuns reads one page. Empty jobUID selects project-wide history.
+func (c *Client) ListCronJobRuns(ctx context.Context, projectID int64, jobUID, beforeUID string, limit int64) ([]generated.CronRun, string, error) {
 	client, err := c.generatedClient()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	query := &generated.ListCronRunsQuery{Limit: new(int64(100))}
+	query := &generated.ListCronRunsQuery{Limit: new(limit)}
+	if jobUID != "" {
+		query.JobUID = new(jobUID)
+	}
+	if beforeUID != "" {
+		query.BeforeUID = new(beforeUID)
+	}
 	wire, callErr := client.ListCronRunsWithResponse(ctx, &generated.ListCronRunsRequestOptions{
-		PathParams: &generated.ListCronRunsPath{ProjectID: projectID},
-		Query:      query,
+		PathParams: &generated.ListCronRunsPath{ProjectID: projectID}, Query: query,
 	})
 	if wire == nil {
-		return nil, callErr
+		return nil, "", callErr
 	}
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return wire.JSON200.Runs, nil
+	return wire.JSON200.Runs, deref(wire.JSON200.NextBeforeUID), nil
 }
 
 // cronParent is what a native job's parent issue tells the Jobs tab: whether
@@ -83,6 +88,7 @@ func (c *Client) ListCronRuns(ctx context.Context, projectID int64) ([]generated
 type cronParent struct {
 	open     bool
 	progress map[string]cron.RecurringProgress
+	metadata map[string]any
 }
 
 // readCronParent reads a parent issue's status and the delivery checkpoints its
@@ -103,7 +109,7 @@ func (c *Client) readCronParent(ctx context.Context, projectID int64, parentUID 
 		return cronParent{}, err
 	}
 	issue := wire.JSON200.Issue
-	return cronParent{open: issue.Status == "open" && issue.DeletedAt == nil, progress: cronProgressFromMetadata(issue.Metadata)}, nil
+	return cronParent{open: issue.Status == "open" && issue.DeletedAt == nil, progress: cronProgressFromMetadata(issue.Metadata), metadata: issue.Metadata}, nil
 }
 
 // cronProgressFromMetadata decodes each cron.progress.<job-uid> value. An entry
@@ -187,4 +193,55 @@ func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, wr
 		return callErr
 	}
 	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
+}
+
+// Inspected observations may age out of every list page; refresh their exact UID.
+type cronRunAPI interface {
+	readCronRun(context.Context, int64, string) (generated.CronRun, error)
+}
+
+// undoClient forwards the optional method even when its underlying API lacks it.
+func cronRunReader(reader cronAPI) (cronRunAPI, bool) {
+	if u, ok := reader.(*undoClient); ok {
+		if _, ok := u.KataAPI.(cronRunAPI); !ok {
+			return nil, false
+		}
+	}
+	r, ok := reader.(cronRunAPI)
+	return r, ok
+}
+
+func (c *undoClient) readCronRun(ctx context.Context, projectID int64, uid string) (generated.CronRun, error) {
+	reader, ok := c.KataAPI.(cronRunAPI)
+	if !ok {
+		return generated.CronRun{}, fmt.Errorf("run refresh unavailable")
+	}
+	return reader.readCronRun(ctx, projectID, uid)
+}
+func (c *Client) readCronRun(ctx context.Context, projectID int64, uid string) (generated.CronRun, error) {
+	client, err := c.generatedClient()
+	if err != nil {
+		return generated.CronRun{}, err
+	}
+	wire, callErr := client.ShowCronRunWithResponse(ctx, &generated.ShowCronRunRequestOptions{PathParams: &generated.ShowCronRunPath{ProjectID: projectID, RunUID: uid}})
+	if wire == nil {
+		return generated.CronRun{}, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
+		return generated.CronRun{}, err
+	}
+	return wire.JSON200.Run, nil
+}
+
+// Both health and schedule previews interpret the same validated definition.
+func cronJobDefinition(j generated.CronJob) (cron.JobDefinition, error) {
+	var def cron.JobDefinition
+	raw, err := json.Marshal(j.Definition)
+	if err == nil {
+		err = json.Unmarshal(raw, &def)
+	}
+	if err == nil {
+		err = def.Validate()
+	}
+	return def, err
 }

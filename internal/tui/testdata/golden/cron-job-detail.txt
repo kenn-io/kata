@@ -2,7 +2,8 @@
 kata カタ [jobs] runs workflows
  jobs / Daily summary
 
-▶ State:    enabled
+▶ Health:   ok
+  Reason:   last run status is succeeded
   Schedule: 0 7 * * *
   Triggers: 2026-05-02 07:00 UTC
             2026-05-03 07:00 UTC
@@ -18,7 +19,6 @@ kata カタ [jobs] runs workflows
     },
     "catchup": "skip",
     "enabled": true,
-    "issue": {
 
- j/k move▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ r refresh▕ 1-4 tabs▕ ? help
- q quit
+ j/k move▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ r refresh▕ u/U unseen/clear
+ 1-4 tabs▕ ? help    ▕ q quit

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/helplayout"
@@ -17,8 +18,12 @@ import (
 var cronTabNames = [...]string{"kata カタ", "jobs", "runs", "workflows"}
 
 type cronLine struct {
-	text   string
-	target cronRef
+	text               string
+	target             cronRef
+	health             string
+	runUID, runStatus  string
+	unseenFailure      bool
+	errorFrom, errorTo int
 }
 
 func cronTabs(tab int) string {
@@ -99,6 +104,12 @@ func cronLast(runs []generated.CronRun, uid string, workflow bool) string {
 	}
 	return "—"
 }
+func cronJobLast(p cronData, uid string) string {
+	if r, ok := p.lastRuns[uid]; ok {
+		return r.Status + " " + humanizeRelative(r.CreatedAt)
+	}
+	return "—"
+}
 func cronCount(n int, noun string) string {
 	if n != 1 {
 		noun += "s"
@@ -119,17 +130,20 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	headers := [][]string{
 		nil,
-		{"Job", "State", "Trigger", "Action", "Last loaded run"},
+		{"Job", "Health", "Trigger", "Action", "Last run"},
 		{"Status", "Job", "Occurrence", "Started", "Ended", "Summary"},
 		{"Workflow", "Steps", "Used by", "Last loaded run", "Updated"},
 	}[m.cron.tab]
 	// Fixed columns leave the name and summary the remaining cells.
 	widths := [][]int{
 		nil,
-		{0, 7, 17, 18, 18},
-		{10, 0, 12, 11, 11, 0},
+		{0, 13, 17, 18, 18},
+		{17, 0, 12, 11, 11, 0},
 		{0, 5, 7, 18, 11},
 	}[m.cron.tab]
+	if m.cron.tab == cronJobs && m.width < 100 {
+		widths = []int{0, 13, 14, 12, 16}
+	}
 	fixed := 2 + len(widths) - 1
 	flex := 0
 	for _, w := range widths {
@@ -152,34 +166,100 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		return strings.Join(out, " ")
 	}
 	lines := []cronLine{}
-	add := func(uid string, cells []string) {
-		if cronMatches(sanitizeForLine(strings.Join(cells, " ")), m.cron.lists[m.cron.tab].query) {
-			lines = append(lines, cronLine{format(cells), cronRef{m.cron.tab, uid}})
+	query := cronQuery(m.cron.lists[m.cron.tab].query, m.cron.tab)
+	add := func(uid string, cells []string, fields map[string]string, metadata cronLine) {
+		if query.match(fields, sanitizeForLine(strings.Join(cells, " "))) {
+			line := metadata
+			line.text = format(cells)
+			line.target = cronRef{m.cron.tab, uid}
+			if m.cron.tab == cronJobs && (cells[1] == "failing" || cells[1] == "overdue" || cells[1] == "missed") {
+				line.errorFrom = widths[0] + 1
+				line.errorTo = line.errorFrom + widths[1]
+			}
+			lines = append(lines, line)
 		}
 	}
+	healthCounts := map[string]int{}
 	if p := m.cron.data; p != nil {
 		runs := p.runs
+		if m.cron.tab == cronRuns && m.cron.runPage.ready {
+			runs = m.cron.runPage.runs
+		}
+		if m.cron.tab == cronRuns && m.cron.unseenOnly {
+			runs = m.cronLoadedRuns()
+		}
 		switch m.cron.tab {
 		case cronJobs:
 			for _, j := range p.jobs {
-				add(j.UID, []string{j.Name, cronJobState(j), cronSchedule(j.Definition.Trigger), cronAction(*p, j), cronLast(runs, j.UID, false)})
+				health := cronHealth(*p, j, renderNow()).state
+				healthCounts[health]++
+				last := cronJobLast(*p, j.UID)
+				if health == "running" {
+					last = humanizeRelative(p.lastRuns[j.UID].CreatedAt)
+				}
+				lastRun := p.lastRuns[j.UID]
+				add(j.UID, []string{j.Name, health, cronSchedule(j.Definition.Trigger), cronAction(*p, j), last}, map[string]string{"health": health, "status": lastRun.Status, "action": j.Definition.Action.Kind + " " + cronAction(*p, j), "trigger": j.Definition.Trigger.Kind}, cronLine{health: health, runUID: lastRun.UID, runStatus: lastRun.Status})
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				if current, ok := p.run(r.UID); ok {
+					r = current
+				}
+				unseen := m.cronRunUnseen(m.cronProjectUID(), r)
+				if m.cron.unseenOnly && !unseen {
+					continue
+				}
+				status := cronRunStatus(*p, r)
+				if unseen {
+					status = "• " + status
+				}
+				add(r.UID, []string{status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)}, map[string]string{"status": r.Status, "job": cronDefinitionName(*p, deref(r.JobUID), false) + " " + deref(r.JobUID), "actor": r.Actor, "executor": deref(r.ExecutorLabel), "teammate": deref(r.Teammate), "issue": deref(r.IssueUID)}, cronLine{runUID: r.UID, runStatus: r.Status, unseenFailure: unseen})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
-				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronWorkflowUsage(*p, w.UID), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)})
+				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronWorkflowUsage(*p, w.UID), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)}, nil, cronLine{})
 			}
 		}
 	}
 	noun := []string{"", "job", "run", "workflow"}[m.cron.tab]
 	title := cronCount(len(lines), noun)
-	if m.cron.tab == cronRuns {
-		title = cronCount(len(lines), "loaded run") + " · newest 100"
+	header := format(headers)
+	if m.cron.tab == cronJobs && m.cron.data != nil {
+		start, end := cronViewport(m, header, lines)
+		visibleHealthCounts := map[string]int{}
+		for _, line := range lines[start:end] {
+			if line.health != "" {
+				visibleHealthCounts[line.health]++
+			}
+		}
+		for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "blocked", "running", "failing", "missed", "never ran"} {
+			if count := healthCounts[state]; count > visibleHealthCounts[state] {
+				title += fmt.Sprintf(" · %d %s", count, state)
+			}
+		}
 	}
-	return title, format(headers), lines
+	if m.cron.tab == cronRuns {
+		title = cronCount(len(lines), "loaded run")
+		if m.cron.unseenOnly {
+			title += " · unseen only"
+		}
+		if !m.cron.runPage.older {
+			title += " · newest 100"
+		}
+		if m.cron.runPage.next != "" {
+			lines = append(lines, cronLine{text: "load 100 older runs", target: cronRef{cronOlder, "project"}})
+		}
+		if m.cron.runPage.err != nil && (m.cron.data == nil || m.cron.runPage.err != m.cron.data.runsErr) {
+			lines = append(lines, cronLine{text: "unavailable: " + sanitizeForLine(m.cron.runPage.err.Error())})
+		}
+		if m.cron.runPage.out {
+			lines = append(lines, cronLine{text: "loading…"})
+		}
+	}
+	if len(query.tokens) > 0 {
+		title += " · filtered"
+	}
+	return title, header, lines
 }
 
 // Lists and documents share a line cursor and viewport. Links retain their
@@ -223,7 +303,13 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	case cronJobs:
 		if j := p.job(ref.uid); j != nil {
 			name = j.Name
-			d.field("State", cronJobState(*j))
+			health := cronHealth(p, *j, renderNow())
+			label := health.state
+			if label == "blocked" {
+				label = "running · blocked"
+			}
+			d.field("Health", label)
+			d.field("Reason", health.reason)
 			d.field("Schedule", cronSchedule(j.Definition.Trigger))
 			if label, times := cronNextRuns(p, *j, renderNow()); len(times) > 0 {
 				d.field(label, times[0])
@@ -248,15 +334,22 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			}
 			d.section("Definition")
 			d.json(def)
-			cronHistory(&d, p, ref)
+			cronJobHistory(&d, m, ref.uid)
 		}
 	case cronRuns:
-		for _, r := range p.runs {
-			if r.UID != ref.uid {
-				continue
-			}
+		if r, ok := p.run(ref.uid); ok {
 			name = r.UID
+			if err := p.runErr[r.UID]; err != nil {
+				d.field("Refresh", "unavailable: "+err.Error())
+			}
 			d.field("Status", r.Status)
+			if r.Status == "running" {
+				health := cronRunHealth(p, r)
+				if health.state == "blocked" {
+					d.field("Health", "blocked")
+				}
+				d.field("Reason", health.reason)
+			}
 			d.field("Occurrence", deref(r.OccurrenceKey))
 			d.field("Started", cronTime(r.StartedAt))
 			d.field("Ended", cronTime(r.EndedAt))
@@ -264,7 +357,9 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.field("Actor", r.Actor)
 			d.field("Executor", ownerText(r.ExecutorLabel))
 			d.field("Teammate", ownerText(r.Teammate))
-			d.field("Issue", deref(r.IssueUID))
+			if uid := deref(r.IssueUID); uid != "" {
+				d.text(fmt.Sprintf("%-*s %s", d.labelWidth, "Issue:", uid), cronRef{cronIssue, uid})
+			}
 			if r.Summary.InputTokens != nil || r.Summary.OutputTokens != nil {
 				d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(r.Summary.InputTokens), deref(r.Summary.OutputTokens)))
 			}
@@ -382,6 +477,7 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 		{Key: "↵/l", Description: open},
 		{Key: "h/esc", Description: back},
 		{Key: "r", Description: "refresh"},
+		{Key: "u/U", Description: "unseen/clear"},
 		{Key: "1-4", Description: "tabs"},
 		{Key: "?", Description: "help"},
 		{Key: "q", Description: "quit"},
@@ -402,6 +498,49 @@ func cronNoticeRows(m Model) int {
 	}
 	return 0
 }
+
+func cronErrorRows(m Model) []string {
+	errors := []string{}
+	if m.cron.data != nil {
+		for _, tab := range []int{cronJobs, cronWorkflows, cronRuns} {
+			if err := m.cron.data.readError(tab); err != nil {
+				errors = append(errors, errorStyle.Render(truncate(sanitizeForLine(cronTabNames[tab]+": "+err.Error()), m.width)))
+			}
+		}
+	}
+	if m.cronSeen.err != nil {
+		errors = append(errors, errorStyle.Render(truncate(sanitizeForLine("seen state unavailable: "+m.cronSeen.err.Error()), m.width)))
+	}
+	if t := m.cronStatusNotice(); t != nil {
+		errors = append(errors, errorStyle.Render(truncate(t.text, m.width)))
+	}
+	return errors
+}
+
+func cronListBudget(m Model, header string, errorCount int, help [][]helplayout.HelpItem) int {
+	bodyRows := 4 // title bar, tabs, list title, and spacer
+	if header != "" {
+		bodyRows++
+	}
+	return max(m.height-bodyRows-max(errorCount, 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
+}
+
+func cronViewport(m Model, header string, lines []cronLine) (int, int) {
+	budget := cronListBudget(m, header, len(cronErrorRows(m)), cronHelpRows(m))
+	cursor := min(max(*m.cronCursor(), 0), max(len(lines)-1, 0))
+	return windowBounds(len(lines), cursor, budget)
+}
+
+func cronVisibleUnseenFailureCount(lines []cronLine) int {
+	seen := map[string]struct{}{}
+	for _, line := range lines {
+		if line.target.kind == cronRuns && line.unseenFailure && line.target.uid != "" {
+			seen[line.target.uid] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
 func renderCron(m Model) string {
 	if m.scope.allProjects || m.scope.projectID == 0 {
 		body := []string{renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon), cronTabs(m.cron.tab), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
@@ -413,21 +552,10 @@ func renderCron(m Model) string {
 	}
 	title, header, lines := cronScreen(m)
 	help := cronHelpRows(m)
-	errors := []string{}
-	if m.cron.data != nil {
-		for _, read := range []struct {
-			name string
-			err  error
-		}{
-			{"jobs", m.cron.data.jobsErr},
-			{"workflows", m.cron.data.workflowsErr},
-			{"runs", m.cron.data.runsErr},
-		} {
-			if read.err != nil {
-				errors = append(errors, errorStyle.Render(truncate(sanitizeForLine(read.name+": "+read.err.Error()), m.width)))
-			}
-		}
-	}
+	errors := cronErrorRows(m)
+	budget := cronListBudget(m, header, len(errors), help)
+	cursor := min(max(*m.cronCursor(), 0), max(len(lines)-1, 0))
+	start, end := windowBounds(len(lines), cursor, budget)
 	query := m.cron.lists[m.cron.tab].query
 	left, right := title, ""
 	if len(m.cron.stack) == 0 {
@@ -449,6 +577,14 @@ func renderCron(m Model) string {
 	} else if m.cron.out {
 		right = "loading…"
 	}
+	if m.cron.data != nil {
+		if chip := cronReplicaChip(m.cron.data.replica); chip != "" {
+			right += " · " + chip
+		}
+	}
+	if count := m.cronUnseenCount(); count > cronVisibleUnseenFailureCount(lines[start:end]) {
+		right += errorStyle.Render(fmt.Sprintf(" · %d unseen failed", count))
+	}
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
 		cronTabs(m.cron.tab),
@@ -458,9 +594,6 @@ func renderCron(m Model) string {
 	if header != "" {
 		body = append(body, tableHeaderStyle.Render("  "+header))
 	}
-	budget := max(m.height-len(body)-max(len(errors), 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
-	cursor := min(max(*m.cronCursor(), 0), max(len(lines)-1, 0))
-	start, end := windowBounds(len(lines), cursor, budget)
 	if len(lines) == 0 {
 		empty := "no " + cronTabNames[m.cron.tab]
 		switch {
@@ -477,7 +610,7 @@ func renderCron(m Model) string {
 	for i := start; i < end; i++ {
 		line := lines[i]
 		prefix := "  "
-		style := normalRowStyle
+		style, alert := normalRowStyle, errorStyle
 		if i%2 == 1 {
 			style = altRowStyle
 		}
@@ -487,8 +620,18 @@ func renderCron(m Model) string {
 		if i == cursor {
 			prefix = "▶ "
 			style = cursorRowStyle
+			// Dark-theme red is too dim on the selection; use the title text color.
+			alert = errorStyle.Foreground(titleBarStyle.GetForeground())
 		}
-		body = append(body, style.Render(padToWidth(prefix+line.text, m.width)))
+		text := padToWidth(prefix+line.text, m.width)
+		rendered := style.Render(text)
+		if line.errorTo > line.errorFrom {
+			// Render each segment with the row background. A cell's SGR reset must
+			// not clear the stripe or selection on the remainder of the row.
+			from, to := line.errorFrom+2, line.errorTo+2
+			rendered = style.Render(ansi.Cut(text, 0, from)) + alert.Inherit(style).Render(ansi.Cut(text, from, to)) + style.Render(ansi.Cut(text, to, m.width))
+		}
+		body = append(body, rendered)
 		budget--
 	}
 	for range max(budget, 0) {
@@ -507,6 +650,12 @@ func cronHelp(m Model) string {
 		"A workflow is a named list of steps jobs can run.",
 		"A run is what an executor recorded; runs remember the definition revision they used.",
 		"kata cron --help shows creation examples.",
+		"Jobs filters: health: status: action: trigger:.",
+		"Runs filters: status: job: actor: executor: teammate: issue: (UID prefix or none).",
+		"Use health:never-ran or health:parent-closed. Filters cover loaded rows only.",
+		"Repeated keys OR; different keys and free text AND. Workflows use plain text.",
+		"Follow a run’s Issue line to open it; back returns here.",
+		"Replica age is the last successful pull; pushes do not freshen it.",
 	}
 	for i, s := range intro {
 		intro[i] = strings.Join(termtext.Wrap(s, max(m.width, 1)), "\n")

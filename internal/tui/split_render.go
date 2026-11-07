@@ -78,11 +78,11 @@ func renderSplitDetailPane(m Model, paneW, paneH int) string {
 	return splitlayout.PaneStyle(border, paneW, paneH).Render(body)
 }
 
-// splitDetailBody picks the rendered body for the detail pane. With
-// an open issue, defer to dm.ViewSplit; otherwise show the empty
-// hint so the pane never goes blank.
+// splitDetailBody picks the rendered body for the detail pane. An idle
+// pane with no issue shows the empty hint so it never goes blank; an open,
+// loading or failed detail defers to dm.ViewSplit.
 func splitDetailBody(m Model, innerW, innerH int) string {
-	if m.detail.issue == nil {
+	if m.detail.issue == nil && !m.detail.loading && m.detail.err == nil {
 		return splitDetailEmptyHint(innerW, innerH)
 	}
 	return m.detail.ViewSplit(innerW, innerH, m.chrome())
@@ -99,6 +99,14 @@ func splitDetailEmptyHint(innerW, innerH int) string {
 		return hint
 	}
 	return lipgloss.Place(innerW, innerH, lipgloss.Center, lipgloss.Center, hint)
+}
+
+// emptyBody says why a detail with no issue has nothing to show.
+func (dm detailModel) emptyBody(width int) string {
+	if dm.err == nil {
+		return statusStyle.Render("no issue selected")
+	}
+	return errorStyle.Render(truncate("unavailable: "+sanitizeForLine(dm.err.Error()), max(width, 1)))
 }
 
 // renderSplitInfoLine renders the shared info line at the bottom of
@@ -191,7 +199,7 @@ func (dm detailModel) ViewSplit(width, height int, chrome viewChrome) string {
 		return statusStyle.Render("loading…")
 	}
 	if dm.issue == nil {
-		return statusStyle.Render("no issue selected")
+		return dm.emptyBody(width)
 	}
 	if width <= 0 || height < 6 {
 		return dm.renderTinyFallback(width)
