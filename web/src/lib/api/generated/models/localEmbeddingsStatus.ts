@@ -9,10 +9,8 @@ export interface LocalEmbeddingsStatus {
   can_change: boolean
   download_bytes: number
   indexing?: LocalEmbeddingsIndexing
-  issues?: number
   job?: LocalEmbeddingsJob
   ollama_available: boolean
   provider: LocalEmbeddingsStatusProvider
-  rebuild: boolean
   [key: string]: unknown
 }

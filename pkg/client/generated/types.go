@@ -4484,11 +4484,9 @@ type LocalEmbeddingsStatus struct {
 	CanChange       bool                          `json:"can_change"`
 	DownloadBytes   int64                         `json:"download_bytes"`
 	Indexing        *LocalEmbeddingsIndexing      `json:"indexing,omitempty"`
-	Issues          *int64                        `json:"issues,omitempty"`
 	Job             *LocalEmbeddingsJob           `json:"job,omitempty"`
 	OllamaAvailable bool                          `json:"ollama_available"`
 	Provider        LocalEmbeddingsStatusProvider `json:"provider" validate:"required"`
-	Rebuild         bool                          `json:"rebuild"`
 }
 
 func (l LocalEmbeddingsStatus) Validate() error {

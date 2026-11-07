@@ -4287,9 +4287,6 @@ components:
           type: integer
         indexing:
           $ref: "#/components/schemas/LocalEmbeddingsIndexing"
-        issues:
-          format: int64
-          type: integer
         job:
           $ref: "#/components/schemas/LocalEmbeddingsJob"
         ollama_available:
@@ -4301,13 +4298,10 @@ components:
             - built_in
             - other
           type: string
-        rebuild:
-          type: boolean
       required:
         - provider
         - download_bytes
         - ollama_available
-        - rebuild
         - can_change
       type: object
     MapConnectorFieldRequestBody:

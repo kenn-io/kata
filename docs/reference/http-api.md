@@ -21,11 +21,11 @@ Search responses include `X-Kata-Embeddings-Configured: true` when the answering
 
 ## Local embeddings setup
 
-`GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, rebuild warning, setup job, initial indexing progress, and `can_change`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. A rebuild includes the number of issues visible to the caller. Issue-scoped credentials can read the status.
+`GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, setup job, initial indexing progress, and `can_change`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. Issue-scoped credentials can read the status.
 
-`POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It reuses the CLI's `kata daemon local-embeddings` operation, including its config checks and automatic restart. The daemon must support restarting its installed executable.
+`POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It shares the CLI's download and config checks, saves the setting, and reports the `restart` job state until the daemon restarts. Run `kata daemon restart` locally, or restart the daemon on its host. Reopen `kata ui` or sign in again afterward to see indexing progress.
 
-Setup requires a local owner browser session, a bootstrap token, or a static daemon token, with a writable browser session manager when present. It returns `403` for other viewers and through the daemon switcher proxy, `404` when setup is unavailable, and `409` while setup is already running. The switcher proxy permits status reads.
+Setup is available only when no embeddings provider is configured and no setup job is active. It requires a local owner browser session, a bootstrap token, or a static daemon token, with a writable browser session manager when present. It returns `403` for other viewers and through the daemon switcher proxy, `404` when setup is unavailable, and `409` while setup is already running. The switcher proxy permits status reads.
 
 ## Getting the schema
 

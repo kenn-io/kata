@@ -10,7 +10,6 @@ function status(patch: Partial<LocalEmbeddingsStatus> = {}): LocalEmbeddingsStat
     provider: 'none',
     download_bytes: 290_000_000,
     ollama_available: false,
-    rebuild: false,
     can_change: true,
     ...patch,
   }
@@ -45,81 +44,80 @@ describe('SearchSettings', () => {
     expect(screen.queryByRole('button', { name: 'Turn on' })).toBeNull()
   })
 
-  test.each([false, true])(
-    'renders count-free indexing with download active=%s',
-    async (downloading) => {
-      vi.useFakeTimers()
-      setGeneratedFetch(
-        vi.fn(async () =>
-          Response.json(
-            status({
-              can_change: false,
-              provider: downloading ? 'ollama' : 'built_in',
-              indexing: { done: 0, total: 0, failed: false },
-              ...(downloading
-                ? { job: { state: 'downloading', downloaded: 120_000_000, total: 290_000_000 } }
-                : {}),
-            }),
-          ),
-        ),
-      )
-      renderSettings({ canAdministerDaemon: false })
-      await settle()
-      if (downloading) {
-        expect(
-          screen.getByText('Downloading 120 MB of 290 MB · Keyword search works meanwhile'),
-        ).not.toBeNull()
-      } else {
-        expect(screen.getByText('Turning on', { exact: true })).not.toBeNull()
-        expect(screen.queryByText(/Indexing 0 of 0/)).toBeNull()
-        expect(screen.queryByRole('progressbar')).toBeNull()
-        expect(screen.getByText(/Keyword search works meanwhile/)).not.toBeNull()
-      }
-    },
-  )
-
-  test('keeps the built-in recovery action when Ollama indexing fails', async () => {
+  test('renders count-free indexing without progress counts', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
       vi.fn(async () =>
         Response.json(
-          status({ provider: 'ollama', indexing: { done: 0, total: 2, failed: true } }),
+          status({
+            can_change: false,
+            provider: 'built_in',
+            indexing: { done: 0, total: 0, failed: false },
+          }),
         ),
       ),
     )
-    renderSettings()
+    renderSettings({ canAdministerDaemon: false })
     await settle()
-    expect(screen.getByRole('button', { name: 'Use built-in instead' })).not.toBeNull()
-    expect(screen.getByRole('alert').textContent).toContain('Indexing hit an error')
+    expect(screen.getByText('Turning on', { exact: true })).not.toBeNull()
+    expect(screen.queryByText(/Indexing 0 of 0/)).toBeNull()
+    expect(screen.queryByRole('progressbar')).toBeNull()
   })
 
-  test.each([false, true])(
-    'discloses the download for an available Ollama switch after failure=%s',
-    async (failed) => {
+  test('shows Ollama as on without a switch or download action', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi.fn(async () => Response.json(status({ provider: 'ollama', can_change: false }))),
+    )
+    renderSettings()
+    await settle()
+    expect(screen.getByText('On · Ollama', { exact: true })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Use built-in instead' })).toBeNull()
+    expect(screen.queryByText('Switching keeps your index')).toBeNull()
+    expect(screen.queryByText(/Downloads 290 MB/)).toBeNull()
+  })
+
+  test.each([undefined, 'daemon.example'])(
+    'shows the manual restart step for host=%s after download',
+    async (remoteHost) => {
       vi.useFakeTimers()
-      setGeneratedFetch(
-        vi.fn(async () =>
+      const read = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(status()))
+        .mockResolvedValue(
           Response.json(
             status({
-              provider: 'ollama',
-              ...(failed
-                ? {
-                    job: {
-                      state: 'failed' as const,
-                      downloaded: 0,
-                      total: 290_000_000,
-                      error: 'Not enough disk space. Free space and try again.',
-                    },
-                  }
-                : {}),
+              can_change: false,
+              job: { state: 'restart', downloaded: 290_000_000, total: 290_000_000 },
             }),
           ),
+        )
+      setGeneratedFetch(read)
+      const postFetch = vi.fn<typeof fetch>(async () =>
+        Response.json(
+          status({
+            can_change: false,
+            job: { state: 'downloading', downloaded: 0, total: 290_000_000 },
+          }),
+          { status: 202 },
         ),
       )
-      renderSettings()
+      render(SearchSettings, {
+        props: { canAdministerDaemon: true, onback: vi.fn(), postFetch, remoteHost },
+      })
       await settle()
-      expect(screen.getByRole('button', { name: 'Use built-in instead' })).not.toBeNull()
-      expect(screen.getByText('Downloads 290 MB once, shared by all Kenn apps')).not.toBeNull()
+      await fireEvent.click(screen.getByRole('button', { name: 'Turn on' }))
+      await settle()
+      expect(screen.getByText(/Downloading 0 MB/)).not.toBeNull()
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(
+        screen.getByText(
+          remoteHost
+            ? `Restart the daemon on ${remoteHost} to finish.`
+            : 'Restart the daemon to finish: run kata daemon restart.',
+        ),
+      ).not.toBeNull()
+      expect(screen.queryByRole('button', { name: 'Turn on' })).toBeNull()
     },
   )
 
@@ -158,42 +156,7 @@ describe('SearchSettings', () => {
     ).not.toBeNull()
   })
 
-  test('follows a lost POST through Off, failed reads, indexing, and On', async () => {
-    vi.useFakeTimers()
-    const read = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json(status()))
-      .mockResolvedValueOnce(Response.json(status()))
-      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
-      .mockResolvedValueOnce(
-        Response.json(
-          status({ provider: 'built_in', indexing: { done: 0, total: 1, failed: false } }),
-        ),
-      )
-      .mockResolvedValueOnce(Response.json(status({ provider: 'built_in' })))
-    setGeneratedFetch(read)
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        throw new TypeError('Failed to fetch')
-      }),
-    )
-    renderSettings()
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Turn on' }))
-    await settle()
-    expect(screen.getByRole('alert').textContent).toContain("Couldn't confirm Turn on")
-    await vi.advanceTimersByTimeAsync(4000)
-    expect(
-      screen.getByText('Indexing 0 of 1 issue · Keyword search works meanwhile'),
-    ).not.toBeNull()
-    expect(screen.queryByRole('alert')).toBeNull()
-    await vi.advanceTimersByTimeAsync(10000)
-    expect(screen.getByText('On', { exact: true })).not.toBeNull()
-    expect(read).toHaveBeenCalledTimes(5)
-  })
-
-  test('aborts a read at Turn on and ignores its late Off response', async () => {
+  test('ignores the failed-request refresh if a later Turn on starts first', async () => {
     vi.useFakeTimers()
     let late!: (response: Response) => void
     const read = vi
@@ -205,27 +168,51 @@ describe('SearchSettings', () => {
             late = resolve
           }),
       )
-    setGeneratedFetch(read)
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
+      .mockResolvedValue(
         Response.json(
-          status({ job: { state: 'downloading', downloaded: 0, total: 290_000_000 } }),
+          status({
+            can_change: false,
+            job: { state: 'restart', downloaded: 290_000_000, total: 290_000_000 },
+          }),
+        ),
+      )
+    setGeneratedFetch(read)
+    const postFetch = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        Response.json(
+          status({
+            can_change: false,
+            job: { state: 'downloading', downloaded: 0, total: 290_000_000 },
+          }),
           { status: 202 },
         ),
-      ),
-    )
-    renderSettings()
+      )
+    renderSettings({ postFetch })
     await settle()
-    await vi.advanceTimersByTimeAsync(2000)
     await fireEvent.click(screen.getByRole('button', { name: 'Turn on' }))
     await settle()
-    expect(read.mock.calls[1]?.[1]?.signal?.aborted).toBe(true)
+    expect(read).toHaveBeenCalledTimes(2)
+    await fireEvent.click(screen.getByRole('button', { name: 'Turn on' }))
+    await settle()
     late(Response.json(status()))
     await settle()
+    expect(screen.getByText(/Downloading 0 MB/)).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(2000)
     expect(
-      screen.getByText('Downloading 0 MB of 290 MB · Keyword search works meanwhile'),
+      screen.getByText('Restart the daemon to finish: run kata daemon restart.'),
     ).not.toBeNull()
+  })
+
+  test('stops polling while Off', async () => {
+    vi.useFakeTimers()
+    const read = vi.fn<typeof fetch>(async () => Response.json(status()))
+    setGeneratedFetch(read)
+    renderSettings()
+    await settle()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(read).toHaveBeenCalledOnce()
   })
 
   test('sends a rejected POST through sign-in recovery', async () => {
@@ -248,7 +235,14 @@ describe('SearchSettings', () => {
     vi.useFakeTimers()
     const read = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json(status()))
+      .mockResolvedValueOnce(
+        Response.json(
+          status({
+            can_change: false,
+            job: { state: 'downloading', downloaded: 0, total: 290_000_000 },
+          }),
+        ),
+      )
       .mockImplementation(() => new Promise<Response>(() => {}))
     setGeneratedFetch(read)
     const view = renderSettings()

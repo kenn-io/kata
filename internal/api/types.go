@@ -1808,9 +1808,7 @@ type LocalEmbeddingsStatus struct {
 	Provider        string                   `json:"provider" enum:"none,ollama,built_in,other"`
 	DownloadBytes   int64                    `json:"download_bytes"`
 	OllamaAvailable bool                     `json:"ollama_available"`
-	Rebuild         bool                     `json:"rebuild"`
 	CanChange       bool                     `json:"can_change"`
-	Issues          *int64                   `json:"issues,omitempty"`
 	Job             *LocalEmbeddingsJob      `json:"job,omitempty"`
 	Indexing        *LocalEmbeddingsIndexing `json:"indexing,omitempty"`
 }

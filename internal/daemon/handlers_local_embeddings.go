@@ -7,7 +7,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/db"
 )
 
 // ErrLocalEmbeddingsBusy reports an already active setup job.
@@ -63,17 +62,6 @@ func registerLocalEmbeddingsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if !localEmbeddingsAdministrator(ctx, cfg.InsecureReadonly, cfg.WebSessions) {
 			redactLocalEmbeddingsStatus(&snapshot)
-		}
-		if snapshot.Rebuild {
-			ctx, err = authorizeHostProjectScope(ctx, nil, nil, true)
-			if err != nil {
-				return nil, err
-			}
-			count, err := cfg.DB.CountAllIssues(ctx, db.ListAllIssuesParams{IssueScope: issueScopeFromContext(ctx)})
-			if err != nil {
-				return nil, internalAPIError(err)
-			}
-			snapshot.Issues = &count
 		}
 		return &api.LocalEmbeddingsResponse{Body: snapshot}, nil
 	}

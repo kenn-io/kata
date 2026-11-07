@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +17,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 
@@ -41,12 +39,10 @@ type daemonRestart struct {
 	dir        string
 	reply      string
 	from       string
-	webListen  string
 	requested  atomic.Bool
 }
 
 const (
-	daemonRestartWebListenEnv = "KATA_DAEMON_RESTART_WEB_LISTEN"
 	// daemonRestartReplyEnv names the accepted request in the replacement's environment.
 	daemonRestartReplyEnv = "KATA_DAEMON_RESTART_REPLY"
 	// daemonRestartFromEnv names the daemon generation the replacement replaces.
@@ -58,9 +54,8 @@ const (
 
 // The restart variables are unset at process start so children never inherit them.
 var (
-	startedForRestartReply     = takeEnv(daemonRestartReplyEnv)
-	startedForRestartFrom      = takeEnv(daemonRestartFromEnv)
-	startedForRestartWebListen = takeEnv(daemonRestartWebListenEnv)
+	startedForRestartReply = takeEnv(daemonRestartReplyEnv)
+	startedForRestartFrom  = takeEnv(daemonRestartFromEnv)
 )
 
 func takeEnv(key string) string {
@@ -144,7 +139,7 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 	if r == nil || !r.requested.Load() {
 		return nil
 	}
-	env := append(os.Environ(), daemonRestartReplyEnv+"="+r.reply, daemonRestartFromEnv+"="+r.from, daemonRestartWebListenEnv+"="+r.webListen)
+	env := append(os.Environ(), daemonRestartReplyEnv+"="+r.reply, daemonRestartFromEnv+"="+r.from)
 	started := func(pid int) {
 		writeRestartReply(r.dir, r.reply, restartReplacementPIDSuffix, []byte(strconv.Itoa(pid)))
 	}
@@ -386,42 +381,4 @@ func requireRestartable(running []kitdaemon.RuntimeRecord) error {
 		}
 	}
 	return nil
-}
-
-// restartAddress reuses a previous browser address only for an ephemeral bind
-// on the same host. A changed bind host, including the separate web
-// listener's loopback default, is authoritative.
-func restartAddress(web config.WebConfig, requested, previous string) string {
-	if previous == "" || web.PublicOrigin != "" {
-		return ""
-	}
-	bind := ""
-	for _, address := range []string{web.Listen, requested} {
-		if address != "" {
-			_, port, err := net.SplitHostPort(address)
-			if err != nil || port != "0" {
-				return ""
-			}
-			bind = address
-		}
-	}
-	if bind == "" {
-		bind = "127.0.0.1:0"
-	}
-	if !sameBindHost(bind, previous) {
-		return ""
-	}
-	return previous
-}
-
-func sameBindHost(a, b string) bool {
-	hostA, _, errA := net.SplitHostPort(a)
-	hostB, _, errB := net.SplitHostPort(b)
-	if errA != nil || errB != nil {
-		return false
-	}
-	if ipA, ipB := net.ParseIP(hostA), net.ParseIP(hostB); ipA != nil && ipB != nil {
-		return ipA.Equal(ipB)
-	}
-	return hostA == hostB
 }

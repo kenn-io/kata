@@ -38,9 +38,7 @@ Kata can run a shared local embeddings server or use an OpenAI-compatible
 
 ## Enabling it
 
-Open `kata ui`, click the gear in the top bar, and choose **Turn on** under **Search by meaning**. Settings applies to every project on the daemon. It shows download and indexing progress, reports indexing failures while retrying, and keeps the page's address through the automatic restart. A local owner session or a daemon access administrator sees the button. Other viewers, including viewers connected through the daemon switcher, see the status.
-
-To switch Ollama to the built-in server, choose **Use built-in instead**. A different model rebuilds the index; Settings shows the estimate and warns that daemons sharing embeddings need the same model and settings.
+Open `kata ui`, click the gear in the top bar, and choose **Turn on** under **Search by meaning**. Settings applies to every project on the daemon. Turn on downloads what is missing and saves the setting. Run `kata daemon restart` to finish, then reopen `kata ui` to see indexing progress and any failures while it retries. A local owner session or a daemon access administrator sees the button. Other viewers, including viewers connected through the daemon switcher, see the status.
 
 You can also enable it from the CLI:
 

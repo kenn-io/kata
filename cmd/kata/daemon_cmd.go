@@ -1253,18 +1253,6 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, n
 	return restart.exec(ctx)
 }
 
-// localEmbeddingsRestart restarts the daemon for local embeddings and returns
-// why a refused restart was refused, so the owner sees it on the job.
-func localEmbeddingsRestart(restart *daemonRestart, idle daemon.IdleForegroundAdmission, dir string, rec kitdaemon.RuntimeRecord, logger *log.Logger, trigger func()) func(context.Context) error {
-	return func(ctx context.Context) error {
-		cause := errors.New("daemon is shutting down")
-		if !restart.handle(idle, func() error { cause = restart.accept(ctx, dir, rec); return cause }, logger, trigger) {
-			return fmt.Errorf("daemon restart refused: %w", cause)
-		}
-		return nil
-	}
-}
-
 func runDaemonProcess(
 	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart,
 ) (returnErr error) {
@@ -1298,15 +1286,7 @@ func runDaemonProcess(
 			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon; runtime record: %s; remove that file if no kata daemon owns that PID", record.PID, record.SourcePath)
 		}
 	}
-	var listener net.Listener
-	if previous := restartAddress(startup.Web, endpoint.Address, startedForRestartWebListen); endpoint.Network == kitdaemon.NetworkTCP && previous != "" {
-		pinned := endpoint
-		pinned.Address = previous
-		listener, err = kitdaemon.Listen(ctx, pinned, kitdaemon.WithRuntimeStore(runtimeStore))
-	}
-	if listener == nil {
-		listener, err = kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
-	}
+	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
 	if err != nil {
 		return err
 	}
@@ -1370,30 +1350,14 @@ func runDaemonProcess(
 	}
 
 	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
-	webOptions := daemon.WebEndpointOptions{
+	webEndpoint, err := daemon.ResolveWebEndpoint(daemon.WebEndpointOptions{
 		NamespaceID: ns.DBHash,
 		GOOS:        runtime.GOOS,
 		Daemon:      runtimeEndpoint,
 		Config:      startup.Web,
-	}
-	var webEndpoint daemon.WebEndpoint
-	if previous := restartAddress(startup.Web, startup.Web.Listen, startedForRestartWebListen); previous != "" && runtimeEndpoint.Network != kitdaemon.NetworkTCP {
-		pinned := webOptions
-		pinned.Config.Listen = previous
-		webEndpoint, err = daemon.ResolveWebEndpoint(pinned)
-	}
-	if webEndpoint.Origin == "" {
-		webEndpoint, err = daemon.ResolveWebEndpoint(webOptions)
-	}
+	})
 	if err != nil {
 		return err
-	}
-	if restart != nil {
-		requested := startup.Web.Listen
-		if webEndpoint.Shared {
-			requested = endpoint.Address
-		}
-		restart.webListen = restartAddress(startup.Web, requested, webEndpoint.Endpoint.Address)
 	}
 	if webEndpoint.Listener != nil {
 		defer func() { _ = webEndpoint.Listener.Close() }()
@@ -1664,9 +1628,6 @@ func runDaemonProcess(
 	localSetup := &localEmbeddingsSetup{
 		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
 		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
-	}
-	if restart != nil {
-		localSetup.restart = localEmbeddingsRestart(restart, idleAdmission, ns.DataDir, rec, daemonLog, shutdownTrigger.Call)
 	}
 	srv := daemon.NewServer(daemon.ServerConfig{
 		LocalEmbeddings:           localSetup,

@@ -453,13 +453,12 @@ type localEmbeddingsSetup struct {
 	embeddings config.EmbeddingsConfig
 	idle       daemon.IdleForegroundAdmission
 	start      func(func(context.Context)) bool
-	restart    func(context.Context) error
 	mu         sync.Mutex
 	job        *api.LocalEmbeddingsJob
 }
 
 func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsStatus, error) {
-	status := api.LocalEmbeddingsStatus{Provider: "none", CanChange: s.restart != nil}
+	status := api.LocalEmbeddingsStatus{Provider: "none"}
 	if s.embeddings.UsesLocal() {
 		status.Provider = "built_in"
 	} else if s.embeddings.Enabled() {
@@ -474,34 +473,17 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 		return status, err
 	}
 	status.DownloadBytes, status.OllamaAvailable = inspected.DownloadBytes, inspected.OllamaAvailable
-	if status.Provider == "ollama" {
-		status.Rebuild, status.Job = localEmbeddingsSwitch(ctx, s.embeddings)
-		status.CanChange = status.CanChange && status.Job == nil
-	}
 	s.mu.Lock()
 	if s.job != nil {
 		job := *s.job
 		status.Job = &job
 	}
 	s.mu.Unlock()
+	status.CanChange = status.Provider == "none" && (status.Job == nil || status.Job.State == "failed")
 	return status, nil
 }
 
-// localEmbeddingsSwitch reports whether switching to the built-in server
-// rebuilds the index. A configuration that refuses the switch comes back as a
-// failed job explaining why, so status still shows the running provider.
-func localEmbeddingsSwitch(ctx context.Context, current config.EmbeddingsConfig) (bool, *api.LocalEmbeddingsJob) {
-	prepared, err := prepareLocalEmbeddingsConfig(ctx, current)
-	if err != nil {
-		return false, &api.LocalEmbeddingsJob{State: "failed", Error: err.Error()}
-	}
-	return prepared.index == "rebuilt", nil
-}
-
 func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
-	if s.embeddings.UsesLocal() {
-		return nil
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.job != nil && s.job.State != "failed" {
@@ -528,14 +510,14 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 				s.job.Downloaded, s.job.Total = downloaded, total
 				s.mu.Unlock()
 			},
-			restart: func(ctx context.Context, apply func() error) error {
+			restart: func(_ context.Context, apply func() error) error {
 				if err := apply(); err != nil {
 					return err
 				}
 				s.mu.Lock()
-				s.job.State = "restarting"
+				s.job.State = "restart"
 				s.mu.Unlock()
-				return s.restart(ctx)
+				return nil
 			},
 		})
 		if err != nil {
