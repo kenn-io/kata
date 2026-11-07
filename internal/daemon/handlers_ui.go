@@ -722,7 +722,7 @@ func uiValidationError(field, message string, data map[string]any) error {
 
 func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	policy := uiPolicy{Capabilities: api.UICapabilities{
-		Attachments: cfg.Docbank != nil,
+		Attachments: uiAttachmentsAvailable(ctx, cfg),
 		Writable:    !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
 	}}
 	if cfg.WebSessions != nil {
@@ -756,6 +756,25 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 		}
 	}
 	return policy
+}
+
+func uiAttachmentsAvailable(ctx context.Context, cfg ServerConfig) bool {
+	if cfg.Docbank != nil {
+		return true
+	}
+	if cfg.DB == nil {
+		return false
+	}
+	bindings, err := cfg.DB.ListFederationBindings(ctx)
+	if err != nil {
+		return false
+	}
+	for _, binding := range bindings {
+		if binding.Role == db.FederationRoleSpoke && binding.Enabled {
+			return true
+		}
+	}
+	return false
 }
 
 func makeUIETag(intent any, cursor int64, policy uiPolicy) (string, error) {

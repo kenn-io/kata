@@ -337,6 +337,24 @@ func TestUIAttachmentCapabilityFollowsDocbankConfiguration(t *testing.T) {
 	}
 }
 
+func TestUIAttachmentCapabilityIncludesFederatedDocbankOrigin(t *testing.T) {
+	env := testenv.New(t)
+	project, _ := seedProjectAndIssue(t, env)
+	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
+		HubProjectID: 42, HubProjectUID: project.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+
+	code, raw := env.Get(t, "/api/v1/ui/snapshot?view=inbox")
+	require.Equal(t, 200, code, string(raw))
+	var snapshot struct {
+		Capabilities api.UICapabilities `json:"capabilities"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &snapshot))
+	require.True(t, snapshot.Capabilities.Attachments, "enabled spoke should expose origin-routed Docbank controls")
+}
+
 func TestAttachmentUploadStatusErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

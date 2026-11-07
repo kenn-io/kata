@@ -435,7 +435,7 @@ func Sign(r *http.Request, source signingpolicy.Source) error {
 		if spool != nil {
 			_ = spool.Close()
 		}
-		return signingpolicy.ErrInvalid
+		return errors.Join(signingpolicy.ErrInvalid, err)
 	}
 	r.Header.Set("Content-Digest", digest)
 	input, sig, err := httpsign.SignRequest("sig1", *signer, r)

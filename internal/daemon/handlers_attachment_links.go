@@ -30,7 +30,7 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 	if err != nil {
 		return nil, err
 	}
-	if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, false); err != nil {
+	if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, true); err != nil {
 		return nil, err
 	}
 	input := in.Body

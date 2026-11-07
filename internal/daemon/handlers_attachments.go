@@ -102,7 +102,7 @@ func recheckAttachmentWrite(ctx context.Context, cfg ServerConfig, projectID int
 	if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
 		return err
 	}
-	return requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, false)
+	return requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, true)
 }
 
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
@@ -119,7 +119,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, false); err != nil {
+		if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, true); err != nil {
 			return nil, err
 		}
 		if !metadata.ValidAttachmentName(in.Name) {

@@ -114,6 +114,9 @@ func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.Fed
 	}
 	resp, err := remote.client.Do(req) //nolint:gosec // G704: destination and credential are pinned to the project's configured upstream origin.
 	if err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			return nil, attachmentError(http.StatusRequestEntityTooLarge, "attachment_too_large")
+		}
 		return nil, attachmentError(503, "federation_offline")
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
