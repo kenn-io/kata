@@ -83,26 +83,13 @@ func newDocbankSetupCmd() *cobra.Command {
 					return fmt.Errorf("%s already has a different [docbank] section; edit or remove it, then rerun", path)
 				}
 			}
-			var client *docbank.Client
-			var where, vault string
+			vault, label, where := want.URL, want.URL, "docbank at "+want.URL
 			if local {
 				if vault, err = docbank.LocalHome(); err != nil {
 					return err
 				}
-				if err = localDocbank.Ready(ctx); err != nil {
-					return fmt.Errorf("cannot use the Docbank on this machine: %w; kata's config was not changed", err)
-				}
-				client, where = docbank.NewLocalClient(localDocbank), "the Docbank on this machine ("+vault+")"
-			} else {
-				vault = want.URL
-				key, err := want.ResolveKey()
-				if err != nil {
-					return err
-				}
-				client, where = docbank.NewClient(want.URL, func() (string, error) { return key, nil }), "docbank at "+want.URL
-			}
-			if err := checkDocbankKey(ctx, client, where); err != nil {
-				return err
+				label = "the Docbank on this machine (" + vault + ")"
+				where = label
 			}
 			changed := !set
 			if changed {
@@ -118,6 +105,25 @@ func newDocbankSetupCmd() *cobra.Command {
 						return err
 					}
 				}
+			}
+			// Starting Docbank and reading the key wait for approval, but still precede any write.
+			var client *docbank.Client
+			if local {
+				if err = localDocbank.Ready(ctx); err != nil {
+					return fmt.Errorf("cannot use the Docbank on this machine: %w; kata's config was not changed", err)
+				}
+				client = docbank.NewLocalClient(localDocbank)
+			} else {
+				key, err := want.ResolveKey()
+				if err != nil {
+					return err
+				}
+				client = docbank.NewClient(want.URL, func() (string, error) { return key, nil })
+			}
+			if err := checkDocbankKey(ctx, client, where); err != nil {
+				return err
+			}
+			if changed {
 				proposed, err := appendTOMLTable(original, "docbank", docbankSection{Local: want.Local, URL: want.URL, APIKeyFile: want.APIKeyFile, Folder: want.Folder})
 				if err != nil {
 					return fmt.Errorf("cannot add [docbank] to %s: %w", path, err)
@@ -128,11 +134,8 @@ func newDocbankSetupCmd() *cobra.Command {
 				if err := writeDaemonConfigAndRestart(ctx, cmd.ErrOrStderr(), path, original, originalExists, proposed); err != nil {
 					return err
 				}
-				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Service environment settings can override this configuration."); err != nil {
-					return err
-				}
 			}
-			return printDocbankSetup(cmd.OutOrStdout(), want, vault, changed)
+			return printDocbankSetup(cmd.OutOrStdout(), want, label, changed)
 		},
 	}
 	cmd.Flags().StringVar(&docbankURL, "url", "", "use a Docbank running elsewhere; HTTPS except on loopback")
@@ -142,13 +145,9 @@ func newDocbankSetupCmd() *cobra.Command {
 	return cmd
 }
 
-// printDocbankSetup reports the result; vault is the Docbank home for the local form and the URL otherwise.
-func printDocbankSetup(w io.Writer, want config.DocbankConfig, vault string, changed bool) error {
+// printDocbankSetup reports the result; target names the Docbank (the machine's Docbank for the local form, the URL otherwise).
+func printDocbankSetup(w io.Writer, want config.DocbankConfig, target string, changed bool) error {
 	var err error
-	target := want.URL
-	if want.Local {
-		target = "the Docbank on this machine (" + vault + ")"
-	}
 	switch currentOutputMode() {
 	case outputJSON:
 		return emitJSON(w, struct {

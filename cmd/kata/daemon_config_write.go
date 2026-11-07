@@ -78,5 +78,6 @@ func writeDaemonConfigAndRestart(ctx context.Context, stderr io.Writer, path str
 		}
 		return err
 	}
-	return nil
+	_, err = fmt.Fprintln(stderr, "Service environment settings can override this configuration.")
+	return err
 }

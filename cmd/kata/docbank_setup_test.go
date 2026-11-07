@@ -161,3 +161,22 @@ func TestDocbankSetupLocalRefusesBeforeWriting(t *testing.T) {
 		})
 	}
 }
+
+func TestDocbankSetupDeclinedPromptStartsNothing(t *testing.T) {
+	home := setupDocbankEnv(t)
+	stubIsTTY(t, false)
+	started := false
+	stubLocalDocbank(t, func(context.Context, string) error { started = true; return nil })
+	path := filepath.Join(home, "config.toml")
+	original := "# operator notes stay\n"
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
+
+	_, stderr, err := executeRootCapture(t, t.Context(), "docbank", "setup")
+
+	require.ErrorContains(t, err, "no TTY")
+	require.Contains(t, stderr, "can read any file in the Docbank vault")
+	require.False(t, started, "Docbank must not start before the change is approved")
+	written, readErr := os.ReadFile(path) // #nosec G304 -- test-owned configuration
+	require.NoError(t, readErr)
+	require.Equal(t, original, string(written))
+}
