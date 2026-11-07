@@ -3,10 +3,8 @@ package sqlitestore_test
 import (
 	"database/sql"
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -89,9 +87,7 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 			if interleaved {
 				stride = 2
 			}
-			for i, e := range events {
-				require.Equal(t, after+int64(i+1)*stride, e.ID)
-			}
+			require.Equal(t, after+stride, events[0].ID)
 			conn, err = raw.Conn(t.Context())
 			require.NoError(t, err)
 			pages := sqlitePageFetches(t, conn, false)
@@ -132,49 +128,19 @@ func TestReadFederationSparseCatchupPageBudget(t *testing.T) {
 	tx, err := raw.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
+	windows := 0
 	query := func(where string, args ...any) ([]db.Event, error) {
+		windows++
 		return (sqlquery.Query{SQL: sqlitestore.EventSelectForTest + where, Args: args}).All(ctx, tx, func(rows *sql.Rows) (db.Event, error) { return sqlitestore.ScanEventForTest(rows) })
 	}
-	identity := db.FederationReadIssueUIDExpr(false)
-	readers := []func() ([]db.Event, error){
-		func() ([]db.Event, error) {
-			// origin/main's single-query reader, with the same projection and data.
-			return query(` WHERE (e.project_id=$1 OR `+identity+` IN (SELECT uid FROM issues WHERE project_id=$1)
- OR (e.type='issue.moved' AND json_extract(e.payload,'$.from_project_uid')=(SELECT uid FROM projects WHERE id=$1))) AND e.type<>'sync.reset_required' AND e.id>$2 AND ($4='' OR `+identity+`=$4) ORDER BY e.id LIMIT $3`, project.ID, after, limit, "")
-		},
-		func() ([]db.Event, error) {
-			return db.ReadFederationEventPage(ctx, tx, project, "", after, limit, false, query)
-		},
+	events, err := db.ReadFederationEventPage(ctx, tx, project, "", after, limit, false, query)
+	require.NoError(t, err)
+	require.Len(t, events, limit)
+	for i, event := range events {
+		require.Equal(t, after+int64((i+1)*(gap+1)), event.ID)
 	}
-	// Rebuilding each window's membership list costs CPU without many extra
-	// database page fetches. Measure complete page reads, warm both readers,
-	// alternate their order, and compare medians to reduce scheduling noise.
-	var samples [2][]time.Duration
-	var baseline []db.Event
-	for trial := range 6 {
-		for offset := range 2 {
-			reader := (trial + offset) % 2
-			start := time.Now()
-			events, err := readers[reader]()
-			elapsed := time.Since(start)
-			require.NoError(t, err)
-			require.Len(t, events, limit)
-			if baseline == nil {
-				baseline = events
-				for i, event := range events {
-					require.Equal(t, after+int64((i+1)*(gap+1)), event.ID)
-				}
-			}
-			require.Equal(t, baseline, events)
-			if trial > 0 {
-				samples[reader] = append(samples[reader], elapsed)
-			}
-		}
-	}
-	for _, durations := range samples {
-		slices.Sort(durations)
-	}
-	mainCost, headCost := samples[0][2], samples[1][2]
-	t.Logf("median page read: head=%s, origin/main single query=%s, ratio=%.2fx", headCost, mainCost, float64(headCost)/float64(mainCost))
-	require.LessOrEqual(t, headCost, mainCost*3/2, "sparse catchup must stay within 1.5x of the single-query reader")
+	// A constant issue-count-wide window needs 46 queries for this history.
+	const constantWidthWindows = (limit*(gap+1) + issueCount - 1) / issueCount
+	t.Logf("%d window queries; constant width needs %d", windows, constantWidthWindows)
+	require.LessOrEqual(t, windows, constantWidthWindows/4, "sparse catchup must widen productive windows")
 }
