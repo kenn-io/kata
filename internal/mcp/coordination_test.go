@@ -22,7 +22,7 @@ func TestNewSectionLoadersRegisterOnlyTheirTools(t *testing.T) {
 		loader, section string
 		tools           []string
 	}{
-		{"kata.load_coordination", "coordination", []string{"kata.assign", "kata.inbox", "kata.status", "kata.unassign"}},
+		{"kata.load_coordination", "coordination", []string{"kata.assign", "kata.inbox", "kata.notify", "kata.status", "kata.unassign"}},
 		{"kata.load_docs", "docs", []string{"kata.read_doc", "kata.search_docs"}},
 	} {
 		t.Run(test.section, func(t *testing.T) {

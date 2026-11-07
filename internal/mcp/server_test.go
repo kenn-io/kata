@@ -347,6 +347,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.list",
 		"kata.move",
 		"kata.next",
+		"kata.notify",
 		"kata.project_create",
 		"kata.project_merge",
 		"kata.project_purge",

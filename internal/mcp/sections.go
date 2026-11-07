@@ -85,8 +85,8 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		},
 		{
 			loader: "kata.load_coordination", section: "coordination", title: "Load coordination tools",
-			description: "Load typed assign, unassign, inbox, and issue-status tools for handing work between actors, then refresh the MCP tool list.",
-			tools:       []string{"kata.assign", "kata.inbox", "kata.status", "kata.unassign"}, available: true, register: registerCoordinationTools,
+			description: "Load typed assign, unassign, notify, inbox, and issue-status tools for handing work between actors, then refresh the MCP tool list.",
+			tools:       []string{"kata.assign", "kata.inbox", "kata.notify", "kata.status", "kata.unassign"}, available: true, register: registerCoordinationTools,
 		},
 		{
 			loader: "kata.load_cron", section: "cron", title: "Load cron tools",

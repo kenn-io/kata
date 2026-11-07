@@ -123,15 +123,20 @@ type PurgeOutput struct {
 type WaitInput struct {
 	Refs           []string `json:"refs"`
 	Status         string   `json:"status,omitempty"`
+	Until          string   `json:"until,omitempty" jsonschema:"closed, attention, needs-human, stuck, or reply; mutually exclusive with status"`
+	For            string   `json:"for,omitempty" jsonschema:"Exact reply recipient; defaults to the effective actor and startup teammate; only with until=reply"`
 	Any            bool     `json:"any,omitzero"`
 	TimeoutSeconds int      `json:"timeout_seconds,omitzero"`
 }
 
 // WaitState reports one observed issue state.
 type WaitState struct {
-	Ref     string `json:"ref"`
-	Status  string `json:"status"`
-	Matched bool   `json:"matched"`
+	Ref          string `json:"ref"`
+	Status       string `json:"status"`
+	Matched      bool   `json:"matched"`
+	Reason       string `json:"reason,omitempty"`
+	Attention    string `json:"attention,omitempty"`
+	AttentionMsg string `json:"attention_msg,omitempty"`
 }
 
 // WaitOutput reports why an issue-state wait ended.
@@ -558,85 +563,6 @@ func (h toolHandlers) destructiveTarget(ctx context.Context, rawRef, confirm, ve
 		return ProjectIdentity{}, destructiveIssue{}, "", fmt.Errorf("confirm must equal %q", expected)
 	}
 	return project, destructiveIssue{UID: shown.Issue.UID, ShortID: shown.Issue.ShortID}, expected, nil
-}
-
-func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input WaitInput) (*sdkmcp.CallToolResult, WaitOutput, error) {
-	if len(input.Refs) == 0 || len(input.Refs) > maximumResultLimit {
-		return nil, WaitOutput{}, fmt.Errorf("refs must contain between 1 and %d issue references", maximumResultLimit)
-	}
-	status := strings.TrimSpace(input.Status)
-	if status == "" {
-		status = "closed"
-	}
-	if status != "open" && status != "closed" && status != "deleted" {
-		return nil, WaitOutput{}, errors.New("status must be open, closed, or deleted")
-	}
-	timeout := input.TimeoutSeconds
-	if timeout == 0 {
-		timeout = 30
-	}
-	if timeout < 1 || timeout > 300 {
-		return nil, WaitOutput{}, errors.New("timeout_seconds must be between 1 and 300")
-	}
-	waitContext, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-	defer cancel()
-	h = h.withLongRunningClient()
-	// The deadline can expire while a lookup is in flight; that is the
-	// documented timeout outcome, not a tool error. States from the last
-	// complete round keep the output honest.
-	lastStates := make([]WaitState, 0)
-	for {
-		states := make([]WaitState, 0, len(input.Refs))
-		matches := 0
-		for _, raw := range input.Refs {
-			project, ref, targetErr := h.options.Scope.IssueTarget(waitContext, h.options.Client, raw, false)
-			if targetErr != nil {
-				if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-					return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
-				}
-				return nil, WaitOutput{}, targetErr
-			}
-			includeDeleted := true
-			shown, showErr := h.options.Client.ShowIssue(waitContext, &generated.ShowIssueRequestOptions{
-				PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
-				Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
-			})
-			if showErr != nil {
-				if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-					return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
-				}
-				return nil, WaitOutput{}, showErr
-			}
-			project, showErr = h.currentIssueProject(waitContext, project, issueFromShow(shown.Issue))
-			if showErr != nil {
-				if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-					return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
-				}
-				return nil, WaitOutput{}, showErr
-			}
-			actual := shown.Issue.Status
-			if shown.Issue.DeletedAt != nil {
-				actual = "deleted"
-			}
-			matched := actual == status
-			if matched {
-				matches++
-			}
-			states = append(states, WaitState{Ref: project.Name + "#" + shown.Issue.ShortID, Status: actual, Matched: matched})
-		}
-		if input.Any && matches > 0 || !input.Any && matches == len(states) {
-			return successResult(), WaitOutput{Reason: "matched", States: states}, nil
-		}
-		lastStates = states
-		select {
-		case <-waitContext.Done():
-			if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-				return successResult(), WaitOutput{Reason: "timeout", States: states}, nil
-			}
-			return nil, WaitOutput{}, waitContext.Err()
-		case <-time.After(250 * time.Millisecond):
-		}
-	}
 }
 
 func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest, input AuditClosesInput) (*sdkmcp.CallToolResult, AuditClosesOutput, error) {

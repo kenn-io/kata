@@ -34,8 +34,8 @@ var skillCommands = []SkillCommand{
 	{"kata delete", []string{"kata.delete"}, "exact confirmation required"},
 	{"kata purge", []string{"kata.purge"}, "exact confirmation required"},
 	{"kata inbox", []string{"kata.inbox"}, "`--for` maps to `for`; lists `notify.*` requests on open issues, not `work.attention`"},
-	{"kata wait", []string{"kata.wait"}, "`kata.wait` waits on issue status only. For `--until attention`, poll `kata.show` for each watched ref with your own deadline: closed completes first, then a non-empty `work.attention` other than `ok`. Notifications are separate state."},
-	{"kata notify", nil, "no MCP tool yet; an operator with CLI access must send or clear requests"},
+	{"kata wait", []string{"kata.wait"}, "Use `status` or `until` (`closed`, `attention`, `needs-human`, `stuck`, `reply`), never both. Until modes also finish on closure. `for` selects an exact reply inbox; its first poll is the baseline. `timeout_seconds` defaults to 30 and accepts 1–300; `any` returns after one match. Notifications remain separate from `work.attention`."},
+	{"kata notify", []string{"kata.notify"}, "Send with `ref`, `to`, and `message`; clear one exact recipient with `ref`, `to`, and `clear: true`. Optional `re` links a comment. Broadcast uses `broadcast` instead of `to`, with optional `teammates`; retries are rate limited."},
 	{"kata events", []string{"kata.events"}, ""},
 }
 

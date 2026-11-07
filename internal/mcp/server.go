@@ -211,7 +211,7 @@ func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.purge", "Purge issue", "Irreversibly purge a soft-deleted issue after exact confirmation.", mutating, handlers.purgeIssue)
 	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
 	addTool(server, "kata.restore", "Restore issue", "Restore a soft-deleted issue.", additive, handlers.restoreIssue)
-	addTool(server, "kata.wait", "Wait for issues", "Wait for issue status conditions with a bounded timeout.", read, handlers.wait)
+	addTool(server, "kata.wait", "Wait for issues", "Wait up to 300 seconds for status, delegated work.attention, or an exact recipient's notification change after the first poll. until modes also finish on closure; requests are never consumed. Use any to return after one match.", read, handlers.wait)
 }
 
 func addTool[In, Out any](
@@ -330,6 +330,12 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 			Then: &jsonschema.Schema{Required: []string{"external_comment_id"}},
 			Else: &jsonschema.Schema{Not: &jsonschema.Schema{Required: []string{"external_comment_id"}}},
 		})
+	case "kata.wait":
+		setEnum("status", "open", "closed", "deleted")
+		setEnum("until", "closed", "attention", "needs-human", "stuck", "reply")
+		setStringBounds("for", 1, 128)
+		forbidTogether("status", "until")
+		setNumberBounds("timeout_seconds", 1, 300)
 	case "kata.search":
 		setEnum("status", "open", "closed")
 		setStringBounds("query", 1, 4096)
@@ -452,6 +458,13 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 	case "kata.inbox":
 		setStringBounds("for", 1, notification.RecipientMaxBytes)
 		setNumberBounds("limit", 1, maximumResultLimit)
+	case "kata.notify":
+		setStringBounds("ref", 1, 256)
+		setStringBounds("to", 1, notification.RecipientMaxBytes)
+		setStringBounds("message", 1, notification.MessageMaxBytes)
+		forbidTrueWith("clear", "message")
+		forbidTrueWith("clear", "re")
+		forbidTrueWith("broadcast", "to")
 	case "kata.search_docs":
 		setStringBounds("query", 1, maximumQueryBytes)
 		setNumberBounds("limit", 1, maximumResultLimit)
