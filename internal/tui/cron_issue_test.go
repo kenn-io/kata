@@ -120,7 +120,8 @@ func TestCronIssueMouseListNavigationFollowsSelection(t *testing.T) {
 			m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &Issue{UID: "issue-example", ShortID: "abcd", ProjectID: 7}})
 			require.Equal(t, "issue-example", m.detail.issue.UID)
 			m.opts.Mouse = true
-			m.list.issues = append(m.list.issues, testIssue("next-example"))
+			nextIssue := testIssue("next-example")
+			m.list.issues = append(m.list.issues, nextIssue)
 			m.list.cursor = 0
 			m.list = m.list.syncSelection(m.list.visibleRows())
 
@@ -132,7 +133,7 @@ func TestCronIssueMouseListNavigationFollowsSelection(t *testing.T) {
 			}
 
 			require.False(t, m.cron.returnToCron)
-			require.Equal(t, "next-example", m.detail.issue.UID, "mouse list navigation retargets the split detail")
+			require.Equal(t, nextIssue.UID, m.detail.issue.UID, "mouse list navigation retargets the split detail")
 		})
 	}
 }
@@ -374,6 +375,11 @@ func TestCronIssueReadFailureNoticeWhenHidden(t *testing.T) {
 			require.True(t, m.cron.returnToCron)
 			require.NotNil(t, m.toast, "no persistent error is visible, so a notice explains the failure")
 			require.Contains(t, m.toast.text, "server unavailable")
+			if mode == "behind narrow" {
+				content := ansi.Strip(m.View().Content)
+				require.Contains(t, content, "needs more space")
+				require.Contains(t, content, "server unavailable", "the narrow fallback keeps the linked-issue error visible")
+			}
 			if mode == "refresh" {
 				require.Equal(t, "Linked result", m.detail.issue.Title, "a failed refresh keeps the retained issue")
 			}

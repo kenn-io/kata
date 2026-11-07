@@ -455,7 +455,7 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.cron.events++
 	}
 	*cursor = min(max(*cursor, 0), max(len(lines)-1, 0))
-	return m, nil
+	return m.cronMarkOpenSeen(), nil
 }
 
 func (p cronData) job(uid string) *generated.CronJob {

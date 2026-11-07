@@ -3762,19 +3762,19 @@ func (m Model) overlayInputAndModal(body string) string {
 }
 
 func (m Model) appendNonListDetailExtras(body string) string {
-	if m.view != viewList && m.view != viewDetail {
-		extras := []string{}
-		if s := renderSSEStatus(m.sseStatus); s != "" {
-			extras = append(extras, s)
-		}
-		if s := m.cronToastLine(); s != "" {
-			extras = append(extras, s)
-		}
-		if len(extras) > 0 {
-			body = joinNonEmpty(append([]string{body}, extras...))
-		}
+	// List/detail render these beside their inline status line at normal widths.
+	// The narrow fallback replaces those renderers, so keep their notices there.
+	if (m.view == viewList || m.view == viewDetail) && (m.width == 0 || m.width >= 80) {
+		return body
 	}
-	return body
+	extras := []string{}
+	if s := renderSSEStatus(m.sseStatus); s != "" {
+		extras = append(extras, s)
+	}
+	if s := m.cronToastLine(); s != "" {
+		extras = append(extras, s)
+	}
+	return joinNonEmpty(append([]string{body}, extras...))
 }
 
 // overlaySuggestMenu places the suggestion menu above the info line

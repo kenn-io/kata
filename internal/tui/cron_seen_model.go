@@ -220,10 +220,18 @@ func (m Model) cronOpenRun() Model {
 // behind Help or the narrow hint, is not. Closing Help or widening shows it.
 func (m Model) cronMarkOpenSeen() Model {
 	n := len(m.cron.stack)
-	if n == 0 || !m.cronScreenShown() || m.cron.stack[n-1].ref.kind != cronRuns || m.cronSeen.session[m.cronProjectUID()][m.cron.stack[n-1].ref.uid] {
+	if n == 0 || !m.cronScreenShown() || m.cron.data == nil || m.cron.stack[n-1].ref.kind != cronRuns {
 		return m
 	}
-	return m.cronMarkSeen(m.cron.stack[n-1].ref.uid)
+	uid := m.cron.stack[n-1].ref.uid
+	if m.cronSeen.session[m.cronProjectUID()][uid] {
+		return m
+	}
+	run, ok := m.cron.data.run(uid)
+	if !ok || !m.cronOpenRunStatusVisible(uid, run.Status) {
+		return m
+	}
+	return m.cronMarkSeen(uid)
 }
 
 // The Cron screen is visible in its view unless Help or the narrow hint covers it.

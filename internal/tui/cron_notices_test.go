@@ -744,6 +744,25 @@ func TestCronNoticeOpenRunDetail(t *testing.T) {
 	})
 }
 
+func TestCronNoticeAppearsBesideNarrowHintOnListAndDetail(t *testing.T) {
+	defer snapshotInit(t)()
+	m := cronNoticeFixture(t)
+	m.width, m.height = 60, 24
+	m, _ = m.cronNoticeEvent(cronNoticeEvent("run-a", m.cron.data.jobs[0].UID, snapshotFixedNow))
+	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+	require.NotNil(t, m.toast)
+
+	m.view = viewList
+	content := stripANSI(m.View().Content)
+	require.Contains(t, content, "needs more space")
+	require.Contains(t, content, "cron: 1 run failed:")
+
+	m.view = viewDetail
+	content = stripANSI(m.View().Content)
+	require.Contains(t, content, "needs more space")
+	require.Contains(t, content, "cron: 1 run failed:")
+}
+
 func TestCronNoticeJobPageSettlementBeatsOlderHeadRefresh(t *testing.T) {
 	T := snapshotFixedNow
 	m := cronNoticeFixture(t)

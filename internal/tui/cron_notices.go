@@ -359,20 +359,30 @@ func (m Model) cronFailureVisibleInOpenRunDetail(t *toast) bool {
 		(failure.Status != "failed" && failure.Status != "unknown") {
 		return false
 	}
-	run, ok := m.cron.data.run(failure.UID)
-	if !ok || run.Status != failure.Status {
-		return false
-	}
 	list := m
 	list.toast = nil
-	_, header, lines := cronScreen(list)
-	start, end := cronViewport(list, header, lines)
+	return list.cronOpenRunStatusVisible(failure.UID, failure.Status)
+}
+
+func (m Model) cronOpenRunStatusVisible(uid, wantStatus string) bool {
+	n := len(m.cron.stack)
+	if n == 0 || !m.cronScreenShown() || m.cron.data == nil ||
+		m.cron.stack[n-1].ref.kind != cronRuns || m.cron.stack[n-1].ref.uid != uid ||
+		(wantStatus != "failed" && wantStatus != "unknown") {
+		return false
+	}
+	run, ok := m.cron.data.run(uid)
+	if !ok || run.Status != wantStatus {
+		return false
+	}
+	_, header, lines := cronScreen(m)
+	start, end := cronViewport(m, header, lines)
 	for i := start; i < end; i++ {
 		line := lines[i]
-		label, status, ok := strings.Cut(strings.TrimSpace(line.text), ":")
+		label, visibleStatus, ok := strings.Cut(strings.TrimSpace(line.text), ":")
 		if ok && label == "Status" {
-			status = strings.TrimSpace(status)
-			if status == failure.Status || (status == "" && i+1 < end && strings.TrimSpace(lines[i+1].text) == failure.Status) {
+			visibleStatus = strings.TrimSpace(visibleStatus)
+			if visibleStatus == wantStatus || (visibleStatus == "" && i+1 < end && strings.TrimSpace(lines[i+1].text) == wantStatus) {
 				return true
 			}
 		}

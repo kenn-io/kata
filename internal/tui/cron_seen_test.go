@@ -344,6 +344,30 @@ func TestCronSeenOpeningOldRunAtCapacityIsSeenForSession(t *testing.T) {
 	require.NotContains(t, m.cronSeen.data.Projects["project-example"].Runs, r.UID)
 }
 
+func TestCronOpenRunStatusBecomesSeenWhenScrolledIntoView(t *testing.T) {
+	m := cronSeenFixture(t)
+	r := m.cron.data.runs[0]
+	r.Status = "failed"
+	r.Summary.Message = new(strings.Repeat("failure detail ", 100))
+	m.cron.data.runs = []generated.CronRun{r}
+	m.cron.data.lookup = map[string]generated.CronRun{r.UID: r}
+	m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{r}, ready: true}
+	m.cron.tab = cronRuns
+	m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
+	m.view = viewCron
+	m.width, m.height = 120, 8
+	_, _, lines := cronScreen(m)
+	m.cron.stack[0].cursor = len(lines) - 1
+
+	require.False(t, m.cronOpenRunStatusVisible(r.UID, r.Status), "the selected page leaves Status outside the final viewport")
+	m = m.cronMarkOpenSeen()
+	require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID], "an offscreen failure stays unseen")
+
+	m = sendKey(m, tea.KeyHome)
+	require.True(t, m.cronOpenRunStatusVisible(r.UID, r.Status), "Home scrolls Status into the viewport")
+	require.True(t, m.cronSeen.session[m.cronProjectUID()][r.UID], "scrolling to Status acknowledges the failure")
+}
+
 func TestCronSeenUpdateSchedulesPersistence(t *testing.T) {
 	m := cronSeenFixture(t)
 	r := m.cron.data.runs[0]
