@@ -2284,10 +2284,10 @@ type EmbeddingsHealth struct {
 	ErrorPresent     *bool   `json:"error_present,omitempty"`
 	EtaSeconds       *int64  `json:"eta_seconds,omitempty"`
 
-	// LastError Sanitized credential rejection; cleared after the next successful embedding call.
+	// LastError Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call.
 	LastError *string `json:"last_error,omitempty"`
 
-	// LastErrorAt Time of the credential rejection; cleared after the next successful embedding call.
+	// LastErrorAt Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call.
 	LastErrorAt     *time.Time `json:"last_error_at,omitempty"`
 	LastErrorStatus *int64     `json:"last_error_status,omitempty"`
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`

@@ -245,6 +245,10 @@ type Storage interface {
 	SearchFTS(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
 	// SearchFTSAny finds at least one query term in title and body documents only
 	// for look-alike checks. Comments don't contribute candidates, scores, or MatchedIn flags.
+	// With TitleQuery on stores of 5k+ issues, SQLite retrieves title matches that
+	// can reach the similarity threshold, ordered by similarity score then ID,
+	// with Score holding that similarity. Above Limit warnings or 200 eligible
+	// titles it uses BM25 ranking. Limit and match flags apply to both paths.
 	SearchFTSAny(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
 
 	// embeddings (semantic search)

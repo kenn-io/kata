@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-04
+last_edited: 2026-11-06
 ---
 
 # Federation
@@ -1928,7 +1928,9 @@ This section describes direct-spoke transport. Negotiated relays use
 A spoke polls the hub for events after its pull cursor. It applies hub events
 in order, deduplicates by event UID and content hash, folds portable payloads
 into the local projection, and advances its pull cursor only after successful
-application.
+application. SQLite cron-only pull pages replay the project's cron history
+without reconciling unrelated issues or their short IDs. Mixed pages and
+project or move baselines retain the ordinary issue reconciliation path.
 
 A push-enabled spoke scans for local-origin events above its push cursor and
 sends them to the hub as an all-or-nothing batch. The hub authenticates the
@@ -1939,13 +1941,30 @@ materializes the batch, and returns the advanced push cursor.
 
 Ingest work is bounded by the accepted batch: metadata, comment, label,
 status, and claim-only batches skip the federation group's link rebuild because
-they cannot change link state. Link mutations, snapshots, and issue lifecycle
-events that can change endpoint resolution still run the full reconciliation.
+they cannot change link state. Link mutations,
+snapshots, and issue lifecycle events that can change endpoint resolution
+still run the full reconciliation.
 
 Federation push and poll requests have a 60-second default budget, separate
 from the shorter interactive CLI default. `KATA_HTTP_TIMEOUT` overrides that
-budget when a large, healthy hub needs more time. A timed-out request leaves
-the cursor unchanged and retries through the normal sync loop.
+budget when a large, healthy hub needs more time. Set it in the environment
+that starts the daemon; local-profile autostart preserves the value. A running
+daemon keeps the environment it started with. To apply a changed value, stop
+that daemon and let the next command autostart it. For a profile with its own
+home, run `KATA_HOME=/absolute/profile-home kata daemon stop`; the stop command
+rejects `--daemon` (see
+[Local daemon profiles](local-daemon-profiles.md#reboots-idle-shutdown-and-clients)).
+A timed-out
+request leaves the cursor unchanged and retries through the normal sync loop.
+
+SQLite push and pull application first prepare without holding the writer.
+If a concurrent write invalidates that snapshot, Kata tries once more the same
+way, unless the invalidated preparation took a second or longer. After that,
+the next attempt acquires the writer before preparing. Optimistic preparation
+time does not consume that fallback's contention retry budget; caller
+cancellation and deadlines still stop the operation. While the fallback holds
+the writer, other local writes wait, so a slow preparation can make local CLI
+writes time out until it commits.
 
 If a response is lost after the hub commits, retrying the same batch is safe.
 Permanent validation failures or hash conflicts record a quarantine on the
@@ -2011,6 +2030,13 @@ A complete issue read on a spoke, including `kata show`, makes an optional
 lease-status refresh from the hub. That refresh gets a 500 ms budget; if it
 times out or the hub is unavailable, the read still returns the locally cached
 lease state.
+On main, local cache updates share an outer 600 ms optional-work budget,
+including the 500 ms hub request. A busy local writer or a federation endpoint
+change therefore leaves the read using its committed local cache. Cache
+transactions already committed remain visible if a later update times out.
+When the cache is available, failed hub refreshes still record their retry
+suppression marker. Caller cancellation and local authorization or storage
+errors remain errors.
 This is a budget for the optional hub refresh, not a deadline for the complete
 issue read. Project-local projections such as `kata meta get` do not perform
 the refresh.

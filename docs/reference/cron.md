@@ -486,9 +486,12 @@ An adapter creates one independent run UID and retains it across retries:
 
 ```sh
 kata cron run observe <run-uid> --json-input observation.json --json
-kata cron run list --limit 100 --json
+kata cron run list --json
 kata cron run show <run-uid> --json
 ```
+
+Run lists default to 100 records; see [Run list page size](#run-list-page-size)
+for the defaults on each surface.
 
 The HTTP operation is `PUT /api/v1/projects/{project_id}/cron/runs/{run_uid}`
 (`observeCronRun`). An omitted JSON `teammate` inherits `--teammate` or
@@ -778,20 +781,64 @@ the whole merge.
 
 ## Routes, events, and records
 
-Run retention uses `POST /api/v1/projects/{project_id}/cron/runs/actions/prune`
-with `actor`, RFC 3339 `before`, `keep`, `limit`, optional `job_uid` or
-`workflow_uid`, and `dry_run`. Ordinary purge-authorized clients may call it;
-owner-local browser sessions, issue-scoped tokens, and federation enrollment
-credentials cannot. The route has no MCP tool. A real deletion requires
+All paths below are project-scoped. CLI entries follow `kata cron`; MCP
+entries follow `kata.`. CLI and MCP create definitions through stable-UID
+`PUT`, so the collection `POST` operations are HTTP only.
+
+| Method | Path | Operation ID | CLI | MCP tool |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/cron/capabilities` | `getCronCapabilities` | `capabilities` | `cron_capabilities` |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs` | `listCronJobs` | `job list` | `cron_jobs` |
+| `POST` | `/api/v1/projects/{project_id}/cron/jobs` | `createCronJob` | HTTP only | — |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `showCronJob` | `job show` | `cron_job` |
+| `PUT` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `replaceCronJob` | `job create` / `job update` | `cron_job_create` / `cron_job_update` |
+| `DELETE` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `archiveCronJob` | `job delete` | `cron_job_delete` |
+| `POST` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore` | `restoreCronJob` | `job restore` | `cron_job_restore` |
+| `GET` | `/api/v1/projects/{project_id}/cron/workflows` | `listCronWorkflows` | `workflow list` | `cron_workflows` |
+| `POST` | `/api/v1/projects/{project_id}/cron/workflows` | `createCronWorkflow` | HTTP only | — |
+| `GET` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `showCronWorkflow` | `workflow show` | `cron_workflow` |
+| `PUT` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `replaceCronWorkflow` | `workflow create` / `workflow update` | `cron_workflow_create` / `cron_workflow_update` |
+| `DELETE` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `archiveCronWorkflow` | `workflow delete` | `cron_workflow_delete` |
+| `POST` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/restore` | `restoreCronWorkflow` | `workflow restore` | `cron_workflow_restore` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs` | `listCronRuns` | `run list` | `cron_runs` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `showCronRun` | `run show` | `cron_run` |
+| `PUT` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `observeCronRun` | `run observe` | `cron_run_observe` |
+| `POST` | `/api/v1/projects/{project_id}/cron/runs/actions/prune` | `pruneCronRuns` | `run prune` | — |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs/counts` | `getCronRunCounts` | `run counts` | — |
+
+### Run pruning and counts routes
+
+The prune route accepts `actor`, RFC 3339 `before`, `keep`, `limit`, optional
+`job_uid` or `workflow_uid`, and `dry_run`. Ordinary purge-authorized clients
+may call it; owner-local browser sessions, issue-scoped tokens, and federation
+enrollment credentials cannot. It has no MCP tool. A real deletion requires
 `X-Kata-Confirm: PRUNE <project-name> cron runs`; a missing or incorrect value
 returns 412. Enabled spokes return `409 federated_admin_required`, and pending
 relay delivery returns `409 federation_pending_delivery`. Responses contain
 `dry_run`, `before`, `keep`, `pruned`, `events_deleted`, `more`, per-group
 `groups`, and `reset_after_event_id` for committed nonempty deletion.
 
-Counts use `GET /api/v1/projects/{project_id}/cron/runs/counts` with ordinary
-project read authority and optional `job_uid` or `workflow_uid`. Invalid or
-combined filters return 400; unauthorized project access returns 404.
+The counts route uses ordinary project read authority and optional `job_uid` or
+`workflow_uid`. Invalid or combined filters return 400; unauthorized project
+access returns 404.
+
+`kata.cron_new_uid` generates a UID locally and has no HTTP route.
+
+### Run list page size
+
+| Surface | Default page size | Maximum page size |
+| --- | --- | --- |
+| HTTP `listCronRuns` (omitted `limit`) | 100 | 100 |
+| CLI `kata cron run list` | 100 | 100 |
+| TUI Runs tab | Newest 100 (fixed) | 100 |
+| MCP `kata.cron_runs` | 20 | 100 |
+
+CLI `--limit` and MCP `limit` accept 1–100. MCP uses the shared default for
+paginated results. HTTP, CLI and MCP return `next_before_uid`; pass it as
+`before_uid` (CLI `--before-uid`) for the next page. The TUI loads only the
+newest page.
+
+### Events and records
 
 Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}`. Responses use

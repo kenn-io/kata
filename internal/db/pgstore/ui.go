@@ -142,8 +142,8 @@ func (s *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 			return db.UISnapshotData{}, err
 		}
 	}
-	if query.IncludeGraph {
-		data.GraphIssues, err = readUIGraphIssues(ctx, tx, query, projectNames)
+	if query.IncludeGraph && data.SelectedIssue != nil {
+		data.GraphIssues, err = readUIGraphIssues(ctx, tx, query, projectNames, data.SelectedIssue.ID)
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
@@ -170,16 +170,23 @@ func (s *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 
 func readUIGraphIssues(
 	ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
-	projectNames map[int64]string,
+	projectNames map[int64]string, sourceID int64,
 ) ([]db.UIIssue, error) {
-	args := []any{db.SystemProjectName}
-	statement := issueSelect + `
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
-	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
+	args := []any{sourceID, db.SystemProjectName}
+	predicate := `i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $2`
+	predicate += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	if allow := uiPostgresIssueAllowlist(&args, `i.id`, query.AllowedIssueIDs); allow != "" {
-		statement += ` AND ` + allow // #nosec G202 -- the predicate contains only a fixed column name and a generated $N placeholder; values stay bound.
+		predicate += " AND " + allow
 	}
-	statement += ` ORDER BY i.uid`
+	statement := `WITH RECURSIVE graph_reach(id) AS (
+		SELECT $1::bigint
+		UNION
+		SELECT i.id FROM graph_reach r
+		JOIN links l ON l.from_issue_id = r.id OR l.to_issue_id = r.id
+		JOIN issues i ON i.id = CASE WHEN l.from_issue_id = r.id THEN l.to_issue_id ELSE l.from_issue_id END
+		JOIN projects p ON p.id = i.project_id
+		WHERE ` + predicate + `
+	) ` + issueSelect + ` WHERE i.id IN (SELECT id FROM graph_reach) ORDER BY i.uid`
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI graph issues: %w", mapSQLError(err, nil))

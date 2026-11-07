@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -28,8 +29,8 @@ func newSearchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search <query>...",
 		Short: "search issues by title/body/comments",
-		Long: `Find issues whose title, body, or comments match the words. Run this before
-kata create and reuse an open match.
+		Long: `Find issues whose title, body, or comments contain every word. Run this before
+kata create and reuse an open match; one or two distinctive words find the most.
 Searches the bound project (or --project), open and closed unless --status.
 Mode is auto by default: hybrid when embeddings are configured, else
 lexical. --agent prints "OK search count=N" then one "- issue=<ref> ..." row
@@ -140,6 +141,13 @@ per match.`,
 				return err
 			}
 			bs := response.Body
+			if r := response.JSON200; r != nil {
+				for _, hint := range searchhint.EmptyLexical(r.Query, r.Mode, len(r.Results), cursor == "") {
+					if bs, err = reportHint(cmd, bs, cliHint{Code: hint.Code, Message: hint.Message}); err != nil {
+						return err
+					}
+				}
+			}
 			if err := printSearchResults(cmd, bs); err != nil {
 				return err
 			}

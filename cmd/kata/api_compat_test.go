@@ -158,7 +158,9 @@ func TestListAllDefaultsToUnlimited(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		sentLimit.Store(r.URL.Query().Has("limit"))
+		if r.URL.Query().Get("include_total") == "" { // Skip the empty-list status count.
+			sentLimit.Store(r.URL.Query().Has("limit"))
+		}
 		_, _ = w.Write([]byte(`{"issues":[]}`))
 	}))
 	t.Cleanup(server.Close)
@@ -205,8 +207,10 @@ func TestListSortDaemonCompatibility(t *testing.T) {
 					}
 					_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"` + tt.version + `"}`))
 				case "/api/v1/issues":
-					listCalls.Add(1)
-					observedSort = r.URL.Query().Get("sort")
+					if r.URL.Query().Get("include_total") == "" { // Skip the empty-list status count.
+						listCalls.Add(1)
+						observedSort = r.URL.Query().Get("sort")
+					}
 					_, _ = w.Write([]byte(`{"issues":[]}`))
 				default:
 					http.NotFound(w, r)
@@ -226,6 +230,72 @@ func TestListSortDaemonCompatibility(t *testing.T) {
 			assert.Equal(t, tt.wantHealthCalls, healthCalls.Load())
 			assert.Equal(t, tt.wantSort, observedSort)
 		})
+	}
+}
+
+func TestNextPriorityDaemonCompatibility(t *testing.T) {
+	for _, version := range []string{"0.41.0", "0.40.0"} {
+		for _, scope := range []struct {
+			name    string
+			all     bool
+			unowned bool
+		}{
+			{name: "project"},
+			{name: "all", all: true},
+			{name: "all-unowned", all: true, unowned: true},
+		} {
+			if scope.all && version != "0.41.0" {
+				continue
+			}
+			t.Run(version+"/"+scope.name, func(t *testing.T) {
+				var readyCalls, healthCalls atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch r.URL.Path {
+					case "/api/v1/health":
+						healthCalls.Add(1)
+						_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "api_schema_version": version})
+					case "/api/v1/projects/resolve":
+						_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project","uid":"01TESTPROJECTAAAAAAAAAAAAAA"}}`))
+					case "/api/v1/projects/1/ready", "/api/v1/ready":
+						readyCalls.Add(1)
+						if scope.unowned {
+							assert.Equal(t, "true", r.URL.Query().Get("unowned"))
+						}
+						if scope.all {
+							assert.Equal(t, "/api/v1/ready", r.URL.Path)
+						} else {
+							assert.Equal(t, "/api/v1/projects/1/ready", r.URL.Path)
+						}
+						if version == "0.41.0" {
+							assert.Equal(t, "1", r.URL.Query().Get("limit"))
+							assert.Equal(t, "priority", r.URL.Query().Get("sort"))
+							_, _ = w.Write([]byte(`{"issues":[{"short_id":"best","title":"priority pick","priority":1,"project_name":"example-project"}]}`))
+						} else {
+							assert.Empty(t, r.URL.Query().Get("limit"))
+							assert.Empty(t, r.URL.Query().Get("sort"))
+							_, _ = w.Write([]byte(`{"issues":[{"short_id":"newer","title":"unprioritized"},{"short_id":"best","title":"priority pick","priority":1,"project_name":"example-project"}]}`))
+						}
+					default:
+						http.NotFound(w, r)
+					}
+				}))
+				t.Cleanup(server.Close)
+				args := []string{"--agent", "next"}
+				if scope.all {
+					args = append(args, "--all")
+				} else {
+					args = append(args, "--project", "example-project")
+				}
+				if scope.unowned {
+					args = append(args, "--unowned")
+				}
+				out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
+				require.NoError(t, err)
+				assert.Contains(t, out, `best priority=1 title="priority pick"`)
+				assert.Equal(t, int32(1), readyCalls.Load())
+				assert.Equal(t, int32(1), healthCalls.Load())
+			})
+		}
 	}
 }
 

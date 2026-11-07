@@ -700,6 +700,11 @@ func (f *fakeGitHubSyncFetcher) Comments(_ context.Context, _ githubsync.Binding
 	return f.comments[issueNumber], nil
 }
 
+func (f *fakeGitHubSyncFetcher) RepositoryComments(_ context.Context, _ githubsync.Binding, _ *time.Time) (map[int][]githubsync.Comment, bool, error) {
+	f.commentCalls++
+	return f.comments, true, nil
+}
+
 func (f *fakeGitHubSyncFetcher) ParentData(_ context.Context, _ githubsync.Binding, _ githubsync.ParentRequest) (githubsync.ParentData, error) {
 	return githubsync.ParentData{}, nil
 }

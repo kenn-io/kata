@@ -24,7 +24,10 @@ func TestEventResetFromIndexMigrationUpgradesVersion43(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	dropLaterReadyAndEventIndexes(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS event_reset_upgrade.idx_events_reset_from;
+DROP INDEX IF EXISTS event_reset_upgrade.idx_issues_uid_prefix;
+DROP INDEX IF EXISTS event_reset_upgrade.idx_issues_project_uid_prefix;
 UPDATE event_reset_upgrade.meta SET value='43' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})

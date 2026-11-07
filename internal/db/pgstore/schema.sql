@@ -144,6 +144,8 @@ CREATE TABLE issues (
   CHECK (short_id !~ '[^0-9abcdefghjkmnpqrstvwxyz]'),
   CHECK (short_id = lower(substr(uid, 27 - length(short_id), length(short_id))))
 );
+CREATE INDEX idx_issues_uid_prefix ON issues(uid text_pattern_ops);
+CREATE INDEX idx_issues_project_uid_prefix ON issues(project_id, uid text_pattern_ops);
 CREATE INDEX idx_issues_project_status_updated
   ON issues(project_id, status, updated_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_issues_project_updated
@@ -152,6 +154,15 @@ CREATE INDEX idx_issues_project_created
   ON issues(project_id, created_at, id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_issues_created
   ON issues(created_at, id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_issues_project_ready_priority
+  ON issues(project_id, COALESCE(priority, 5), updated_at DESC, id DESC)
+  WHERE status = 'open' AND deleted_at IS NULL;
+CREATE INDEX idx_issues_ready_priority
+  ON issues(COALESCE(priority, 5), updated_at DESC, id DESC)
+  WHERE status = 'open' AND deleted_at IS NULL;
+CREATE INDEX idx_issues_ready_updated
+  ON issues(updated_at DESC, id DESC)
+  WHERE status = 'open' AND deleted_at IS NULL;
 CREATE INDEX idx_issues_owner
   ON issues(owner) WHERE owner IS NOT NULL AND deleted_at IS NULL;
 CREATE INDEX idx_issues_assignment_expires_on
@@ -340,6 +351,7 @@ CREATE INDEX idx_events_resolved_issue_uid ON events (
     id
 );
 CREATE INDEX idx_events_moved_from ON events((payload::jsonb->>'from_project_uid'), (payload::jsonb->>'from_short_id')) WHERE type = 'issue.moved';
+CREATE INDEX idx_events_moved_from_id ON events((payload::jsonb->>'from_project_uid'), id) WHERE type = 'issue.moved';
 CREATE INDEX idx_events_reset_from ON events((payload::jsonb->>'from_project_uid'), (payload::jsonb->>'from_short_id')) WHERE type = 'sync.reset_required';
 CREATE INDEX idx_events_reply_to ON events((payload::jsonb->>'reply_to_uid')) WHERE type = 'issue.commented' AND (payload::jsonb->>'reply_to_uid') IS NOT NULL;
 CREATE INDEX idx_events_related_issue_uid ON events(related_issue_uid) WHERE related_issue_uid IS NOT NULL;

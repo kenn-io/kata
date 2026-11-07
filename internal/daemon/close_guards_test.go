@@ -413,8 +413,8 @@ func TestParentCloseCompleteness_TruncatesLongChildList(t *testing.T) {
 	parent := createIssueViaHTTP(t, env, pid, "parent with many children")
 	// Create more children than the sample limit (10) so the suffix renders.
 	const totalChildren = 12
-	for range totalChildren {
-		child := createIssueViaHTTP(t, env, pid, "child")
+	for i := range totalChildren {
+		child := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i))
 		postLink(t, env, pid, child, "parent", parent)
 	}
 

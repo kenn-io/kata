@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"slices"
 
 	"go.kenn.io/kata/internal/db"
@@ -35,12 +34,14 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 	return prepareFederationMaterialization(ctx, tx, projectID, prepared, false, nil)
 }
 
-// alreadyStored selects pull preparation: the page is in the log already, and
-// only the supplied issue histories and rows need reconciliation (nil is full).
+// alreadyStored selects pull preparation: the page is in the log already.
+// Cron-only pages fold cron history; other pages reconcile the supplied issue
+// histories and rows (nil is full).
 func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string) (federationMaterialization, error) {
 	var fresh []db.FoldEvent
 	var accepted []string
 	linksAffected := false
+	cronOnly := alreadyStored
 	for _, in := range prepared {
 		if in.Duplicate {
 			continue
@@ -58,6 +59,7 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		fresh = append(fresh, event)
 		accepted = append(accepted, event.UID)
 		linksAffected = linksAffected || db.FederationEventAffectsLinks(ev.Type)
+		cronOnly = cronOnly && db.EventRequiredFeatures(ev.Type) == db.CronEventFeature
 	}
 	if len(fresh) == 0 {
 		return federationMaterialization{}, nil
@@ -65,6 +67,9 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err != nil {
 		return federationMaterialization{}, err
+	}
+	if cronOnly {
+		return prepareCronPullMaterialization(ctx, tx, projectID, binding)
 	}
 	events, err := federationFoldEventsForIssues(ctx, tx, projectID, issueScope)
 	if err != nil {
@@ -198,22 +203,9 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 		if err != nil {
 			return err
 		}
-		metadata := string(m.projection.IssueMetadata[issue.UID])
-		if metadata == "" {
-			metadata = "{}"
-		}
-		updatedAt := issue.UpdatedAt
-		if updatedAt == "" {
-			updatedAt = issue.CreatedAt
-		}
-		values := []any{shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status), issue.ClosedReason, issue.Owner,
-			issue.AssignmentExpiresOn, issue.Priority, nonEmptyAuthor(issue.Author), nonEmptyTime(issue.CreatedAt),
-			nonEmptyTime(updatedAt), optionalStringValue(issue.ClosedAt), optionalStringValue(issue.DeletedAt), metadata}
-		for i, value := range values {
-			values[i], err = driver.DefaultParameterConverter.ConvertValue(value)
-			if err != nil {
-				return err
-			}
+		values, err := federatedIssueValues(issue, shortID, m.projection.IssueMetadata[issue.UID])
+		if err != nil {
+			return err
 		}
 		if slices.Equal(values, row.values) {
 			delete(m.projection.Issues, issue.UID)

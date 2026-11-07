@@ -681,6 +681,24 @@ func claimForwardClient(
 	if err != nil {
 		return nil, config.FederationCredential{}, internalAPIError(err)
 	}
+	return newClaimForwardClient(ctx, binding, cred)
+}
+
+// Show classifies optional setup cancellation before API conversion loses
+// the cause. Explicit lease operations keep their existing error mapping.
+func showClaimForwardClient(ctx context.Context, cfg ServerConfig, binding db.FederationBinding) (*claimHubClient, config.FederationCredential, error) {
+	project, err := cfg.DB.ProjectByID(ctx, binding.ProjectID)
+	if err != nil {
+		return nil, config.FederationCredential{}, err
+	}
+	cred, _, err := cfg.federationCredentialStore().FederationCredential(ctx, project.UID)
+	if err != nil {
+		return nil, config.FederationCredential{}, err
+	}
+	return newClaimForwardClient(ctx, binding, cred)
+}
+
+func newClaimForwardClient(ctx context.Context, binding db.FederationBinding, cred config.FederationCredential) (*claimHubClient, config.FederationCredential, error) {
 	if cred.RelayEnrollmentPending {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "relay enrollment pending", "finish bridge enrollment before forwarding claims", nil)
 	}
@@ -1360,7 +1378,39 @@ func showIssueClaimRelevant(ctx context.Context, store db.Storage, projectID int
 }
 
 func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issue) (*time.Time, error) {
-	finishTransport, err := beginClaimFederationTransport(ctx, cfg, issue.ProjectID)
+	// Leave time to persist a failed remote attempt, but never let optional
+	// cache writes wait indefinitely behind another local writer.
+	refreshCtx, cancel := context.WithTimeout(ctx, showClaimStatusRefreshTimeout+100*time.Millisecond)
+	defer cancel()
+	hubNow, err := refreshShowClaimStatusWithinBudget(refreshCtx, cfg, issue)
+	if ctx.Err() != nil {
+		return nil, internalAPIError(ctx.Err())
+	}
+	if errors.Is(err, federationcoord.ErrBusy) ||
+		(refreshCtx.Err() != nil && showClaimStatusContextError(err)) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, claimAPIError(err)
+	}
+	return hubNow, nil
+}
+
+// Joined errors can carry failed rollback or authorization finalization.
+// Only a chain ending in cancellation is safe to treat as optional expiry.
+func showClaimStatusContextError(err error) bool {
+	for err != nil {
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return true
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
+}
+
+func refreshShowClaimStatusWithinBudget(ctx context.Context, cfg ServerConfig, issue db.Issue) (*time.Time, error) {
+	finishTransport, err := federationcoord.TryBeginSync(ctx,
+		federationcoord.Key(cfg.DB.InstanceUID(), issue.ProjectID), cfg.DB, issue.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -1371,7 +1421,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 		return nil, nil
 	}
 	if err != nil {
-		return nil, internalAPIError(err)
+		return nil, err
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
 		if binding.Enabled && binding.Role == db.FederationRoleHub {
@@ -1379,7 +1429,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 			// writer lock. The sweeper and explicit status endpoint persist expiry.
 			status, err := cfg.DB.ClaimStatusReadOnly(ctx, issue.ProjectID, issue.UID, time.Now().UTC())
 			if err != nil {
-				return nil, claimAPIError(err)
+				return nil, err
 			}
 			hubNow := status.HubNow
 			if hubNow.IsZero() {
@@ -1391,16 +1441,16 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	now := time.Now().UTC()
 	if skip, err := skipRecentShowClaimStatusError(ctx, cfg.DB, issue, now); err != nil {
-		return nil, internalAPIError(err)
+		return nil, err
 	} else if skip {
 		return nil, nil
 	}
 	remoteCtx, cancelRemote := context.WithTimeout(ctx, showClaimStatusRefreshTimeout)
-	remote, cred, err := claimForwardClient(remoteCtx, cfg, binding)
+	remote, cred, err := showClaimForwardClient(remoteCtx, cfg, binding)
 	if err != nil {
 		budgetErr := remoteCtx.Err()
 		cancelRemote()
-		if budgetErr != nil {
+		if budgetErr != nil && showClaimStatusContextError(err) {
 			return nil, markShowClaimStatusRefreshFailure(ctx, cfg.DB, issue, 0,
 				fmt.Sprintf("status refresh transport: %s", budgetErr.Error()), now)
 		}
@@ -1420,19 +1470,24 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
 	if err != nil {
-		return nil, claimAPIError(err)
+		return nil, err
 	}
 	if err := cfg.DB.ApplyClaimStatus(ctx, binding.ProjectID, issue.UID, claimStatusFromAPI(resp)); err != nil {
-		return nil, claimAPIError(err)
+		return nil, err
+	}
+	var hubNow *time.Time
+	if !resp.HubNow.IsZero() {
+		hubNow = &resp.HubNow
 	}
 	if err := cfg.DB.ClearClaimStatusRefreshError(ctx, issue.ProjectID, issue.UID); err != nil {
-		return nil, claimAPIError(err)
+		// The cache already holds the hub's status, so its clock must survive an
+		// expired budget; a leftover marker only delays the next optional refresh.
+		if ctx.Err() != nil && showClaimStatusContextError(err) {
+			return hubNow, nil
+		}
+		return nil, err
 	}
-	if resp.HubNow.IsZero() {
-		return nil, nil
-	}
-	hubNow := resp.HubNow
-	return &hubNow, nil
+	return hubNow, nil
 }
 
 func skipRecentShowClaimStatusError(ctx context.Context, store db.Storage, issue db.Issue, now time.Time) (bool, error) {
@@ -1479,15 +1534,15 @@ func markShowClaimStatusRefreshFailure(
 	now time.Time,
 ) error {
 	if err := store.MarkClaimStatusRefreshError(ctx, issue.ProjectID, issue.UID, statusCode, msg, now); err != nil {
-		return internalAPIError(err)
+		return err
 	}
 	pending, err := store.ListPendingClaimRequestsForIssue(ctx, issue.ProjectID, issue.UID, 0)
 	if err != nil {
-		return internalAPIError(err)
+		return err
 	}
 	for _, req := range pending {
 		if err := store.MarkPendingClaimAttempt(ctx, req.RequestUID, msg, now); err != nil {
-			return internalAPIError(err)
+			return err
 		}
 	}
 	return nil
