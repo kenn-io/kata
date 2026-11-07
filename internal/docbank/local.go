@@ -96,9 +96,6 @@ const (
 // it knows key, without ever sending the key.
 func proveKey(ctx context.Context, address, key string) (conn net.Conn, err error) {
 	deadline := time.Now().Add(keyProofTimeout)
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
-	}
 	conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
@@ -112,6 +109,9 @@ func proveKey(ctx context.Context, address, key string) (conn net.Conn, err erro
 	if err = conn.SetDeadline(deadline); err != nil {
 		return nil, fmt.Errorf("set key proof deadline: %w", err)
 	}
+	// Reads on the raw connection ignore ctx, so its end cuts the proof short.
+	stop := context.AfterFunc(ctx, func() { _ = c.SetDeadline(time.Now()) })
+	defer stop()
 	nonce := make([]byte, 32)
 	if _, err = rand.Read(nonce); err != nil {
 		return nil, fmt.Errorf("make key proof nonce: %w", err)

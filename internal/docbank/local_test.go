@@ -107,12 +107,13 @@ func TestLocalClientFollowsSymlinkedHome(t *testing.T) {
 func TestLocalClientAbandonsKeyProofWhenRequestEnds(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DOCBANK_HOME", home)
-	proofAbandoned := make(chan struct{})
+	proofStarted, proofAbandoned := make(chan struct{}), make(chan struct{})
 	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == kitdaemon.DefaultPingPath {
 			kitdaemon.NewPingHandler(kitdaemon.PingHandlerOptions{Service: "docbank", Version: "test"}).ServeHTTP(w, r)
 			return
 		}
+		close(proofStarted)
 		<-r.Context().Done() // never answers the key challenge
 		close(proofAbandoned)
 	}))
@@ -121,8 +122,15 @@ func TestLocalClientAbandonsKeyProofWhenRequestEnds(t *testing.T) {
 	rec.Metadata = map[string]string{"api_key": "test-key"}
 	_, err := (kitdaemon.RuntimeStore{Dir: home}).Write(rec)
 	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	go func() {
+		select {
+		case <-proofStarted:
+		case <-ctx.Done():
+		}
+		cancel()
+	}()
 
 	_, err = docbank.NewLocalClient(publishedOnly).ResolvePath(ctx, "/")
 
