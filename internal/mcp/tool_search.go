@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	strictjson "encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -67,7 +68,12 @@ func registerToolSearch(server *sdkmcp.Server, options Options) {
 		return newToolSearchCatalog(options)
 	})
 	addTool(server, "kata.search_tools", "Find Kata tools", "Find typed MCP tools for a task, with loader, guide and input details. Searches tool metadata only; kata.search searches issues. Available before loading sections.", toolHints(true, false, false),
-		func(_ context.Context, _ *sdkmcp.CallToolRequest, input ToolSearchInput) (*sdkmcp.CallToolResult, ToolSearchOutput, error) {
+		func(_ context.Context, request *sdkmcp.CallToolRequest, input ToolSearchInput) (*sdkmcp.CallToolResult, ToolSearchOutput, error) {
+			// The SDK repairs malformed Unicode while validating its typed
+			// copy. Decode the retained original strictly before using it.
+			if err := strictjson.Unmarshal(request.Params.Arguments, &input); err != nil {
+				return nil, ToolSearchOutput{}, err
+			}
 			if err := validateToolSearch(input); err != nil {
 				return nil, ToolSearchOutput{}, err
 			}

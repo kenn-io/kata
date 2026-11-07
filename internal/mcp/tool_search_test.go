@@ -269,6 +269,27 @@ func TestToolSearchRejectsInvalidUTF8AndByteOverflow(t *testing.T) {
 	require.NoError(t, validateToolSearch(ToolSearchInput{Query: strings.Repeat("猫", 170) + "ab"}))
 }
 
+// The original arguments must be checked before accepting a string repaired
+// by the SDK's permissive JSON decoder. A literal replacement rune is valid.
+func TestToolSearchRejectsMalformedUnicodeOnWire(t *testing.T) {
+	session := connectRawTestServerWithOptions(t, discoveryOptions(t))
+	for _, query := range []string{`comment\ud800`, `comment\udfff`, "comment\xff"} {
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+			Name: "kata.search_tools", Arguments: json.RawMessage(`{"query":"` + query + `"}`),
+		})
+		require.NoError(t, err)
+		require.True(t, result.IsError, "%q was silently repaired", query)
+		require.Nil(t, result.StructuredContent)
+	}
+	for _, query := range []string{"comment�", `comment\ufffd`, `comment\ud83d\ude00`} {
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+			Name: "kata.search_tools", Arguments: json.RawMessage(`{"query":"` + query + `"}`),
+		})
+		require.NoError(t, err)
+		require.False(t, result.IsError, "%s", mustJSON(t, result))
+	}
+}
+
 func TestToolSearchConcurrentColdStart(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, discoveryOptions(t))
 	var group sync.WaitGroup
@@ -276,4 +297,40 @@ func TestToolSearchConcurrentColdStart(t *testing.T) {
 		group.Go(func() { searchToolSession(t, session, "add a comment to an issue", 1) })
 	}
 	group.Wait()
+}
+
+func TestToolSearchConcurrentSectionLoading(t *testing.T) {
+	options := discoveryOptions(t)
+	baseline := connectRawTestServerWithOptions(t, options)
+	want := searchToolSession(t, baseline, "add a comment to an issue", 3)
+	sections := []string{"issue_discovery", "issue_mutation", "coordination"}
+	options.StartupSections = sections
+	loadedBaseline := connectRawTestServerWithOptions(t, options)
+	expected, err := loadedBaseline.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	options.StartupSections = nil
+	session := connectRawTestServerWithOptions(t, options)
+	start := make(chan struct{})
+	var group sync.WaitGroup
+	for range 6 {
+		group.Go(func() {
+			<-start
+			require.Equal(t, want, searchToolSession(t, session, "add a comment to an issue", 3))
+		})
+	}
+	for _, section := range sections {
+		group.Go(func() {
+			<-start
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.load_" + section})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+		})
+	}
+	close(start)
+	group.Wait()
+	// This session has not listed tools yet, so its first read observes the
+	// final catalog without depending on the SDK's debounced notifications.
+	actual, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	require.Equal(t, expected.Tools, actual.Tools, "only explicitly loaded sections may enter the public catalog")
 }

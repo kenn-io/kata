@@ -309,16 +309,7 @@ scope, sort, and filters. Changing these rejects a cursor. The page size and
 restart a scan after changes to filter membership, project membership, deletion,
 or imported creation timestamps. Stop only when `complete` is true.
 
-## Progressive tool catalog
-
-The initial catalog exposes read-only section loaders, `kata.skills`, and, on
-unreleased `main`, `kata.search_tools`. Call the applicable
-loader, then refresh the tool list when the server sends the standard
-`notifications/tools/list_changed` notification. This exposes only the detailed
-typed tools needed for the current task instead of placing every detailed tool in the
-model context at startup.
-
-### Find tools for a task
+## Find tools for a task
 
 On unreleased `main`, call `kata.search_tools` to find an operation without
 knowing its section. For example:
@@ -351,7 +342,14 @@ require daemon-wide scope from project-limited servers. Storage tools also
 require configured host storage; token and team tools require explicit token
 administration. Discovery does not grant permission to invoke a returned tool.
 
-### Section loaders
+## Progressive tool catalog
+
+The initial catalog exposes read-only section loaders, `kata.skills`, and, on
+unreleased `main`, `kata.search_tools`. Call the applicable
+loader, then refresh the tool list when the server sends the standard
+`notifications/tools/list_changed` notification. This exposes only the detailed
+typed tools needed for the current task instead of placing every detailed tool in the
+model context at startup.
 
 | Loader | Detailed tools |
 | --- | --- |
