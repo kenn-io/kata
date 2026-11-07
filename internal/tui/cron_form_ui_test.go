@@ -57,7 +57,7 @@ func (a *cronWriteTestAPI) PutCronJob(_ context.Context, _ int64, uid string, w 
 	return nil
 }
 
-func (a *cronWriteTestAPI) GetIssueDetail(_ context.Context, _ int64, ref string) (*IssueDetail, error) {
+func (a *cronWriteTestAPI) readIssue(_ context.Context, _ int64, ref string) (*IssueDetail, error) {
 	uid, ok := a.issueUIDs[ref]
 	if !ok {
 		return nil, &APIError{Status: http.StatusNotFound, Code: "not_found"}

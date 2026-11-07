@@ -197,7 +197,7 @@ func printShowHuman(
 		return err
 	}
 	if b.Recurrence != nil {
-		if _, err := fmt.Fprintln(out, b.Recurrence.line()); err != nil {
+		if _, err := fmt.Fprintln(out, recurrenceLine(b.Recurrence)); err != nil {
 			return err
 		}
 	}
@@ -559,7 +559,7 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 		}
 	}
 	if b.Recurrence != nil {
-		if err := writeAgentField(w, "Repeat", agentValue(b.Recurrence.line())); err != nil {
+		if err := writeAgentField(w, "Repeat", agentValue(recurrenceLine(b.Recurrence))); err != nil {
 			return err
 		}
 	}

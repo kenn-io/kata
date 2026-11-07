@@ -146,7 +146,7 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 		fail := func(err error) tea.Msg { return cronSavedMsg{conn: conn, scope: scope, err: err} }
 		resolved := map[string]string{}
 		for _, r := range f.issueRefs() {
-			detail, err := api.GetIssueDetail(ctx, pid, r.ref)
+			detail, err := api.readIssue(ctx, pid, r.ref)
 			if err != nil || detail == nil || detail.Issue == nil || detail.Issue.UID == "" {
 				text := fmt.Sprintf("no issue %q in this project", r.ref)
 				var apiErr *APIError
