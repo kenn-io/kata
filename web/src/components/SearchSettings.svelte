@@ -38,6 +38,10 @@
     rebuild:
       'Switching rebuilds the index, {time} for {count} {items}. Daemons sharing embeddings need the same model and settings before reusing them.',
   }
+  // Non-owners get indexing without its counts, so the row's one state with
+  // no progress bar says only that it's turning on.
+  const turningOn: SearchByMeaningState = { kind: 'downloaded' }
+  const turningOnLabels = { off: 'Turning on', downloaded: 'Keyword search works meanwhile' }
   const requestFailure = "Couldn't confirm Turn on with the daemon. This page keeps checking."
 
   let status = $state<LocalEmbeddingsStatus>()
@@ -54,7 +58,9 @@
   let timer: ReturnType<typeof setTimeout> | undefined
 
   let job = $derived(status?.job)
-  let row = $derived(status ? rowState(status) : undefined)
+  let base = $derived(status ? rowState(status) : undefined)
+  let countFree = $derived(base?.kind === 'indexing' && !base.total)
+  let row = $derived(countFree ? turningOn : base)
   let count = $derived(
     row?.kind === 'indexing' ? row.total : row?.kind === 'ollama-other' ? row.itemCount : 0,
   )
@@ -62,7 +68,8 @@
   // Indexing keeps polling while failed, so the note clears once a pass succeeds.
   let indexingFailed = $derived(status?.indexing?.failed === true)
 
-  let readonly = $derived(!(status?.can_change && canAdministerDaemon))
+  // Count-free indexing borrows a state that offers Turn on, so it never shows a button.
+  let readonly = $derived(countFree || !(status?.can_change && canAdministerDaemon))
 
   $effect(() => {
     const abort = new AbortController()
@@ -199,7 +206,7 @@
             <SearchByMeaningRow
               state={row}
               itemNoun={count === 1 ? 'issue' : 'issues'}
-              {labels}
+              labels={countFree ? turningOnLabels : labels}
               {readonly}
               onturnon={turnOn}
               onusebuiltin={turnOn}

@@ -55,7 +55,7 @@ func TestLocalEmbeddingsVisibleStatus(t *testing.T) {
 				assert.Equal(t, int64(2), status.Indexing.Total)
 				assert.Equal(t, detail, status.Job.Error)
 			} else {
-				assert.LessOrEqual(t, status.Indexing.Total, tc.count)
+				assert.Zero(t, status.Indexing.Total)
 				assert.NotContains(t, status.Job.Error, detail)
 			}
 		})

@@ -1253,6 +1253,18 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, n
 	return restart.exec(ctx)
 }
 
+// localEmbeddingsRestart restarts the daemon for local embeddings and returns
+// why a refused restart was refused, so the owner sees it on the job.
+func localEmbeddingsRestart(restart *daemonRestart, idle daemon.IdleForegroundAdmission, dir string, rec kitdaemon.RuntimeRecord, logger *log.Logger, trigger func()) func(context.Context) error {
+	return func(ctx context.Context) error {
+		cause := errors.New("daemon is shutting down")
+		if !restart.handle(idle, func() error { cause = restart.accept(ctx, dir, rec); return cause }, logger, trigger) {
+			return fmt.Errorf("daemon restart refused: %w", cause)
+		}
+		return nil
+	}
+}
+
 func runDaemonProcess(
 	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart,
 ) (returnErr error) {
@@ -1650,12 +1662,7 @@ func runDaemonProcess(
 		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
 	}
 	if restart != nil {
-		localSetup.restart = func(ctx context.Context) error {
-			if !restart.handle(idleAdmission, func() error { return restart.accept(ctx, ns.DataDir, rec) }, daemonLog, shutdownTrigger.Call) {
-				return errors.New("daemon restart refused")
-			}
-			return nil
-		}
+		localSetup.restart = localEmbeddingsRestart(restart, idleAdmission, ns.DataDir, rec, daemonLog, shutdownTrigger.Call)
 	}
 	srv := daemon.NewServer(daemon.ServerConfig{
 		LocalEmbeddings:           localSetup,

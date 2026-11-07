@@ -2,12 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kit/embedlocal"
@@ -102,4 +108,47 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	require.Equal(t, "ollama", status.Provider)
 	require.True(t, status.Rebuild)
 	require.False(t, status.CanChange)
+}
+
+func TestLocalEmbeddingsRestartRefusalIncludesCause(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell fixture")
+	}
+	clearLocalEmbeddingsEnv(t)
+	executable := filepath.Join(t.TempDir(), "kata-replacement")
+	require.NoError(t, os.WriteFile(executable, []byte("#!/bin/sh\necho 'replacement configuration rejected' >&2\nexit 1\n"), 0o700)) //nolint:gosec // G306: test-owned executable fixture
+	stubDaemonExecutable(t, func() (string, error) { return executable, nil })
+	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+	installed := false
+	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
+		if !installed {
+			return "", embedlocal.ErrNotFound
+		}
+		return "http://127.0.0.1:12345/v1", nil
+	}
+	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		installed = true
+		return embedlocal.Installation{Executable: executable}, nil
+	}
+	baseURL := startDaemonWithFederationConfig(t, "")
+	client := &http.Client{Timeout: time.Second}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+"/api/v1/embeddings/local", strings.NewReader("{}"))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, response.StatusCode)
+	require.NoError(t, response.Body.Close())
+	var status api.LocalEmbeddingsStatus
+	require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: waits for the daemon worker's real replacement subprocess
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/embeddings/local", nil)
+		require.NoError(t, err)
+		response, err := client.Do(request)
+		require.NoError(t, err)
+		defer func() { _ = response.Body.Close() }()
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&status))
+		return status.Job != nil && status.Job.State == "failed"
+	}, 5*time.Second, 10*time.Millisecond)
+	require.Contains(t, status.Job.Error, "replacement configuration rejected")
 }

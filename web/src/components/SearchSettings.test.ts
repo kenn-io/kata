@@ -47,6 +47,47 @@ describe('SearchSettings', () => {
     expect(screen.queryByRole('button', { name: 'Turn on' })).toBeNull()
   })
 
+  test('shows count-free indexing status when the daemon withholds progress counts', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json(
+          status({
+            can_change: false,
+            provider: 'built_in',
+            indexing: { done: 0, total: 0, failed: false },
+          }),
+        ),
+      ),
+    )
+    renderSettings({ canAdministerDaemon: false })
+    await settle()
+    expect(screen.getByText('Turning on', { exact: true })).not.toBeNull()
+    expect(screen.queryByText(/Indexing 0 of 0/)).toBeNull()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.getByText(/Keyword search works meanwhile/)).not.toBeNull()
+  })
+
+  test('keeps download progress ahead of count-free indexing from the old provider', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json(
+          status({
+            can_change: false,
+            indexing: { done: 0, total: 0, failed: false },
+            job: { state: 'downloading', downloaded: 120_000_000, total: 290_000_000 },
+          }),
+        ),
+      ),
+    )
+    renderSettings({ canAdministerDaemon: false })
+    await settle()
+    expect(
+      screen.getByText('Downloading 120 MB of 290 MB · Keyword search works meanwhile'),
+    ).not.toBeNull()
+  })
+
   test('sends one unproxied request per click and shows the download it starts', async () => {
     vi.useFakeTimers()
     const read = vi.fn<typeof fetch>(async () => Response.json(status()))
