@@ -24,7 +24,7 @@ func dropIssueCreatedAndEventIndexes(ctx context.Context, t *testing.T, admin *s
 	t.Helper()
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_project_created; DROP INDEX IF EXISTS %s.idx_issues_created; DROP INDEX IF EXISTS %s.idx_events_resolved_issue_uid; DROP INDEX IF EXISTS %s.idx_events_reset_from; DROP INDEX IF EXISTS %s.idx_issues_uid_prefix; DROP INDEX IF EXISTS %s.idx_issues_project_uid_prefix`, schema, schema, schema, schema, schema, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
-	dropReadyPriorityIndexes(ctx, t, admin, schema)
+	dropLaterReadyAndEventIndexes(ctx, t, admin, schema)
 }
 
 func TestCommentUIDHandleIndexMigrationUpgradesVersion38(t *testing.T) {

@@ -56,7 +56,7 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		return err
 	}
 	err := d.RetryTransient(ctx, func() error {
-		tx, err := d.BeginTx(ctx, nil)
+		tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: !in.Metadata})
 		if err != nil {
 			return err
 		}

@@ -81,40 +81,22 @@ Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin` (often
 [Install](docs/get-started/install.md) for package downloads, manual release
 downloads, and build-from-source steps.
 
+Coding agents follow this loop. `kata quickstart` covers subagents, inboxes,
+attention signals, and scheduling.
+
 ```mermaid
 flowchart TB
-  arrive{"Work arrives"} --> search["Search first:<br/>kata search #34;#60;terms#62;#34; --agent<br/>Same work: reuse the open issue, else create one.<br/>Related work: link each hit with --parent #60;ref#62; #124; --related #60;ref#62;.<br/>If create refuses a look-alike, reuse it;<br/>--force-new only if the work truly differs.<br/>No bound workspace: refs are #60;project#62;##60;id#62;,<br/>or pass --project #60;project#62;."]
-  search --> route{"Work it, or delegate it?"}
-
-  subgraph workside[" "]
-    direction TB
-    claim["Claim and mark it tracked:<br/>kata claim #60;ref#62;<br/>kata meta set #60;ref#62; work.attention ok"]
-    branch["If the work happens on a dedicated branch, stamp it once:<br/>kata meta set #60;ref#62; work.branch #60;branch#62;<br/>or bind at creation:<br/>kata create ... --meta work.branch=#60;branch#62; --idempotency-key #60;key#62;"]
-    live["Keep state current:<br/>kata meta set #60;ref#62; work.attention stuck#124;needs-human#124;ok<br/>kata meta set #60;ref#62; work.attention_msg #34;#60;why#62;#34;<br/>stuck = blocked; needs-human = input/review; ok = unblocked.<br/>Record progress:<br/>kata comment #60;ref#62; -m #34;#60;what changed#62;#34;<br/>Respond to a comment:<br/>kata comment #60;ref#62; --reply#124;--confirm#124;--refute#124;--supersede c:#60;id#62; -m #34;#60;evidence#62;#34;<br/>Request attention:<br/>kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --message #60;reason#62;"]
-    claim --> branch --> live
-  end
-
-  subgraph delegateside[" "]
-    direction TB
-    fanout["Tracked children: --parent #60;ref#62;, --meta work.branch=#60;branch#62;,<br/>--idempotency-key #60;key#62;, --json; capture .issue.short_id.<br/>Subagents: distinct KATA_TEAMMATE and<br/>KATA_INBOX_USER=#60;actor#62;/#60;teammate#62;; keep the actor.<br/>Read requests: kata inbox --for #60;actor#62;[/#60;teammate#62;].<br/>After handling: kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --clear."]
-    join["Join with kata wait #60;refs#62; --until attention --any<br/>Matches needs-human or stuck; a close also completes the wait,<br/>and the reported reason distinguishes which. Use --timeout so a<br/>wrapper can tell timeout from satisfaction."]
-    coord["Read delegated work.*; never write it."]
-    fanout --> join --> coord
-  end
-
-  route -->|work it| claim
-  route -->|delegate it| fanout
-  route -->|record only| park
-  live --> done
-  coord --> done
-
-  done{"Verified complete?"}
-  done -->|yes| close["kata close #60;ref#62; --done --message #34;#60;scope and verification, 40+ chars#62;#34;<br/>--evidence commit:#60;sha#62; #124; pr:#60;url#62; #124; test:#60;cmd#62; #124; reviewed-paths:#60;path#62;<br/>(or --commit, --pr, --test, --reviewed)"]
-  done -->|duplicate, superseded or dropped| retire["kata close #60;ref#62; --message #34;#60;why#62;#34;<br/>--duplicate-of #60;ref#62; #124; --superseded-by #60;ref#62; (20+ chars)<br/>#124; --wontfix (60+ chars)"]
-  done -->|no| park{"Park it?"}
-  park -->|start date known| schedule["kata schedule #60;ref#62; #60;date-or-time#62;<br/>sets scheduled_on; clear with -"]
-  park -->|start date unknown| someday["kata meta set #60;ref#62; someday true --json-value<br/>clear with kata meta unset #60;ref#62; someday"]
-  park -->|needs review| review["kata label add #60;ref#62; needs-review --comment #34;#60;what remains#62;#34;"]
+  arrive{"Does the request change this workspace?"} -->|no: a question or review| answer["Answer without kata"]
+  arrive -->|yes| search["kata search #34;#60;one or two words#62;#34; --agent"]
+  search --> found{"Open issue covers it?"}
+  found -->|yes| claim["kata claim #60;ref#62;"]
+  found -->|no| create["kata create #34;#60;title#62;#34; --idempotency-key #60;key#62; --agent"]
+  create -->|work it| claim
+  create -->|record only| stop["Leave it open"]
+  claim --> work["Do the work; comment findings a later reader needs"]
+  work --> done{"Verified complete?"}
+  done -->|yes| close["kata close #60;ref#62; --done --message #34;#60;what and how verified#62;#34; --test #60;cmd#62;"]
+  done -->|no| review["kata label add #60;ref#62; needs-review --comment #34;#60;what remains#62;#34;"]
 ```
 
 ## Quickstart

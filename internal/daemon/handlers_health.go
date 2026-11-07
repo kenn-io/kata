@@ -69,7 +69,7 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 				out.Body.Embeddings.Credential = c.Credential
 				out.Body.Embeddings.CredentialSource = c.CredentialSource
 				out.Body.Embeddings.CredentialReason = c.CredentialReason
-				// Only credential errors exclude provider-reflected issue text.
+				// Credential and built-in setup errors exclude provider-reflected issue text.
 				out.Body.Embeddings.LastError = c.LastError
 				out.Body.Embeddings.LastErrorAt = c.LastErrorAt
 				if c.LastErrorStatus != 0 || h.LastErrorStatus == 401 || h.LastErrorStatus == 403 {

@@ -27,63 +27,63 @@ type CronJobUpdateInput struct {
 	ExpectedEventUID string `json:"expected_event_uid"`
 }
 
-func (h toolHandlers) cronJobs(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronListInput) (*sdkmcp.CallToolResult, *generated.ListCronJobsResponse, error) {
+func (h toolHandlers) cronJobs(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronListInput) (*sdkmcp.CallToolResult, generated.ListCronJobsResponse, error) {
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ListCronJobsResponse{}, err
 	}
 	return cronResult(h.options.Client.ListCronJobs(ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: p.ID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &in.IncludeDeleted}}))
 }
-func (h toolHandlers) cronJob(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, *generated.ShowCronJobResponse, error) {
+func (h toolHandlers) cronJob(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, generated.ShowCronJobResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ShowCronJobResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ShowCronJobResponse{}, err
 	}
 	return cronResult(h.options.Client.ShowCronJob(ctx, &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: p.ID, CronUID: id}}))
 }
-func (h toolHandlers) cronJobCreate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobCreateInput) (*sdkmcp.CallToolResult, *generated.ReplaceCronJobResponse, error) {
+func (h toolHandlers) cronJobCreate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobCreateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronJobResponse, error) {
 	return h.cronPutJob(ctx, in, nil)
 }
-func (h toolHandlers) cronJobUpdate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobUpdateInput) (*sdkmcp.CallToolResult, *generated.ReplaceCronJobResponse, error) {
+func (h toolHandlers) cronJobUpdate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobUpdateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronJobResponse, error) {
 	expected, err := cronExpected(in.ExpectedEventUID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronJobResponse{}, err
 	}
 	return h.cronPutJob(ctx, in.CronJobCreateInput, &expected)
 }
-func (h toolHandlers) cronPutJob(ctx context.Context, in CronJobCreateInput, expected *string) (*sdkmcp.CallToolResult, *generated.ReplaceCronJobResponse, error) {
+func (h toolHandlers) cronPutJob(ctx context.Context, in CronJobCreateInput, expected *string) (*sdkmcp.CallToolResult, generated.ReplaceCronJobResponse, error) {
 	h = h.withLongRunningClient()
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronJobResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronJobResponse{}, err
 	}
 	if strings.TrimSpace(in.ParentRef) != "" {
 		parent, err := h.cronParent(ctx, p, in.ParentRef)
 		if err != nil {
-			return nil, nil, err
+			return nil, generated.ReplaceCronJobResponse{}, err
 		}
 		if in.Definition.Issue == nil {
-			return nil, nil, errors.New("parent_ref requires definition.issue")
+			return nil, generated.ReplaceCronJobResponse{}, errors.New("parent_ref requires definition.issue")
 		}
 		if in.Definition.Issue.ParentUID != nil && *in.Definition.Issue.ParentUID != parent {
-			return nil, nil, errors.New("parent_ref disagrees with definition.issue.parent_uid")
+			return nil, generated.ReplaceCronJobResponse{}, errors.New("parent_ref disagrees with definition.issue.parent_uid")
 		}
 		in.Definition.Issue.ParentUID = &parent
 	}
 	raw, err := json.Marshal(in.Definition)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronJobResponse{}, err
 	}
 	if _, err = cron.ParseJob(raw); err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronJobResponse{}, err
 	}
 	return cronResult(h.options.Client.ReplaceCronJob(ctx, &generated.ReplaceCronJobRequestOptions{PathParams: &generated.ReplaceCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ReplaceCronJobBody{Actor: &h.options.Actor, Name: in.Name, Definition: in.Definition, ExpectedEventUID: expected}}))
 }
@@ -108,35 +108,35 @@ func (h toolHandlers) cronParent(ctx context.Context, p ProjectIdentity, raw str
 	}
 	return shown.Issue.UID, nil
 }
-func (h toolHandlers) cronJobDelete(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, *generated.ArchiveCronJobResponse, error) {
+func (h toolHandlers) cronJobDelete(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, generated.ArchiveCronJobResponse, error) {
 	h = h.withLongRunningClient()
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ArchiveCronJobResponse{}, err
 	}
 	expected, err := cronExpected(in.ExpectedEventUID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ArchiveCronJobResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ArchiveCronJobResponse{}, err
 	}
 	return cronResult(h.options.Client.ArchiveCronJob(ctx, &generated.ArchiveCronJobRequestOptions{PathParams: &generated.ArchiveCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ArchiveCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }
-func (h toolHandlers) cronJobRestore(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, *generated.RestoreCronJobResponse, error) {
+func (h toolHandlers) cronJobRestore(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, generated.RestoreCronJobResponse, error) {
 	h = h.withLongRunningClient()
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.RestoreCronJobResponse{}, err
 	}
 	expected, err := cronExpected(in.ExpectedEventUID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.RestoreCronJobResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.RestoreCronJobResponse{}, err
 	}
 	return cronResult(h.options.Client.RestoreCronJob(ctx, &generated.RestoreCronJobRequestOptions{PathParams: &generated.RestoreCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.RestoreCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }

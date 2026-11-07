@@ -364,6 +364,9 @@ func buildListIssuesQuery(ctx context.Context, params db.ListIssuesParams, count
 	if scopeFilter.Len() > 0 {
 		conditions = append(conditions, strings.TrimPrefix(scopeFilter.String(), " AND "))
 	}
+	if params.ExactTitle != "" {
+		add(`i.title COLLATE "C" = $%d`, params.ExactTitle)
+	}
 	if params.Status != "" {
 		add("i.status = $%d", params.Status)
 	}
@@ -419,6 +422,9 @@ func buildListIssuesQuery(ctx context.Context, params db.ListIssuesParams, count
 	}
 	if params.OldestFirst {
 		order = `i.created_at ASC, i.id ASC`
+	}
+	if params.ShortestBodyFirst {
+		order = `length(i.body), i.id`
 	}
 	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY ` + order
 	if params.Limit > 0 {

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -32,7 +33,7 @@ func newCreateCmd() *cobra.Command {
 		blockedBy      []string
 		related        []string
 		owner          string
-		priority       int
+		priority       string
 		meta           []string
 	)
 	cmd := &cobra.Command{
@@ -74,7 +75,7 @@ stays unset.
 	cmd.Flags().Var(newRefSliceValue(&related), "related",
 		"this issue is related to <ref> (symmetric, no ordering; repeatable; "+issueRefHelp+")")
 	cmd.Flags().StringVar(&owner, "owner", "", "initial owner")
-	cmd.Flags().IntVar(&priority, "priority", 0, "initial priority (0..4; 0 = highest); defaults to [create].default_priority when omitted")
+	cmd.Flags().StringVar(&priority, "priority", "", "initial priority (0..4; 0 = highest; none = unset); defaults to [create].default_priority when omitted")
 	cmd.Flags().StringArrayVar(&meta, "meta", nil,
 		"initial metadata key=value (repeatable; value stored as a JSON string)")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "send Idempotency-Key header for safe retry")
@@ -96,17 +97,18 @@ stays unset.
 		if err != nil {
 			return err
 		}
-		if cmd.Flags().Changed("priority") && (priority < 0 || priority > 4) {
-			return &cliError{
-				Message:  "--priority must be between 0 and 4",
-				Kind:     kindValidation,
-				ExitCode: ExitValidation,
-			}
-		}
-
 		var initialPriority *int64
 		if cmd.Flags().Changed("priority") {
-			initialPriority = new(int64(priority))
+			if priority != "none" {
+				value, err := strconv.ParseInt(priority, 0, strconv.IntSize)
+				if err != nil {
+					return &cliError{Message: "--priority must be an integer or none", Kind: kindUsage, ExitCode: ExitUsage}
+				}
+				if value < 0 || value > 4 {
+					return &cliError{Message: "--priority must be between 0 and 4, or none", Kind: kindValidation, ExitCode: ExitValidation}
+				}
+				initialPriority = &value
+			}
 		} else {
 			defaults, err := config.ReadCreateConfig()
 			if err != nil {

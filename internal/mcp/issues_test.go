@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -425,4 +427,55 @@ func globalIssueJSON(projectID int64, projectUID, projectName, shortID string) m
 
 func writeJSON(writer http.ResponseWriter, value any) {
 	_ = json.NewEncoder(writer).Encode(value)
+}
+
+// An initial every-word miss explains the empty result. A single word and
+// an empty continuation page get no hint.
+func TestSearchEmptyMultiWordHints(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	var ids []int64
+	for _, issue := range []db.CreateIssueParams{
+		{Title: "inventory export stalls", Labels: []string{"bug"}},
+		{Title: "inventory export retries", Labels: []string{"bug"}},
+		{Title: "paginate drops the last partial page"},
+	} {
+		issue.ProjectID, issue.Author = project.ID, "example-agent"
+		created, _, err := env.DB.CreateIssue(t.Context(), issue)
+		require.NoError(t, err)
+		ids = append(ids, created.ID)
+	}
+	client, err := kataclient.NewWithHTTPClient(env.URL, env.HTTP)
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
+	want := []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}
+	assert.Equal(t, want, callWorkflowTool(t, session, "kata.search", map[string]any{"query": "paginate inventory"})["hints"])
+
+	single := callWorkflowTool(t, session, "kata.search", map[string]any{"query": "absent"})
+	assert.Empty(t, single["results"])
+	assert.NotContains(t, single, "hints")
+
+	page := map[string]any{"query": "inventory export", "mode": "lexical", "project": "example-project", "limit": 1}
+	first := callWorkflowTool(t, session, "kata.search", page)
+	require.Len(t, first["results"], 1)
+	require.NotEmpty(t, first["next_cursor"])
+	for _, id := range ids {
+		_, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: id, Title: new("unrelated"), Actor: "example-agent"})
+		require.NoError(t, err)
+	}
+	page["cursor"] = first["next_cursor"]
+	continued := callWorkflowTool(t, session, "kata.search", page)
+	assert.Empty(t, continued["results"])
+	assert.NotContains(t, continued, "hints")
+}
+
+func TestSearchEmptyCatalogHasNoEveryWordHint(t *testing.T) {
+	env := testenv.New(t)
+	client, err := kataclient.NewWithHTTPClient(env.URL, env.HTTP)
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
+	out := callWorkflowTool(t, session, "kata.search", map[string]any{"query": "paginate inventory"})
+	assert.Empty(t, out["results"])
+	assert.NotContains(t, out, "hints")
 }

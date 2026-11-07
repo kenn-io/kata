@@ -1867,6 +1867,10 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 	if err != nil {
 		return nil, fmt.Errorf("list federated events: %w", err)
 	}
+	return scanFederationFoldEvents(rows, issueScope)
+}
+
+func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEvent, error) {
 	defer func() { _ = rows.Close() }()
 	var out []db.FoldEvent
 	for rows.Next() {
