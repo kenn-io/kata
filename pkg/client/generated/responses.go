@@ -123,6 +123,22 @@ type ShowIssueByUIDResponse = ShowIssueResponseBody
 
 type ShowIssueByUIDErrorResponse = ErrorEnvelope
 
+type McpEventsListResponse = MCPEventsListResponseBody
+
+type McpEventsListErrorResponse = ErrorEnvelope
+
+type McpEventsSubscribeResponse = MCPEventsSubscribeResponseBody
+
+type McpEventsSubscribeErrorResponse = ErrorEnvelope
+
+type McpEventSubscriptionsResponse = MCPEventsSubscriptionsResponseBody
+
+type McpEventSubscriptionsErrorResponse = ErrorEnvelope
+
+type McpEventsUnsubscribeResponse = MCPEventsUnsubscribeResponseBody
+
+type McpEventsUnsubscribeErrorResponse = ErrorEnvelope
+
 type PingResponse = PingResponseBody
 
 type PingErrorResponse = ErrorEnvelope
@@ -834,6 +850,38 @@ type ShowIssueByUIDResp struct {
 	StatusCode   int
 	JSON200      *ShowIssueByUIDResponse
 	JSONDefault  *ShowIssueByUIDErrorResponse
+}
+
+type McpEventsListResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventsListResponse
+	JSONDefault  *McpEventsListErrorResponse
+}
+
+type McpEventsSubscribeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventsSubscribeResponse
+	JSONDefault  *McpEventsSubscribeErrorResponse
+}
+
+type McpEventSubscriptionsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventSubscriptionsResponse
+	JSONDefault  *McpEventSubscriptionsErrorResponse
+}
+
+type McpEventsUnsubscribeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventsUnsubscribeResponse
+	JSONDefault  *McpEventsUnsubscribeErrorResponse
 }
 
 type PingResp struct {

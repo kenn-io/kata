@@ -421,3 +421,28 @@ runtime credentials cannot migrate.
 Start the matching schema 48 binary after migration. Older binaries cannot open
 schema 48. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 49: MCP Events subscriptions
+
+The 48→49 migration adds the `mcp_event_subscriptions` table, with a text
+primary key `id`, and three indexes: `idx_mcp_event_subscriptions_due` on
+`(state, next_attempt_at)`, `idx_mcp_event_subscriptions_principal_callback`
+on `(principal_key, callback_url)`, and `idx_mcp_event_subscriptions_ended` on
+`(state, ended_at)`. The table holds one row per daemon-owned MCP Events
+subscription, including callback delivery and retry state. It has no CHECK
+constraints; Go validates rows before they are stored or imported. An upgraded
+database starts with the table empty. The delivery worker's scan position is a
+`meta` row, `mcp_events_scan_position`, written when Events first starts.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. The migration
+creates a new table and indexes without scanning existing data. Reapply the
+runtime role grants in [PostgreSQL operations](../operations/postgres.md) so
+the runtime role can read and write the new table. Validation-only credentials
+cannot migrate. Versions 25–48 follow the existing immutable migration chain
+before applying schema 49. SQLite upgrades through its normal JSONL cutover
+with backup and swap protections.
+
+Start the matching schema 49 binary after migration. Older binaries cannot open
+schema 49. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

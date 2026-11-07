@@ -29,6 +29,7 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/linearsync"
+	"go.kenn.io/kata/internal/mcpevents"
 	"go.kenn.io/kata/internal/mcpicon"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
@@ -65,7 +66,14 @@ type ServerConfig struct {
 	StartedAt       time.Time
 	Endpoint        *kitdaemon.Endpoint
 	Broadcaster     *EventBroadcaster
-	FederationWake  func()
+	// MCPEvents serves the /api/v1/mcp-events routes. Nil means Events is not
+	// running in this process; MCPEventsDisabledReason then says why, and the
+	// routes report it. Ordinary daemon operation is unaffected either way.
+	MCPEvents *mcpevents.Service
+	// MCPEventsDisabledReason is the status reason when MCPEvents is nil.
+	// Empty reports mcpevents.ReasonNotConfigured.
+	MCPEventsDisabledReason string
+	FederationWake          func()
 	// FederationPushPending drains existing direct push replication under caller-held coordination.
 	FederationPushPending func(context.Context, db.FederationBinding, config.FederationCredential) error
 	// FederationHubClient builds the bearer-pinned hub client for a stored
@@ -745,6 +753,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerAttachmentHandlers(humaAPI, cfg)
 	registerMove(humaAPI, cfg)
 	registerEventsHandlers(humaAPI, mux, cfg)
+	registerMCPEventsHandlers(humaAPI, cfg)
 	registerFederationHandlers(humaAPI, cfg)
 	registerIssueSyncHandlers(humaAPI, cfg)
 	registerExternalRootHandlers(humaAPI, cfg)

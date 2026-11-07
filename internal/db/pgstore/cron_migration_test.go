@@ -50,6 +50,7 @@ func TestNativeCronMigrationPreservesVersion30(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 	dropLaterMigrationIndexes(ctx, t, admin, schema)
+	dropMCPEventSubscriptionsSchema(ctx, t, admin, schema)
 	dropCommentReplySchema(ctx, t, admin, schema)
 	dropProjectAccessSchema(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)
