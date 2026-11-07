@@ -1971,6 +1971,153 @@ describe('App', () => {
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
+  it.each(['success', 'creation refusal', 'designation retry', 'conflict', 'event overlap'])(
+    'creates the first project as Inbox before opening task capture: %s',
+    async (outcome) => {
+      history.replaceState(null, '', '/kata#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const created = snapshot()
+      created.collection = []
+      created.catalog[0]!.project.revision = 1
+      if (outcome === 'event overlap') created.capabilities.updates = 'sse'
+      const empty = { ...created, catalog: [] }
+      let accepted: typeof created = empty
+      const requests: Request[] = []
+      let recoveryReads = 0
+      let designationRefused = false
+      let projectExists = false
+      let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+      let finishCreation: (() => void) | undefined
+      let release: (() => void) | undefined
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          requests.push(request)
+          const path = new URL(request.url).pathname
+          if (path === '/api/v1/events/stream')
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  stream = controller
+                  request.signal.addEventListener('abort', () => controller.close(), { once: true })
+                },
+              }),
+              { headers: { 'Content-Type': 'text/event-stream' } },
+            )
+          if (path === '/api/v1/ui/snapshot' && finishCreation) {
+            const complete = finishCreation
+            finishCreation = undefined
+            complete()
+            return new Promise<Response>((resolve) => {
+              release = () => resolve(Response.json(created))
+            })
+          }
+          if (request.method === 'POST' && path === '/api/v1/projects') {
+            if (outcome === 'creation refusal')
+              return Response.json(
+                { error: { code: 'validation', message: 'Project creation refused' } },
+                { status: 422 },
+              )
+            accepted = created
+            const response = Response.json({
+              created: !projectExists,
+              project: created.catalog[0]!.project,
+            })
+            projectExists = true
+            if (outcome === 'event overlap') {
+              stream!.enqueue(
+                new TextEncoder().encode('id: 13\nevent: project.created\ndata: {}\n\n'),
+              )
+              return new Promise<Response>((resolve) => (finishCreation = () => resolve(response)))
+            }
+            return response
+          }
+          if (request.method === 'POST' && path === '/api/v1/projects/7/metadata') {
+            if (
+              (outcome === 'designation retry' || outcome === 'conflict') &&
+              !designationRefused
+            ) {
+              designationRefused = true
+              return Response.json(
+                {
+                  error: {
+                    code: outcome === 'conflict' ? 'revision_conflict' : 'validation',
+                    message: 'Inbox designation refused',
+                  },
+                },
+                { status: outcome === 'conflict' ? 412 : 422 },
+              )
+            }
+            created.catalog[0]!.project.metadata.role = 'inbox'
+            created.catalog[0]!.project.revision = 2
+            return Response.json({ changed: true, project: created.catalog[0]!.project })
+          }
+          if (designationRefused && path === '/api/v1/ui/snapshot') recoveryReads += 1
+          return new Response(JSON.stringify(accepted), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${requests.length}"` },
+          })
+        }),
+      )
+      render(App)
+      await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+      const input = screen.getByRole('textbox', { name: 'New project name' })
+      await fireEvent.input(input, { target: { value: 'example-project' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      if (
+        outcome === 'creation refusal' ||
+        outcome === 'designation retry' ||
+        outcome === 'conflict'
+      ) {
+        await waitFor(() => {
+          expect(
+            requests.some(
+              (request) =>
+                request.method === 'POST' && new URL(request.url).pathname === '/api/v1/projects',
+            ),
+          ).toBe(true)
+          expect((input as HTMLInputElement).disabled).toBe(false)
+        })
+        if (outcome === 'creation refusal') {
+          expect(
+            requests.some((request) => new URL(request.url).pathname.endsWith('/metadata')),
+          ).toBe(false)
+          return
+        }
+        expect(await screen.findByRole('button', { name: /example-project/ })).not.toBeNull()
+        await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false))
+        expect(recoveryReads).toBe(1)
+        if (outcome !== 'conflict') await fireEvent.keyDown(input, { key: 'Enter' })
+      }
+      if (outcome !== 'conflict')
+        expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
+      const designation = requests.findLast(
+        (request) =>
+          request.method === 'POST' &&
+          new URL(request.url).pathname === '/api/v1/projects/7/metadata',
+      )!
+      expect(await designation.json()).toEqual({ actor: 'kata-web', patch: { role: 'inbox' } })
+      expect(designation.headers.get('If-Match')).toBe('"rev-1"')
+      if (outcome === 'conflict') return
+      expect(screen.getByRole('dialog', { name: 'New task' }).textContent).toContain(
+        'example-project',
+      )
+      if (outcome === 'event overlap') {
+        expect(release).toBeDefined()
+        release!()
+        await waitFor(() =>
+          expect(
+            (screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).disabled,
+          ).toBe(false),
+        )
+      }
+    },
+  )
+
   it('designates the capture Inbox from New task on a fresh catalog', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
