@@ -136,8 +136,13 @@ precedence over the force-new escape hatch.
 
 ## Schema evolution by JSONL cutover
 
-kata does not evolve its schema with in-place table-rebuild migrations. Instead
-it exports the current database to JSONL exactly as stored, imports that JSONL
+SQLite upgrades that only add indexes register a complete version chain in
+`indexOnlyUpgrades` in `internal/db/sqlitestore/schema_upgrade.go`. Startup
+applies those indexes and the schema-version stamp in one transaction under
+the cutover lock. Schemas 41 through 47 can reach schema 48 this way.
+
+Changes to tables, triggers, or FTS use JSONL cutover. Kata exports the current
+database to JSONL exactly as stored, imports that JSONL
 into a fresh database at the binary's current schema, applies deterministic fill
 rules for anything an older export version lacked, validates, and atomically
 swaps the database files into place.

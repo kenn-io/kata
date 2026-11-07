@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -150,4 +151,130 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 	require.FileExists(t, path+".import.tmp.jsonl")
 	require.FileExists(t, path+".import.tmp.db")
 	require.ErrorIs(t, CheckCutoverSource(ctx, path), ErrCutoverInProgress)
+}
+
+// Index-only upgrades must preserve rows and the fresh-store catalog without
+// exporting or replacing the source. Schema 40 still requires a cutover.
+func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
+	for _, version := range []int{40, 41, 44, 47} {
+		t.Run(strconv.Itoa(version), func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			path := indexOnlySource(t, version)
+			fresh, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "fresh.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, fresh.Close()) })
+			var exported bool
+			err = autoCutover(t.Context(), path, cutoverOperations{
+				replaceFile: atomicfile.Replace,
+				exportSource: func(ctx context.Context, sourcePath, exportPath string) (int64, error) {
+					exported = true
+					return exportCutoverSource(ctx, sourcePath, exportPath)
+				},
+			})
+			require.NoError(t, err)
+			require.Equal(t, version == 40, exported)
+			backups, err := filepath.Glob(path + ".bak.*")
+			require.NoError(t, err)
+			if version == 40 {
+				require.Len(t, backups, 1)
+			} else {
+				require.Empty(t, backups)
+			}
+			temps, err := filepath.Glob(path + ".import.tmp.*")
+			require.NoError(t, err)
+			require.Empty(t, temps)
+			upgraded, err := sqlitestore.Open(t.Context(), path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, upgraded.Close()) })
+			got, err := upgraded.SchemaVersion(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, db.CurrentSchemaVersion(), got)
+			var title, project string
+			var events int
+			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT i.title, p.name FROM issues i JOIN projects p ON p.id=i.project_id`).Scan(&title, &project))
+			require.Equal(t, "Preserved issue", title)
+			require.Equal(t, "example-project", project)
+			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT count(*) FROM events WHERE type='issue.created'`).Scan(&events))
+			require.Equal(t, 1, events)
+			catalog := func(store *sqlitestore.Store) [][4]sql.NullString {
+				rows, err := store.QueryContext(t.Context(), `SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name`)
+				require.NoError(t, err)
+				defer func() { require.NoError(t, rows.Close()) }()
+				var entries [][4]sql.NullString
+				for rows.Next() {
+					var entry [4]sql.NullString
+					require.NoError(t, rows.Scan(&entry[0], &entry[1], &entry[2], &entry[3]))
+					entries = append(entries, entry)
+				}
+				require.NoError(t, rows.Err())
+				return entries
+			}
+			require.Equal(t, catalog(fresh), catalog(upgraded))
+		})
+	}
+}
+
+func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	path := indexOnlySource(t, 41)
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	_, err = raw.ExecContext(t.Context(), `CREATE INDEX idx_events_moved_from_id ON events(id)`)
+	require.NoError(t, err)
+	ops := cutoverOperations{exportSource: func(context.Context, string, string) (int64, error) {
+		t.Fatal("index-only upgrade exported the source")
+		return 0, nil
+	}, replaceFile: atomicfile.Replace}
+	require.ErrorContains(t, autoCutover(t.Context(), path, ops), "add index idx_events_moved_from_id")
+	var version, indexes int
+	require.NoError(t, raw.QueryRowContext(t.Context(), `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
+	require.Equal(t, 41, version)
+	require.NoError(t, raw.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE name='idx_issues_project_created'`).Scan(&indexes))
+	require.Zero(t, indexes)
+	backups, err := filepath.Glob(path + ".bak.*")
+	require.NoError(t, err)
+	require.Empty(t, backups)
+	_, err = raw.ExecContext(t.Context(), `DROP INDEX idx_events_moved_from_id`)
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+	require.NoError(t, autoCutover(t.Context(), path, ops))
+	version, err = sqlitestore.PeekSchemaVersion(t.Context(), path)
+	require.NoError(t, err)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
+}
+
+func indexOnlySource(t *testing.T, version int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	source, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.DB.Close() })
+	project, err := source.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	_, _, err = source.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Preserved issue", Author: "tester"})
+	require.NoError(t, err)
+	for _, step := range []struct {
+		to      int
+		indexes []string
+	}{
+		{42, []string{"idx_issues_project_created", "idx_issues_created"}},
+		{43, []string{"idx_events_resolved_issue_uid"}},
+		{44, []string{"idx_events_reset_from"}},
+		{45, []string{"idx_issues_uid_prefix", "idx_issues_project_uid_prefix"}},
+		{46, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}},
+		{47, []string{"idx_issues_ready_updated"}},
+		{48, []string{"idx_events_moved_from_id"}},
+	} {
+		if step.to > version {
+			for _, name := range step.indexes {
+				_, err = source.ExecContext(t.Context(), `DROP INDEX `+name)
+				require.NoError(t, err)
+			}
+		}
+	}
+	_, err = source.ExecContext(t.Context(), `UPDATE meta SET value=? WHERE key='schema_version'`, version)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	return path
 }

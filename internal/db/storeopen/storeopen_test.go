@@ -180,9 +180,10 @@ func TestOpen_UnknownSchemeIsUnsupported(t *testing.T) {
 	assert.True(t, strings.Contains(msg, "unsupported"), "error must mark scheme as unsupported, got %q", msg)
 }
 
-// TestOpen_RunsCutoverOnPreCurrentSQLite stands up a DB whose
-// schema_version is below db.CurrentSchemaVersion() and confirms storeopen
-// runs jsonl.AutoCutover before opening.
+const preIndexOnlySchemaVersion = 40
+
+// TestOpen_RunsCutoverOnPreCurrentSQLite confirms storeopen replaces schemas
+// that require more than index additions before opening.
 func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
@@ -197,11 +198,11 @@ func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 			require.NoError(t, err)
 			_, err = source.ExecContext(ctx, `DROP INDEX idx_issues_uid_prefix;
 DROP INDEX idx_issues_project_uid_prefix;
-UPDATE meta SET value='44' WHERE key='schema_version'`)
+UPDATE meta SET value='40' WHERE key='schema_version'`)
 			require.NoError(t, err)
 			require.NoError(t, source.Close())
 		} else {
-			stageLegacyPreCutoverFixture(t, path, db.CurrentSchemaVersion()-1)
+			stageLegacyPreCutoverFixture(t, path, preIndexOnlySchemaVersion)
 		}
 		upgraded, err := storeopen.Open(ctx, path)
 		require.NoError(t, err)
@@ -216,16 +217,6 @@ UPDATE meta SET value='44' WHERE key='schema_version'`)
 		require.NoError(t, err)
 		require.Len(t, matches, 1)
 		require.Equal(t, "01hznq7v000000000000000001", matches[0].UID)
-		fresh, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "fresh.db"))
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = fresh.Close() })
-		for _, name := range []string{"idx_issues_uid_prefix", "idx_issues_project_uid_prefix"} {
-			const indexSQL = `SELECT sql FROM sqlite_master WHERE type='index' AND name=?`
-			var canonical, imported string
-			require.NoError(t, fresh.QueryRowContext(ctx, indexSQL, name).Scan(&canonical))
-			require.NoError(t, upgraded.(*sqlitestore.Store).QueryRowContext(ctx, indexSQL, name).Scan(&imported))
-			require.Equal(t, canonical, imported)
-		}
 	}
 }
 

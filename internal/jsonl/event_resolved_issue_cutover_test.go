@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kata/internal/jsonl"
 )
 
-func TestEventResolvedIssueIndexCutoverUpgradesVersion42(t *testing.T) {
+func TestEventResolvedIssueIndexCutoverUpgradesOlderSchema(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "old.db")
@@ -20,7 +20,7 @@ func TestEventResolvedIssueIndexCutoverUpgradesVersion42(t *testing.T) {
 	require.NoError(t, err)
 	issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Retained history", Author: "worker"})
 	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `DROP INDEX IF EXISTS idx_events_resolved_issue_uid; UPDATE meta SET value='42' WHERE key='schema_version'`)
+	_, err = store.ExecContext(ctx, `DROP INDEX IF EXISTS idx_events_resolved_issue_uid; UPDATE meta SET value=? WHERE key='schema_version'`, preIndexOnlySchemaVersion)
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 	require.NoError(t, jsonl.AutoCutover(ctx, path))

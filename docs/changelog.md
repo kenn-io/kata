@@ -14,6 +14,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
   `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
   recorded oh-my-pi closes as pi sessions.
+- Upgrade SQLite schemas 41 through 47 to 48 by adding indexes in place, avoiding
+  a full JSONL export/import and its retained database backup. The indexes and
+  version stamp commit together; interrupted upgrades retry on the next start.
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the
