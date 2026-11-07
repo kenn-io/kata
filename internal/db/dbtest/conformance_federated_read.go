@@ -15,7 +15,7 @@ import (
 
 // checkFederatedReadPages puts unrelated history wider than any page window
 // before each visibility source, so every source is reached through a skip.
-func checkFederatedReadPages(t *testing.T, store db.Storage, backend Backend) error {
+func checkFederatedReadPages(t *testing.T, store db.Storage, backend Backend) {
 	ctx := t.Context()
 	quiet, err := store.CreateProject(ctx, "quiet-project")
 	require.NoError(t, err)
@@ -102,7 +102,6 @@ func checkFederatedReadPages(t *testing.T, store db.Storage, backend Backend) er
 		}
 		require.Equal(t, want, ids, "limit %d", limit)
 	}
-	return nil
 }
 
 // SeedFederatedReadBulkHistory puts long source histories behind the cursor,
