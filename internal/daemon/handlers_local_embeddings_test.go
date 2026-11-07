@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
@@ -126,6 +127,7 @@ func TestLocalEmbeddingsInitialIndexingProgress(t *testing.T) {
 	}{
 		{name: "coverage not read", health: ReconcilerHealth{Configured: true}},
 		{name: "backfill", health: ReconcilerHealth{Configured: true, Embedded: 40, Backlog: 172}, done: 40, total: 212},
+		{name: "shared issues deferred", health: ReconcilerHealth{Configured: true, LastSuccessAt: new(time.Time), Embedded: 1, Backlog: 1}, done: 1, total: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			health = tc.health
