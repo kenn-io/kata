@@ -40,7 +40,7 @@ describe('SearchSettings', () => {
     setGeneratedFetch(vi.fn(async () => Response.json(status({ can_change: canChange }))))
     renderSettings({ canAdministerDaemon })
     await settle()
-    expect(screen.getByText('Downloads 290 MB once, shared by all Kenn apps')).not.toBeNull()
+    expect(screen.getByText('Off', { exact: true })).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Turn on' })).toBeNull()
   })
 

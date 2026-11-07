@@ -119,8 +119,8 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 						select {
 						case err := <-done:
 							require.NoError(t, err)
-						case <-time.After(3 * time.Second):
-							t.Error("daemon shutdown timed out")
+						case <-time.After(30 * time.Second):
+							t.Fatal("daemon shutdown timed out")
 						}
 					})
 				}

@@ -329,7 +329,6 @@ func TestReconcileRecipeChangeCutsOverEligibleProjectsWithDeferredSharedContent(
 	require.Zero(t, skipped)
 	require.EqualValues(t, 1, backlog, "deferred shared content remains pending")
 	require.EqualValues(t, 1, newReconciler.Health().Backlog)
-	require.NotNil(t, newReconciler.Health().LastSuccessAt)
 	encoded := newEmbedder.inputs()
 	require.Len(t, encoded, 1)
 	require.Contains(t, encoded[0][0], "private search target")

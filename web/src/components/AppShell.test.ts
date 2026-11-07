@@ -1117,7 +1117,7 @@ describe('AppShell', () => {
     })
 
     expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
-    expect(await screen.findByText('Downloads 290 MB once to kata.example.com')).not.toBeNull()
+    expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
 

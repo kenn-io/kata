@@ -1821,7 +1821,7 @@ type LocalEmbeddingsJob struct {
 	Error      string `json:"error,omitempty"`
 }
 
-// LocalEmbeddingsIndexing reports initial indexing progress.
+// LocalEmbeddingsIndexing reports indexing progress.
 type LocalEmbeddingsIndexing struct {
 	Done       int64  `json:"done"`
 	Total      int64  `json:"total"`
