@@ -10,31 +10,46 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// Cron state is independent of issue state. A cron-containing page must not
-// prepare unrelated issue rows just because it also contains an issue delta.
-func TestCronPushPreparationBoundsIssueRows(t *testing.T) {
-	for _, mixed := range []bool{false, true} {
-		for _, history := range []int{100, 10_000} {
-			t.Run(fmt.Sprintf("mixed=%t/history=%d", mixed, history), func(t *testing.T) {
-				d, p, issue := incrementalTestStore(t)
-				seedCronPullHistory(t, d, p, history)
-				events := []preparedFederationIngestEvent{{Event: cronPullWorkflow(t, p, "workflow", 9_000_001_000_001)}}
-				want := 0
-				if mixed {
-					ev := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":"mixed changed"}`, issue.UID), 9_000_001_000_002)
-					events = append(events, preparedFederationIngestEvent{Event: ev})
-					want = 1
-				}
-				tx, err := d.BeginTx(t.Context(), nil)
-				require.NoError(t, err)
-				defer func() { _ = tx.Rollback() }()
-				m, err := prepareFederationMaterializationTx(t.Context(), tx, p.ID, events)
-				require.NoError(t, err)
-				require.False(t, m.fullReplay)
-				t.Logf("history=%d touched=%d prepared=%d", history, want, len(m.issueRows))
-				require.Equal(t, want, len(m.issueRows), "cron must not widen issue row preparation")
-				require.Len(t, m.projection.CronWorkflows, 1)
-			})
+// Cron state is independent of issue state. A cron-containing push or pull
+// must not prepare unrelated issue rows just because it also has an issue delta.
+func TestCronPreparationBoundsIssueRows(t *testing.T) {
+	for _, pull := range []bool{false, true} {
+		for _, mixed := range []bool{false, true} {
+			for _, history := range []int{100, 10_000} {
+				t.Run(fmt.Sprintf("pull=%t/mixed=%t/history=%d", pull, mixed, history), func(t *testing.T) {
+					d, p, issue := incrementalTestStore(t)
+					seedCronPullHistory(t, d, p, history)
+					events := []db.RemoteEvent{cronPullWorkflow(t, p, "workflow", 9_000_001_000_001)}
+					want := 0
+					if mixed {
+						events = append(events, incrementalRemoteEvent(t, p, issue.UID, "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":"mixed changed"}`, issue.UID), 9_000_001_000_002))
+						want = 1
+					}
+					var uids []string
+					prepared := make([]preparedFederationIngestEvent, 0, len(events))
+					for _, ev := range events {
+						uids = append(uids, ev.EventUID)
+						prepared = append(prepared, preparedFederationIngestEvent{Event: ev})
+					}
+					if pull {
+						_, err := d.InsertRemoteEvents(t.Context(), p.ID, events)
+						require.NoError(t, err)
+					}
+					tx, err := d.BeginTx(t.Context(), nil)
+					require.NoError(t, err)
+					defer func() { _ = tx.Rollback() }()
+					var m federationMaterialization
+					if pull {
+						m, err = preparePulledFederationMaterializationTx(t.Context(), tx, p.ID, uids)
+					} else {
+						m, err = prepareFederationMaterializationTx(t.Context(), tx, p.ID, prepared)
+					}
+					require.NoError(t, err)
+					require.False(t, m.fullReplay)
+					require.Equal(t, want, len(m.issueRows), "cron must not widen issue row preparation")
+					require.Len(t, m.projection.CronWorkflows, 1)
+				})
+			}
 		}
 	}
 }
