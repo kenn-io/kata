@@ -1,3 +1,4 @@
+import { FlashBanner } from '@kenn-io/kit-ui'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -213,7 +214,10 @@ describe('Sidebar', () => {
   })
 
   it('submits project creation without deriving navigation from the mutation result', async () => {
-    const onCreateProject = vi.fn(async () => ({ changed: true }))
+    render(FlashBanner)
+    const onCreateProject = vi
+      .fn(async () => ({ changed: true }))
+      .mockRejectedValueOnce(new Error('Project creation refused'))
     const onOpenProject = vi.fn()
 
     renderSidebar({ onCreateProject, onOpenProject })
@@ -224,6 +228,9 @@ describe('Sidebar', () => {
     await fireEvent.input(input, { target: { value: 'New Project' } })
     await fireEvent.submit(input.closest('form')!)
 
+    expect(await screen.findByText('Project creation refused')).not.toBeNull()
+    expect((input as HTMLInputElement).value).toBe('New Project')
+    await fireEvent.submit(input.closest('form')!)
     await waitFor(() => {
       expect(onCreateProject).toHaveBeenCalledWith('New Project')
     })

@@ -1,3 +1,4 @@
+import { FlashBanner } from '@kenn-io/kit-ui'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
@@ -1445,6 +1446,7 @@ describe('AppShell', () => {
   })
 
   test('offers the first project from an empty catalog and keeps task-only empty views', async () => {
+    render(FlashBanner)
     const empty = snapshot()
     empty.catalog = []
     empty.collection = []
@@ -1460,15 +1462,20 @@ describe('AppShell', () => {
         loading: false,
         ...mutationProps(),
         onNavigate: vi.fn(),
-        onCreateProject: vi.fn(async () => ({ changed: true })),
+        onCreateProject: vi.fn(async () => {
+          throw new Error('Project creation refused')
+        }),
       },
     })
     const collection = screen.getByRole('region', { name: 'Issues' })
     expect(within(collection).getByText('No projects yet')).not.toBeNull()
     await fireEvent.click(within(collection).getByRole('button', { name: 'New project' }))
     const input = screen.getByRole('textbox', { name: 'New project name' })
-    await waitFor(() => expect(document.activeElement).toBe(input))
-    await fireEvent.keyDown(input, { key: 'Escape' })
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    await fireEvent.input(input, { target: { value: 'example-project' } })
+    await fireEvent.keyDown(input, { key: 'Enter' })
+    expect(await screen.findByText('Project creation refused')).not.toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
     const existing = snapshot()
     existing.collection = []
     await view.rerender({ snapshot: existing })

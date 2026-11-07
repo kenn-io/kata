@@ -2013,7 +2013,7 @@ describe('App', () => {
             finishCreation = undefined
             complete()
             return new Promise<Response>((resolve) => {
-              release = () => resolve(Response.json(empty))
+              release = () => resolve(Response.json(created))
             })
           }
           if (request.method === 'POST' && path === '/api/v1/projects/7/issues') {
@@ -2076,31 +2076,31 @@ describe('App', () => {
         await screen.findAllByText(
           outcome === 'creation refusal' ? /Project creation refused/ : /Inbox designation refused/,
         )
-        expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
-        expect(
-          (screen.getByRole('textbox', { name: 'New project name' }) as HTMLInputElement).value,
-        ).toBe('example-project')
-        if (outcome === 'creation refusal') return
-        expect(await screen.findByRole('button', { name: /example-project/ })).not.toBeNull()
-        await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false))
-        if (outcome === 'conflict') {
-          expect(recoveryReads).toBe(1)
+        if (outcome === 'creation refusal') {
+          expect(
+            requests.some((request) => new URL(request.url).pathname.endsWith('/metadata')),
+          ).toBe(false)
           return
         }
-        await fireEvent.keyDown(input, { key: 'Enter' })
+        expect(await screen.findByRole('button', { name: /example-project/ })).not.toBeNull()
+        await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false))
+        expect(recoveryReads).toBe(1)
+        if (outcome !== 'conflict') await fireEvent.keyDown(input, { key: 'Enter' })
       }
-      expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
-      const designation = requests.find(
+      if (outcome !== 'conflict')
+        expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
+      const designation = requests.findLast(
         (request) =>
           request.method === 'POST' &&
           new URL(request.url).pathname === '/api/v1/projects/7/metadata',
       )!
       expect(await designation.json()).toEqual({ actor: 'kata-web', patch: { role: 'inbox' } })
+      expect(designation.headers.get('If-Match')).toBe('"rev-1"')
+      if (outcome === 'conflict') return
       expect(screen.getByRole('dialog', { name: 'New task' }).textContent).toContain(
         'example-project',
       )
       if (outcome === 'event overlap') {
-        expect(designation.headers.get('If-Match')).toBe('"rev-1"')
         expect(release).toBeDefined()
         release!()
         const capture = screen.getByRole('textbox', { name: 'Quick capture' })
