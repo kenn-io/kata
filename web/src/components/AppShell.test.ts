@@ -1444,6 +1444,99 @@ describe('AppShell', () => {
     expect(onCreateIssue).toHaveBeenCalledWith('New example task')
   })
 
+  test('offers the first project from an empty catalog and keeps task-only empty views', async () => {
+    const empty = snapshot()
+    empty.catalog = []
+    empty.collection = []
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: empty,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    const collection = screen.getByRole('region', { name: 'Issues' })
+    expect(within(collection).getByText('No projects yet')).not.toBeNull()
+    await fireEvent.click(within(collection).getByRole('button', { name: 'New project' }))
+    const input = screen.getByRole('textbox', { name: 'New project name' })
+    await waitFor(() => expect(document.activeElement).toBe(input))
+    await fireEvent.keyDown(input, { key: 'Escape' })
+    const existing = snapshot()
+    existing.collection = []
+    await view.rerender({ snapshot: existing })
+    expect(within(collection).getByText('No tasks')).not.toBeNull()
+    expect(screen.queryByText('No projects yet')).toBeNull()
+    await view.rerender({ snapshot: empty, loading: true })
+    expect(screen.queryByText('No projects yet')).toBeNull()
+    await view.rerender({ loading: false, canMutate: false, stale: true })
+    expect(
+      within(collection)
+        .getByRole('button', {
+          name: 'New project',
+          description: 'Changes are paused while the snapshot may be out of date.',
+        })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
+  })
+
+  test.each(['close', 'fence'])(
+    'cancels pending first-project capture after %s',
+    async (action) => {
+      const empty = snapshot()
+      empty.catalog = []
+      empty.collection = []
+      vi.stubGlobal('matchMedia', (media: string) => ({
+        matches: true,
+        media,
+        addEventListener() {},
+        removeEventListener() {},
+      }))
+      let finish = () => {}
+      const onCreateProject = vi.fn(
+        () =>
+          new Promise<{ changed: boolean }>(
+            (resolve) => (finish = () => resolve({ changed: true })),
+          ),
+      )
+      const view = render(AppShell, {
+        props: {
+          route: {
+            kind: 'kata',
+            view: 'all-open',
+            graph: false,
+            filters: { status: [], owner: [], label: [], relationship: [] },
+          },
+          snapshot: empty,
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject,
+        },
+      })
+      await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+      const drawer = screen.getByRole('dialog', { name: 'Kata navigation' })
+      const input = within(drawer).getByRole('textbox', { name: 'New project name' })
+      await fireEvent.input(input, { target: { value: 'example-project' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await waitFor(() => expect(onCreateProject).toHaveBeenCalledWith('example-project', true))
+      if (action === 'close')
+        await fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }))
+      else await view.rerender({ draftFenceGeneration: 1 })
+      finish()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(screen.queryAllByRole('textbox', { name: 'New project name' })).toHaveLength(0)
+      expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
+    },
+  )
+
   test('designates an Inbox from New task before opening quick capture', async () => {
     const onDesignateInbox = vi.fn(async () => {})
     render(AppShell, {

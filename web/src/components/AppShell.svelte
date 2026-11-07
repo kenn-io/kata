@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { MediaQuery } from 'svelte/reactivity'
   import {
     DetailDrawer,
+    EmptyState,
+    MEDIA,
     IconButton,
     PageHeader,
     Tooltip,
@@ -87,7 +90,7 @@
     onBackFromCredentials?: (() => void | Promise<void>) | undefined
     onSearchEmpty?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
-    onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
+    onCreateProject: (name: string, designateInbox?: boolean) => Promise<KataTaskMutationResponse>
     onDesignateInbox: (projectUID: string) => Promise<void>
     onCreateIssue: (title: string, parent?: ChildParent) => void | Promise<void>
     searchReferences: (query: string) => Promise<UIIssueReference[]>
@@ -227,6 +230,8 @@
   let captureOpen = $state(false)
   let inboxChooserOpen = $state(false)
   let mobileNavigationOpen = $state(false)
+  let creationIntent = $state<'project' | 'task' | null>(null)
+  const mediumScreen = new MediaQuery(MEDIA.medium)
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
   let credentialRoute = $derived(route.view === 'credentials')
@@ -299,6 +304,7 @@
   })
   const controlID = $props.id()
   const newTaskReasonID = `${controlID}-new-task-reason`
+  const createProjectReasonID = `${controlID}-create-project-reason`
   let writeBlockedReason = $derived(
     canMutate
       ? undefined
@@ -330,8 +336,15 @@
     void onNavigate(next)
   }
 
-  function openView(name: KataTaskViewName): void {
+  // Closing the drawer drops the form it showed, as unmounting its sidebar did.
+  function closeNavigation(): void {
+    if (!mobileNavigationOpen) return
     mobileNavigationOpen = false
+    creationIntent = null
+  }
+
+  function openView(name: KataTaskViewName): void {
+    closeNavigation()
     navigate({
       kind: 'kata',
       view: systemViewName(name),
@@ -341,7 +354,7 @@
   }
 
   function openProject(projectUID: string): void {
-    mobileNavigationOpen = false
+    closeNavigation()
     navigate({
       kind: 'kata',
       projectUID,
@@ -351,7 +364,7 @@
   }
 
   function openCredentials(): void {
-    mobileNavigationOpen = false
+    closeNavigation()
     navigate({
       kind: 'kata',
       view: 'credentials',
@@ -431,8 +444,28 @@
       captureOpen = true
       return
     }
+    if (projection.projects.length === 0) {
+      beginProjectCreation('task')
+      return
+    }
     if (hasInbox) captureOpen = true
     else inboxChooserOpen = true
+  }
+
+  function beginProjectCreation(intent: 'project' | 'task' = 'project'): void {
+    if (projectCreationBlockedReason) return
+    if (mediumScreen.current) mobileNavigationOpen = true
+    creationIntent = intent
+  }
+
+  async function createProject(name: string): Promise<KataTaskMutationResponse> {
+    const task = creationIntent === 'task'
+    const result = await onCreateProject(name, task)
+    if (task && creationIntent === 'task') {
+      mobileNavigationOpen = false
+      captureOpen = true
+    }
+    return result
   }
 
   async function chooseInbox(projectUID: string): Promise<void> {
@@ -552,6 +585,32 @@
   </button>
 {/snippet}
 
+{#snippet createProjectButton()}
+  <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
+  <button
+    type="button"
+    class="accent-button"
+    aria-disabled={projectCreationBlockedReason ? 'true' : undefined}
+    aria-describedby={projectCreationBlockedReason ? createProjectReasonID : undefined}
+    onclick={() => beginProjectCreation()}
+  >
+    New project
+  </button>
+{/snippet}
+
+{#snippet noProjects()}
+  <EmptyState title="No projects yet" description="Create a project, or run kata init in a repo.">
+    {#if projectCreationBlockedReason}
+      <Tooltip text={projectCreationBlockedReason}>
+        {@render createProjectButton()}
+      </Tooltip>
+      <span id={createProjectReasonID} class="kit-sr-only">{projectCreationBlockedReason}</span>
+    {:else}
+      {@render createProjectButton()}
+    {/if}
+  </EmptyState>
+{/snippet}
+
 {#snippet navigationSidebar()}
   <Sidebar
     {areas}
@@ -562,12 +621,13 @@
     }}
     {searchFilters}
     {projectCreationBlockedReason}
+    bind:creationIntent
     {draftFenceGeneration}
     credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
     credentialAuditActive={credentialRoute}
     onOpenView={openView}
     onOpenProject={openProject}
-    {onCreateProject}
+    onCreateProject={createProject}
     onOpenCredentials={openCredentials}
   />
 {/snippet}
@@ -725,9 +785,7 @@
   <DetailDrawer
     title="Kata navigation"
     width="min(320px, calc(100vw - 40px))"
-    onclose={() => {
-      mobileNavigationOpen = false
-    }}
+    onclose={closeNavigation}
   >
     {@render navigationSidebar()}
   </DetailDrawer>
@@ -776,6 +834,7 @@
         readyIssueUIDs={projection.member_issue_uid_set}
         onSelect={(issue) => selectIssue(issue.uid)}
         onOpenGraph={(issue) => openGraph(issue.uid)}
+        empty={!loading && projection.projects.length === 0 ? noProjects : undefined}
       />
     {/if}
   </div>

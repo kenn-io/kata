@@ -254,6 +254,18 @@ describe('Sidebar', () => {
     expect(onCreateProject).not.toHaveBeenCalled()
   })
 
+  it('discards its local draft when shared project creation ends', async () => {
+    const view = renderSidebar({ creationIntent: 'task' })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'New project name' }), {
+      target: { value: 'cancelled-project' },
+    })
+    await view.rerender({ creationIntent: null })
+    await fireEvent.click(screen.getByRole('button', { name: 'New project' }))
+    expect(
+      (screen.getByRole('textbox', { name: 'New project name' }) as HTMLInputElement).value,
+    ).toBe('')
+  })
+
   it('resets a project draft after authentication authority changes', async () => {
     const view = renderSidebar({ draftFenceGeneration: 0 })
     await fireEvent.click(screen.getByRole('button', { name: 'New project' }))
