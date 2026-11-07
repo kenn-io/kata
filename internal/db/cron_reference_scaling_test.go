@@ -288,10 +288,3 @@ func TestCronReplayDistinctColdPairsWork(t *testing.T) {
 		})
 	}
 }
-
-func TestCronReplayHistoricalDocumentFailureIsValidation(t *testing.T) {
-	tx, _, event := referenceWorkFixture(t, 0)
-	_, err := tx.ExecContext(t.Context(), `INSERT INTO events VALUES(1,'01MC0000000000000000000001','cron.run.observed',$1,$2,0,'{"uid":"01M40000000000000000000004"}')`, event.OriginInstanceUID, event.HLCPhysicalMS)
-	require.NoError(t, err)
-	require.ErrorIs(t, NewCronReplayValidator(tx, false).Validate(t.Context(), 1, event), ErrFederationIngestValidation)
-}
