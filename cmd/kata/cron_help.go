@@ -79,7 +79,8 @@ workflow_uid. Commands belong in workflow steps, referenced by workflow_uid.
 A recurring notify job needs issue.kind: "per-run", title, and parent_uid
 (or --parent); its overlap must be "allow". The examples use catchup: "latest"
 to deliver only the newest occurrence after downtime. The adapter resolves
-checkout_key locally; options.agent selects its prompt agent (adapter-specific).`
+checkout_key locally; options.agent selects its prompt agent (adapter-specific).
+Before writing a job, read kata cron guide for authoring decisions.`
 }
 
 func cronRequestExamples(resource, action string) string {

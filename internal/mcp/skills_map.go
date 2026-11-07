@@ -37,6 +37,20 @@ var skillCommands = []SkillCommand{
 	{"kata wait", []string{"kata.wait"}, "`kata.wait` waits on issue status only. For `--until attention`, poll `kata.show` for each watched ref with your own deadline: closed completes first, then a non-empty `work.attention` other than `ok`. Notifications are separate state."},
 	{"kata notify", nil, "no MCP tool yet; an operator with CLI access must send or clear requests"},
 	{"kata events", []string{"kata.events"}, ""},
+	{"kata cron guide", []string{"kata.skills"}, "`name: \"cron\"`; always available, no loader needed"},
+	{"kata tui", nil, "CLI only; Jobs previews native Next and nominal adapter Triggers"},
+	{"kata cron capabilities", []string{"kata.cron_capabilities"}, "`project` required outside a bound single project"},
+	{"kata cron job list", []string{"kata.cron_jobs"}, "`--include-deleted` maps to `include_deleted`"},
+	{"kata cron job show", []string{"kata.cron_job"}, "`uid` is the full job ULID"},
+	{"kata cron job create", []string{"kata.cron_new_uid", "kata.cron_job_create"}, "retain the generated `uid` before create and reuse on retry; resolve `--parent` to a full UID in `definition.issue.parent_uid`"},
+	{"kata cron job update", []string{"kata.cron_job_update"}, "replace the full definition; `--expected-event-uid` maps to `expected_event_uid`"},
+	{"kata cron job delete", []string{"kata.cron_job_delete"}, "reversible archive; current `expected_event_uid` required"},
+	{"kata cron job restore", []string{"kata.cron_job_restore"}, "current `expected_event_uid` required"},
+	{"kata cron workflow list", []string{"kata.cron_workflows"}, "`--include-deleted` maps to `include_deleted`"},
+	{"kata cron workflow show", []string{"kata.cron_workflow"}, "`uid` is the full workflow ULID"},
+	{"kata cron workflow create", []string{"kata.cron_new_uid", "kata.cron_workflow_create"}, "retain the generated `uid` before create and reuse on retry"},
+	{"kata cron run list", []string{"kata.cron_runs"}, "`--job-uid` maps to `job_uid`; observations never launch work"},
+	{"kata cron run show", []string{"kata.cron_run"}, "`uid` is the full run ULID; corroborate with adapter output"},
 }
 
 // SkillCommands returns independent copies of every command row in table order.
@@ -79,7 +93,9 @@ func renderCommandRow(c SkillCommand, loader string) string {
 	tools, load := "none", "—"
 	if len(c.Tools) != 0 {
 		tools = "`" + strings.Join(c.Tools, "`, `") + "`"
-		load = "`" + loader + "`"
+		if loader != "" {
+			load = "`" + loader + "`"
+		}
 	}
 	return "| `" + escape(c.CLI) + "` | " + escape(tools) + " | " + escape(load) + " | " + escape(c.Note) + " |"
 }

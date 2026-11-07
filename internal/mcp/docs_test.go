@@ -6,6 +6,7 @@ import (
 	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
+	katadocs "go.kenn.io/kata/docs"
 )
 
 func TestSearchAndReadBundledDocs(t *testing.T) {
@@ -91,5 +92,64 @@ func TestDocSectionsRespectClosingFences(t *testing.T) {
 			require.Equal(t, "guide/example.md#after", sections[2].id)
 			require.NotContains(t, sections[1].content, "## After")
 		})
+	}
+}
+
+// The new guide is searchable through the embedded docs carrier without API I/O.
+func TestCronAuthoringGuideSearchAndRead(t *testing.T) {
+	session := connectTestServerWithOptions(t, Options{
+		Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
+		Actor: "example-agent", Version: "test-version",
+	})
+	page, err := katadocs.Page("guide/cron-authoring.md")
+	require.NoError(t, err)
+	heading := "## Choose the execution adapter, agent and model"
+	_, section, ok := strings.Cut(page, heading)
+	require.True(t, ok)
+	section, _, _ = strings.Cut(section, "\n## ")
+	want := strings.TrimSpace(heading + section)
+	const id = "guide/cron-authoring.md#choose-the-execution-adapter-agent-and-model"
+	for _, query := range []string{"cron agent model", "CRON Agent MODEL", "  cron\tmodel agent cron  "} {
+		found := callAdministrationTool(t, session, "kata.search_docs", map[string]any{"query": query})
+		var guide map[string]any
+		for _, entry := range found["matches"].([]any) {
+			match := entry.(map[string]any)
+			if match["id"] == id {
+				guide = match
+				break
+			}
+		}
+		require.NotNil(t, guide, query)
+		read := callAdministrationTool(t, session, "kata.read_doc", map[string]any{"id": guide["id"]})
+		require.Equal(t, "Author cron jobs with an agent", read["document"])
+		require.Equal(t, strings.TrimPrefix(heading, "## "), read["heading"])
+		require.Equal(t, "https://katatracker.com/docs/guide/cron-authoring/#choose-the-execution-adapter-agent-and-model", read["url"])
+		require.Equal(t, want, read["content"])
+	}
+}
+
+func TestCronAuthoringDocLookupRejectsInvalidInputs(t *testing.T) {
+	session := connectTestServerWithOptions(t, Options{
+		Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
+		Actor: "example-agent", Version: "test-version",
+	})
+	for _, id := range []string{"", "missing.md", "../guide/cron-authoring.md", "https://daemon.example/guide.md"} {
+		callToolError(t, session, "kata.read_doc", map[string]any{"id": id})
+	}
+	for _, query := range []string{"", "?!", strings.Repeat("a", 513), strings.Repeat("é", 257)} {
+		callToolError(t, session, "kata.search_docs", map[string]any{"query": query})
+	}
+	for _, limit := range []int{-1, 0, 101} {
+		callToolError(t, session, "kata.search_docs", map[string]any{"query": "cron agent model", "limit": limit})
+	}
+	for _, limit := range []int{0, 1, 100} {
+		for _, query := range []string{strings.Repeat("a", 512), strings.Repeat("é", 256)} {
+			input := map[string]any{"query": query}
+			if limit != 0 {
+				input["limit"] = limit
+			}
+			found := callAdministrationTool(t, session, "kata.search_docs", input)
+			require.Empty(t, found["matches"])
+		}
 	}
 }
