@@ -252,6 +252,15 @@ func TestToolSearchOutputBudget(t *testing.T) {
 	require.LessOrEqual(t, len(mustJSON(t, output)), 32*1024)
 	require.True(t, output.Truncated)
 	require.Empty(t, output.Results)
+	// The SDK emits JSON-v1-compatible escaping. Bound the actual encoded
+	// response even when a description contains HTML-sensitive characters.
+	for _, summary := range []string{strings.Repeat("<", 7000), strings.Repeat("\u2028", 6000)} {
+		catalog.tools["kata.comment"] = ToolSearchResult{Name: "kata.comment", Summary: summary}
+		output = catalog.search(ToolSearchInput{Query: "kata.comment"})
+		require.LessOrEqual(t, len(mustJSON(t, output)), 32*1024)
+		require.True(t, output.Truncated)
+		require.Empty(t, output.Results)
+	}
 	catalog.tools = map[string]ToolSearchResult{
 		"kata.comment": {Name: "kata.comment", Summary: "issue " + strings.Repeat("x", 20_000)},
 		"kata.claim":   {Name: "kata.claim", Summary: "issue " + strings.Repeat("x", 20_000)},

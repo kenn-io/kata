@@ -2,8 +2,8 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
-	strictjson "encoding/json/v2"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -48,6 +48,7 @@ type ToolSearchResult struct {
 	Inputs  []ToolSearchParameter `json:"inputs"`
 }
 
+// ToolSearchOutput returns bounded task matches and the complete-schema route.
 type ToolSearchOutput struct {
 	Query       string             `json:"query"`
 	Results     []ToolSearchResult `json:"results"`
@@ -71,7 +72,7 @@ func registerToolSearch(server *sdkmcp.Server, options Options) {
 		func(_ context.Context, request *sdkmcp.CallToolRequest, input ToolSearchInput) (*sdkmcp.CallToolResult, ToolSearchOutput, error) {
 			// The SDK repairs malformed Unicode while validating its typed
 			// copy. Decode the retained original strictly before using it.
-			if err := strictjson.Unmarshal(request.Params.Arguments, &input); err != nil {
+			if err := json.Unmarshal(request.Params.Arguments, &input); err != nil {
 				return nil, ToolSearchOutput{}, err
 			}
 			if err := validateToolSearch(input); err != nil {
@@ -243,7 +244,9 @@ func (catalog *toolSearchCatalog) search(input ToolSearchInput) ToolSearchOutput
 	}
 	for _, candidate := range candidates {
 		output.Results = append(output.Results, candidate)
-		encoded, _ := json.Marshal(output) // Only strings, booleans and slices.
+		// Match the SDK's JSON-v1-compatible escaping when measuring the
+		// wire payload. Only strings, booleans and slices can reach here.
+		encoded, _ := json.Marshal(output, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 		if len(encoded) > toolSearchOutputBytes {
 			output.Results = output.Results[:len(output.Results)-1]
 			output.Truncated = true
