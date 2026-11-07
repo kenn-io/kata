@@ -760,6 +760,7 @@
         onSubmitSearch={submitSearch}
       />
       <IssueCollection
+        resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
         currentView={{
           name: currentView.view,

@@ -1,7 +1,7 @@
 ---
 title: Migrating from Beads
 description: Compare Kata with Beads and migrate Beads projects while preserving supported issue data.
-last_edited: 2026-09-15
+last_edited: 2026-11-05
 ---
 
 # Migrating from Beads
@@ -85,6 +85,8 @@ For each Beads issue it runs `bd comments <id> --json` to pull comments, then
 upserts the issue, its comments, labels, and dependency links into the current
 project in one all-or-nothing transaction. Large migrations are supported: the
 daemon accepts import bodies up to 64 MiB, roughly 25k issues.
+On SQLite, the import holds other writes until it commits, so run a large
+migration when nothing else writes.
 
 Every imported issue gets a fresh kata ULID and short ID. The Beads ID survives
 in three places so you can trace an issue back: a `beads-id:<id>` label, an

@@ -18,10 +18,7 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 	if len(eventUIDs) == 0 {
 		return nil
 	}
-	attempt := 0
-	return d.RetryTransient(ctx, func() error {
-		attempt++
-		locked := attempt > federationIngestOptimisticAttempts
+	return d.retryFederationPreparation(ctx, func(locked bool) error {
 		txCtx := ctx
 		if !locked {
 			txCtx = withOptimisticWrite(ctx)

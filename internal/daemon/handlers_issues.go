@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -1478,12 +1479,8 @@ func loadLinkOuts(ctx context.Context, store db.Storage, issueID int64) ([]api.L
 	return out, nil
 }
 
-const (
-	// idempotencyWindow is the 7-day lookback per spec §3.6.
-	idempotencyWindow = 7 * 24 * time.Hour
-	// similarityThreshold is the soft-block trigger per spec §3.7.
-	similarityThreshold = 0.7
-)
+// idempotencyWindow is the 7-day lookback per spec §3.6.
+const idempotencyWindow = 7 * 24 * time.Hour
 
 // tryIdempotencyMatch runs the §3.6 idempotency lookup. Returns the fingerprint
 // (so the caller can fold it into the issue.created event payload) and, when a
@@ -1584,32 +1581,53 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 	return fp, out, nil
 }
 
-// runLookalikeCheck runs the §3.7 soft-block: SearchFTSAny over the
-// 500-code-point title and body prefixes used by the scorer
-// (OR-of-tokens for high recall), scores each candidate via similarity.Score,
-// and returns a 409 duplicate_candidates error if any candidate is at or
-// above the 0.7 threshold. nil means proceed. The OR variant is required
-// because near-duplicates that differ by even one token would be filtered
-// out by SearchFTS's implicit-AND before similarity scoring runs.
+// runLookalikeCheck scores exact full-title matches and SearchFTSAny results
+// over the scorer's 500-code-point title and body prefixes. OR retrieval keeps
+// near-duplicates that differ by a token. A score at or above 0.7 returns a
+// 409 duplicate_candidates error; nil means proceed. Spec §3.7.
 func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssueRequest, projectName string) error {
 	q := similarity.LookalikeQuery(in.Body.Title, in.Body.Body)
 	candidates, err := cfg.DB.SearchFTSAny(ctx, db.SearchFTSParams{
-		ProjectID: in.ProjectID, Query: q, Limit: 20, IssueScope: issueScopeFromContext(ctx),
+		ProjectID: in.ProjectID, Query: q, TitleQuery: similarity.TitlePrefix(in.Body.Title), TitleBody: in.Body.Body, Limit: 20, IssueScope: issueScopeFromContext(ctx),
 	})
 	if err != nil {
 		return internalAPIError(err)
 	}
 	matched := []map[string]any{}
-	for _, c := range candidates {
-		score := similarity.Score(in.Body.Title, in.Body.Body, c.Issue.Title, c.Issue.Body)
-		if score >= similarityThreshold {
+	addMatch := func(issue db.Issue) {
+		score := similarity.Score(in.Body.Title, in.Body.Body, issue.Title, issue.Body)
+		if score >= similarity.Threshold {
 			matched = append(matched, map[string]any{
-				"uid":          c.Issue.UID,
-				"short_id":     c.Issue.ShortID,
-				"qualified_id": qualifiedID(projectName, c.Issue.ShortID),
-				"title":        c.Issue.Title,
+				"uid":          issue.UID,
+				"short_id":     issue.ShortID,
+				"qualified_id": qualifiedID(projectName, issue.ShortID),
+				"title":        issue.Title,
 				"score":        score,
 			})
+		}
+	}
+	seen := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		seen[c.Issue.UID] = true
+		addMatch(c.Issue)
+	}
+	titleHasWord := similarity.TitlePrefix(in.Body.Title) == in.Body.Title && titleHasPortableToken(in.Body.Title)
+	// An underfull FTS page already includes every issue sharing a title token.
+	if len(matched) < 20 && (len(candidates) == 20 || !titleHasWord) {
+		exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
+			ProjectID: in.ProjectID, ExactTitle: in.Body.Title, Limit: 20,
+			ShortestBodyFirst: true, IssueScope: issueScopeFromContext(ctx),
+		})
+		if err != nil {
+			return internalAPIError(err)
+		}
+		for _, issue := range exact {
+			if !seen[issue.UID] {
+				addMatch(issue)
+				if len(matched) == 20 {
+					break
+				}
+			}
 		}
 	}
 	if len(matched) == 0 {
@@ -1619,6 +1637,16 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 		formatDuplicateMessage(matched),
 		"comment on an existing issue, or pass --force-new to create anyway",
 		map[string]any{"candidates": matched})
+}
+
+// titleHasPortableToken accepts ASCII letters, digits, and spaces, with at
+// least one letter or digit. SQLite unicode61 and PostgreSQL simple search
+// both index these titles. Punctuation and Unicode keep the exact-title fallback.
+func titleHasPortableToken(title string) bool {
+	return !strings.ContainsFunc(title, func(r rune) bool {
+		return r > unicode.MaxASCII || r != ' ' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) &&
+		strings.ContainsFunc(title, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) })
 }
 
 // formatDuplicateMessage produces a singular/plural-aware human message for

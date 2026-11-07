@@ -109,11 +109,13 @@ type CloseIssueParams struct {
 
 // ListIssuesParams filters single-project list output.
 type ListIssuesParams struct {
-	PriorityUnset bool                 // only issues with no priority
-	CreatedFirst  bool                 // created_at DESC; OldestFirst selects ASC
-	After         *pagination.Position // stable keyset boundary
+	PriorityUnset     bool                 // only issues with no priority
+	CreatedFirst      bool                 // created_at DESC; OldestFirst selects ASC
+	ShortestBodyFirst bool                 // body length ASC, id ASC
+	After             *pagination.Position // stable keyset boundary
 
 	ProjectID     int64
+	ExactTitle    string       // empty = no filter; otherwise identical full title text
 	Status        string       // "open" | "closed" | "" (any)
 	Priority      *int64       // nil = no filter; non-nil = exactly this value
 	MaxPriority   *int64       // nil = no filter; non-nil = priority <= MaxPriority
@@ -285,6 +287,7 @@ type ExpireAssignmentsParams struct {
 
 // ReadyIssuesFilter holds optional filters for the ready query.
 type ReadyIssuesFilter struct {
+	PriorityFirst bool     // priority ascending, unprioritized last, then ready order
 	Unowned       bool     // only issues effectively unassigned at At
 	Owner         string   // only active assignments to this owner (empty = no filter)
 	Labels        []string // issues must have ALL these labels (AND logic)
@@ -307,6 +310,8 @@ type SearchFTSParams struct {
 	Status          string // "open" | "closed" | "" (any)
 	ProjectID       int64
 	Query           string
+	TitleQuery      string // title prefix; opts into SQLite look-alike scoring
+	TitleBody       string // original body for look-alike scoring
 	Limit           int
 	IncludeDeleted  bool
 	Labels          []string // issues must have ALL these labels (AND logic)

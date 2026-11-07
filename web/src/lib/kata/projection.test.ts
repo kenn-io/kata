@@ -12,9 +12,9 @@ describe('normalizeKataUISnapshot', () => {
     ['layered10', 2000, 8000],
     ['skip4', 2000, 8000],
   ] as const)(
-    '%s normalization scales with graph size',
+    '%s normalization keeps array traversal below quadratic growth',
     (shape, smallSize, largeSize) => {
-      const timings = [smallSize, largeSize].map((size) => {
+      const traversals = [smallSize, largeSize].map((size) => {
         const wire = snapshot()
         const issues = Array.from({ length: size }, (_, index) =>
           issue(`issue-${index}`, `t${index}`, `Task ${index}`),
@@ -50,7 +50,22 @@ describe('normalizeKataUISnapshot', () => {
         if (shape === 'hub with back-link') connect(1, 0)
         wire.selected!.issue = issues[0]!
         wire.graph = { issues, links, edges: [], unresolved_refs: [] }
-        const graph = normalizeKataUISnapshot(wire).selected_graph!
+        let visits = 0
+        const iterate = Array.prototype[Symbol.iterator]
+        Array.prototype[Symbol.iterator] = function* (this: unknown[]) {
+          const iterator = iterate.call(this)
+          for (let item = iterator.next(); !item.done; item = iterator.next()) {
+            visits++
+            yield item.value
+          }
+          return undefined
+        }
+        let graph
+        try {
+          graph = normalizeKataUISnapshot(wire).selected_graph!
+        } finally {
+          Array.prototype[Symbol.iterator] = iterate
+        }
         expect(graph.nodes).toHaveLength(size)
         expect(graph.edges.map((edge) => edge.layout)).toEqual(
           links.map((edge) =>
@@ -59,18 +74,11 @@ describe('normalizeKataUISnapshot', () => {
               : true,
           ),
         )
-        const samples = Array.from({ length: 3 }, () => {
-          const start = performance.now()
-          normalizeKataUISnapshot(wire)
-          return performance.now() - start
-        })
-        return samples.sort((a, b) => a - b)[1]!
+        return visits
       })
-      const [small, large] = timings as [number, number]
-      console.info(
-        `${shape}: ${smallSize}=${small.toFixed(2)}ms, ${largeSize}=${large.toFixed(2)}ms`,
-      )
-      // Leave room above linear growth while separating it from quadratic growth.
+      const [small, large] = traversals as [number, number]
+      // Count real array iteration, including spreads and per-edge graph walks,
+      // so runner scheduling and garbage collection cannot change the verdict.
       expect(large).toBeLessThan(small * (largeSize / smallSize) ** 1.5)
     },
     60_000,

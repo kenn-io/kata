@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-08
+last_edited: 2026-11-06
 ---
 
 # Data model and durability
@@ -123,7 +123,12 @@ mistaken reuse is caught.
 **Look-alike soft-block.** Independently, `create` runs a full-text and
 similarity search and refuses when an existing issue is too close, returning the
 candidates so the caller can comment instead. This check is bypassable with
-`force_new`.
+`force_new`. If fewer than 20 candidates qualify, an exact-title fallback
+checks up to 20 issues, shortest bodies first, when full-text search fills
+its page or the title lacks searchable terms. Non-ASCII title text also
+keeps the fallback because store tokenizers may differ. See
+[issue lifecycle](../reference/cli.md#issue-lifecycle) for matching rules
+and limits.
 
 Where the two interact, **idempotency wins**: an idempotent reuse never emits a
 duplicate even when `force_new` is set. The retry-safety guarantee takes

@@ -49,6 +49,7 @@ type Issue struct {
 // Comment is the subset of a GitHub issue comment API row needed for imports.
 type Comment struct {
 	ID        int64      `json:"id"`
+	IssueURL  string     `json:"issue_url"`
 	NodeID    string     `json:"node_id"`
 	Body      string     `json:"body"`
 	User      *User      `json:"user"`

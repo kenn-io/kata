@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-03
+last_edited: 2026-11-05
 ---
 
 # HTTP API schema
@@ -251,6 +251,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.41.0` | Adds `sort=priority` to both ready routes. `kata next` and MCP `kata.next` request one priority-ordered row; older daemons retain the full-queue fetch and client-side selection. |
 | `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |
 | `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |
 | `0.38.0` | Publishes `POST /projects/{project_id}/issues/{ref}/attachments/links`, which saves a reference to an existing Docbank file version without uploading its bytes. `kata docbank attachments link` refuses older daemons. |
@@ -510,6 +511,17 @@ an empty alias object. These placeholders do not expose private project data.
 The [scope guide](../design/issue-scoped-credentials.md) owns membership,
 operation constraints, and [event invalidation and revocation](../design/issue-scoped-credentials.md#events-concurrency-and-revocation).
 
+## Ready issues
+
+Request `sort=priority` to select ready issues by lowest priority number first, with unprioritized issues last. Ties use `updated_at DESC, id DESC`. Omit `sort`, or send an empty value, to keep the default ready order. Other values return 400.
+
+| Route | Parameter | Values |
+| --- | --- | --- |
+| `GET /api/v1/projects/{project_id}/ready` | `sort` | `priority` or empty; requires API `0.41.0`. |
+| `GET /api/v1/ready` | `sort` | `priority` or empty; requires API `0.41.0`. |
+
+Combine `sort=priority` with `limit=1` to fetch the highest-priority due issue. Parked issues do not consume the limit. The CLI and MCP `next` check the API version first; older daemons keep the full-queue fetch and client-side selection.
+
 ## Temporary assignments
 
 `POST /api/v1/projects/{project_id}/issues/{ref}/actions/claim` accepts an
@@ -679,9 +691,10 @@ endpoints published in OpenAPI:
   selected detail/history/graph projection, capability envelope, durable event
   cursor, and strong ETag.
 - `GET /api/v1/ui/references` returns bounded projects, owners, labels, and
-  qualified issue references for pickers and typeahead. Repeating `issue_uid`
-  hydrates summaries for up to 200 stable issue UIDs and composes with the
-  existing project and text filters.
+  qualified issue references for pickers and typeahead. A `q` search returns
+  only issue references, with empty projects, owners, and labels. Repeating
+  `issue_uid` hydrates summaries for up to 200 stable issue UIDs and composes
+  with the existing project and text filters.
 - `GET /api/v1/ui/launch-target?issue_uid=<uid>` validates one active issue and
   returns a safe absolute route into the standalone browser application:
 
@@ -695,6 +708,11 @@ endpoints published in OpenAPI:
   remain not found. The `#direct=1` fragment keeps the standalone application
   on the daemon that issued the target even when its roster defaults to a
   different remote daemon.
+
+With `include_graph=true`, the snapshot returns only issues and links reachable
+from the selected issue through parent, blocks, or related links in either
+direction. Traversal stays within issues the caller can read. The graph is
+empty without an available selected issue.
 
 Clients can count a parent's open and total children from the snapshot alone,
 without a second `GET /api/v1/issues` request. `collection_links` contains

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/daemon"
@@ -1690,16 +1691,13 @@ func TestAllowlistListAndReadyApplyLimitAfterScopedFanout(t *testing.T) {
 	}
 }
 
-func TestNextExaminesAllReadyIssues(t *testing.T) {
+func TestNextExaminesAllReadyIssuesOnOlderDaemon(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/api/v1/projects":
-			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
 		case "/api/v1/ready":
-			count := 101
-			if request.URL.Query().Has("limit") {
-				count = 100
-			}
+			assert.Empty(t, request.URL.Query().Get("sort"))
+			assert.False(t, request.URL.Query().Has("limit"))
+			const count = 101
 			issues := make([]any, 0, count)
 			for index := 0; index < count; index++ {
 				issue := globalIssueJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project", fmt.Sprintf("i%03d", index))
@@ -1711,6 +1709,8 @@ func TestNextExaminesAllReadyIssues(t *testing.T) {
 				issues = append(issues, issue)
 			}
 			writeJSON(writer, map[string]any{"issues": issues})
+		case "/api/v1/health":
+			writeJSON(writer, map[string]any{"ok": true, "api_schema_version": "0.40.0"})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -1726,6 +1726,8 @@ func TestNextExaminesAllReadyIssues(t *testing.T) {
 func TestAllowlistNextPreservesMergedReadyOrderingForEqualPriority(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
+		case "/api/v1/health":
+			writeJSON(writer, map[string]any{"ok": true, "api_schema_version": "0.41.0"})
 		case "/api/v1/projects":
 			writeJSON(writer, map[string]any{"projects": []any{
 				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),

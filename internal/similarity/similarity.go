@@ -124,16 +124,30 @@ func Jaccard(a, b []string) float64 {
 	return float64(intersect) / float64(union)
 }
 
+const (
+	titleWeight = 0.6
+	bodyWeight  = 0.4
+	// Threshold is the duplicate warning threshold from spec §3.7.
+	Threshold = 0.7
+	// MinTitleJaccard assumes the maximum possible body overlap of 1.
+	MinTitleJaccard = (Threshold - bodyWeight) / titleWeight
+)
+
 // Score returns the weighted similarity between two issues:
 //
 //	0.6 * Jaccard(title[:500] tokens) + 0.4 * Jaccard(body[:500] tokens)
 //
 // Field slicing is rune-based: the first 500 Unicode codepoints of each title
-// and body are tokenized. Spec §3.7.
+// and body are tokenized. Spec §3.7. If either bounded body has no tokens,
+// identical full title strings score 1.
 func Score(titleA, bodyA, titleB, bodyB string) float64 {
+	bodyTokensA, bodyTokensB := Tokenize(BodyPrefix(bodyA)), Tokenize(BodyPrefix(bodyB))
+	if (len(bodyTokensA) == 0 || len(bodyTokensB) == 0) && titleA == titleB {
+		return 1
+	}
 	titleScore := Jaccard(Tokenize(TitlePrefix(titleA)), Tokenize(TitlePrefix(titleB)))
-	bodyScore := Jaccard(Tokenize(BodyPrefix(bodyA)), Tokenize(BodyPrefix(bodyB)))
-	return 0.6*titleScore + 0.4*bodyScore
+	bodyScore := Jaccard(bodyTokensA, bodyTokensB)
+	return titleWeight*titleScore + bodyWeight*bodyScore
 }
 
 const lookalikePrefixRunes = 500
