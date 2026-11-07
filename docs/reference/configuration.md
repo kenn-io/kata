@@ -1516,7 +1516,7 @@ for setup and the shared-vault trust boundary.
 | `api_key_file` | empty | Mode-0600 key file, preferred over the environment source. |
 | `api_key_env` | empty | Name of the environment variable containing the key. |
 | `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
-| `local` | `false` | Use the Docbank running on this machine, found through its runtime record; the daemon runs `docbank daemon start` when none is running. |
+| `local` | `false` | Use the Docbank running on this machine, found through its runtime record. |
 
 A configured URL requires a key source. A broken selected credential
 source fails explicitly; Kata does not fall back to another source. Keys are
