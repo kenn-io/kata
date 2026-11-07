@@ -13,7 +13,7 @@ observations. External adapters schedule other jobs, resolve checkout and provid
 configuration, create or update ordinary issues, deliver notifications, and launch processes.
 An observation records evidence; its status does not control whether anything runs.
 
-Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs tab, create and edit jobs; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
+Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs and Workflows tabs, create and edit jobs and workflows; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
 
 For a run organized as dependent issues with human approval, see
 [Gated workflows](../workflows/gated-workflows.md).

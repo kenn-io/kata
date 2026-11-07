@@ -2001,7 +2001,7 @@ such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
-**Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Runs and Workflows are read-only; Jobs can create and change jobs (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
+**Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Runs is read-only; Jobs and Workflows can create and change records (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
 
 A job's detail lists its next three run times in the trigger's timezone, with the zone abbreviation so daylight-saving changes read clearly. A native recurring job shows them as **Next**, stepping from the progress the daemon saved on its parent issue. An adapter job shows its cron and `once` trigger times as **Triggers**; they are when the adapter's trigger fires, because Kata holds no anchor or catch-up for an adapter, and an adapter interval shows no time. A paused job shows none, as does a native job whose parent issue is closed or deleted, because the daemon delivers only while the parent is open. A native job whose parent or progress cannot be read shows **unavailable**. An adapter cron expression is read in its own `TZ=` or `CRON_TZ=` zone when it has one, and an `@every` expression shows no time.
 
@@ -2016,7 +2016,7 @@ A job's detail lists its next three run times in the trigger's timezone, with th
 | `?` | Explain jobs, workflows, and runs, and show keybindings. |
 | `q` | Quit. |
 
-On the Jobs tab, or on a job's detail, these keys change jobs. On the Kata tab, `n` creates an issue. Runs and Workflows ignore `n`.
+On the Jobs tab, or on a job's detail, these keys change jobs. On the Kata tab, `n` creates an issue. Runs ignores `n`.
 
 | Key | Jobs |
 | --- | --- |
@@ -2026,6 +2026,8 @@ On the Jobs tab, or on a job's detail, these keys change jobs. On the Kata tab, 
 The job form offers four kinds: a recurring child issue (a native job with a parent issue), an agent prompt, a workflow run, and a notification. Each kind offers the triggers that fit it: cron with its time zone, interval, once at an RFC 3339 instant, manual, an issue's scheduled date, and an issue's deadline with its lead. Issue fields take a short ID or a full UID. A prompt or workflow job on an issue-date trigger runs on the trigger's issue when its policy is the existing issue, so the form asks for it once. The form also edits `enabled`, `checkout_key`, `secret_refs`, and `options`; `options` is a raw JSON object, and unknown keys and exact numbers are kept across an edit. Job validation messages appear below the form. `Ctrl+o` or `Ctrl+s` saves. `Tab`, `Shift+Tab`, and `Enter` change fields. On an issue body, prompt, message, or options field, `Ctrl+e` opens `$VISUAL` or `$EDITOR`, with `vi` as the fallback. These fields keep their complete text, including tabs and line endings, until you edit them. `Esc` on a changed draft asks `y`/`n` before it discards the changes. Definitions with unsupported versions or unknown members require a newer kata for editing.
 
 The form mints the job UID when it opens, so retrying a failed create never makes a second job. An edit is guarded on the job's `definition_event_uid`. If the revision changed while you edited, the form keeps your draft. If the current definition supports editing, it shows the current name, revision, and complete definition; otherwise it shows an error. Use the arrow keys to scroll, or press `Ctrl+o` to save your whole draft against the current revision. Saving the draft replaces the current definition, including settings changed by another writer. `Esc` returns to the draft. Other save errors keep the form open with the error. A recurring child issue's parent cannot change after creation. On a federated project, native jobs are written on the owning hub; a direct, push-enabled spoke forwards the save there (see [Cron](cron.md)).
+
+On the Workflows tab or a workflow's detail, `n` creates a workflow and `e` edits it in the same form as jobs, with Name and Definition fields. Definition is JSON: press `Ctrl+e` to edit it in `$VISUAL` or `$EDITOR`, then `Ctrl+o` to save. JSON errors show a line, column, and path; invalid steps show their number and key. The form keeps drafts, confirms discard, and handles concurrent changes like the job form above. Unknown option keys and exact numbers in `options` survive edits.
 
 Runs loads the newest 100 observations for the current project. Job and workflow details show matching runs from that loaded project history. Run details distinguish the recorded definition revision from the current job or workflow, including definitions that have changed or disappeared.
 
