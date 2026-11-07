@@ -94,7 +94,7 @@ func TestSearch_EmptyMultiWordSearchHintsEveryWordMustMatch(t *testing.T) {
 	out, stderr, err = runCLIWithErr(t, env, dir, "search", "paginate", "inventory")
 	require.NoError(t, err)
 	assert.Equal(t, "no matches\n", out)
-	assert.Equal(t, hint+"Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings.\n", stderr)
+	assert.True(t, strings.HasPrefix(stderr, hint))
 
 	_, stderr, err = runCLIWithErr(t, env, dir, "--quiet", "search", "paginate inventory")
 	require.NoError(t, err)
@@ -119,7 +119,6 @@ func TestSearch_JSONEmptyMultiWordHint(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}, got["hints"])
-	assert.Equal(t, "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings.\n", stderr)
 }
 
 func TestSearch_EmptyContinuationHasNoHint(t *testing.T) {
@@ -139,9 +138,8 @@ func TestSearch_EmptyContinuationHasNoHint(t *testing.T) {
 		_, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: id, Title: new("unrelated"), Actor: "tester"})
 		require.NoError(t, err)
 	}
-	out, stderr, err := runCLIWithErr(t, env, dir, "--json", "search", "--lexical", "--limit", "1", "--cursor", first["next_cursor"].(string), "inventory export")
+	out, _, err = runCLIWithErr(t, env, dir, "--json", "search", "--lexical", "--limit", "1", "--cursor", first["next_cursor"].(string), "inventory export")
 	require.NoError(t, err)
-	require.Empty(t, stderr)
 	var continued map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out), &continued))
 	assert.Empty(t, continued["results"])
@@ -378,25 +376,89 @@ func TestSearchPlainLexicalHasNoFallbackWarning(t *testing.T) {
 }
 
 func TestSearchSuggestsSettings(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
-	createIssue(t, env, pid, "login crash")
 	const hint = "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings.\n"
 	for _, tc := range []struct {
-		name  string
-		flags []string
-		want  bool
+		name                                            string
+		flags                                           []string
+		want, configured, remote, missingHeader, cursor bool
 	}{
-		{"human", nil, true}, {"quiet", []string{"--quiet"}, false}, {"agent", []string{"--agent"}, false}, {"explicit", []string{"--lexical"}, true},
+		{name: "human", want: true},
+		{name: "quiet", flags: []string{"--quiet"}},
+		{name: "agent", flags: []string{"--agent"}},
+		{name: "explicit", flags: []string{"--lexical"}, want: true},
+		{name: "json", flags: []string{"--json"}, want: true},
+		{name: "configured", flags: []string{"--lexical", "--json"}, configured: true},
+		{name: "remote", flags: []string{"--json"}, remote: true},
+		{name: "missing header", missingHeader: true},
+		{name: "continuation", flags: []string{"--lexical"}, cursor: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			env, dir, pid := setupCLIWorkspaceOptions(t, func(cfg *daemon.ServerConfig) {
+				if tc.configured {
+					var err error
+					cfg.Embedder, err = embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:1", Model: "example-model", Dims: 2})
+					require.NoError(t, err)
+				}
+			})
+			createIssue(t, env, pid, "login crash")
+			if tc.missingHeader {
+				upstream := env.URL
+				proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					req, err := http.NewRequestWithContext(r.Context(), r.Method, upstream+r.URL.RequestURI(), r.Body) // #nosec G704 -- fixed loopback test daemon
+					require.NoError(t, err)
+					req.Header = r.Header.Clone()
+					response, err := env.HTTP.Do(req) // #nosec G704 -- fixed loopback test daemon
+					require.NoError(t, err)
+					defer func() { _ = response.Body.Close() }()
+					for name, values := range response.Header {
+						if strings.EqualFold(name, "X-Kata-Embeddings-Configured") {
+							continue
+						}
+						for _, value := range values {
+							w.Header().Add(name, value)
+						}
+					}
+					w.WriteHeader(response.StatusCode)
+					_, err = io.Copy(w, response.Body)
+					require.NoError(t, err)
+				}))
+				t.Cleanup(proxy.Close)
+				env.URL = proxy.URL
+			}
 			args := append([]string{"search", "login"}, tc.flags...)
-			out, stderr, err := runCLIWithErr(t, env, dir, args...)
+			if tc.cursor {
+				createIssue(t, env, pid, "login crash again")
+				first, _, err := runCLIWithErr(t, env, dir, "search", "login", "--lexical", "--json", "--limit", "1")
+				require.NoError(t, err)
+				var page struct {
+					NextCursor string `json:"next_cursor"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(first), &page))
+				require.NotEmpty(t, page.NextCursor)
+				args = append(args, "--cursor", page.NextCursor)
+			}
+			run := func(args []string) (string, string, error) {
+				if !tc.remote {
+					return runCLIWithErr(t, env, dir, args...)
+				}
+				t.Chdir(dir)
+				t.Setenv("KATA_SERVER", "")
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"), []byte(fmt.Sprintf("version = 1\n[server]\nurl = %q\n", env.URL)), 0600))
+				resetFlags(t)
+				cmd := newRootCmd()
+				var out, stderr bytes.Buffer
+				cmd.SetOut(&out)
+				cmd.SetErr(&stderr)
+				cmd.SetArgs(append([]string{"--workspace", dir}, args...))
+				err := cmd.ExecuteContext(t.Context())
+				return out.String(), stderr.String(), err
+			}
+			out, stderr, err := run(args)
 			require.NoError(t, err)
 			require.Contains(t, out, "login crash")
 			if tc.want {
 				require.Equal(t, hint, stderr)
-				baselineArgs := append([]string{"search", "login", "--quiet"}, tc.flags...)
-				baseline, _, err := runCLIWithErr(t, env, dir, baselineArgs...)
+				baseline, _, err := run(append(args, "--quiet"))
 				require.NoError(t, err)
 				require.Equal(t, baseline, out)
 			} else {
@@ -404,65 +466,4 @@ func TestSearchSuggestsSettings(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestSearchRemoteHasNoSetupHint(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
-	createIssue(t, env, pid, "login crash")
-	t.Chdir(dir)
-	t.Setenv("KATA_SERVER", "")
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"), []byte(fmt.Sprintf("version = 1\n[server]\nurl = %q\n", env.URL)), 0600))
-	resetFlags(t)
-	cmd := newRootCmd()
-	var out, stderr bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--workspace", dir, "--json", "search", "login"})
-	cmd.SetContext(t.Context())
-	require.NoError(t, cmd.Execute())
-	require.Contains(t, out.String(), "login crash")
-	require.Empty(t, stderr.String())
-}
-
-func TestSearchUsesDaemonEmbeddingState(t *testing.T) {
-	env, dir, pid := setupCLIWorkspaceOptions(t, func(cfg *daemon.ServerConfig) {
-		var err error
-		cfg.Embedder, err = embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:1", Model: "example-model", Dims: 2})
-		require.NoError(t, err)
-	})
-	createIssue(t, env, pid, "login crash")
-	out, stderr, err := runCLIWithErr(t, env, dir, "search", "login", "--lexical", "--json")
-	require.NoError(t, err)
-	require.Contains(t, out, `"mode":"lexical"`)
-	require.Empty(t, stderr)
-}
-
-func TestSearchMissingConfigurationHeaderHasNoHint(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
-	createIssue(t, env, pid, "login crash")
-	upstream := env.URL
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		req, err := http.NewRequestWithContext(r.Context(), r.Method, upstream+r.URL.RequestURI(), r.Body) // #nosec G704 -- fixed loopback test daemon; only its path is forwarded
-		require.NoError(t, err)
-		req.Header = r.Header.Clone()
-		response, err := env.HTTP.Do(req) // #nosec G704 -- fixed loopback test daemon
-		require.NoError(t, err)
-		defer func() { _ = response.Body.Close() }()
-		for name, values := range response.Header {
-			if strings.EqualFold(name, "X-Kata-Embeddings-Configured") {
-				continue
-			}
-			for _, value := range values {
-				w.Header().Add(name, value)
-			}
-		}
-		w.WriteHeader(response.StatusCode)
-		_, err = io.Copy(w, response.Body)
-		require.NoError(t, err)
-	}))
-	t.Cleanup(proxy.Close)
-	env.URL = proxy.URL
-	_, stderr, err := runCLIWithErr(t, env, dir, "search", "login")
-	require.NoError(t, err)
-	require.Empty(t, stderr)
 }

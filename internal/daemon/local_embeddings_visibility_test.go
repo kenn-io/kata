@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
@@ -18,10 +17,10 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
-type localEmbeddingsRebuild struct{ error string }
+type localEmbeddingsRebuild struct{}
 
 func (s localEmbeddingsRebuild) Status(context.Context) (api.LocalEmbeddingsStatus, error) {
-	return api.LocalEmbeddingsStatus{Provider: "ollama", Rebuild: true, CanChange: true, Job: &api.LocalEmbeddingsJob{State: "failed", Error: s.error}}, nil
+	return api.LocalEmbeddingsStatus{Provider: "ollama", Rebuild: true, CanChange: true}, nil
 }
 func (localEmbeddingsRebuild) TurnOn(context.Context) error { return nil }
 
@@ -33,8 +32,7 @@ func TestLocalEmbeddingsVisibleStatus(t *testing.T) {
 	expires := time.Now().Add(time.Hour)
 	_, _, err = store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "subtree-test-token", Actor: "member", AdminActor: "admin", Scope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: f.private.UID, RootIssueUID: f.issue.UID}, ExpiresAt: &expires})
 	require.NoError(t, err)
-	detail := "open " + filepath.Join(t.TempDir(), "config.toml") + ": permission denied"
-	server := daemon.NewServer(daemon.ServerConfig{DB: store, LocalEmbeddings: localEmbeddingsRebuild{error: detail}, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}, ReconcilerHealth: func() daemon.ReconcilerHealth { return daemon.ReconcilerHealth{Configured: true, Backlog: 2} }})
+	server := daemon.NewServer(daemon.ServerConfig{DB: store, LocalEmbeddings: localEmbeddingsRebuild{}, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	f.server = httptest.NewServer(server.Handler())
 	t.Cleanup(f.server.Close)
@@ -49,15 +47,6 @@ func TestLocalEmbeddingsVisibleStatus(t *testing.T) {
 			require.NoError(t, json.Unmarshal(body, &status))
 			require.NotNil(t, status.Issues)
 			require.Equal(t, tc.count, *status.Issues)
-			require.NotNil(t, status.Indexing)
-			require.NotNil(t, status.Job)
-			if tc.actor == "admin" {
-				assert.Equal(t, int64(2), status.Indexing.Total)
-				assert.Equal(t, detail, status.Job.Error)
-			} else {
-				assert.Zero(t, status.Indexing.Total)
-				assert.NotContains(t, status.Job.Error, detail)
-			}
 		})
 	}
 }

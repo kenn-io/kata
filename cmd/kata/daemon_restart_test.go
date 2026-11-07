@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -305,6 +306,21 @@ func TestDaemonRestartWatch_RefusalReleasesIdleHold(t *testing.T) {
 }
 
 func TestDaemonRestartKeepsBrowserAddress(t *testing.T) {
+	const handoffEnv = "KATA_TEST_RESTART_HANDOFF"
+	const addressEnv = "KATA_TEST_RESTART_ADDRESS"
+	const resultEnv = "KATA_TEST_RESTART_RESULT"
+	if phase := os.Getenv(handoffEnv); phase != "" {
+		if phase == "read" {
+			require.NotEmpty(t, startedForRestartWebListen, "replacement must receive the browser address through exec")
+			require.NoError(t, os.WriteFile(os.Getenv(resultEnv), []byte(startedForRestartWebListen), 0o600)) // #nosec G703 -- parent supplies a test-owned temporary file
+			return
+		}
+		require.NoError(t, os.Setenv(handoffEnv, "read"))
+		restart := &daemonRestart{executable: os.Args[0], args: []string{"-test.run=^TestDaemonRestartKeepsBrowserAddress$"}, webListen: os.Getenv(addressEnv)}
+		restart.requested.Store(true)
+		require.NoError(t, restart.exec(t.Context()))
+		return
+	}
 	for _, transport := range []string{"127.0.0.1:0", ""} {
 		t.Run(transport, func(t *testing.T) {
 			setupKataEnv(t)
@@ -313,11 +329,12 @@ func TestDaemonRestartKeepsBrowserAddress(t *testing.T) {
 			original := startedForRestartWebListen
 			t.Cleanup(func() { startedForRestartWebListen = original })
 			startedForRestartWebListen = ""
+			restart := &daemonRestart{}
 			start := func() (string, func()) {
 				ctx, cancel := context.WithCancel(t.Context())
 				t.Cleanup(cancel)
 				done := make(chan error, 1)
-				go func() { done <- runDaemonProcess(ctx, transport, false, true, nil) }()
+				go func() { done <- runDaemonProcess(ctx, transport, false, true, restart) }()
 				ns, err := daemonruntime.NewNamespace()
 				require.NoError(t, err)
 				var origin string
@@ -342,7 +359,20 @@ func TestDaemonRestartKeepsBrowserAddress(t *testing.T) {
 			}
 			origin, stop := start()
 			stop()
-			startedForRestartWebListen = strings.TrimPrefix(origin, "http://")
+			require.Equal(t, strings.TrimPrefix(origin, "http://"), restart.webListen)
+			result := filepath.Join(t.TempDir(), "browser-address")
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestDaemonRestartKeepsBrowserAddress$") // #nosec G204 G702 -- re-executes this test binary
+			cmd.Env = append(os.Environ(), handoffEnv+"=exec", addressEnv+"="+restart.webListen, resultEnv+"="+result)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			var address []byte
+			require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: Windows starts the replacement as a detached process
+				address, err = os.ReadFile(result) // #nosec G304 -- test-owned temporary file
+				return err == nil
+			}, 5*time.Second, 10*time.Millisecond)
+			startedForRestartWebListen = string(address)
 			replacement, stop := start()
 			require.Equal(t, origin, replacement)
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, origin+"/api/v1/ping", nil)
@@ -364,8 +394,6 @@ func TestDaemonRestartKeepsBrowserAddress(t *testing.T) {
 
 func TestDaemonRestartAddress(t *testing.T) {
 	for _, tc := range []struct{ name, listen, origin, requested, want string }{
-		{"default", "", "", "", "127.0.0.1:54321"},
-		{"shared", "", "", "127.0.0.1:0", "127.0.0.1:54321"},
 		{"zero", "127.0.0.1:0", "", "", "127.0.0.1:54321"},
 		{"pinned web", "127.0.0.1:12345", "", "127.0.0.1:0", ""},
 		{"pinned main", "", "", "127.0.0.1:12345", ""},

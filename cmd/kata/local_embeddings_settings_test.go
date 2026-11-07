@@ -78,10 +78,8 @@ func TestLocalEmbeddingsSetupTurnOn(t *testing.T) {
 
 func TestLocalEmbeddingsSetupTurnOnBuiltIn(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
-	home := setupKataEnv(t)
+	setupKataEnv(t)
 	source := []byte("[search.embeddings]\nlocal = true\n")
-	path := filepath.Join(home, "config.toml")
-	require.NoError(t, os.WriteFile(path, source, 0600))
 	cfg, err := config.ParseSearchConfig(source)
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.UsesLocal())
@@ -108,6 +106,17 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	require.Equal(t, "ollama", status.Provider)
 	require.True(t, status.Rebuild)
 	require.False(t, status.CanChange)
+	t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", "1024")
+	_, err = config.ReadSearchConfig()
+	require.NoError(t, err, "the current Ollama configuration accepts its dimension override")
+	s.restart = func(context.Context) error { return nil }
+	status, err = s.Status(t.Context())
+	require.NoError(t, err, "a refused built-in proposal must not hide the running provider")
+	require.Equal(t, "ollama", status.Provider)
+	require.False(t, status.CanChange)
+	require.NotNil(t, status.Job)
+	require.Equal(t, "failed", status.Job.State)
+	require.Contains(t, status.Job.Error, "KATA_SEARCH_EMBEDDINGS", "explain why the proposed switch is unavailable")
 }
 
 func TestLocalEmbeddingsRestartRefusalIncludesCause(t *testing.T) {

@@ -475,11 +475,8 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 	}
 	status.DownloadBytes, status.OllamaAvailable = inspected.DownloadBytes, inspected.OllamaAvailable
 	if status.Provider == "ollama" {
-		prepared, err := prepareLocalEmbeddingsConfig(ctx, s.embeddings)
-		if err != nil {
-			return status, err
-		}
-		status.Rebuild = prepared.index == "rebuilt"
+		status.Rebuild, status.Job = localEmbeddingsSwitch(ctx, s.embeddings)
+		status.CanChange = status.CanChange && status.Job == nil
 	}
 	s.mu.Lock()
 	if s.job != nil {
@@ -488,6 +485,17 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 	}
 	s.mu.Unlock()
 	return status, nil
+}
+
+// localEmbeddingsSwitch reports whether switching to the built-in server
+// rebuilds the index. A configuration that refuses the switch comes back as a
+// failed job explaining why, so status still shows the running provider.
+func localEmbeddingsSwitch(ctx context.Context, current config.EmbeddingsConfig) (bool, *api.LocalEmbeddingsJob) {
+	prepared, err := prepareLocalEmbeddingsConfig(ctx, current)
+	if err != nil {
+		return false, &api.LocalEmbeddingsJob{State: "failed", Error: err.Error()}
+	}
+	return prepared.index == "rebuilt", nil
 }
 
 func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {

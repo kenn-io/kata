@@ -42,6 +42,12 @@
   // no progress bar says only that it's turning on.
   const turningOn: SearchByMeaningState = { kind: 'downloaded' }
   const turningOnLabels = { off: 'Turning on', downloaded: 'Keyword search works meanwhile' }
+  const megabytes = new Intl.NumberFormat(undefined, {
+    style: 'unit',
+    unit: 'megabyte',
+    unitDisplay: 'short',
+    maximumFractionDigits: 0,
+  })
   const requestFailure = "Couldn't confirm Turn on with the daemon. This page keeps checking."
 
   let status = $state<LocalEmbeddingsStatus>()
@@ -65,6 +71,15 @@
     row?.kind === 'indexing' ? row.total : row?.kind === 'ollama-other' ? row.itemCount : 0,
   )
   let failure = $derived(requestError ?? (job?.state === 'failed' ? job.error : undefined))
+  let switchTarget = $derived(
+    remoteHost ? `once to ${remoteHost}` : 'once, shared by all Kenn apps',
+  )
+  // kit-ui's Off line, for the files a switch from Ollama fetches when it's approved.
+  let switchDownload = $derived(
+    row?.kind.startsWith('ollama') && status?.download_bytes
+      ? `Downloads ${megabytes.format(status.download_bytes / 1_000_000)} ${switchTarget}`
+      : undefined,
+  )
   // Indexing keeps polling while failed, so the note clears once a pass succeeds.
   let indexingFailed = $derived(status?.indexing?.failed === true)
 
@@ -83,11 +98,12 @@
     }
   })
 
+  // A failed Ollama pass keeps the switch, since a broken Ollama setup is what fails it.
   function rowState(current: LocalEmbeddingsStatus): SearchByMeaningState {
     const job = current.job
     if (job?.state === 'downloading' || job?.state === 'restarting')
       return { kind: 'downloading', doneBytes: job.downloaded, totalBytes: job.total }
-    if (current.indexing)
+    if (current.indexing && !(current.indexing.failed && current.provider === 'ollama'))
       return {
         kind: 'indexing',
         done: current.indexing.done,
@@ -212,6 +228,9 @@
               onusebuiltin={turnOn}
             />
           </fieldset>
+          {#if switchDownload}
+            <p class="settings-note">{switchDownload}</p>
+          {/if}
           {#if failure}
             <p class="settings-note" role="alert">{failure}</p>
           {/if}

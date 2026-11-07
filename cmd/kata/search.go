@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -151,7 +152,7 @@ per match.`,
 			}
 			if r := response.JSON200; !daemon.resolved.ConfiguredRemote() && cursor == "" && r != nil && r.Mode == "lexical" && !flags.Quiet && currentOutputMode() != outputAgent {
 				if response.Headers200 != nil && response.Headers200.XKataEmbeddingsConfigured == "false" {
-					if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings."); err != nil {
+					if _, err := fmt.Fprintln(cmd.ErrOrStderr(), searchByMeaningOffHint(daemon.resolved.LocalProfile)); err != nil {
 						return err
 					}
 				}
@@ -172,6 +173,16 @@ per match.`,
 	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
 	cmd.Flags().StringSliceVar(&noLabels, "no-label", nil, "exclude issues with this label (repeatable)")
 	return cmd
+}
+
+// searchByMeaningOffHint names the searched profile's home, since Settings and
+// the setup command both administer whichever KATA_HOME they run under.
+func searchByMeaningOffHint(profile *client.LocalProfileIdentity) string {
+	hint := "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings."
+	if profile != nil {
+		hint += " Set KATA_HOME to " + profile.Home + " before running kata ui or kata daemon local-embeddings."
+	}
+	return hint
 }
 
 // printSearchResults renders a search response in the active output mode:
