@@ -274,7 +274,15 @@ func TestGeneratedClientSendsLargeIntegerQueryParams(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQueries = append(gotQueries, r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"events":[],"next_after_id":1251852,"issues":[]}`))
+		switch r.URL.Path {
+		case "/api/v1/projects/42/events":
+			_, _ = w.Write([]byte(`{"events":[],"next_after_id":1251852,"reset_required":false}`))
+		case "/api/v1/issues":
+			_, _ = w.Write([]byte(`{"issues":[],"complete":true,"truncated":false}`))
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
 	}))
 	defer server.Close()
 
