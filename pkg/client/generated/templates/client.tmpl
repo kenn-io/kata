@@ -107,7 +107,7 @@ func (o pathEscapingRequestOptions) GetQuery() (map[string]any, error) {
         return nil, nil
     }
     params, err := o.RequestOptions.GetQuery()
-    if err != nil || len(params) == 0 {
+    if err != nil {
         return params, err
     }
     for key, value := range params {
