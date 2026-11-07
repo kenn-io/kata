@@ -21,7 +21,7 @@ For a Docbank on the same machine:
 kata docbank setup [--folder /kata]
 ```
 
-Setup prints the shared-vault warning with the vault path and asks once; without a terminal, pass `--yes` to skip the question. Only then does it check that the Docbank in `DOCBANK_HOME` (default `~/.docbank`) answers with its API key, starting it with `docbank daemon start` when it is not running, so `docbank` must be on `PATH`. It then adds `[docbank]` with `local = true` and `folder` to `<KATA_HOME>/config.toml`. Setup does not edit Docbank's config or store a key. Setup reads `DOCBANK_HOME` from its own shell while the daemon reads it from its own environment, so they must match; a restart keeps the daemon's environment.
+Setup prints the shared-vault warning with the vault path and asks once; without a terminal, pass `--yes` to skip the question. A first setup starts Docbank only after that approval. It then checks that the Docbank in `DOCBANK_HOME` (default `~/.docbank`) answers with its API key, starting it with `docbank daemon start` when it is not running, so `docbank` must be on `PATH`. It then adds `[docbank]` with `local = true` and `folder` to `<KATA_HOME>/config.toml`. Setup does not edit Docbank's config or store a key. Setup reads `DOCBANK_HOME` from its own shell while the daemon reads it from its own environment, so they must match; a restart keeps the daemon's environment.
 
 For a Docbank on another host:
 
@@ -38,7 +38,7 @@ Setup changes nothing when:
 - Docbank cannot be found or started, or rejects the key;
 - `--key-file` is given without `--url`.
 
-Running setup again with the same settings reports that attachments are already set up and writes nothing. See the [CLI reference](../reference/cli.md#issue-attachments) for flags and output.
+Running setup again with the same settings reports that attachments are already set up, writes nothing and does not ask; it still checks Docbank, starting it when it is not running. See the [CLI reference](../reference/cli.md#issue-attachments) for flags and output.
 
 To configure the daemon by hand for a Docbank on the same machine, add this to `<KATA_HOME>/config.toml` on each daemon that uploads or serves files, then restart the daemon:
 

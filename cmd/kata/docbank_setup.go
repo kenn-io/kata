@@ -83,13 +83,15 @@ func newDocbankSetupCmd() *cobra.Command {
 					return fmt.Errorf("%s already has a different [docbank] section; edit or remove it, then rerun", path)
 				}
 			}
-			vault, label, where := want.URL, want.URL, "docbank at "+want.URL
+			vault, label := want.URL, want.URL
+			var key string
 			if local {
 				if vault, err = docbank.LocalHome(); err != nil {
 					return err
 				}
 				label = "the Docbank on this machine (" + vault + ")"
-				where = label
+			} else if key, err = want.ResolveKey(); err != nil {
+				return err
 			}
 			changed := !set
 			if changed {
@@ -106,7 +108,7 @@ func newDocbankSetupCmd() *cobra.Command {
 					}
 				}
 			}
-			// Starting Docbank and reading the key wait for approval, but still precede any write.
+			// Starting Docbank and contacting a remote one wait for approval, but still precede any write.
 			var client *docbank.Client
 			if local {
 				if err = localDocbank.Ready(ctx); err != nil {
@@ -114,13 +116,9 @@ func newDocbankSetupCmd() *cobra.Command {
 				}
 				client = docbank.NewLocalClient(localDocbank)
 			} else {
-				key, err := want.ResolveKey()
-				if err != nil {
-					return err
-				}
 				client = docbank.NewClient(want.URL, func() (string, error) { return key, nil })
 			}
-			if err := checkDocbankKey(ctx, client, where); err != nil {
+			if err := checkDocbankKey(ctx, client, label); err != nil {
 				return err
 			}
 			if changed {
@@ -174,19 +172,19 @@ func printDocbankSetup(w io.Writer, want config.DocbankConfig, target string, ch
 }
 
 // checkDocbankKey reads Docbank's root folder through client, which carries the key the daemon will use.
-// where names the Docbank in errors.
-func checkDocbankKey(ctx context.Context, client *docbank.Client, where string) error {
+// label names the Docbank in errors.
+func checkDocbankKey(ctx context.Context, client *docbank.Client, label string) error {
 	_, err := client.ResolvePath(ctx, "/")
 	status, ok := errors.AsType[*docbank.Error](err)
 	switch {
 	case err == nil:
 		return nil
 	case ok && (status.Status == 401 || status.Status == 403):
-		return fmt.Errorf("%s rejected the API key (HTTP %d); kata's config was not changed", where, status.Status)
+		return fmt.Errorf("%s rejected the API key (HTTP %d); kata's config was not changed", label, status.Status)
 	case ok && status.Status != 0:
-		return fmt.Errorf("%s answered HTTP %d to a read of its root folder; kata's config was not changed", where, status.Status)
+		return fmt.Errorf("%s answered HTTP %d to a read of its root folder; kata's config was not changed", label, status.Status)
 	default:
-		return fmt.Errorf("cannot reach %s; kata's config was not changed", where)
+		return fmt.Errorf("cannot reach %s; kata's config was not changed", label)
 	}
 }
 

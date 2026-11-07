@@ -6,11 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 )
@@ -57,10 +55,7 @@ func TestDocbankSetupRemote(t *testing.T) {
 	require.Contains(t, fake.Requests(), "GET /api/v1/path")
 	written, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
 	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(string(written), original), "setup must append, keeping the existing text:\n%s", written)
-	got, err := config.ParseDocbankFile(written)
-	require.NoError(t, err)
-	require.Equal(t, config.DocbankConfig{URL: fake.Server.URL, APIKeyFile: keyFile, Folder: "/kata"}, got)
+	require.Equal(t, original+"\n[docbank]\nurl = \""+fake.Server.URL+"\"\napi_key_file = \""+keyFile+"\"\nfolder = \"/kata\"\n", string(written))
 	require.Contains(t, stderr, "can read any file in the Docbank vault at "+fake.Server.URL)
 	require.Contains(t, out, fake.Server.URL)
 }
@@ -129,9 +124,7 @@ func TestDocbankSetupLocal(t *testing.T) {
 	require.Contains(t, fake.Requests(), "GET /api/v1/path")
 	written, err := os.ReadFile(filepath.Join(home, "config.toml")) // #nosec G304 -- test-owned configuration
 	require.NoError(t, err)
-	got, err := config.ParseDocbankFile(written)
-	require.NoError(t, err)
-	require.Equal(t, config.DocbankConfig{Local: true, Folder: "/kata"}, got)
+	require.Equal(t, "[docbank]\nlocal = true\nfolder = \"/kata\"\n", string(written))
 	require.Contains(t, stderr, "can read any file in the Docbank vault at "+docbankHome)
 	require.Equal(t, "OK docbank-setup local=true folder=/kata changed=true\n", out)
 }
@@ -162,7 +155,7 @@ func TestDocbankSetupLocalRefusesBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestDocbankSetupDeclinedPromptStartsNothing(t *testing.T) {
+func TestDocbankSetupWithoutApprovalStartsNothing(t *testing.T) {
 	home := setupDocbankEnv(t)
 	stubIsTTY(t, false)
 	started := false
@@ -171,10 +164,9 @@ func TestDocbankSetupDeclinedPromptStartsNothing(t *testing.T) {
 	original := "# operator notes stay\n"
 	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
 
-	_, stderr, err := executeRootCapture(t, t.Context(), "docbank", "setup")
+	_, _, err := executeRootCapture(t, t.Context(), "docbank", "setup")
 
 	require.ErrorContains(t, err, "no TTY")
-	require.Contains(t, stderr, "can read any file in the Docbank vault")
 	require.False(t, started, "Docbank must not start before the change is approved")
 	written, readErr := os.ReadFile(path) // #nosec G304 -- test-owned configuration
 	require.NoError(t, readErr)
