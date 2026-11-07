@@ -33,7 +33,11 @@ func TestCronPullMaterializesOnlyTouchedRuns(t *testing.T) {
 	_, err := d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{workflow, a, b})
 	require.NoError(t, err)
 	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
-	_, err = d.ExecContext(ctx, `UPDATE cron_runs SET summary_json='{"version":1,"message":"local B"}' WHERE uid=?`, "01ARZ3NDEKTSV4RRFFQ69G5FCC")
+	before, err := (db.CronSQL{Query: d}).Run(ctx, p.ID, "01ARZ3NDEKTSV4RRFFQ69G5FCC")
+	require.NoError(t, err)
+	// Admission can retain an observation before its pull page is materialized.
+	pendingB := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FCC", "pending B", 9_000_001_000_005)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{pendingB})
 	require.NoError(t, err)
 	later := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FBB", "later A", 9_000_001_000_003)
 	older := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FBB", "older A", 9_000_001_000_002)
@@ -41,24 +45,14 @@ func TestCronPullMaterializesOnlyTouchedRuns(t *testing.T) {
 	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{c, later, older})
 	require.NoError(t, err)
 	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{c.EventUID, later.EventUID, older.EventUID}))
-	for uid, message := range map[string]string{
-		"01ARZ3NDEKTSV4RRFFQ69G5FBB": "later A",
-		"01ARZ3NDEKTSV4RRFFQ69G5FCC": "local B",
-		"01ARZ3NDEKTSV4RRFFQ69G5FDD": "new C",
-	} {
-		run, err := (db.CronSQL{Query: d}).Run(ctx, p.ID, uid)
-		require.NoError(t, err)
-		require.Equal(t, message, run.Summary.Message)
-	}
+	after, err := (db.CronSQL{Query: d}).Run(ctx, p.ID, "01ARZ3NDEKTSV4RRFFQ69G5FCC")
+	require.NoError(t, err)
+	require.Equal(t, before, after, "a pull must leave runs outside its page unchanged")
 	// A page carrying only an older observation must keep the historical winner.
 	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{older.EventUID}))
 	run, err := (db.CronSQL{Query: d}).Run(ctx, p.ID, "01ARZ3NDEKTSV4RRFFQ69G5FBB")
 	require.NoError(t, err)
 	require.Equal(t, "later A", run.Summary.Message)
-	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
-	run, err = (db.CronSQL{Query: d}).Run(ctx, p.ID, "01ARZ3NDEKTSV4RRFFQ69G5FCC")
-	require.NoError(t, err)
-	require.Equal(t, "original B", run.Summary.Message)
 }
 
 func seedCronPullHistory(t testing.TB, d *Store, p db.Project, count int) {

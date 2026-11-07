@@ -17,7 +17,8 @@ import (
 // relay push. Legacy ingest refuses a cron definition whose version names an
 // unrelated event; a relay push of the same document must be refused with the
 // same error class and leave no definition behind, while a well-formed
-// definition from the same sender is still accepted.
+// definition from the same sender is still accepted. Legacy admission also
+// rejects identity changes against pending run observations.
 func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "hub-project")

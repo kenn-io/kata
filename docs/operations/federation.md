@@ -1923,6 +1923,7 @@ and use indexed lookups for the runs carried by the page. Run-history work follo
 the runs the pull brings, preserving their complete observation history without
 reconciling unrelated runs, issues, or short IDs. Mixed pages and
 project or move baselines retain the ordinary issue reconciliation path.
+A cron-only pull leaves run rows it didn't carry unchanged; a full rebuild still repairs every run.
 
 A push-enabled spoke scans for local-origin events above its push cursor and
 sends them to the hub as an all-or-nothing batch. The hub authenticates the

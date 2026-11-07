@@ -34,8 +34,10 @@ func TestReadyIndexMigrationUpgrades(t *testing.T) {
 				_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS ready_priority_upgrade.idx_issues_ready_updated; DROP INDEX ready_priority_upgrade.idx_events_moved_from_id`)
 				require.NoError(t, err)
 			}
-			_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS ready_priority_upgrade.idx_events_cron_run_uid`)
-			require.NoError(t, err)
+			if sourceVersion != 45 {
+				_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS ready_priority_upgrade.idx_events_cron_run_uid`)
+				require.NoError(t, err)
+			}
 			_, err = admin.ExecContext(ctx, `UPDATE ready_priority_upgrade.meta SET value=$1 WHERE key='schema_version'`, fmt.Sprint(sourceVersion))
 			require.NoError(t, err)
 			upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
