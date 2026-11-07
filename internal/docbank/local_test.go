@@ -104,7 +104,7 @@ func TestLocalClientFollowsSymlinkedHome(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestLocalClientCarriesAttachmentUploadAndContentOverPinnedConnection(t *testing.T) {
+func TestLocalClientCarriesAttachmentUploadAndContentOverProvenConnection(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DOCBANK_HOME", home)
 	docbanktest.New(t).Publish(t, home)

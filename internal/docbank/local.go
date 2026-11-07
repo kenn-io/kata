@@ -18,7 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -50,28 +49,16 @@ type Local struct {
 	Start func(ctx context.Context, home string) error
 }
 
-// Ready checks that a Docbank on this machine is running, starting it when it
-// is not, and that it holds the key its runtime record names.
-func (l Local) Ready(ctx context.Context) error {
-	_, _, conn, err := l.connect(ctx)
-	if err != nil {
-		return err
-	}
-	return conn.Close()
-}
-
-// connect returns the running Docbank's base URL, its API key, and a
-// connection to it that has proven it holds that key. The key must only travel
-// over that connection: the record's PID can outlive the listener, so another
-// user could otherwise bind the freed port and answer the public ping.
-func (l Local) connect(ctx context.Context) (base, key string, conn net.Conn, err error) {
+// connect finds the running Docbank, starting it when none is running, and
+// returns its endpoint and the API key its runtime record names.
+func (l Local) connect(ctx context.Context) (kitdaemon.Endpoint, string, error) {
 	home, err := LocalHome()
 	if err != nil {
-		return "", "", nil, err
+		return kitdaemon.Endpoint{}, "", err
 	}
 	rec, found, err := discoverDocbank(ctx, home)
 	if err != nil {
-		return "", "", nil, err
+		return kitdaemon.Endpoint{}, "", err
 	}
 	if !found {
 		start := l.Start
@@ -79,28 +66,24 @@ func (l Local) connect(ctx context.Context) (base, key string, conn net.Conn, er
 			start = startDocbank
 		}
 		if err := start(ctx, home); err != nil {
-			return "", "", nil, fmt.Errorf("start docbank in %s: %w", home, err)
+			return kitdaemon.Endpoint{}, "", fmt.Errorf("start docbank in %s: %w", home, err)
 		}
 		if rec, found, err = discoverDocbank(ctx, home); err != nil {
-			return "", "", nil, err
+			return kitdaemon.Endpoint{}, "", err
 		}
 		if !found {
-			return "", "", nil, fmt.Errorf("docbank is not running in %s after starting it", home)
+			return kitdaemon.Endpoint{}, "", fmt.Errorf("docbank is not running in %s after starting it", home)
 		}
 	}
-	key = rec.Metadata["api_key"]
+	key := rec.Metadata["api_key"]
 	if key == "" {
-		return "", "", nil, fmt.Errorf("docbank runtime record in %s has no api_key", home)
+		return kitdaemon.Endpoint{}, "", fmt.Errorf("docbank runtime record in %s has no api_key", home)
 	}
 	ep := rec.Endpoint()
 	if ep.Network != "tcp" {
-		return "", "", nil, fmt.Errorf("docbank runtime record in %s uses unsupported network %q", home, ep.Network)
+		return kitdaemon.Endpoint{}, "", fmt.Errorf("docbank runtime record in %s uses unsupported network %q", home, ep.Network)
 	}
-	conn, err = proveKey(ctx, ep.Address, key)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("docbank at %s: %w", ep.Address, err)
-	}
-	return ep.BaseURL(), key, conn, nil
+	return ep, key, nil
 }
 
 const (
@@ -181,47 +164,6 @@ func proveKey(ctx context.Context, address, key string) (conn net.Conn, err erro
 	return conn, nil
 }
 
-// pinnedTransport carries one request over a connection already proven to
-// belong to Docbank and refuses to dial anything else.
-type pinnedTransport struct {
-	inner *http.Transport
-	mu    sync.Mutex
-	conn  net.Conn
-}
-
-func newPinnedClient(conn net.Conn) *http.Client {
-	p := &pinnedTransport{conn: conn}
-	p.inner = &http.Transport{
-		DisableKeepAlives: true,
-		DialContext: func(context.Context, string, string) (net.Conn, error) {
-			p.mu.Lock()
-			defer p.mu.Unlock()
-			c := p.conn
-			if c == nil {
-				return nil, errors.New("docbank connection already used")
-			}
-			p.conn = nil
-			return c, nil
-		},
-	}
-	return noRedirectClient(p)
-}
-
-func (p *pinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	return p.inner.RoundTrip(req)
-}
-
-// CloseIdleConnections closes the proven connection when no request used it.
-func (p *pinnedTransport) CloseIdleConnections() {
-	p.mu.Lock()
-	if p.conn != nil {
-		_ = p.conn.Close()
-		p.conn = nil
-	}
-	p.mu.Unlock()
-	p.inner.CloseIdleConnections()
-}
-
 // discoverDocbank reports a missing home or an unreachable record as not
 // running; List would create the missing home, so it is never asked.
 func discoverDocbank(ctx context.Context, home string) (kitdaemon.RuntimeRecord, bool, error) {
@@ -275,11 +217,20 @@ func NewLocalClient(l Local) *Client {
 		case <-ctx.Done():
 			return "", "", nil, &Error{}
 		}
-		base, key, conn, err := l.connect(ctx)
+		ep, key, err := l.connect(ctx)
 		if err != nil {
 			slog.WarnContext(ctx, "local docbank unavailable", "error", err)
 			return "", "", nil, &Error{}
 		}
-		return base, key, newPinnedClient(conn), nil
+		// The key travels only over connections whose listener proved it holds the key: the record's
+		// PID can outlive the listener, so another user could bind the freed port and answer the ping.
+		proven := &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			conn, err := proveKey(ctx, ep.Address, key)
+			if err != nil {
+				slog.WarnContext(ctx, "local docbank unavailable", "address", ep.Address, "error", err)
+			}
+			return conn, err
+		}}
+		return ep.BaseURL(), key, noRedirectClient(proven), nil
 	}}
 }
