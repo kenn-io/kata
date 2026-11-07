@@ -106,10 +106,7 @@ func newDocbankSetupCmd() *cobra.Command {
 			}
 			changed := !set
 			if changed {
-				warning := "Every issue reader and metadata writer served by this daemon can read any file in this Docbank vault: " + vault
-				if local {
-					warning = "Every issue reader and metadata writer served by this daemon can read any file in the Docbank vault at " + vault
-				}
+				warning := "Every issue reader and metadata writer served by this daemon can read any file in the Docbank vault at " + vault
 				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), warning); err != nil {
 					return err
 				}

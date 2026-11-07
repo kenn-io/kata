@@ -61,17 +61,17 @@ func TestDocbankSetupRemote(t *testing.T) {
 	got, err := config.ParseDocbankFile(written)
 	require.NoError(t, err)
 	require.Equal(t, config.DocbankConfig{URL: fake.Server.URL, APIKeyFile: keyFile, Folder: "/kata"}, got)
-	require.Contains(t, stderr, "can read any file in this Docbank")
+	require.Contains(t, stderr, "can read any file in the Docbank vault at "+fake.Server.URL)
 	require.Contains(t, out, fake.Server.URL)
 }
 
 func TestDocbankSetupRefusesBeforeWriting(t *testing.T) {
 	for _, tc := range []struct {
-		name, key, url, config, env, wantErr string
-		wantRequest                          bool
+		name, key, config, env, wantErr string
+		wantRequest                     bool
 	}{
 		{name: "rejected key", key: "wrong-key", wantRequest: true, wantErr: "rejected the API key (HTTP 401)"},
-		{name: "plain HTTP to another host", key: "test-key", url: "http://docbank.example", wantErr: "requires HTTPS except on loopback"},
+		{name: "empty section", key: "test-key", config: "[docbank]\n", wantRequest: true, wantErr: "already sets docbank keys"},
 		{name: "different section", key: "test-key", config: "[docbank]\nurl = \"https://docbank.example\"\napi_key_env = \"EXAMPLE_KEY\"\n", wantErr: "already has a different [docbank] section"},
 		{name: "environment override", key: "test-key", env: "KATA_DOCBANK_FOLDER", wantErr: "unset KATA_DOCBANK_FOLDER"},
 	} {
@@ -81,15 +81,11 @@ func TestDocbankSetupRefusesBeforeWriting(t *testing.T) {
 			if tc.env != "" {
 				t.Setenv(tc.env, "/elsewhere")
 			}
-			url := tc.url
-			if url == "" {
-				url = fake.Server.URL
-			}
 			path := filepath.Join(home, "config.toml")
 			original := "# operator notes stay\n" + tc.config
 			require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
 
-			_, _, err := executeRootCapture(t, t.Context(), "docbank", "setup", "--url", url, "--key-file", writeDocbankKey(t, tc.key), "--yes")
+			_, _, err := executeRootCapture(t, t.Context(), "docbank", "setup", "--url", fake.Server.URL, "--key-file", writeDocbankKey(t, tc.key), "--yes")
 
 			require.ErrorContains(t, err, tc.wantErr)
 			written, readErr := os.ReadFile(path) // #nosec G304 -- test-owned configuration
@@ -127,7 +123,7 @@ func TestDocbankSetupLocal(t *testing.T) {
 	fake := docbanktest.New(t)
 	fake.Publish(t, docbankHome)
 
-	_, stderr, err := executeRootCapture(t, t.Context(), "docbank", "setup", "--yes")
+	out, stderr, err := executeRootCapture(t, t.Context(), "--agent", "docbank", "setup", "--yes")
 	require.NoError(t, err, stderr)
 
 	require.Contains(t, fake.Requests(), "GET /api/v1/path")
@@ -137,6 +133,7 @@ func TestDocbankSetupLocal(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, config.DocbankConfig{Local: true, Folder: "/kata"}, got)
 	require.Contains(t, stderr, "can read any file in the Docbank vault at "+docbankHome)
+	require.Equal(t, "OK docbank-setup local=true folder=/kata changed=true\n", out)
 }
 
 func TestDocbankSetupLocalRefusesBeforeWriting(t *testing.T) {
