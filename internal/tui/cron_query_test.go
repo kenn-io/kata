@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // Contract: OR within a key, AND across keys and free text; health/status
@@ -38,24 +38,24 @@ func TestCronQueryExamples(t *testing.T) {
 }
 
 func TestCronQueryArbitraryInputTotal(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		query, text := hegel.Draw(ht, hegel.Text()), hegel.Draw(ht, hegel.Text())
+	cronRapidCheck(t, 2000, func(rt *rapid.T) {
+		query, text := rapid.String().Draw(rt, "query"), rapid.String().Draw(rt, "text")
 		fields := map[string]string{"status": "failed", "health": "never ran", "actor": "Operator", "issue": "01ABC"}
 		for _, tab := range []int{cronJobs, cronRuns, cronWorkflows} {
 			parsed := cronQuery(query, tab)
 			if got, want := parsed.match(fields, "Report actor:"), cronQuery(strings.ToLower(query), tab).match(fields, "Report actor:"); got != want {
-				ht.Fatalf("case-fold changed arbitrary query %q in tab %d", query, tab)
+				rt.Fatalf("case-fold changed arbitrary query %q in tab %d", query, tab)
 			}
 			if tab != cronWorkflows && len(parsed.tokens) != 0 {
 				continue // Token semantics have their own contract properties.
 			}
 			for _, candidate := range []string{text, ""} {
 				if got, want := parsed.match(nil, candidate), cronMatches(candidate, query); got != want {
-					ht.Fatalf("literal query changed: %q in %q (tab %d)", query, candidate, tab)
+					rt.Fatalf("literal query changed: %q in %q (tab %d)", query, candidate, tab)
 				}
 			}
 		}
-	}, hegel.WithTestCases(2000))
+	})
 }
 
 // OR within status and AND across actor share one closed-form query oracle.
@@ -64,14 +64,14 @@ func TestCronQueryRepeatedStatusAndActorIntersection(t *testing.T) {
 	fields := map[string]string{"status": "failed", "actor": "Operator"}
 	require.True(t, cronQuery("status:running status:failed actor:oper", cronRuns).match(fields, ""))
 	require.False(t, cronQuery("status:failed actor:other", cronRuns).match(fields, ""))
-	hegel.Test(t, func(ht *hegel.T) {
+	cronRapidCheck(t, 2000, func(rt *rapid.T) {
 		statuses := []string{"failed", "running", "succeeded", "unknown", "cancelled"}
-		status := hegel.Draw(ht, hegel.SampledFrom(statuses))
-		first := hegel.Draw(ht, hegel.SampledFrom(statuses))
-		second := hegel.Draw(ht, hegel.SampledFrom(statuses))
-		actor := hegel.Draw(ht, hegel.Text())
+		status := rapid.SampledFrom(statuses).Draw(rt, "run status")
+		first := rapid.SampledFrom(statuses).Draw(rt, "first status")
+		second := rapid.SampledFrom(statuses).Draw(rt, "second status")
+		actor := rapid.String().Draw(rt, "actor")
 		// Exercise both actor-match directions while preserving arbitrary text.
-		if hegel.Draw(ht, hegel.Booleans()) {
+		if rapid.Bool().Draw(rt, "operator prefix") {
 			actor = "Operator" + actor
 		}
 		fields := map[string]string{"status": status, "actor": actor}
@@ -82,13 +82,13 @@ func TestCronQueryRepeatedStatusAndActorIntersection(t *testing.T) {
 			query := fmt.Sprintf("status:%s status:%s", operands[0], operands[1])
 			wantStatus := status == operands[0] || status == operands[1]
 			if got := cronQuery(query, cronRuns).match(fields, ""); got != wantStatus {
-				ht.Fatalf("OR mismatch: %q vs %q/%q", status, operands[0], operands[1])
+				rt.Fatalf("OR mismatch: %q vs %q/%q", status, operands[0], operands[1])
 			}
 			if got := cronQuery(query+" actor:operator", cronRuns).match(fields, ""); got != (wantStatus && wantActor) {
-				ht.Fatal("new key must intersect the actor match")
+				rt.Fatal("new key must intersect the actor match")
 			}
 		}
-	}, hegel.WithTestCases(2000))
+	})
 }
 
 func TestCronQueryViewFields(t *testing.T) {

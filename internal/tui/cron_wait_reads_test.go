@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/pkg/client/generated"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 type cronWaitReadAPI struct {
@@ -208,11 +208,11 @@ func TestCronWaitSharedIssueThroughUndoClient(t *testing.T) {
 // Contract: at most 20 attention reads, one fetch per shared issue, with each
 // actor evaluated independently and excess/missing evidence explicitly unknown.
 func TestCronWaitUniqueAdmissionProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		count := hegel.Draw(ht, hegel.Integers(0, 60))
-		pool := hegel.Draw(ht, hegel.Integers(1, 31))
+	cronRapidCheck(t, 150, func(rt *rapid.T) {
+		count := rapid.IntRange(0, 60).Draw(rt, "run count")
+		pool := rapid.IntRange(1, 31).Draw(rt, "issue pool size")
 		p := cronData{}
-		nativeCount := hegel.Draw(ht, hegel.Integers[int](0, pool))
+		nativeCount := rapid.IntRange(0, pool).Draw(rt, "native job count")
 		for i := range nativeCount {
 			j := cronFixture(t).cron.data.jobs[0]
 			j.UID = fmt.Sprintf("native-%d", i)
@@ -241,17 +241,17 @@ func TestCronWaitUniqueAdmissionProperty(t *testing.T) {
 			}
 		}
 		if len(a.waitCalls) != nativeCount+min(20, len(unique)-shared) {
-			ht.Fatalf("count %d pool %d: fetched %v", count, pool, a.waitCalls)
+			rt.Fatalf("count %d pool %d: fetched %v", count, pool, a.waitCalls)
 		}
 		for uid, n := range a.waitCalls {
 			if p.waitErr[uid] != nil {
-				ht.Fatalf("fetched issue %q has cap error: %v", uid, p.waitErr[uid])
+				rt.Fatalf("fetched issue %q has cap error: %v", uid, p.waitErr[uid])
 			}
 			if n != 1 {
-				ht.Fatalf("issue %q fetched %d times", uid, n)
+				rt.Fatalf("issue %q fetched %d times", uid, n)
 			}
 		}
-	}, hegel.WithTestCases(150))
+	})
 
 	t.Run("shared actor and overflow outcomes", func(t *testing.T) {
 		p := cronData{}

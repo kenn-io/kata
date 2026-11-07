@@ -10,13 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/pkg/client/generated"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 func TestCronWaitOnlyExactNormalizedActorCounts(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		arbitrary := hegel.Draw(ht, hegel.Text().MaxSize(180))
-		valid := hegel.Draw(ht, hegel.SampledFrom([]string{"operator", " operator ", "operator/reader", "Équipe"}))
+	cronRapidCheck(t, 300, func(rt *rapid.T) {
+		arbitrary := rapid.StringN(0, 180, 180).Draw(rt, "arbitrary actor")
+		valid := rapid.SampledFrom([]string{"operator", " operator ", "operator/reader", "Équipe"}).Draw(rt, "valid actor")
 		for _, actor := range []string{valid, arbitrary, arbitrary + "\x00"} {
 			normalized, err := notification.NormalizeRecipient(actor)
 			other := "other-recipient"
@@ -28,20 +28,20 @@ func TestCronWaitOnlyExactNormalizedActorCounts(t *testing.T) {
 			// Check before installing the matching request, using the same parent.
 			unrelated := cronRunWaitForActor(cronParent{open: true, metadata: metadata}, actor)
 			if unrelated.state == "blocked" {
-				ht.Fatalf("unrelated recipient blocked actor %q: %v", actor, unrelated)
+				rt.Fatalf("unrelated recipient blocked actor %q: %v", actor, unrelated)
 			}
 			if err == nil {
 				metadata[notification.MetadataKey(normalized)] = map[string]any{"from": "worker", "message": "review\nnow"}
 			}
 			got := cronRunWaitForActor(cronParent{open: true, metadata: metadata}, actor)
 			if (got.state == "blocked") != (err == nil) {
-				ht.Fatalf("actor %q: %v, normalization error %v", actor, got, err)
+				rt.Fatalf("actor %q: %v, normalization error %v", actor, got, err)
 			}
 			if strings.ContainsAny(got.reason, "\r\n\x1b") {
-				ht.Fatalf("wait reason is not a sanitized line: %q", got.reason)
+				rt.Fatalf("wait reason is not a sanitized line: %q", got.reason)
 			}
 		}
-	}, hegel.WithTestCases(300))
+	})
 }
 
 func TestCronWaitUnavailableOrMalformedNeverBlocks(t *testing.T) {

@@ -515,6 +515,16 @@ func cronListBudget(m Model, header string, errorCount int, help [][]helplayout.
 	return max(m.height-bodyRows-max(errorCount, 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
 }
 
+func cronRunLineCount(lines []cronLine) int {
+	count := 0
+	for _, line := range lines {
+		if line.target.kind == cronRuns && line.target.uid != "" {
+			count++
+		}
+	}
+	return count
+}
+
 func renderCron(m Model) string {
 	if m.scope.allProjects || m.scope.projectID == 0 {
 		body := []string{renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon), cronTabs(m.cron.tab), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
@@ -553,7 +563,7 @@ func renderCron(m Model) string {
 			right += " · " + chip
 		}
 	}
-	if count := m.cronUnseenCount(); count > 0 && (m.cron.tab != cronRuns || !m.cron.unseenOnly || len(m.cron.stack) > 0 || len(lines) != count) {
+	if count := m.cronUnseenCount(); count > 0 && (m.cron.tab != cronRuns || !m.cron.unseenOnly || len(m.cron.stack) > 0 || cronRunLineCount(lines) != count) {
 		right += errorStyle.Render(fmt.Sprintf(" · %d unseen failed", count))
 	}
 	body := []string{

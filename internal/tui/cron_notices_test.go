@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 func cronNoticeFixture(t *testing.T) Model {
@@ -52,17 +52,17 @@ func TestCronNoticeDecodeObservedOnly(t *testing.T) {
 // Contract: permutations/replays within a window count distinct eligible run
 // UIDs once. Same-job failures count individually, but get one label.
 func TestCronNoticeWindowPermutation(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	cronRapidCheck(t, 200, func(rt *rapid.T) {
 		m := cronNoticeFixture(t)
-		n := hegel.Draw(ht, hegel.Integers[int](1, 8))
-		m.width = hegel.Draw(ht, hegel.Integers[int](64, 160))
+		n := rapid.IntRange(1, 8).Draw(rt, "run count")
+		m.width = rapid.IntRange(64, 160).Draw(rt, "width")
 		jobs := []string{"named-a", "named-b", "0123456789abcdef"}
 		m.cron.data.jobs = []generated.CronJob{{UID: jobs[0], Name: "alpha\tjob"}, {UID: jobs[1], Name: "beta"}}
 		labels := []string{"alpha job", "beta", "job 0123456789a…"}
 		chosen := make([]string, n)
 		wantLabels := []string{}
 		for i := range n {
-			j := hegel.Draw(ht, hegel.Integers[int](0, len(jobs)-1))
+			j := rapid.IntRange(0, len(jobs)-1).Draw(rt, "job index")
 			chosen[i] = jobs[j]
 			if !slices.Contains(wantLabels, labels[j]) {
 				wantLabels = append(wantLabels, labels[j])
@@ -74,19 +74,19 @@ func TestCronNoticeWindowPermutation(t *testing.T) {
 			order[i] = i % n
 		}
 		for i := len(order) - 1; i > 0; i-- {
-			j := hegel.Draw(ht, hegel.Integers[int](0, i))
+			j := rapid.IntRange(0, i).Draw(rt, "shuffle index")
 			order[i], order[j] = order[j], order[i]
 		}
 		for i, id := range order {
 			next, cmd := m.cronNoticeEvent(cronNoticeEvent(fmt.Sprint(id), chosen[id], snapshotFixedNow))
 			m = next
 			if (cmd != nil) != (i == 0) {
-				ht.Fatalf("event %d armed an unexpected window", i)
+				rt.Fatalf("event %d armed an unexpected window", i)
 			}
 		}
 		m, cmd := m.cronNoticeFlush(cronNoticeTickFor(m))
 		if cmd == nil || m.toast == nil {
-			ht.Fatal("eligible window must emit a toast")
+			rt.Fatal("eligible window must emit a toast")
 		}
 		wantText := strings.Join(wantLabels[:min(2, len(wantLabels))], ", ")
 		if len(wantLabels) > 2 {
@@ -101,12 +101,12 @@ func TestCronNoticeWindowPermutation(t *testing.T) {
 			count = "1 run"
 		}
 		if want := "cron: " + count + " failed: " + wantText; m.toast.text != want {
-			ht.Fatalf("grouped notice = %q, want %q", m.toast.text, want)
+			rt.Fatalf("grouped notice = %q, want %q", m.toast.text, want)
 		}
 		if !m.toast.expiresAt.Equal(snapshotFixedNow.Add(10 * time.Second)) {
-			ht.Fatal("wrong notice lifetime")
+			rt.Fatal("wrong notice lifetime")
 		}
-	}, hegel.WithTestCases(200))
+	})
 }
 func TestCronNoticeStartupScopeAndCutoff(t *testing.T) {
 	m := cronNoticeFixture(t)
@@ -687,6 +687,51 @@ func TestCronNoticeOlderPageCannotReplaceNewerRefresh(t *testing.T) {
 	olderPage := cronPageMsg{gen: 12, events: m.cron.events, runs: []generated.CronRun{failed}}
 	m = m.cronNoticePage(olderPage)
 	require.Equal(t, "succeeded", m.cronNotices.pending["r"].Status, "a page requested before the refresh cannot replace its newer settlement")
+}
+
+// Contract: local run revisions are monotonic even when overlapping reads
+// return snapshots in the opposite order from their request generations.
+func TestCronNoticeSettlementKeepsHigherRevision(t *testing.T) {
+	T := snapshotFixedNow
+	m := cronNoticeFixture(t)
+	job := m.cron.data.jobs[0].UID
+	failed := m.cron.data.runs[0]
+	failed.UID, failed.JobUID, failed.Status, failed.Revision = "r", &job, "failed", 6
+	failed.CreatedAt, failed.UpdatedAt, failed.EndedAt = T, T, new(T)
+	m.cron.data.runs = []generated.CronRun{failed}
+	m.cron.data.lookup = map[string]generated.CronRun{"r": failed}
+
+	msg := cronNoticeEvent("r", job, T)
+	next, _ := m.handleEventReceived(msg)
+	m = next.(Model)
+	require.Contains(t, m.cronNotices.pending, "r")
+
+	corrected := failed
+	corrected.Status, corrected.Revision = "succeeded", 7
+	corrected.UpdatedAt, corrected.EndedAt = T.Add(time.Second), new(T.Add(time.Second))
+	m = m.cronNoticePage(cronPageMsg{gen: 10, events: m.cron.events, runs: []generated.CronRun{corrected}})
+	require.Equal(t, "succeeded", m.cronNotices.pending["r"].Status)
+	require.EqualValues(t, 10, m.cronNotices.pending["r"].settledGen)
+
+	// A later-created full refresh can still carry an older database snapshot.
+	data := *m.cron.data
+	data.events, data.generation = m.cron.events, 11
+	data.runs, data.lookup = []generated.CronRun{failed}, map[string]generated.CronRun{"r": failed}
+	m.cron.data = &data
+	m = m.cronSettleChanged(data)
+	require.NotContains(t, m.cron.changed, "r", "the later refresh captured the event")
+	m = m.cronNoticeResolve()
+	require.Equal(t, "succeeded", m.cronNotices.pending["r"].Status, "the newer request generation cannot replace a higher local revision")
+	require.EqualValues(t, 10, m.cronNotices.pending["r"].settledGen)
+
+	// A still-later page has the same revision guard as full refresh resolution.
+	m = m.cronNoticePage(cronPageMsg{gen: 12, events: m.cron.events, runs: []generated.CronRun{failed}})
+	require.Equal(t, "succeeded", m.cronNotices.pending["r"].Status)
+	require.EqualValues(t, 10, m.cronNotices.pending["r"].settledGen)
+	require.Equal(t, "succeeded", m.cronNoticeNewest(m.cronNotices.pending["r"]).Status)
+
+	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+	require.Nil(t, m.toast, "the retained correction must prevent a false failure notice")
 }
 
 // A read that settled an announced failure outlives the history that showed

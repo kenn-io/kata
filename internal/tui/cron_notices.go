@@ -71,7 +71,7 @@ func (m Model) cronNoticeSuppressed(r cronRunEvent) bool {
 // change mark, resolves it; an older in-flight read or a bare event does not.
 func (m Model) cronNoticeNewest(r cronRunEvent) generated.CronRun {
 	if m.cron.data != nil && m.cron.data.events >= r.seq && m.cron.data.generation >= r.settledGen && m.cron.changed[r.UID].at == 0 {
-		if known, ok := m.cron.data.fetched(r.UID); ok {
+		if known, ok := m.cron.data.fetched(r.UID); ok && known.Revision >= r.Revision {
 			return known
 		}
 	}
@@ -104,6 +104,9 @@ func (p cronData) fetched(uid string) (generated.CronRun, bool) {
 
 // settle takes a qualifying read's evidence; seq stays the event's.
 func (r cronRunEvent) settle(row generated.CronRun, generation uint64) cronRunEvent {
+	if row.Revision < r.Revision {
+		return r
+	}
 	r.Status, r.Revision, r.EndedAt, r.UpdatedAt = row.Status, row.Revision, row.EndedAt, row.UpdatedAt
 	r.settledGen = generation
 	return r

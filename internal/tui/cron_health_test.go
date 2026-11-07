@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // Contract: health describes fresh observations for adapters, and delivery
@@ -105,61 +105,61 @@ func TestCronHealthStates(t *testing.T) {
 		})
 	}
 	t.Run("disabled always paused", func(t *testing.T) {
-		hegel.Test(t, func(ht *hegel.T) {
-			j := generated.CronJob{Definition: generated.CronJobDefinitionResponse{Enabled: false, Trigger: generated.TriggerResponse{Kind: hegel.Draw(ht, hegel.SampledFrom([]string{"manual", "cron", "interval", "once", "issue-deadline"}))}}}
-			got := cronHealth(cronData{jobsErr: errors.New("offline")}, j, hegel.Draw(ht, hegel.Datetimes()))
+		cronRapidCheck(t, 2000, func(rt *rapid.T) {
+			j := generated.CronJob{Definition: generated.CronJobDefinitionResponse{Enabled: false, Trigger: generated.TriggerResponse{Kind: rapid.SampledFrom([]string{"manual", "cron", "interval", "once", "issue-deadline"}).Draw(rt, "trigger kind")}}}
+			got := cronHealth(cronData{jobsErr: errors.New("offline")}, j, cronDateTimes().Draw(rt, "now"))
 			if got.state != "paused" {
-				ht.Fatalf("disabled health: %s", got.state)
+				rt.Fatalf("disabled health: %s", got.state)
 			}
-		}, hegel.WithTestCases(2000))
+		})
 	})
 
 	t.Run("adapter interval never missed", func(t *testing.T) {
 		j := cronFixture(t).cron.data.jobs[0]
-		hegel.Test(t, func(ht *hegel.T) {
-			j.Definition.Trigger = generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(hegel.Draw(ht, hegel.Integers[int64](1, 31536000)))}
-			j.CreatedAt = hegel.Draw(ht, hegel.Datetimes())
-			if got := cronHealth(cronData{lastRuns: map[string]generated.CronRun{}, lastErr: map[string]error{}}, j, hegel.Draw(ht, hegel.Datetimes())); got.state == "missed" {
-				ht.Fatal("adapter interval has no anchor")
+		cronRapidCheck(t, 2000, func(rt *rapid.T) {
+			j.Definition.Trigger = generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(rapid.Int64Range(1, 31536000).Draw(rt, "interval seconds"))}
+			j.CreatedAt = cronDateTimes().Draw(rt, "created at")
+			if got := cronHealth(cronData{lastRuns: map[string]generated.CronRun{}, lastErr: map[string]error{}}, j, cronDateTimes().Draw(rt, "now")); got.state == "missed" {
+				rt.Fatal("adapter interval has no anchor")
 			}
-		}, hegel.WithTestCases(2000))
+		})
 	})
 
 	t.Run("failed regardless of observation time", func(t *testing.T) {
 		j := cronFixture(t).cron.data.jobs[0]
-		hegel.Test(t, func(ht *hegel.T) {
-			p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: "failed", CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}, lastErr: map[string]error{}}
-			if got := cronHealth(p, j, hegel.Draw(ht, hegel.Datetimes())); got.state != "failing" {
-				ht.Fatalf("failed run must be failing: %v", got)
+		cronRapidCheck(t, 2000, func(rt *rapid.T) {
+			p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: "failed", CreatedAt: cronDateTimes().Draw(rt, "created at")}}, lastErr: map[string]error{}}
+			if got := cronHealth(p, j, cronDateTimes().Draw(rt, "now")); got.state != "failing" {
+				rt.Fatalf("failed run must be failing: %v", got)
 			}
-		}, hegel.WithTestCases(2000))
+		})
 	})
 	t.Run("once grace boundaries", func(t *testing.T) {
 		j := cronFixture(t).cron.data.jobs[0]
-		hegel.Test(t, func(ht *hegel.T) {
+		cronRapidCheck(t, 2000, func(rt *rapid.T) {
 			// A fixed instant keeps the oracle about grace, rather than cron arithmetic.
 			due := snapshotFixedNow
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(due.Format(time.RFC3339))}
-			seconds := hegel.Draw(ht, hegel.Integers[int64](0, 86400))
+			seconds := rapid.Int64Range(0, 86400).Draw(rt, "grace seconds")
 			for _, setting := range []*int64{nil, new(int64(0)), new(seconds)} {
 				j.Definition.GraceSeconds = setting
 				grace := 15 * time.Minute
 				if setting != nil && *setting > 0 {
 					grace = time.Duration(*setting) * time.Second
 				}
-				offset := time.Duration(hegel.Draw(ht, hegel.Integers[int64](-86400, 172800))) * time.Second
+				offset := time.Duration(rapid.Int64Range(-86400, 172800).Draw(rt, "elapsed seconds")) * time.Second
 				for _, elapsed := range []time.Duration{grace - time.Nanosecond, grace, grace + time.Nanosecond, offset} {
 					got := cronHealth(cronData{lastErr: map[string]error{}}, j, due.Add(elapsed))
 					if elapsed <= grace {
 						if got.state != "never ran" || got.reason != "No scheduled run is past its grace period" {
-							ht.Fatalf("health=%v grace=%v elapsed=%v", got, grace, elapsed)
+							rt.Fatalf("health=%v grace=%v elapsed=%v", got, grace, elapsed)
 						}
 					} else if got.state != "missed" {
-						ht.Fatalf("health=%v grace=%v elapsed=%v", got, grace, elapsed)
+						rt.Fatalf("health=%v grace=%v elapsed=%v", got, grace, elapsed)
 					}
 				}
 			}
-		}, hegel.WithTestCases(2000))
+		})
 	})
 }
 
@@ -187,13 +187,13 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 		j := cronFixture(t).cron.data.jobs[0]
 		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
 		p := cronData{jobs: []generated.CronJob{j}, parentOpen: map[string]bool{nextParentUID: true}, progress: map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}}
-		hegel.Test(t, func(ht *hegel.T) {
-			p.lastRuns = map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: hegel.Draw(ht, hegel.SampledFrom([]string{"running", "succeeded", "cancelled", "failed", "unknown"})), CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}
+		cronRapidCheck(t, 2000, func(rt *rapid.T) {
+			p.lastRuns = map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: rapid.SampledFrom([]string{"running", "succeeded", "cancelled", "failed", "unknown"}).Draw(rt, "run status"), CreatedAt: cronDateTimes().Draw(rt, "created at")}}
 			p.lastErr = map[string]error{j.UID: errors.New("unreadable")}
 			if got := cronHealth(p, j, snapshotFixedNow); got.state != "ok" {
-				ht.Fatalf("observation affected native health: %v", got)
+				rt.Fatalf("observation affected native health: %v", got)
 			}
-		}, hegel.WithTestCases(2000))
+		})
 	})
 }
 

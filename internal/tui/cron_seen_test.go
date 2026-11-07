@@ -19,23 +19,23 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // Contract: the bounded cache merge is a deterministic capped union and max,
 // preserving all projects. Only explicit capacity eviction can lose membership.
 func TestCronSeenMergeAlgebra(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	cronRapidCheck(t, 300, func(rt *rapid.T) {
 		draw := func() cronSeenStore {
 			store := cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{}}
 			// Each sample has an overlapping key and a possibly distinct key.
-			for _, key := range []string{"project-shared", fmt.Sprintf("project-%d", hegel.Draw(ht, hegel.Integers[int](0, 2)))} {
-				ids := hegel.Draw(ht, hegel.Lists(hegel.Integers[uint64](0, ^uint64(0))).MaxSize(40))
+			for _, key := range []string{"project-shared", fmt.Sprintf("project-%d", rapid.IntRange(0, 2).Draw(rt, "project suffix"))} {
+				ids := rapid.SliceOfN(rapid.Uint64(), 0, 40).Draw(rt, "run IDs")
 				runs := make([]string, len(ids))
 				for i, id := range ids {
 					runs[i] = fmt.Sprintf("%016x", id)
 				}
-				stamp := snapshotFixedNow.Add(time.Duration(hegel.Draw(ht, hegel.Integers[uint32](0, ^uint32(0)))))
+				stamp := snapshotFixedNow.Add(time.Duration(rapid.Uint32().Draw(rt, "clear offset")))
 				store.Projects[key] = cronSeenProject{ClearedThrough: stamp, Runs: runs}
 			}
 			return store
@@ -43,14 +43,14 @@ func TestCronSeenMergeAlgebra(t *testing.T) {
 		a, b, c := draw(), draw(), draw()
 		ab := cronSeenMerge(a, b)
 		if !reflect.DeepEqual(ab, cronSeenMerge(b, a)) {
-			ht.Fatal("merge is not commutative")
+			rt.Fatal("merge is not commutative")
 		}
 		if !reflect.DeepEqual(cronSeenMerge(ab, c), cronSeenMerge(a, cronSeenMerge(b, c))) {
-			ht.Fatal("merge is not associative")
+			rt.Fatal("merge is not associative")
 		}
 		canonical := cronSeenMerge(a, cronSeenStore{})
 		if !reflect.DeepEqual(canonical, cronSeenMerge(canonical, canonical)) {
-			ht.Fatal("merge is not idempotent")
+			rt.Fatal("merge is not idempotent")
 		}
 		expected := map[string]cronSeenProject{}
 		for _, input := range []cronSeenStore{a, b} {
@@ -64,20 +64,20 @@ func TestCronSeenMergeAlgebra(t *testing.T) {
 			}
 		}
 		if len(ab.Projects) != len(expected) {
-			ht.Fatal("merge must preserve every input project")
+			rt.Fatal("merge must preserve every input project")
 		}
 		for key, want := range expected {
 			slices.Sort(want.Runs)
 			want.Runs = slices.Compact(want.Runs)
 			got := ab.Projects[key]
 			if !slices.Equal(want.Runs, got.Runs) {
-				ht.Fatalf("project %q membership = %v, want input union %v", key, got.Runs, want.Runs)
+				rt.Fatalf("project %q membership = %v, want input union %v", key, got.Runs, want.Runs)
 			}
 			if !got.ClearedThrough.Equal(want.ClearedThrough) {
-				ht.Fatalf("project %q lost the maximum clear watermark", key)
+				rt.Fatalf("project %q lost the maximum clear watermark", key)
 			}
 		}
-	}, hegel.WithTestCases(300))
+	})
 
 	t.Run("capacity", func(t *testing.T) {
 		ids := make([]string, 1100)
@@ -197,6 +197,28 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 		_, _, lines := cronScreen(m)
 		require.Len(t, lines, m.cronUnseenCount())
 		require.NotContains(t, stripANSI(renderCron(m)), "2 unseen failed", "the list count and unseen-only badge already identify these runs")
+	})
+	t.Run("unseen-only count ignores history controls", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			edit func(*cronHistoryPage)
+		}{
+			{"load older", func(page *cronHistoryPage) { page.next = "older" }},
+			{"loading", func(page *cronHistoryPage) { page.out = true }},
+			{"error", func(page *cronHistoryPage) { page.err = errors.New("history unavailable") }},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m, _ := fixture(t)
+				m.width = 160
+				m.cron.tab = cronRuns
+				m.cron.unseenOnly = true
+				tc.edit(&m.cron.runPage)
+				_, _, lines := cronScreen(m)
+				require.Equal(t, 2, m.cronUnseenCount())
+				require.Len(t, lines, 3, "one history control accompanies the two visible unseen runs")
+				require.NotContains(t, stripANSI(renderCron(m)), "2 unseen failed", "history controls do not change how many runs are shown")
+			})
+		}
 	})
 	t.Run("review and clear keys", func(t *testing.T) {
 		t.Run("active notice preserves unseen filter", func(t *testing.T) {
