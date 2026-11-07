@@ -460,11 +460,12 @@ func localTOMLComments(node *unstable.Node, out *bytes.Buffer) {
 // localEmbeddingsSetup owns one setup job for the daemon's lifetime. start
 // registers work with the daemon worker group using its shutdown context.
 type localEmbeddingsSetup struct {
-	embeddings config.EmbeddingsConfig
-	idle       daemon.IdleForegroundAdmission
-	start      func(func(context.Context)) bool
-	mu         sync.Mutex
-	job        *api.LocalEmbeddingsJob
+	embeddings  config.EmbeddingsConfig
+	idle        daemon.IdleForegroundAdmission
+	start       func(func(context.Context)) bool
+	vectorReady func(context.Context) error
+	mu          sync.Mutex
+	job         *api.LocalEmbeddingsJob
 }
 
 func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsStatus, error) {
@@ -518,25 +519,31 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 		if release != nil {
 			defer release()
 		}
-		_, err := enableLocalEmbeddings(ctx, localEmbeddingsRun{
-			confirm:      func(context.Context, int64) (bool, error) { return true, nil },
-			notice:       func(string) error { return nil },
-			keepProvider: true,
-			progress: func(downloaded, total int64) {
-				s.mu.Lock()
-				s.job.Downloaded, s.job.Total = downloaded, total
-				s.mu.Unlock()
-			},
-			restart: func(_ context.Context, apply func() error) error {
-				if err := apply(); err != nil {
-					return err
-				}
-				s.mu.Lock()
-				s.job.State = "restart"
-				s.mu.Unlock()
-				return nil
-			},
-		})
+		var err error
+		if s.vectorReady != nil {
+			err = s.vectorReady(ctx)
+		}
+		if err == nil {
+			_, err = enableLocalEmbeddings(ctx, localEmbeddingsRun{
+				confirm:      func(context.Context, int64) (bool, error) { return true, nil },
+				notice:       func(string) error { return nil },
+				keepProvider: true,
+				progress: func(downloaded, total int64) {
+					s.mu.Lock()
+					s.job.Downloaded, s.job.Total = downloaded, total
+					s.mu.Unlock()
+				},
+				restart: func(_ context.Context, apply func() error) error {
+					if err := apply(); err != nil {
+						return err
+					}
+					s.mu.Lock()
+					s.job.State = "restart"
+					s.mu.Unlock()
+					return nil
+				},
+			})
+		}
 		if err != nil {
 			s.mu.Lock()
 			s.job.State, s.job.Error = "failed", err.Error()

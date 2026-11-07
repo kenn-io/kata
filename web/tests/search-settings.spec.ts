@@ -35,7 +35,7 @@ test('Settings keeps Turning on equally active when indexing counts are hidden',
   expect(colors[1]).toEqual(colors[0])
 })
 
-test('Settings failures stand out above static download details', async ({ page, kata }) => {
+test('Settings failures stand out beside shared download details', async ({ page, kata }) => {
   let current = off as Record<string, unknown>
   await page.route('**/api/v1/embeddings/local', (route) => route.fulfill({ json: current }))
   await kata.launch(page)
@@ -68,7 +68,7 @@ test('Settings failures stand out above static download details', async ({ page,
     })
     if (patch.provider !== 'built_in') {
       await expect(download).toBeVisible()
-      expect((await alert.boundingBox())!.y).toBeLessThan((await download.boundingBox())!.y)
+      await expect(page.getByRole('button', { name: 'Turn on', exact: true })).toBeEnabled()
     } else {
       const progress = (await page.getByRole('progressbar').boundingBox())!
       const detail = (await page

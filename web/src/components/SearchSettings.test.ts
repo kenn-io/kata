@@ -64,6 +64,40 @@ describe('SearchSettings', () => {
     expect(screen.queryByRole('progressbar')).toBeNull()
   })
 
+  test.each([undefined, 'daemon.example'])(
+    'keeps shared download wording and retry after failure for host=%s',
+    async (remoteHost) => {
+      vi.useFakeTimers()
+      setGeneratedFetch(
+        vi.fn(async () =>
+          Response.json(
+            status({
+              job: {
+                state: 'failed',
+                downloaded: 0,
+                total: 0,
+                error: "Install pgvector in this daemon's database, then try again.",
+              },
+            }),
+          ),
+        ),
+      )
+      render(SearchSettings, {
+        props: { canAdministerDaemon: true, onback: vi.fn(), postFetch: fetch, remoteHost },
+      })
+      await settle()
+      expect(
+        screen.getByText(
+          remoteHost
+            ? `Downloads 290 MB once to ${remoteHost}`
+            : 'Downloads 290 MB once, shared by all Kenn apps',
+        ),
+      ).not.toBeNull()
+      expect(screen.getByRole('alert').textContent).toContain('Install pgvector')
+      expect(screen.getByRole('button', { name: 'Turn on' }).hasAttribute('disabled')).toBe(false)
+    },
+  )
+
   test('shows Ollama as on without a switch or download action', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(

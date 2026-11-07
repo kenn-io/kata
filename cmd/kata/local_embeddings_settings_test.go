@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +18,10 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/telemetry"
+	"go.kenn.io/kata/internal/testenv"
+	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/embedlocal"
 )
 
@@ -40,59 +47,163 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 }
 
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	installed := false
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
-		if !installed {
-			return "", embedlocal.ErrNotFound
-		}
-		return "http://127.0.0.1:12345/v1", nil
+	for _, tc := range []struct {
+		name     string
+		postgres func(*testing.T, context.Context) (string, func())
+		ready    bool
+	}{
+		{"SQLite", nil, true},
+		{"Postgres without pgvector", testenv.NewPlainPostgresContainer, false},
+		{"Postgres with pgvector", testenv.NewPostgresWithPgvectorContainer, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearLocalEmbeddingsEnv(t)
+			resetFlags(t)
+			home := setupKataEnv(t)
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("PORT", "")
+			t.Setenv("KATA_SERVER", "")
+			t.Setenv("KATA_DSN", "")
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+			if tc.postgres != nil {
+				if testing.Short() {
+					t.Skip("requires postgres testcontainer")
+				}
+				dsn, cleanup := tc.postgres(t, t.Context())
+				t.Cleanup(cleanup)
+				t.Setenv("KATA_DSN", dsn)
+				t.Setenv("KATA_POSTGRES_ALLOW_INSECURE", "1")
+			}
+			path := filepath.Join(home, "config.toml")
+			original := []byte("# example configuration\n")
+			require.NoError(t, os.WriteFile(path, original, 0o600))
+			oldTelemetry := newTelemetryReporter
+			newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+			t.Cleanup(func() { newTelemetryReporter = oldTelemetry })
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var input struct {
+					Input []string `json:"input"`
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+				vectors := make([]map[string]any, len(input.Input))
+				for i := range input.Input {
+					v := make([]float64, 768)
+					v[0] = 1
+					vectors[i] = map[string]any{"embedding": v, "index": i}
+				}
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": vectors}))
+			}))
+			t.Cleanup(provider.Close)
+			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+			var installs atomic.Int32
+			localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
+				if installs.Load() == 0 {
+					return "", embedlocal.ErrNotFound
+				}
+				return provider.URL, nil
+			}
+			localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+				installs.Add(1)
+				return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+			}
+			launch := func() (string, func()) {
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan error, 1)
+				go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+				var once sync.Once
+				stop := func() {
+					once.Do(func() {
+						cancel()
+						select {
+						case err := <-done:
+							require.NoError(t, err)
+						case <-time.After(3 * time.Second):
+							t.Error("daemon shutdown timed out")
+						}
+					})
+				}
+				t.Cleanup(stop)
+				namespace, err := daemonruntime.NewNamespace()
+				require.NoError(t, err)
+				runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
+				require.NoError(t, err)
+				var record daemonRuntimeRecordJSON
+				require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: observes the daemon's runtime publication
+					body, err := os.ReadFile(runtimePath) // #nosec G304 -- isolated test runtime path
+					return err == nil && json.Unmarshal(body, &record) == nil
+				}, 5*time.Second, 10*time.Millisecond)
+				return "http://" + record.Address, stop
+			}
+			client := &http.Client{Timeout: time.Second}
+			baseURL, stop := launch()
+			request := func(method, path, body string, expected int, output any) {
+				req, err := http.NewRequestWithContext(t.Context(), method, baseURL+path, strings.NewReader(body))
+				require.NoError(t, err)
+				req.Header.Set("Content-Type", "application/json")
+				response, err := client.Do(req)
+				require.NoError(t, err)
+				defer func() { _ = response.Body.Close() }()
+				require.Equal(t, expected, response.StatusCode)
+				if output != nil {
+					require.NoError(t, json.NewDecoder(response.Body).Decode(output))
+				}
+			}
+			var project struct {
+				Project struct {
+					ID int64 `json:"id"`
+				} `json:"project"`
+			}
+			request("POST", "/api/v1/projects", `{"name":"example-project","actor":"tester"}`, 200, &project)
+			request("POST", fmt.Sprintf("/api/v1/projects/%d/issues", project.Project.ID), `{"title":"Repair the bicycle brakes","actor":"tester"}`, 200, nil)
+			request("POST", "/api/v1/embeddings/local", `{}`, 202, nil)
+			var status api.LocalEmbeddingsStatus
+			require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: observes the admitted setup worker
+				request("GET", "/api/v1/embeddings/local", "", 200, &status)
+				return status.Job != nil && (status.Job.State == "restart" || status.Job.State == "failed")
+			}, 5*time.Second, 10*time.Millisecond)
+			require.Equal(t, "none", status.Provider, "the running daemon keeps its startup configuration")
+			data, err := os.ReadFile(path) // #nosec G304 -- configuration in the isolated test home
+			require.NoError(t, err)
+			if tc.ready {
+				require.Equal(t, "restart", status.Job.State, status.Job.Error)
+				require.Contains(t, string(data), "local = true")
+				require.False(t, status.CanChange)
+				request("POST", "/api/v1/embeddings/local", `{}`, 409, nil)
+			} else {
+				require.Equal(t, "failed", status.Job.State)
+				require.Contains(t, status.Job.Error, "pgvector")
+				require.Zero(t, installs.Load())
+				require.Equal(t, original, data)
+				require.True(t, status.CanChange, "the owner can retry after database preparation")
+			}
+			request("GET", "/api/v1/health", "", 200, nil)
+			search := func() (string, int) {
+				out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--json", "--project", "example-project", "search", "bicycle")
+				require.NoError(t, err, stderr)
+				var result struct {
+					Mode    string `json:"mode"`
+					Results []any  `json:"results"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(out), &result))
+				return result.Mode, len(result.Results)
+			}
+			mode, count := search()
+			require.Equal(t, "lexical", mode)
+			require.Equal(t, 1, count)
+			stop()
+			baseURL, _ = launch()
+			wantMode := "lexical"
+			if tc.ready {
+				wantMode = "hybrid"
+			}
+			require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: waits for the real reconciler after explicit restart
+				mode, count := search()
+				return mode == wantMode && count == 1
+			}, 5*time.Second, 20*time.Millisecond)
+		})
 	}
-	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		installed = true
-		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
-	}
-	baseURL := startDaemonWithFederationConfig(t, "")
-	client := &http.Client{Timeout: time.Second}
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+"/api/v1/embeddings/local", strings.NewReader("{}"))
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", "application/json")
-	response, err := client.Do(request)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusAccepted, response.StatusCode)
-	require.NoError(t, response.Body.Close())
-	var status api.LocalEmbeddingsStatus
-	require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: waits for the daemon worker to save the configuration
-		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/embeddings/local", nil)
-		require.NoError(t, err)
-		response, err := client.Do(request)
-		require.NoError(t, err)
-		defer func() { _ = response.Body.Close() }()
-		require.NoError(t, json.NewDecoder(response.Body).Decode(&status))
-		return status.Job != nil && status.Job.State == "restart"
-	}, 5*time.Second, 10*time.Millisecond)
-	require.Equal(t, "none", status.Provider, "the running daemon keeps its startup configuration")
-	require.False(t, status.CanChange)
-	request, err = http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+"/api/v1/embeddings/local", strings.NewReader("{}"))
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", "application/json")
-	response, err = client.Do(request)
-	require.NoError(t, err)
-	require.NoError(t, response.Body.Close())
-	require.Equal(t, http.StatusConflict, response.StatusCode, "the same owner remains authorized while setup is busy")
-	path, err := config.DaemonConfigPath()
-	require.NoError(t, err)
-	data, err := os.ReadFile(path) // #nosec G304 -- configuration in the isolated test home
-	require.NoError(t, err)
-	require.Contains(t, string(data), "local = true")
-	request, err = http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/health", nil)
-	require.NoError(t, err)
-	response, err = client.Do(request)
-	require.NoError(t, err, "setup leaves the daemon running")
-	require.Equal(t, http.StatusOK, response.StatusCode)
-	require.NoError(t, response.Body.Close())
 }
 
 func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {

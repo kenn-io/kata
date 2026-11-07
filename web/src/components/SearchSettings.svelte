@@ -32,14 +32,6 @@
   // row's one state with no progress bar, so they say only that it's turning on.
   const turningOn: SearchByMeaningState = { kind: 'downloaded' }
   const turningOnLabels = { off: 'Turning on', downloaded: 'Keyword search works meanwhile' }
-  // A failure replaces the row's own line, so it reads first.
-  const failedLabels = { ...labels, download: '', downloadToHost: '' }
-  const megabytes = new Intl.NumberFormat(undefined, {
-    style: 'unit',
-    unit: 'megabyte',
-    unitDisplay: 'short',
-    maximumFractionDigits: 0,
-  })
   const requestFailure = "Couldn't confirm Turn on with the daemon."
 
   let status = $state<LocalEmbeddingsStatus>()
@@ -68,15 +60,6 @@
       : 'Restart the daemon to finish: run kata daemon restart.',
   })
   let failure = $derived(requestError ?? (job?.state === 'failed' ? job.error : undefined))
-  // kit-ui's Off line, below a failed setup in place of the row's own,
-  // unless the failure is a setup the daemon can't change.
-  let downloadLine = $derived(
-    failure && status?.can_change && row?.kind === 'off' && status.download_bytes
-      ? `Downloads ${megabytes.format(status.download_bytes / 1_000_000)} ${
-          remoteHost ? `once to ${remoteHost}` : 'once, shared by all Kenn apps'
-        }`
-      : undefined,
-  )
   // Indexing keeps polling while failed, so the note clears once a pass succeeds.
   let indexingFailed = $derived(status?.indexing?.failed === true)
 
@@ -204,13 +187,7 @@
           <SearchByMeaningRow
             state={row}
             itemNoun={count === 1 ? 'issue' : 'issues'}
-            labels={restarting
-              ? restartLabels
-              : countFree
-                ? turningOnLabels
-                : failure
-                  ? failedLabels
-                  : labels}
+            labels={restarting ? restartLabels : countFree ? turningOnLabels : labels}
             {readonly}
             onturnon={turnOn}
             onusebuiltin={() => {}}
@@ -223,9 +200,6 @@
           <p class="settings-note" role="alert">
             Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
           </p>
-        {/if}
-        {#if downloadLine}
-          <p class="settings-note">{downloadLine}</p>
         {/if}
       </div>
     {:else if loading}
@@ -317,15 +291,14 @@
     color: var(--accent-red);
   }
 
-  /* An error sits apart from the details around it, but no farther below a
+  /* An error sits apart from the details above it, but no farther below a
      bare title than any other detail. */
   .row-actions:has(
       :global(.kit-search-by-meaning__warning),
       :global(.kit-search-by-meaning__progress),
       :global(.kit-search-by-meaning__line)
     )
-    + [role='alert'],
-  .settings-note[role='alert'] + .settings-note:not([role='alert']) {
+    + [role='alert'] {
     margin-top: var(--space-2);
   }
 
