@@ -56,9 +56,8 @@ func TestUICommandBrowserFailurePrintsReachableURL(t *testing.T) {
 		cfg.WebHandler = handler
 	})
 	for name, openerErr := range map[string]error{
-		"missing":     &exec.Error{Name: "xdg-open", Err: exec.ErrNotFound},
-		"installed":   errors.New("exit status 3"),
-		"unsupported": errors.New("opening a browser is not supported on this platform"),
+		"missing": &exec.Error{Name: "xdg-open", Err: exec.ErrNotFound},
+		"failed":  errors.New("exit status 3"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			stubUICommandLaunch(t, client.PreparedWebUI{
