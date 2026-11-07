@@ -100,11 +100,26 @@ func TestUICommandOutputModesBeforeBrowser(t *testing.T) {
 			openWebBrowserForCommand = func(_ context.Context, launch client.WebUILaunch) error {
 				assert.Equal(t, "https://daemon.example/kata#login=1&return_path=%2Fkata", launch.PublicURL)
 				assert.Equal(t, tc.want, stdout.String())
-				return errors.New("browser launcher unavailable")
+				return exec.ErrNotFound
 			}
 			require.NoError(t, cmd.Execute())
 			assert.Equal(t, tc.want, stdout.String())
-			assert.Equal(t, "Could not open a browser: browser launcher unavailable. Open the URL above.\n", stderr.String())
+			assert.Equal(t, "Could not open a browser: "+exec.ErrNotFound.Error()+". Open the URL above.\n", stderr.String())
+		})
+	}
+}
+
+func TestUICommandPropagatesBrowserFailures(t *testing.T) {
+	for name, openerErr := range map[string]error{
+		"broken opener": errors.New("browser launcher failed"),
+		"cancelled":     context.Canceled,
+	} {
+		t.Run(name, func(t *testing.T) {
+			stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: "https://daemon.example", ConfiguredRemote: true})
+			openWebBrowserForCommand = func(context.Context, client.WebUILaunch) error { return openerErr }
+			stdout, _, err := runCmdCapture(t, nil, "ui")
+			require.ErrorIs(t, err, openerErr)
+			assert.Equal(t, "Opening https://daemon.example/kata#login=1&return_path=%2Fkata\n", stdout)
 		})
 	}
 }

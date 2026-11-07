@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -72,6 +73,9 @@ func newUICmd() *cobra.Command {
 					return outputErr
 				}
 				if err := openWebBrowserForCommand(ctx, launch); err != nil {
+					if !errors.Is(err, exec.ErrNotFound) {
+						return err
+					}
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Could not open a browser: %v. Open the URL above.\n", err)
 				}
 				return nil
