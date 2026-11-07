@@ -75,3 +75,65 @@ test('a blocked switch shows the blocker without switch or download promises', a
   ).toBeHidden()
   await expect(page.getByRole('button', { name: 'Use built-in instead' })).toBeHidden()
 })
+
+test('Settings keeps the search title aligned as setup changes state', async ({ page, kata }) => {
+  let current = off as Record<string, unknown>
+  await page.route('**/api/v1/embeddings/local', (route) => route.fulfill({ json: current }))
+  await kata.launch(page)
+  const positions: number[] = []
+  for (const patch of [
+    {},
+    { job: { state: 'downloading', downloaded: 120_000_000, total: 290_000_000 } },
+    { provider: 'built_in', indexing: { done: 1, total: 2 } },
+    { job: { state: 'failed', downloaded: 0, total: 290_000_000, error: 'Disk is full.' } },
+    { provider: 'built_in' },
+  ]) {
+    current = { ...off, ...patch }
+    await page.goto(`${kata.origin}/kata?view=settings`)
+    const title = page.getByText('Search by meaning', { exact: true })
+    await expect(title).toBeVisible()
+    positions.push((await title.boundingBox())!.y)
+  }
+  expect(Math.max(...positions) - Math.min(...positions)).toBeLessThanOrEqual(1)
+})
+
+test('Settings separates the search title consistently from every secondary state', async ({
+  page,
+  kata,
+}) => {
+  let current = off as Record<string, unknown>
+  await page.route('**/api/v1/embeddings/local', (route) => route.fulfill({ json: current }))
+  await kata.launch(page)
+  const gaps: number[] = []
+  for (const patch of [
+    {},
+    { job: { state: 'downloading', downloaded: 120_000_000, total: 290_000_000 } },
+    { job: { state: 'failed', downloaded: 0, total: 290_000_000, error: 'Disk is full.' } },
+  ]) {
+    current = { ...off, ...patch }
+    await page.goto(`${kata.origin}/kata?view=settings`)
+    const title = page.getByText('Search by meaning', { exact: true })
+    await expect(title).toBeVisible()
+    const titleBox = (await title.boundingBox())!
+    const secondary = page
+      .locator('.kit-search-by-meaning__line, [role="progressbar"], .search-row [role="alert"]')
+      .first()
+    const secondaryBox = (await secondary.boundingBox())!
+    gaps.push(secondaryBox.y - titleBox.y - titleBox.height)
+  }
+  for (const gap of gaps) expect.soft(gap).toBeCloseTo(8, 0)
+})
+
+test('Settings groups Ollama retry guidance before both switch helpers', async ({ page, kata }) => {
+  await page.route('**/api/v1/embeddings/local', (route) =>
+    route.fulfill({
+      json: { ...off, provider: 'ollama', indexing: { done: 1, total: 2, failed: true } },
+    }),
+  )
+  await kata.launch(page)
+  await page.goto(`${kata.origin}/kata?view=settings`)
+  const failure = page.getByRole('alert')
+  await expect(failure).toBeVisible()
+  const helper = page.getByText('Switching keeps your index', { exact: true })
+  expect((await failure.boundingBox())!.y).toBeLessThan((await helper.boundingBox())!.y)
+})

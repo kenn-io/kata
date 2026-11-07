@@ -45,6 +45,8 @@
   // A failure replaces the row's own line, so it reads first and nothing
   // promises a switch the daemon refused.
   const failedLabels = { ...labels, download: '', downloadToHost: '', keepsIndex: '', rebuild: '' }
+  const keepsIndex = 'Switching keeps your index'
+  const retryLabels = { ...labels, keepsIndex: '' }
   const megabytes = new Intl.NumberFormat(undefined, {
     style: 'unit',
     unit: 'megabyte',
@@ -89,6 +91,11 @@
   )
   // Indexing keeps polling while failed, so the note clears once a pass succeeds.
   let indexingFailed = $derived(status?.indexing?.failed === true)
+  // A failed Ollama pass reads before the switch helpers, so the row's own
+  // line moves below it.
+  let movedLine = $derived(
+    !failure && indexingFailed && row?.kind === 'ollama' ? keepsIndex : undefined,
+  )
 
   // Count-free indexing borrows a state that offers Turn on, so it never shows a button.
   let readonly = $derived(countFree || !(status?.can_change && canAdministerDaemon))
@@ -229,7 +236,13 @@
             <SearchByMeaningRow
               state={row}
               itemNoun={count === 1 ? 'issue' : 'issues'}
-              labels={countFree ? turningOnLabels : failure ? failedLabels : labels}
+              labels={countFree
+                ? turningOnLabels
+                : failure
+                  ? failedLabels
+                  : movedLine
+                    ? retryLabels
+                    : labels}
               {readonly}
               onturnon={turnOn}
               onusebuiltin={turnOn}
@@ -242,6 +255,9 @@
             <p class="settings-note" role="alert">
               Indexing hit an error and will retry. Run <code>kata health --json</code> for details.
             </p>
+          {/if}
+          {#if movedLine}
+            <p class="settings-note">{movedLine}</p>
           {/if}
           {#if switchDownload}
             <p class="settings-note">{switchDownload}</p>
@@ -277,7 +293,23 @@
   /* Matches the row's own line gap, so a failure reads as part of the row. */
   .search-row {
     display: grid;
-    gap: var(--space-3);
+    gap: var(--space-4);
+  }
+
+  /* The title's line sets the first row's height in every state, so the
+     title holds still and sits the same distance above what follows it. */
+  .search-row :global(.kit-search-by-meaning) {
+    min-height: 0;
+    row-gap: var(--space-4);
+  }
+
+  @media (min-width: 641px) {
+    /* The button centers on the title's line without growing it. */
+    .search-row :global(.kit-search-by-meaning__action) {
+      display: flex;
+      align-items: center;
+      height: 0;
+    }
   }
 
   .row-actions {
