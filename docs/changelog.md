@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep federation polls fast on busy hubs by skipping other projects' event history.
 - Attach oh-my-pi sessions to closes by copying the documented
   [closing-session transcript](reference/configuration.md#closing-session-transcripts)
   configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
