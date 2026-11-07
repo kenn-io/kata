@@ -15,6 +15,7 @@ import (
 func dropIssueStatusSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
 	dropLaterMigrationIndexes(ctx, t, admin, schema)
+	dropMCPEventSubscriptionsSchema(ctx, t, admin, schema)
 	dropCommentReplySchema(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)
 	dropProjectAccessSchema(ctx, t, admin, schema)

@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -15,8 +15,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
   `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
   recorded oh-my-pi closes as pi sessions.
-- Upgrade SQLite schemas 41 through 47 to 48 by adding indexes in place, avoiding
-  a full JSONL export/import and its retained database backup. The indexes and
+- Upgrade SQLite schemas 41 through 48 to 49 in place by adding indexes and the
+  empty MCP Events subscriptions table, avoiding a full JSONL export/import and
+  its retained database backup. The indexes and
   version stamp commit together; interrupted upgrades retry on the next start.
 - Create your first project from the web UI's empty task list. **New task**
   makes that project Inbox and opens task capture when no projects exist.
@@ -67,6 +68,16 @@ All notable changes to kata, grouped by release. Versioned releases start with
   and planning dates moved to `kata quickstart` and the MCP `teammates` guide.
   In Codex runs, agents now reuse an existing issue instead of filing a
   duplicate, and recording a bug no longer sets attention metadata.
+- Wake an assistant within about a second of a change to its inbox, even when
+  it is not running. Turn on `[mcp_events] enabled = true` in the daemon
+  configuration, and MCP clients can subscribe to `kata.inbox.changed` through
+  `kata mcp serve`. The daemon stores each subscription, verifies its HTTPS
+  callback, and sends a signed webhook ping that names only the recipient; the
+  receiver then reads `kata.inbox`. Subscriptions survive daemon restarts and
+  need daemon API `0.42.0`. PostgreSQL deployments run
+  `kata storage postgres migrate` to reach schema 49 first. See
+  [MCP Events](operations/mcp-events.md). Thanks to
+  [Rusty Shackleford](https://github.com/salmonumbrella).
 - Keep coding agents focused outside kata workspaces. User-scope contract hooks
   installed by `kata agent-hook install` now inject the contract only when the
   session starts under a `.kata.toml`; elsewhere they return an empty response

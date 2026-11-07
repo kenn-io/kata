@@ -153,9 +153,10 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 	require.ErrorIs(t, CheckCutoverSource(ctx, path), ErrCutoverInProgress)
 }
 
-// Index-only upgrades must match the fresh-store catalog without exporting.
+// Index-only upgrades, and the one that adds the MCP Events table, must
+// match the fresh-store catalog without exporting.
 func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
-	for _, version := range []int{41, 44} {
+	for _, version := range []int{41, 44, 48} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			path := indexOnlySource(t, version)
@@ -233,18 +234,24 @@ func indexOnlySource(t *testing.T, version int) string {
 	for _, step := range []struct {
 		to      int
 		indexes []string
+		tables  []string
 	}{
-		{42, []string{"idx_issues_project_created", "idx_issues_created"}},
-		{43, []string{"idx_events_resolved_issue_uid"}},
-		{44, []string{"idx_events_reset_from"}},
-		{45, []string{"idx_issues_uid_prefix", "idx_issues_project_uid_prefix"}},
-		{46, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}},
-		{47, []string{"idx_issues_ready_updated"}},
-		{48, []string{"idx_events_moved_from_id"}},
+		{42, []string{"idx_issues_project_created", "idx_issues_created"}, nil},
+		{43, []string{"idx_events_resolved_issue_uid"}, nil},
+		{44, []string{"idx_events_reset_from"}, nil},
+		{45, []string{"idx_issues_uid_prefix", "idx_issues_project_uid_prefix"}, nil},
+		{46, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}, nil},
+		{47, []string{"idx_issues_ready_updated"}, nil},
+		{48, []string{"idx_events_moved_from_id"}, nil},
+		{49, nil, []string{"mcp_event_subscriptions"}},
 	} {
 		if step.to > version {
 			for _, name := range step.indexes {
 				_, err = source.ExecContext(t.Context(), `DROP INDEX `+name)
+				require.NoError(t, err)
+			}
+			for _, name := range step.tables {
+				_, err = source.ExecContext(t.Context(), `DROP TABLE `+name)
 				require.NoError(t, err)
 			}
 		}

@@ -176,6 +176,21 @@ func (s *Scope) Projects(ctx context.Context, client *kataclient.Client, include
 	return projects, nil
 }
 
+// ProjectUIDs returns the immutable startup project UIDs of a fixed scope.
+func (s *Scope) ProjectUIDs() ([]string, error) {
+	if s == nil || s.mode == ScopeAll {
+		return nil, errors.New("MCP project scope has no fixed project UIDs")
+	}
+	uids := make([]string, 0, len(s.projects))
+	for _, project := range s.projects {
+		if strings.TrimSpace(project.UID) == "" {
+			return nil, errors.New("MCP project scope has no project UID")
+		}
+		uids = append(uids, project.UID)
+	}
+	return uids, nil
+}
+
 // Project resolves a current project name within the startup boundary.
 func (s *Scope) Project(ctx context.Context, client *kataclient.Client, name string, includeArchived bool) (ProjectIdentity, error) {
 	name = strings.TrimSpace(name)

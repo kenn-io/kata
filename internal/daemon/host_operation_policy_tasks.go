@@ -14,6 +14,12 @@ func registerTaskOperationPolicies(policies map[string]HostOperationPolicy) {
 		"digestProject", "getIssueLeaseStatus", "readUISnapshot", "readUIReferences",
 		"resolveUIIssueReference", "readUILaunchTarget")
 
+	// MCP Events subscriptions are daemon-owned delivery state, not project
+	// data. Delivery re-authorizes with the read policy of pollEvents.
+	registerHostOperations(policies, HostOperationPolicy{
+		Kind: hostOperationTaskRead, Capability: hostCapabilityRead,
+	}, "mcpEventsList", "mcpEventsSubscribe", "mcpEventsUnsubscribe", "mcpEventSubscriptions")
+
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationTaskRead, Capability: hostCapabilityRead, LongLived: true,
 	}, "streamEvents")
