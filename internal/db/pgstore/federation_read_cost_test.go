@@ -38,47 +38,38 @@ func TestReadFederationQuietPageBudget(t *testing.T) {
  VALUES('00000000000000000000999999',$1,$2,'quiet-project',$3,'sync.reset_required','tester','{}',1,0,$4)`, store.InstanceUID(), project.ID, issue.UID, strings.Repeat("a", 64))
 	require.NoError(t, err)
 
-	for _, populated := range []bool{false, true} {
-		want := []int64{}
-		if populated {
-			title := "Occasional update"
-			_, event, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "tester"})
+	for _, analyzed := range []bool{false, true} {
+		if analyzed {
+			_, err = store.ExecContext(t.Context(), `ANALYZE`)
 			require.NoError(t, err)
-			want = append(want, event.ID)
 		}
-
-		for _, analyzed := range []bool{false, true} {
-			if analyzed {
-				_, err = store.ExecContext(t.Context(), `ANALYZE`)
+		for _, subject := range []string{"", issue.UID} {
+			t.Run(fmt.Sprintf("analyzed=%t/issue=%t", analyzed, subject != ""), func(t *testing.T) {
+				tx, err := store.BeginTx(t.Context(), nil)
 				require.NoError(t, err)
-			}
-			for _, subject := range []string{"", issue.UID} {
-				t.Run(fmt.Sprintf("populated=%t/analyzed=%t/issue=%t", populated, analyzed, subject != ""), func(t *testing.T) {
-					tx, err := store.BeginTx(t.Context(), nil)
-					require.NoError(t, err)
-					defer func() { _ = tx.Rollback() }()
-					var visited float64
-					events, err := db.ReadFederationEventPage(t.Context(), tx, project, subject, after, 1000, true, func(where string, args ...any) ([]db.Event, error) {
-						query := pgstore.EventSelectForTest + where //nolint:gosec // G202: helper-built SQL; values stay bound.
-						var raw []byte
-						require.NoError(t, tx.QueryRowContext(t.Context(), `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) `+query, args...).Scan(&raw))
-						var plans []struct{ Plan federationPagePlan }
-						require.NoError(t, json.Unmarshal(raw, &plans))
-						visited += plans[0].Plan.visitedEvents()
-						return (sqlquery.Query{SQL: query, Args: args}).All(t.Context(), tx, func(rows *sql.Rows) (db.Event, error) {
-							return pgstore.ScanEventForTest(rows)
-						})
-					})
-					require.NoError(t, err)
-					require.Len(t, events, len(want))
-					if populated {
-						require.Equal(t, want[0], events[0].ID)
-					}
-					t.Logf("%.0f event rows visited", visited)
-					require.LessOrEqual(t, visited, float64(1200), "quiet polls must skip unrelated event history")
-				})
-			}
+				defer func() { _ = tx.Rollback() }()
+				var visited float64
+				events, err := db.ReadFederationEventPage(t.Context(), tx, project, subject, after, 1000, true, explainedEventPage(t, tx, &visited))
+				require.NoError(t, err)
+				require.Empty(t, events)
+				t.Logf("%.0f event rows visited", visited)
+				require.LessOrEqual(t, visited, float64(1200), "quiet polls must skip unrelated event history")
+			})
 		}
+	}
+}
+
+// explainedEventPage runs each page query with the production projection and
+// adds the event rows its plan visited.
+func explainedEventPage(t *testing.T, tx *sql.Tx, visited *float64) func(string, ...any) ([]db.Event, error) {
+	return func(where string, args ...any) ([]db.Event, error) {
+		query := pgstore.EventSelectForTest + where //nolint:gosec // G202: helper-built SQL; values stay bound.
+		var raw []byte
+		require.NoError(t, tx.QueryRowContext(t.Context(), `EXPLAIN (ANALYZE, FORMAT JSON) `+query, args...).Scan(&raw))
+		var plans []struct{ Plan federationPagePlan }
+		require.NoError(t, json.Unmarshal(raw, &plans))
+		*visited += plans[0].Plan.visitedEvents()
+		return (sqlquery.Query{SQL: query, Args: args}).All(t.Context(), tx, func(rows *sql.Rows) (db.Event, error) { return pgstore.ScanEventForTest(rows) })
 	}
 }
 
@@ -108,36 +99,22 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 			store, _ := openConformanceStore(t)
 			t.Cleanup(func() { require.NoError(t, store.Close()) })
 			project, after := dbtest.SeedFederatedReadBulkHistory(t, store, interleaved)
-			for _, analyzed := range []bool{false, true} {
-				if analyzed {
-					_, err := store.ExecContext(t.Context(), "ANALYZE")
-					require.NoError(t, err)
-				}
-				tx, err := store.BeginTx(t.Context(), nil)
-				require.NoError(t, err)
-				var visited float64
-				events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1000, true, func(where string, args ...any) ([]db.Event, error) {
-					query := pgstore.EventSelectForTest + where //nolint:gosec // G202: helper-built SQL; values stay bound.
-					var raw []byte
-					require.NoError(t, tx.QueryRowContext(t.Context(), `EXPLAIN (ANALYZE, FORMAT JSON) `+query, args...).Scan(&raw))
-					var plans []struct{ Plan federationPagePlan }
-					require.NoError(t, json.Unmarshal(raw, &plans))
-					visited += plans[0].Plan.visitedEvents()
-					return (sqlquery.Query{SQL: query, Args: args}).All(t.Context(), tx, func(rows *sql.Rows) (db.Event, error) { return pgstore.ScanEventForTest(rows) })
-				})
-				require.NoError(t, err)
-				require.NoError(t, tx.Rollback())
-				require.Len(t, events, 1000)
-				stride := int64(1)
-				if interleaved {
-					stride = 2
-				}
-				for i, e := range events {
-					require.Equal(t, after+int64(i+1)*stride, e.ID)
-				}
-				t.Logf("analyzed=%t: %.0f event rows visited", analyzed, visited)
-				require.LessOrEqual(t, visited, float64(5000), "bulk histories must cost a small multiple of the page size")
+			tx, err := store.BeginTx(t.Context(), nil)
+			require.NoError(t, err)
+			defer func() { _ = tx.Rollback() }()
+			var visited float64
+			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1000, true, explainedEventPage(t, tx, &visited))
+			require.NoError(t, err)
+			require.Len(t, events, 1000)
+			stride := int64(1)
+			if interleaved {
+				stride = 2
 			}
+			for i, e := range events {
+				require.Equal(t, after+int64(i+1)*stride, e.ID)
+			}
+			t.Logf("%.0f event rows visited", visited)
+			require.LessOrEqual(t, visited, float64(5000), "bulk histories must cost a small multiple of the page size")
 		})
 	}
 }

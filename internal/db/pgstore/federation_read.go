@@ -38,7 +38,6 @@ func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 				})
 			})
 		}
-
 		readEvents := func() ([]db.Event, error) {
 			return db.ReadFederationMoveHistory(ctx, tx, in.AfterID, in.Limit, readPage)
 		}
