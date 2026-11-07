@@ -10,7 +10,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 
 	katadocs "go.kenn.io/kata/docs"
 	mcpserver "go.kenn.io/kata/internal/mcp"
@@ -61,17 +61,18 @@ func TestCronGuidePropagatesOutputErrors(t *testing.T) {
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
 	page, err := katadocs.Page("guide/cron-authoring.md")
 	require.NoError(t, err)
-	hegel.Test(t, func(ht *hegel.T) {
-		failure := errors.New(hegel.Draw(ht, hegel.Text()))
-		writer := &cronGuideErrorWriter{limit: hegel.Draw(ht, hegel.Integers(0, len(page)-1)), err: failure}
+	rapid.Check(t, func(rt *rapid.T) {
+		failure := errors.New(rapid.String().Draw(rt, "failure"))
+		limit := rapid.IntRange(0, len(page)-1).Draw(rt, "write limit")
+		writer := &cronGuideErrorWriter{limit: limit, err: failure}
 		root := newRootCmd()
 		root.SetArgs([]string{"cron", "guide"})
 		root.SetOut(writer)
 		root.SetErr(io.Discard)
 		root.SilenceErrors, root.SilenceUsage = true, true
-		require.ErrorIs(ht, root.ExecuteContext(t.Context()), failure)
-		require.Equal(ht, page[:writer.limit], writer.body.String())
-	}, hegel.WithTestCases(100))
+		require.ErrorIs(rt, root.ExecuteContext(t.Context()), failure)
+		require.Equal(rt, page[:writer.limit], writer.body.String())
+	})
 }
 
 func TestCronGuideIsDiscoverableInHelp(t *testing.T) {

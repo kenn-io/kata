@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // The embedded guide must print without metadata and without rewriting Markdown.
@@ -31,36 +31,35 @@ func TestPageBody(t *testing.T) {
 }
 
 func TestPagePreservesNonleadingAndNearOpeners(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		prefix := hegel.Draw(ht, hegel.SampledFrom([]string{"\n---\n", " ---\n", "---x\n", "--- \n", "---\t\n", "\ufeff---\n"}))
-		raw := prefix + hegel.Draw(ht, hegel.Text())
-		require.Equal(ht, strings.ReplaceAll(raw, "\r\n", "\n"), pageBody(raw))
-	}, hegel.WithTestCases(1000))
+	rapid.Check(t, func(rt *rapid.T) {
+		prefix := rapid.SampledFrom([]string{"\n---\n", " ---\n", "---x\n", "--- \n", "---\t\n", "\ufeff---\n"}).Draw(rt, "prefix")
+		raw := prefix + rapid.String().Draw(rt, "suffix")
+		require.Equal(rt, strings.ReplaceAll(raw, "\r\n", "\n"), pageBody(raw))
+	})
 }
 
 func TestPagePreservesBody(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		body := hegel.Draw(ht, hegel.Text())
-		require.Equal(ht, strings.ReplaceAll(body, "\r\n", "\n"), pageBody("---\ntitle: Guide\n---\n"+body))
-	}, hegel.WithTestCases(1000))
+	rapid.Check(t, func(rt *rapid.T) {
+		body := rapid.String().Draw(rt, "body")
+		require.Equal(rt, strings.ReplaceAll(body, "\r\n", "\n"), pageBody("---\ntitle: Guide\n---\n"+body))
+	})
 }
 
 func TestPageLineEndingsAgree(t *testing.T) {
-	// A line excludes line terminators; arbitrary Unicode bodies are covered above.
-	lines := hegel.Lists(hegel.Text().ExcludeCharacters("\r\n"))
-	hegel.Test(t, func(ht *hegel.T) {
-		body := strings.Join(hegel.Draw(ht, lines), "\n")
+	// Generate logical lines without carriage returns, then encode them both ways.
+	rapid.Check(t, func(rt *rapid.T) {
+		body := strings.ReplaceAll(rapid.String().Draw(rt, "body"), "\r", "")
 		lf := "---\ntitle: Guide\n---\n" + body
-		require.Equal(ht, pageBody(lf), pageBody(strings.ReplaceAll(lf, "\n", "\r\n")))
-	}, hegel.WithTestCases(1000))
+		require.Equal(rt, pageBody(lf), pageBody(strings.ReplaceAll(lf, "\n", "\r\n")))
+	})
 }
 
 func TestPagePreservesMarkdown(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		payload := hegel.Draw(ht, hegel.Text())
+	rapid.Check(t, func(rt *rapid.T) {
+		payload := rapid.String().Draw(rt, "payload")
 		body := "[Cron](https://katatracker.com/docs/reference/cron/#triggers)\n\n`" + payload + "`\n\n```text\n" + payload + "\n```\n"
-		require.Equal(ht, strings.ReplaceAll(body, "\r\n", "\n"), pageBody("---\ntitle: Guide\n---\n"+body))
-	}, hegel.WithTestCases(1000))
+		require.Equal(rt, strings.ReplaceAll(body, "\r\n", "\n"), pageBody("---\ntitle: Guide\n---\n"+body))
+	})
 }
 
 func TestPageEmbeddedGuide(t *testing.T) {
