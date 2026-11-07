@@ -137,3 +137,32 @@ test('Settings groups Ollama retry guidance before both switch helpers', async (
   const helper = page.getByText('Switching keeps your index', { exact: true })
   expect((await failure.boundingBox())!.y).toBeLessThan((await helper.boundingBox())!.y)
 })
+
+test('Settings groups related details apart from retry errors', async ({ page, kata }) => {
+  let current = off as Record<string, unknown>
+  await page.route('**/api/v1/embeddings/local', (route) => route.fulfill({ json: current }))
+  await kata.launch(page)
+  for (const provider of ['ollama', 'built_in']) {
+    current = { ...off, provider, indexing: { done: 1, total: 2, failed: true } }
+    await page.goto(`${kata.origin}/kata?view=settings`)
+    const alert = page.getByRole('alert')
+    await expect(alert).toBeVisible()
+    const first = provider === 'ollama' ? alert : page.getByRole('progressbar')
+    const second =
+      provider === 'ollama'
+        ? page.getByText('Switching keeps your index', { exact: true })
+        : page.getByText('Indexing 1 of 2 issues · Keyword search works meanwhile', { exact: true })
+    const third =
+      provider === 'ollama'
+        ? page.getByText('Downloads 290 MB once, shared by all Kenn apps', { exact: true })
+        : alert
+    const a = (await first.boundingBox())!
+    const b = (await second.boundingBox())!
+    const c = (await third.boundingBox())!
+    const firstGap = b.y - a.y - a.height
+    const secondGap = c.y - b.y - b.height
+    const betweenGroups = provider === 'ollama' ? firstGap : secondGap
+    const withinGroup = provider === 'ollama' ? secondGap : firstGap
+    expect.soft(betweenGroups, provider).toBeGreaterThan(withinGroup)
+  }
+})

@@ -346,6 +346,18 @@
     color: var(--accent-red);
   }
 
+  /* An error sits apart from the details around it, but no farther below a
+     bare title than any other detail. */
+  .row-actions:has(
+      :global(.kit-search-by-meaning__warning),
+      :global(.kit-search-by-meaning__progress),
+      :global(.kit-search-by-meaning__line)
+    )
+    + [role='alert'],
+  .settings-note[role='alert'] + .settings-note:not([role='alert']) {
+    margin-top: var(--space-2);
+  }
+
   @media (max-width: 760px) {
     .search-settings {
       padding: var(--space-4);
