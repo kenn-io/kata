@@ -20,6 +20,9 @@ var cronTabNames = [...]string{"kata カタ", "jobs", "runs", "workflows"}
 type cronLine struct {
 	text               string
 	target             cronRef
+	health             string
+	runUID, runStatus  string
+	unseenFailure      bool
 	errorFrom, errorTo int
 }
 
@@ -164,9 +167,11 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	lines := []cronLine{}
 	query := cronQuery(m.cron.lists[m.cron.tab].query, m.cron.tab)
-	add := func(uid string, cells []string, fields map[string]string) {
+	add := func(uid string, cells []string, fields map[string]string, metadata cronLine) {
 		if query.match(fields, sanitizeForLine(strings.Join(cells, " "))) {
-			line := cronLine{text: format(cells), target: cronRef{m.cron.tab, uid}}
+			line := metadata
+			line.text = format(cells)
+			line.target = cronRef{m.cron.tab, uid}
 			if m.cron.tab == cronJobs && (cells[1] == "failing" || cells[1] == "overdue" || cells[1] == "missed") {
 				line.errorFrom = widths[0] + 1
 				line.errorTo = line.errorFrom + widths[1]
@@ -192,7 +197,8 @@ func cronScreen(m Model) (string, string, []cronLine) {
 				if health == "running" {
 					last = humanizeRelative(p.lastRuns[j.UID].CreatedAt)
 				}
-				add(j.UID, []string{j.Name, health, cronSchedule(j.Definition.Trigger), cronAction(*p, j), last}, map[string]string{"health": health, "status": p.lastRuns[j.UID].Status, "action": j.Definition.Action.Kind + " " + cronAction(*p, j), "trigger": j.Definition.Trigger.Kind})
+				lastRun := p.lastRuns[j.UID]
+				add(j.UID, []string{j.Name, health, cronSchedule(j.Definition.Trigger), cronAction(*p, j), last}, map[string]string{"health": health, "status": lastRun.Status, "action": j.Definition.Action.Kind + " " + cronAction(*p, j), "trigger": j.Definition.Trigger.Kind}, cronLine{health: health, runUID: lastRun.UID, runStatus: lastRun.Status})
 			}
 		case cronRuns:
 			for _, r := range runs {
@@ -207,11 +213,11 @@ func cronScreen(m Model) (string, string, []cronLine) {
 				if unseen {
 					status = "• " + status
 				}
-				add(r.UID, []string{status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)}, map[string]string{"status": r.Status, "job": cronDefinitionName(*p, deref(r.JobUID), false) + " " + deref(r.JobUID), "actor": r.Actor, "executor": deref(r.ExecutorLabel), "teammate": deref(r.Teammate), "issue": deref(r.IssueUID)})
+				add(r.UID, []string{status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)}, map[string]string{"status": r.Status, "job": cronDefinitionName(*p, deref(r.JobUID), false) + " " + deref(r.JobUID), "actor": r.Actor, "executor": deref(r.ExecutorLabel), "teammate": deref(r.Teammate), "issue": deref(r.IssueUID)}, cronLine{runUID: r.UID, runStatus: r.Status, unseenFailure: unseen})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
-				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronWorkflowUsage(*p, w.UID), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)}, nil)
+				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronWorkflowUsage(*p, w.UID), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)}, nil, cronLine{})
 			}
 		}
 	}
@@ -219,12 +225,16 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	title := cronCount(len(lines), noun)
 	header := format(headers)
 	if m.cron.tab == cronJobs && m.cron.data != nil {
-		listBudget := cronListBudget(m, header, len(cronErrorRows(m)), cronHelpRows(m))
-		if len(lines) < len(m.cron.data.jobs) || len(lines) > listBudget {
-			for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "blocked", "running", "failing", "missed", "never ran"} {
-				if count := healthCounts[state]; count > 0 {
-					title += fmt.Sprintf(" · %d %s", count, state)
-				}
+		start, end := cronViewport(m, header, lines)
+		visibleHealthCounts := map[string]int{}
+		for _, line := range lines[start:end] {
+			if line.health != "" {
+				visibleHealthCounts[line.health]++
+			}
+		}
+		for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "blocked", "running", "failing", "missed", "never ran"} {
+			if count := healthCounts[state]; count > visibleHealthCounts[state] {
+				title += fmt.Sprintf(" · %d %s", count, state)
 			}
 		}
 	}
@@ -515,14 +525,20 @@ func cronListBudget(m Model, header string, errorCount int, help [][]helplayout.
 	return max(m.height-bodyRows-max(errorCount, 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
 }
 
-func cronRunLineCount(lines []cronLine) int {
-	count := 0
+func cronViewport(m Model, header string, lines []cronLine) (int, int) {
+	budget := cronListBudget(m, header, len(cronErrorRows(m)), cronHelpRows(m))
+	cursor := min(max(*m.cronCursor(), 0), max(len(lines)-1, 0))
+	return windowBounds(len(lines), cursor, budget)
+}
+
+func cronVisibleUnseenFailureCount(lines []cronLine) int {
+	seen := map[string]struct{}{}
 	for _, line := range lines {
-		if line.target.kind == cronRuns && line.target.uid != "" {
-			count++
+		if line.target.kind == cronRuns && line.unseenFailure && line.target.uid != "" {
+			seen[line.target.uid] = struct{}{}
 		}
 	}
-	return count
+	return len(seen)
 }
 
 func renderCron(m Model) string {
@@ -537,6 +553,9 @@ func renderCron(m Model) string {
 	title, header, lines := cronScreen(m)
 	help := cronHelpRows(m)
 	errors := cronErrorRows(m)
+	budget := cronListBudget(m, header, len(errors), help)
+	cursor := min(max(*m.cronCursor(), 0), max(len(lines)-1, 0))
+	start, end := windowBounds(len(lines), cursor, budget)
 	query := m.cron.lists[m.cron.tab].query
 	left, right := title, ""
 	if len(m.cron.stack) == 0 {
@@ -563,7 +582,7 @@ func renderCron(m Model) string {
 			right += " · " + chip
 		}
 	}
-	if count := m.cronUnseenCount(); count > 0 && (m.cron.tab != cronRuns || !m.cron.unseenOnly || len(m.cron.stack) > 0 || cronRunLineCount(lines) != count) {
+	if count := m.cronUnseenCount(); count > cronVisibleUnseenFailureCount(lines[start:end]) {
 		right += errorStyle.Render(fmt.Sprintf(" · %d unseen failed", count))
 	}
 	body := []string{
@@ -575,9 +594,6 @@ func renderCron(m Model) string {
 	if header != "" {
 		body = append(body, tableHeaderStyle.Render("  "+header))
 	}
-	budget := cronListBudget(m, header, len(errors), help)
-	cursor := min(max(*m.cronCursor(), 0), max(len(lines)-1, 0))
-	start, end := windowBounds(len(lines), cursor, budget)
 	if len(lines) == 0 {
 		empty := "no " + cronTabNames[m.cron.tab]
 		switch {

@@ -280,6 +280,45 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 	}
 }
 
+func TestCronNoticeHiddenWhenDescribedFailureIsVisible(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, tab := range []struct {
+		name        string
+		kind        int
+		visibleList bool
+	}{
+		{name: "Jobs", kind: cronJobs, visibleList: true},
+		{name: "Runs", kind: cronRuns, visibleList: true},
+		{name: "Workflows", kind: cronWorkflows},
+	} {
+		t.Run(tab.name, func(t *testing.T) {
+			m := cronNoticeFixture(t)
+			m.width, m.height = 120, 26
+			job := m.cron.data.jobs[0].UID
+			run := generated.CronRun{
+				UID: "visible-failure", JobUID: new(job), Status: "failed",
+				Revision: 1, CreatedAt: snapshotFixedNow, UpdatedAt: snapshotFixedNow,
+			}
+			m.cron.data.runs = []generated.CronRun{run}
+			m.cron.data.lookup = map[string]generated.CronRun{run.UID: run}
+			m.cron.data.lastRuns = map[string]generated.CronRun{job: run}
+			m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{run}, ready: true}
+			m.cron.tab = tab.kind
+
+			m, _ = m.cronNoticeEvent(cronNoticeEvent(run.UID, job, snapshotFixedNow))
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.NotNil(t, m.toast)
+			if tab.visibleList {
+				require.NotContains(t, stripANSI(m.viewContent()), "cron: 1 run failed:", "the active Jobs or Runs list already shows the described failure")
+				m = m.cronFilter("no matching rows")
+				require.Contains(t, stripANSI(m.viewContent()), "cron: 1 run failed:", "the notice returns when its failure is filtered out")
+			} else {
+				require.Contains(t, stripANSI(m.viewContent()), "cron: 1 run failed:", "Workflows does not show the described run failure")
+			}
+		})
+	}
+}
+
 // An emitted failure belongs to the scope and connection that observed it.
 func TestCronNoticeClearsOnSwitch(t *testing.T) {
 	for _, target := range []string{"project", "all projects", "daemon"} {

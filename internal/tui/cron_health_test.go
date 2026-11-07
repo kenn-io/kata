@@ -280,6 +280,19 @@ func TestCronHealthColumnRollupAndReason(t *testing.T) {
 	assertGolden(t, "cron-jobs-health", cronHealthFixture(t).viewBody())
 }
 
+func TestCronHealthRollupOmitsVisibleFilteredStates(t *testing.T) {
+	defer snapshotInit(t)()
+	m := cronHealthFixture(t)
+	m.height = 8
+	m = m.cronFilter("job-failing")
+
+	title, _, lines := cronScreen(m)
+	require.Len(t, lines, 1)
+	require.NotContains(t, title, "1 failing", "the only failing job is visible even though other jobs are filtered out")
+	require.Contains(t, title, "1 overdue", "hidden jobs still have a health total")
+	require.NotContains(t, stripANSI(renderCron(m)), "1 failing")
+}
+
 // Both rendering entry points preserve row backgrounds in both themes.
 // Selected health text additionally retains at least 4.5:1 contrast.
 func TestCronHealthRowBandsAndSelectedContrast(t *testing.T) {

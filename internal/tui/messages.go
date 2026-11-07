@@ -376,10 +376,11 @@ type toastExpiredMsg struct{}
 // view. Task 11 uses it for the 'resynced' notice; Task 12 will own
 // stacked toasts for mutation feedback.
 type toast struct {
-	cronFailure bool
-	text        string
-	level       toastLevel
-	expiresAt   time.Time
+	cronFailure  bool
+	cronFailures []cronRunEvent
+	text         string
+	level        toastLevel
+	expiresAt    time.Time
 }
 
 // toastLevel discriminates toast styling.

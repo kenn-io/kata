@@ -250,7 +250,7 @@ func (m Model) cronNoticeFlush(msg cronNoticeTickMsg) (Model, tea.Cmd) {
 		text += fmt.Sprintf(" +%d", len(names)-2)
 	}
 	text = truncate(text, max(m.width-52, 12))
-	m.toast = &toast{text: fmt.Sprintf("cron: %s failed: %s", cronCount(len(eligible), "run"), text), level: toastError, expiresAt: m.toastNow().Add(10 * time.Second), cronFailure: true}
+	m.toast = &toast{text: fmt.Sprintf("cron: %s failed: %s", cronCount(len(eligible), "run"), text), level: toastError, expiresAt: m.toastNow().Add(10 * time.Second), cronFailure: true, cronFailures: slices.Clone(eligible)}
 	return m, toastExpireCmd(10 * time.Second)
 }
 
@@ -281,18 +281,65 @@ func (m Model) cronToastLine() string {
 	switch {
 	case t == nil || !t.cronFailure:
 		return renderToast(t)
+	case m.cronFailureVisibleInActiveList(t):
+		return ""
 	case m.cronStatusNotice() != nil:
 		return ""
 	}
 	return errorStyle.Render(t.text)
 }
 
-// The Cron list shows its failure notice in the error row above help, so the
-// shared toast line below the screen skips it there.
+// A visible failure is redundant in the active Jobs or Runs list; otherwise a
+// wide, project-scoped Cron screen shows the notice above help.
 func (m Model) cronStatusNotice() *toast {
 	if t := m.cronToast(); t != nil && t.cronFailure && m.view == viewCron && !m.cron.help && m.cron.form == nil &&
 		m.width >= 80 && !m.scope.allProjects && m.scope.projectID != 0 {
+		if m.cronFailureVisibleInActiveList(t) {
+			return nil
+		}
 		return t
 	}
 	return nil
+}
+
+func (m Model) cronFailureVisibleInActiveList(t *toast) bool {
+	if t == nil || !t.cronFailure || len(t.cronFailures) == 0 || m.view != viewCron || m.cron.help || m.cron.form != nil ||
+		len(m.cron.stack) != 0 || m.scope.allProjects || m.scope.projectID == 0 || m.cron.data == nil ||
+		(m.cron.tab != cronJobs && m.cron.tab != cronRuns) {
+		return false
+	}
+
+	// Decide against the largest viewport. If every described run fits without
+	// the notice row, hiding that row cannot make one of them disappear.
+	list := m
+	list.toast = nil
+	_, header, lines := cronScreen(list)
+	start, end := cronViewport(list, header, lines)
+	visible := map[string]cronLine{}
+	for _, line := range lines[start:end] {
+		if line.target.uid != "" {
+			visible[line.target.uid] = line
+		}
+	}
+	for _, failure := range t.cronFailures {
+		if failure.ProjectUID != m.cronProjectUID() {
+			return false
+		}
+		switch m.cron.tab {
+		case cronJobs:
+			line, ok := visible[failure.JobUID]
+			if failure.JobUID == "" || !ok || line.runUID != failure.UID || line.runStatus != failure.Status {
+				return false
+			}
+		case cronRuns:
+			line, ok := visible[failure.UID]
+			if !ok || line.runStatus != failure.Status {
+				return false
+			}
+		}
+		if failure.Status != "failed" && failure.Status != "unknown" {
+			return false
+		}
+	}
+	return true
 }

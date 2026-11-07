@@ -184,10 +184,25 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 		m, _ := fixture(t)
 		require.Equal(t, 2, m.cronUnseenCount())
 		m.width = 160
-		for _, tab := range []int{cronJobs, cronRuns, cronWorkflows} {
+		for _, tab := range []int{cronJobs, cronWorkflows} {
 			m.cron.tab = tab
 			require.Contains(t, stripANSI(renderCron(m)), "2 unseen failed")
 		}
+		m.cron.tab = cronRuns
+		require.NotContains(t, stripANSI(renderCron(m)), "2 unseen failed", "both counted failures are visible in the regular Runs list")
+	})
+	t.Run("regular run list keeps total when a failure is hidden", func(t *testing.T) {
+		m, _ := fixture(t)
+		m.width = 160
+		m.cron.tab = cronRuns
+		m = m.cronFilter("succeeded")
+		require.Contains(t, stripANSI(renderCron(m)), "2 unseen failed", "filtering hides both counted failures")
+	})
+	t.Run("regular run list keeps total when scrolling hides a failure", func(t *testing.T) {
+		m, _ := fixture(t)
+		m.width, m.height = 160, 8
+		m.cron.tab = cronRuns
+		require.Contains(t, stripANSI(renderCron(m)), "2 unseen failed", "only one counted failure fits in the viewport")
 	})
 	t.Run("unseen-only list does not repeat its count", func(t *testing.T) {
 		m, _ := fixture(t)
