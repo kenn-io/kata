@@ -17,7 +17,7 @@ import (
 )
 
 // localDocbank finds the Docbank on this machine; tests replace it to stub starting Docbank.
-// Home stays empty so DOCBANK_HOME decides.
+// The home is always DOCBANK_HOME or ~/.docbank.
 var localDocbank = docbank.Local{}
 
 // docbankSection is the [docbank] table setup appends; credentials stay in the key file.
@@ -83,21 +83,25 @@ func newDocbankSetupCmd() *cobra.Command {
 					return fmt.Errorf("%s already has a different [docbank] section; edit or remove it, then rerun", path)
 				}
 			}
-			var base, key, vault string
+			var client *docbank.Client
+			var where, vault string
 			if local {
 				if vault, err = docbank.LocalHome(); err != nil {
 					return err
 				}
-				if base, key, err = localDocbank.Target(ctx); err != nil {
+				if err = localDocbank.Ready(ctx); err != nil {
 					return fmt.Errorf("cannot use the Docbank on this machine: %w; kata's config was not changed", err)
 				}
+				client, where = docbank.NewLocalClient(localDocbank), "the Docbank on this machine ("+vault+")"
 			} else {
-				base, vault = want.URL, want.URL
-				if key, err = want.ResolveKey(); err != nil {
+				vault = want.URL
+				key, err := want.ResolveKey()
+				if err != nil {
 					return err
 				}
+				client, where = docbank.NewClient(want.URL, func() (string, error) { return key, nil }), "docbank at "+want.URL
 			}
-			if err := checkDocbankKey(ctx, base, key); err != nil {
+			if err := checkDocbankKey(ctx, client, where); err != nil {
 				return err
 			}
 			changed := !set
@@ -173,19 +177,20 @@ func printDocbankSetup(w io.Writer, want config.DocbankConfig, vault string, cha
 	return err
 }
 
-// checkDocbankKey reads Docbank's root folder with key, the one the daemon will use.
-func checkDocbankKey(ctx context.Context, base, key string) error {
-	_, err := docbank.NewClient(base, func() (string, error) { return key, nil }).ResolvePath(ctx, "/")
+// checkDocbankKey reads Docbank's root folder through client, which carries the key the daemon will use.
+// where names the Docbank in errors.
+func checkDocbankKey(ctx context.Context, client *docbank.Client, where string) error {
+	_, err := client.ResolvePath(ctx, "/")
 	status, ok := errors.AsType[*docbank.Error](err)
 	switch {
 	case err == nil:
 		return nil
 	case ok && (status.Status == 401 || status.Status == 403):
-		return fmt.Errorf("docbank at %s rejected the API key (HTTP %d); kata's config was not changed", base, status.Status)
+		return fmt.Errorf("%s rejected the API key (HTTP %d); kata's config was not changed", where, status.Status)
 	case ok && status.Status != 0:
-		return fmt.Errorf("docbank at %s answered HTTP %d to a read of its root folder; kata's config was not changed", base, status.Status)
+		return fmt.Errorf("%s answered HTTP %d to a read of its root folder; kata's config was not changed", where, status.Status)
 	default:
-		return fmt.Errorf("cannot reach Docbank at %s; kata's config was not changed", base)
+		return fmt.Errorf("cannot reach %s; kata's config was not changed", where)
 	}
 }
 
