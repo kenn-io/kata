@@ -1,13 +1,4 @@
-class TestResizeObserver implements ResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-Object.defineProperty(globalThis, 'ResizeObserver', {
-  configurable: true,
-  value: TestResizeObserver,
-})
+import '../../../../scripts/test/resize-observer'
 
 // Svelte window reactivity reads matchMedia while component modules load.
 if (typeof window !== 'undefined') {
