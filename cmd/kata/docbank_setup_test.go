@@ -55,7 +55,7 @@ func TestDocbankSetupRemote(t *testing.T) {
 	require.Contains(t, fake.Requests(), "GET /api/v1/path")
 	written, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
 	require.NoError(t, err)
-	require.Equal(t, original+"\n[docbank]\nurl = \""+fake.Server.URL+"\"\napi_key_file = \""+keyFile+"\"\nfolder = \"/kata\"\n", string(written))
+	require.Equal(t, original+"\n[docbank]\nurl = \""+fake.Server.URL+"\"\napi_key_file = "+strconv.Quote(keyFile)+"\nfolder = \"/kata\"\n", string(written))
 	require.Contains(t, stderr, "can read any file in the Docbank vault at "+fake.Server.URL)
 	require.Contains(t, out, fake.Server.URL)
 }
@@ -171,4 +171,16 @@ func TestDocbankSetupWithoutApprovalStartsNothing(t *testing.T) {
 	written, readErr := os.ReadFile(path) // #nosec G304 -- test-owned configuration
 	require.NoError(t, readErr)
 	require.Equal(t, original, string(written))
+}
+
+func TestDocbankSetupReportsMissingKeyFileBeforeAsking(t *testing.T) {
+	setupDocbankEnv(t)
+	stubIsTTY(t, false)
+	fake := docbanktest.New(t)
+
+	_, stderr, err := executeRootCapture(t, t.Context(), "docbank", "setup", "--url", fake.Server.URL, "--key-file", filepath.Join(t.TempDir(), "missing.key"))
+
+	require.ErrorContains(t, err, "missing.key")
+	require.NotContains(t, stderr, "can read any file", "a key file that can't be read fails before the warning and question")
+	require.Empty(t, fake.Requests())
 }
