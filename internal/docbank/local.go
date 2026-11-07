@@ -49,9 +49,9 @@ type Local struct {
 	Start func(ctx context.Context, home string) error
 }
 
-// connect finds the running Docbank, starting it when none is running, and
+// locate finds the running Docbank, starting it when none is running, and
 // returns its endpoint and the API key its runtime record names.
-func (l Local) connect(ctx context.Context) (kitdaemon.Endpoint, string, error) {
+func (l Local) locate(ctx context.Context) (kitdaemon.Endpoint, string, error) {
 	home, err := LocalHome()
 	if err != nil {
 		return kitdaemon.Endpoint{}, "", err
@@ -217,14 +217,16 @@ func NewLocalClient(l Local) *Client {
 		case <-ctx.Done():
 			return "", "", nil, &Error{}
 		}
-		ep, key, err := l.connect(ctx)
+		ep, key, err := l.locate(ctx)
 		if err != nil {
 			slog.WarnContext(ctx, "local docbank unavailable", "error", err)
 			return "", "", nil, &Error{}
 		}
 		// The key travels only over connections whose listener proved it holds the key: the record's
 		// PID can outlive the listener, so another user could bind the freed port and answer the ping.
-		proven := &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		// net/http detaches dials from request cancellation; this transport serves only this request,
+		// so the proof uses the request's context.
+		proven := &http.Transport{DisableKeepAlives: true, DialContext: func(context.Context, string, string) (net.Conn, error) {
 			conn, err := proveKey(ctx, ep.Address, key)
 			if err != nil {
 				slog.WarnContext(ctx, "local docbank unavailable", "address", ep.Address, "error", err)
