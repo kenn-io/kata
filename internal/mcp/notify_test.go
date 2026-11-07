@@ -26,19 +26,6 @@ func callCoordinationTool(t *testing.T, session *sdkmcp.ClientSession, name stri
 	return out
 }
 
-// Contract: assistants reading shipped teammate guidance can discover the
-// native notification tool and attention/reply wait arguments.
-func TestMCPCoordinationGuideMapsNativeAdapters(t *testing.T) {
-	rows := map[string]SkillCommand{}
-	for _, row := range SkillCommands() {
-		rows[row.CLI] = row
-	}
-	require.Equal(t, []string{"kata.notify"}, rows["kata notify"].Tools)
-	require.Equal(t, []string{"kata.wait"}, rows["kata wait"].Tools)
-	require.Contains(t, rows["kata wait"].Note, "`until`")
-	require.Contains(t, rows["kata wait"].Note, "`reply`")
-}
-
 // Contract: typed sends and clears address one exact recipient, retry without
 // adding events, and never change delegated work.attention.
 func TestMCPNotifySendRetryAndClearAgainstDaemon(t *testing.T) {

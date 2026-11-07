@@ -256,9 +256,11 @@ func TestMCPCoordinationWaitDeadlineCoversReplyIdentityDiscovery(t *testing.T) {
 
 func TestMCPCoordinationWaitParentCancellation(t *testing.T) {
 	entered := make(chan struct{}, 1)
+	cancelled := make(chan struct{})
 	session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
 		entered <- struct{}{}
 		<-r.Context().Done()
+		close(cancelled)
 		return issueJSON(1, "spoke-project", "abc1")
 	})
 	ctx, cancel := context.WithCancel(t.Context())
@@ -279,5 +281,10 @@ func TestMCPCoordinationWaitParentCancellation(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 	case <-time.After(time.Second):
 		t.Fatal("parent cancellation did not stop the wait")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("daemon request was not cancelled")
 	}
 }
