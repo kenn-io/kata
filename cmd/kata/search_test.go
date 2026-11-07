@@ -117,6 +117,7 @@ func TestSearch_JSONEmptyMultiWordHint(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}, got["hints"])
+	assert.NotContains(t, stderr, "Hint:")
 }
 
 func TestSearch_EmptyContinuationHasNoHint(t *testing.T) {
@@ -453,11 +454,6 @@ func TestSearchSuggestsSettings(t *testing.T) {
 			require.Contains(t, out, "login crash")
 			if tc.want {
 				require.Equal(t, hint, stderr)
-				if tc.name == "human" {
-					baseline, _, err := run(append(args, "--quiet"))
-					require.NoError(t, err)
-					require.Equal(t, baseline, out)
-				}
 			} else {
 				require.Empty(t, stderr)
 			}

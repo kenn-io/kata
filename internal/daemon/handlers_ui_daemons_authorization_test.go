@@ -942,8 +942,11 @@ func TestWebDaemonGatewayRestrictsEmbeddingsByViewer(t *testing.T) {
 			require.NotNil(t, got.Indexing)
 			if administrator {
 				assert.Equal(t, int64(212), got.Indexing.Total)
+				require.NotNil(t, got.Indexing.ETASeconds)
+				assert.Equal(t, int64(30), *got.Indexing.ETASeconds)
 			} else {
 				assert.Zero(t, got.Indexing.Total)
+				assert.Nil(t, got.Indexing.ETASeconds)
 			}
 		})
 	}

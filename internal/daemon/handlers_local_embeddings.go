@@ -46,7 +46,6 @@ func registerLocalEmbeddingsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return snapshot, internalAPIError(err)
 		}
-		snapshot.CanChange = snapshot.CanChange && localEmbeddingsAdministrator(ctx, cfg.InsecureReadonly, cfg.WebSessions)
 		return snapshot, nil
 	}
 	status := func(ctx context.Context) (*api.LocalEmbeddingsResponse, error) {

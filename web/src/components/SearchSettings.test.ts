@@ -52,6 +52,7 @@ describe('SearchSettings', () => {
           status({
             can_change: false,
             provider: 'built_in',
+            download_bytes: 0,
             indexing: { done: 0, total: 0, failed: false },
           }),
         ),
@@ -101,7 +102,9 @@ describe('SearchSettings', () => {
   test('shows Ollama as on without a switch or download action', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
-      vi.fn(async () => Response.json(status({ provider: 'ollama', can_change: false }))),
+      vi.fn(async () =>
+        Response.json(status({ provider: 'ollama', can_change: false, download_bytes: 0 })),
+      ),
     )
     renderSettings()
     await settle()

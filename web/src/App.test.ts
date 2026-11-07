@@ -1617,7 +1617,7 @@ describe('App', () => {
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('admin-session')
   })
 
-  it.each(['accepted', 'server-error', 'network-error'] as const)(
+  it.each(['accepted', 'rejected-session'] as const)(
     'turns on search directly for a selected local daemon and handles %s',
     async (outcome) => {
       sessionStorage.setItem(
@@ -1650,14 +1650,13 @@ describe('App', () => {
             if (request.method === 'POST') {
               posts.push(request)
               return outcome === 'accepted'
-                ? Response.json({ ...off, job: { state: 'restart' } }, { status: 202 })
+                ? Response.json(
+                    { ...off, can_change: false, job: { state: 'restart' } },
+                    { status: 202 },
+                  )
                 : new Response('', { status: 401 })
             }
             statusPath = target.pathname
-            if (posts.length && outcome !== 'accepted') {
-              if (outcome === 'network-error') throw new TypeError('Failed to fetch')
-              return new Response('', { status: 500 })
-            }
             return Response.json(off)
           }
           if (target.pathname.endsWith('/snapshot')) {

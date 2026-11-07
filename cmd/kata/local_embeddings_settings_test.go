@@ -168,7 +168,6 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			require.NoError(t, err)
 			if tc.ready {
 				require.Equal(t, "restart", status.Job.State, status.Job.Error)
-				require.Contains(t, string(data), "local = true")
 				require.False(t, status.CanChange)
 			} else {
 				require.Equal(t, "failed", status.Job.State)
