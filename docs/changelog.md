@@ -28,6 +28,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   integer query values such as `kata events --after` cursors go out as plain
   numbers.
 - Open the web UI manually over SSH or in a container: `kata ui` and `kata ui <issue-ref>` print the browser URL in the selected output format before launching the browser and exit 0 with a manual-open hint if no browser opens. Cancelling the command still returns an error.
+- Turn on issue attachments with `kata docbank setup`. Without `--url`, it
+  writes `[docbank] local = true` for the Docbank on this machine; with `--url`
+  and `--key-file`, it uses a Docbank that runs elsewhere. It checks the key
+  with an authenticated read before writing `[docbank]` to `config.toml`, then
+  restarts running daemons.
 - Attach files through a Docbank running on the same machine with
   `[docbank] local = true`, without copying its URL or API key. Kata reads the
   current address and key on every request, so Docbank restarts and updates need

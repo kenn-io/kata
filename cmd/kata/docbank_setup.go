@@ -3,76 +3,41 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/docbank"
-	"go.kenn.io/kit/atomicfile"
 )
 
-// defaultDocbankPort is the fixed port a local Docbank gets when neither --port nor its config names one.
-const defaultDocbankPort = 8080
-
-// runDocbank runs the Docbank CLI and returns its standard output.
-var runDocbank = func(ctx context.Context, args ...string) ([]byte, error) {
-	if _, err := exec.LookPath("docbank"); err != nil {
-		return nil, errors.New("docbank is not on PATH; install Docbank (https://github.com/kenn-io/docbank), then rerun")
-	}
-	out, err := exec.CommandContext(ctx, "docbank", args...).Output() //nolint:gosec // G204: fixed docbank subcommands from setup; no shell.
-	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
-		err = fmt.Errorf("docbank %s: %s", strings.Join(args, " "), strings.TrimSpace(string(exit.Stderr)))
-	}
-	return out, err
-}
+// localDocbank finds the Docbank on this machine; tests replace it to stub starting Docbank.
+// Home stays empty so DOCBANK_HOME decides.
+var localDocbank = docbank.Local{}
 
 // docbankSection is the [docbank] table setup appends; credentials stay in the key file.
 type docbankSection struct {
-	URL        string `toml:"url"`
-	APIKeyFile string `toml:"api_key_file"`
+	Local      bool   `toml:"local,omitempty"`
+	URL        string `toml:"url,omitempty"`
+	APIKeyFile string `toml:"api_key_file,omitempty"`
 	Folder     string `toml:"folder"`
-}
-
-// docbankServer is the [server] table of Docbank's config.toml that fixes its address and key.
-type docbankServer struct {
-	BindAddr string `toml:"bind_addr"`
-	APIPort  *int   `toml:"api_port"`
-	APIKey   string `toml:"api_key"`
-}
-
-// localDocbank is what setup changes on this machine's Docbank, decided before anything is written.
-type localDocbank struct {
-	vault, configPath     string
-	configText            []byte
-	port                  int
-	key                   string
-	writeServer, writeKey bool
 }
 
 func newDocbankSetupCmd() *cobra.Command {
 	var docbankURL, keyFile, folder string
-	var port int
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "point the daemon at a Docbank for attachments",
-		Long: "Without --url, give the Docbank on this machine a fixed loopback port and API key, " +
-			"store the key in <KATA_HOME>/docbank.key and restart Docbank. With --url and --key-file, " +
-			"use a Docbank that already runs elsewhere. Either way, check the key against Docbank, " +
-			"add [docbank] to <KATA_HOME>/config.toml and restart running daemons.",
+		Long: "Without --url, use the Docbank running on this machine (starting it when it is not running): " +
+			"the daemon finds it through Docbank's runtime record on every request, so its port and key may change. " +
+			"With --url and --key-file, use a Docbank that already runs elsewhere. Either way, check the key " +
+			"against Docbank, add [docbank] to <KATA_HOME>/config.toml and restart running daemons.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -87,34 +52,20 @@ func newDocbankSetupCmd() *cobra.Command {
 			local := docbankURL == ""
 			switch {
 			case local && keyFile != "":
-				return &cliError{Message: "--key-file goes with --url; without --url setup makes the key itself", Kind: kindValidation, ExitCode: ExitValidation}
+				return &cliError{Message: "--key-file goes with --url; the Docbank on this machine supplies its own key", Kind: kindValidation, ExitCode: ExitValidation}
 			case !local && keyFile == "":
 				return &cliError{Message: "--url needs --key-file naming a private file that holds the Docbank API key", Kind: kindValidation, ExitCode: ExitValidation}
-			case !local && port != 0:
-				return &cliError{Message: "--port sets up a Docbank on this machine and does not go with --url", Kind: kindValidation, ExitCode: ExitValidation}
-			case port < 0 || port > 65535:
-				return &cliError{Message: "--port must be between 1 and 65535", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			path, err := config.DaemonConfigPath()
 			if err != nil {
 				return err
 			}
-			var plan localDocbank
-			if local {
-				keyFile = filepath.Join(filepath.Dir(path), "docbank.key")
-			}
-			if keyFile != "~" && !strings.HasPrefix(keyFile, "~/") {
+			if !local && keyFile != "~" && !strings.HasPrefix(keyFile, "~/") {
 				if keyFile, err = filepath.Abs(keyFile); err != nil {
 					return err
 				}
 			}
-			if local {
-				if plan, err = planLocalDocbank(ctx, port, keyFile); err != nil {
-					return err
-				}
-				docbankURL = "http://127.0.0.1:" + strconv.Itoa(plan.port)
-			}
-			want, err := config.NormalizeDocbankConfig(config.DocbankConfig{URL: docbankURL, APIKeyFile: keyFile, Folder: folder})
+			want, err := config.NormalizeDocbankConfig(config.DocbankConfig{Local: local, URL: docbankURL, APIKeyFile: keyFile, Folder: folder})
 			if err != nil {
 				return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
 			}
@@ -132,18 +83,30 @@ func newDocbankSetupCmd() *cobra.Command {
 					return fmt.Errorf("%s already has a different [docbank] section; edit or remove it, then rerun", path)
 				}
 			}
-			if !local {
-				if err := checkDocbankKey(ctx, want); err != nil {
+			var base, key, vault string
+			if local {
+				if vault, err = docbank.LocalHome(); err != nil {
+					return err
+				}
+				if base, key, err = localDocbank.Target(ctx); err != nil {
+					return fmt.Errorf("cannot use the Docbank on this machine: %w; kata's config was not changed", err)
+				}
+			} else {
+				base, vault = want.URL, want.URL
+				if key, err = want.ResolveKey(); err != nil {
 					return err
 				}
 			}
-			changed := !set || plan.writeServer || plan.writeKey
+			if err := checkDocbankKey(ctx, base, key); err != nil {
+				return err
+			}
+			changed := !set
 			if changed {
-				vault := want.URL
+				warning := "Every issue reader and metadata writer served by this daemon can read any file in this Docbank vault: " + vault
 				if local {
-					vault = plan.vault
+					warning = "Every issue reader and metadata writer served by this daemon can read any file in the Docbank vault at " + vault
 				}
-				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "Every issue reader and metadata writer served by this daemon can read any file in this Docbank vault: %s\n", vault); err != nil {
+				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), warning); err != nil {
 					return err
 				}
 				if !yes {
@@ -154,21 +117,11 @@ func newDocbankSetupCmd() *cobra.Command {
 						return err
 					}
 				}
-			}
-			if local {
-				if err := plan.apply(ctx, keyFile); err != nil {
-					return err
-				}
-				if err := checkDocbankKey(ctx, want); err != nil {
-					return err
-				}
-			}
-			if !set {
-				proposed, err := appendTOMLTable(original, "docbank", docbankSection{URL: want.URL, APIKeyFile: want.APIKeyFile, Folder: want.Folder})
+				proposed, err := appendTOMLTable(original, "docbank", docbankSection{Local: want.Local, URL: want.URL, APIKeyFile: want.APIKeyFile, Folder: want.Folder})
 				if err != nil {
 					return fmt.Errorf("cannot add [docbank] to %s: %w", path, err)
 				}
-				if written, err := config.ParseDocbankFile(proposed); err != nil || written != (config.DocbankConfig{URL: want.URL, APIKeyFile: want.APIKeyFile, Folder: want.Folder}) {
+				if written, err := config.ParseDocbankFile(proposed); err != nil || written != want {
 					return fmt.Errorf("cannot add [docbank] to %s: the file already sets docbank keys", path)
 				}
 				if err := writeDaemonConfigAndRestart(ctx, cmd.ErrOrStderr(), path, original, originalExists, proposed); err != nil {
@@ -178,168 +131,62 @@ func newDocbankSetupCmd() *cobra.Command {
 					return err
 				}
 			}
-			return printDocbankSetup(cmd.OutOrStdout(), want, changed)
+			return printDocbankSetup(cmd.OutOrStdout(), want, vault, changed)
 		},
 	}
 	cmd.Flags().StringVar(&docbankURL, "url", "", "use a Docbank running elsewhere; HTTPS except on loopback")
 	cmd.Flags().StringVar(&keyFile, "key-file", "", "private file holding that Docbank's API key (with --url)")
-	cmd.Flags().IntVar(&port, "port", 0, "loopback port for the Docbank on this machine (default 8080)")
 	cmd.Flags().StringVar(&folder, "folder", "", "Docbank folder for uploads (default /kata)")
 	cmd.Flags().BoolVar(&yes, "yes", false, "approve the configuration change and restarts")
 	return cmd
 }
 
-func printDocbankSetup(w io.Writer, want config.DocbankConfig, changed bool) error {
+// printDocbankSetup reports the result; vault is the Docbank home for the local form and the URL otherwise.
+func printDocbankSetup(w io.Writer, want config.DocbankConfig, vault string, changed bool) error {
 	var err error
+	target := want.URL
+	if want.Local {
+		target = "the Docbank on this machine (" + vault + ")"
+	}
 	switch currentOutputMode() {
 	case outputJSON:
 		return emitJSON(w, struct {
-			URL     string `json:"url"`
+			Local   bool   `json:"local"`
+			URL     string `json:"url,omitempty"`
 			Folder  string `json:"folder"`
-			KeyFile string `json:"key_file"`
+			KeyFile string `json:"key_file,omitempty"`
 			Changed bool   `json:"changed"`
-		}{want.URL, want.Folder, want.APIKeyFile, changed})
+		}{want.Local, want.URL, want.Folder, want.APIKeyFile, changed})
 	case outputAgent:
-		_, err = fmt.Fprintf(w, "OK docbank-setup url=%s folder=%s changed=%t\n", agentValue(want.URL), agentValue(want.Folder), changed)
+		if want.Local {
+			_, err = fmt.Fprintf(w, "OK docbank-setup local=true folder=%s changed=%t\n", agentValue(want.Folder), changed)
+		} else {
+			_, err = fmt.Fprintf(w, "OK docbank-setup url=%s folder=%s changed=%t\n", agentValue(want.URL), agentValue(want.Folder), changed)
+		}
 	case outputHuman:
 		if changed {
-			_, err = fmt.Fprintf(w, "Docbank attachments use %s, folder %s.\n", want.URL, want.Folder)
+			_, err = fmt.Fprintf(w, "Docbank attachments use %s, folder %s.\n", target, want.Folder)
 		} else {
-			_, err = fmt.Fprintf(w, "Docbank attachments are already set up: %s, folder %s.\n", want.URL, want.Folder)
+			_, err = fmt.Fprintf(w, "Docbank attachments are already set up: %s, folder %s.\n", target, want.Folder)
 		}
 	}
 	return err
 }
 
-// checkDocbankKey reads Docbank's root folder with the key the daemon will resolve from the same section.
-func checkDocbankKey(ctx context.Context, want config.DocbankConfig) error {
-	key, err := want.ResolveKey()
-	if err != nil {
-		return err
-	}
-	_, err = docbank.NewClient(want.URL, func() (string, error) { return key, nil }).ResolvePath(ctx, "/")
+// checkDocbankKey reads Docbank's root folder with key, the one the daemon will use.
+func checkDocbankKey(ctx context.Context, base, key string) error {
+	_, err := docbank.NewClient(base, func() (string, error) { return key, nil }).ResolvePath(ctx, "/")
 	status, ok := errors.AsType[*docbank.Error](err)
 	switch {
 	case err == nil:
 		return nil
 	case ok && (status.Status == 401 || status.Status == 403):
-		return fmt.Errorf("docbank at %s rejected the API key (HTTP %d); kata's config was not changed", want.URL, status.Status)
+		return fmt.Errorf("docbank at %s rejected the API key (HTTP %d); kata's config was not changed", base, status.Status)
 	case ok && status.Status != 0:
-		return fmt.Errorf("docbank at %s answered HTTP %d to a read of its root folder; kata's config was not changed", want.URL, status.Status)
+		return fmt.Errorf("docbank at %s answered HTTP %d to a read of its root folder; kata's config was not changed", base, status.Status)
 	default:
-		return fmt.Errorf("cannot reach Docbank at %s; kata's config was not changed", want.URL)
+		return fmt.Errorf("cannot reach Docbank at %s; kata's config was not changed", base)
 	}
-}
-
-// planLocalDocbank finds this machine's Docbank and decides its port and key without writing anything.
-func planLocalDocbank(ctx context.Context, port int, keyFile string) (localDocbank, error) {
-	out, err := runDocbank(ctx, "vault", "info", "--json")
-	if err != nil {
-		return localDocbank{}, err
-	}
-	var info struct {
-		VaultPath string `json:"vault_path"`
-	}
-	if json.Unmarshal(out, &info) != nil || info.VaultPath == "" {
-		return localDocbank{}, errors.New("docbank vault info --json did not name the vault")
-	}
-	plan := localDocbank{vault: info.VaultPath, configPath: filepath.Join(info.VaultPath, "config.toml")}
-	if plan.configText, _, err = readDaemonConfig(plan.configPath); err != nil {
-		return localDocbank{}, err
-	}
-	var file struct {
-		Server *docbankServer `toml:"server"`
-	}
-	if _, err := toml.Decode(string(plan.configText), &file); err != nil {
-		return localDocbank{}, fmt.Errorf("read %s: %w", plan.configPath, err)
-	}
-	stored, err := os.ReadFile(keyFile) // #nosec G304 -- the key file under the operator's KATA_HOME
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return localDocbank{}, fmt.Errorf("read %s: %w", keyFile, err)
-	}
-	diskKey := strings.TrimSpace(string(stored))
-	if server := file.Server; server != nil {
-		if server.APIPort == nil || server.APIKey == "" {
-			return localDocbank{}, fmt.Errorf("%s has a [server] section without both api_port and api_key; add the missing one or remove the section, then rerun", plan.configPath)
-		}
-		if plan.port, plan.key = *server.APIPort, server.APIKey; plan.port < 1 || plan.port > 65535 {
-			return localDocbank{}, fmt.Errorf("%s: api_port %d is not a port", plan.configPath, plan.port)
-		}
-		if port != 0 && port != plan.port {
-			return localDocbank{}, fmt.Errorf("--port %d differs from api_port %d in %s; drop --port or edit that file", port, plan.port, plan.configPath)
-		}
-		if diskKey != "" && diskKey != plan.key {
-			return localDocbank{}, fmt.Errorf("%s holds a different key than %s; remove it or give Docbank that key, then rerun", keyFile, plan.configPath)
-		}
-	} else {
-		plan.writeServer = true
-		if plan.port = port; plan.port == 0 {
-			plan.port = defaultDocbankPort
-		}
-		if plan.key = diskKey; plan.key == "" {
-			raw := make([]byte, 32)
-			if _, err := rand.Read(raw); err != nil {
-				return localDocbank{}, err
-			}
-			plan.key = hex.EncodeToString(raw)
-		}
-	}
-	plan.writeKey = diskKey == ""
-	return plan, nil
-}
-
-// apply fixes Docbank's port and key, stores the key for kata, and restarts Docbank when it is not
-// already serving that port, then requires Docbank to report that address.
-func (p localDocbank) apply(ctx context.Context, keyFile string) error {
-	addr := "127.0.0.1:" + strconv.Itoa(p.port)
-	names := regexp.MustCompile(regexp.QuoteMeta(addr) + `\b`)
-	status, _ := runDocbank(ctx, "daemon", "status") // a stopped Docbank exits non-zero
-	running := names.Match(status)
-	if !running {
-		listener, err := new(net.ListenConfig).Listen(ctx, "tcp", addr)
-		if err != nil {
-			return fmt.Errorf("port %d on 127.0.0.1 is in use by something other than this Docbank; free it or pick another with --port", p.port)
-		}
-		_ = listener.Close()
-	}
-	if p.writeKey {
-		if err := os.MkdirAll(filepath.Dir(keyFile), 0o700); err != nil {
-			return err
-		}
-		if err := atomicfile.WriteFile(keyFile, []byte(p.key+"\n"), atomicfile.WithPrivate()); err != nil {
-			return err
-		}
-	}
-	if p.writeServer {
-		latest, _, err := readDaemonConfig(p.configPath)
-		if err != nil {
-			return err
-		}
-		if !bytes.Equal(latest, p.configText) {
-			return fmt.Errorf("%s changed during setup; rerun the command", p.configPath)
-		}
-		port := p.port
-		text, err := appendTOMLTable(p.configText, "server", docbankServer{BindAddr: "127.0.0.1", APIPort: &port, APIKey: p.key})
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(p.vault, 0o700); err != nil {
-			return err
-		}
-		if err := atomicfile.WriteFile(p.configPath, text, atomicfile.WithPreserveMode(), atomicfile.WithFollowLink()); err != nil {
-			return err
-		}
-	}
-	if running && !p.writeServer {
-		return nil
-	}
-	if _, err := runDocbank(ctx, "daemon", "restart"); err != nil {
-		return fmt.Errorf("%w; kata's config was not changed", err)
-	}
-	if status, _ = runDocbank(ctx, "daemon", "status"); !names.Match(status) {
-		return fmt.Errorf("docbank did not come up at %s (DOCBANK_BIND_ADDR or DOCBANK_API_PORT in its environment override its config); kata's config was not changed. docbank daemon status says: %s", addr, strings.TrimSpace(string(status)))
-	}
-	return nil
 }
 
 // appendTOMLTable keeps every existing byte and adds the table after them.

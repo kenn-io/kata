@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 # CLI reference
@@ -2585,8 +2585,10 @@ kata docbank attachments rm <issue> <attachment>
 Point the current `KATA_HOME`'s daemon at a Docbank:
 
 ```sh
-kata docbank setup [--port N] [--folder PATH] [--yes]
+kata docbank setup [--folder PATH] [--yes]
 kata docbank setup --url URL --key-file PATH [--folder PATH] [--yes]
 ```
 
-Without `--url`, setup gives the Docbank on this machine a fixed loopback port and API key. With `--url`, it uses a Docbank that runs elsewhere and reads the key from `--key-file`. Both check the key against Docbank, add `[docbank]` to `config.toml`, and restart running daemons. They reject `--daemon`. JSON and agent output report `url`, `folder`, `key_file` and `changed`. See [Configure the daemon](../guide/attachments.md#configure-the-daemon) for what setup writes and when it refuses.
+Without `--url`, setup finds the Docbank on this machine (starting it when it is not running), checks its key with an authenticated read, and writes `[docbank] local = true` to `config.toml`. With `--url`, it uses a Docbank that runs elsewhere and reads the key from `--key-file`, which is allowed only with `--url`. Both ask once before writing (`--yes` skips the question), then restart running daemons. They reject `--daemon`. Setup refuses, writing nothing, when a `KATA_DOCBANK_*` override is set, `config.toml` has a different `[docbank]` section, or Docbank cannot be reached or rejects the key. Rerunning with the same settings changes nothing.
+
+JSON output is `{"local":true,"folder":"/kata","changed":true}` for the local form and `{"local":false,"url":"https://docbank.example","folder":"/kata","key_file":"/abs/path","changed":true}` for the remote form. Agent output is `OK docbank-setup local=true folder=/kata changed=true` or `OK docbank-setup url=<url> folder=/kata changed=true`. See [Configure the daemon](../guide/attachments.md#configure-the-daemon) for what setup writes and when it refuses.
