@@ -1270,13 +1270,14 @@ func connectTestServer(t *testing.T) *sdkmcp.ClientSession {
 
 func connectTestServerWithClient(t *testing.T, apiClient *kataclient.Client) *sdkmcp.ClientSession {
 	t.Helper()
-	return connectTestServerWithOptions(t, Options{
-		Client:      apiClient,
-		ProjectID:   42,
-		ProjectName: "spoke-project",
-		Actor:       "example-agent",
-		Version:     "test-version",
-	})
+	return connectTestServerWithOptions(t, defaultCatalogOptions(apiClient))
+}
+
+func defaultCatalogOptions(apiClient *kataclient.Client) Options {
+	return Options{
+		Client: apiClient, ProjectID: 42, ProjectName: "spoke-project",
+		Actor: "example-agent", Version: "test-version",
+	}
 }
 
 func connectTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientSession {
@@ -1299,12 +1300,20 @@ func connectRawTestServerWithClientOptions(t *testing.T, options Options, client
 	t.Helper()
 	server, err := New(options)
 	require.NoError(t, err)
+	return connectServerSession(t, server, clientOptions, nil)
+}
 
+func connectServerSession(t *testing.T, server *sdkmcp.Server, clientOptions *sdkmcp.ClientOptions, capture io.Writer) *sdkmcp.ClientSession {
+	t.Helper()
 	serverConn, clientConn := net.Pipe()
+	var writer io.Writer = serverConn
+	if capture != nil {
+		writer = io.MultiWriter(capture, serverConn)
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- server.Run(ctx, NewStdioTransport(serverConn, serverConn))
+		serverDone <- server.Run(ctx, NewStdioTransport(serverConn, writer))
 	}()
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{

@@ -39,6 +39,7 @@
     unassignIssue,
     type CreateRecurrenceRequestBody,
     type PatchRecurrenceRequestBody,
+    type ProjectOut,
     type RecurrenceTemplateInput,
     type RecurrenceTemplateUpdateInput,
     type UIIssueReference,
@@ -440,15 +441,28 @@
     )
   }
 
-  async function createProject(name: string): Promise<{ changed: boolean }> {
+  async function createProject(name: string, makeInbox = false): Promise<{ changed: boolean }> {
     let changed = false
     const accepted = await runMutation({}, async (context) => {
       const result = await initProject(context.body({ name }, requestActor))
-      if (result.status === 200) changed = result.data.created
-      return result
+      if (result.status !== 200) return result
+      changed = result.data.created
+      return makeInbox ? patchInboxProject(result.data.project, context) : result
     })
-    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create project.')
+    if (!accepted) {
+      if (changed && mutationState.kind === 'domain-error') await refreshSnapshot(true)
+      throw new Error(mutationMessage(mutationState) ?? 'Could not create project.')
+    }
     return { changed }
+  }
+
+  function patchInboxProject(project: ProjectOut, context: MutationContext) {
+    context.headers.set('If-Match', `"rev-${project.revision}"`)
+    return patchProjectMetadata(
+      { projectId: project.id },
+      { actor: requestActor, patch: { role: 'inbox' } },
+      { headers: context.headers },
+    )
   }
 
   async function designateInbox(projectUID: string): Promise<void> {
@@ -457,14 +471,8 @@
     if (!target) throw new Error('Inbox project is not available.')
     if (target.metadata?.role === 'inbox') return
 
-    const accepted = await runMutation(
-      { draft: projectUID, revision: `"rev-${target.revision}"` },
-      (context) =>
-        patchProjectMetadata(
-          { projectId: target.id },
-          { actor: requestActor, patch: { role: 'inbox' } },
-          { headers: context.headers },
-        ),
+    const accepted = await runMutation({ draft: projectUID }, (context) =>
+      patchInboxProject(target, context),
     )
     if (!accepted) {
       throw new Error(mutationMessage(mutationState) ?? 'Could not designate the Inbox project.')

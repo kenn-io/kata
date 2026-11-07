@@ -10,7 +10,22 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Turn on search by meaning from the web's Settings page. Watch the download, then run `kata daemon restart` to finish. Reopen `kata ui` to watch indexing. Other viewers can read the status. Unconfigured `kata search` results point to Settings and the CLI setup command on stderr; `--quiet` and `--agent` suppress the line.
-
+- Keep federation polls fast on busy hubs by skipping other projects' event history.
+- Attach oh-my-pi sessions to closes by copying the documented
+  [closing-session transcript](reference/configuration.md#closing-session-transcripts)
+  configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
+  `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
+  recorded oh-my-pi closes as pi sessions.
+- Upgrade SQLite schemas 41 through 47 to 48 by adding indexes in place, avoiding
+  a full JSONL export/import and its retained database backup. The indexes and
+  version stamp commit together; interrupted upgrades retry on the next start.
+- Create your first project from the web UI's empty task list. **New task**
+  makes that project Inbox and opens task capture when no projects exist.
+- Keep pulling from a federation hub after its event history passes one million
+  events. Spokes no longer stall with `after_id: invalid integer`, and other large
+  integer query values such as `kata events --after` cursors go out as plain
+  numbers.
+- Open the web UI manually over SSH or in a container: `kata ui` and `kata ui <issue-ref>` print the browser URL in the selected output format before launching the browser and exit 0 with a manual-open hint if no browser opens. Cancelling the command still returns an error.
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the
@@ -86,6 +101,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.
+- Push ordinary issue changes to large SQLite hubs without replaying every
+  unrelated issue. Preparation folds touched issue histories; project-wide
+  changes and move history retain complete replay, and link reconciliation
+  keeps its existing scope.
 
 - Pull shared cron updates faster on large SQLite spokes by replaying cron
   history without reconciling unrelated issues and their short IDs.

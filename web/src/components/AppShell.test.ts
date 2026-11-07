@@ -1532,6 +1532,98 @@ describe('AppShell', () => {
     expect(onCreateIssue).toHaveBeenCalledWith('New example task')
   })
 
+  test('distinguishes empty projects from empty tasks and keeps refused capture closed', async () => {
+    const empty = snapshot()
+    empty.catalog = []
+    empty.collection = []
+    const onCreateProject = vi.fn(async () => {
+      throw new Error('Project creation refused')
+    })
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: empty,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject,
+      },
+    })
+    const collection = screen.getByRole('region', { name: 'Issues' })
+    expect(within(collection).getByText('No projects yet')).not.toBeNull()
+    await fireEvent.click(within(collection).getByRole('button', { name: 'New project' }))
+    const input = screen.getByRole('textbox', { name: 'New project name' })
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    await fireEvent.input(input, { target: { value: 'example-project' } })
+    await fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(onCreateProject).toHaveBeenCalledWith('example-project', true))
+    await expect(onCreateProject.mock.results[0]!.value).rejects.toThrow()
+    expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
+    const existing = snapshot()
+    existing.collection = []
+    await view.rerender({ snapshot: existing })
+    expect(within(collection).getByText('No tasks')).not.toBeNull()
+    expect(screen.queryByText('No projects yet')).toBeNull()
+    await view.rerender({ snapshot: empty, loading: true })
+    expect(screen.queryByText('No projects yet')).toBeNull()
+  })
+
+  test.each(['close', 'fence'])(
+    'cancels pending first-project capture after %s',
+    async (action) => {
+      const empty = snapshot()
+      empty.catalog = []
+      empty.collection = []
+      vi.stubGlobal('matchMedia', (media: string) => ({
+        matches: true,
+        media,
+        addEventListener() {},
+        removeEventListener() {},
+      }))
+      let finish = () => {}
+      const onCreateProject = vi.fn(
+        () =>
+          new Promise<{ changed: boolean }>(
+            (resolve) => (finish = () => resolve({ changed: true })),
+          ),
+      )
+      const view = render(AppShell, {
+        props: {
+          route: {
+            kind: 'kata',
+            view: 'all-open',
+            graph: false,
+            filters: { status: [], owner: [], label: [], relationship: [] },
+          },
+          snapshot: empty,
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject,
+        },
+      })
+      await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+      const drawer = screen.getByRole('dialog', { name: 'Kata navigation' })
+      const input = within(drawer).getByRole('textbox', { name: 'New project name' })
+      await fireEvent.input(input, { target: { value: 'example-project' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await waitFor(() => expect(onCreateProject).toHaveBeenCalledWith('example-project', true))
+      if (action === 'close')
+        await fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }))
+      else await view.rerender({ draftFenceGeneration: 1 })
+      finish()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      if (action === 'fence')
+        expect(screen.queryAllByRole('textbox', { name: 'New project name' })).toHaveLength(0)
+      expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
+    },
+  )
+
   test('designates an Inbox from New task before opening quick capture', async () => {
     const onDesignateInbox = vi.fn(async () => {})
     render(AppShell, {
@@ -1628,6 +1720,18 @@ describe('AppShell', () => {
 
     await view.rerender({ mutationPending: false })
     expect(create().getAttribute('aria-disabled')).toBeNull()
+    const empty = snapshot()
+    empty.catalog = []
+    empty.collection = []
+    await view.rerender({ snapshot: empty, canMutate: false, stale: true })
+    expect(
+      within(screen.getByRole('region', { name: 'Issues' }))
+        .getByRole('button', {
+          name: 'New project',
+          description: 'Changes are paused while the snapshot may be out of date.',
+        })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
   })
 
   test('keeps the canonical issue route while authority is missing or archived', async () => {
