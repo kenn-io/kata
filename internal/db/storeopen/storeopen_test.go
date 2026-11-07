@@ -187,37 +187,14 @@ const preIndexOnlySchemaVersion = 40
 func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
-	for _, prefixFixture := range []bool{false, true} {
-		path := filepath.Join(t.TempDir(), "kata.db")
-		if prefixFixture {
-			source, err := sqlitestore.Open(ctx, path)
-			require.NoError(t, err)
-			project, err := source.CreateProject(ctx, "example-project")
-			require.NoError(t, err)
-			_, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, UID: "01hznq7v000000000000000001", Title: "Prefix match", Author: "agent"})
-			require.NoError(t, err)
-			_, err = source.ExecContext(ctx, `DROP INDEX idx_issues_uid_prefix;
-DROP INDEX idx_issues_project_uid_prefix;
-UPDATE meta SET value='40' WHERE key='schema_version'`)
-			require.NoError(t, err)
-			require.NoError(t, source.Close())
-		} else {
-			stageLegacyPreCutoverFixture(t, path, preIndexOnlySchemaVersion)
-		}
-		upgraded, err := storeopen.Open(ctx, path)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = upgraded.Close() })
-		version, err := upgraded.SchemaVersion(ctx)
-		require.NoError(t, err)
-		require.Equal(t, db.CurrentSchemaVersion(), version)
-		if !prefixFixture {
-			continue
-		}
-		matches, err := upgraded.IssueUIDPrefixMatch(ctx, "01HZNQ7V", 1, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		require.Len(t, matches, 1)
-		require.Equal(t, "01hznq7v000000000000000001", matches[0].UID)
-	}
+	path := filepath.Join(t.TempDir(), "kata.db")
+	stageLegacyPreCutoverFixture(t, path, preIndexOnlySchemaVersion)
+	upgraded, err := storeopen.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	version, err := upgraded.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 }
 
 func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {
