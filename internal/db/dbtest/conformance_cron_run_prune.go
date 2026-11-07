@@ -12,7 +12,7 @@ import (
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // Contract: pruning removes only old terminal evidence beyond each definition's
@@ -160,22 +160,22 @@ func checkCronRunPruneModel(t *testing.T, store db.Storage) error {
 		job, workflow     *string
 	}
 	iteration := 0
-	hegel.Test(t, func(ht *hegel.T) {
+	checkCronRapidCases(t, 1000, func(ht *rapid.T) {
 		iteration++
-		cutoff := cutoff.In(time.FixedZone("cutoff", hegel.Draw(ht, hegel.Integers(-12, 14))*3600))
-		raw := hegel.Draw(ht, hegel.Lists(hegel.Integers(0, 10000)))
+		cutoff := cutoff.In(time.FixedZone("cutoff", rapid.IntRange(-12, 14).Draw(ht, "cutoff offset")*3600))
+		raw := rapid.SliceOf(rapid.IntRange(0, 10000)).Draw(ht, "run values")
 		if len(raw) > 24 {
 			raw = raw[:24]
 		}
-		keep := hegel.Draw(ht, hegel.Integers(1, 1000))
-		if hegel.Draw(ht, hegel.Booleans()) {
-			keep = hegel.Draw(ht, hegel.Integers(1, 4))
+		keep := rapid.IntRange(1, 1000).Draw(ht, "retained count")
+		if rapid.Bool().Draw(ht, "small retained count") {
+			keep = rapid.IntRange(1, 4).Draw(ht, "small retained count")
 		}
-		limit := hegel.Draw(ht, hegel.Integers(1, 20000))
-		if hegel.Draw(ht, hegel.Booleans()) {
-			limit = hegel.Draw(ht, hegel.Integers(1, 4))
+		limit := rapid.IntRange(1, 20000).Draw(ht, "prune limit")
+		if rapid.Bool().Draw(ht, "small prune limit") {
+			limit = rapid.IntRange(1, 4).Draw(ht, "small prune limit")
 		}
-		narrow := hegel.Draw(ht, hegel.Integers(0, 4))
+		narrow := rapid.IntRange(0, 4).Draw(ht, "filter mode")
 		_, err := q.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, project.ID)
 		require.NoError(ht, err)
 		_, err = q.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND type='cron.run.observed'`, project.ID)
@@ -185,8 +185,8 @@ func checkCronRunPruneModel(t *testing.T, store db.Storage) error {
 			group := fmt.Sprintf("%026d", v%2+1)
 			id := fmt.Sprintf("%026d", iteration*100+i)
 			r := run{id: id, group: group, kind: (v / 2) % 2, status: []string{"running", "succeeded", "failed", "cancelled", "unknown"}[(v/4)%5], created: cutoff.Add(time.Duration((v/20)%7-4) * time.Second), updated: cutoff.Add(time.Duration((v/140)%7-4) * time.Nanosecond)}
-			if hegel.Draw(ht, hegel.Booleans()) {
-				r.created = cutoff.Add(time.Duration(hegel.Draw(ht, hegel.Integers(-1, 1))))
+			if rapid.Bool().Draw(ht, "near cutoff timestamp") {
+				r.created = cutoff.Add(time.Duration(rapid.IntRange(-1, 1).Draw(ht, "cutoff delta")))
 			}
 			// Product creation timestamps are canonical UTC strings.
 			r.created = r.created.UTC()
@@ -307,6 +307,6 @@ func checkCronRunPruneModel(t *testing.T, store db.Storage) error {
 				require.NoError(ht, err)
 			}
 		}
-	}, hegel.WithTestCases(1000))
+	})
 	return nil
 }

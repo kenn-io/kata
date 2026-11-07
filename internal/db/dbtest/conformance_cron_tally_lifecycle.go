@@ -13,7 +13,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 func tallyLifecycleEntry(f cronTallyFixture, count int64) db.CronTallyEntry {
@@ -383,7 +383,7 @@ func checkCronTallyLegacyDuplicate(t *testing.T, store db.Storage) error {
 // regardless of the number of incoming metadata records.
 func checkCronTallyAdoptionChunk(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
-	hegel.Test(t, func(ht *hegel.T) {
+	checkCronRapidCases(t, 30, func(ht *rapid.T) {
 		f := newCronTallyFixture(ctx, ht, store)
 		root := tallyLifecycleEntry(f, 7)
 		f.seed(ctx, ht, root)
@@ -402,7 +402,7 @@ func checkCronTallyAdoptionChunk(t *testing.T, store db.Storage) error {
 			entry := root
 			entry.UID, err = uid.New()
 			require.NoError(ht, err)
-			entry.Counts.Succeeded = hegel.Draw(ht, hegel.Integers[int64](1, math.MaxInt64))
+			entry.Counts.Succeeded = rapid.Int64Range(1, math.MaxInt64).Draw(ht, "succeeded count")
 			expected = append(expected, entry)
 			value, err := json.Marshal(db.CronTallyValue{Version: 1, Groups: map[string]db.CronTallyEntry{"job": entry}})
 			require.NoError(ht, err)
@@ -434,7 +434,7 @@ func checkCronTallyAdoptionChunk(t *testing.T, store db.Storage) error {
 		require.NoError(ht, err)
 		require.Equal(ht, 2, retry.Duplicates)
 		require.Empty(ht, retry.Events)
-	}, hegel.WithTestCases(30))
+	})
 	return nil
 }
 

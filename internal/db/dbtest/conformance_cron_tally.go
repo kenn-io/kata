@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"flag"
 	"fmt"
 	"math"
 	"testing"
@@ -15,8 +16,18 @@ import (
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
+
+func checkCronRapidCases(t *testing.T, cases int, property func(*rapid.T)) {
+	t.Helper()
+	checks := flag.Lookup("rapid.checks")
+	require.NotNil(t, checks, "rapid checks flag is registered")
+	previous := checks.Value.String()
+	require.NoError(t, flag.Set(checks.Name, fmt.Sprint(cases)))
+	defer func() { require.NoError(t, flag.Set(checks.Name, previous)) }()
+	rapid.Check(t, property)
+}
 
 type cronTallyFixture struct {
 	store    db.Storage
@@ -174,16 +185,16 @@ func checkCronRunTally(t *testing.T, store db.Storage) error {
 // never derives expected counts from production preview/metadata/fold helpers.
 func checkCronRunTallyModel(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
-	hegel.Test(t, func(ht *hegel.T) {
+	checkCronRapidCases(t, 80, func(ht *rapid.T) {
 		f := newCronTallyFixture(ctx, ht, store)
-		data := hegel.Draw(ht, hegel.Lists(hegel.Integers(0, 7)))
+		data := rapid.SliceOf(rapid.IntRange(0, 7)).Draw(ht, "run values")
 		if len(data) > 16 {
 			data = data[:16]
 		}
 		if len(data) == 0 {
 			data = []int{0}
 		}
-		limit := hegel.Draw(ht, hegel.Integers(1, 5))
+		limit := rapid.IntRange(1, 5).Draw(ht, "prune limit")
 		statuses := []string{"succeeded", "failed", "cancelled", "unknown"}
 		for i, value := range data {
 			kind := "job"
@@ -231,7 +242,7 @@ func checkCronRunTallyModel(t *testing.T, store db.Storage) error {
 			}
 			removed = end
 		}
-	}, hegel.WithTestCases(80))
+	})
 	return nil
 }
 
@@ -311,11 +322,11 @@ func checkCronRunCountsSnapshotAuthorization(t *testing.T, store db.Storage, pro
 	require.NoError(t, err)
 	team, _, err := store.CreateTeam(ctx, "cron-counts-readers", db.BootstrapActor)
 	require.NoError(t, err)
-	hegel.Test(t, func(ht *hegel.T) {
-		scope := hegel.Draw(ht, hegel.Integers(0, 2)) // owner, empty, or one admitted project
-		public := hegel.Draw(ht, hegel.Booleans())
-		member := hegel.Draw(ht, hegel.Booleans())
-		validActor := hegel.Draw(ht, hegel.Booleans())
+	checkCronRapidCases(t, 64, func(ht *rapid.T) {
+		scope := rapid.IntRange(0, 2).Draw(ht, "authorization scope") // owner, empty, or one admitted project
+		public := rapid.Bool().Draw(ht, "public visibility")
+		member := rapid.Bool().Draw(ht, "team membership")
+		validActor := rapid.Bool().Draw(ht, "valid actor")
 		visibility, teamUIDs := "teams", []string{team.UID}
 		if public {
 			visibility, teamUIDs = "all", nil
@@ -354,7 +365,7 @@ func checkCronRunCountsSnapshotAuthorization(t *testing.T, store db.Storage, pro
 		} else {
 			require.ErrorIs(ht, err, db.ErrNotFound)
 		}
-	}, hegel.WithTestCases(64))
+	})
 }
 
 func checkCronRunCountsSnapshot(t *testing.T, store db.Storage) error {

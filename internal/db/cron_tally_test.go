@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"flag"
 	"fmt"
 	"math"
 	"strings"
@@ -10,11 +11,21 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 const tallyTestUID = "01K00000000000000000000001"
 const tallyTestKey = "cron.tally." + tallyTestUID
+
+func checkCronTallyProperty(t *testing.T, cases int, property func(*rapid.T)) {
+	t.Helper()
+	checks := flag.Lookup("rapid.checks")
+	require.NotNil(t, checks, "rapid checks flag is registered")
+	previous := checks.Value.String()
+	require.NoError(t, flag.Set(checks.Name, fmt.Sprint(cases)))
+	defer func() { require.NoError(t, flag.Set(checks.Name, previous)) }()
+	rapid.Check(t, property)
+}
 
 func tallyTestEntry(kind, count string) string {
 	return fmt.Sprintf(`{"kind":%q,"uid":%q,"coverage_started_at":"2026-08-01T00:00:00Z","last_pruned_at":"2026-08-02T00:00:00Z","oldest_created_at":"2025-01-01T00:00:00Z","newest_created_at":"2025-12-31T00:00:00Z","counts":{"succeeded":%s,"failed":0,"cancelled":0,"unknown":0}}`, kind, tallyTestUID, count)
@@ -85,9 +96,9 @@ func TestCronTallyExactIntegers(t *testing.T) {
 	}
 	check(t, 9007199254740993)
 	check(t, math.MaxInt64)
-	hegel.Test(t, func(ht *hegel.T) {
-		check(ht, hegel.Draw(ht, hegel.Integers[int64](1, math.MaxInt64)))
-	}, hegel.WithTestCases(1000))
+	checkCronTallyProperty(t, 1000, func(ht *rapid.T) {
+		check(ht, rapid.Int64Range(1, math.MaxInt64).Draw(ht, "positive count"))
+	})
 }
 
 func TestCronTallyUnionAndRootPreservation(t *testing.T) {
@@ -191,14 +202,14 @@ func TestCronTallyImportAndBaselineValidation(t *testing.T) {
 // Accepted timestamps must remain in the documented year domain after the
 // decoder's UTC normalization and the next backup/counts serialization.
 func TestCronTallyTimestampDomainIsUTCClosed(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		offsetMinutes := hegel.Draw(ht, hegel.Integers(-1439, 1439))
-		upper := hegel.Draw(ht, hegel.Integers(0, 1)) == 1
+	checkCronTallyProperty(t, 400, func(ht *rapid.T) {
+		offsetMinutes := rapid.IntRange(-1439, 1439).Draw(ht, "offset minutes")
+		upper := rapid.IntRange(0, 1).Draw(ht, "upper boundary") == 1
 		at := time.Date(0, 1, 1, 0, 0, 0, 0, time.FixedZone("offset", offsetMinutes*60))
 		if upper {
 			at = time.Date(9999, 12, 31, 23, 59, 59, 999999999, at.Location())
 		}
-		count := hegel.Draw(ht, hegel.Integers[int64](1, math.MaxInt64))
+		count := rapid.Int64Range(1, math.MaxInt64).Draw(ht, "succeeded count")
 		entry := CronTallyEntry{Kind: "job", UID: tallyTestUID, CoverageStartedAt: at, LastPrunedAt: at, OldestCreatedAt: at, NewestCreatedAt: at, Counts: CronTallyCounts{Succeeded: count}}
 		raw, err := json.Marshal(map[string]CronTallyValue{tallyTestKey: {Version: 1, Groups: map[string]CronTallyEntry{"job": entry}}})
 		require.NoError(ht, err)
@@ -216,5 +227,5 @@ func TestCronTallyTimestampDomainIsUTCClosed(t *testing.T) {
 		roundTrip, err := DecodeCronTallies(JSONBlob(raw))
 		require.NoError(ht, err)
 		require.Equal(ht, values, roundTrip)
-	}, hegel.WithTestCases(400))
+	})
 }

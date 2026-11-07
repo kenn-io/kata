@@ -16,7 +16,7 @@ import (
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 type pruneFixtureSQL interface {
@@ -175,13 +175,13 @@ func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 	// Deterministically retain the five-row identity case: observed, snapshot,
 	// job snapshot with the same UID, retained run, and escaped observed UID.
 	check(t, 3, true)
-	hegel.Test(t, func(ht *hegel.T) {
-		matches := hegel.Draw(ht, hegel.Integers(0, 20))
-		if hegel.Draw(ht, hegel.Booleans()) {
-			matches = []int{0, 1, 499, 500, 501, 999, 1000, 1001}[hegel.Draw(ht, hegel.Integers(0, 7))]
+	checkCronRapidCases(t, 30, func(ht *rapid.T) {
+		matches := rapid.IntRange(0, 20).Draw(ht, "matching runs")
+		if rapid.Bool().Draw(ht, "chunk boundary case") {
+			matches = []int{0, 1, 499, 500, 501, 999, 1000, 1001}[rapid.IntRange(0, 7).Draw(ht, "chunk boundary")]
 		}
 		check(ht, matches, false)
-	}, hegel.WithTestCases(30))
+	})
 	return nil
 }
 
@@ -253,8 +253,8 @@ func checkCronPruneAcceptedReplay(t *testing.T, s db.Storage) error {
 	// Distinct source events advance the spoke cursor; retries retain their ID.
 	sourceIDs := map[string]int64{}
 	var nextSourceID int64
-	hegel.Test(t, func(ht *hegel.T) {
-		status := []string{"running", "succeeded", "failed", "cancelled", "unknown"}[hegel.Draw(ht, hegel.Integers(0, 4))]
+	checkCronRapidCases(t, 20, func(ht *rapid.T) {
+		status := []string{"running", "succeeded", "failed", "cancelled", "unknown"}[rapid.IntRange(0, 4).Draw(ht, "run status")]
 		id, err := uid.New()
 		require.NoError(ht, err)
 		at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -292,6 +292,6 @@ func checkCronPruneAcceptedReplay(t *testing.T, s db.Storage) error {
 		retry, err := ingest(original)
 		require.NoError(ht, err)
 		require.Equal(ht, 1, retry.Duplicates)
-	}, hegel.WithTestCases(20))
+	})
 	return nil
 }
