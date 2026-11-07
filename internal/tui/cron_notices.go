@@ -14,15 +14,16 @@ import (
 const cronNoticeWindow = 2 * time.Second
 
 type cronRunEvent struct {
-	seq        uint64     // m.cron.events when this event arrived; reads that captured it describe it
-	settledGen uint64     // newest qualifying page or refresh read that settled the event
-	UID        string     `json:"uid"`
-	JobUID     string     `json:"job_uid"`
-	ProjectUID string     `json:"project_uid"`
-	Status     string     `json:"status"`
-	Revision   int64      `json:"revision"`
-	EndedAt    *time.Time `json:"ended_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	seq            uint64     // m.cron.events when this event arrived; reads that captured it describe it
+	settledGen     uint64     // newest qualifying page or refresh read that settled the event
+	locallySettled bool       // Revision is from the local store, not the observing peer.
+	UID            string     `json:"uid"`
+	JobUID         string     `json:"job_uid"`
+	ProjectUID     string     `json:"project_uid"`
+	Status         string     `json:"status"`
+	Revision       int64      `json:"revision"`
+	EndedAt        *time.Time `json:"ended_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 func (r cronRunEvent) run() generated.CronRun {
@@ -69,10 +70,13 @@ func (m Model) cronNoticeSuppressed(r cronRunEvent) bool {
 // The store folds a run's concurrent observations by an HLC the client never
 // sees, so only a row read after the run's latest event, which settles its
 // change mark, resolves it; an older in-flight read or a bare event does not.
+// Peer and local revisions are incomparable until a read provides local evidence.
 func (m Model) cronNoticeNewest(r cronRunEvent) generated.CronRun {
 	if m.cron.data != nil && m.cron.data.events >= r.seq && m.cron.data.generation >= r.settledGen && m.cron.changed[r.UID].at == 0 {
-		if known, ok := m.cron.data.fetched(r.UID); ok && known.Revision >= r.Revision {
-			return known
+		if known, ok := m.cron.data.fetched(r.UID); ok {
+			if !r.locallySettled || known.Revision >= r.Revision {
+				return known
+			}
 		}
 	}
 	return r.run()
@@ -104,11 +108,12 @@ func (p cronData) fetched(uid string) (generated.CronRun, bool) {
 
 // settle takes a qualifying read's evidence; seq stays the event's.
 func (r cronRunEvent) settle(row generated.CronRun, generation uint64) cronRunEvent {
-	if row.Revision < r.Revision {
+	if r.locallySettled && row.Revision < r.Revision {
 		return r
 	}
 	r.Status, r.Revision, r.EndedAt, r.UpdatedAt = row.Status, row.Revision, row.EndedAt, row.UpdatedAt
 	r.settledGen = generation
+	r.locallySettled = true
 	return r
 }
 

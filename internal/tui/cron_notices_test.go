@@ -689,6 +689,32 @@ func TestCronNoticeOlderPageCannotReplaceNewerRefresh(t *testing.T) {
 	require.Equal(t, "succeeded", m.cronNotices.pending["r"].Status, "a page requested before the refresh cannot replace its newer settlement")
 }
 
+func TestCronNoticeNewestComparesOnlyLocalRevisions(t *testing.T) {
+	m := cronNoticeFixture(t)
+	job := m.cron.data.jobs[0].UID
+	local := generated.CronRun{
+		UID: "r", JobUID: &job, Status: "succeeded", Revision: 5,
+		CreatedAt: snapshotFixedNow, UpdatedAt: snapshotFixedNow,
+	}
+	m.cron.data.runs = []generated.CronRun{local}
+	m.cron.data.lookup = map[string]generated.CronRun{"r": local}
+	m.cron.data.events = m.cron.events
+	m.cron.data.generation = 1
+
+	peer := cronRunEvent{UID: "r", ProjectUID: m.cronProjectUID(), JobUID: job, Status: "failed", Revision: 9, seq: m.cron.events}
+	require.Equal(t, local, m.cronNoticeNewest(peer), "a peer revision cannot reject a qualifying local row")
+
+	settled := peer.settle(local, 1)
+	require.True(t, settled.locallySettled)
+	require.EqualValues(t, 5, settled.Revision)
+	olderLocal := local
+	olderLocal.Status, olderLocal.Revision = "failed", 4
+	m.cron.data.runs = []generated.CronRun{olderLocal}
+	m.cron.data.lookup = map[string]generated.CronRun{"r": olderLocal}
+	m.cron.data.generation = 2
+	require.Equal(t, local, m.cronNoticeNewest(settled), "a lower later-read revision cannot replace settled local evidence")
+}
+
 // Contract: local run revisions are monotonic even when overlapping reads
 // return snapshots in the opposite order from their request generations.
 func TestCronNoticeSettlementKeepsHigherRevision(t *testing.T) {
