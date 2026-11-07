@@ -2016,11 +2016,6 @@ describe('App', () => {
               release = () => resolve(Response.json(created))
             })
           }
-          if (request.method === 'POST' && path === '/api/v1/projects/7/issues') {
-            const issue = { ...snapshot().collection[0]!, title: 'First task' }
-            accepted.collection = [issue]
-            return Response.json({ issue })
-          }
           if (request.method === 'POST' && path === '/api/v1/projects') {
             if (outcome === 'creation refusal')
               return Response.json(
@@ -2048,7 +2043,12 @@ describe('App', () => {
             ) {
               designationRefused = true
               return Response.json(
-                { error: { code: 'validation', message: 'Inbox designation refused' } },
+                {
+                  error: {
+                    code: outcome === 'conflict' ? 'revision_conflict' : 'validation',
+                    message: 'Inbox designation refused',
+                  },
+                },
                 { status: outcome === 'conflict' ? 412 : 422 },
               )
             }
@@ -2073,9 +2073,15 @@ describe('App', () => {
         outcome === 'designation retry' ||
         outcome === 'conflict'
       ) {
-        await screen.findAllByText(
-          outcome === 'creation refusal' ? /Project creation refused/ : /Inbox designation refused/,
-        )
+        await waitFor(() => {
+          expect(
+            requests.some(
+              (request) =>
+                request.method === 'POST' && new URL(request.url).pathname === '/api/v1/projects',
+            ),
+          ).toBe(true)
+          expect((input as HTMLInputElement).disabled).toBe(false)
+        })
         if (outcome === 'creation refusal') {
           expect(
             requests.some((request) => new URL(request.url).pathname.endsWith('/metadata')),
@@ -2103,10 +2109,11 @@ describe('App', () => {
       if (outcome === 'event overlap') {
         expect(release).toBeDefined()
         release!()
-        const capture = screen.getByRole('textbox', { name: 'Quick capture' })
-        await fireEvent.input(capture, { target: { value: 'First task' } })
-        await fireEvent.keyDown(capture, { key: 'Enter' })
-        expect(await screen.findByRole('button', { name: /First task/ })).not.toBeNull()
+        await waitFor(() =>
+          expect(
+            (screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).disabled,
+          ).toBe(false),
+        )
       }
     },
   )

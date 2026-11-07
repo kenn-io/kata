@@ -213,7 +213,7 @@ describe('Sidebar', () => {
     expect(onOpenProject).toHaveBeenCalledWith('project-example')
   })
 
-  it('submits project creation without deriving navigation from the mutation result', async () => {
+  it('keeps a refused project draft for retry and leaves navigation to the caller', async () => {
     render(FlashBanner)
     const onCreateProject = vi
       .fn(async () => ({ changed: true }))
@@ -233,6 +233,7 @@ describe('Sidebar', () => {
     await fireEvent.submit(input.closest('form')!)
     await waitFor(() => {
       expect(onCreateProject).toHaveBeenCalledWith('New Project')
+      expect(onCreateProject).toHaveBeenCalledTimes(2)
     })
     expect(onOpenProject).not.toHaveBeenCalled()
     expect(screen.queryByRole('textbox', { name: 'New project name' })).toBeNull()

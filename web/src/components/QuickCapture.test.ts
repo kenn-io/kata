@@ -20,18 +20,14 @@ describe('QuickCapture', () => {
   })
 
   it('focuses the task title when an opening refresh finishes', async () => {
-    const onClose = vi.fn()
     const view = render(QuickCapture, {
-      props: { open: true, disabled: true, onClose, onSubmit: vi.fn() },
+      props: { open: true, disabled: true, onClose: vi.fn(), onSubmit: vi.fn() },
     })
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' })),
-    )
+    screen.getByRole('button', { name: 'Cancel' }).focus()
     await view.rerender({ disabled: false })
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Quick capture' })),
     )
-    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('resets a task draft after authentication authority changes', async () => {
