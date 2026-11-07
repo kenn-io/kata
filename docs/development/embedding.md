@@ -1,6 +1,7 @@
 ---
 title: Embedding kata in Go
 description: Mount kata's HTTP service inside a Go application.
+last_edited: 2026-11-04
 ---
 
 # Embedding kata in Go
@@ -16,6 +17,11 @@ The host application remains responsible for the listener, TLS, signal
 handling, and HTTP server shutdown. A `kata.Service` owns its storage handle and
 the federation, GitHub sync, timed-claim, due-notification, and
 assignment-expiry background workers associated with that handle.
+
+Native recurring dispatch decisions from `Run` appear in `/api/v1/health` and the
+project-scoped dispatch explanation route. The service owns the recorder and
+closes its local log after workers stop. Log paths, retention, and diagnostic
+limits follow the [cron reference](../reference/cron.md).
 
 ## Browser host boundary
 

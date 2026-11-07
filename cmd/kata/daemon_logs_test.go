@@ -97,15 +97,15 @@ func TestHookRunsRootSeparatesPostgresSchemas(t *testing.T) {
 	home := setupKataEnv(t)
 	t.Setenv("KATA_DSN", "postgres://user@db.example/kata?sslmode=verify-full")
 	t.Setenv("KATA_POSTGRES_SCHEMA", "alpha")
-	alpha, err := hookRunsRoot()
+	alpha, err := daemonLogSource(t.Context(), false)
 	require.NoError(t, err)
 	t.Setenv("KATA_POSTGRES_SCHEMA", "beta")
-	beta, err := hookRunsRoot()
+	beta, err := daemonLogSource(t.Context(), false)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, alpha, beta)
-	assert.True(t, strings.HasPrefix(alpha, filepath.Join(home, "hooks")))
-	assert.True(t, strings.HasPrefix(beta, filepath.Join(home, "hooks")))
+	assert.True(t, strings.HasPrefix(alpha.root, filepath.Join(home, "hooks")))
+	assert.True(t, strings.HasPrefix(beta.root, filepath.Join(home, "hooks")))
 }
 
 func TestDaemonLogs_Hooks_PrintsChronological(t *testing.T) {
@@ -210,8 +210,8 @@ func TestDaemonLogs_Hooks_AgentOutputOneLinePerRecord(t *testing.T) {
 	assert.NotContains(t, lines[0], "{")
 }
 
-func TestFormatAgentHookLogRecordFormatsDecodedRecord(t *testing.T) {
-	got := formatAgentHookLogRecord(map[string]jsontext.Value{
+func TestFormatAgentDaemonLogRecordFormatsDecodedRecord(t *testing.T) {
+	got := formatAgentDaemonLogRecord(map[string]jsontext.Value{
 		"event_id":   jsontext.Value(`1`),
 		"event_type": jsontext.Value(`"issue.created"`),
 		"stderr":     jsontext.Value(`"first line\nsecond line"`),
@@ -244,12 +244,8 @@ func TestDaemonLogs_Hooks_Tail_RotatedOnlyWaitsForActive(t *testing.T) {
 	})
 }
 
-// TestEmitNewLines_PartialTrailingLine_NotConsumed pins the contract
-// that emitNewLines does NOT advance the caller's offset across a
-// partial trailing line. Before the fix, every scanned record advanced
-// `read` by len(line)+1, which over-counted the unflushed mid-line by
-// 1 byte and caused later ticks to miss content.
-func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
+// Complete-record reads retain a partial trailing line for the next tick.
+func TestEmitLogLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 	resetFlags(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "runs.jsonl")
@@ -260,7 +256,12 @@ func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 	}
 	f := &hookLogFilter{hookIndex: -1}
 	var stdout, stderr bytes.Buffer
-	n, err := emitNewLines(path, 0, &stdout, &stderr, f)
+	file, err := openLog(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	n, err := emitLogLines(t.Context(), file, path, 0, &stdout, &stderr, f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +286,7 @@ func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	n2, err := emitNewLines(path, n, &stdout, &stderr, f)
+	n2, err := emitLogLines(t.Context(), file, path, n, &stdout, &stderr, f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,43 +351,32 @@ func TestFollowActive_MarkAtSize_DoesNotReEmit(t *testing.T) {
 	}
 }
 
-// TestRunHookLogOnce_Mark_ReportsActiveFileSize verifies that the
-// one-shot pass reports a set mark with the size of runs.jsonl after
-// it was read, so tail can resume at the exact byte offset.
-func TestRunHookLogOnce_Mark_ReportsActiveFileSize(t *testing.T) {
-	_, dir, _ := setupHooksDir(t)
-	contents := `{"event_id":1,"result":"ok"}` + "\n"
-	path := filepath.Join(dir, "runs.jsonl")
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	mark, err := runHookLogOnce(&stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !mark.set {
-		t.Fatal("mark should be set when runs.jsonl was in the snapshot")
-	}
-	if mark.size != int64(len(contents)) {
-		t.Fatalf("mark.size = %d, want %d", mark.size, len(contents))
-	}
-}
-
-// TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent verifies that the
-// one-shot mark stays unset when runs.jsonl is absent — so follow
-// later starts at offset 0 once the file appears.
-func TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent(t *testing.T) {
-	_, dir, _ := setupHooksDir(t)
-	// Only a rotated file exists.
-	writeHookLog(t, dir, "runs.jsonl.1", map[string]any{"event_id": 99, "result": "ok"})
-	var stdout, stderr bytes.Buffer
-	mark, err := runHookLogOnce(&stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mark.set {
-		t.Fatal("mark must stay unset when runs.jsonl wasn't in snapshot")
+// Snapshots retain the newest cursor, including when only a rotated file exists.
+func TestRunHookLogOnce_Mark_RetainsNewestFile(t *testing.T) {
+	for _, tc := range []struct {
+		file     string
+		contents string
+	}{
+		{file: "runs.jsonl", contents: `{"event_id":1,"result":"ok"}` + "\n"},
+		{file: "runs.jsonl.1", contents: `{"event_id":99,"result":"ok"}` + "\n"},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			_, dir, _ := setupHooksDir(t)
+			if err := os.WriteFile(filepath.Join(dir, tc.file), []byte(tc.contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			mark, err := runDaemonLogOnce(t.Context(), testHookLogSource(t), &stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !mark.set {
+				t.Fatal("mark must retain the newest file")
+			}
+			if mark.size != int64(len(tc.contents)) {
+				t.Fatalf("mark.size = %d, want %d", mark.size, len(tc.contents))
+			}
+		})
 	}
 }
 
@@ -437,4 +427,13 @@ func TestDaemonLogs_RejectsHookIndexBelowMinusOne(t *testing.T) {
 	var ce *cliError
 	require.True(t, errors.As(err, &ce))
 	assert.Equal(t, ExitValidation, ce.ExitCode)
+}
+
+func testHookLogSource(t *testing.T) logSource {
+	t.Helper()
+	source, err := daemonLogSource(t.Context(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
 }

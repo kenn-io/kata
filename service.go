@@ -196,6 +196,7 @@ type serviceDeps struct {
 type Service struct {
 	store                  db.Storage
 	server                 *daemon.Server
+	cronRecorder           *daemon.CronDispatchRecorder
 	broadcaster            *daemon.EventBroadcaster
 	publish                daemon.EventPublisher
 	federationWake         chan struct{}
@@ -320,6 +321,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if err != nil {
 		return nil, fmt.Errorf("kata: open storage: %w", err)
 	}
+
+	// Local diagnostics are best effort; explicit storage needs no home.
+	cronRecorder := daemon.ResolveCronDispatchRecorder(config.CronDispatchLogPath(config.StorageHash(cfg.DSN, pgCfg.Schema)))
 
 	startedAt := cfg.StartedAt
 	if startedAt.IsZero() {
@@ -451,6 +455,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	server := daemon.NewServer(daemon.ServerConfig{
 		DB:              store,
+		CronRecorder:    cronRecorder,
 		Docbank:         docbankClient,
 		DocbankFolder:   docbankConfig.Folder,
 		WebHandler:      cfg.WebHandler,
@@ -505,6 +510,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	return &Service{
 		store:                  store,
 		server:                 server,
+		cronRecorder:           cronRecorder,
 		broadcaster:            broadcaster,
 		publish:                publisher,
 		federationWake:         federationWake,
@@ -906,6 +912,7 @@ func (s *Service) Run(ctx context.Context) error {
 		s.logger.Error("kata timed-claim worker", "err", err)
 	}
 	dueNotificationSweeper := daemon.NewDueNotificationSweeper(s.store, s.publish, s.defaultTimezone)
+	dueNotificationSweeper.CronRecorder = s.cronRecorder
 	dueNotificationSweeper.OnError = func(err error) {
 		s.logger.Error("kata due-notification worker", "err", err)
 	}
@@ -1141,7 +1148,7 @@ func (s *Service) Close() error {
 		<-runDone
 	}
 	s.handlerWG.Wait()
-	err := errors.Join(s.server.Close(), s.store.Close())
+	err := errors.Join(s.server.Close(), s.cronRecorder.Close(), s.store.Close())
 
 	s.mu.Lock()
 	s.closeErr = err

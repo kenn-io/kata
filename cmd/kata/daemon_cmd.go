@@ -1504,8 +1504,9 @@ func runDaemonProcess(
 	federationWake := startFederationRunner(
 		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog, syncOutcome, embeddingWake,
 	)
+	cronRecorder := daemon.ResolveCronDispatchRecorder(config.CronDispatchLogPath(ns.DBHash))
 	startDueNotificationSweeper(
-		ctx, workers, waitableDrainAdmission, store, publisher, dcfg.Timezone, daemonLog,
+		ctx, workers, waitableDrainAdmission, store, publisher, dcfg.Timezone, daemonLog, cronRecorder,
 	)
 	startAssignmentSweeper(ctx, workers, waitableDrainAdmission, store, publisher, daemonLog)
 	federationConfigHealth := startFederationConfigReconciler(
@@ -1692,6 +1693,7 @@ func runDaemonProcess(
 		DocbankFolder:          dcfg.Docbank.Folder,
 		VectorIndex:            vectorIndex,
 		ReconcilerHealth:       reconcilerHealth,
+		CronRecorder:           cronRecorder,
 		FederationConfigHealth: federationConfigHealth,
 		IdleAdmission:          idleAdmission,
 		IdleShutdownHealth:     idleHealth,
@@ -1814,13 +1816,17 @@ func startDueNotificationSweeper(
 	publisher daemon.EventPublisher,
 	defaultTimezone string,
 	daemonLog *log.Logger,
+	cronRecorder *daemon.CronDispatchRecorder,
 ) {
 	sweeper := daemon.NewDueNotificationSweeper(store, publisher, defaultTimezone)
+	sweeper.CronRecorder = cronRecorder
 	sweeper.IdleAdmission = drainAdmission
 	sweeper.OnError = func(err error) {
 		daemonLog.Printf("due notification sweeper: %v", err)
 	}
 	workers.Go(func() {
+		// The recorder owns the sweeper's file; release it after dispatch stops.
+		defer func() { _ = cronRecorder.Close() }()
 		if err := sweeper.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			daemonLog.Printf("due notification sweeper: %v", err)
 		}

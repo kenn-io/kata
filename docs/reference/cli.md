@@ -1811,6 +1811,7 @@ kata daemon restart [--listen <host:port>] [--insecure-readonly]
 kata daemon reload
 kata daemon local-embeddings [--yes]
 kata daemon logs --hooks [--tail]
+kata daemon logs --cron [--tail] [--limit N] [--job-uid <job-uid>] [--reason <code>]
 kata health
 kata doctor [--json | --agent] [--workspace <path>] [--project <name>] [--daemon <name>]
 kata whoami
@@ -1820,6 +1821,15 @@ kata --version
 kata update [--check] [--force] [--yes]
 kata tui [issue-ref]
 ```
+
+`kata daemon logs --tail` follows complete records across retained rotations. If
+the previous file has been evicted, it resumes from the oldest retained file.
+History already evicted by retention cannot be recovered; run without `--tail`
+to read all retained history. This also applies to `--hooks`: when only rotated
+files exist at startup, tail retains the newest snapshot position and follows
+the active file when it appears, without replaying that snapshot. Hook writer
+behavior is unchanged. See [Cron diagnostics](cron.md)
+for decision filters, local history limits and `job show --why`.
 
 Search stays visible above the issue list and the Jobs, Runs, and Workflows
 lists. Press `/` or, with `--mouse`, click the search line to edit the current query.
@@ -2328,7 +2338,7 @@ See [Cron](cron.md) for bounded documents and retry semantics.
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
 kata cron job list [--include-deleted] --json
-kata cron job show <job-uid> --json
+kata cron job show <job-uid> [--why] --json
 kata cron job edit <job-uid>
 kata cron workflow edit <workflow-uid>
 kata cron job update <job-uid> --expected-event-uid <event-uid> --file replacement.json --json

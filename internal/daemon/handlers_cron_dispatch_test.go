@@ -1,0 +1,208 @@
+package daemon_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json/v2"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
+)
+
+func TestCronDispatchExplanationProjectScopedRead(t *testing.T) {
+	for _, role := range []string{"local", "spoke", "hub"} {
+		t.Run(role, func(t *testing.T) {
+			env := testenv.New(t)
+			p, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			other, err := env.DB.CreateProject(t.Context(), "hub-project")
+			require.NoError(t, err)
+			job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: cronHTTPDefinition(t)})
+			require.NoError(t, err)
+			foreign, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: other.ID, Name: "Private", Actor: "operator", Definition: cronHTTPDefinition(t)})
+			require.NoError(t, err)
+			if role != "local" {
+				if role == "spoke" {
+					_, err = env.DB.AdoptProjectIntoFederation(t.Context(), db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", Actor: "operator"})
+				} else {
+					_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
+				}
+				require.NoError(t, err)
+				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET enabled=0 WHERE project_id=$1`, p.ID)
+				require.NoError(t, err)
+			}
+			host := &capabilitiesReadHost{projectID: p.ID}
+			server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostAccess: host})
+			t.Cleanup(func() { require.NoError(t, server.Close()) })
+			for _, tc := range []struct {
+				id   int64
+				uid  string
+				want int
+			}{
+				{p.ID, job.UID, 200}, {other.ID, job.UID, 404},
+				{p.ID, foreign.UID, 404}, {p.ID, "01K5ZN7SP700000000000000001", 404},
+			} {
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", tc.id, tc.uid), nil)
+				request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "reader", Actor: "reader"}))
+				response := httptest.NewRecorder()
+				server.Handler().ServeHTTP(response, request)
+				require.Equalf(t, tc.want, response.Code, "%s", response.Body.String())
+				if tc.want == 200 && role == "local" {
+					require.Contains(t, response.Body.String(), `"reason":"external_adapter"`)
+				}
+			}
+			require.Len(t, host.calls, 4)
+			require.Equal(t, "explainCronJobDispatch", host.calls[0].ID)
+			require.False(t, host.calls[0].Policy.Mutation)
+		})
+	}
+	t.Run("lowercase job UID", func(t *testing.T) {
+		env := testenv.New(t)
+		p, err := env.DB.CreateProject(t.Context(), "spoke-project")
+		require.NoError(t, err)
+		job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: cronHTTPDefinition(t)})
+		require.NoError(t, err)
+		status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, strings.ToLower(job.UID)), nil)
+		require.Equalf(t, 200, status, "%s", raw)
+		require.Contains(t, string(raw), job.UID)
+	})
+}
+
+type failingExplanationStore struct{ db.Storage }
+
+func (s failingExplanationStore) ExplainRecurringCron(context.Context, int64, string, time.Time) (db.RecurringExplanation, error) {
+	return db.RecurringExplanation{Reason: cron.DispatchError, Detail: cron.DispatchError.PublicDetail()}, errors.New("local-sensitive-detail")
+}
+
+type archiveBeforeExplanationStore struct {
+	db.Storage
+	archive func() error
+}
+
+func (s archiveBeforeExplanationStore) ExplainRecurringCron(ctx context.Context, projectID int64, jobUID string, now time.Time) (db.RecurringExplanation, error) {
+	if err := s.archive(); err != nil {
+		return db.RecurringExplanation{}, err
+	}
+	return s.Storage.ExplainRecurringCron(ctx, projectID, jobUID, now)
+}
+
+func TestCronDispatchExplanationProjectArchivedAfterPreflight(t *testing.T) {
+	for _, role := range []string{"local", "spoke", "hub"} {
+		t.Run(role, func(t *testing.T) {
+			env := testenv.New(t)
+			p, err := env.DB.CreateProject(t.Context(), "example-project")
+			require.NoError(t, err)
+			job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: cronHTTPDefinition(t)})
+			require.NoError(t, err)
+			if role != "local" {
+				if role == "spoke" {
+					_, err = env.DB.AdoptProjectIntoFederation(t.Context(), db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", Actor: "operator"})
+				} else {
+					_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
+				}
+				require.NoError(t, err)
+				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET enabled=0 WHERE project_id=$1`, p.ID)
+				require.NoError(t, err)
+			}
+			server := daemon.NewServer(daemon.ServerConfig{DB: archiveBeforeExplanationStore{Storage: env.DB, archive: func() error {
+				// Model a separate writer, outside the read request's transaction fence.
+				_, _, err := env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: p.ID, Actor: "operator", Force: role != "local"})
+				return err
+			}}})
+			t.Cleanup(func() { require.NoError(t, server.Close()) })
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, job.UID), nil)
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+		})
+	}
+}
+
+func TestCronDispatchExplanationRedactsFailureAndObservation(t *testing.T) {
+	env := testenv.New(t)
+	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	job := nativeDispatchJob(t, env.DB, p.ID)
+	recorder := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
+	t.Cleanup(func() { require.NoError(t, recorder.Close()) })
+	_, err = recorder.Record(t.Context(), db.RecurringCronCandidate{JobUID: job.UID, ProjectID: p.ID, ProjectUID: p.UID}, db.DispatchRecurringCronOut{Reason: cron.DispatchError}, errors.New("local-sensitive-detail"), time.Now())
+	require.NoError(t, err)
+	_, err = recorder.Record(t.Context(), db.RecurringCronCandidate{JobUID: job.UID, ProjectID: p.ID, ProjectUID: p.UID}, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	var logs bytes.Buffer
+	server := daemon.NewServer(daemon.ServerConfig{DB: failingExplanationStore{env.DB}, CronRecorder: recorder, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, job.UID), nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	require.Equalf(t, 200, response.Code, "%s", response.Body.String())
+	require.NotContains(t, response.Body.String(), "local-sensitive-detail")
+	require.Contains(t, logs.String(), "local-sensitive-detail")
+	require.Contains(t, response.Body.String(), `"last":{`)
+	// The route must wire both recorder outputs correctly; recorder-only tests
+	// cannot detect a handler that omits or swaps Last and LastNonIdle.
+	var body api.CronDispatchExplanation
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.NotNil(t, body.Last)
+	require.Equal(t, cron.DispatchIdle, body.Last.Reason)
+	require.NotNil(t, body.LastNonIdle)
+	require.Equal(t, cron.DispatchError, body.LastNonIdle.Reason)
+	require.Equal(t, "Live dispatch check failed; inspect daemon.log or the daemon's stderr/service logs for 'explain recurring cron dispatch'.", body.Gate.Detail)
+	require.Equal(t, cron.DispatchError.PublicDetail(), body.LastNonIdle.Detail)
+	require.Contains(t, logs.String(), "explain recurring cron dispatch")
+	t.Run("invalid progress polling", func(t *testing.T) {
+		env := testenv.New(t)
+		p, err := env.DB.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		job := nativeDispatchJob(t, env.DB, p.ID)
+		_, err = env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata='{}' WHERE uid=$1`, job.Definition.Issue.ParentUID)
+		require.NoError(t, err)
+		var logs bytes.Buffer
+		server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		for range 2 {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, job.UID), nil)
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code)
+			require.Contains(t, response.Body.String(), `"reason":"progress_invalid"`)
+		}
+		require.Empty(t, logs.String(), "expected invalid-state explanations must not flood daemon logs")
+	})
+	t.Run("malformed definition", func(t *testing.T) {
+		env := testenv.New(t)
+		p, err := env.DB.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: cronHTTPDefinition(t)})
+		require.NoError(t, err)
+		_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, `{"version":1,"local-sensitive-detail":true}`, job.UID)
+		require.NoError(t, err)
+		var logs bytes.Buffer
+		server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, job.UID), nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		require.Equalf(t, http.StatusOK, response.Code, "%s", response.Body.String())
+		raw := response.Body.Bytes()
+		require.Empty(t, logs.String(), "expected invalid-state explanations must not flood daemon logs")
+		var body api.CronDispatchExplanation
+		require.NoError(t, json.Unmarshal(raw, &body))
+		require.Equal(t, cron.DispatchScheduleInvalid, body.Gate.Reason)
+		require.Equal(t, cron.DispatchScheduleInvalid.PublicDetail(), body.Gate.Detail)
+		require.NotContains(t, string(raw), "local-sensitive-detail")
+	})
+}

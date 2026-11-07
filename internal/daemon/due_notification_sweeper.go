@@ -20,6 +20,7 @@ const maxRecurringBatchesPerSweep = 20
 // child issues through the same notify.* inbox slots written by kata notify,
 // and records each newly reached scheduled_on value as issue.scheduled_reached.
 type DueNotificationSweeper struct {
+	CronRecorder      *CronDispatchRecorder
 	DB                db.Storage
 	Publish           EventPublisher
 	DefaultTimezone   string
@@ -39,18 +40,27 @@ func NewDueNotificationSweeper(store db.Storage, publisher EventPublisher, defau
 // RunOnce reconciles every current candidate once. One malformed issue is
 // reported without preventing other due issues from reaching their inboxes.
 func (s *DueNotificationSweeper) RunOnce(ctx context.Context, now time.Time) error {
-	_, _, err := s.runOnce(ctx, now)
-	return err
+	return s.runOnce(ctx, now).err
 }
 
-func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-chan struct{}, bool, error) {
+type dueSweepResult struct {
+	retry  <-chan struct{}
+	denied bool
+	err    error
+	alert  error
+}
+
+type recurringDispatchResult struct{ err, alert error }
+
+func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) dueSweepResult {
+	started := time.Now()
 	var idleLease *activity.Lease
 	if s.IdleAdmission != nil {
 		var admitted bool
 		var retry <-chan struct{}
 		idleLease, admitted, retry = s.IdleAdmission()
 		if !admitted {
-			return retry, true, nil
+			return dueSweepResult{retry: retry, denied: true}
 		}
 		defer idleLease.Release()
 	}
@@ -89,40 +99,57 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-
 			errs = append(errs, fmt.Errorf("plan inbox request for issue %d: %w", issueID, result.NotificationErr))
 		}
 	}
+	alerts := append([]error(nil), errs...)
 	candidates, err := s.DB.ListRecurringCronJobs(ctx, s.recurringAfterUID, 100)
 	if err != nil {
 		errs = append(errs, err)
+		alerts = append(alerts, err)
+		s.recurringAfterUID = ""
 	} else {
 		for _, candidate := range candidates {
 			s.recurringAfterUID = candidate.JobUID
-			if err := s.dispatchRecurring(ctx, candidate, now, fork); err != nil {
-				errs = append(errs, err)
-			}
+			result := s.dispatchRecurring(ctx, candidate, now, fork)
+			errs = append(errs, result.err)
+			alerts = append(alerts, result.alert)
 		}
 		if len(candidates) < 100 {
 			s.recurringAfterUID = ""
 		}
 	}
-	return nil, false, errors.Join(errs...)
+	if s.CronRecorder != nil {
+		s.CronRecorder.FinishCycle(now, time.Since(started), err == nil && len(candidates) < 100, err != nil)
+	}
+	return dueSweepResult{err: errors.Join(errs...), alert: errors.Join(alerts...)}
 }
 
 // dispatchRecurring drains a job's backlog in bounded batches so a long
 // pause catches up within one sweep instead of one batch per interval.
-func (s *DueNotificationSweeper) dispatchRecurring(ctx context.Context, candidate db.RecurringCronCandidate, now time.Time, fork activity.Admission) error {
+func (s *DueNotificationSweeper) dispatchRecurring(ctx context.Context, candidate db.RecurringCronCandidate, now time.Time, fork activity.Admission) recurringDispatchResult {
 	in := db.DispatchRecurringCronIn{ProjectID: candidate.ProjectID, JobUID: candidate.JobUID, ExpectedEventUID: candidate.ExpectedEventUID, Now: now}
 	for range maxRecurringBatchesPerSweep {
 		out, err := s.DB.DispatchRecurringCron(ctx, in)
-		if err != nil {
-			return fmt.Errorf("dispatch recurring job %s in project %d: %w", candidate.JobUID, candidate.ProjectID, err)
-		}
+		// Publish committed events before best-effort diagnostic I/O.
 		for _, event := range out.Events {
 			s.Publish.EventFrom(event.ProjectID, event, fork)
 		}
+		changed := true
+		if s.CronRecorder != nil {
+			// Log failures remain visible in health without repeating sweep alerts.
+			changed, _ = s.CronRecorder.Record(ctx, candidate, out, err, now)
+		}
+		if err != nil {
+			err = fmt.Errorf("dispatch recurring job %s in project %d: %w", candidate.JobUID, candidate.ProjectID, err)
+			var alert error
+			if changed {
+				alert = err
+			}
+			return recurringDispatchResult{err: err, alert: alert}
+		}
 		if !out.More {
-			return nil
+			break
 		}
 	}
-	return nil
+	return recurringDispatchResult{}
 }
 
 // Run performs one startup pass, then reconciles every interval until the
@@ -135,24 +162,24 @@ func (s *DueNotificationSweeper) Run(ctx context.Context) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		retry, denied, err := s.runOnce(ctx, time.Now().UTC())
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return err
+		result := s.runOnce(ctx, time.Now().UTC())
+		if result.err != nil {
+			if errors.Is(result.err, context.Canceled) {
+				return result.err
 			}
-			if s.OnError != nil {
-				s.OnError(err)
+			if s.OnError != nil && result.alert != nil {
+				s.OnError(result.alert)
 			}
 		}
-		if denied && retry != nil {
+		if result.denied && result.retry != nil {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-retry:
+			case <-result.retry:
 				continue
 			}
 		}
-		if denied {
+		if result.denied {
 			<-ctx.Done()
 			return ctx.Err()
 		}

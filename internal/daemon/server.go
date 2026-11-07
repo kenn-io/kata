@@ -172,6 +172,9 @@ type ServerConfig struct {
 	// the health response omits the embeddings block entirely.
 	ReconcilerHealth func() ReconcilerHealth
 
+	// CronRecorder owns daemon-local recurring decisions; nil omits cron health.
+	CronRecorder *CronDispatchRecorder
+
 	// FederationConfigHealth snapshots declarative federation convergence for
 	// /health. Nil means no mappings are configured, so the block is omitted.
 	FederationConfigHealth func() api.FederationConfigHealth

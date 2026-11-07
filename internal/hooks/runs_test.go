@@ -126,3 +126,28 @@ func TestRunsAppender_ConcurrentAppends_NoInterleave(t *testing.T) {
 			totalLines, len(files), want)
 	}
 }
+
+// Hook records default to version 1; writes after Close are discarded.
+// The explicit-version rotation tests do not exercise either contract.
+func TestRunsAppenderPreservesHookContract(t *testing.T) {
+	app, path := newTestRunsAppender(t, 1<<20, 5)
+	app.Append(runRecord{EventID: 1, Result: "ok"})
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
+	app.Append(runRecord{EventID: 2, Result: "ok"})
+	if count := countValidRunRecords(t, path); count != 1 {
+		t.Errorf("closed hook appender wrote %d records; want one", count)
+	}
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: test-controlled log under t.TempDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record runRecord
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Version != 1 || record.EventID != 1 {
+		t.Errorf("got version %d event %d; want default version 1 and the pre-Close event", record.Version, record.EventID)
+	}
+}
