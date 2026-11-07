@@ -309,7 +309,7 @@ func TestCronNoticeHiddenWhenDescribedFailureIsVisible(t *testing.T) {
 			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
 			require.NotNil(t, m.toast)
 			if tab.visibleList {
-				require.NotContains(t, stripANSI(m.viewContent()), "cron: 1 run failed:", "the active Jobs or Runs list already shows the described failure")
+				require.NotContains(t, stripANSI(m.viewContent()), "cron: 1 run failed:", "the active Jobs or Runs view already shows the described failure")
 				m = m.cronFilter("no matching rows")
 				require.Contains(t, stripANSI(m.viewContent()), "cron: 1 run failed:", "the notice returns when its failure is filtered out")
 			} else {
@@ -656,6 +656,97 @@ func TestCronNoticeOlderPageSettlement(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestCronNoticeOpenRunDetail(t *testing.T) {
+	defer snapshotInit(t)()
+	t.Run("open run detail", func(t *testing.T) {
+		newDetail := func(t *testing.T, count int) Model {
+			t.Helper()
+			m := cronNoticeFixture(t)
+			m.width, m.height = 120, 26
+			job := m.cron.data.jobs[0].UID
+			runs := make([]generated.CronRun, count)
+			lookup := make(map[string]generated.CronRun, count)
+			for i := range runs {
+				run := generated.CronRun{
+					UID: fmt.Sprintf("visible-failure-%d", i), JobUID: new(job), Status: "failed",
+					Revision: 1, CreatedAt: snapshotFixedNow, UpdatedAt: snapshotFixedNow,
+				}
+				runs[i] = run
+				lookup[run.UID] = run
+			}
+			m.cron.data.runs = slices.Clone(runs)
+			m.cron.data.lookup = lookup
+			m.cron.data.lastRuns = map[string]generated.CronRun{job: runs[0]}
+			m.cron.runPage = cronHistoryPage{runs: slices.Clone(runs), ready: true}
+			m.cron.tab = cronRuns
+			for _, run := range runs {
+				m, _ = m.cronNoticeEvent(cronNoticeEvent(run.UID, job, snapshotFixedNow))
+			}
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.NotNil(t, m.toast)
+			m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, runs[0].UID}}}
+			return m
+		}
+
+		t.Run("matching visible status", func(t *testing.T) {
+			m := newDetail(t, 1)
+			content := stripANSI(m.viewContent())
+			require.Contains(t, content, "Status:")
+			require.Contains(t, content, "failed")
+			require.NotContains(t, content, "cron: 1 run failed:", "the run detail already shows the sole failure")
+		})
+
+		t.Run("wrapped visible status", func(t *testing.T) {
+			m := newDetail(t, 1)
+			m.width, m.height = 18, 80
+			_, header, lines := cronScreen(m)
+			start, end := cronViewport(m, header, lines)
+			wrappedStatus := false
+			for i := start; i+1 < end; i++ {
+				wrappedStatus = wrappedStatus || strings.TrimSpace(lines[i].text) == "Status:" && strings.TrimSpace(lines[i+1].text) == "failed"
+			}
+			require.True(t, wrappedStatus, "the run status wraps but remains visible")
+			require.NotContains(t, stripANSI(m.viewContent()), "cron: 1 run failed:", "a wrapped visible status still covers the notice")
+		})
+
+		t.Run("status changed", func(t *testing.T) {
+			m := newDetail(t, 1)
+			run := m.cron.data.runs[0]
+			run.Status = "succeeded"
+			m.cron.data.runs[0] = run
+			m.cron.data.lookup[run.UID] = run
+			m.cron.runPage.runs[0] = run
+			content := stripANSI(m.viewContent())
+			require.Contains(t, content, "succeeded")
+			require.Contains(t, content, "cron: 1 run failed:", "a changed detail status does not cover the stale failure notice")
+		})
+
+		t.Run("status offscreen", func(t *testing.T) {
+			m := newDetail(t, 1)
+			m.height = 12
+			m.cron.stack[0].cursor = len(m.cron.data.runs) + 100 // the detail extends beyond the viewport
+			list := m
+			list.toast = nil
+			_, header, lines := cronScreen(list)
+			start, end := cronViewport(list, header, lines)
+			statusVisible := false
+			for _, line := range lines[start:end] {
+				label, status, ok := strings.Cut(strings.TrimSpace(line.text), ":")
+				statusVisible = statusVisible || ok && label == "Status" && strings.TrimSpace(status) == "failed"
+			}
+			require.False(t, statusVisible, "the status row is below the detail viewport")
+			require.Contains(t, stripANSI(m.viewContent()), "cron: 1 run failed:", "the notice remains while the status is offscreen")
+		})
+
+		t.Run("another failure is grouped", func(t *testing.T) {
+			m := newDetail(t, 2)
+			content := stripANSI(m.viewContent())
+			require.Contains(t, content, "Status:")
+			require.Contains(t, content, "cron: 2 runs failed:", "the notice still summarizes failures beyond the open run")
+		})
+	})
 }
 
 func TestCronNoticeJobPageSettlementBeatsOlderHeadRefresh(t *testing.T) {
