@@ -441,7 +441,7 @@
       return makeInbox ? patchInboxProject(result.data.project, context) : result
     })
     if (!accepted) {
-      if (changed) await refreshSnapshot(true)
+      if (changed && mutationState.kind === 'domain-error') await refreshSnapshot(true)
       throw new Error(mutationMessage(mutationState) ?? 'Could not create project.')
     }
     return { changed }

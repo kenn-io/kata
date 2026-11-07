@@ -1971,7 +1971,7 @@ describe('App', () => {
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
-  it.each(['success', 'creation refusal', 'designation retry', 'event overlap'])(
+  it.each(['success', 'creation refusal', 'designation retry', 'conflict', 'event overlap'])(
     'creates the first project as Inbox before opening task capture: %s',
     async (outcome) => {
       history.replaceState(null, '', '/kata#direct=1')
@@ -1986,6 +1986,7 @@ describe('App', () => {
       const empty = { ...created, catalog: [] }
       let accepted: typeof created = empty
       const requests: Request[] = []
+      let recoveryReads = 0
       let designationRefused = false
       let projectExists = false
       let stream: ReadableStreamDefaultController<Uint8Array> | undefined
@@ -2041,17 +2042,21 @@ describe('App', () => {
             return response
           }
           if (request.method === 'POST' && path === '/api/v1/projects/7/metadata') {
-            if (outcome === 'designation retry' && !designationRefused) {
+            if (
+              (outcome === 'designation retry' || outcome === 'conflict') &&
+              !designationRefused
+            ) {
               designationRefused = true
               return Response.json(
                 { error: { code: 'validation', message: 'Inbox designation refused' } },
-                { status: 422 },
+                { status: outcome === 'conflict' ? 412 : 422 },
               )
             }
             created.catalog[0]!.project.metadata.role = 'inbox'
             created.catalog[0]!.project.revision = 2
             return Response.json({ changed: true, project: created.catalog[0]!.project })
           }
+          if (designationRefused && path === '/api/v1/ui/snapshot') recoveryReads += 1
           return new Response(JSON.stringify(accepted), {
             status: 200,
             headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${requests.length}"` },
@@ -2063,7 +2068,11 @@ describe('App', () => {
       const input = screen.getByRole('textbox', { name: 'New project name' })
       await fireEvent.input(input, { target: { value: 'example-project' } })
       await fireEvent.keyDown(input, { key: 'Enter' })
-      if (outcome === 'creation refusal' || outcome === 'designation retry') {
+      if (
+        outcome === 'creation refusal' ||
+        outcome === 'designation retry' ||
+        outcome === 'conflict'
+      ) {
         await screen.findAllByText(
           outcome === 'creation refusal' ? /Project creation refused/ : /Inbox designation refused/,
         )
@@ -2074,6 +2083,10 @@ describe('App', () => {
         if (outcome === 'creation refusal') return
         expect(await screen.findByRole('button', { name: /example-project/ })).not.toBeNull()
         await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false))
+        if (outcome === 'conflict') {
+          expect(recoveryReads).toBe(1)
+          return
+        }
         await fireEvent.keyDown(input, { key: 'Enter' })
       }
       expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
