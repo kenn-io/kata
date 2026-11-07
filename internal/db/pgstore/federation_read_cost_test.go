@@ -17,6 +17,9 @@ import (
 // Quiet polls must cost only the project's own history and issue seeks,
 // with the normal planner and the same projection used by ReadFederation.
 func TestReadFederationQuietPageBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
 	store, _ := openConformanceStore(t)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	project, err := store.CreateProject(t.Context(), "quiet-project")
@@ -94,6 +97,9 @@ func (p federationPagePlan) visitedEvents() float64 {
 }
 
 func TestReadFederationBulkMovePageBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
 	for _, interleaved := range []bool{false, true} {
 		t.Run(fmt.Sprintf("interleaved=%t", interleaved), func(t *testing.T) {
 			store, _ := openConformanceStore(t)
