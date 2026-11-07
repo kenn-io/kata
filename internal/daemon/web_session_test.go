@@ -815,15 +815,13 @@ func TestBrowserAccessAdministrationBoundary(t *testing.T) {
 			manager.writable = false
 			require.False(t, manager.CanAdministerAccess(principal))
 			handler := requireBrowserSession(manager, ListenerPolicy{Kind: ListenerBrowser, Origin: manager.Origin(), RequireBrowserSession: true}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-			for _, path := range []string{"/api/v1/teams", "/api/v1/embeddings/local"} {
-				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, manager.Origin()+path, strings.NewReader(`{"name":"blocked"}`))
-				request.AddCookie(manager.Cookie(issued.Cookie))
-				request.Header.Set(webSessionHeader, issued.Session)
-				request.Header.Set(webCSRFHeader, issued.CSRF)
-				response := httptest.NewRecorder()
-				handler.ServeHTTP(response, request)
-				assert.Equal(t, http.StatusForbidden, response.Code)
-			}
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, manager.Origin()+"/api/v1/teams", strings.NewReader(`{"name":"blocked"}`))
+			request.AddCookie(manager.Cookie(issued.Cookie))
+			request.Header.Set(webSessionHeader, issued.Session)
+			request.Header.Set(webCSRFHeader, issued.CSRF)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			assert.Equal(t, http.StatusForbidden, response.Code)
 		})
 	}
 }

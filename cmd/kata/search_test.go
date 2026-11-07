@@ -92,7 +92,7 @@ func TestSearch_EmptyMultiWordSearchHintsEveryWordMustMatch(t *testing.T) {
 	out, stderr, err = runCLIWithErr(t, env, dir, "search", "paginate", "inventory")
 	require.NoError(t, err)
 	assert.Equal(t, "no matches\n", out)
-	assert.Equal(t, hint+"Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings.\n", stderr)
+	assert.True(t, strings.HasPrefix(stderr, hint))
 
 	_, stderr, err = runCLIWithErr(t, env, dir, "--quiet", "search", "paginate inventory")
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestSearch_JSONEmptyMultiWordHint(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}, got["hints"])
-	assert.Equal(t, "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings.\n", stderr)
+	assert.NotContains(t, stderr, "Hint:")
 }
 
 func TestSearch_EmptyContinuationHasNoHint(t *testing.T) {

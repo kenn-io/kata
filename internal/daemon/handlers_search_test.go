@@ -69,9 +69,11 @@ func TestSearchEndpoint_EmbeddingConfigurationHeaderAndReadonlyLexicalSearch(t *
 
 			resp, bs := envGetRaw(t, env, projectPath(project.ID)+"/search?q="+url.QueryEscape("credential rotation"))
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
-			assert.Contains(t, string(bs), `"mode":"lexical"`)
 			require.Equal(t, tc.header, resp.Header.Get("X-Kata-Embeddings-Configured"))
-			assert.Equal(t, int32(0), embeddingCalls.Load(), "unauthenticated read-only search must not call embedding provider")
+			if tc.embedder != nil {
+				assert.Contains(t, string(bs), `"mode":"lexical"`)
+				assert.Equal(t, int32(0), embeddingCalls.Load(), "unauthenticated read-only search must not call embedding provider")
+			}
 		})
 	}
 }

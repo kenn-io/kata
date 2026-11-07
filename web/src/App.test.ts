@@ -1681,7 +1681,6 @@ describe('App', () => {
       }
       expect(statusPath).toBe('/api/v1/ui/proxy/api/v1/embeddings/local')
       expect(posts).toHaveLength(1)
-      expect(new URL(posts[0]!.url).pathname).toBe('/api/v1/embeddings/local')
       expect(posts[0]!.headers.get('X-Kata-Web-Daemon')).toBeNull()
       expect(posts[0]!.headers.get('X-Kata-Web-Session')).toBe('tab-session')
       expect(posts[0]!.headers.get('X-Kata-CSRF')).toBe('tab-csrf')

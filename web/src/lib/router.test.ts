@@ -72,7 +72,6 @@ describe('canonical Kata routes', () => {
         filters: { status: [], owner: [], label: [], relationship: [] },
       })
       expect(serializeRoute(route)).toBe(`/kata?view=${view}`)
-      if (view === 'settings') expect(screenNameForRoute(route)).toBe('settings')
     },
   )
 
@@ -127,6 +126,7 @@ describe('screen names', () => {
     [`?issue=${issueUID}`, 'issue'],
     [`?issue=${issueUID}&graph=1`, 'graph'],
     [`?view=credentials&issue=${issueUID}`, 'credentials'],
+    [`?view=settings&issue=${issueUID}`, 'settings'],
     ['?view=unknown', undefined],
   ])('maps %s to %s', (query, screen) => {
     expect(screenNameForRoute(parseRoute(new URL(`https://daemon.example/kata${query}`)))).toBe(
