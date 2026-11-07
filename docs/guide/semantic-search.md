@@ -13,9 +13,12 @@ before creating a duplicate. Semantic search adds a vector (embedding) leg so a 
 like "auth redirect duplicates" can surface an issue titled "Login callback
 double-submits on Safari" even though they share no keywords.
 
-Semantic search is **opt-in**. With no embedding endpoint configured, `kata
-search` matches words and prints a stderr hint pointing to Settings and the CLI setup command. `--quiet` and `--agent` suppress that line. Stdout stays unchanged. This
-page explains how to turn it on and how it behaves; for the exact config fields
+Semantic search is **opt-in**. Without an embedding endpoint, `kata search`
+matches words. A local daemon with search by meaning off adds a stderr hint
+pointing to Settings and the CLI setup command. `--quiet` and `--agent` suppress
+it; stdout stays unchanged.
+
+This page explains how to turn it on and how it behaves; for the exact config fields
 see [Configuration](../reference/configuration.md#semantic-search), and for the
 command flags see the [CLI reference](../reference/cli.md).
 
