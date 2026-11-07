@@ -3,6 +3,9 @@ package docbank_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,15 +14,24 @@ import (
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 )
 
+func requireUnreachable(t *testing.T, err error) {
+	t.Helper()
+	apiErr, ok := errors.AsType[*docbank.Error](err)
+	require.True(t, ok)
+	require.Zero(t, apiErr.Status)
+}
+
 func TestLocalClientFollowsRestartedDocbank(t *testing.T) {
 	home := t.TempDir()
+	t.Setenv("DOCBANK_HOME", home)
 	a := docbanktest.New(t)
 	a.Publish(t, home)
-	client := docbank.NewLocalClient(docbank.Local{Home: home})
+	client := docbank.NewLocalClient(docbank.Local{})
 
 	_, err := client.ResolvePath(t.Context(), "/")
 	require.NoError(t, err)
 	b := docbanktest.New(t)
+	b.Key = "rotated-key"
 	b.Publish(t, home)
 	aSeen := len(a.Requests())
 	_, err = client.ResolvePath(t.Context(), "/")
@@ -45,12 +57,40 @@ func TestLocalClientStartsStoppedDocbankInConfiguredHome(t *testing.T) {
 }
 
 func TestLocalClientReportsStartFailureAsUnreachable(t *testing.T) {
-	client := docbank.NewLocalClient(docbank.Local{Home: t.TempDir(), Start: func(context.Context, string) error {
+	t.Setenv("DOCBANK_HOME", t.TempDir())
+	client := docbank.NewLocalClient(docbank.Local{Start: func(context.Context, string) error {
 		return errors.New("docbank not installed")
 	}})
 
 	_, err := client.ResolvePath(t.Context(), "/")
-	apiErr, ok := errors.AsType[*docbank.Error](err)
-	require.True(t, ok)
-	require.Zero(t, apiErr.Status)
+	requireUnreachable(t, err)
+}
+
+func TestLocalClientNeverSendsKeyToImpostor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DOCBANK_HOME", home)
+	impostor := docbanktest.New(t)
+	impostor.Publish(t, home)
+	impostor.Key = "not-the-recorded-key"
+	client := docbank.NewLocalClient(docbank.Local{})
+
+	_, err := client.ResolvePath(t.Context(), "/")
+	requireUnreachable(t, err)
+	require.Empty(t, impostor.Requests())
+}
+
+func TestLocalClientFollowsSymlinkedHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	vault := t.TempDir()
+	link := filepath.Join(t.TempDir(), "docbank-link")
+	require.NoError(t, os.Symlink(vault, link))
+	t.Setenv("DOCBANK_HOME", link)
+	fake := docbanktest.New(t)
+	fake.Publish(t, vault)
+	client := docbank.NewLocalClient(docbank.Local{})
+
+	_, err := client.ResolvePath(t.Context(), "/")
+	require.NoError(t, err)
 }
