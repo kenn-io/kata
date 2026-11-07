@@ -198,14 +198,14 @@ func proveKey(ctx context.Context, address, key string) (conn net.Conn, err erro
 // pinnedTransport carries one request over a connection already proven to
 // belong to Docbank and refuses to dial anything else.
 type pinnedTransport struct {
-	*http.Transport
-	mu   sync.Mutex
-	conn net.Conn
+	inner *http.Transport
+	mu    sync.Mutex
+	conn  net.Conn
 }
 
 func newPinnedClient(conn net.Conn) *http.Client {
 	p := &pinnedTransport{conn: conn}
-	p.Transport = &http.Transport{
+	p.inner = &http.Transport{
 		DisableKeepAlives: true,
 		DialContext: func(context.Context, string, string) (net.Conn, error) {
 			p.mu.Lock()
@@ -221,14 +221,19 @@ func newPinnedClient(conn net.Conn) *http.Client {
 	return noRedirectClient(p)
 }
 
+func (p *pinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return p.inner.RoundTrip(req)
+}
+
 // CloseIdleConnections closes the proven connection when no request used it.
 func (p *pinnedTransport) CloseIdleConnections() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.conn != nil {
 		_ = p.conn.Close()
 		p.conn = nil
 	}
+	p.mu.Unlock()
+	p.inner.CloseIdleConnections()
 }
 
 // discoverDocbank reports a missing home or an unreachable record as not
@@ -276,7 +281,7 @@ func startDocbank(ctx context.Context, home string) error {
 // a new port and key is picked up by the next call.
 func NewLocalClient(l Local) *Client {
 	slot := make(chan struct{}, 1)
-	return newClient(func(ctx context.Context) (string, string, *http.Client, error) {
+	return &Client{target: func(ctx context.Context) (string, string, *http.Client, error) {
 		select {
 		case slot <- struct{}{}:
 			defer func() { <-slot }()
@@ -289,5 +294,5 @@ func NewLocalClient(l Local) *Client {
 			return "", "", nil, &Error{}
 		}
 		return base, key, newPinnedClient(conn), nil
-	})
+	}}
 }

@@ -28,24 +28,19 @@ func (e *Error) Error() string { return "docbank: HTTP " + strconv.Itoa(e.Status
 // Client resolves its endpoint and key on every request.
 type Client struct {
 	target func(context.Context) (base, key string, hc *http.Client, err error)
-	http   *http.Client
 }
 
 // NewClient uses the normalized endpoint and resolves credentials on each request.
 func NewClient(base string, key func() (string, error)) *Client {
-	c := newClient(nil)
-	c.target = func(context.Context) (string, string, *http.Client, error) {
+	// Own transport: request closes idle connections on failure, which must not touch http.DefaultTransport.
+	hc := noRedirectClient(http.DefaultTransport.(*http.Transport).Clone())
+	return &Client{target: func(context.Context) (string, string, *http.Client, error) {
 		k, err := key()
 		if err != nil || k == "" {
 			return "", "", nil, &Error{Status: 401}
 		}
-		return base, k, c.http, nil
-	}
-	return c
-}
-
-func newClient(target func(context.Context) (string, string, *http.Client, error)) *Client {
-	return &Client{target: target, http: noRedirectClient(nil)}
+		return base, k, hc, nil
+	}}
 }
 
 func noRedirectClient(rt http.RoundTripper) *http.Client {
