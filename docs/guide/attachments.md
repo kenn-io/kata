@@ -21,7 +21,15 @@ For a Docbank on the same machine:
 kata docbank setup [--folder /kata]
 ```
 
-Setup prints the shared-vault warning with the vault path and asks once; without a terminal, pass `--yes` to skip the question. A first setup starts Docbank only after that approval. It then checks that the Docbank in `DOCBANK_HOME` (default `~/.docbank`) answers with its API key, starting it with `docbank daemon start` when it is not running, so `docbank` must be on `PATH`. It then adds `[docbank]` with `local = true` and `folder` to `<KATA_HOME>/config.toml`. Setup does not edit Docbank's config or store a key. Setup reads `DOCBANK_HOME` from its own shell while the daemon reads it from its own environment, so they must match; a restart keeps the daemon's environment.
+Setup then:
+
+1. Prints the shared-vault warning with the vault path and asks once. Without a terminal, pass `--yes` to skip the question.
+2. Checks that the Docbank in `DOCBANK_HOME` (default `~/.docbank`) answers with its API key. If Docbank is not running, setup starts it with `docbank daemon start`, so `docbank` must be on `PATH`. Nothing starts before you approve.
+3. Adds `[docbank]` with `local = true` and `folder` to `<KATA_HOME>/config.toml` and restarts running daemons.
+
+Setup does not edit Docbank's config or store a key.
+
+Setup reads `DOCBANK_HOME` from its own shell, but the daemon reads it from its own environment, so the two must match. A daemon restart keeps the daemon's environment.
 
 For a Docbank on another host, or a local one whose port and key you already fixed in its config (loopback `http://127.0.0.1:<port>` is allowed):
 
