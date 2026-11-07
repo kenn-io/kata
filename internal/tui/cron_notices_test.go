@@ -58,13 +58,13 @@ func TestCronNoticeWindowPermutation(t *testing.T) {
 		m.width = rapid.IntRange(64, 160).Draw(rt, "width")
 		jobs := []string{"named-a", "named-b", "0123456789abcdef"}
 		m.cron.data.jobs = []generated.CronJob{{UID: jobs[0], Name: "alpha\tjob"}, {UID: jobs[1], Name: "beta"}}
-		labels := []string{"alpha job", "beta", "job 0123456789a…"}
+		labels := []string{"alpha job", "beta", ""}
 		chosen := make([]string, n)
 		wantLabels := []string{}
 		for i := range n {
 			j := rapid.IntRange(0, len(jobs)-1).Draw(rt, "job index")
 			chosen[i] = jobs[j]
-			if !slices.Contains(wantLabels, labels[j]) {
+			if labels[j] != "" && !slices.Contains(wantLabels, labels[j]) {
 				wantLabels = append(wantLabels, labels[j])
 			}
 		}
@@ -93,20 +93,54 @@ func TestCronNoticeWindowPermutation(t *testing.T) {
 			wantText += fmt.Sprintf(" +%d", len(wantLabels)-2)
 		}
 		// Fixture labels are ASCII except the one-column ellipsis.
-		if limit := max(m.width-52, 12); len([]rune(wantText)) > limit {
+		if limit := max(m.width-52, 12); wantText != "" && len([]rune(wantText)) > limit {
 			wantText = string([]rune(wantText)[:limit-1]) + "…"
 		}
 		count := fmt.Sprintf("%d runs", n)
 		if n == 1 {
 			count = "1 run"
 		}
-		if want := "cron: " + count + " failed: " + wantText; m.toast.text != want {
+		want := "cron: " + count + " failed"
+		if wantText != "" {
+			want += ": " + wantText
+		}
+		if m.toast.text != want {
 			rt.Fatalf("grouped notice = %q, want %q", m.toast.text, want)
 		}
 		if !m.toast.expiresAt.Equal(snapshotFixedNow.Add(10 * time.Second)) {
 			rt.Fatal("wrong notice lifetime")
 		}
 	})
+}
+
+func TestCronNoticeUnnamedFailureOmitsIDs(t *testing.T) {
+	runUID := "0123456789abcdef-run"
+	jobUID := "fedcba9876543210-job"
+	for _, tc := range []struct {
+		name    string
+		jobID   string
+		nameJob bool
+	}{
+		{name: "no job UID"},
+		{name: "unknown job UID", jobID: jobUID},
+		{name: "job without a name", jobID: jobUID, nameJob: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := cronNoticeFixture(t)
+			if tc.nameJob {
+				m.cron.data.jobs = append(m.cron.data.jobs, generated.CronJob{UID: tc.jobID})
+			}
+			event := cronNoticeEvent(runUID, tc.jobID, snapshotFixedNow)
+			m, cmd := m.cronNoticeEvent(event)
+			require.NotNil(t, cmd)
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.NotNil(t, m.toast)
+			require.Equal(t, "cron: 1 run failed", m.toast.text)
+			require.Contains(t, m.cronToast().text, "review")
+			require.NotContains(t, m.toast.text, runUID[:12])
+			require.NotContains(t, m.toast.text, jobUID[:12])
+		})
+	}
 }
 func TestCronNoticeStartupScopeAndCutoff(t *testing.T) {
 	m := cronNoticeFixture(t)
@@ -909,6 +943,62 @@ func TestCronNoticeSettlementKeepsHigherRevision(t *testing.T) {
 
 	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
 	require.Nil(t, m.toast, "the retained correction must prevent a false failure notice")
+}
+
+func TestCronNoticeHigherRevisionBeatsOlderGeneration(t *testing.T) {
+	fixture := func(t *testing.T) (Model, generated.CronRun, generated.CronRun) {
+		t.Helper()
+		m := cronNoticeFixture(t)
+		job := m.cron.data.jobs[0].UID
+		failed := m.cron.data.runs[0]
+		failed.UID, failed.JobUID, failed.Status, failed.Revision = "r", &job, "failed", 6
+		failed.CreatedAt, failed.UpdatedAt, failed.EndedAt = snapshotFixedNow, snapshotFixedNow, new(snapshotFixedNow)
+		corrected := failed
+		corrected.Status, corrected.Revision = "succeeded", 7
+		corrected.UpdatedAt, corrected.EndedAt = snapshotFixedNow.Add(time.Second), new(snapshotFixedNow.Add(time.Second))
+		m.cron.data.runs = []generated.CronRun{failed}
+		m.cron.data.lookup = map[string]generated.CronRun{"r": failed}
+		m, cmd := m.cronNoticeEvent(cronNoticeEvent("r", job, snapshotFixedNow))
+		require.NotNil(t, cmd)
+		return m, failed, corrected
+	}
+
+	t.Run("refresh after page", func(t *testing.T) {
+		m, failed, corrected := fixture(t)
+		m = m.cronNoticePage(cronPageMsg{gen: 10, events: m.cron.events, runs: []generated.CronRun{failed}})
+		require.Equal(t, "failed", m.cronNotices.pending["r"].Status)
+
+		data := *m.cron.data
+		data.events, data.generation = m.cron.events, 9
+		data.runs, data.lookup = []generated.CronRun{corrected}, map[string]generated.CronRun{"r": corrected}
+		m.cron.data = &data
+		require.Equal(t, "succeeded", m.cronNoticeNewest(m.cronNotices.pending["r"]).Status, "a higher local revision beats an older generation")
+		m = m.cronNoticeResolve()
+		settled := m.cronNotices.pending["r"]
+		require.Equal(t, "succeeded", settled.Status)
+		require.EqualValues(t, 7, settled.Revision)
+		require.EqualValues(t, 10, settled.settledGen, "accepting an older read does not lower the generation watermark")
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		require.Nil(t, m.toast, "the correction must prevent a false failure notice")
+	})
+
+	t.Run("page after refresh", func(t *testing.T) {
+		m, failed, corrected := fixture(t)
+		data := *m.cron.data
+		data.events, data.generation = m.cron.events, 10
+		data.runs, data.lookup = []generated.CronRun{failed}, map[string]generated.CronRun{"r": failed}
+		m.cron.data = &data
+		m = m.cronNoticeResolve()
+		require.Equal(t, "failed", m.cronNotices.pending["r"].Status)
+
+		m = m.cronNoticePage(cronPageMsg{gen: 9, events: m.cron.events, runs: []generated.CronRun{corrected}})
+		settled := m.cronNotices.pending["r"]
+		require.Equal(t, "succeeded", settled.Status, "a page with a higher local revision beats the refresh generation")
+		require.EqualValues(t, 7, settled.Revision)
+		require.EqualValues(t, 10, settled.settledGen, "accepting an older page does not lower the generation watermark")
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		require.Nil(t, m.toast, "the correction must prevent a false failure notice")
+	})
 }
 
 // A read that settled an announced failure outlives the history that showed

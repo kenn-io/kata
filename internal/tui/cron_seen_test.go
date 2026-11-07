@@ -174,6 +174,7 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 		success.UID = "success"
 		success.Status = "succeeded"
 		m.cron.data.runs = []generated.CronRun{r, success}
+		m.cron.data.lookup = map[string]generated.CronRun{unknown.UID: unknown}
 		m.cron.data.lastRuns = map[string]generated.CronRun{*r.JobUID: r}
 		m.cron.jobPage = cronHistoryPage{job: *r.JobUID, runs: []generated.CronRun{unknown, r}, ready: true}
 		m.cron.runPage.runs = []generated.CronRun{r, unknown}
@@ -363,8 +364,8 @@ func TestCronOpenRunStatusBecomesSeenWhenScrolledIntoView(t *testing.T) {
 	m = m.cronMarkOpenSeen()
 	require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID], "an offscreen failure stays unseen")
 
-	m = sendKey(m, tea.KeyHome)
-	require.True(t, m.cronOpenRunStatusVisible(r.UID, r.Status), "Home scrolls Status into the viewport")
+	m = sendRune(m, 'g')
+	require.True(t, m.cronOpenRunStatusVisible(r.UID, r.Status), "the first-row key scrolls Status into the viewport")
 	require.True(t, m.cronSeen.session[m.cronProjectUID()][r.UID], "scrolling to Status acknowledges the failure")
 }
 

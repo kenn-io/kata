@@ -72,9 +72,9 @@ func (m Model) cronNoticeSuppressed(r cronRunEvent) bool {
 // change mark, resolves it; an older in-flight read or a bare event does not.
 // Peer and local revisions are incomparable until a read provides local evidence.
 func (m Model) cronNoticeNewest(r cronRunEvent) generated.CronRun {
-	if m.cron.data != nil && m.cron.data.events >= r.seq && m.cron.data.generation >= r.settledGen && m.cron.changed[r.UID].at == 0 {
+	if m.cron.data != nil && m.cron.data.events >= r.seq && m.cron.changed[r.UID].at == 0 {
 		if known, ok := m.cron.data.fetched(r.UID); ok {
-			if !r.locallySettled || known.Revision >= r.Revision {
+			if r.acceptsSettlement(known, m.cron.data.generation) && (!r.locallySettled || known.Revision >= r.Revision) {
 				return known
 			}
 		}
@@ -112,9 +112,15 @@ func (r cronRunEvent) settle(row generated.CronRun, generation uint64) cronRunEv
 		return r
 	}
 	r.Status, r.Revision, r.EndedAt, r.UpdatedAt = row.Status, row.Revision, row.EndedAt, row.UpdatedAt
-	r.settledGen = generation
+	r.settledGen = max(r.settledGen, generation)
 	r.locallySettled = true
 	return r
+}
+
+// A later request is stronger evidence until a local row has settled. After
+// that, a higher local revision can supersede it even from an older request.
+func (r cronRunEvent) acceptsSettlement(row generated.CronRun, generation uint64) bool {
+	return generation >= r.settledGen || r.locallySettled && row.Revision > r.Revision
 }
 
 // A read that settled a pending or announced run outlives the refresh that
@@ -127,10 +133,10 @@ func (m Model) cronNoticeResolve() Model {
 	for _, notices := range []*map[string]cronRunEvent{&m.cronNotices.pending, &m.cronNotices.announced} {
 		*notices = maps.Clone(*notices)
 		for uid, r := range *notices {
-			if data.events < r.seq || data.generation < r.settledGen || m.cron.changed[uid].at != 0 {
+			if data.events < r.seq || m.cron.changed[uid].at != 0 {
 				continue
 			}
-			if row, ok := data.fetched(uid); ok {
+			if row, ok := data.fetched(uid); ok && r.acceptsSettlement(row, data.generation) {
 				(*notices)[uid] = r.settle(row, data.generation)
 			}
 		}
@@ -147,7 +153,7 @@ func (m Model) cronNoticePage(msg cronPageMsg) Model {
 	for _, notices := range []*map[string]cronRunEvent{&m.cronNotices.pending, &m.cronNotices.announced} {
 		*notices = maps.Clone(*notices)
 		for _, row := range msg.runs {
-			if r, ok := (*notices)[row.UID]; ok && r.seq <= msg.events && msg.gen >= r.settledGen {
+			if r, ok := (*notices)[row.UID]; ok && r.seq <= msg.events && r.acceptsSettlement(row, msg.gen) {
 				(*notices)[row.UID] = r.settle(row, msg.gen)
 			}
 		}
@@ -229,28 +235,34 @@ func (m Model) cronNoticeFlush(msg cronNoticeTickMsg) (Model, tea.Cmd) {
 	labels := map[string]bool{}
 	for _, r := range eligible {
 		m.cronNotices.announced[r.UID] = r
-		label := "run " + truncate(r.UID, 12)
-		if r.JobUID != "" {
-			label = "job " + truncate(r.JobUID, 12)
-			if m.cron.data != nil {
-				if j := m.cron.data.job(r.JobUID); j != nil {
-					label = j.Name
-				}
+		label := ""
+		if r.JobUID != "" && m.cron.data != nil {
+			if j := m.cron.data.job(r.JobUID); j != nil {
+				label = j.Name
 			}
 		}
-		labels[sanitizeForLine(label)] = true
+		if label != "" {
+			labels[sanitizeForLine(label)] = true
+		}
 	}
 	names := make([]string, 0, len(labels))
 	for label := range labels {
 		names = append(names, label)
 	}
 	slices.Sort(names)
-	text := strings.Join(names[:min(2, len(names))], ", ")
-	if len(names) > 2 {
-		text += fmt.Sprintf(" +%d", len(names)-2)
+	text := ""
+	if len(names) > 0 {
+		text = strings.Join(names[:min(2, len(names))], ", ")
+		if len(names) > 2 {
+			text += fmt.Sprintf(" +%d", len(names)-2)
+		}
 	}
 	text = truncate(text, max(m.width-52, 12))
-	m.toast = &toast{text: fmt.Sprintf("cron: %s failed: %s", cronCount(len(eligible), "run"), text), level: toastError, expiresAt: m.toastNow().Add(10 * time.Second), cronFailure: true, cronFailures: slices.Clone(eligible)}
+	label := "cron: " + cronCount(len(eligible), "run") + " failed"
+	if text != "" {
+		label += ": " + text
+	}
+	m.toast = &toast{text: label, level: toastError, expiresAt: m.toastNow().Add(10 * time.Second), cronFailure: true, cronFailures: slices.Clone(eligible)}
 	return m, toastExpireCmd(10 * time.Second)
 }
 
