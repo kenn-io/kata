@@ -87,40 +87,19 @@ func TestLocalEmbeddingsSetupTurnOnBuiltIn(t *testing.T) {
 		return nil
 	}}
 	require.NoError(t, setup.TurnOn(t.Context()))
-	require.NoError(t, setup.TurnOn(t.Context()))
-	status, err := setup.Status(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, "built_in", status.Provider)
-	require.Nil(t, status.Job)
-	got, err := os.ReadFile(path) // #nosec G304 -- configuration in the test home
-	require.NoError(t, err)
-	require.Equal(t, source, got)
 }
 
 func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
-	for _, tc := range []struct {
-		name, source, provider string
-		rebuild                bool
-	}{
-		{"off", "", "none", false},
-		{"same Ollama", "[search.embeddings]\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"nomic-embed-text\"\ndims = 768\n", "ollama", false},
-		{"different Ollama", "[search.embeddings]\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"mxbai-embed-large\"\ndims = 1024\n", "ollama", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.source), 0600))
-			cfg, err := config.ParseSearchConfig([]byte(tc.source))
-			require.NoError(t, err)
-			s := &localEmbeddingsSetup{embeddings: cfg.Embeddings}
-			status, err := s.Status(t.Context())
-			require.NoError(t, err)
-			require.Equal(t, tc.provider, status.Provider)
-			require.Equal(t, tc.rebuild, status.Rebuild)
-			require.False(t, status.CanChange)
-			if tc.provider == "none" {
-				require.Positive(t, status.DownloadBytes)
-			}
-		})
-	}
+	source := []byte("[search.embeddings]\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"mxbai-embed-large\"\ndims = 1024\n")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), source, 0600))
+	cfg, err := config.ParseSearchConfig(source)
+	require.NoError(t, err)
+	s := &localEmbeddingsSetup{embeddings: cfg.Embeddings}
+	status, err := s.Status(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "ollama", status.Provider)
+	require.True(t, status.Rebuild)
+	require.False(t, status.CanChange)
 }

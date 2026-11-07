@@ -149,7 +149,7 @@ per match.`,
 			if err := printSearchResults(cmd, bs); err != nil {
 				return err
 			}
-			if r := response.JSON200; flags.Daemon == "" && !daemon.resolved.ConfiguredRemote() && cursor == "" && r != nil && r.Mode == "lexical" && !flags.Quiet && currentOutputMode() != outputAgent {
+			if r := response.JSON200; !daemon.resolved.ConfiguredRemote() && cursor == "" && r != nil && r.Mode == "lexical" && !flags.Quiet && currentOutputMode() != outputAgent {
 				if response.Headers200 != nil && response.Headers200.XKataEmbeddingsConfigured == "false" {
 					if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings."); err != nil {
 						return err

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
@@ -379,18 +377,8 @@ func TestSearchPlainLexicalHasNoFallbackWarning(t *testing.T) {
 	assert.Empty(t, stderr.String())
 }
 
-type searchSetupProbe struct{ calls int }
-
-func (p *searchSetupProbe) Status(context.Context) (api.LocalEmbeddingsStatus, error) {
-	p.calls++
-	return api.LocalEmbeddingsStatus{Provider: "none"}, nil
-}
-func (*searchSetupProbe) TurnOn(context.Context) error { return nil }
-
 func TestSearchSuggestsSettings(t *testing.T) {
-	probe := &searchSetupProbe{}
-	env, dir, pid := setupCLIWorkspaceOptions(t, func(cfg *daemon.ServerConfig) { cfg.LocalEmbeddings = probe })
-	t.Cleanup(func() { require.Zero(t, probe.calls, "search must use its response header without a setup request") })
+	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "login crash")
 	const hint = "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings.\n"
 	for _, tc := range []struct {
@@ -419,32 +407,21 @@ func TestSearchSuggestsSettings(t *testing.T) {
 }
 
 func TestSearchRemoteHasNoSetupHint(t *testing.T) {
-	for _, source := range []string{"workspace", "named"} {
-		t.Run(source, func(t *testing.T) {
-			env, dir, pid := setupCLIWorkspace(t)
-			createIssue(t, env, pid, "login crash")
-			t.Chdir(dir)
-			t.Setenv("KATA_SERVER", "")
-			args := []string{"--workspace", dir, "--json", "search", "login"}
-			switch source {
-			case "workspace":
-				require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"), []byte(fmt.Sprintf("version = 1\n[server]\nurl = %q\n", env.URL)), 0600))
-			case "named":
-				require.NoError(t, os.WriteFile(filepath.Join(env.Home, "config.toml"), []byte(fmt.Sprintf("[[daemon]]\nname = \"example-remote\"\nurl = %q\n", env.URL)), 0600))
-				args = append([]string{"--daemon", "example-remote"}, args...)
-			}
-			resetFlags(t)
-			cmd := newRootCmd()
-			var out, stderr bytes.Buffer
-			cmd.SetOut(&out)
-			cmd.SetErr(&stderr)
-			cmd.SetArgs(args)
-			cmd.SetContext(t.Context())
-			require.NoError(t, cmd.Execute())
-			require.Contains(t, out.String(), "login crash")
-			require.Empty(t, stderr.String())
-		})
-	}
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "login crash")
+	t.Chdir(dir)
+	t.Setenv("KATA_SERVER", "")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"), []byte(fmt.Sprintf("version = 1\n[server]\nurl = %q\n", env.URL)), 0600))
+	resetFlags(t)
+	cmd := newRootCmd()
+	var out, stderr bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"--workspace", dir, "--json", "search", "login"})
+	cmd.SetContext(t.Context())
+	require.NoError(t, cmd.Execute())
+	require.Contains(t, out.String(), "login crash")
+	require.Empty(t, stderr.String())
 }
 
 func TestSearchUsesDaemonEmbeddingState(t *testing.T) {

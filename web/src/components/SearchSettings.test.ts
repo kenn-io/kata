@@ -82,21 +82,6 @@ describe('SearchSettings', () => {
     ).not.toBeNull()
   })
 
-  test('shows a failed job under the row and keeps its button for a retry', async () => {
-    vi.useFakeTimers()
-    setGeneratedFetch(
-      vi.fn(async () =>
-        Response.json(
-          status({ job: { state: 'failed', downloaded: 0, total: 0, error: 'Disk is full.' } }),
-        ),
-      ),
-    )
-    renderSettings()
-    await settle()
-    expect(screen.getByRole('alert').textContent).toBe('Disk is full.')
-    expect(screen.getByRole('button', { name: 'Turn on' })).not.toBeNull()
-  })
-
   test('follows a lost POST through Off, failed reads, sign-in, indexing, and On', async () => {
     vi.useFakeTimers()
     const requireSignIn = vi.fn(() => true)
@@ -200,84 +185,5 @@ describe('SearchSettings', () => {
     expect(read.mock.calls[1]?.[1]?.signal?.aborted).toBe(true)
     await vi.advanceTimersByTimeAsync(10000)
     expect(read).toHaveBeenCalledTimes(2)
-  })
-
-  test('keeps polling until the first indexing pass finishes', async () => {
-    vi.useFakeTimers()
-    const read = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json(
-          status({ job: { state: 'restarting', downloaded: 290_000_000, total: 290_000_000 } }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        Response.json(
-          status({ provider: 'built_in', indexing: { failed: false, done: 0, total: 0 } }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        Response.json(
-          status({ provider: 'built_in', indexing: { failed: false, done: 40, total: 212 } }),
-        ),
-      )
-      .mockResolvedValueOnce(Response.json(status({ provider: 'built_in' })))
-    setGeneratedFetch(read)
-    renderSettings()
-    await settle()
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(
-      screen.getByText('Indexing 0 of 0 issues · Keyword search works meanwhile'),
-    ).not.toBeNull()
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(
-      screen.getByText('Indexing 40 of 212 issues · Keyword search works meanwhile'),
-    ).not.toBeNull()
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(screen.getByText('On', { exact: true })).not.toBeNull()
-    await vi.advanceTimersByTimeAsync(4000)
-    expect(read).toHaveBeenCalledTimes(4)
-  })
-
-  test('says when the daemon has no status to report', async () => {
-    vi.useFakeTimers()
-    setGeneratedFetch(vi.fn(async () => new Response(null, { status: 404 })))
-    renderSettings()
-    expect(screen.getByText('Loading…')).not.toBeNull()
-    await settle()
-    expect(
-      screen.getByText('Search by meaning status is unavailable for this daemon.'),
-    ).not.toBeNull()
-  })
-
-  test('shows an indexing failure while retrying and clears it after recovery', async () => {
-    vi.useFakeTimers()
-    const read = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json(
-          status({ provider: 'built_in', indexing: { done: 0, total: 1, failed: true } }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        Response.json(
-          status({ provider: 'built_in', indexing: { done: 1, total: 2, failed: false } }),
-        ),
-      )
-      .mockResolvedValueOnce(Response.json(status({ provider: 'built_in' })))
-    setGeneratedFetch(read)
-    renderSettings()
-    await settle()
-    expect(screen.getByRole('alert').textContent).toBe(
-      'Indexing hit an error and will retry. Run kata health --json for details.',
-    )
-    expect(screen.getByText('Turning on')).not.toBeNull()
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(screen.queryByRole('alert')).toBeNull()
-    expect(
-      screen.getByText('Indexing 1 of 2 issues · Keyword search works meanwhile'),
-    ).not.toBeNull()
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 })

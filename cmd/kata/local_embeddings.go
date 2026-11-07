@@ -133,7 +133,7 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 	if err != nil {
 		return "", fmt.Errorf("read search configuration, including KATA_SEARCH_EMBEDDINGS_* environment overrides: %w", err)
 	}
-	prepared, err := prepareLocalEmbeddingsConfig(ctx, current.Embeddings, true)
+	prepared, err := prepareLocalEmbeddingsConfig(ctx, current.Embeddings)
 	if err != nil {
 		return "", err
 	}
@@ -222,7 +222,7 @@ type preparedLocalEmbeddingsConfig struct {
 	index          string
 }
 
-func prepareLocalEmbeddingsConfig(ctx context.Context, current config.EmbeddingsConfig, discover bool) (preparedLocalEmbeddingsConfig, error) {
+func prepareLocalEmbeddingsConfig(ctx context.Context, current config.EmbeddingsConfig) (preparedLocalEmbeddingsConfig, error) {
 	var prepared preparedLocalEmbeddingsConfig
 	var err error
 	prepared.path, err = config.DaemonConfigPath()
@@ -234,7 +234,7 @@ func prepareLocalEmbeddingsConfig(ctx context.Context, current config.Embeddings
 		return prepared, err
 	}
 	baseURL := ""
-	if discover && !current.Enabled() {
+	if !current.Enabled() {
 		endpoint, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{})
 		if err != nil && !errors.Is(err, embedlocal.ErrNotFound) {
 			return prepared, err
@@ -475,7 +475,7 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 	}
 	status.DownloadBytes, status.OllamaAvailable = inspected.DownloadBytes, inspected.OllamaAvailable
 	if status.Provider == "ollama" {
-		prepared, err := prepareLocalEmbeddingsConfig(ctx, s.embeddings, false)
+		prepared, err := prepareLocalEmbeddingsConfig(ctx, s.embeddings)
 		if err != nil {
 			return status, err
 		}

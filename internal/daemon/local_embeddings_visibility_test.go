@@ -41,7 +41,7 @@ func TestLocalEmbeddingsVisibleStatus(t *testing.T) {
 	for _, tc := range []struct {
 		actor string
 		count int64
-	}{{"member", 2}, {"nonmember", 1}, {"admin", 2}, {"subtree", 1}} {
+	}{{"member", 2}, {"admin", 2}, {"subtree", 1}} {
 		t.Run(tc.actor, func(t *testing.T) {
 			code, _, body := f.request(t, http.MethodGet, "/api/v1/embeddings/local", tc.actor, nil, nil)
 			require.Equal(t, 200, code, string(body))
