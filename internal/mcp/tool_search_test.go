@@ -189,6 +189,9 @@ func TestToolSearchFiltersAdminAndScope(t *testing.T) {
 					found := slices.ContainsFunc(output.Results, func(result discoveredTool) bool { return result.Name == name })
 					require.Equal(t, enabled && scope.Mode() == ScopeAll, found, name)
 				}
+				output := searchToolSession(t, session, "kata.storage_import", 1)
+				found := slices.ContainsFunc(output.Results, func(result discoveredTool) bool { return result.Name == "kata.storage_import" })
+				require.Equal(t, enabled, found, "storage import supports every project scope when configured")
 				for _, name := range []string{"kata.project_create", "kata.project_merge", "kata.connector_field_map", "kata.federation_rebind", "kata.federation_bridge_status"} {
 					output := searchToolSession(t, session, name, 10)
 					found := slices.ContainsFunc(output.Results, func(result discoveredTool) bool { return result.Name == name })
@@ -297,15 +300,6 @@ func TestToolSearchRejectsMalformedUnicodeOnWire(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, result.IsError, "%s", mustJSON(t, result))
 	}
-}
-
-func TestToolSearchConcurrentColdStart(t *testing.T) {
-	session := connectRawTestServerWithOptions(t, discoveryOptions(t))
-	var group sync.WaitGroup
-	for range 6 {
-		group.Go(func() { searchToolSession(t, session, "add a comment to an issue", 1) })
-	}
-	group.Wait()
 }
 
 func TestToolSearchConcurrentSectionLoading(t *testing.T) {

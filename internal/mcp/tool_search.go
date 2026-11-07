@@ -98,7 +98,7 @@ func validateToolSearch(input ToolSearchInput) error {
 
 func newToolSearchCatalog(options Options) (*toolSearchCatalog, error) {
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "kata-tool-metadata", Version: options.Version}, nil)
-	sections := toolSections(options.StorageAdmin != nil && options.Scope.Mode() == ScopeAll, options.EnableTokenAdmin && options.Scope.Mode() == ScopeAll)
+	sections := toolSections(options.StorageAdmin != nil, options.EnableTokenAdmin && options.Scope.Mode() == ScopeAll)
 	for _, section := range sections {
 		if section.available {
 			section.register(server, toolHandlers{options: options})
@@ -158,7 +158,7 @@ func toolSearchInScope(name string, mode ScopeMode) bool {
 		return true
 	}
 	switch name {
-	case "kata.project_create", "kata.project_update", "kata.project_merge",
+	case "kata.storage_export", "kata.project_create", "kata.project_update", "kata.project_merge",
 		"kata.project_remove", "kata.project_restore", "kata.project_purge",
 		"kata.connectors", "kata.connector_fields", "kata.connector_field_map",
 		"kata.connector_field_unmap", "kata.bridge_bind",
