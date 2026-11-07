@@ -85,18 +85,16 @@ per match.`,
 			if err != nil {
 				return err
 			}
-			ctx, baseURL, err := ensureDaemonContext(ctx)
+			daemon, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
+			ctx, baseURL := daemon.ctx, daemon.baseURL
 			pid, err := resolveProjectID(ctx, baseURL, start)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
+			client := daemon.client
 			if lexical {
 				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionDiscoveryPagination, "lexical search pagination"); err != nil {
 					return err
@@ -150,6 +148,13 @@ per match.`,
 			}
 			if err := printSearchResults(cmd, bs); err != nil {
 				return err
+			}
+			if r := response.JSON200; flags.Daemon == "" && !daemon.resolved.ConfiguredRemote() && cursor == "" && r != nil && r.Mode == "lexical" && !flags.Quiet && currentOutputMode() != outputAgent {
+				if response.Headers200 != nil && response.Headers200.XKataEmbeddingsConfigured == "false" {
+					if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings."); err != nil {
+						return err
+					}
+				}
 			}
 			if cursor == "" && response.JSON200 != nil && len(response.JSON200.Results) == 0 {
 				reportCLIEmptySearch(cmd, query)

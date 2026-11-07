@@ -1458,7 +1458,8 @@ type SearchHit struct {
 // response is byte-identical to its pre-semantic shape apart from the
 // always-present mode echo.
 type SearchResponse struct {
-	Body struct {
+	EmbeddingsConfigured string `header:"X-Kata-Embeddings-Configured" doc:"Whether the daemon has an embeddings provider configured."`
+	Body                 struct {
 		PageMetadata
 
 		Query          string      `json:"query"`
@@ -1801,3 +1802,34 @@ const (
 const (
 	ProjectMetadataKeyArea = "area"
 )
+
+// LocalEmbeddingsStatus reports daemon-wide search setup and its current work.
+type LocalEmbeddingsStatus struct {
+	Provider        string                   `json:"provider" enum:"none,ollama,built_in,other"`
+	DownloadBytes   int64                    `json:"download_bytes"`
+	OllamaAvailable bool                     `json:"ollama_available"`
+	Rebuild         bool                     `json:"rebuild"`
+	CanChange       bool                     `json:"can_change"`
+	Issues          *int64                   `json:"issues,omitempty"`
+	Job             *LocalEmbeddingsJob      `json:"job,omitempty"`
+	Indexing        *LocalEmbeddingsIndexing `json:"indexing,omitempty"`
+}
+
+// LocalEmbeddingsJob reports the current installation or restart.
+type LocalEmbeddingsJob struct {
+	State      string `json:"state"`
+	Downloaded int64  `json:"downloaded"`
+	Total      int64  `json:"total"`
+	Error      string `json:"error,omitempty"`
+}
+
+// LocalEmbeddingsIndexing reports initial indexing progress.
+type LocalEmbeddingsIndexing struct {
+	Done       int64  `json:"done"`
+	Total      int64  `json:"total"`
+	ETASeconds *int64 `json:"eta_seconds,omitempty"`
+	Failed     bool   `json:"failed"`
+}
+
+// LocalEmbeddingsResponse carries the daemon-wide setup status.
+type LocalEmbeddingsResponse struct{ Body LocalEmbeddingsStatus }

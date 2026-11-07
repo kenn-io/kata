@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 # HTTP API schema
@@ -14,6 +14,18 @@ Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
 transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
 discovery. [Cron](cron.md) documents job and workflow resources.
+
+## Search configuration header
+
+Search responses include `X-Kata-Embeddings-Configured: true` when the answering daemon has an embeddings provider, even while its index is empty or read-only mode forces lexical search. The value is `false` when no provider is configured. The response body is unchanged.
+
+## Local embeddings setup
+
+`GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, rebuild warning, setup job, initial indexing progress, and `can_change`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. A rebuild includes the number of issues visible to the caller. Issue-scoped credentials can read the status.
+
+`POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It reuses the CLI's `kata daemon local-embeddings` operation, including its config checks and automatic restart. The daemon must support restarting its installed executable.
+
+Setup requires a local owner browser session, a bootstrap token, or a static daemon token, with a writable browser session manager when present. It returns `403` for other viewers and through the daemon switcher proxy, `404` when setup is unavailable, and `409` while setup is already running. The switcher proxy permits status reads.
 
 ## Getting the schema
 
@@ -251,6 +263,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |
 | `0.41.0` | Adds `sort=priority` to both ready routes. `kata next` and MCP `kata.next` request one priority-ordered row; older daemons retain the full-queue fetch and client-side selection. |
 | `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |
 | `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |

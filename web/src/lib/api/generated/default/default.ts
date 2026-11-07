@@ -168,6 +168,7 @@ import type {
   ListRecurrencesResponseBody,
   ListTeamsResponseBody,
   ListTokensResponseBody,
+  LocalEmbeddingsStatus,
   MapConnectorFieldPathParameters,
   MapConnectorFieldRequestBody,
   MergeProjectPathParameters,
@@ -727,6 +728,102 @@ export const doctor = async (
   return orvalFetch<doctorResponse>(getDoctorUrl(), {
     ...options,
     method: 'GET',
+  })
+}
+
+export type getLocalEmbeddingsResponse200 = {
+  data: LocalEmbeddingsStatus
+  status: 200
+}
+
+export type getLocalEmbeddingsResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type getLocalEmbeddingsResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type getLocalEmbeddingsResponseSuccess = getLocalEmbeddingsResponse200 & {
+  headers: Headers
+}
+export type getLocalEmbeddingsResponseError = (
+  | getLocalEmbeddingsResponse404
+  | getLocalEmbeddingsResponse500
+) & {
+  headers: Headers
+}
+
+export type getLocalEmbeddingsResponse =
+  | getLocalEmbeddingsResponseSuccess
+  | getLocalEmbeddingsResponseError
+
+export const getGetLocalEmbeddingsUrl = () => {
+  return `/api/v1/embeddings/local`
+}
+
+export const getLocalEmbeddings = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getLocalEmbeddingsResponse> => {
+  return orvalFetch<getLocalEmbeddingsResponse>(getGetLocalEmbeddingsUrl(), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type turnOnLocalEmbeddingsResponse202 = {
+  data: LocalEmbeddingsStatus
+  status: 202
+}
+
+export type turnOnLocalEmbeddingsResponse403 = {
+  data: ErrorEnvelope
+  status: 403
+}
+
+export type turnOnLocalEmbeddingsResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type turnOnLocalEmbeddingsResponse409 = {
+  data: ErrorEnvelope
+  status: 409
+}
+
+export type turnOnLocalEmbeddingsResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type turnOnLocalEmbeddingsResponseSuccess = turnOnLocalEmbeddingsResponse202 & {
+  headers: Headers
+}
+export type turnOnLocalEmbeddingsResponseError = (
+  | turnOnLocalEmbeddingsResponse403
+  | turnOnLocalEmbeddingsResponse404
+  | turnOnLocalEmbeddingsResponse409
+  | turnOnLocalEmbeddingsResponse500
+) & {
+  headers: Headers
+}
+
+export type turnOnLocalEmbeddingsResponse =
+  | turnOnLocalEmbeddingsResponseSuccess
+  | turnOnLocalEmbeddingsResponseError
+
+export const getTurnOnLocalEmbeddingsUrl = () => {
+  return `/api/v1/embeddings/local`
+}
+
+export const turnOnLocalEmbeddings = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<turnOnLocalEmbeddingsResponse> => {
+  return orvalFetch<turnOnLocalEmbeddingsResponse>(getTurnOnLocalEmbeddingsUrl(), {
+    ...options,
+    method: 'POST',
   })
 }
 

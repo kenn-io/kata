@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Turn on search by meaning from the web's Settings page. Watch downloads and indexing there while the daemon restarts automatically at the same address. Other viewers can read the status. Unconfigured `kata search` results point to Settings and the CLI setup command on stderr; `--quiet` and `--agent` suppress the line.
+
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the

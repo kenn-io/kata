@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 
@@ -39,10 +41,12 @@ type daemonRestart struct {
 	dir        string
 	reply      string
 	from       string
+	webListen  string
 	requested  atomic.Bool
 }
 
 const (
+	daemonRestartWebListenEnv = "KATA_DAEMON_RESTART_WEB_LISTEN"
 	// daemonRestartReplyEnv names the accepted request in the replacement's environment.
 	daemonRestartReplyEnv = "KATA_DAEMON_RESTART_REPLY"
 	// daemonRestartFromEnv names the daemon generation the replacement replaces.
@@ -54,8 +58,9 @@ const (
 
 // The restart variables are unset at process start so children never inherit them.
 var (
-	startedForRestartReply = takeEnv(daemonRestartReplyEnv)
-	startedForRestartFrom  = takeEnv(daemonRestartFromEnv)
+	startedForRestartReply     = takeEnv(daemonRestartReplyEnv)
+	startedForRestartFrom      = takeEnv(daemonRestartFromEnv)
+	startedForRestartWebListen = takeEnv(daemonRestartWebListenEnv)
 )
 
 func takeEnv(key string) string {
@@ -139,7 +144,7 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 	if r == nil || !r.requested.Load() {
 		return nil
 	}
-	env := append(os.Environ(), daemonRestartReplyEnv+"="+r.reply, daemonRestartFromEnv+"="+r.from)
+	env := append(os.Environ(), daemonRestartReplyEnv+"="+r.reply, daemonRestartFromEnv+"="+r.from, daemonRestartWebListenEnv+"="+r.webListen)
 	started := func(pid int) {
 		writeRestartReply(r.dir, r.reply, restartReplacementPIDSuffix, []byte(strconv.Itoa(pid)))
 	}
@@ -381,4 +386,20 @@ func requireRestartable(running []kitdaemon.RuntimeRecord) error {
 		}
 	}
 	return nil
+}
+
+// restartAddress reuses a previous browser address only for an ephemeral bind.
+func restartAddress(web config.WebConfig, requested, previous string) string {
+	if previous == "" || web.PublicOrigin != "" {
+		return ""
+	}
+	for _, address := range []string{web.Listen, requested} {
+		if address != "" {
+			_, port, err := net.SplitHostPort(address)
+			if err != nil || port != "0" {
+				return ""
+			}
+		}
+	}
+	return previous
 }

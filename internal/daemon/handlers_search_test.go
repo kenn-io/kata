@@ -25,6 +25,7 @@ func TestSearchEndpoint_ReturnsHitsWithScores(t *testing.T) {
 
 	resp, bs := envGetRaw(t, env, projectPath(pid)+"/search?q="+url.QueryEscape("login Safari"))
 	require.Equal(t, 200, resp.StatusCode)
+	require.Equal(t, "false", resp.Header.Get("X-Kata-Embeddings-Configured"))
 	body := string(bs)
 	assert.Contains(t, body, `"query":"login Safari"`)
 	assert.Contains(t, body, `"title":"fix login crash on Safari"`)
@@ -62,6 +63,7 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedAutoSearchStaysLexical(t 
 	resp, bs := envGetRaw(t, env, projectPath(project.ID)+"/search?q="+url.QueryEscape("credential rotation"))
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
 	assert.Contains(t, string(bs), `"mode":"lexical"`)
+	require.Equal(t, "true", resp.Header.Get("X-Kata-Embeddings-Configured"))
 	assert.Equal(t, int32(0), embeddingCalls.Load(), "unauthenticated read-only search must not call embedding provider")
 }
 

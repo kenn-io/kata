@@ -77,6 +77,9 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 	}{
 		{name: "snapshot", method: http.MethodGet, path: "/api/v1/ui/snapshot", want: http.StatusNoContent},
 		{name: "daemon roster", method: http.MethodGet, path: "/api/v1/ui/daemons", want: http.StatusNoContent},
+		{name: "local embeddings status", method: http.MethodGet, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
+		{name: "local embeddings setup", method: http.MethodPost, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
+		{name: "proxied local embeddings setup", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/embeddings/local", want: http.StatusForbidden},
 		{name: "project sync status", method: http.MethodGet, path: "/api/v1/projects/7/federation/status", want: http.StatusNoContent},
 		{name: "global sync status", method: http.MethodGet, path: "/api/v1/federation/status", want: http.StatusForbidden},
 		{name: "proxied project sync status", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/projects/7/federation/status", want: http.StatusForbidden},
@@ -152,6 +155,7 @@ func TestIssueScopedBrowserSessionUsesSameRouteAllowlist(t *testing.T) {
 		name, method, path string
 		want               int
 	}{
+		{name: "local embeddings status", method: http.MethodGet, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
 		{name: "ordinary issue read", method: http.MethodGet, path: "/api/v1/projects/1/issues/abc4", want: http.StatusNoContent},
 		{name: "recurrence denied", method: http.MethodGet, path: "/api/v1/projects/1/recurrences", want: http.StatusForbidden},
 		{name: "project deletion denied", method: http.MethodDelete, path: "/api/v1/projects/2", want: http.StatusForbidden},
@@ -812,13 +816,15 @@ func TestBrowserAccessAdministrationBoundary(t *testing.T) {
 			manager.writable = false
 			require.False(t, manager.CanAdministerAccess(principal))
 			handler := requireBrowserSession(manager, ListenerPolicy{Kind: ListenerBrowser, Origin: manager.Origin(), RequireBrowserSession: true}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, manager.Origin()+"/api/v1/teams", strings.NewReader(`{"name":"blocked"}`))
-			request.AddCookie(manager.Cookie(issued.Cookie))
-			request.Header.Set(webSessionHeader, issued.Session)
-			request.Header.Set(webCSRFHeader, issued.CSRF)
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, request)
-			assert.Equal(t, http.StatusForbidden, response.Code)
+			for _, path := range []string{"/api/v1/teams", "/api/v1/embeddings/local"} {
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, manager.Origin()+path, strings.NewReader(`{"name":"blocked"}`))
+				request.AddCookie(manager.Cookie(issued.Cookie))
+				request.Header.Set(webSessionHeader, issued.Session)
+				request.Header.Set(webCSRFHeader, issued.CSRF)
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, request)
+				assert.Equal(t, http.StatusForbidden, response.Code)
+			}
 		})
 	}
 }

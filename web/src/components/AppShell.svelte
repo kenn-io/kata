@@ -14,6 +14,7 @@
   import MenuIcon from '@lucide/svelte/icons/menu'
   import MoonIcon from '@lucide/svelte/icons/moon'
   import PlusIcon from '@lucide/svelte/icons/plus'
+  import SettingsIcon from '@lucide/svelte/icons/settings'
   import SunIcon from '@lucide/svelte/icons/sun'
 
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
@@ -48,6 +49,7 @@
   import InboxProjectChooser from './InboxProjectChooser.svelte'
   import KataDaemonSwitcher from './KataDaemonSwitcher.svelte'
   import QuickCapture from './QuickCapture.svelte'
+  import SearchSettings from './SearchSettings.svelte'
   import Sidebar from './Sidebar.svelte'
   import SplitLayout from './SplitLayout.svelte'
 
@@ -75,6 +77,8 @@
     credentialTokens?: readonly TokenOut[] | undefined
     credentialLoading?: boolean | undefined
     credentialError?: string | undefined
+    searchSettingsPostFetch?: typeof fetch | undefined
+    canAdministerDaemon?: boolean | undefined
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
     onSelectDaemon?: ((id: string) => void) | undefined
     onAccessMutation?:
@@ -144,6 +148,8 @@
     credentialTokens = [],
     credentialLoading = false,
     credentialError = undefined,
+    searchSettingsPostFetch = fetch,
+    canAdministerDaemon = false,
     onPreferencesChange = () => {},
     onSelectDaemon = () => {},
     onAccessMutation = undefined,
@@ -230,6 +236,13 @@
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
   let credentialRoute = $derived(route.view === 'credentials')
+  let settingsRoute = $derived(route.view === 'settings')
+  let daemonRoute = $derived(credentialRoute || settingsRoute)
+  let settingsHost = $derived.by(() => {
+    const remote = activeConnection && !activeConnection.local ? activeConnection.url : undefined
+    const host = remote ? new URL(remote).hostname : globalThis.location?.hostname
+    return host && !loopbackHost(host) ? host : undefined
+  })
   let accessAdministrationAvailable = $derived(
     snapshot.capabilities.access_admin === true &&
       !credentialExpired &&
@@ -360,6 +373,19 @@
     })
   }
 
+  function openSettings(): void {
+    navigate({
+      kind: 'kata',
+      view: 'settings',
+      graph: false,
+      filters: emptyShareableFilters(),
+    })
+  }
+
+  function loopbackHost(host: string): boolean {
+    return host === 'localhost' || host === '[::1]' || /^127\./.test(host)
+  }
+
   // The landing route has no view and means Inbox, but adding a scope or issue
   // to it would read as All Open. Pin Inbox so these moves stay in Inbox.
   function withResolvedView(current: AppRoute): AppRoute {
@@ -450,7 +476,7 @@
   }
 
   function viewNameForRoute(current: AppRoute): KataTaskViewName {
-    if (current.view === 'credentials') return 'all'
+    if (current.view === 'credentials' || current.view === 'settings') return 'all'
     if (current.view) return current.view === 'all-open' ? 'all' : current.view
     return current.projectUID || current.issueUID ? 'all' : 'inbox'
   }
@@ -631,7 +657,10 @@
             <MonitorIcon size={15} strokeWidth={1.8} aria-hidden="true" />
           {/if}
         </IconButton>
-        {#if !credentialRoute}
+        <IconButton ariaLabel="Settings" title="Settings" onclick={openSettings}>
+          <SettingsIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+        </IconButton>
+        {#if !daemonRoute}
           <IconButton
             ariaLabel={preferences.splitDirection === 'vertical'
               ? 'Switch to side-by-side layout'
@@ -659,7 +688,7 @@
       </div>
     {/snippet}
   </TopBar>
-  {#if selectedProject && !credentialRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
+  {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
     {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
       <ProjectSyncStatus projectID={selectedProject.id} projectUID={selectedProject.uid} />
     {/key}
@@ -697,6 +726,15 @@
             </section>
           {/if}
         </div>
+      {:else if settingsRoute}
+        {#key activeDaemonID ?? 'direct'}
+          <SearchSettings
+            postFetch={searchSettingsPostFetch}
+            {canAdministerDaemon}
+            onback={onBackFromCredentials}
+            remoteHost={settingsHost}
+          />
+        {/key}
       {:else}
         {#if mutationMessage}
           <p class="mutation-message" role="alert">{mutationMessage}</p>

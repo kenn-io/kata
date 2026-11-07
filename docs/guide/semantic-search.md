@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-11-05
+last_edited: 2026-11-06
 ---
 
 # Semantic search
@@ -14,7 +14,7 @@ like "auth redirect duplicates" can surface an issue titled "Login callback
 double-submits on Safari" even though they share no keywords.
 
 Semantic search is **opt-in**. With no embedding endpoint configured, `kata
-search` behaves exactly as before and the daemon makes no network calls. This
+search` matches words and prints a stderr hint pointing to Settings and the CLI setup command. `--quiet` and `--agent` suppress that line. Stdout stays unchanged. This
 page explains how to turn it on and how it behaves; for the exact config fields
 see [Configuration](../reference/configuration.md#semantic-search), and for the
 command flags see the [CLI reference](../reference/cli.md).
@@ -37,6 +37,12 @@ Kata can run a shared local embeddings server or use an OpenAI-compatible
 `/embeddings` endpoint, such as Ollama or a hosted provider.
 
 ## Enabling it
+
+Open `kata ui`, click the gear in the top bar, and choose **Turn on** under **Search by meaning**. Settings applies to every project on the daemon. It shows download and indexing progress, reports indexing failures while retrying, and keeps the page's address through the automatic restart. A local owner session or a daemon access administrator sees the button. Other viewers, including viewers connected through the daemon switcher, see the status.
+
+To switch Ollama to the built-in server, choose **Use built-in instead**. A different model rebuilds the index; Settings shows the estimate and warns that daemons sharing embeddings need the same model and settings.
+
+You can also enable it from the CLI:
 
 ```sh
 kata daemon local-embeddings

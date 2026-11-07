@@ -862,6 +862,9 @@ func webDaemonOutboundHeaders(in http.Header) http.Header {
 }
 
 func webDaemonProxyRequestAllowed(r *http.Request, path string) bool {
+	if path == "/api/v1/embeddings/local" {
+		return r.Method == http.MethodGet
+	}
 	// Project sync status is a source-origin read. Target credentials must not
 	// expose federation topology through the ordinary SPA gateway.
 	if strings.Contains(path, "/federation/") {

@@ -171,6 +171,7 @@ type ServerConfig struct {
 	// state for /health. Nil means semantic search is disabled, in which case
 	// the health response omits the embeddings block entirely.
 	ReconcilerHealth func() ReconcilerHealth
+	LocalEmbeddings  LocalEmbeddings
 
 	// FederationConfigHealth snapshots declarative federation convergence for
 	// /health. Nil means no mappings are configured, so the block is omitted.
@@ -724,6 +725,7 @@ func isMutation(method string) bool {
 // contract around the Huma streaming route.
 func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerHealth(humaAPI, cfg)
+	registerLocalEmbeddingsHandlers(humaAPI, cfg)
 	registerDoctorHandlers(humaAPI, cfg)
 	registerInstanceHandlers(humaAPI, cfg)
 	registerTokenHandlers(humaAPI, cfg)

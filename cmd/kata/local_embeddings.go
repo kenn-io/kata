@@ -6,16 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pelletier/go-toml/v2/unstable"
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kit/atomicfile"
 	"go.kenn.io/kit/embedlocal"
@@ -29,19 +34,19 @@ func resolveLocalEmbeddings(ctx context.Context, confirm func(context.Context, i
 	if !errors.Is(err, embedlocal.ErrNotFound) {
 		return endpoint, err
 	}
-	installed, err := installLocalEmbeddings(ctx, confirm)
+	installed, err := installLocalEmbeddings(ctx, confirm, nil)
 	if err != nil {
 		return "", err
 	}
 	return localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true, Executable: installed.Executable})
 }
 
-func installLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error)) (embedlocal.Installation, error) {
+func installLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error), progress func(int64, int64)) (embedlocal.Installation, error) {
 	dir, err := embedlocal.DefaultDir()
 	if err != nil {
 		return embedlocal.Installation{}, err
 	}
-	return localEmbeddingsInstall(ctx, embedlocal.InstallOptions{DataDir: dir, Confirm: confirm})
+	return localEmbeddingsInstall(ctx, embedlocal.InstallOptions{DataDir: dir, Confirm: confirm, Progress: progress})
 }
 
 func daemonLocalEmbeddingsCmd() *cobra.Command {
@@ -50,74 +55,6 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 		if err := requireCurrentHomeDaemonCommand(); err != nil {
 			return err
 		}
-		if strings.TrimSpace(os.Getenv("KATA_SEARCH_EMBEDDINGS_BASE_URL")) != "" {
-			return errors.New("unset KATA_SEARCH_EMBEDDINGS_BASE_URL, then rerun to enable built-in embeddings")
-		}
-		path, err := config.DaemonConfigPath()
-		if err != nil {
-			return err
-		}
-		original, originalExists, err := readLocalEmbeddingsConfig(path)
-		if err != nil {
-			return err
-		}
-		current, err := config.ReadSearchConfig()
-		if err != nil {
-			return fmt.Errorf("read search configuration, including KATA_SEARCH_EMBEDDINGS_* environment overrides: %w", err)
-		}
-		baseURL := ""
-		if !current.Embeddings.Enabled() {
-			endpoint, err := localEmbeddingsEndpoint(cmd.Context(), embedlocal.Options{})
-			if err != nil && !errors.Is(err, embedlocal.ErrNotFound) {
-				return err
-			}
-			if err == nil {
-				builtIn, _ := localEmbeddingsEndpoint(cmd.Context(), embedlocal.Options{SkipOllama: true})
-				if endpoint != builtIn {
-					baseURL = endpoint
-				}
-			}
-		}
-		proposed, err := localEmbeddingsConfig(original, current.Embeddings, baseURL)
-		if err != nil {
-			return err
-		}
-		next, err := config.ParseSearchConfig(proposed)
-		if err != nil {
-			return fmt.Errorf("cannot enable built-in embeddings; check KATA_SEARCH_EMBEDDINGS_* environment overrides: %w", err)
-		}
-		before, _, err := preflightEmbeddingStartup(current.Embeddings, "")
-		if err != nil {
-			return err
-		}
-		after, _, err := preflightEmbeddingStartup(next.Embeddings, "")
-		if err != nil {
-			return err
-		}
-		index := "new"
-		if before != nil {
-			oldRecipe, err := before.ArtifactIdentity("", "", "")
-			if err != nil {
-				return err
-			}
-			newRecipe, err := after.ArtifactIdentity("", "", "")
-			if err != nil {
-				return err
-			}
-			index = "rebuilt"
-			if before.Generation().Fingerprint() == after.Generation().Fingerprint() && oldRecipe == newRecipe {
-				index = "kept"
-			}
-			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "Search index will be %s.\n", index); err != nil {
-				return err
-			}
-			if index == "rebuilt" {
-				if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Daemons sharing embeddings need the same model and settings before reusing them."); err != nil {
-					return err
-				}
-			}
-		}
-		confirmed := false
 		confirm := func(_ context.Context, size int64) (bool, error) {
 			if size > 0 {
 				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "Download about %.0f MB, shared by all Kenn apps.\n", float64(size)/1_000_000); err != nil {
@@ -132,69 +69,32 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 					return false, err
 				}
 			}
-			confirmed = true
 			return true, nil
 		}
-		if next.Embeddings.UsesLocal() {
-			installed, err := installLocalEmbeddings(cmd.Context(), confirm)
-			if err != nil {
-				return err
-			}
-			if !confirmed && before != nil && !current.Embeddings.UsesLocal() {
-				if _, err := confirm(cmd.Context(), 0); err != nil {
+		index, err := enableLocalEmbeddings(cmd.Context(), localEmbeddingsRun{
+			confirm: confirm,
+			notice:  func(message string) error { _, err := fmt.Fprintln(cmd.ErrOrStderr(), message); return err },
+			restart: func(ctx context.Context, apply func() error) error {
+				ns, err := daemonruntime.NewNamespace()
+				if err != nil {
 					return err
 				}
-			}
-			if _, err := localEmbeddingsEndpoint(cmd.Context(), embedlocal.Options{SkipOllama: true, Executable: installed.Executable}); err != nil {
-				return err
-			}
-		}
-		ns, err := daemonruntime.NewNamespace()
-		if err != nil {
-			return err
-		}
-		running, release, err := lockLiveDaemons(cmd.Context(), ns, cmd.ErrOrStderr())
-		if err != nil {
-			return err
-		}
-		defer release()
-		if err := requireRestartable(running); err != nil {
-			return err
-		}
-		latest, err := os.ReadFile(path) // #nosec G304 -- same config snapshot read before installation
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("read configuration before writing: %w", err)
-		}
-		if (err == nil) != originalExists || !bytes.Equal(latest, original) {
-			return fmt.Errorf("configuration %q changed during setup; rerun the command", path)
-		}
-		if !bytes.Equal(original, proposed) {
-			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-				return err
-			}
-			if err := atomicfile.WriteFile(path, proposed, atomicfile.WithPreserveMode(), atomicfile.WithFollowLink()); err != nil {
-				return err
-			}
-		}
-		if _, _, err := restartRunningDaemons(cmd.Context(), ns, running, nil); err != nil {
-			if !bytes.Equal(original, proposed) {
-				latest, readErr := os.ReadFile(path) // #nosec G304 -- compare the snapshot before restoring it
-				if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-					return errors.Join(err, readErr)
+				running, release, err := lockLiveDaemons(ctx, ns, cmd.ErrOrStderr())
+				if err != nil {
+					return err
 				}
-				if readErr == nil && bytes.Equal(latest, proposed) {
-					var restoreErr error
-					if originalExists {
-						restoreErr = atomicfile.WriteFile(path, original, atomicfile.WithPreserveMode(), atomicfile.WithFollowLink())
-					} else {
-						restoreErr = os.Remove(path)
-					}
-					if restoreErr != nil {
-						return errors.Join(err, restoreErr)
-					}
-					return fmt.Errorf("%w; configuration restored", err)
+				defer release()
+				if err := requireRestartable(running); err != nil {
+					return err
 				}
-			}
+				if err := apply(); err != nil {
+					return err
+				}
+				_, _, err = restartRunningDaemons(ctx, ns, running, nil)
+				return err
+			},
+		})
+		if err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Service environment settings can override this configuration."); err != nil {
@@ -216,6 +116,146 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 	}}
 	cmd.Flags().BoolVar(&yes, "yes", false, "approve the download and configuration change")
 	return cmd
+}
+
+type localEmbeddingsRun struct {
+	confirm  func(context.Context, int64) (bool, error)
+	progress func(int64, int64)
+	notice   func(string) error
+	restart  func(context.Context, func() error) error
+}
+
+func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string, error) {
+	if strings.TrimSpace(os.Getenv("KATA_SEARCH_EMBEDDINGS_BASE_URL")) != "" {
+		return "", errors.New("unset KATA_SEARCH_EMBEDDINGS_BASE_URL, then rerun to enable built-in embeddings")
+	}
+	current, err := config.ReadSearchConfig()
+	if err != nil {
+		return "", fmt.Errorf("read search configuration, including KATA_SEARCH_EMBEDDINGS_* environment overrides: %w", err)
+	}
+	prepared, err := prepareLocalEmbeddingsConfig(ctx, current.Embeddings, true)
+	if err != nil {
+		return "", err
+	}
+	path, original, originalExists := prepared.path, prepared.original, prepared.originalExists
+	proposed, next, index := prepared.proposed, prepared.next, prepared.index
+	if index != "new" {
+		if err := run.notice(fmt.Sprintf("Search index will be %s.", index)); err != nil {
+			return "", err
+		}
+		if index == "rebuilt" {
+			if err := run.notice("Daemons sharing embeddings need the same model and settings before reusing them."); err != nil {
+				return "", err
+			}
+		}
+	}
+	confirmed := false
+	confirm := func(ctx context.Context, size int64) (bool, error) {
+		yes, err := run.confirm(ctx, size)
+		confirmed = yes && err == nil
+		return yes, err
+	}
+	if next.Embeddings.UsesLocal() {
+		installed, err := installLocalEmbeddings(ctx, confirm, run.progress)
+		if err != nil {
+			return "", err
+		}
+		if !confirmed && current.Embeddings.Enabled() && !current.Embeddings.UsesLocal() {
+			if _, err := confirm(ctx, 0); err != nil {
+				return "", err
+			}
+		}
+		if _, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true, Executable: installed.Executable}); err != nil {
+			return "", err
+		}
+	}
+	applied := false
+	err = run.restart(ctx, func() error {
+		latest, err := os.ReadFile(path) // #nosec G304 -- same config snapshot read before installation
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read configuration before writing: %w", err)
+		}
+		if (err == nil) != originalExists || !bytes.Equal(latest, original) {
+			return fmt.Errorf("configuration %q changed during setup; rerun the command", path)
+		}
+		if !bytes.Equal(original, proposed) {
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				return err
+			}
+			if err := atomicfile.WriteFile(path, proposed, atomicfile.WithPreserveMode(), atomicfile.WithFollowLink()); err != nil {
+				return err
+			}
+		}
+		applied = true
+		return nil
+	})
+	if err != nil {
+		if applied && !bytes.Equal(original, proposed) {
+			latest, readErr := os.ReadFile(path) // #nosec G304 -- compare the snapshot before restoring it
+			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+				return "", errors.Join(err, readErr)
+			}
+			if readErr == nil && bytes.Equal(latest, proposed) {
+				var restoreErr error
+				if originalExists {
+					restoreErr = atomicfile.WriteFile(path, original, atomicfile.WithPreserveMode(), atomicfile.WithFollowLink())
+				} else {
+					restoreErr = os.Remove(path)
+				}
+				if restoreErr != nil {
+					return "", errors.Join(err, restoreErr)
+				}
+				return "", fmt.Errorf("%w; configuration restored", err)
+			}
+		}
+		return "", err
+	}
+	return index, nil
+}
+
+type preparedLocalEmbeddingsConfig struct {
+	path           string
+	original       []byte
+	originalExists bool
+	proposed       []byte
+	next           config.SearchConfig
+	index          string
+}
+
+func prepareLocalEmbeddingsConfig(ctx context.Context, current config.EmbeddingsConfig, discover bool) (preparedLocalEmbeddingsConfig, error) {
+	var prepared preparedLocalEmbeddingsConfig
+	var err error
+	prepared.path, err = config.DaemonConfigPath()
+	if err != nil {
+		return prepared, err
+	}
+	prepared.original, prepared.originalExists, err = readLocalEmbeddingsConfig(prepared.path)
+	if err != nil {
+		return prepared, err
+	}
+	baseURL := ""
+	if discover && !current.Enabled() {
+		endpoint, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{})
+		if err != nil && !errors.Is(err, embedlocal.ErrNotFound) {
+			return prepared, err
+		}
+		if err == nil {
+			builtIn, _ := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true})
+			if endpoint != builtIn {
+				baseURL = endpoint
+			}
+		}
+	}
+	prepared.proposed, err = localEmbeddingsConfig(prepared.original, current, baseURL)
+	if err != nil {
+		return prepared, err
+	}
+	prepared.next, err = config.ParseSearchConfig(prepared.proposed)
+	if err != nil {
+		return prepared, fmt.Errorf("cannot enable built-in embeddings; check KATA_SEARCH_EMBEDDINGS_* environment overrides: %w", err)
+	}
+	prepared.index, err = localEmbeddingsIndex(current, prepared.next.Embeddings)
+	return prepared, err
 }
 
 // A dangling symlink reads as absent, but writing through it would create its target.
@@ -405,4 +445,128 @@ func localTOMLComments(node *unstable.Node, out *bytes.Buffer) {
 	for children.Next() {
 		localTOMLComments(children.Node(), out)
 	}
+}
+
+// localEmbeddingsSetup owns one setup job for the daemon's lifetime. start
+// registers work with the daemon worker group using its shutdown context.
+type localEmbeddingsSetup struct {
+	embeddings config.EmbeddingsConfig
+	idle       daemon.IdleForegroundAdmission
+	start      func(func(context.Context)) bool
+	restart    func(context.Context) error
+	mu         sync.Mutex
+	job        *api.LocalEmbeddingsJob
+}
+
+func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsStatus, error) {
+	status := api.LocalEmbeddingsStatus{Provider: "none", CanChange: s.restart != nil}
+	if s.embeddings.UsesLocal() {
+		status.Provider = "built_in"
+	} else if s.embeddings.Enabled() {
+		status.Provider = "other"
+		endpoint, err := url.Parse(s.embeddings.BaseURL)
+		if err == nil && endpoint.Port() == "11434" && (endpoint.Hostname() == "localhost" || net.ParseIP(endpoint.Hostname()).IsLoopback()) {
+			status.Provider = "ollama"
+		}
+	}
+	inspected, err := embedlocal.Inspect(ctx, embedlocal.Options{SkipOllama: status.Provider != "none"})
+	if err != nil {
+		return status, err
+	}
+	status.DownloadBytes, status.OllamaAvailable = inspected.DownloadBytes, inspected.OllamaAvailable
+	if status.Provider == "ollama" {
+		prepared, err := prepareLocalEmbeddingsConfig(ctx, s.embeddings, false)
+		if err != nil {
+			return status, err
+		}
+		status.Rebuild = prepared.index == "rebuilt"
+	}
+	s.mu.Lock()
+	if s.job != nil {
+		job := *s.job
+		status.Job = &job
+	}
+	s.mu.Unlock()
+	return status, nil
+}
+
+func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
+	if s.embeddings.UsesLocal() {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.job != nil && s.job.State != "failed" {
+		return daemon.ErrLocalEmbeddingsBusy
+	}
+	var release func()
+	if s.idle != nil {
+		lease, ok := s.idle.TryForeground()
+		if !ok {
+			return errors.New("daemon is shutting down")
+		}
+		release = lease.Release
+	}
+	s.job = &api.LocalEmbeddingsJob{State: "downloading"}
+	if !s.start(func(ctx context.Context) {
+		if release != nil {
+			defer release()
+		}
+		_, err := enableLocalEmbeddings(ctx, localEmbeddingsRun{
+			confirm: func(context.Context, int64) (bool, error) { return true, nil },
+			notice:  func(string) error { return nil },
+			progress: func(downloaded, total int64) {
+				s.mu.Lock()
+				s.job.Downloaded, s.job.Total = downloaded, total
+				s.mu.Unlock()
+			},
+			restart: func(ctx context.Context, apply func() error) error {
+				if err := apply(); err != nil {
+					return err
+				}
+				s.mu.Lock()
+				s.job.State = "restarting"
+				s.mu.Unlock()
+				return s.restart(ctx)
+			},
+		})
+		if err != nil {
+			s.mu.Lock()
+			s.job.State, s.job.Error = "failed", err.Error()
+			s.mu.Unlock()
+		}
+	}) {
+		if release != nil {
+			release()
+		}
+		s.job = nil
+		return errors.New("daemon is shutting down")
+	}
+	return nil
+}
+
+func localEmbeddingsIndex(current, next config.EmbeddingsConfig) (string, error) {
+	before, _, err := preflightEmbeddingStartup(current, "")
+	if err != nil {
+		return "", err
+	}
+	after, _, err := preflightEmbeddingStartup(next, "")
+	if err != nil {
+		return "", err
+	}
+	if before == nil {
+		return "new", nil
+	}
+	oldRecipe, err := before.ArtifactIdentity("", "", "")
+	if err != nil {
+		return "", err
+	}
+	newRecipe, err := after.ArtifactIdentity("", "", "")
+	if err != nil {
+		return "", err
+	}
+	if before.Generation().Fingerprint() == after.Generation().Fingerprint() && oldRecipe == newRecipe {
+		return "kept", nil
+	}
+	return "rebuilt", nil
 }

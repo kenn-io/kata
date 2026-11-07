@@ -1286,7 +1286,15 @@ func runDaemonProcess(
 			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon; runtime record: %s; remove that file if no kata daemon owns that PID", record.PID, record.SourcePath)
 		}
 	}
-	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
+	var listener net.Listener
+	if previous := restartAddress(startup.Web, endpoint.Address, startedForRestartWebListen); endpoint.Network == kitdaemon.NetworkTCP && previous != "" {
+		pinned := endpoint
+		pinned.Address = previous
+		listener, err = kitdaemon.Listen(ctx, pinned, kitdaemon.WithRuntimeStore(runtimeStore))
+	}
+	if listener == nil {
+		listener, err = kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
+	}
 	if err != nil {
 		return err
 	}
@@ -1350,14 +1358,26 @@ func runDaemonProcess(
 	}
 
 	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
-	webEndpoint, err := daemon.ResolveWebEndpoint(daemon.WebEndpointOptions{
+	webOptions := daemon.WebEndpointOptions{
 		NamespaceID: ns.DBHash,
 		GOOS:        runtime.GOOS,
 		Daemon:      runtimeEndpoint,
 		Config:      startup.Web,
-	})
+	}
+	var webEndpoint daemon.WebEndpoint
+	if previous := restartAddress(startup.Web, startup.Web.Listen, startedForRestartWebListen); previous != "" && runtimeEndpoint.Network != kitdaemon.NetworkTCP {
+		pinned := webOptions
+		pinned.Config.Listen = previous
+		webEndpoint, err = daemon.ResolveWebEndpoint(pinned)
+	}
+	if webEndpoint.Origin == "" {
+		webEndpoint, err = daemon.ResolveWebEndpoint(webOptions)
+	}
 	if err != nil {
 		return err
+	}
+	if restart != nil {
+		restart.webListen = restartAddress(startup.Web, startup.Web.Listen, webEndpoint.Endpoint.Address)
 	}
 	if webEndpoint.Listener != nil {
 		defer func() { _ = webEndpoint.Listener.Close() }()
@@ -1625,7 +1645,20 @@ func runDaemonProcess(
 			rec.Metadata["mcp"] = "unavailable"
 		}
 	}
+	localSetup := &localEmbeddingsSetup{
+		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
+		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
+	}
+	if restart != nil {
+		localSetup.restart = func(ctx context.Context) error {
+			if !restart.handle(idleAdmission, func() error { return restart.accept(ctx, ns.DataDir, rec) }, daemonLog, shutdownTrigger.Call) {
+				return errors.New("daemon restart refused")
+			}
+			return nil
+		}
+	}
 	srv := daemon.NewServer(daemon.ServerConfig{
+		LocalEmbeddings:           localSetup,
 		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,

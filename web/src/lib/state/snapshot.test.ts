@@ -183,25 +183,28 @@ describe('snapshotIntentForRoute', () => {
     expect(intent.localDate).toBe('2026-08-31')
   })
 
-  it('maps the credentials screen to an unselected ordinary authority snapshot', () => {
-    const route = parseRoute(
-      new URL(
-        'https://daemon.example/kata?view=credentials&issue=01HZNQ7VFPK1XGD8R5MABCD4EX&owner=private-actor',
-      ),
-    )
-    if (route.kind === 'route-error') throw new Error('expected credentials route')
+  it.each(['credentials', 'settings'])(
+    'maps the %s screen to an unselected ordinary authority snapshot',
+    (view) => {
+      const route = parseRoute(
+        new URL(
+          `https://daemon.example/kata?view=${view}&issue=01HZNQ7VFPK1XGD8R5MABCD4EX&owner=private-actor`,
+        ),
+      )
+      if (route.kind === 'route-error') throw new Error('expected credentials route')
 
-    expect(snapshotIntentForRoute(route, new Date('2026-09-15T12:00:00Z'), 'UTC')).toEqual({
-      view: 'all-open',
-      statuses: [],
-      owners: [],
-      labels: [],
-      relationships: [],
-      includeGraph: false,
-      includeHistory: false,
-      timeZone: 'UTC',
-    })
-  })
+      expect(snapshotIntentForRoute(route, new Date('2026-09-15T12:00:00Z'), 'UTC')).toEqual({
+        view: 'all-open',
+        statuses: [],
+        owners: [],
+        labels: [],
+        relationships: [],
+        includeGraph: false,
+        includeHistory: false,
+        timeZone: 'UTC',
+      })
+    },
+  )
 })
 
 describe('createUISnapshotRequest', () => {

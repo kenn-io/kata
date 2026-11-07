@@ -10,7 +10,7 @@ export const systemViews = [
 ] as const
 
 export type SystemView = (typeof systemViews)[number]
-export type DaemonView = 'credentials'
+export type DaemonView = 'credentials' | 'settings'
 
 export interface ShareableFilters {
   status: string[]
@@ -45,7 +45,7 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
     return { kind: 'route-error', path: url.pathname, reason: 'path' }
   }
   const view = url.searchParams.get('view')?.trim()
-  if (view === 'credentials') {
+  if (view === 'credentials' || view === 'settings') {
     return {
       kind: 'kata',
       view,
@@ -131,7 +131,7 @@ function validUID(value: string): boolean {
 
 export function screenNameForRoute(route: KataRoute): string | undefined {
   if (route.kind === 'route-error') return undefined
-  if (route.view === 'credentials') return 'credentials'
+  if (route.view === 'credentials' || route.view === 'settings') return route.view
   if (route.issueUID) return route.graph ? 'graph' : 'issue'
   if (route.view) return route.view === 'all-open' ? 'issues' : route.view
   return route.projectUID ? 'issues' : 'inbox'

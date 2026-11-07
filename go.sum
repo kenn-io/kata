@@ -392,6 +392,8 @@ github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
 go.kenn.io/kit v0.48.2-0.20261105033532-aaab6a3899c6 h1:1+wSx5qr8SZs2J//GaB1t8Y1fvsTwrcQf00ab4xGuM8=
 go.kenn.io/kit v0.48.2-0.20261105033532-aaab6a3899c6/go.mod h1:4g35Ia8V+5uTSUWp6XK/NurYdgPoq/PFZZLubtYly80=
+go.kenn.io/kit v0.48.2 h1:c+JfMBPJbp7kpvWj/o7uYrd/kxUT34bhL5svsDfEQBc=
+go.kenn.io/kit v0.48.2/go.mod h1:4g35Ia8V+5uTSUWp6XK/NurYdgPoq/PFZZLubtYly80=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0 h1:LxwW/9ctSCv+QkE/cLR7M91ZIkXNMqJtEMi1vCw9U8s=
