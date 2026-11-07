@@ -134,7 +134,7 @@ Where the two interact, **idempotency wins**: an idempotent reuse never emits a
 duplicate even when `force_new` is set. The retry-safety guarantee takes
 precedence over the force-new escape hatch.
 
-## Schema evolution by JSONL cutover
+## Schema evolution
 
 SQLite upgrades that only add indexes register a complete version chain in
 `indexOnlyUpgrades` in `internal/db/sqlitestore/schema_upgrade.go`. Startup
@@ -175,7 +175,7 @@ inside backend packages, SQLite-specific JSONL cutover code, and tests that
 assert SQL details.
 
 SQLite bootstraps a fresh database from its canonical `schema.sql` and upgrades
-older files through the JSONL cutover path described above. Postgres also
+older files through the upgrade paths described above. Postgres also
 installs fresh databases from a canonical current `schema.sql`. Because no
 Postgres backend predates its first public release, development-only versions
 are not represented as compatibility migrations. The first released Postgres
