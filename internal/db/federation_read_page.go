@@ -15,6 +15,13 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 	if issueUID != "" {
 		return query(` WHERE `+identity+`=$1 AND e.type<>'sync.reset_required' AND e.id>$2 ORDER BY e.id LIMIT $3`, issueUID, afterID, limit)
 	}
+	var hasEvents bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id>$1)`, afterID).Scan(&hasEvents); err != nil {
+		return nil, fmt.Errorf("federation event presence: %w", err)
+	}
+	if !hasEvents {
+		return []Event{}, nil
+	}
 	movedFrom := `json_extract(e.payload,'$.from_project_uid')`
 	projectIndex, movedIndex, identityIndex, subjectUID := "", "", "", "subject.uid"
 	if postgres {

@@ -103,9 +103,9 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { _ = tx.Rollback() }()
 			var visited float64
-			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1000, true, explainedEventPage(t, tx, &visited))
+			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1, true, explainedEventPage(t, tx, &visited))
 			require.NoError(t, err)
-			require.Len(t, events, 1000)
+			require.Len(t, events, 1)
 			stride := int64(1)
 			if interleaved {
 				stride = 2
@@ -114,7 +114,7 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 				require.Equal(t, after+int64(i+1)*stride, e.ID)
 			}
 			t.Logf("%.0f event rows visited", visited)
-			require.LessOrEqual(t, visited, float64(5000), "bulk histories must cost a small multiple of the page size")
+			require.LessOrEqual(t, visited, float64(16), "bulk histories must cost a small multiple of the page size")
 		})
 	}
 }

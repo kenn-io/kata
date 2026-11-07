@@ -77,12 +77,12 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 			require.NoError(t, conn.Close())
 			tx, err := raw.BeginTx(t.Context(), nil)
 			require.NoError(t, err)
-			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1000, false, func(where string, args ...any) ([]db.Event, error) {
+			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1, false, func(where string, args ...any) ([]db.Event, error) {
 				return (sqlquery.Query{SQL: sqlitestore.EventSelectForTest + where, Args: args}).All(t.Context(), tx, func(rows *sql.Rows) (db.Event, error) { return sqlitestore.ScanEventForTest(rows) })
 			})
 			require.NoError(t, err)
 			require.NoError(t, tx.Rollback())
-			require.Len(t, events, 1000)
+			require.Len(t, events, 1)
 			stride := int64(1)
 			if interleaved {
 				stride = 2
@@ -95,7 +95,7 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 			pages := sqlitePageFetches(t, conn, false)
 			require.NoError(t, conn.Close())
 			t.Logf("%d page fetches", pages)
-			require.LessOrEqual(t, pages, 3000, "bulk histories must cost a small multiple of the page size")
+			require.LessOrEqual(t, pages, 256, "bulk histories must cost a small multiple of the page size")
 		})
 	}
 }

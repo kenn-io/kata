@@ -136,7 +136,7 @@ func SeedFederatedReadBulkHistory(t *testing.T, store db.Storage, interleaved bo
 	})
 	_, err = executor.ExecContext(ctx, `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<100*$4)
  INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- SELECT '00000000000000000000'||CAST(100000+$5+(i.id-$6)*100*$4+x AS TEXT),$1,CASE WHEN x%$4=0 THEN CAST($2 AS BIGINT) ELSE CAST($3 AS BIGINT) END,'source-project',
+ SELECT '00000000000000000000'||CAST(100000+$5+(i.id-$6)*100*$4+x AS TEXT),$1,CASE WHEN x%$4=0 THEN CAST($2 AS BIGINT) ELSE CAST($3 AS BIGINT) END,CASE WHEN x%$4=0 THEN 'source-project' ELSE 'other-project' END,
  CASE WHEN x%$4=0 THEN i.id ELSE NULL END,CASE WHEN x%$4=0 THEN i.uid ELSE NULL END,'issue.updated','tester','{}',1,0,$7
  FROM issues i CROSS JOIN n WHERE i.project_id=$2 ORDER BY i.id,x`, store.InstanceUID(), source.ID, other.ID, stride, after, issues[0].ID, strings.Repeat("a", 64))
 	require.NoError(t, err)
