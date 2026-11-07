@@ -5,7 +5,6 @@ import (
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,8 +12,6 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/embedding"
 )
 
 type localEmbeddingsFixture struct {
@@ -121,13 +118,16 @@ func TestLocalEmbeddingsInitialIndexingProgress(t *testing.T) {
 	mux := http.NewServeMux()
 	registerLocalEmbeddingsHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{LocalEmbeddings: &localEmbeddingsFixture{}, ReconcilerHealth: func() ReconcilerHealth { return health }})
 	for _, tc := range []struct {
-		name        string
-		health      ReconcilerHealth
-		done, total int64
+		name             string
+		health           ReconcilerHealth
+		done, total      int64
+		failed, complete bool
 	}{
 		{name: "coverage not read", health: ReconcilerHealth{Configured: true}},
-		{name: "backfill", health: ReconcilerHealth{Configured: true, Embedded: 40, Backlog: 172}, done: 40, total: 212},
+		{name: "backfill", health: ReconcilerHealth{Configured: true, Embedded: 40, Skipped: 3, Backlog: 172}, done: 43, total: 215},
 		{name: "shared issues deferred", health: ReconcilerHealth{Configured: true, LastSuccessAt: new(time.Time), Embedded: 1, Backlog: 1}, done: 1, total: 2},
+		{name: "failed first pass", health: ReconcilerHealth{Configured: true, LastError: "provider reflected example issue text", Backlog: 3}, total: 3, failed: true},
+		{name: "recovered", health: ReconcilerHealth{Configured: true, LastSuccessAt: new(time.Time)}, complete: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			health = tc.health
@@ -136,56 +136,15 @@ func TestLocalEmbeddingsInitialIndexingProgress(t *testing.T) {
 			require.Equal(t, 200, response.Code)
 			var status api.LocalEmbeddingsStatus
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &status))
+			require.NotContains(t, response.Body.String(), "provider reflected")
+			if tc.complete {
+				require.Nil(t, status.Indexing)
+				return
+			}
 			require.NotNil(t, status.Indexing)
+			require.Equal(t, tc.failed, status.Indexing.Failed)
 			require.Equal(t, tc.done, status.Indexing.Done)
 			require.Equal(t, tc.total, status.Indexing.Total)
 		})
-	}
-}
-
-func TestLocalEmbeddingsFailedFirstIndex(t *testing.T) {
-	ctx := WithPrincipal(t.Context(), Principal{Kind: PrincipalBootstrap})
-	store := newReconcilerTestStore(t)
-	project, err := store.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "example issue", Author: "tester"})
-	require.NoError(t, err)
-	var failing atomic.Bool
-	failing.Store(true)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if failing.Load() {
-			http.Error(w, "provider reflected example issue text", http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"embedding":[1,0]}]}`))
-	}))
-	t.Cleanup(server.Close)
-	embedder, err := embedding.New(embedding.Config{BaseURL: server.URL, Model: "example-model", Dims: 2})
-	require.NoError(t, err)
-	reconciler := NewReconciler(store, openTestVectorIndex(t), embedder, ReconcilerConfig{})
-	mux := http.NewServeMux()
-	registerLocalEmbeddingsHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{LocalEmbeddings: &localEmbeddingsFixture{}, ReconcilerHealth: reconciler.Health})
-	for _, failed := range []bool{true, false} {
-		failing.Store(failed)
-		err := reconciler.reconcileOnce(ctx)
-		if failed {
-			require.Error(t, err)
-		} else {
-			require.NoError(t, err)
-		}
-		response := httptest.NewRecorder()
-		mux.ServeHTTP(response, httptest.NewRequestWithContext(WithPrincipal(ctx, Principal{Kind: PrincipalWebLocal}), "GET", "/api/v1/embeddings/local", nil))
-		require.Equal(t, http.StatusOK, response.Code)
-		require.NotContains(t, response.Body.String(), "provider reflected")
-		var status api.LocalEmbeddingsStatus
-		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &status))
-		if failed {
-			require.NotNil(t, status.Indexing)
-			require.True(t, status.Indexing.Failed)
-			require.Equal(t, int64(1), status.Indexing.Total)
-		} else {
-			require.Nil(t, status.Indexing)
-		}
 	}
 }

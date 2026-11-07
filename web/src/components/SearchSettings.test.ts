@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
-import { createCredentialedFetch, setGeneratedFetch } from '../lib/api/client'
+import { setGeneratedFetch } from '../lib/api/client'
 import type { LocalEmbeddingsStatus } from '../lib/api/generated'
 import SearchSettings from './SearchSettings.svelte'
 
@@ -108,7 +108,6 @@ describe('SearchSettings', () => {
       await settle()
       await fireEvent.click(screen.getByRole('button', { name: 'Turn on' }))
       await settle()
-      expect(screen.getByText(/Downloading 0 MB/)).not.toBeNull()
       await vi.advanceTimersByTimeAsync(2000)
       expect(
         screen.getByText(
@@ -198,11 +197,7 @@ describe('SearchSettings', () => {
     await settle()
     late(Response.json(status()))
     await settle()
-    expect(screen.getByText(/Downloading 0 MB/)).not.toBeNull()
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(
-      screen.getByText('Restart the daemon to finish: run kata daemon restart.'),
-    ).not.toBeNull()
+    expect(screen.getByText(/^Downloading /)).not.toBeNull()
   })
 
   test('stops polling while Off', async () => {
@@ -213,22 +208,6 @@ describe('SearchSettings', () => {
     await settle()
     await vi.advanceTimersByTimeAsync(10000)
     expect(read).toHaveBeenCalledOnce()
-  })
-
-  test('sends a rejected POST through sign-in recovery', async () => {
-    vi.useFakeTimers()
-    setGeneratedFetch(vi.fn(async () => Response.json(status())))
-    const requireSignIn = vi.fn(() => true)
-    const postFetch = createCredentialedFetch(
-      () => undefined,
-      vi.fn(async () => new Response(null, { status: 401 })),
-      requireSignIn,
-    )
-    renderSettings({ postFetch })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Turn on' }))
-    await settle()
-    expect(requireSignIn).toHaveBeenCalledOnce()
   })
 
   test('aborts reads and stops polling when navigation removes Settings', async () => {

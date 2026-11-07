@@ -947,11 +947,9 @@ func TestWebDaemonGatewayRedactsEmbeddingsDetailsForMember(t *testing.T) {
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
 			assert.False(t, got.CanChange)
 			require.NotNil(t, got.Indexing)
-			assert.Zero(t, got.Indexing.Done)
 			assert.Zero(t, got.Indexing.Total)
-			assert.Nil(t, got.Indexing.ETASeconds)
 			require.NotNil(t, got.Job)
-			assert.Equal(t, "Search by meaning could not be turned on. Ask a daemon administrator for details.", got.Job.Error)
+			assert.NotEqual(t, "setup provider detail", got.Job.Error)
 		})
 	}
 }

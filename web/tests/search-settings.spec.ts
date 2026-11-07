@@ -18,8 +18,8 @@ test('Settings keeps Turning on equally active when indexing counts are hidden',
   await kata.launch(page)
   const colors: Array<{ color: string; background: string }> = []
   for (const patch of [
-    { provider: 'built_in', indexing: { done: 1, total: 2 } },
-    { provider: 'built_in', can_change: false, indexing: {} },
+    { provider: 'built_in', can_change: false, indexing: { done: 1, total: 2, failed: false } },
+    { provider: 'built_in', can_change: false, indexing: { done: 0, total: 0, failed: false } },
   ]) {
     current = { ...off, ...patch }
     await page.goto(`${kata.origin}/kata?view=settings`)
@@ -48,7 +48,7 @@ test('Settings failures stand out above static download details', async ({ page,
         error: 'Not enough disk space. Free space and try again.',
       },
     },
-    { provider: 'built_in', indexing: { done: 1, total: 2, failed: true } },
+    { provider: 'built_in', can_change: false, indexing: { done: 1, total: 2, failed: true } },
   ]) {
     current = { ...off, ...patch }
     await page.goto(`${kata.origin}/kata?view=settings`)
@@ -69,70 +69,52 @@ test('Settings failures stand out above static download details', async ({ page,
     if (patch.provider !== 'built_in') {
       await expect(download).toBeVisible()
       expect((await alert.boundingBox())!.y).toBeLessThan((await download.boundingBox())!.y)
+    } else {
+      const progress = (await page.getByRole('progressbar').boundingBox())!
+      const detail = (await page
+        .getByText('Indexing 1 of 2 issues · Keyword search works meanwhile', { exact: true })
+        .boundingBox())!
+      const error = (await alert.boundingBox())!
+      expect(error.y - detail.y - detail.height).toBeGreaterThan(
+        detail.y - progress.y - progress.height,
+      )
     }
   }
 })
 
-test('Settings keeps the search title aligned as setup changes state', async ({ page, kata }) => {
-  let current = off as Record<string, unknown>
-  await page.route('**/api/v1/embeddings/local', (route) => route.fulfill({ json: current }))
-  await kata.launch(page)
-  const positions: number[] = []
-  for (const patch of [
-    {},
-    { job: { state: 'downloading', downloaded: 120_000_000, total: 290_000_000 } },
-    { provider: 'built_in', indexing: { done: 1, total: 2 } },
-    { job: { state: 'failed', downloaded: 0, total: 290_000_000, error: 'Disk is full.' } },
-    { provider: 'built_in' },
-  ]) {
-    current = { ...off, ...patch }
-    await page.goto(`${kata.origin}/kata?view=settings`)
-    const title = page.getByText('Search by meaning', { exact: true })
-    await expect(title).toBeVisible()
-    positions.push((await title.boundingBox())!.y)
-  }
-  expect(Math.max(...positions) - Math.min(...positions)).toBeLessThanOrEqual(1)
-})
-
-test('Settings separates the search title consistently from every secondary state', async ({
+test('Settings keeps the search title aligned and separates secondary states', async ({
   page,
   kata,
 }) => {
   let current = off as Record<string, unknown>
   await page.route('**/api/v1/embeddings/local', (route) => route.fulfill({ json: current }))
   await kata.launch(page)
+  const positions: number[] = []
   const gaps: number[] = []
   for (const patch of [
     {},
-    { job: { state: 'downloading', downloaded: 120_000_000, total: 290_000_000 } },
+    {
+      can_change: false,
+      job: { state: 'downloading', downloaded: 120_000_000, total: 290_000_000 },
+    },
+    { provider: 'built_in', can_change: false, indexing: { done: 1, total: 2, failed: false } },
     { job: { state: 'failed', downloaded: 0, total: 290_000_000, error: 'Disk is full.' } },
+    { provider: 'built_in', can_change: false },
   ]) {
     current = { ...off, ...patch }
     await page.goto(`${kata.origin}/kata?view=settings`)
     const title = page.getByText('Search by meaning', { exact: true })
     await expect(title).toBeVisible()
     const titleBox = (await title.boundingBox())!
+    positions.push(titleBox.y)
     const secondary = page
       .locator('.kit-search-by-meaning__line, [role="progressbar"], .search-row [role="alert"]')
       .first()
-    const secondaryBox = (await secondary.boundingBox())!
-    gaps.push(secondaryBox.y - titleBox.y - titleBox.height)
+    if (await secondary.count()) {
+      const secondaryBox = (await secondary.boundingBox())!
+      gaps.push(secondaryBox.y - titleBox.y - titleBox.height)
+    }
   }
+  expect(Math.max(...positions) - Math.min(...positions)).toBeLessThanOrEqual(1)
   for (const gap of gaps) expect.soft(gap).toBeCloseTo(8, 0)
-})
-
-test('Settings groups related details apart from retry errors', async ({ page, kata }) => {
-  let current = off as Record<string, unknown>
-  await page.route('**/api/v1/embeddings/local', (route) => route.fulfill({ json: current }))
-  await kata.launch(page)
-  current = { ...off, provider: 'built_in', indexing: { done: 1, total: 2, failed: true } }
-  await page.goto(`${kata.origin}/kata?view=settings`)
-  const alert = page.getByRole('alert')
-  await expect(alert).toBeVisible()
-  const a = (await page.getByRole('progressbar').boundingBox())!
-  const b = (await page
-    .getByText('Indexing 1 of 2 issues · Keyword search works meanwhile', { exact: true })
-    .boundingBox())!
-  const c = (await alert.boundingBox())!
-  expect(c.y - b.y - b.height).toBeGreaterThan(b.y - a.y - a.height)
 })
