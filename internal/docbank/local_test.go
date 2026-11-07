@@ -109,8 +109,7 @@ func TestLocalClientCarriesAttachmentUploadAndContentOverPinnedConnection(t *tes
 
 	folder, err := client.EnsureFolder(t.Context(), "/kata/p")
 	require.NoError(t, err)
-	// MultiReader hides the length so the request body is streamed.
-	version, err := client.Upload(t.Context(), folder, "shot.bin", io.MultiReader(bytes.NewReader(payload)), int64(len(payload)), hex.EncodeToString(sum[:]))
+	version, err := client.Upload(t.Context(), folder, "shot.bin", bytes.NewReader(payload), int64(len(payload)), hex.EncodeToString(sum[:]))
 	require.NoError(t, err)
 	resp, err := client.Content(t.Context(), version)
 	require.NoError(t, err)
