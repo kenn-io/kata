@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -48,34 +49,36 @@ func TestUICommandNoArgOpensInbox(t *testing.T) {
 	assert.Contains(t, openedUIURL, "https://daemon.example/kata#")
 }
 
-func TestUICommandMissingBrowserPrintsReachableURL(t *testing.T) {
+func TestUICommandBrowserFailurePrintsReachableURL(t *testing.T) {
 	handler, err := web.NewEmbeddedHandler()
 	require.NoError(t, err)
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 		cfg.WebHandler = handler
 	})
-	stubUICommandLaunch(t, client.PreparedWebUI{
-		BaseURL: env.URL,
-		Client:  env.HTTP,
-		Runtime: client.DiscoveredWebRuntime{
-			Origin: env.URL, OriginStable: true,
-			Capabilities: []string{"loopback", "sse"},
-		},
-	})
-	openWebBrowserForCommand = func(context.Context, client.WebUILaunch) error {
-		return &exec.Error{Name: "xdg-open", Err: exec.ErrNotFound}
+	for name, openerErr := range map[string]error{
+		"missing":     &exec.Error{Name: "xdg-open", Err: exec.ErrNotFound},
+		"installed":   errors.New("exit status 3"),
+		"unsupported": errors.New("opening a browser is not supported on this platform"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			stubUICommandLaunch(t, client.PreparedWebUI{
+				BaseURL: env.URL, Client: env.HTTP,
+				Runtime: client.DiscoveredWebRuntime{Origin: env.URL, OriginStable: true, Capabilities: []string{"loopback", "sse"}},
+			})
+			openWebBrowserForCommand = func(context.Context, client.WebUILaunch) error { return openerErr }
+			stdout, stderr, err := runCmdCapture(t, nil, "ui")
+			require.NoError(t, err)
+			assert.Equal(t, "Could not open a browser: "+openerErr.Error()+". Open the URL above.\n", stderr)
+			printedURL := strings.TrimSpace(strings.TrimPrefix(stdout, "Opening "))
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, printedURL, nil)
+			require.NoError(t, err)
+			request.Header.Set("Accept", "text/html")
+			response, err := env.HTTP.Do(request)
+			require.NoError(t, err)
+			defer func() { _ = response.Body.Close() }()
+			assert.Equal(t, http.StatusOK, response.StatusCode)
+		})
 	}
-
-	stdout, _, err := runCmdCapture(t, nil, "ui")
-	require.NoError(t, err)
-	printedURL := strings.TrimSpace(strings.TrimPrefix(stdout, "Opening "))
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, printedURL, nil)
-	require.NoError(t, err)
-	request.Header.Set("Accept", "text/html")
-	response, err := env.HTTP.Do(request)
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	assert.Equal(t, http.StatusOK, response.StatusCode)
 }
 
 func TestUICommandOutputModesBeforeBrowser(t *testing.T) {
@@ -87,6 +90,7 @@ func TestUICommandOutputModesBeforeBrowser(t *testing.T) {
 		{"json", []string{"--json"}, "{\"kata_api_version\":1,\"url\":\"https://daemon.example/kata#login=1&return_path=%2Fkata\"}\n"},
 		{"agent", []string{"--agent"}, "OK ui url=https://daemon.example/kata#login=1&return_path=%2Fkata\n"},
 		{"human", nil, "Opening https://daemon.example/kata#login=1&return_path=%2Fkata\n"},
+		{"quiet", []string{"-q"}, "Opening https://daemon.example/kata#login=1&return_path=%2Fkata\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: "https://daemon.example", ConfiguredRemote: true})
@@ -100,28 +104,37 @@ func TestUICommandOutputModesBeforeBrowser(t *testing.T) {
 			openWebBrowserForCommand = func(_ context.Context, launch client.WebUILaunch) error {
 				assert.Equal(t, "https://daemon.example/kata#login=1&return_path=%2Fkata", launch.PublicURL)
 				assert.Equal(t, tc.want, stdout.String())
-				return exec.ErrNotFound
+				return nil
 			}
 			require.NoError(t, cmd.Execute())
-			assert.Equal(t, tc.want, stdout.String())
-			assert.Equal(t, "Could not open a browser: "+exec.ErrNotFound.Error()+". Open the URL above.\n", stderr.String())
 		})
 	}
 }
 
-func TestUICommandPropagatesBrowserFailures(t *testing.T) {
-	for name, openerErr := range map[string]error{
-		"broken opener": errors.New("browser launcher failed"),
-		"cancelled":     context.Canceled,
-	} {
-		t.Run(name, func(t *testing.T) {
-			stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: "https://daemon.example", ConfiguredRemote: true})
-			openWebBrowserForCommand = func(context.Context, client.WebUILaunch) error { return openerErr }
-			stdout, _, err := runCmdCapture(t, nil, "ui")
-			require.ErrorIs(t, err, openerErr)
-			assert.Equal(t, "Opening https://daemon.example/kata#login=1&return_path=%2Fkata\n", stdout)
-		})
+func TestUICommandPropagatesCancellation(t *testing.T) {
+	stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: "https://daemon.example", ConfiguredRemote: true})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	openWebBrowserForCommand = func(context.Context, client.WebUILaunch) error {
+		cancel()
+		return errors.New("signal: killed")
 	}
+	_, _, err := executeRootCapture(t, ctx, "ui")
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestUICommandOutputFailurePreventsBrowser(t *testing.T) {
+	stubUICommandLaunch(t, client.PreparedWebUI{BaseURL: "https://daemon.example", ConfiguredRemote: true})
+	openWebBrowserForCommand = func(context.Context, client.WebUILaunch) error {
+		t.Fatal("browser launched after output failure")
+		return nil
+	}
+	resetFlags(t)
+	cmd := newRootCmd()
+	cmd.SetOut(extraFailWriter{})
+	cmd.SetArgs([]string{"ui"})
+	cmd.SetContext(t.Context())
+	require.ErrorIs(t, cmd.Execute(), io.ErrClosedPipe)
 }
 
 func TestUICommandResolvesRefsToCanonicalUIDRoutes(t *testing.T) {

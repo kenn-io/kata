@@ -27,7 +27,7 @@ kata ui abc4
 kata ui example-project#abc4
 ```
 
-Kata prints the URL in the selected output format before opening the browser; if the browser opener is missing, the command succeeds and asks you to open that URL manually. Other launch errors still fail the command.
+Kata prints the URL in the selected output format before opening the browser; if the browser cannot open, the command succeeds and asks you to open that URL manually. Cancelling the command still returns an error.
 
 Kata resolves the reference before opening the browser, then uses the issue and
 project UIDs in the URL so the bookmark survives project renames and issue
