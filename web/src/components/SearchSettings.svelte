@@ -230,7 +230,7 @@
     </PageHeader>
     <SettingsSection title="Search">
       {#if row}
-        <div class="search-row">
+        <div class="search-row" class:turning-on={countFree}>
           <!-- Disables Turn on while its request is in flight. -->
           <fieldset class="row-actions" disabled={posting}>
             <SearchByMeaningRow
@@ -301,6 +301,13 @@
   .search-row :global(.kit-search-by-meaning) {
     min-height: 0;
     row-gap: var(--space-4);
+  }
+
+  /* Count-free indexing borrows the Off chip, so it takes the info tone
+     indexing's own Turning on chip wears. */
+  .turning-on :global(.kit-chip--tone-muted) {
+    background: color-mix(in srgb, var(--accent-blue) 15%, transparent);
+    color: color-mix(in srgb, var(--accent-blue) 65%, var(--text-primary));
   }
 
   @media (min-width: 641px) {

@@ -10,6 +10,32 @@ const off = {
   can_change: true,
 }
 
+test('Settings keeps Turning on equally active when indexing counts are hidden', async ({
+  page,
+  kata,
+}) => {
+  let current = off as Record<string, unknown>
+  await page.route('**/api/v1/embeddings/local', (route) => route.fulfill({ json: current }))
+  await kata.launch(page)
+  const colors: Array<{ color: string; background: string }> = []
+  for (const patch of [
+    { provider: 'built_in', indexing: { done: 1, total: 2 } },
+    { provider: 'built_in', can_change: false, indexing: {} },
+  ]) {
+    current = { ...off, ...patch }
+    await page.goto(`${kata.origin}/kata?view=settings`)
+    const badge = page.getByText('Turning on', { exact: true })
+    await expect(badge).toBeVisible()
+    colors.push(
+      await badge.evaluate((element) => {
+        const style = getComputedStyle(element.closest('.kit-chip')!)
+        return { color: style.color, background: style.backgroundColor }
+      }),
+    )
+  }
+  expect(colors[1]).toEqual(colors[0])
+})
+
 test('Settings failures stand out above static download details', async ({ page, kata }) => {
   let current = off as Record<string, unknown>
   await page.route('**/api/v1/embeddings/local', (route) => route.fulfill({ json: current }))
