@@ -108,7 +108,7 @@ func (d *Store) ingestFederationEventsOnce(
 			result.RequiredEventFeatures = db.MergeEventFeatures(result.RequiredEventFeatures, feature)
 		}
 	}
-	knownIssueUIDs, err := currentFederatedIssueUIDSet(ctx, tx, p.ProjectID)
+	knownIssueUIDs, err := federationIngestKnownIssueUIDSet(ctx, tx, p.ProjectID, p.Events)
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
@@ -1358,17 +1358,65 @@ func payloadLinks(ev db.RemoteEvent) ([]payloadLink, error) {
 	return created.Links, nil
 }
 
-func currentFederatedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]struct{}, error) {
-	out, err := materializedIssueUIDSet(ctx, tx, projectID)
+// Only identities referenced by this batch participate in admission checks.
+// Resolve them from both current rows and retained creation/move history, just
+// as the complete set does for relay ingress.
+func federationIngestKnownIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FederationIngestEvent) (map[string]struct{}, error) {
+	candidates := map[string]struct{}{}
+	for _, input := range events {
+		if !strings.HasPrefix(input.Event.Type, "issue.") {
+			continue
+		}
+		ev := input.Event
+		if len(ev.Payload) == 0 {
+			ev.Payload = jsontext.Value(`{}`)
+		}
+		payload := db.PayloadMap(ev.Payload)
+		uid, err := payloadIssueUID(ev, payload)
+		if err != nil {
+			return nil, err
+		}
+		if uid != "" {
+			candidates[uid] = struct{}{}
+		}
+		refs, err := payloadReferencedIssueUIDs(ev, payload)
+		if err != nil {
+			return nil, err
+		}
+		for _, ref := range refs {
+			if ref != "" {
+				candidates[ref] = struct{}{}
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return map[string]struct{}{}, nil
+	}
+	// Snapshot links can name many unresolved peers. Keep large batches on the
+	// complete lookup instead of exceeding SQLite's bound-parameter limit.
+	if len(candidates) > federationIngestIssueScopeLimit {
+		return currentFederatedIssueUIDSet(ctx, tx, projectID)
+	}
+	scope := make([]string, 0, len(candidates))
+	for uid := range candidates {
+		scope = append(scope, uid)
+	}
+	return currentFederatedIssueUIDSet(ctx, tx, projectID, scope...)
+}
+
+func currentFederatedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64, scope ...string) (map[string]struct{}, error) {
+	out, err := materializedIssueUIDSet(ctx, tx, projectID, scope...)
 	if err != nil {
 		return nil, err
 	}
-	eventRows, err := tx.QueryContext(ctx, `
+	query := `
 		SELECT issue_uid
 		  FROM events
 		 WHERE project_id = ?
 		   AND issue_uid IS NOT NULL
-		   AND type IN ('issue.created', 'issue.snapshot', 'issue.moved')`, projectID)
+		   AND type IN ('issue.created', 'issue.snapshot', 'issue.moved')`
+	query, args := scopedFederationRows(query, projectID, "issue_uid", scope)
+	eventRows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list event issue uids: %w", err)
 	}
@@ -1383,9 +1431,10 @@ func currentFederatedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int6
 	return out, eventRows.Err()
 }
 
-func materializedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]struct{}, error) {
+func materializedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64, scope ...string) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
-	rows, err := tx.QueryContext(ctx, `SELECT uid FROM issues WHERE project_id = ?`, projectID)
+	query, args := scopedFederationRows(`SELECT uid FROM issues WHERE project_id = ?`, projectID, "uid", scope)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list current issue uids: %w", err)
 	}

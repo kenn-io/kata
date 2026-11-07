@@ -89,6 +89,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.
+- Push ordinary issue changes to large SQLite hubs without replaying every
+  unrelated issue. Preparation folds touched issue histories; project-wide
+  changes and move history retain complete replay, and link reconciliation
+  keeps its existing scope.
 
 - Pull shared cron updates faster on large SQLite spokes by replaying cron
   history without reconciling unrelated issues and their short IDs.

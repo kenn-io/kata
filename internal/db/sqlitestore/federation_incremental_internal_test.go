@@ -497,3 +497,73 @@ func TestFederationIncrementalNewEndpointsAndShortIDCollisions(t *testing.T) {
 	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT count(*) FROM links`).Scan(&links))
 	require.Equal(t, 2, links)
 }
+
+// Ordinary pushes have the same touched-issue boundary as ordinary pull pages.
+// Older HLCs and payload-only identities must still agree with a complete fold.
+func TestFederationIngestOnlyMaterializesTouchedIssues(t *testing.T) {
+	for _, payloadOnly := range []bool{false, true} {
+		for _, older := range []bool{false, true} {
+			t.Run(fmt.Sprintf("payload-only=%t/older=%t", payloadOnly, older), func(t *testing.T) {
+				d, p, issue := incrementalTestStore(t)
+				ctx := t.Context()
+				other, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "untouched", Author: "tester", Labels: []string{"retained"}})
+				require.NoError(t, err)
+				_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "tester", Body: "retained note"})
+				require.NoError(t, err)
+				_, err = d.ExecContext(ctx, `UPDATE issues SET title='local projection' WHERE id=?`, other.ID)
+				require.NoError(t, err)
+				_, err = d.ExecContext(ctx, `UPDATE projects SET metadata='{"retained":true}' WHERE id=?`, p.ID)
+				require.NoError(t, err)
+				reference := cloneIncrementalStore(t, d)
+				uid := issue.UID
+				if payloadOnly {
+					uid = ""
+				}
+				clock := int64(9_000_000_000_000)
+				if older {
+					clock = 1
+				}
+				ev := incrementalRemoteEvent(t, p, uid, "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":"incoming"}`, issue.UID), clock)
+				params := db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: ev.OriginInstanceUID, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}}}
+				result, err := d.IngestFederationEvents(ctx, params)
+				require.NoError(t, err)
+				require.Equal(t, 1, result.Accepted)
+				_, err = ingestFullRebuildReference(ctx, reference, params)
+				require.NoError(t, err)
+				actual, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				want, err := reference.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, want, actual)
+				sibling, err := d.IssueByUID(ctx, other.UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, "local projection", sibling.Title)
+				labels, err := d.LabelsByIssue(ctx, other.ID)
+				require.NoError(t, err)
+				require.Len(t, labels, 1)
+				require.Equal(t, "retained", labels[0].Label)
+				comments, err := d.CommentsByIssue(ctx, other.ID)
+				require.NoError(t, err)
+				require.Len(t, comments, 1)
+				require.Equal(t, "retained note", comments[0].Body)
+				project, err := d.ProjectByID(ctx, p.ID)
+				require.NoError(t, err)
+				require.JSONEq(t, `{"retained":true}`, string(project.Metadata))
+			})
+		}
+	}
+}
+
+// A reopened event may omit its payload; ingest normalizes that to an empty
+// object before validating and applying it.
+func TestFederationIngestAcceptsEmptyPayload(t *testing.T) {
+	d, p, issue := incrementalTestStore(t)
+	ev := incrementalRemoteEvent(t, p, issue.UID, "issue.reopened", `{}`, 9_000_001_000_000)
+	ev.Payload = nil
+	result, err := d.IngestFederationEvents(t.Context(), db.FederationIngestParams{
+		ProjectID: p.ID, SpokeInstanceUID: ev.OriginInstanceUID,
+		Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Accepted)
+}
