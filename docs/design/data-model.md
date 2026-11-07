@@ -139,7 +139,7 @@ precedence over the force-new escape hatch.
 SQLite upgrades that only add indexes register a complete version chain in
 `indexOnlyUpgrades` in `internal/db/sqlitestore/schema_upgrade.go`. Startup
 applies those indexes and the schema-version stamp in one transaction under
-the cutover lock. Schemas 41 through 47 can reach schema 48 this way.
+the cutover lock. Schemas 41 through 48 can reach schema 49 this way.
 
 Changes to tables, triggers, or FTS use JSONL cutover. Kata exports the current
 database to JSONL exactly as stored, imports that JSONL

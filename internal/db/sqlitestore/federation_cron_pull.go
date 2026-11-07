@@ -17,8 +17,9 @@ func prepareCronPullMaterialization(ctx context.Context, tx *sql.Tx, projectID i
 	runUIDs := []string{}
 	for _, in := range prepared {
 		if in.Event.Type == "cron.run.observed" || in.Event.Type == "cron.run.snapshot" {
-			var body db.CronRunObservation
-			if err := json.Unmarshal(in.Event.Payload, &body); err != nil {
+			event := in.Event
+			body, err := db.ParseCronRunObservation(db.FoldEvent{UID: event.EventUID, ProjectUID: event.ProjectUID, Type: event.Type, Payload: event.Payload, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter})
+			if err != nil {
 				return federationMaterialization{}, err
 			}
 			runUIDs = append(runUIDs, body.UID)

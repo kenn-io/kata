@@ -169,7 +169,7 @@ func validateCronEvent(event RemoteEvent, applyRules bool) error {
 		return fmt.Errorf("%w: invalid cron envelope", ErrFederationIngestValidation)
 	}
 	if event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot" {
-		_, err := parseCronRunObservation(FoldEvent{UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, Payload: event.Payload, Type: event.Type})
+		_, err := ParseCronRunObservation(FoldEvent{UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, Payload: event.Payload, Type: event.Type})
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
 		}

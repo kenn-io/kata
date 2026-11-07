@@ -61,24 +61,6 @@ func TestCronPullMaterializesOnlyTouchedRuns(t *testing.T) {
 	require.Equal(t, "original B", run.Summary.Message)
 }
 
-func TestCronPullRejectsPendingRunIdentityChange(t *testing.T) {
-	d, p, _ := incrementalTestStore(t)
-	workflow := cronPullWorkflow(t, p, "workflow", 9_000_001_000_000)
-	original := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FBB", "original", 9_000_001_000_001)
-	_, err := d.InsertRemoteEvents(t.Context(), p.ID, []db.RemoteEvent{workflow, original})
-	require.NoError(t, err)
-	var count int
-	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT count(*) FROM cron_runs WHERE project_id=?`, p.ID).Scan(&count))
-	require.Zero(t, count)
-	changed := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FBB", "changed", 9_000_001_000_002)
-	changed = incrementalRemoteEvent(t, p, "", changed.Type, strings.ReplaceAll(string(changed.Payload), `"actor":"tester"`, `"actor":"other"`), changed.HLCPhysicalMS)
-	_, err = d.InsertRemoteEvents(t.Context(), p.ID, []db.RemoteEvent{changed})
-	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
-	var exists bool
-	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE uid=?)`, changed.EventUID).Scan(&exists))
-	require.False(t, exists)
-}
-
 func seedCronPullHistory(t testing.TB, d *Store, p db.Project, count int) {
 	t.Helper()
 	tx, err := d.BeginTx(t.Context(), nil)

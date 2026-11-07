@@ -56,7 +56,8 @@ type FoldCronRun struct {
 	ObservationHLC      CronDefinitionHLC
 }
 
-func parseCronRunObservation(e FoldEvent) (FoldCronRun, error) {
+// ParseCronRunObservation validates a run observation and preserves its original provenance.
+func ParseCronRunObservation(e FoldEvent) (FoldCronRun, error) {
 	if len(e.Payload) > CronObservationLimit {
 		return FoldCronRun{}, fmt.Errorf("run observation exceeds byte limit")
 	}
@@ -131,7 +132,7 @@ func (v *CronReplayValidator) Validate(ctx context.Context, projectID int64, eve
 		_, err = v.idx.event(projectID, e)
 		return classifyCronReferenceError(err, ErrFederationIngestValidation)
 	}
-	incoming, err := parseCronRunObservation(e)
+	incoming, err := ParseCronRunObservation(e)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
 	}
@@ -168,7 +169,7 @@ func (v *CronReplayValidator) Validate(ctx context.Context, projectID int64, eve
 					return fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 				}
 				previous.ProjectUID = body.ProjectUID
-				value, err := parseCronRunObservation(previous)
+				value, err := ParseCronRunObservation(previous)
 				if err != nil {
 					return fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 				}
@@ -210,7 +211,7 @@ func (v *CronReplayValidator) Validate(ctx context.Context, projectID int64, eve
 	return nil
 }
 func (p *FoldProjection) applyCronRun(e FoldEvent) {
-	value, err := parseCronRunObservation(e)
+	value, err := ParseCronRunObservation(e)
 	if err != nil {
 		p.Warnings = append(p.Warnings, err.Error())
 		return
