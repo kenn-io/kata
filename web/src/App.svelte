@@ -160,7 +160,11 @@
     daemonFetch,
     rejectCredentialsAndRequireAuthentication,
   )
-  const searchSettingsPostFetch = createCredentialedFetch(undefined, fetch, requireAuthentication)
+  const searchSettingsPostFetch = createCredentialedFetch(
+    undefined,
+    fetch,
+    rejectCredentialsAndRequireAuthentication,
+  )
   setGeneratedFetch(browserFetch)
   let browserTelemetry: ReturnType<typeof startBrowserTelemetry> | undefined
   let stopQuietSubscription: (() => void) | undefined
