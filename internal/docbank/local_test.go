@@ -25,12 +25,17 @@ func requireUnreachable(t *testing.T, err error) {
 	require.Zero(t, apiErr.Status)
 }
 
+// publishedOnly finds only fakes the test published; a discovery regression must not launch a real Docbank.
+var publishedOnly = docbank.Local{Start: func(context.Context, string) error {
+	return errors.New("test must not start docbank")
+}}
+
 func TestLocalClientFollowsRestartedDocbank(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DOCBANK_HOME", home)
 	a := docbanktest.New(t)
 	a.Publish(t, home)
-	client := docbank.NewLocalClient(docbank.Local{})
+	client := docbank.NewLocalClient(publishedOnly)
 
 	_, err := client.ResolvePath(t.Context(), "/")
 	require.NoError(t, err)
@@ -76,7 +81,7 @@ func TestLocalClientNeverSendsKeyToImpostor(t *testing.T) {
 	impostor := docbanktest.New(t)
 	impostor.Publish(t, home)
 	impostor.Key = "not-the-recorded-key"
-	client := docbank.NewLocalClient(docbank.Local{})
+	client := docbank.NewLocalClient(publishedOnly)
 
 	_, err := client.ResolvePath(t.Context(), "/")
 	requireUnreachable(t, err)
@@ -93,7 +98,7 @@ func TestLocalClientFollowsSymlinkedHome(t *testing.T) {
 	t.Setenv("DOCBANK_HOME", link)
 	fake := docbanktest.New(t)
 	fake.Publish(t, vault)
-	client := docbank.NewLocalClient(docbank.Local{})
+	client := docbank.NewLocalClient(publishedOnly)
 
 	_, err := client.ResolvePath(t.Context(), "/")
 	require.NoError(t, err)
@@ -103,7 +108,7 @@ func TestLocalClientCarriesAttachmentUploadAndContentOverPinnedConnection(t *tes
 	home := t.TempDir()
 	t.Setenv("DOCBANK_HOME", home)
 	docbanktest.New(t).Publish(t, home)
-	client := docbank.NewLocalClient(docbank.Local{})
+	client := docbank.NewLocalClient(publishedOnly)
 	payload := bytes.Repeat([]byte("kata attachment "), 64<<10)
 	sum := sha256.Sum256(payload)
 
