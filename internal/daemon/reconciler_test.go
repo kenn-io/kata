@@ -6,15 +6,20 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/activity"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/embedding"
@@ -329,6 +334,23 @@ func TestReconcileRecipeChangeCutsOverEligibleProjectsWithDeferredSharedContent(
 	require.Zero(t, skipped)
 	require.EqualValues(t, 1, backlog, "deferred shared content remains pending")
 	require.EqualValues(t, 1, newReconciler.Health().Backlog)
+	require.NotNil(t, newReconciler.Health().LastSuccessAt)
+	mux := http.NewServeMux()
+	registerLocalEmbeddingsHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{LocalEmbeddings: &localEmbeddingsFixture{}, ReconcilerHealth: newReconciler.Health})
+	readIndexing := func() *api.LocalEmbeddingsIndexing {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequestWithContext(WithPrincipal(ctx, Principal{Kind: PrincipalWebLocal}), "GET", "/api/v1/embeddings/local", nil)
+		mux.ServeHTTP(response, request)
+		require.Equal(t, 200, response.Code)
+		var status api.LocalEmbeddingsStatus
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &status))
+		return status.Indexing
+	}
+	indexing := readIndexing()
+	require.NotNil(t, indexing, "a successful pass can leave shared issues waiting for their producer")
+	require.EqualValues(t, 1, indexing.Done)
+	require.EqualValues(t, 2, indexing.Total)
+
 	encoded := newEmbedder.inputs()
 	require.Len(t, encoded, 1)
 	require.Contains(t, encoded[0][0], "private search target")
@@ -356,6 +378,7 @@ func TestReconcileRecipeChangeCutsOverEligibleProjectsWithDeferredSharedContent(
 	_, _, backlog, err = idx.Coverage(ctx, newKey)
 	require.NoError(t, err)
 	require.Zero(t, backlog, "shared content resumes after the root adopts the new recipe")
+	require.Nil(t, readIndexing(), "completed coverage clears Settings progress")
 	encoded = newEmbedder.inputs()
 	require.Len(t, encoded, 2)
 	require.Contains(t, encoded[1][0], "shared search target")

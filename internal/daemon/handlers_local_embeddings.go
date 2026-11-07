@@ -46,7 +46,7 @@ func registerLocalEmbeddingsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if cfg.ReconcilerHealth != nil {
 			h := cfg.ReconcilerHealth()
-			if h.LastSuccessAt == nil {
+			if h.LastSuccessAt == nil || h.Backlog > 0 {
 				snapshot.Indexing = &api.LocalEmbeddingsIndexing{Failed: h.LastError != ""}
 				if owner {
 					snapshot.Indexing.Done, snapshot.Indexing.Total, snapshot.Indexing.ETASeconds = h.Embedded+h.Skipped, h.Embedded+h.Skipped+h.Backlog, h.ETASeconds
