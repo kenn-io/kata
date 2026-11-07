@@ -39,12 +39,7 @@ kata docbank setup --url https://docbank.example --key-file /path/to/docbank-key
 
 Setup reads the key from `--key-file` (allowed only with `--url`), checks it with an authenticated read of the Docbank's root folder, and adds `[docbank]` with `url`, `api_key_file`, and `folder`.
 
-Setup changes nothing when:
-
-- `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, or `KATA_DOCBANK_FOLDER` is set;
-- `config.toml` already has a different `[docbank]` section;
-- Docbank cannot be found or started, or rejects the key;
-- `--key-file` is given without `--url`.
+Setup changes nothing while `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, or `KATA_DOCBANK_FOLDER` is set, when `config.toml` already has a different `[docbank]` section, or when the Docbank check fails.
 
 Running setup again with the same settings reports that attachments are already set up, writes nothing and does not ask; it still checks Docbank, starting it when it is not running. See the [CLI reference](../reference/cli.md#issue-attachments) for flags and output.
 
