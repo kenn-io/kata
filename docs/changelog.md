@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Attach oh-my-pi sessions to closes by copying the documented
+  [closing-session transcript](reference/configuration.md#closing-session-transcripts)
+  configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
+  `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
+  recorded oh-my-pi closes as pi sessions.
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the
@@ -90,6 +95,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   of a restored run. See [run retention](reference/cron.md#run-retention).
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.
+- Push ordinary issue changes to large SQLite hubs without replaying every
+  unrelated issue. Preparation folds touched issue histories; project-wide
+  changes and move history retain complete replay, and link reconciliation
+  keeps its existing scope.
 
 - Pull shared cron updates faster on large SQLite spokes by replaying cron
   history without reconciling unrelated issues and their short IDs.

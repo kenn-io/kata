@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/testenv"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 // Showing a spoke issue must retain its cached lease when a local writer
@@ -100,10 +101,13 @@ func (s *showClaimPendingWaitStore) MarkPendingClaimAttempt(ctx context.Context,
 }
 
 func TestShowIssueClaimFailureRecordingPreservesCommittedPrefixProperty(t *testing.T) {
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "24"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
 	daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond) //nolint:kennlint // deadlinetest: controlled pending-attempt persistence waits for optional cancellation
-	hegel.Test(t, func(ht *hegel.T) {
-		count := hegel.Draw(ht, hegel.Integers(0, 6))
-		prefix := hegel.Draw(ht, hegel.Integers(0, count))
+	rapid.Check(t, func(rt *rapid.T) {
+		count := rapid.IntRange(0, 6).Draw(rt, "pending claim count")
+		prefix := rapid.IntRange(0, count).Draw(rt, "committed prefix")
 		spoke := testenv.New(t, func(cfg *daemon.ServerConfig) {
 			cfg.DB = &showClaimPendingWaitStore{Storage: cfg.DB, remaining: prefix}
 		})
@@ -121,20 +125,20 @@ func TestShowIssueClaimFailureRecordingPreservesCommittedPrefixProperty(t *testi
 		t.Cleanup(hub.Close)
 		writeShowClaimSpokeBinding(t, spoke, project, hub.URL, "claim-token", "claim")
 		body := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, time.Second)
-		require.Len(ht, body.PendingClaims, count)
+		require.Len(rt, body.PendingClaims, count)
 		for i, pending := range body.PendingClaims {
-			require.Equal(ht, ids[count-1-i], pending.RequestUID)
+			require.Equal(rt, ids[count-1-i], pending.RequestUID)
 			if i < prefix {
-				require.NotNil(ht, pending.LastError)
-				require.Contains(ht, *pending.LastError, "status refresh")
+				require.NotNil(rt, pending.LastError)
+				require.Contains(rt, *pending.LastError, "status refresh")
 			} else {
-				require.Nil(ht, pending.LastError)
+				require.Nil(rt, pending.LastError)
 			}
 		}
 		marker, err := spoke.DB.ClaimStatusRefreshError(t.Context(), project.ID, issue.UID)
-		require.NoError(ht, err)
-		require.Equal(ht, http.StatusServiceUnavailable, marker.StatusCode)
-	}, hegel.WithTestCases(24), hegel.WithDatabase(t.TempDir()))
+		require.NoError(rt, err)
+		require.Equal(rt, http.StatusServiceUnavailable, marker.StatusCode)
+	})
 }
 
 func TestShowIssueClaimSpokeKeepsCommittedRefreshWhenClearingTimesOut(t *testing.T) {

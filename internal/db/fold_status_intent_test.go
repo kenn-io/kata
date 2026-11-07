@@ -34,8 +34,7 @@ func TestFoldStatusIntentSurvivesOnlyEffectiveExplicitTransitions(t *testing.T) 
 
 func TestFoldStatusIntentMatchesTraceForGeneratedPermutations(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		requested := rapid.IntRange(1, int(^uint(0)>>1)).Draw(t, "event count")
-		count := min(requested, 40)
+		count := rapid.IntRange(1, 40).Draw(t, "event count")
 		sharedTick := rapid.Int64Range(0, int64(^uint64(0)>>1)).Draw(t, "shared physical clock")
 		tiedPhysical := rapid.Bool().Draw(t, "physical clocks tied")
 		events := []FoldEvent{testEvent("issue.created", 0, `{"uid":"issue-1","status":"open"}`)}

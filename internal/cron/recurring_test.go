@@ -159,7 +159,11 @@ func TestCalendarAndCatchup(t *testing.T) {
 func TestRecurringIntervalPrefixProperty(t *testing.T) {
 	base := nativeJob(t)
 	rapid.Check(t, func(t *rapid.T) {
-		seconds := rapid.Int64Range(60, maxDurationSeconds).Draw(t, "seconds")
+		seconds := rapid.OneOf(
+			rapid.Int64Range(60, maxDurationSeconds),
+			rapid.Int64Range(60, 3659),
+			rapid.SampledFrom([]int64{60, maxDurationSeconds}),
+		).Draw(t, "seconds")
 		count := rapid.Uint64().Draw(t, "count")
 		// Materialize a bounded timeline; generation still spans the duration domain.
 		n := int(count%200) + 1
