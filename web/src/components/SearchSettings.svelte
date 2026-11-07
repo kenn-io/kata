@@ -57,7 +57,7 @@
     off: 'Turning on',
     downloaded: remoteHost
       ? `Restart the daemon on ${remoteHost} to finish.`
-      : 'Restart the daemon to finish: run kata daemon restart.',
+      : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
   })
   let failure = $derived(requestError ?? (job?.state === 'failed' ? job.error : undefined))
   // Indexing keeps polling while failed, so the note clears once a pass succeeds.

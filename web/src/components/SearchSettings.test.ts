@@ -149,7 +149,7 @@ describe('SearchSettings', () => {
         screen.getByText(
           remoteHost
             ? `Restart the daemon on ${remoteHost} to finish.`
-            : 'Restart the daemon to finish: run kata daemon restart.',
+            : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
         ),
       ).not.toBeNull()
       expect(screen.queryByRole('button', { name: 'Turn on' })).toBeNull()

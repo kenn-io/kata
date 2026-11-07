@@ -1673,7 +1673,9 @@ describe('App', () => {
       await fireEvent.click(await screen.findByRole('button', { name: 'Turn on' }))
 
       if (outcome === 'accepted') {
-        await screen.findByText('Restart the daemon to finish: run kata daemon restart.')
+        await screen.findByText(
+          'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+        )
         expect(sessionStorage.getItem('kata.web.session.v1')).toContain('tab-session')
       } else {
         await screen.findByRole('form', { name: 'Log in to Kata' })

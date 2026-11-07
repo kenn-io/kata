@@ -474,6 +474,7 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 		status.Provider = "built_in"
 	} else if s.embeddings.Enabled() {
 		status.Provider = "other"
+		// Kit probes local availability; it doesn't classify configured endpoints.
 		endpoint, err := url.Parse(s.embeddings.BaseURL)
 		if err == nil && endpoint.Port() == "11434" && (endpoint.Hostname() == "localhost" || net.ParseIP(endpoint.Hostname()).IsLoopback()) {
 			status.Provider = "ollama"
