@@ -45,14 +45,14 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
  FROM issues subject WHERE subject.project_id=$1
  ) candidates)`
 	events := []Event{}
-	for pos := afterID; len(events) < limit && pos < math.MaxInt64; {
-		end := pos + min(width, math.MaxInt64-pos)
+	for pos, span := afterID, width; len(events) < limit && pos < math.MaxInt64; {
+		end := pos + min(span, math.MaxInt64-pos)
 		page, err := query(` WHERE `+visible+` AND e.id>$2 AND e.id<=$3 ORDER BY e.id LIMIT $4`, project.ID, pos, end, limit-len(events))
 		if err != nil {
 			return nil, err
 		}
-		events = append(events, page...)
-		pos = end
+		// Widen after each productive window and reset after each seek.
+		events, pos, span = append(events, page...), end, span+min(span, math.MaxInt64-span)
 		if len(page) == 0 {
 			candidate, err := query(next, project.ID, pos, project.UID)
 			if err != nil {
@@ -61,7 +61,7 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 			if len(candidate) == 0 {
 				break
 			}
-			pos = candidate[0].ID - 1
+			pos, span = candidate[0].ID-1, width
 		}
 	}
 	return events, nil
