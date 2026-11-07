@@ -13,7 +13,7 @@ import (
 const (
 	canonicalColumnFingerprint     = "e39313e493aca5629098c150076ee7e1aa04a8d747d8704001e741401fe3df50"
 	canonicalConstraintFingerprint = "ec4c05a641252558d8b52b92ed9ff97c9310064e5f8ad2ab8c636fba65344a17"
-	canonicalIndexFingerprint      = "aafb5c873cf244d187745e763b0670ec885f8ff31c08ed6eec61fe4fe0f58e0a"
+	canonicalIndexFingerprint      = "684155ae767c5f04857943ff70cf13813f47111f2c9db53d66f7d9db7e000fa5"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -73,7 +73,7 @@ var optionalVectorTableColumns = map[string]string{
 }
 
 var canonicalIndexes = strings.Fields(`
-idx_cron_jobs_project_name idx_cron_workflows_project_name idx_cron_runs_project_time idx_cron_runs_job_time idx_events_project_cron
+idx_cron_jobs_project_name idx_cron_workflows_project_name idx_cron_runs_project_time idx_cron_runs_job_time idx_events_project_cron idx_events_cron_run_uid
 idx_embedding_artifacts_input idx_embedding_artifacts_staging
 idx_relay_outbox_pending idx_relay_inbox_prefix
 uniq_federation_root_active

@@ -421,3 +421,20 @@ runtime credentials cannot migrate.
 Start the matching schema 48 binary after migration. Older binaries cannot open
 schema 48. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 49: cron run history index
+
+Cron replay looks up each incoming run's observation history by UID. The 48→49
+migration adds `idx_events_cron_run_uid` on `events`, keyed by project, event
+type, and the payload's run UID for `cron.%` events. Fresh databases include
+the index. SQLite adds it in place, with an atomic schema-version update.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads `events` and blocks event writes; reserve an offline window sized
+for the table. Existing runtime grants remain sufficient. Validation-only
+runtime credentials cannot migrate.
+
+Start the matching schema 49 binary after migration. Older binaries cannot open
+schema 49. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

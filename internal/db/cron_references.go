@@ -188,7 +188,7 @@ type CronReplayValidator struct {
 	historyPrepared map[cronDefinitionReference]bool
 	ownersLoaded    map[cronDefinitionIdentity]bool
 	eventsLoaded    map[string]bool
-	runsLoaded      map[int64]bool
+	runsLoaded      map[string]bool
 	runs            map[string]CronRun
 }
 
@@ -197,7 +197,7 @@ type CronReplayValidator struct {
 // NewCronReplayValidator validates cron replay inside one transaction.
 // postgres selects PostgreSQL SQL for the shared history queries.
 func NewCronReplayValidator(tx *sql.Tx, postgres bool) *CronReplayValidator {
-	return &CronReplayValidator{tx: tx, postgres: postgres, idx: newCronReferenceIndex(), loaded: map[cronDefinitionReference]bool{}, historyPrepared: map[cronDefinitionReference]bool{}, ownersLoaded: map[cronDefinitionIdentity]bool{}, eventsLoaded: map[string]bool{}, runsLoaded: map[int64]bool{}, runs: map[string]CronRun{}}
+	return &CronReplayValidator{tx: tx, postgres: postgres, idx: newCronReferenceIndex(), loaded: map[cronDefinitionReference]bool{}, historyPrepared: map[cronDefinitionReference]bool{}, ownersLoaded: map[cronDefinitionIdentity]bool{}, eventsLoaded: map[string]bool{}, runsLoaded: map[string]bool{}, runs: map[string]CronRun{}}
 }
 
 func (v *CronReplayValidator) loadKnown(ctx context.Context, ref cronDefinitionReference) error {

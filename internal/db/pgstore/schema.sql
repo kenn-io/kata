@@ -867,6 +867,7 @@ CREATE TABLE cron_runs (
 CREATE INDEX idx_cron_runs_project_time ON cron_runs(project_id,created_at,uid);
 CREATE INDEX idx_cron_runs_job_time ON cron_runs(project_id,job_uid,created_at,uid);
 CREATE INDEX idx_events_project_cron ON events(project_id) WHERE type LIKE 'cron.%';
+CREATE INDEX idx_events_cron_run_uid ON events(project_id, type, (payload::jsonb->>'uid')) WHERE type LIKE 'cron.%';
 
 -- Teams are daemon-local actor groups; restricted empty policies stay restricted.
 CREATE TABLE teams (

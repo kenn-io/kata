@@ -96,4 +96,29 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.Equal(t, "Nightly review", job.Name)
 	require.Equal(t, created.EventUID, job.DefinitionEventUID)
+
+	// Admission must compare pending run history before a projection exists.
+	jobUID, err = uid.New()
+	require.NoError(t, err)
+	legacyJob := cronEvent(legacy, "cron.job.created", jobUID, "")
+	_, err = store.InsertRemoteEvent(ctx, legacy.ID, legacyJob)
+	require.NoError(t, err)
+	runUID, err := uid.New()
+	require.NoError(t, err)
+	run := db.CronRun{UID: runUID, JobUID: &jobUID, DefinitionEventUID: &legacyJob.EventUID, Actor: "source-assistant", Status: "running", Summary: cron.Summary{Version: 1}, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	body, err := json.Marshal(db.NewCronRunObservation(run, legacy.UID))
+	require.NoError(t, err)
+	observation := newRemoteEvent(t, legacy, nil, "cron.run.observed", "source-assistant", downstream, 320, body)
+	_, err = store.InsertRemoteEvent(ctx, legacy.ID, observation)
+	require.NoError(t, err)
+	_, err = store.CronRun(ctx, legacy.ID, runUID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	run.Actor = "other-assistant"
+	body, err = json.Marshal(db.NewCronRunObservation(run, legacy.UID))
+	require.NoError(t, err)
+	changed := newRemoteEvent(t, legacy, nil, "cron.run.observed", "source-assistant", downstream, 321, body)
+	_, err = store.InsertRemoteEvent(ctx, legacy.ID, changed)
+	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	_, err = store.EventsByUIDs(ctx, legacy.ID, []string{changed.EventUID})
+	require.ErrorIs(t, err, db.ErrNotFound)
 }
