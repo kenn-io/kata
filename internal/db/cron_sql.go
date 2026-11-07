@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -61,11 +62,12 @@ type cronRow struct {
 	document []byte
 }
 
-func scanCron(row interface{ Scan(...any) error }) (cronRow, error) {
+func scanCron(row interface{ Scan(...any) error }, extra ...any) (cronRow, error) {
 	var result cronRow
 	var definition, clock, created, updated string
 	var deleted sql.NullString
 	fields := []any{&result.ID, &result.UID, &result.ProjectID, &result.Name, &definition, &result.DefinitionEventUID, &clock, &result.Author, &result.Revision, &created, &updated, &deleted}
+	fields = append(fields, extra...)
 	if err := row.Scan(fields...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return result, ErrNotFound
@@ -330,10 +332,15 @@ func (a CronSQL) openCronProject(ctx context.Context, tx *sql.Tx, projectID int6
 		return Project{}, err
 	}
 	project := Project{ID: projectID}
-	err := tx.QueryRowContext(ctx, `SELECT uid,name FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, projectID, SystemProjectName).Scan(&project.UID, &project.Name)
+	var created string
+	err := tx.QueryRowContext(ctx, `SELECT uid,name,metadata,revision,created_at FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, projectID, SystemProjectName).Scan(&project.UID, &project.Name, &project.Metadata, &project.Revision, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Project{}, ErrNotFound
 	}
+	if err != nil {
+		return Project{}, err
+	}
+	project.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 	if err != nil {
 		return Project{}, err
 	}
@@ -356,12 +363,35 @@ func checkCronPutState(req cronPutRequest, current cronRow, fresh bool) error {
 }
 
 func (a CronSQL) checkCronPutDependencies(ctx context.Context, tx *sql.Tx, req cronPutRequest, current cronRow) error {
+	var old cron.JobDefinition
 	if req.job {
-		if err := a.checkRecurringPutTx(ctx, tx, req, current); err != nil {
+		if len(current.document) > 0 {
+			var err error
+			old, err = cron.DecodeJob(current.document)
+			if err != nil && !req.deleted {
+				return err
+			}
+		}
+		if err := a.checkRecurringPutTx(ctx, tx, req, old); err != nil {
 			return err
 		}
 	}
 	if req.job && !req.deleted {
+		// Existing native progress and ownership were checked above. Pausing
+		// retains same-project tombstones; native resume retains its gated
+		// parent, while adapter resume requires live dependencies.
+		if current.DeletedAt == nil && len(current.document) > 0 {
+			definition := req.definition.(cron.JobDefinition)
+			enabledChanged := old.Enabled != definition.Enabled
+			old.Enabled = definition.Enabled
+			if enabledChanged && (!definition.Enabled || cron.IsRecurringIssueJob(definition)) && reflect.DeepEqual(old, definition) {
+				// The locked native parent and progress were checked above.
+				if cron.IsRecurringIssueJob(definition) {
+					return nil
+				}
+				return checkCronDependenciesForEnabledChange(ctx, tx, req.projectID, definition)
+			}
+		}
 		return CheckCronDependencies(ctx, tx, req.projectID, req.definition.(cron.JobDefinition))
 	}
 	if !req.job && req.deleted && current.DeletedAt == nil {

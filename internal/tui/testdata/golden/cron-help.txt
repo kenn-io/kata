@@ -12,8 +12,11 @@ j/k    move
 ↵/l    open
 /      filter
 n/e    new/edit
+p      pause/resume
 h/esc  kata
 r      refresh
 1-4    tabs
 ?      help
 q      quit
+R      request run
+X      request cancel

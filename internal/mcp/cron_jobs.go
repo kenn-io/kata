@@ -140,3 +140,70 @@ func (h toolHandlers) cronJobRestore(ctx context.Context, _ *sdkmcp.CallToolRequ
 	}
 	return cronResult(h.options.Client.RestoreCronJob(ctx, &generated.RestoreCronJobRequestOptions{PathParams: &generated.RestoreCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.RestoreCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }
+
+func (h toolHandlers) cronEnabledTarget(ctx context.Context, in CronEnabledActionInput) (int64, string, *string, error) {
+	id, err := cronUID(in.UID)
+	if err != nil {
+		return 0, "", nil, err
+	}
+	expected, err := cronOptionalExpected(in.ExpectedEventUID)
+	if err != nil {
+		return 0, "", nil, err
+	}
+	p, err := h.createTarget(ctx, in.Project)
+	return p.ID, id, expected, err
+}
+func (h toolHandlers) cronJobPause(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronEnabledActionInput) (*sdkmcp.CallToolResult, generated.PauseCronJobResponse, error) {
+	h = h.withLongRunningClient()
+	projectID, id, expected, err := h.cronEnabledTarget(ctx, in)
+	if err != nil {
+		return nil, generated.PauseCronJobResponse{}, err
+	}
+	return cronResult(h.options.Client.PauseCronJob(ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: projectID, CronUID: id}, Body: &generated.PauseCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
+}
+func (h toolHandlers) cronJobResume(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronResumeActionInput) (*sdkmcp.CallToolResult, generated.ResumeCronJobResponse, error) {
+	h = h.withLongRunningClient()
+	projectID, id, expected, err := h.cronEnabledTarget(ctx, in.CronEnabledActionInput)
+	if err != nil {
+		return nil, generated.ResumeCronJobResponse{}, err
+	}
+	if in.DiscardMissed {
+		if _, err = h.cronDiscardCapabilities(ctx, projectID, false); err != nil {
+			return nil, generated.ResumeCronJobResponse{}, err
+		}
+		if expected == nil {
+			shown, readErr := h.options.Client.ShowCronJob(ctx, &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: id}})
+			if readErr != nil {
+				return nil, generated.ResumeCronJobResponse{}, readErr
+			}
+			expected, err = cronOptionalExpected(shown.Job.DefinitionEventUID)
+			if err != nil {
+				return nil, generated.ResumeCronJobResponse{}, err
+			}
+			if expected == nil {
+				return nil, generated.ResumeCronJobResponse{}, errors.New("job revision is unavailable")
+			}
+		}
+	}
+	var discardFlag *bool
+	if in.DiscardMissed {
+		discardFlag = &in.DiscardMissed
+	}
+	return cronResult(h.options.Client.ResumeCronJob(ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: projectID, CronUID: id}, Body: &generated.ResumeCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected, DiscardMissed: discardFlag}}))
+}
+func cronOptionalExpected(value string) (*string, error) {
+	if value == "" {
+		return nil, nil
+	}
+	expected, err := cronExpected(value)
+	if err != nil {
+		return nil, err
+	}
+	return &expected, nil
+}
+
+// CronResumeActionInput adds explicitly requested backlog discard to resume.
+type CronResumeActionInput struct {
+	CronEnabledActionInput
+	DiscardMissed bool `json:"discard_missed,omitempty" jsonschema:"Discard all undelivered scheduled occurrences through the resume cutoff; root support required"`
+}

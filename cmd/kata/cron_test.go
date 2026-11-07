@@ -140,6 +140,7 @@ func TestCronCLIRejectsInvalidInputBeforeNetwork(t *testing.T) {
 		want string
 	}{
 		{[]string{"job", "create", "--file", "-"}, `{"operator":true}`, "unknown"},
+		{[]string{"job", "resume", "01J00000000000000000000001", "--discard-missed", "--file", "-"}, `null`, "cron request must be a JSON object"},
 
 		{[]string{"job", "create", "--file", "-"}, `{"actor":"one","actor":"two"}`, "duplicate"},
 		{[]string{"job", "update", "01J00000000000000000000001", "--file", "-"}, `{"name":"Inspection"}`, "expected_event_uid"},

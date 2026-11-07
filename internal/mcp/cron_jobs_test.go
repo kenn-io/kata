@@ -74,6 +74,8 @@ func TestCronProgressiveDiscovery(t *testing.T) {
 	s := connectRawTestServerWithOptions(t, Options{Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test"})
 	loaded := cronOK(t, s, "load_cron", map[string]any{})
 	require.Equal(t, true, loaded["loaded"])
+	require.Contains(t, loaded["tools"], "kata.cron_job_pause")
+	require.Contains(t, loaded["tools"], "kata.cron_job_resume")
 	after, err := s.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(after.Tools), "kata.cron_job_create")
@@ -346,4 +348,52 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 		require.Contains(t, string(mustJSON(t, denied)), "scoped_operation_forbidden")
 	}
 	require.Empty(t, cronOK(t, f.session, "cron_jobs", map[string]any{})["jobs"])
+}
+
+func TestCronJobEnabledTools(t *testing.T) {
+	f := newCronFixture(t)
+	id := cronNewUID(t, f.session)
+	job := cronRecord(t, f.session, "cron_job_create", map[string]any{"uid": id, "name": "Inspect", "definition": cronDefinition()}, "job")
+	// A malformed supplied revision must never become an unconditional action.
+	rejectWhitespace := func(action string, job map[string]any) {
+		t.Helper()
+		before, err := f.store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		result := cronCall(t, f.session, "cron_job_"+action, map[string]any{"uid": id, "expected_event_uid": " \t"})
+		require.True(t, result.IsError)
+		require.Contains(t, string(mustJSON(t, result)), "expected_event_uid")
+		current, err := f.store.CronJob(t.Context(), f.project.ID, id)
+		require.NoError(t, err)
+		require.Equal(t, job["definition_event_uid"], current.DefinitionEventUID)
+		after, err := f.store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, before, after, "rejecting a malformed guard must not mutate first")
+	}
+	rejectWhitespace("resume", job)
+	resumed := cronRecord(t, f.session, "cron_job_resume", map[string]any{"uid": id}, "job")
+	// These booleans prove each tool chooses its matching generated operation.
+	require.Equal(t, true, resumed["definition"].(map[string]any)["enabled"])
+	rejectWhitespace("pause", resumed)
+	require.True(t, cronCall(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": job["definition_event_uid"]}).IsError)
+	paused := cronRecord(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": resumed["definition_event_uid"]}, "job")
+	require.Equal(t, false, paused["definition"].(map[string]any)["enabled"])
+	cronOK(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": ""})
+}
+
+func TestCronProjectPauseTools(t *testing.T) {
+	f := newCronFixture(t)
+	paused := cronOK(t, f.session, "cron_project_pause", map[string]any{"reason": "Maintenance"})
+	require.Equal(t, true, paused["changed"])
+	state := paused["project_pause"].(map[string]any)
+	require.Equal(t, "example-agent", state["paused_by"])
+	require.Equal(t, "Maintenance", state["reason"])
+	retry := cronOK(t, f.session, "cron_project_pause", map[string]any{"reason": "Retry"})
+	require.Equal(t, false, retry["changed"])
+	require.Equal(t, state, retry["project_pause"])
+	caps := cronOK(t, f.session, "cron_capabilities", map[string]any{})
+	require.Equal(t, state, caps["project_pause"])
+	resumed := cronOK(t, f.session, "cron_project_resume", map[string]any{})
+	require.Equal(t, true, resumed["changed"])
+	require.Nil(t, resumed["project_pause"])
+	require.True(t, cronCall(t, f.session, "cron_project_pause", map[string]any{"reason": strings.Repeat("x", 257)}).IsError)
 }

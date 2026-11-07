@@ -1,0 +1,24 @@
+
+
+
+
+
+    ╭──────────────────────────────────────────────────╮
+    │                                                  │
+    │  Request run for Digest?                         │
+    │                                                  │
+    │  An optional runtime may run this job now.       │
+    │  The request itself changes no running process.  │
+    │                                                  │
+    │  Response unavailable. Retry with the same UID:  │
+    │  01ARZ3NDEKTSV4RRFFQ69G5FB9                      │
+    │  connection interrupted                          │
+    │                                                  │
+    ╰──────────────────────────────────────────────────╯
+
+
+
+
+
+
+ y send/retry▕ n/esc cancel

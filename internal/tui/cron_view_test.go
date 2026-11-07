@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -530,10 +531,12 @@ func TestCronFilterAndTabState(t *testing.T) {
 
 func TestSnapshot_Cron(t *testing.T) {
 	defer snapshotInit(t)()
-	for _, name := range []string{"jobs", "jobs-filter", "jobs-unavailable", "runs", "job-detail", "run-detail", "workflow-detail", "help", "all-projects"} {
+	for _, name := range []string{"jobs", "jobs-paused", "jobs-filter", "jobs-unavailable", "runs", "job-detail", "run-detail", "workflow-detail", "help", "all-projects"} {
 		t.Run(name, func(t *testing.T) {
 			m := cronFixture(t)
 			switch name {
+			case "jobs-paused":
+				m.cron.data.jobs[0].Definition.Enabled = false
 			case "jobs-filter":
 				m = sendRune(m, '/')
 				m, _ = updateModel(m, tea.PasteMsg{Content: "daily"})
@@ -551,6 +554,7 @@ func TestSnapshot_Cron(t *testing.T) {
 				m = sendRune(m, '4')
 				m = sendKey(m, tea.KeyEnter)
 			case "help":
+				m.cron.data.project.controls = []string{"job_pause", "run_request", "cancel_request"}
 				m = sendRune(m, '?')
 			case "all-projects":
 				m.scope.allProjects = true
@@ -672,4 +676,26 @@ func TestCronSearchClickGuards(t *testing.T) {
 		m, _ = updateModel(m, mouseLeftClick(4, 2))
 		require.False(t, m.cron.filtering, state)
 	}
+}
+
+func (a *cronReadTestAPI) readCronProjectState(_ context.Context, id int64) (cronProjectState, error) {
+	if id != 7 {
+		return cronProjectState{}, fmt.Errorf("unexpected project %d", id)
+	}
+	return a.data.project, a.data.projectErr
+}
+
+func (a *cronReadTestAPI) ListCronRequests(context.Context, int64) ([]db.CronRequest, error) {
+	return a.data.requests, a.data.requestsErr
+}
+func (a *cronReadTestAPI) ShowCronRun(context.Context, int64, string) (db.CronRun, error) {
+	return db.CronRun{}, errors.New("run read unavailable")
+}
+func (a *cronReadTestAPI) RequestCron(context.Context, int64, string, string, string, string) (db.RequestCronOut, error) {
+	return db.RequestCronOut{}, errors.New("request write unavailable")
+}
+
+func (a *cronReadTestAPI) readCronJobs(ctx context.Context, id int64) (cronJobsRead, error) {
+	jobs, err := a.ListCronJobs(ctx, id)
+	return cronJobsRead{jobs, a.data.passovers}, err
 }

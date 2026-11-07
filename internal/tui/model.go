@@ -846,6 +846,15 @@ func projectIDFromMutation(m Model, mut mutationDoneMsg) int64 {
 // open/key. ok=true means the message was handled here.
 func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case cronRuntimeDoneMsg:
+		next, cmd := m.cronRuntimeDone(msg)
+		return next, cmd, true
+	case cronEnabledReadyMsg:
+		next, cmd := m.cronEnabledReady(msg)
+		return next, cmd, true
+	case cronEnabledDoneMsg:
+		next, cmd := m.cronEnabledDone(msg)
+		return next, cmd, true
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
 	case cronEditOpenedMsg:
@@ -2777,7 +2786,8 @@ func cacheKeysEqual(a, b cacheKey) bool {
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.eventAffectsView(msg) {
-		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
+		m = m.invalidateCronEnabled(msg)
+		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.metadata_updated" || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
 			m.cron.events++
 		}
 		m.cache.markStale()
@@ -3079,6 +3089,7 @@ func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 // makes the SSE id: line on this frame the authoritative resume
 // cursor, so resetRequiredMsg deliberately carries no payload.
 func (m Model) handleResetRequired(_ resetRequiredMsg) (tea.Model, tea.Cmd) {
+	m = m.invalidateCronEnabled(eventReceivedMsg{eventType: "sync.reset_required"})
 	m.cron.events++
 	m.cache.drop()
 	m.pendingRefetch = false
@@ -3222,6 +3233,30 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			return m, nil
 		case "n", "N", "esc":
 			m.modal = modalNone
+			return m, nil
+		}
+	case modalCronRequest:
+		switch msg.String() {
+		case "y", "Y":
+			return m.confirmCronRuntimeRequest()
+		case "n", "N", "esc":
+			if m.cron.request == nil || !m.cron.request.inflight {
+				m.modal, m.cron.request = modalNone, nil
+			}
+			return m, nil
+		}
+	case modalCronResume:
+		switch msg.String() {
+		case "d", "D":
+			if m.cron.enabled == nil || !m.cron.enabled.allowDiscard {
+				return m, nil
+			}
+			m.cron.enabled.discard = true
+			return m.confirmCronResume()
+		case "y", "Y":
+			return m.confirmCronResume()
+		case "n", "N", "esc":
+			m.modal, m.cron.enabled = modalNone, nil
 			return m, nil
 		}
 	case modalReopenBacklog:
@@ -3680,6 +3715,15 @@ func (m Model) viewContent() string {
 		case viewCredentials:
 			body = renderCredentials(m)
 		default:
+			if m.modal == modalCronResume || m.modal == modalCronRequest {
+				footer := renderFooterHelpTable(m.activeModalHelpRows(), m.width)
+				bodyHeight := max(0, m.height-lipgloss.Height(footer))
+				body = renderTooNarrow(m.width, bodyHeight)
+				body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
+				body = overlayModal(body, m.renderActiveConfirmModal(), m.width, bodyHeight)
+				lines := strings.Split(body, "\n")
+				return joinNonEmpty([]string{strings.Join(lines[:min(bodyHeight, len(lines))], "\n"), footer})
+			}
 			body = renderTooNarrow(m.width, m.height)
 		}
 		body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
@@ -3715,7 +3759,7 @@ func (m Model) overlayInputAndModal(body string) string {
 		return m.overlayReopenBacklog(body)
 	}
 	if m.modal != modalNone {
-		body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, m.height)
+		body = overlayModal(body, m.renderActiveConfirmModal(), m.width, m.height)
 	}
 	return body
 }

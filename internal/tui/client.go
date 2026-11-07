@@ -66,19 +66,32 @@ func NewClient(base string, hc *http.Client) *Client {
 }
 
 func (c *Client) generatedClient() (*generated.Client, error) {
-	return generated.NewDefaultClient(c.base, runtime.WithHTTPClient(tuiRequestDoer{c}))
+	return generated.NewDefaultClient(c.base, runtime.WithHTTPClient(tuiRequestDoer{client: c}))
 }
 
-type tuiRequestDoer struct{ client *Client }
+type tuiRequestDoer struct {
+	client  *Client
+	timeout time.Duration
+}
 
 func (d tuiRequestDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return d.client.sendRequest(ctx, req)
+	return d.client.sendRequestWithTimeout(ctx, req, d.timeout)
 }
 
 func (c *Client) sendRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
+	return c.sendRequestWithTimeout(ctx, req, 0)
+}
+
+func (c *Client) sendRequestWithTimeout(ctx context.Context, req *http.Request, timeout time.Duration) (*http.Response, error) {
 	hc := c.httpClient()
 	if hc == nil {
 		return nil, fmt.Errorf("%s %s: daemon client is not initialized", req.Method, req.URL.RequestURI())
+	}
+	if timeout > 0 {
+		// Keep transport, authentication, and reconnect behavior without changing shared read timeouts.
+		clone := *hc
+		clone.Timeout = timeout
+		hc = &clone
 	}
 	resp, err := hc.Do(req) //nolint:gosec // G704: generated requests use the daemon selected by the local TUI.
 	_, profileTransport := hc.Transport.(localProfileTransport)

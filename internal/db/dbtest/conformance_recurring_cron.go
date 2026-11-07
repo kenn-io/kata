@@ -44,6 +44,9 @@ func recurringFixture(t *testing.T, s db.Storage, catchup string) (db.Project, d
 	parent, _, e := s.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Ongoing commitment", Author: "operator", Owner: &owner})
 	require.NoError(t, e)
 	j := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}, Overlap: "allow", Catchup: catchup}
+	if catchup == "skip" {
+		j.GraceSeconds = 1
+	}
 	job, events, e := s.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Periodic review", Actor: "operator", Definition: j})
 	require.NoError(t, e)
 	require.Len(t, events, 2)
@@ -655,7 +658,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	parent, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Ongoing review", Author: "operator", Metadata: map[string]jsontext.Value{"note": []byte(`"future"`)}})
 	require.NoError(t, err)
-	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "operator", Message: "Review service"}, Issue: &cron.IssuePolicy{Kind: "existing", UID: parent.UID}, Overlap: "allow", Catchup: "latest"}
+	definition := adapterNotifyDefinition(parent.UID)
 	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Adapter review", Actor: "operator", Definition: definition})
 	require.NoError(t, err)
 	probe := &recurringCountingProbe{recurringProbeQuerier: s.(recurringProbeQuerier)}

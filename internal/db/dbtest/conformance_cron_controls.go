@@ -1,0 +1,307 @@
+package dbtest
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json/jsontext"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
+)
+
+// Contract: root pause is idempotent, uses exact metadata events, and serializes with delivery.
+func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
+	ctx := t.Context()
+	t.Run("lifecycle", func(t *testing.T) {
+		p, e := s.CreateProject(ctx, "pause-project")
+		require.NoError(t, e)
+		out, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Reason: "maintenance", Paused: true})
+		require.NoError(t, e)
+		require.True(t, out.Changed)
+		require.Equal(t, p.Revision+1, out.NewRevision)
+		require.Equal(t, "project.metadata_updated", out.Event.Type)
+		require.Equal(t, "operator", out.Event.Actor)
+		pause := db.CronProjectPauseFromMetadata(out.Project.Metadata)
+		require.NotNil(t, pause)
+		require.False(t, pause.Invalid)
+		require.Equal(t, "maintenance", pause.Reason)
+		require.Equal(t, "operator", pause.PausedBy)
+		require.WithinDuration(t, time.Now(), pause.PausedAt, time.Minute)
+		repeat, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "other", Reason: "changed", Paused: true})
+		require.NoError(t, e)
+		require.False(t, repeat.Changed)
+		require.Empty(t, repeat.Event.UID)
+		require.Equal(t, out.Project.Metadata, repeat.Project.Metadata)
+		require.Equal(t, out.NewRevision, repeat.NewRevision)
+		cleared, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+		require.NoError(t, e)
+		require.True(t, cleared.Changed)
+		require.Equal(t, out.NewRevision+1, cleared.NewRevision)
+		require.Nil(t, db.CronProjectPauseFromMetadata(cleared.Project.Metadata))
+		repeat, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+		require.NoError(t, e)
+		require.False(t, repeat.Changed)
+		_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Reason: strings.Repeat("é", 129), Paused: true})
+		require.Error(t, e)
+	})
+	t.Run("reserved metadata", func(t *testing.T) {
+		p, e := s.CreateProject(ctx, "reserved-project")
+		require.NoError(t, e)
+		for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV", "cron.passover", "cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAV", "cron.passover.bad"} {
+			for _, value := range []string{`true`, `null`} {
+				_, e = s.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: p.ID, Actor: "operator", Patch: map[string]jsontext.Value{key: []byte(value)}})
+				require.Error(t, e, key)
+			}
+		}
+		_, e = s.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: p.ID, Actor: "operator", Patch: map[string]jsontext.Value{"cron.pause.note": []byte(`"ordinary"`)}})
+		require.NoError(t, e)
+	})
+	for _, initial := range []string{`{"legacy":true}`, `null`} {
+		t.Run("policy recovery/"+initial, func(t *testing.T) {
+			p, e := s.CreateProject(ctx, "recovery-project-"+strings.ReplaceAll(initial, "\"", ""))
+			require.NoError(t, e)
+			q := s.(interface {
+				ExecContext(context.Context, string, ...any) (sql.Result, error)
+			})
+			_, e = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.pause":`+initial+`,"keep":9007199254740993}`, p.ID)
+			require.NoError(t, e)
+			if initial == `null` {
+				unpaused, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+				require.NoError(t, e)
+				require.False(t, unpaused.Changed, "null is already unpaused")
+				require.Nil(t, db.CronProjectPauseFromMetadata(unpaused.Project.Metadata))
+			}
+			paused, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
+			require.NoError(t, e)
+			require.Equal(t, initial == `null`, paused.Changed)
+			require.NotNil(t, db.CronProjectPauseFromMetadata(paused.Project.Metadata))
+			require.Equal(t, initial != `null`, db.CronProjectPauseFromMetadata(paused.Project.Metadata).Invalid)
+			out, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+			require.NoError(t, e)
+			require.True(t, out.Changed)
+			require.Nil(t, db.CronProjectPauseFromMetadata(out.Project.Metadata))
+			if initial == `null` {
+				require.Equal(t, p.Revision+2, out.NewRevision)
+			}
+			require.Contains(t, string(out.Project.Metadata), "9007199254740993")
+		})
+	}
+	for _, policy := range []string{"all", "latest", "skip"} {
+		t.Run("dispatch "+policy, func(t *testing.T) {
+			// Separate backend because recurringFixture has a fixed project name.
+			store := b.Open(t)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			p, parent, job, progress := recurringFixture(t, store, policy)
+			before, e := store.IssueByID(ctx, parent.ID)
+			require.NoError(t, e)
+			_, e = store.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
+			require.NoError(t, e)
+			in := db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(6 * time.Hour)}
+			out, e := store.DispatchRecurringCron(ctx, in)
+			require.NoError(t, e)
+			require.Empty(t, out.Events)
+			require.False(t, out.More)
+			after, e := store.IssueByID(ctx, parent.ID)
+			require.NoError(t, e)
+			require.Equal(t, before.Metadata, after.Metadata)
+			_, e = store.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+			require.NoError(t, e)
+			out, e = store.DispatchRecurringCron(ctx, in)
+			require.NoError(t, e)
+			children, e := store.ChildrenOfIssue(ctx, parent.ID)
+			require.NoError(t, e)
+			want := map[string]int{"all": 3, "latest": 1, "skip": 1}[policy]
+			require.Len(t, children, want)
+			current, e := store.CronJob(ctx, p.ID, job.UID)
+			require.NoError(t, e)
+			require.Equal(t, job.DefinitionEventUID, current.DefinitionEventUID)
+			require.True(t, current.Definition.Enabled)
+		})
+	}
+
+	// Contract: pause gates admission, not reporting already running work.
+	t.Run("observations while paused", func(t *testing.T) {
+		p, err := s.CreateProject(ctx, "paused-evidence-project")
+		require.NoError(t, err)
+		job, _ := nativeFederationDefinitions(t, s, p)
+		for _, invalid := range []bool{false, true} {
+			_, err = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
+			require.NoError(t, err)
+			if invalid {
+				q := s.(interface {
+					ExecContext(context.Context, string, ...any) (sql.Result, error)
+				})
+				_, err = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.pause":false}`, p.ID)
+				require.NoError(t, err)
+			}
+			for _, status := range []string{"succeeded", "failed", "cancelled", "unknown"} {
+				id, err := uid.New()
+				require.NoError(t, err)
+				in := db.ObserveCronRun{ProjectID: p.ID, UID: id, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "operator", Status: "running", Summary: cron.Summary{Version: 1}}
+				first, err := s.ObserveCronRun(ctx, in)
+				require.NoError(t, err)
+				in.ExpectedRevision, in.Status = first.Run.Revision, status
+				out, err := s.ObserveCronRun(ctx, in)
+				require.NoError(t, err)
+				require.Equal(t, status, out.Run.Status)
+				require.Equal(t, first.Run.Revision+1, out.Run.Revision)
+			}
+		}
+	})
+	t.Run("spoke denied even disabled", func(t *testing.T) {
+		p, e := s.CreateProject(ctx, "spoke-project")
+		require.NoError(t, e)
+		adopted, e := s.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", ReplayHorizonEventID: 1, Actor: "operator", EmptyOnly: true})
+		require.NoError(t, e)
+		for _, paused := range []bool{true, false} {
+			_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: adopted.Project.ID, Actor: "operator", Paused: paused})
+			require.ErrorIs(t, e, db.ErrFederatedSpokeUnsupported)
+		}
+	})
+	t.Run("adoption refuses retained cron controls", func(t *testing.T) {
+		for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV", "cron.passover", "cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
+			for _, emptyOnly := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/empty_only_%t", key, emptyOnly), func(t *testing.T) {
+					p, e := s.CreateProject(ctx, fmt.Sprintf("control-adoption-%s-%t", strings.ReplaceAll(key, ".", "-"), emptyOnly))
+					require.NoError(t, e)
+					seedPassover(t, s, p.ID, map[string]jsontext.Value{key: jsontext.Value(`false`)})
+					before, e := s.ProjectByID(ctx, p.ID)
+					require.NoError(t, e)
+					beforeEventID, e := s.MaxEventID(ctx)
+					require.NoError(t, e)
+					hubUID, e := uid.New()
+					require.NoError(t, e)
+					_, e = s.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: hubUID, ReplayHorizonEventID: 1, Actor: "operator", EmptyOnly: emptyOnly})
+					require.ErrorIs(t, e, db.ErrFederatedSpokeUnsupported)
+					switch key {
+					case "cron.pause":
+						require.Contains(t, e.Error(), "resume")
+					case "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV":
+						require.Contains(t, e.Error(), "expire")
+					default:
+						require.Contains(t, e.Error(), "passover")
+					}
+					after, e := s.ProjectByID(ctx, p.ID)
+					require.NoError(t, e)
+					require.Equal(t, before, after)
+					afterEventID, e := s.MaxEventID(ctx)
+					require.NoError(t, e)
+					require.Equal(t, beforeEventID, afterEventID)
+					_, e = s.FederationBindingByProject(ctx, p.ID)
+					require.ErrorIs(t, e, db.ErrNotFound)
+				})
+			}
+		}
+	})
+	t.Run("adoption accepts null controls", func(t *testing.T) {
+		for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV", "cron.passover", "cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
+			p, e := s.CreateProject(ctx, "null-adoption-"+strings.ReplaceAll(key, ".", "-"))
+			require.NoError(t, e)
+			seedPassover(t, s, p.ID, map[string]jsontext.Value{key: jsontext.Value("null"), "ordinary": jsontext.Value("null")})
+			hub, e := uid.New()
+			require.NoError(t, e)
+			in := db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: hub, ReplayHorizonEventID: 1, Actor: "operator"}
+			adopted, e := s.AdoptProjectIntoFederation(ctx, in)
+			require.NoError(t, e)
+			require.Equal(t, hub, adopted.Project.UID)
+			baseline, e := db.ProjectMetadataAdoptionPayload(adopted.Project.Metadata)
+			require.NoError(t, e)
+			require.JSONEq(t, `{"diff":{"ordinary":{"from":null,"to":null}}}`, baseline)
+			require.NoError(t, db.ValidateCronControlEvent(db.RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: s.InstanceUID(), Payload: jsontext.Value(baseline)}, "root"))
+			retry, e := s.AdoptProjectIntoFederation(ctx, in)
+			require.NoError(t, e, "already-adopted retry bypasses the guard")
+			require.Equal(t, adopted.Project.UID, retry.Project.UID)
+		}
+	})
+	t.Run("root disabled binding", func(t *testing.T) {
+		p, e := s.CreateProject(ctx, "disabled-root-project")
+		require.NoError(t, e)
+		_, e = s.EnableProjectFederation(ctx, p.ID, "operator")
+		require.NoError(t, e)
+		q := s.(interface {
+			ExecContext(context.Context, string, ...any) (sql.Result, error)
+		})
+		_, e = q.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=$1`, p.ID)
+		require.NoError(t, e)
+		_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
+		require.NoError(t, e)
+	})
+	t.Run("merge target policy", func(t *testing.T) {
+		for _, targetPaused := range []bool{false, true} {
+			source, e := s.CreateProject(ctx, fmt.Sprintf("source-pause-%t", targetPaused))
+			require.NoError(t, e)
+			target, e := s.CreateProject(ctx, fmt.Sprintf("target-pause-%t", targetPaused))
+			require.NoError(t, e)
+			_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: source.ID, Actor: "operator", Paused: true, Reason: "source"})
+			require.NoError(t, e)
+			if targetPaused {
+				_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: target.ID, Actor: "operator", Paused: true, Reason: "target"})
+				require.NoError(t, e)
+			}
+			_, e = s.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.ID, TargetProjectID: target.ID, Actor: "operator"})
+			require.NoError(t, e)
+			target, e = s.ProjectByID(ctx, target.ID)
+			require.NoError(t, e)
+			pause := db.CronProjectPauseFromMetadata(target.Metadata)
+			if targetPaused {
+				require.NotNil(t, pause)
+				require.Equal(t, "target", pause.Reason)
+			} else {
+				require.Nil(t, pause)
+			}
+		}
+	})
+	t.Run("pause and dispatch race", func(t *testing.T) {
+		store := b.Open(t)
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+		p, parent, job, progress := recurringFixture(t, store, "all")
+		other := b.OpenSame(t, store)
+		t.Cleanup(func() { require.NoError(t, other.Close()) })
+		var wg sync.WaitGroup
+		var raced db.DispatchRecurringCronOut
+		errs := make(chan error, 2)
+		wg.Go(func() {
+			_, e := store.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
+			errs <- e
+		})
+		wg.Go(func() {
+			var e error
+			raced, e = other.DispatchRecurringCron(ctx, db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(6 * time.Hour)})
+			errs <- e
+		})
+		wg.Wait()
+		close(errs)
+		for e := range errs {
+			require.NoError(t, e)
+		}
+		children, e := store.ChildrenOfIssue(ctx, parent.ID)
+		require.NoError(t, e)
+		current := fixtureProgress(t, store, parent.ID, job.UID)
+		if len(raced.Events) == 0 {
+			require.Empty(t, children, "pause won: no child may commit")
+			require.Equal(t, progress, current, "pause won: no progress may commit")
+		} else {
+			require.Len(t, children, 3, "dispatch won: all due children commit")
+			require.Len(t, raced.Events, len(children)+1, "children and checkpoint commit together")
+			require.Equal(t, progress.Anchor.Add(6*time.Hour), current.Through)
+			require.Equal(t, progress.Anchor, current.Anchor)
+		}
+		// Either serial order is valid. Once pause commits, no further progress occurs.
+		before, e := store.IssueByID(ctx, parent.ID)
+		require.NoError(t, e)
+		out, e := store.DispatchRecurringCron(ctx, db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(8 * time.Hour)})
+		require.NoError(t, e)
+		require.Empty(t, out.Events)
+		after, e := store.IssueByID(ctx, parent.ID)
+		require.NoError(t, e)
+		require.Equal(t, before.Metadata, after.Metadata)
+	})
+	return nil
+}

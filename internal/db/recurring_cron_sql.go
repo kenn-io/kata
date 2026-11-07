@@ -96,16 +96,8 @@ func readRecurringProgress(parent Issue, jobUID string) (cron.RecurringProgress,
 	}
 	return cron.DecodeRecurringProgress(raw)
 }
-func (a CronSQL) checkRecurringPutTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, current cronRow) error {
+func (a CronSQL) checkRecurringPutTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, old cron.JobDefinition) error {
 	next := req.definition.(cron.JobDefinition)
-	var old cron.JobDefinition
-	if len(current.document) > 0 {
-		var err error
-		old, err = cron.DecodeJob(current.document)
-		if err != nil && !req.deleted {
-			return err
-		}
-	}
 	oldNative, newNative := cron.IsRecurringIssueJob(old), cron.IsRecurringIssueJob(next)
 	if !oldNative && !newNative {
 		return nil
@@ -226,6 +218,9 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		if err != nil {
 			return err
 		}
+		if CronProjectPauseFromMetadata(project.Metadata) != nil {
+			return nil
+		}
 		row, err := scanCron(tx.QueryRowContext(ctx, `SELECT `+cronDefinitionColumns+` FROM cron_jobs WHERE project_id=$1 AND uid=$2`, in.ProjectID, in.JobUID))
 		if errors.Is(err, ErrNotFound) {
 			return nil
@@ -256,6 +251,16 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		progress, err := readRecurringProgress(parent, job.UID)
 		if err != nil {
 			return err
+		}
+		original := progress
+		if passover := CronPassoverFromMetadata(project.Metadata, job.UID); passover != nil {
+			if passover.Invalid {
+				return fmt.Errorf("%w: invalid applicable cron passover", cron.ErrInvalid)
+			}
+			progress, err = cron.ApplyPassover(progress, passover.Through)
+			if err != nil {
+				return err
+			}
 		}
 		batch, err := cron.PlanRecurring(job.Definition, job.DefinitionEventUID, progress, in.Now)
 		if err != nil {
@@ -301,7 +306,7 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 			}
 			out.Events = append(out.Events, event)
 		}
-		before, err := json.Marshal(progress)
+		before, err := json.Marshal(original)
 		if err != nil {
 			return err
 		}

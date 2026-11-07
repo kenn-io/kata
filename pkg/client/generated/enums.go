@@ -855,6 +855,24 @@ func (s ShowIssueByUIDQueryKind) Validate() error {
 	}
 }
 
+type ListCronRequestsQueryState string
+
+const (
+	Answered                          ListCronRequestsQueryState = "answered"
+	ListCronRequestsQueryStateExpired ListCronRequestsQueryState = "expired"
+	ListCronRequestsQueryStatePending ListCronRequestsQueryState = "pending"
+)
+
+// Validate checks if the ListCronRequestsQueryState value is valid
+func (l ListCronRequestsQueryState) Validate() error {
+	switch l {
+	case Answered, ListCronRequestsQueryStateExpired, ListCronRequestsQueryStatePending:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ListCronRequestsQueryState value, got: %v", l))
+	}
+}
+
 type OfferRelayDeliveriesQueryStream string
 
 const (

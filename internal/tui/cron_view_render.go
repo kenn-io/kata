@@ -308,6 +308,9 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			cronHistory(&d, p, ref)
 		}
 	}
+	if name != "" && (ref.kind == cronJobs || ref.kind == cronRuns) {
+		cronRequestDetails(&d, p, ref)
+	}
 	if name == "" {
 		d.text("this "+[]string{"", "job", "run", "workflow"}[ref.kind]+" is no longer in the loaded data", cronRef{})
 	}
@@ -369,11 +372,15 @@ func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 }
 
 func cronHelpRows(m Model) [][]helplayout.HelpItem {
-	return modalFirstHelpRows(m.modal, [][]helplayout.HelpItem{cronKeyRows(m)})
+	if m.modal != modalNone {
+		return m.activeModalHelpRows()
+	}
+	return [][]helplayout.HelpItem{cronKeyRows(m)}
 }
 
 func cronKeyRows(m Model) []helplayout.HelpItem {
 	open, back := "open", "kata"
+	jobScope := m.cronJobsScope() || (m.cron.help && !m.scope.allProjects && m.scope.projectID != 0)
 	if len(m.cron.stack) > 0 {
 		open, back = "follow", "back"
 	}
@@ -389,8 +396,16 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 	if len(m.cron.stack) == 0 {
 		rows = slices.Insert(rows, 2, helplayout.HelpItem{Key: "/", Description: "filter"})
 	}
-	if m.cronJobsScope() {
-		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"})
+	if jobScope {
+		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"}, helplayout.HelpItem{Key: "p", Description: "pause/resume"})
+	}
+	if m.cron.data != nil {
+		if jobScope && slices.Contains(m.cron.data.project.controls, "run_request") {
+			rows = append(rows, helplayout.HelpItem{Key: "R", Description: "request run"})
+		}
+		if slices.Contains(m.cron.data.project.controls, "cancel_request") && (m.cron.help || m.cron.tab == cronRuns || len(m.cron.stack) > 0 && m.cron.stack[len(m.cron.stack)-1].ref.kind == cronRuns) {
+			rows = append(rows, helplayout.HelpItem{Key: "X", Description: "request cancel"})
+		}
 	}
 	return rows
 }
@@ -419,6 +434,7 @@ func renderCron(m Model) string {
 			name string
 			err  error
 		}{
+			{"project policy", m.cron.data.projectErr},
 			{"jobs", m.cron.data.jobsErr},
 			{"workflows", m.cron.data.workflowsErr},
 			{"runs", m.cron.data.runsErr},
@@ -452,9 +468,14 @@ func renderCron(m Model) string {
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
 		cronTabs(m.cron.tab),
+	}
+	if banner := cronProjectBanner(m); banner != "" {
+		body = append(body, banner)
+	}
+	body = append(body,
 		statsLineStyle.Render(padLeftRightInside(left, right, titleBarInnerWidth(m.width))),
 		"",
-	}
+	)
 	if header != "" {
 		body = append(body, tableHeaderStyle.Render("  "+header))
 	}
@@ -520,4 +541,21 @@ func cronHelp(m Model) string {
 	}
 	body = append(body, renderHelpGroup([]helpSection{{title: "Cron keys", rows: cronKeyRows(m)}}))
 	return strings.Join(body, "\n")
+}
+
+func cronProjectBanner(m Model) string {
+	if m.cron.data == nil || m.cron.data.project.pause == nil {
+		return ""
+	}
+	pause := m.cron.data.project.pause
+	text := "Project cron paused"
+	if pause.Invalid {
+		text += " · invalid policy; use kata cron resume to clear"
+	} else {
+		text += " · " + pause.PausedBy
+		if pause.Reason != "" {
+			text += " · " + pause.Reason
+		}
+	}
+	return errorStyle.Render(truncate(sanitizeForLine(text), m.width))
 }

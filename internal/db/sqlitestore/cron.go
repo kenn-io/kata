@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -72,4 +73,44 @@ func (d *Store) ListRecurringCronJobs(ctx context.Context, after string, limit i
 // DispatchRecurringCron commits a bounded set of children and its progress together.
 func (d *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
 	return d.cronSQL().DispatchRecurring(ctx, in)
+}
+
+// SetCronProjectPause changes root-owned policy in the cron project transaction.
+func (d *Store) SetCronProjectPause(ctx context.Context, in db.SetCronProjectPauseIn) (db.PatchProjectMetadataOut, error) {
+	return d.cronSQL().SetProjectPause(ctx, in)
+}
+
+// RequestCron admits a root request or returns an immutable exact replay.
+func (d *Store) RequestCron(ctx context.Context, in db.RequestCronIn) (db.RequestCronOut, error) {
+	return d.cronSQL().Request(ctx, in)
+}
+
+// ListCronRequests derives state from the local consistent evidence snapshot.
+func (d *Store) ListCronRequests(ctx context.Context, in db.CronRequestList) ([]db.CronRequest, error) {
+	return d.cronSQL().Requests(ctx, in)
+}
+
+// ListCronRequestProjects lists expiry candidates for per-project cleanup.
+func (d *Store) ListCronRequestProjects(ctx context.Context) ([]int64, error) {
+	return d.cronSQL().RequestProjects(ctx)
+}
+
+// SweepCronRequests returns the exact committed event, including on partial cleanup.
+func (d *Store) SweepCronRequests(ctx context.Context, id int64, now time.Time) (*db.Event, error) {
+	return d.cronSQL().SweepRequests(ctx, id, now)
+}
+
+// ResumeCronJob enables a job with an optional retained delivery cutoff.
+func (d *Store) ResumeCronJob(ctx context.Context, in db.ResumeCronJobIn) (db.ResumeCronJobOut, error) {
+	return d.cronSQL().ResumeJob(ctx, in)
+}
+
+// CronJobControlRead returns definition and effective cutoff in one snapshot.
+func (d *Store) CronJobControlRead(ctx context.Context, pid int64, id string) (db.CronJobControlRead, error) {
+	return d.cronSQL().JobControlRead(ctx, pid, id)
+}
+
+// ListCronJobControlReads returns consistent definition/cutoff pairs.
+func (d *Store) ListCronJobControlReads(ctx context.Context, pid int64, includeDeleted bool) ([]db.CronJobControlRead, error) {
+	return d.cronSQL().JobControlReads(ctx, pid, includeDeleted)
 }
