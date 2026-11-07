@@ -22,6 +22,7 @@ import (
 	"time"
 
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/pathresolve"
 )
 
 const docbankService = "docbank"
@@ -228,7 +229,8 @@ func discoverDocbank(ctx context.Context, home string) (kitdaemon.RuntimeRecord,
 		return kitdaemon.RuntimeRecord{}, false, nil
 	}
 	// The runtime store rejects a symlinked directory; Docbank resolves its own root the same way.
-	resolved, err := filepath.EvalSymlinks(home)
+	// pathresolve also follows Windows directory junctions, which filepath.EvalSymlinks does not.
+	resolved, err := pathresolve.EvalSymlinks(home)
 	if err != nil {
 		return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("resolve docbank home %s: %w", home, err)
 	}
