@@ -149,15 +149,18 @@ func validateAgentsViewClose(ctx context.Context, cfg ServerConfig, issue db.Iss
 // loadAgentsViewClose uses the real event producer and current history. A
 // missing origin event is pending; it never synthesizes/injects that event.
 func loadAgentsViewClose(ctx context.Context, cfg ServerConfig, issue db.Issue, c agentsviewrelay.Control) (agentsviewrelay.Association, error) {
-	if issue.UID != c.IssueUID || issue.Status != "closed" {
+	if issue.UID != c.IssueUID {
 		return agentsviewrelay.Association{}, api.NewError(409, "agentsview_close_changed", "original close is no longer current", "", nil)
 	}
 	events, err := cfg.DB.EventsByUIDs(ctx, issue.ProjectID, []string{c.CloseEventUID})
+	if errors.Is(err, db.ErrNotFound) || (err == nil && len(events) != 1) {
+		return agentsviewrelay.Association{}, api.NewError(409, "close_not_at_origin", "original close is not available here", "retry explicitly after normal replication", nil)
+	}
 	if err != nil {
 		return agentsviewrelay.Association{}, internalAPIError(err)
 	}
-	if len(events) != 1 {
-		return agentsviewrelay.Association{}, api.NewError(409, "close_not_at_origin", "original close is not available here", "retry explicitly after normal replication", nil)
+	if issue.Status != "closed" {
+		return agentsviewrelay.Association{}, api.NewError(409, "agentsview_close_changed", "original close is no longer current", "", nil)
 	}
 	e := events[0]
 	if e.Type != "issue.closed" || e.IssueUID == nil || *e.IssueUID != issue.UID || e.ProjectUID != c.ProjectUID {

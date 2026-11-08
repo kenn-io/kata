@@ -1,6 +1,8 @@
 package agentsviewrelay
 
 import (
+	"encoding/base64"
+	"encoding/json/v2"
 	"strings"
 	"testing"
 )
@@ -28,12 +30,29 @@ func TestAssociationValidatesCanonicalSessionAndRoute(t *testing.T) {
 }
 
 func TestControlStrictBoundedAndSingleHeader(t *testing.T) {
-	for _, raw := range []string{`{"v":1,"v":1}`, `{"unknown":true}`, strings.Repeat("x", MaxControlBytes+1)} {
-		if _, err := DecodeControl([]byte(raw)); err == nil {
-			t.Fatal("accepted invalid control")
+	a := validAssociation()
+	c := Control{Version: 1, IssueUID: a.IssueUID, ProjectUID: a.ProjectUID, AuthorityUID: a.AuthorityUID, CloseEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FAZ", ServiceID: a.ServiceID, Agent: a.Agent, NativeSessionID: a.NativeSessionID, SessionID: a.SessionID, SnapshotSHA256: a.SnapshotSHA256, SnapshotBytes: a.SnapshotBytes, Route: a.Route, ClientKind: "cli"}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = DecodeControl(raw); err != nil {
+		t.Fatal(err)
+	}
+	for name, bad := range map[string]string{
+		"duplicate": `{"v":1,` + string(raw[1:]),
+		"unknown":   `{"unknown":true,` + string(raw[1:]),
+		"oversize":  string(raw) + strings.Repeat(" ", MaxControlBytes),
+	} {
+		if _, err := DecodeControl([]byte(bad)); err == nil {
+			t.Fatalf("accepted %s control", name)
 		}
 	}
-	if _, err := ParseControlHeader([]string{"one", "two"}); err == nil {
-		t.Fatal("accepted repeated header")
+	encoded := base64.RawURLEncoding.EncodeToString(raw)
+	if _, err := ParseControlHeader([]string{encoded}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseControlHeader([]string{encoded, encoded}); err == nil {
+		t.Fatal("accepted repeated valid header")
 	}
 }

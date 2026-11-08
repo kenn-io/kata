@@ -166,7 +166,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return out, nil
 		}
 		if association != nil {
-			if err := requireAgentsViewClaimWhileCoordinated(ctx, cfg, issue, actor, nil, ""); err != nil {
+			if err := requireAgentsViewClaimWhileCoordinated(ctx, cfg, issue, actor, nil, "", nil); err != nil {
 				return nil, err
 			}
 		} else if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {

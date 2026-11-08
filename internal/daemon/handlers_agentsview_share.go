@@ -108,15 +108,16 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if cfg.AgentsViewRelay.Ingest == nil || cfg.RootSigning == nil {
 					return nil, agentsViewUnavailable()
 				}
+				pin, err := cfg.DB.RootAuthority(ctx, association.ProjectUID)
+				if err != nil || pin.Retired || pin.AuthorityUID != association.AuthorityUID || pin.KeyID != association.RootKeyID || !agentsViewSignerMatches(cfg.RootSigning.Signer(), pin) {
+					return nil, agentsViewUnavailable()
+				}
 			} else if cfg.AgentsViewRelay.Forward == nil {
 				return nil, agentsViewUnavailable()
 			}
-			actor, err := attributedActor(ctx, in.Actor)
+			actor, err := agentsViewUploadActor(ctx, federation, in.Actor, incoming)
 			if err != nil {
 				return nil, err
-			}
-			if federation {
-				actor = incoming.Actor
 			}
 			var claimPeer *federationPrincipal
 			if federation {
@@ -188,7 +189,7 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return nil, agentsViewUnavailable()
 				}
 				signer := cfg.RootSigning.Signer()
-				if signer.AuthorityUID != association.AuthorityUID || len(signer.PrivateKey) != ed25519.PrivateKeySize || db.RootPublicKeyID(signer.PrivateKey.Public().(ed25519.PublicKey)) != pin.KeyID {
+				if !agentsViewSignerMatches(signer, pin) {
 					return nil, agentsViewUnavailable()
 				}
 				ack, err := cfg.AgentsViewRelay.Ingest(ctx, issue, association, spool)
@@ -243,4 +244,15 @@ func checkAgentsViewIncoming(c agentsviewrelay.Control, p federationPrincipal, l
 		break
 	}
 	return api.NewError(409, "agentsview_route_changed", "incoming enrollment differs from selected route", "", nil)
+}
+
+func agentsViewUploadActor(ctx context.Context, federation bool, actor string, incoming federationPrincipal) (string, error) {
+	if federation {
+		return incoming.Actor, nil
+	}
+	return attributedActor(ctx, actor)
+}
+
+func agentsViewSignerMatches(signer db.RootAttributionSigner, pin db.RootKeyPin) bool {
+	return signer.AuthorityUID == pin.AuthorityUID && len(signer.PrivateKey) == ed25519.PrivateKeySize && db.RootPublicKeyID(signer.PrivateKey.Public().(ed25519.PublicKey)) == pin.KeyID
 }
