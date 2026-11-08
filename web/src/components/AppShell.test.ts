@@ -253,21 +253,20 @@ describe('AppShell', () => {
     )
 
     for (const [state, label] of [
-      [{ stale: true }, 'Connection unavailable'],
-      [{ reconnecting: true }, 'Reconnecting'],
-      [{ daemonSwitching: true }, 'Connecting'],
-      [{ daemonError: 'Authentication required' }, 'Authentication required'],
-      [{ readOnly: true }, 'Read-only'],
+      ['stale', 'Connection unavailable'],
+      ['reconnecting', 'Reconnecting'],
+      ['switching', 'Connecting'],
+      ['authentication', 'Authentication required'],
+      ['readonly', 'Read-only'],
     ] as const) {
       await view.rerender({
         ...props,
         loading: true,
-        stale: false,
-        reconnecting: false,
-        daemonSwitching: false,
-        daemonError: undefined,
-        readOnly: false,
-        ...state,
+        stale: state === 'stale',
+        reconnecting: state === 'reconnecting',
+        daemonSwitching: state === 'switching',
+        daemonError: state === 'authentication' ? 'Authentication required' : undefined,
+        readOnly: state === 'readonly',
       })
       expect(screen.getByRole('status', { name: 'Active connection' }).textContent).toContain(label)
     }
