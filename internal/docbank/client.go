@@ -72,7 +72,7 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body io.R
 	}
 	key, err := c.resolveKey()
 	if err != nil {
-		slog.WarnContext(ctx, "docbank request not sent", "error", err)
+		slog.WarnContext(ctx, "docbank request not sent", "err", err)
 		return nil, err
 	}
 	req.Header = headers.Clone()

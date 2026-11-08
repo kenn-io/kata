@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -91,7 +92,7 @@ func requireDaemonAPIVersionHealth(
 
 // daemonAPITooOldMessage tells the user a daemon's API predates feature.
 func daemonAPITooOldMessage(feature, required, reported string) string {
-	if reported = strings.TrimSpace(reported); reported == "" {
+	if reported = textsafe.Line(strings.TrimSpace(reported)); reported == "" {
 		reported = "no api_schema_version"
 	}
 	return fmt.Sprintf("%s requires daemon API %s or newer; this daemon reports %s; upgrade the daemon", feature, required, reported)
