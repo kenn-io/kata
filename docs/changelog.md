@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Turn on attachments with `kata docbank setup`: without `--url` it writes
+  `[docbank] local = true` for the Docbank on this machine; with `--url` and
+  `--key-file` it uses one that runs elsewhere. Setup checks the key before
+  writing `config.toml`, restarts running daemons, and changes nothing while a
+  `KATA_DOCBANK_*` variable is set or `config.toml` has a different `[docbank]`
+  section. See [Issue attachments](guide/attachments.md#configure-the-daemon).
 - Attach files through the Docbank on the same machine with
   `[docbank] local = true`, without copying its URL or API key. Docbank restarts
   and updates need no Kata change, and the daemon runs `docbank daemon start`

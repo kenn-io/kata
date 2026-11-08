@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 # CLI reference
@@ -2597,3 +2597,14 @@ kata docbank attachments rm <issue> <attachment>
 ```
 
 `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
+
+Point the current `KATA_HOME`'s daemon at a Docbank:
+
+```sh
+kata docbank setup [--folder PATH] [--yes]
+kata docbank setup --url URL --key-file PATH [--folder PATH] [--yes]
+```
+
+Without `--url`, setup uses the Docbank on this machine. With `--url`, it uses a Docbank that runs elsewhere and reads its key from `--key-file`. Both ask once before writing (`--yes` skips the question), then restart running daemons. They reject `--daemon`.
+
+JSON output is `{"kata_api_version":1,"local":true,"folder":"/kata","changed":true}` for the local form and `{"kata_api_version":1,"local":false,"url":"https://docbank.example","folder":"/kata","key_file":"/abs/path","changed":true}` for the remote form. Agent output is `OK docbank-setup local=true folder=/kata changed=true` or `OK docbank-setup url=<url> folder=/kata changed=true`. See [Configure the daemon](../guide/attachments.md#configure-the-daemon) for what setup writes, when it refuses, and what a rerun does.
