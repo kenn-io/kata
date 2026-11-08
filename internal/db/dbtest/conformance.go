@@ -997,6 +997,14 @@ var storageScenarios = []scenario{
 		run: checkFederationIngestLifecycle,
 	},
 	{
+		name: "federation ingest actor rebind retry",
+		methods: []string{
+			"CommentsByIssue", "CreateFederationEnrollment", "CreateProject", "EnableProjectFederation", "EventsByUIDs",
+			"IngestFederationEvents", "InsertRemoteEvent", "IssueByUID", "MaxEventID",
+		},
+		run: checkFederationIngestActorRebindRetry,
+	},
+	{
 		name: "federation adoption ingest lifecycle",
 		methods: []string{
 			"CreateFederationEnrollment", "CreateProject", "EnableProjectFederation",
