@@ -23,7 +23,7 @@ func newAgentsViewCmd() *cobra.Command {
 func newAgentsViewPrepareCmd() *cobra.Command {
 	var snapshot, output string
 	cmd := &cobra.Command{
-		Use: "prepare <issue-ref>", Short: "bind a retained snapshot to a live project service without uploading", Args: cobra.ExactArgs(1),
+		Use: "prepare <issue-ref>", Short: "prepare project snapshot consent without uploading", Args: cobra.ExactArgs(1),
 		Long: "Prepare inert local consent for an archived snapshot through its captured point. Later running-session messages may be absent. Review the exact file before confirming its digest. The receiver's first accepted snapshot is immutable, including across later closes in the same session.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if snapshot == "" || output == "" {
