@@ -53,13 +53,13 @@ func checkAgentsViewFeatureQueryLayouts(t *testing.T, store db.Storage, backend 
 		require.NoError(t, err)
 		features, err := db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
 		require.NoError(t, err)
-		require.NotContains(t, features, agentsviewrelay.EventFeature)
+		require.Empty(t, features)
 	}
 	_, err = query.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, payload, closed[0].UID)
 	require.NoError(t, err)
 	features, err := db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
 	require.NoError(t, err)
-	require.Contains(t, features, agentsviewrelay.EventFeature)
+	require.Equal(t, agentsviewrelay.EventFeature, features)
 	// Interleave a second project, then append another event in the first. The
 	// second project's history must not inherit the first project's requirement.
 	other, err := store.CreateProject(ctx, "other-project")
@@ -74,10 +74,10 @@ func checkAgentsViewFeatureQueryLayouts(t *testing.T, store db.Storage, backend 
 	require.Greater(t, hi.Int64, lo.Int64+(count-1), "interleaved layout must be sparse")
 	features, err = db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
 	require.NoError(t, err)
-	require.Contains(t, features, agentsviewrelay.EventFeature)
+	require.Equal(t, agentsviewrelay.EventFeature, features)
 	features, err = db.ProjectRequiredEventFeatures(ctx, query, other.UID, backend.Name == "postgres")
 	require.NoError(t, err)
-	require.NotContains(t, features, agentsviewrelay.EventFeature)
+	require.Empty(t, features)
 	// A project with no retained events must select neither SQLite traversal.
 	empty, err := store.CreateProject(ctx, "empty-project")
 	require.NoError(t, err)
@@ -95,10 +95,10 @@ func checkAgentsViewFeatureQueryLayouts(t *testing.T, store db.Storage, backend 
 	require.NoError(t, err)
 	features, err = db.ProjectRequiredEventFeatures(ctx, tx, dense.UID, backend.Name == "postgres")
 	require.NoError(t, err)
-	require.NotContains(t, features, agentsviewrelay.EventFeature)
+	require.Empty(t, features)
 	require.NoError(t, tx.Rollback())
 	features, err = db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
 	require.NoError(t, err)
-	require.Contains(t, features, agentsviewrelay.EventFeature)
+	require.Equal(t, agentsviewrelay.EventFeature, features)
 	return nil
 }

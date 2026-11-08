@@ -75,6 +75,7 @@ var storageScenarios = []scenario{
 	{name: "recurring cron", methods: []string{"ListRecurringCronJobs", "DispatchRecurringCron"}, runWithBackend: checkRecurringCron},
 	{name: "close transcript", run: checkCloseTranscript},
 	{name: "AgentsView close association", run: checkAgentsViewAssociation},
+	{name: "federation empty close payload", run: checkFederationEmptyClosePayload},
 	{name: "AgentsView feature query layouts", runWithBackend: checkAgentsViewFeatureQueryLayouts},
 	{name: "comment notifications", methods: []string{"CreateComment", "PatchIssueMetadata"}, run: checkCommentNotifications},
 	{name: "comment metadata multi issue", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsAfter", "IssueByID", "MaxEventID", "PatchIssueMetadata"}, run: checkCommentMetadataMultiIssue},

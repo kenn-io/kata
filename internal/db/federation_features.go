@@ -49,6 +49,9 @@ func MergeEventFeatures(values ...string) string {
 // PayloadRequiredFeatures supplements type classification with native delivery state.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
+	if payload == "" {
+		payload = "{}"
+	}
 	if kind == "issue.closed" {
 		var body struct {
 			Association *agentsviewrelay.Association `json:"agentsview_association"`

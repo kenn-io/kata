@@ -156,6 +156,9 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(400, "agentsview_invalid_snapshot", err.Error(), "", nil)
 			}
 			revalidate := func() error {
+				if err := revalidateBrowserSession(ctx); err != nil {
+					return api.NewError(http.StatusUnauthorized, "web_session_required", "browser session is no longer valid", "", nil)
+				}
 				if err := revalidateIssueScopedPrincipal(ctx, cfg.DB); err != nil {
 					return err
 				}
