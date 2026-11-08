@@ -44,6 +44,12 @@ func TestFederationIngestUnrelatedHistoryPageBudget(t *testing.T) {
 		require.Equal(t, 1, result.Accepted)
 		count := pages(false)
 		t.Logf("history=%d: %d page fetches", history, count)
+		// Measure the feature negotiation separately so a budget regression can
+		// be attributed without treating all ingest work as a single SQL scan.
+		pages(true)
+		_, err = db.ProjectRequiredEventFeatures(t.Context(), d, p.UID, false)
+		require.NoError(t, err)
+		t.Logf("history=%d: feature negotiation used %d page fetches", history, pages(false))
 		if history == 100 {
 			small = count
 		} else {
