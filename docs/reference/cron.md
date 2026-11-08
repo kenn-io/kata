@@ -13,7 +13,7 @@ observations. External adapters schedule other jobs, resolve checkout and provid
 configuration, create or update ordinary issues, deliver notifications, and launch processes.
 An observation records evidence; its status does not control whether anything runs.
 
-Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs tab, create and edit jobs; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
+Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs and Workflows tabs, create and edit jobs and workflows; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
 
 For a run organized as dependent issues with human approval, see
 [Gated workflows](../workflows/gated-workflows.md).
@@ -37,7 +37,7 @@ issue. Recording a run changes neither ownership nor leases. See
 ## Definitions
 
 `kata cron job` and `kata cron workflow` support `create`, `list`, `show`,
-`update`, `delete`, and `restore`. Commands return JSON. Creation retains a ULID:
+`update`, `edit`, `delete`, and `restore`. Commands return JSON. Creation retains a ULID:
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
@@ -65,6 +65,40 @@ process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
+
+### Edit in place
+
+Open an existing definition with `kata cron job edit <job-uid>` or
+`kata cron workflow edit <workflow-uid>`. Both stdin and stdout must be
+terminals. Kata chooses `$VISUAL`, then `$EDITOR`, then `vi`; editor arguments
+are split on whitespace, without shell expansion.
+
+The buffer contains `name` and `definition`. Kata owns the actor and revision;
+use `--as` for attribution. Only the consecutive leading `//` header is ignored.
+An empty body aborts, and an unchanged definition saves nothing. Local validation
+and daemon validation errors reopen the draft with the error; leaving an invalid
+body unchanged stops the command. Deleted definitions must be restored first.
+
+Kata saves with the `definition_event_uid` captured when the editor opened. If
+another writer changes the definition, the header shows their changes and a
+`CONFLICT` line. Review that diff and delete the conflict line to save your draft
+over the displayed revision. Each further conflict needs acknowledgment again.
+Kata does not merge the definitions automatically.
+
+Failures retain a private draft and print its path. The header records the exact
+expected event for manual recovery. Inspect `kata cron job show <job-uid>` before
+retrying. Strip only the leading header into a new file, then use the retained
+event, substituting `workflow` for a workflow draft:
+
+```sh
+awk 'BEGIN { header = 1 } header && /^\/\// { next } { header = 0; print }' "$draft" > replacement.json
+kata cron job update <job-uid> --file replacement.json --expected-event-uid <retained-event-uid> --json
+```
+
+If an intervening write occurred, that guarded retry conflicts. Review the current
+definition before choosing a newer expected event. A fresh `edit` reads a new base;
+it does not resume the retained draft. An output failure after an accepted save
+reports that the definition was saved and keeps the draft for inspection.
 
 ### Request files
 
@@ -452,9 +486,12 @@ An adapter creates one independent run UID and retains it across retries:
 
 ```sh
 kata cron run observe <run-uid> --json-input observation.json --json
-kata cron run list --limit 100 --json
+kata cron run list --json
 kata cron run show <run-uid> --json
 ```
+
+Run lists default to 100 records; see [Run list page size](#run-list-page-size)
+for the defaults on each surface.
 
 The HTTP operation is `PUT /api/v1/projects/{project_id}/cron/runs/{run_uid}`
 (`observeCronRun`). An omitted JSON `teammate` inherits `--teammate` or
@@ -634,6 +671,47 @@ ordinary identity, revision and credential guards. See
 migration, backup, runtime grants, and rollback requirements.
 
 ## Routes, events, and records
+
+All paths below are project-scoped. CLI entries follow `kata cron`; MCP
+entries follow `kata.`. CLI and MCP create definitions through stable-UID
+`PUT`, so the collection `POST` operations are HTTP only.
+
+| Method | Path | Operation ID | CLI | MCP tool |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/cron/capabilities` | `getCronCapabilities` | `capabilities` | `cron_capabilities` |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs` | `listCronJobs` | `job list` | `cron_jobs` |
+| `POST` | `/api/v1/projects/{project_id}/cron/jobs` | `createCronJob` | HTTP only | — |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `showCronJob` | `job show` | `cron_job` |
+| `PUT` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `replaceCronJob` | `job create` / `job update` | `cron_job_create` / `cron_job_update` |
+| `DELETE` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `archiveCronJob` | `job delete` | `cron_job_delete` |
+| `POST` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore` | `restoreCronJob` | `job restore` | `cron_job_restore` |
+| `GET` | `/api/v1/projects/{project_id}/cron/workflows` | `listCronWorkflows` | `workflow list` | `cron_workflows` |
+| `POST` | `/api/v1/projects/{project_id}/cron/workflows` | `createCronWorkflow` | HTTP only | — |
+| `GET` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `showCronWorkflow` | `workflow show` | `cron_workflow` |
+| `PUT` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `replaceCronWorkflow` | `workflow create` / `workflow update` | `cron_workflow_create` / `cron_workflow_update` |
+| `DELETE` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `archiveCronWorkflow` | `workflow delete` | `cron_workflow_delete` |
+| `POST` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/restore` | `restoreCronWorkflow` | `workflow restore` | `cron_workflow_restore` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs` | `listCronRuns` | `run list` | `cron_runs` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `showCronRun` | `run show` | `cron_run` |
+| `PUT` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `observeCronRun` | `run observe` | `cron_run_observe` |
+
+`kata.cron_new_uid` generates a UID locally and has no HTTP route.
+
+### Run list page size
+
+| Surface | Default page size | Maximum page size |
+| --- | --- | --- |
+| HTTP `listCronRuns` (omitted `limit`) | 100 | 100 |
+| CLI `kata cron run list` | 100 | 100 |
+| TUI Runs tab | Newest 100 (fixed) | 100 |
+| MCP `kata.cron_runs` | 20 | 100 |
+
+CLI `--limit` and MCP `limit` accept 1–100. MCP uses the shared default for
+paginated results. HTTP, CLI and MCP return `next_before_uid`; pass it as
+`before_uid` (CLI `--before-uid`) for the next page. The TUI loads only the
+newest page.
+
+### Events and records
 
 Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}`. Responses use

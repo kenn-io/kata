@@ -77,6 +77,8 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 	}{
 		{name: "snapshot", method: http.MethodGet, path: "/api/v1/ui/snapshot", want: http.StatusNoContent},
 		{name: "daemon roster", method: http.MethodGet, path: "/api/v1/ui/daemons", want: http.StatusNoContent},
+		{name: "local embeddings status", method: http.MethodGet, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
+		{name: "local embeddings setup", method: http.MethodPost, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
 		{name: "project sync status", method: http.MethodGet, path: "/api/v1/projects/7/federation/status", want: http.StatusNoContent},
 		{name: "global sync status", method: http.MethodGet, path: "/api/v1/federation/status", want: http.StatusForbidden},
 		{name: "proxied project sync status", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/projects/7/federation/status", want: http.StatusForbidden},
@@ -152,6 +154,7 @@ func TestIssueScopedBrowserSessionUsesSameRouteAllowlist(t *testing.T) {
 		name, method, path string
 		want               int
 	}{
+		{name: "local embeddings status", method: http.MethodGet, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
 		{name: "ordinary issue read", method: http.MethodGet, path: "/api/v1/projects/1/issues/abc4", want: http.StatusNoContent},
 		{name: "recurrence denied", method: http.MethodGet, path: "/api/v1/projects/1/recurrences", want: http.StatusForbidden},
 		{name: "project deletion denied", method: http.MethodDelete, path: "/api/v1/projects/2", want: http.StatusForbidden},

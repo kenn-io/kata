@@ -122,10 +122,6 @@ func (s *Store) IngestFederationEvents(
 			if err := db.ValidateEmbeddingProducerEvent(event, ""); err != nil {
 				return err
 			}
-			if boundActor != "" && event.Actor != boundActor {
-				return fmt.Errorf("%w: event %s actor %q does not match bound actor",
-					db.ErrFederationIngestValidation, event.EventUID, event.Actor)
-			}
 			if _, _, err := db.ValidateRemoteEventContentHash(event); err != nil {
 				return err
 			}
@@ -165,6 +161,13 @@ func (s *Store) IngestFederationEvents(
 			}
 			if !errors.Is(err, db.ErrNotFound) {
 				return err
+			}
+			// Exact retained history may predate an actor rebind. It is already
+			// admitted and must not be rewritten or projected again; fresh intent
+			// still requires the current enrollment's actor.
+			if boundActor != "" && event.Actor != boundActor {
+				return fmt.Errorf("%w: event %s actor %q does not match bound actor",
+					db.ErrFederationIngestValidation, event.EventUID, event.Actor)
 			}
 			var moveFrom, moveTo int64
 			if event.Type == "issue.moved" {
@@ -208,6 +211,9 @@ func (s *Store) IngestFederationEvents(
 				if err != nil {
 					return err
 				}
+			}
+			if err := validateLegacyRelayAdmissionTx(ctx, tx, params.ProjectID, event); err != nil {
+				return err
 			}
 			if err := db.ValidateFederationBoundActorPayload(ctx, event, db.FederationBoundActorCheck{
 				BoundActor:                      boundActor,

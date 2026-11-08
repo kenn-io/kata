@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,12 +50,32 @@ func TestReady_FiltersBlocked(t *testing.T) {
 func TestReady_RespectsLimit(t *testing.T) {
 	env := testenv.New(t)
 	pid := initLocalWorkspace(t, env, "kata")
-	for range 3 {
-		createIssueViaHTTP(t, env, pid, "x")
+	for i := range 3 {
+		createIssueViaHTTP(t, env, pid, fmt.Sprintf("issue %d", i))
 	}
 
 	out := getReady(t, env, pid, "?limit=2")
 	assert.Len(t, out.Issues, 2)
+}
+
+func TestReady_PrioritySort(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "example-project")
+	best, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: pid, Title: "priority pick", Author: "author", Priority: new(int64(1)),
+	})
+	require.NoError(t, err)
+	createIssueViaHTTP(t, env, pid, "newer unprioritized")
+	for _, path := range []string{projectPath(pid) + "/ready", "/api/v1/ready"} {
+		t.Run(path, func(t *testing.T) {
+			var out readyResp
+			envGetJSON(t, env, path+"?sort=priority&limit=1", &out)
+			require.Len(t, out.Issues, 1)
+			assert.Equal(t, best.ShortID, out.Issues[0].ShortID)
+			status, _ := env.Get(t, path+"?sort=newest")
+			assert.Equal(t, 400, status)
+		})
+	}
 }
 
 func TestReady_UnownedAndOwnerMutuallyExclusive(t *testing.T) {
@@ -184,9 +205,9 @@ func TestReadyGlobal_LimitCapsTotalRows(t *testing.T) {
 	env := testenv.New(t)
 	pid1 := initLocalWorkspace(t, env, "kata")
 	pid2 := initLocalWorkspace(t, env, "other")
-	for range 3 {
-		createIssueViaHTTP(t, env, pid1, "p1")
-		createIssueViaHTTP(t, env, pid2, "p2")
+	for i := range 3 {
+		createIssueViaHTTP(t, env, pid1, fmt.Sprintf("p1 issue %d", i))
+		createIssueViaHTTP(t, env, pid2, fmt.Sprintf("p2 issue %d", i))
 	}
 
 	out := getReadyGlobal(t, env, "?limit=2")

@@ -24,5 +24,12 @@ func TestRelayRootCheckpointLaterBoundary(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = replica.Close() })
 		return replica
+	}, func(t *testing.T, project db.Project, event db.RemoteEvent) {
+		t.Helper()
+		_, err := store.ExecContext(t.Context(), `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			event.EventUID, event.OriginInstanceUID, project.ID, project.Name, *event.IssueUID, event.Type, event.Actor,
+			string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash, event.CreatedAt.Format("2006-01-02T15:04:05.000Z"))
+		require.NoError(t, err)
+		require.NoError(t, store.MaterializeFederatedProject(t.Context(), project.ID))
 	})
 }

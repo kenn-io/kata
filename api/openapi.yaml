@@ -1862,10 +1862,10 @@ components:
           format: int64
           type: integer
         last_error:
-          description: Sanitized credential rejection; cleared after the next successful embedding call.
+          description: Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call.
           type: string
         last_error_at:
-          description: Time of the credential rejection; cleared after the next successful embedding call.
+          description: Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call.
           format: date-time
           type: string
         last_error_status:
@@ -4359,6 +4359,70 @@ components:
       required:
         - tokens
         - observed_at
+      type: object
+    LocalEmbeddingsIndexing:
+      additionalProperties: true
+      properties:
+        done:
+          format: int64
+          type: integer
+        eta_seconds:
+          format: int64
+          type: integer
+        failed:
+          type: boolean
+        total:
+          format: int64
+          type: integer
+      required:
+        - done
+        - total
+        - failed
+      type: object
+    LocalEmbeddingsJob:
+      additionalProperties: true
+      properties:
+        downloaded:
+          format: int64
+          type: integer
+        error:
+          type: string
+        state:
+          type: string
+        total:
+          format: int64
+          type: integer
+      required:
+        - state
+        - downloaded
+        - total
+      type: object
+    LocalEmbeddingsStatus:
+      additionalProperties: true
+      properties:
+        can_change:
+          type: boolean
+        download_bytes:
+          format: int64
+          type: integer
+        indexing:
+          $ref: "#/components/schemas/LocalEmbeddingsIndexing"
+        job:
+          $ref: "#/components/schemas/LocalEmbeddingsJob"
+        ollama_available:
+          type: boolean
+        provider:
+          enum:
+            - none
+            - ollama
+            - built_in
+            - other
+          type: string
+      required:
+        - provider
+        - download_bytes
+        - ollama_available
+        - can_change
       type: object
     MapConnectorFieldRequestBody:
       additionalProperties: false
@@ -7247,7 +7311,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.40.0
+  version: 0.42.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -7508,6 +7572,61 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/embeddings/local:
+    get:
+      operationId: getLocalEmbeddings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalEmbeddingsStatus"
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+    post:
+      operationId: turnOnLocalEmbeddings
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalEmbeddingsStatus"
+          description: Accepted
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
   /api/v1/events:
     get:
       operationId: pollEvents
@@ -11599,6 +11718,16 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+            enum:
+              - priority
+              - ""
+            type: string
         - explode: false
           in: query
           name: limit
@@ -11914,6 +12043,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/SearchResponseBody"
           description: OK
+          headers:
+            X-Kata-Embeddings-Configured:
+              schema:
+                description: Whether the daemon has an embeddings provider configured.
+                type: string
         "400":
           content:
             application/json:
@@ -11966,6 +12100,16 @@ paths:
     get:
       operationId: readyIssuesGlobal
       parameters:
+        - description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+            enum:
+              - priority
+              - ""
+            type: string
         - explode: false
           in: query
           name: limit

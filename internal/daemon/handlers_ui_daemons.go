@@ -714,6 +714,10 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 					}
 				}
 			}
+			if response.Request.URL.Path == "/api/v1/embeddings/local" && response.StatusCode == http.StatusOK {
+				administrator := localEmbeddingsAdministrator(response.Request.Context(), g.insecureReadonly, g.sessions)
+				return restrictWebDaemonLocalEmbeddings(response, administrator)
+			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
@@ -813,6 +817,35 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	return nil
 }
 
+// restrictWebDaemonLocalEmbeddings applies the source viewer's authority to
+// a target's setup status. The target answered with the catalog credential, so
+// its can_change and owner-only details describe that credential, not the
+// browser. Remote setup is never changeable through the gateway.
+func restrictWebDaemonLocalEmbeddings(response *http.Response, administrator bool) error {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("read daemon embeddings response: %w", err)
+	}
+	_ = response.Body.Close()
+	var status api.LocalEmbeddingsStatus
+	if err := json.Unmarshal(body, &status); err != nil {
+		return fmt.Errorf("decode daemon embeddings response: %w", err)
+	}
+	status.CanChange = false
+	if !administrator {
+		redactLocalEmbeddingsStatus(&status)
+	}
+	body, err = json.Marshal(status)
+	if err != nil {
+		return fmt.Errorf("encode daemon embeddings response: %w", err)
+	}
+	response.Header.Del("ETag")
+	response.Body = io.NopCloser(bytes.NewReader(body))
+	response.ContentLength = int64(len(body))
+	response.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	return nil
+}
+
 func encodeWebDaemonETag(upstream string, policy webDaemonSourcePolicy) string {
 	mode := "ro"
 	if policy.writable {
@@ -862,6 +895,9 @@ func webDaemonOutboundHeaders(in http.Header) http.Header {
 }
 
 func webDaemonProxyRequestAllowed(r *http.Request, path string) bool {
+	if path == "/api/v1/embeddings/local" {
+		return r.Method == http.MethodGet
+	}
 	// Project sync status is a source-origin read. Target credentials must not
 	// expose federation topology through the ordinary SPA gateway.
 	if strings.Contains(path, "/federation/") {

@@ -15,9 +15,9 @@ export interface EmbeddingsHealth {
   embedded: number
   error_present?: boolean
   eta_seconds?: number
-  /** Sanitized credential rejection; cleared after the next successful embedding call. */
+  /** Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call. */
   last_error?: string
-  /** Time of the credential rejection; cleared after the next successful embedding call. */
+  /** Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call. */
   last_error_at?: string
   last_error_status?: number
   last_progress_at?: string

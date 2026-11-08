@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -688,73 +689,138 @@ func TestMoveKeepsAnUnrelatedListStatusWhenNoPriorityPromptIsArmed(t *testing.T)
 	require.Equal(t, "filter: 3 of 9", m.list.status)
 }
 
-// deleteMoveAPI adds a delete that succeeds to the move fake, and swallows
-// screen-visit telemetry, which the fake's absent client cannot send.
-type deleteMoveAPI struct{ *moveTestAPI }
+// quietMoveAPI swallows screen-visit telemetry, which the move fake's absent
+// client cannot send.
+type quietMoveAPI struct{ *moveTestAPI }
 
-func (deleteMoveAPI) ReportScreenViewed(context.Context, string) error { return nil }
-
-func (deleteMoveAPI) DeleteIssue(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
-	return &MutationResp{Changed: true}, nil
-}
-
-func (deleteMoveAPI) RestoreIssue(context.Context, int64, string, string) (*MutationResp, error) {
-	return &MutationResp{Changed: true}, nil
-}
+func (quietMoveAPI) ReportScreenViewed(context.Context, string) error { return nil }
 
 // A launch on `kata tui <ref>` opens the pane on that issue before the list
 // has a say. Esc returns focus to the list, whose highlight is another row, and
-// the pane keeps the opened issue with an empty Back history. A delete or move
-// of the highlighted row must leave that pane, its scroll and its tab alone.
-func TestDeleteAndMoveKeepAnUnrelatedSplitPaneWithNoBackHistory(t *testing.T) {
-	for _, action := range []string{"move", "delete"} {
-		t.Run(action, func(t *testing.T) {
-			api := &moveTestAPI{
-				projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
-				preview: func(int, MoveInput) (*MutationResp, error) {
-					return &MutationResp{Issue: &Issue{UID: "issue-b", ShortID: "bbbb"}, Revision: 5}, nil
-				},
-			}
-			m := moveModel(t, api)
-			m.api = newUndoClient(deleteMoveAPI{api})
-			if action == "delete" {
-				m.api = deleteMoveAPI{api}
-			}
-			opened := m.list.issues[0]
-			opened.Body = strings.Repeat("A long paragraph of the opened issue.\n\n", 80)
-			m = m.seedOpenDetail(opened)
-			m, _ = updateModel(m, tea.WindowSizeMsg{Width: 140, Height: 40})
-			require.Equal(t, splitlayout.Split, m.layout)
-			require.Equal(t, focusDetail, m.focus)
-			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
-			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
-			tab, scroll := m.detail.activeTab, m.detail.scroll
-			require.NotEqual(t, tabComments, tab, "Tab moved the pane off its first tab")
-			require.Positive(t, scroll, "PageDown scrolled the pane")
-			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-			require.Equal(t, focusList, m.focus)
-			require.Equal(t, "issue-b", m.list.selectedUID, "the list highlights a different row than the pane")
-			require.Empty(t, m.detail.navStack)
+// the pane keeps the opened issue with an empty Back history. A move of the
+// highlighted row must leave that pane, its scroll and its tab alone.
+func TestMoveKeepsAnUnrelatedSplitPaneWithNoBackHistory(t *testing.T) {
+	api := &moveTestAPI{
+		projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
+		preview: func(int, MoveInput) (*MutationResp, error) {
+			return &MutationResp{Issue: &Issue{UID: "issue-b", ShortID: "bbbb"}, Revision: 5}, nil
+		},
+	}
+	m := moveModel(t, api)
+	m.api = newUndoClient(quietMoveAPI{api})
+	opened := m.list.issues[0]
+	opened.Body = strings.Repeat("A long paragraph of the opened issue.\n\n", 80)
+	m = m.seedOpenDetail(opened)
+	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 140, Height: 40})
+	require.Equal(t, splitlayout.Split, m.layout)
+	require.Equal(t, focusDetail, m.focus)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	tab, scroll := m.detail.activeTab, m.detail.scroll
+	require.NotEqual(t, tabComments, tab, "Tab moved the pane off its first tab")
+	require.Positive(t, scroll, "PageDown scrolled the pane")
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, focusList, m.focus)
+	require.Equal(t, "issue-b", m.list.selectedUID, "the list highlights a different row than the pane")
+	require.Empty(t, m.detail.navStack)
 
-			var cmd tea.Cmd
-			if action == "move" {
-				m = openMove(t, m)
-				m, cmd = enter(m)
-				m, _ = deliver(t, m, cmd)
-				m, cmd = enter(m)
-				m, _ = deliver(t, m, cmd)
-			} else {
-				m, _ = updateModel(m, runeKey('X'))
-				m = typeString(m, "DELETE source#bbbb")
-				m, cmd = enter(m)
-				m, _ = deliver(t, m, cmd)
+	m = openMove(t, m)
+	m, cmd := enter(m)
+	m, _ = deliver(t, m, cmd)
+	m, cmd = enter(m)
+	m, _ = deliver(t, m, cmd)
+
+	require.Equal(t, "issue-c", m.list.selectedUID, "the list selects the row after the one removed")
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, "issue-a", m.detail.issue.UID, "the pane keeps the issue it was opened on")
+	require.Equal(t, tab, m.detail.activeTab)
+	require.Equal(t, scroll, m.detail.scroll)
+}
+
+// TestMoveKeyIsOfferedOnlyOnThePlainListRow holds M to one rule: the footer,
+// the help overlay and the dispatch all offer the key on the selected row of
+// the plain issue list, and nowhere else. An undo in flight also takes it away,
+// because the Move form would be replaced when the undo answers.
+func TestMoveKeyIsOfferedOnlyOnThePlainListRow(t *testing.T) {
+	hint := helplayout.HelpItem{Key: "M", Description: "move"}
+	for _, tc := range []struct {
+		name    string
+		view    viewID
+		scoped  bool
+		context string
+		extra   string
+	}{
+		{name: "unscoped list", view: viewList},
+		{name: "unscoped detail", view: viewDetail},
+		{name: "scoped list", view: viewList, scoped: true},
+		{name: "scoped detail", view: viewDetail, scoped: true},
+		{name: "Inbox", view: viewList, context: "Inbox"},
+		{name: "Attention", view: viewList, context: "Attention"},
+		{name: "Help", view: viewList, extra: "help"},
+		{name: "empty list", view: viewList, extra: "empty"},
+		{name: "split with the detail focused", view: viewList, extra: "split detail"},
+		{name: "undo in flight", view: viewList, extra: "undo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDeleteHarness(t, tc.view)
+			target := h.issues[0]
+			switch tc.context {
+			case "Inbox":
+				_, err := h.env.DB.DesignateInboxProject(t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
+				require.NoError(t, err)
+				h.m = h.drain(h.finish(h.key(runeKey('I'))))
+				require.True(t, h.m.scope.inbox)
+				require.NotNil(t, h.m.inboxReturn)
+			case "Attention":
+				h.m.attention.returnContext = &attentionReturnContext{detail: h.m.detail}
+			}
+			h.selectIssue(target.UID)
+			if tc.view == viewDetail {
+				h.m.focus = focusDetail
+				require.NotNil(t, h.m.detail.issue)
+			}
+			h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, true
+			h.m.issueScoped, h.m.scopedWritable = tc.scoped, tc.scoped
+			switch tc.extra {
+			case "help":
+				h.m.view = viewHelp
+			case "empty":
+				h.m.list.issues, h.m.list.selectedUID, h.m.list.selectedProjectID = nil, "", 0
+			case "split detail":
+				issue := h.m.list.issues[0]
+				h.m.layout, h.m.focus, h.m.detail.issue = splitlayout.Split, focusDetail, &issue
+			case "undo":
+				h.m.undoInFlight = true
 			}
 
-			require.Equal(t, "issue-c", m.list.selectedUID, "the list selects the row after the one removed")
-			require.NotNil(t, m.detail.issue)
-			require.Equal(t, "issue-a", m.detail.issue.UID, "the pane keeps the issue it was opened on")
-			require.Equal(t, tab, m.detail.activeTab)
-			require.Equal(t, scroll, m.detail.scroll)
+			offered := tc.view == viewList && !tc.scoped && tc.context == "" && tc.extra == ""
+			helpListed := !tc.scoped && tc.context == "" && tc.extra != "undo"
+			if tc.extra != "help" {
+				rows := flattenHelpRows(h.m.helpRows())
+				if offered {
+					assertHelpItemPresent(t, rows, hint)
+				} else {
+					assertHelpItemAbsent(t, rows, hint)
+				}
+			}
+			if tc.scoped || tc.context != "" {
+				assertHelpItemAbsent(t, flattenHelpRows(h.m.splitHelpRows()), hint)
+				assertHelpItemAbsent(t, flattenHelpRows(listHelpRows(h.m.list, h.m.chrome())), hint)
+			}
+			for _, section := range helpSections(h.m.helpKeymap()) {
+				for _, item := range section.rows {
+					require.NotEmpty(t, item.Key, "help omits unbound rows")
+				}
+			}
+			helpModel := h.m
+			helpModel.view, helpModel.width = viewHelp, 120
+			require.Equal(t, helpListed, strings.Contains(stripANSI(helpModel.viewBody()), "move to another project"))
+
+			cmd := h.key(runeKey('M'))
+			require.Equal(t, offered, h.m.modal == modalMoveIssue, "dispatch follows the footer")
+			if !offered {
+				require.Nil(t, cmd)
+			}
 		})
 	}
 }

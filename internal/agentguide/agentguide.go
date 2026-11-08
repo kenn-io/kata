@@ -3,67 +3,46 @@ package agentguide
 
 import "strings"
 
-// Contract is the marker-free agent workflow contract.
-const Contract = "Kata is the system of record for intent.\n\n" +
-	"- Never `kata delete` or `kata purge` without explicit user authorization.\n\n" +
-	`~~~dot
-digraph kata {
-  rankdir=TB; node [shape=box];
+// Contract is the marker-free agent workflow contract: the short core every
+// coding agent sees. Coordination detail lives in the quickstart fragments.
+const Contract = `This workspace tracks its work in kata. Use kata for the changes the user asks
+you to make here, not for questions, explanations, or reviews that change
+nothing.
 
-  arrive   [shape=diamond label="Work arrives"];
-  search   [label="Search first:\nkata search \"<terms>\" --agent\nSame work: reuse the open issue, else create one.\nRelated work: link each hit with --parent <ref> | --related <ref>.\nIf create refuses a look-alike, reuse it;\n--force-new only if the work truly differs.\nNo bound workspace: refs are <project>#<id>,\nor pass --project <project>."];
-  route    [shape=diamond label="Work it, or delegate it?"];
+Before starting a change, look for an existing issue:
 
-  subgraph cluster_work {
-    label="";
-    claim  [label="Claim and mark it tracked:\nkata claim <ref>\nkata meta set <ref> work.attention ok"];
-    branch [label="If the work happens on a dedicated branch, stamp it once:\nkata meta set <ref> work.branch <branch>\nor bind at creation:\nkata create ... --meta work.branch=<branch> --idempotency-key <key>"];
-    live   [label="Keep state current:\nkata meta set <ref> work.attention stuck|needs-human|ok\nkata meta set <ref> work.attention_msg \"<why>\"\nstuck = blocked; needs-human = input/review; ok = unblocked.\nRecord progress:\nkata comment <ref> -m \"<what changed>\"\nRespond to a comment:\nkata comment <ref> --reply|--confirm|--refute|--supersede c:<id> -m \"<evidence>\"\nRequest attention:\nkata notify <ref> --to <actor>[/<teammate>] --message <reason>"];
-    claim -> branch -> live;
-  }
+    kata search "<one or two distinctive words>" --agent
 
-  subgraph cluster_delegate {
-    label="";
-    fanout [label="Tracked children: --parent <ref>, --meta work.branch=<branch>,\n--idempotency-key <key>, --json; capture .issue.short_id.\nSubagents: distinct KATA_TEAMMATE and\nKATA_INBOX_USER=<actor>/<teammate>; keep the actor.\nRead requests: kata inbox --for <actor>[/<teammate>].\nAfter handling: kata notify <ref> --to <actor>[/<teammate>] --clear."];
-    join   [label="Join with kata wait <refs> --until attention --any\nMatches needs-human or stuck; a close also completes the wait,\nand the reported reason distinguishes which. Use --timeout so a\nwrapper can tell timeout from satisfaction."];
-    coord  [label="Read delegated work.*; never write it."];
-    fanout -> join -> coord;
-  }
+Search returns issues that contain every word, so add words only to narrow the
+results. If an open issue covers the work, use it. Otherwise create one:
 
-  done     [shape=diamond label="Verified complete?"];
-  close    [label="kata close <ref> --done --message \"<scope and verification, 40+ chars>\"\n--evidence commit:<sha> | pr:<url> | test:<cmd> | reviewed-paths:<path>\n(or --commit, --pr, --test, --reviewed)"];
-  retire   [label="kata close <ref> --message \"<why>\"\n--duplicate-of <ref> | --superseded-by <ref> (20+ chars)\n| --wontfix (60+ chars)"];
-  review   [label="kata label add <ref> needs-review --comment \"<what remains>\""];
-  park     [shape=diamond label="Park it?"];
-  schedule [label="kata schedule <ref> <date-or-time>\nsets scheduled_on; clear with -"];
-  someday  [label="kata meta set <ref> someday true --json-value\nclear with kata meta unset <ref> someday"];
+    kata create "<title>" --body "<what and why>" --idempotency-key <key> --agent
 
-  arrive -> search -> route;
-  route -> claim   [label="work it"];
-  route -> fanout  [label="delegate it"];
-  route -> park    [label="record only"];
-  live  -> done;
-  coord -> done;
-  done -> close    [label="yes"];
-  done -> retire   [label="duplicate, superseded or dropped"];
-  done -> park     [label="no"];
-  park -> schedule [label="start date known"];
-  park -> someday  [label="start date unknown"];
-  park -> review   [label="needs review"];
-}
-~~~
+If create reports a look-alike, use that issue unless the work truly differs
+(--force-new). Link related but different work with --related <ref>, or
+--parent <ref> when the new issue is part of a larger one.
 
-Inbox reads stay in the selected project. For cross-project work, use kata inbox --for <actor>[/<teammate>] --all without --project or --workspace.
+Claim the issue before you work on it: kata claim <ref>. When the user only
+asks you to record something, create the issue and stop there.
 
-Parent links group work; they do not gate readiness, but a parent cannot close with open children.
-Use --blocks <dependent> / --blocked-by <prerequisite> only for real prerequisites; they gate kata ready.
-Use --related <ref> for context only. kata wait observes state without requiring a dependency edge.
+Comment when you learn something a later reader needs:
 
-One writer per key: only write your own work.*. Ignore work.* on closed issues; never write it there.
-Before stopping, close completed work or update both work.attention and work.attention_msg for the handoff.
+    kata comment <ref> -m "<finding>" --agent
 
-Schedule/someday defer work; deadlines don’t. kata deadline <ref> <date-or-time> sets deadline_on without changing readiness.
-Reached schedules and deadlines use notify.* for the current owner, or the author when unowned; clear with kata notify <ref> --to <recipient> --clear.
+Close the issue as soon as the work is verified. The message needs 40 or more
+characters and the close needs evidence:
+
+    kata close <ref> --done --message "<what changed and how you verified it>" --test "<command>" --agent
+
+Use --commit <sha> or --pr <url> instead of --test when that is the evidence.
+If you stop before the work is done, leave the issue open and say what remains:
+
+    kata label add <ref> needs-review --comment "<what remains>"
+
+Never run kata delete or kata purge unless the user asks for that exact action.
+
+For subagents, inboxes, attention signals, scheduling, and relationship rules,
+run kata quickstart.
 `
 
 // Quickstart is the full CLI agent briefing: every fragment, in order.
@@ -91,6 +70,7 @@ var Fragments = []Fragment{
 	{"scheduling", fragScheduling},
 	{"relationships", fragRelationships},
 	{"teammates", fragTeammates},
+	{"coordination", fragCoordination},
 	{"mutation-comments", fragMutationComments},
 	{"destructive", fragDestructive},
 	{"events", fragEvents},
@@ -102,7 +82,11 @@ const fragIntro = `# kata agent quickstart
 
 Use kata as the shared issue ledger for this workspace.
 
-1. Run from the workspace (--workspace overrides; --project picks
+1. Find the right command by describing the task:
+
+      kata cli search "<task>"
+
+   Run from the workspace (--workspace overrides; --project picks
    another). Author = $KATA_AUTHOR > $USER > git user.name.
    No bound workspace: use <project>#<id> refs or --project <project>.
    Issue refs are short_ids derived from each issue's ULID (e.g. abc4).
@@ -313,6 +297,30 @@ const fragTeammates = `9. Attribute swarm contributions and request attention wi
       kata claim <child>
 
    Comments record findings; child issues track owned work.
+
+`
+
+const fragCoordination = `   Coordinate tracked work through work.* metadata when a coordinator or
+   dashboard watches it. Each agent writes only its own work.* keys, and
+   never on closed issues:
+
+   kata meta set <ref> work.attention ok           # actively working
+   kata meta set <ref> work.attention stuck        # blocked
+   kata meta set <ref> work.attention needs-human  # wants input or review
+   kata meta set <ref> work.attention_msg "<why>"
+   kata meta set <ref> work.branch <branch>        # once, for branch work
+
+   Before stopping on watched work, close it or update both
+   work.attention and work.attention_msg for the hand-off.
+
+   A coordinator creates delegated children with --parent <ref>,
+   --meta work.branch=<branch>, and an idempotency key. It reads their
+   work.* but never writes it, and joins with:
+
+   kata wait <refs> --until attention --any --timeout 30m
+
+   needs-human or stuck completes the wait; so does a close, and the
+   reported reason says which.
 
 `
 

@@ -237,14 +237,18 @@ func MovedIssueUID(ctx context.Context, q interface {
 		resetMoveEvent = "reset.payload::jsonb->>'move_event_uid'"
 	}
 	// idx_events_moved_from finds a former short ID directly; a full UID uses
-	// the issue history index. Receiver-local reset references join through the
-	// same issue_uid index. Issue creation runs this check, so neither lookup may
-	// scan event history. Expressions must match the move-history index.
+	// the issue history index. idx_events_reset_from finds receiver-local reset
+	// references. Issue creation runs this check, so neither lookup may scan event
+	// history. Expressions must match their respective indexes.
 	moveMatch := fromShort + "=$2"
 	resetMatch := resetFromShort + "=$2"
 	if len(shortID) == shortid.MaxLength {
 		moveMatch = "e.issue_uid=upper($2)"
 		resetMatch = "reset.issue_uid=upper($2)"
+		if !postgres {
+			// Keep UID lookups on idx_events_issue_uid rather than the departure index.
+			fromProject = "+" + fromProject
+		}
 	}
 	// Bind the project UID: SQLite cannot search an expression index with a
 	// value produced by a subquery.

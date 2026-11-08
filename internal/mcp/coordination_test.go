@@ -39,7 +39,7 @@ func TestNewSectionLoadersRegisterOnlyTheirTools(t *testing.T) {
 
 			listed, err := session.ListTools(t.Context(), nil)
 			require.NoError(t, err)
-			want := append(append([]string(nil), sectionLoaderNames...), append([]string{"kata.skills"}, test.tools...)...)
+			want := append(append([]string(nil), sectionLoaderNames...), append([]string{"kata.search_tools", "kata.skills"}, test.tools...)...)
 			sort.Strings(want)
 			require.Equal(t, want, toolNames(listed.Tools))
 		})
@@ -123,7 +123,7 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 	}
 	for i, value := range requests {
 		created := callAdministrationTool(t, session, "kata.create", map[string]any{
-			"title": "Attention issue", "idempotency_key": "attention-" + string(rune('a'+i)),
+			"title": "Attention issue " + string(rune('a'+i)), "idempotency_key": "attention-" + string(rune('a'+i)),
 		})
 		ref := created["issue"].(map[string]any)["ref"].(string)
 		callAdministrationTool(t, session, "kata.set_metadata", map[string]any{"ref": ref, "patch": map[string]any{key: value}})

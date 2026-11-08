@@ -1,7 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
+vi.mock('../lib/kata/projection', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../lib/kata/projection')>()
+  return { ...original, normalizeKataUISnapshot: vi.fn(original.normalizeKataUISnapshot) }
+})
+
 import { setGeneratedFetch } from '../lib/api/client'
+import { normalizeKataUISnapshot } from '../lib/kata/projection'
 import type { MutationContext, MutationResult } from '../lib/mutations/controller'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
@@ -11,6 +17,64 @@ describe('AppShell', () => {
     cleanup()
     vi.unstubAllGlobals()
     vi.useRealTimers()
+  })
+
+  test('advances Updated labels while the task snapshot stays unchanged', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T12:00:16Z'))
+    const current = snapshot()
+    current.collection[0]!.updated_at = '2026-08-01T12:00:16Z'
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'inbox',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.getByText('now')).not.toBeNull()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    expect(normalizations).toBeGreaterThan(0)
+    await vi.advanceTimersByTimeAsync(45_000)
+    expect(screen.getByText('1m')).not.toBeNull()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
+  })
+
+  test('moves a scheduled task into Inbox at midnight without a new snapshot', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 7, 1, 23, 59, 59))
+    const current = snapshot()
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    current.collection[0]!.metadata = { scheduled_on: '2026-08-02' }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'inbox',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    expect(normalizations).toBeGreaterThan(0)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
   test('identifies the current browser hub when a connection needs attention', () => {
@@ -1037,6 +1101,94 @@ describe('AppShell', () => {
     expect(onBackFromCredentials).toHaveBeenCalledOnce()
   })
 
+  test('opens Settings from the gear for a viewer without access administration', async () => {
+    const onNavigate = vi.fn()
+    const member = snapshot()
+    member.capabilities.writable = false
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: member,
+        loading: false,
+        readOnly: true,
+        ...mutationProps({ canMutate: false }),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(onNavigate).toHaveBeenCalledWith({
+      kind: 'kata',
+      view: 'settings',
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    })
+  })
+
+  test('renders Settings as a daemon screen for the remote host and returns to issues', async () => {
+    const onBackFromCredentials = vi.fn()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json({
+          provider: 'none',
+          download_bytes: 290_000_000,
+          ollama_available: false,
+          rebuild: false,
+          can_change: false,
+        }),
+      ),
+    )
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'settings',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        daemons: [
+          {
+            id: 'local',
+            url: 'http://127.0.0.1:7777',
+            default: true,
+            local: true,
+            auth: 'none',
+            health: 'connected',
+          },
+          {
+            id: 'team',
+            url: 'https://kata.example.com',
+            default: false,
+            auth: 'token',
+            health: 'connected',
+          },
+        ],
+        activeDaemonID: 'team',
+        canAdministerDaemon: false,
+        onBackFromCredentials,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
+    expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
+    expect(onBackFromCredentials).toHaveBeenCalledOnce()
+  })
+
   test('drops held keyboard selection when sidebar navigation begins', async () => {
     vi.useFakeTimers()
     const onNavigate = vi.fn()
@@ -1162,6 +1314,40 @@ describe('AppShell', () => {
         filters: { status: [], owner: [], label: [], relationship: [] },
       }),
     )
+  })
+
+  test('resets grown rows when repeated label filters change', async () => {
+    const current = snapshot()
+    current.collection = Array.from({ length: 400 }, (_, index) => ({
+      ...current.collection[0]!,
+      id: index + 1,
+      uid: `bulk-${index}`,
+      short_id: `b${index}`,
+      title: `Bulk ${index}`,
+      labels: ['a', 'b', 'c', 'd'],
+    }))
+    const props = {
+      route: {
+        kind: 'kata' as const,
+        view: 'all-open' as const,
+        graph: false,
+        filters: { status: [], owner: [], label: ['a', 'b'], relationship: [] },
+      },
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { container, rerender } = render(AppShell, { props })
+    expect(container.querySelectorAll('button.row')).toHaveLength(150)
+    await fireEvent.keyDown(container.querySelector('button.row')!, { key: 'End' })
+    expect(container.querySelectorAll('button.row')).toHaveLength(400)
+    await rerender({
+      ...props,
+      route: { ...props.route, filters: { ...props.route.filters, label: ['a', 'd'] } },
+    })
+    expect(container.querySelectorAll('button.row')).toHaveLength(150)
   })
 
   test('retains repeated route filters when another control changes', async () => {
@@ -1410,6 +1596,98 @@ describe('AppShell', () => {
     expect(onCreateIssue).toHaveBeenCalledWith('New example task')
   })
 
+  test('distinguishes empty projects from empty tasks and keeps refused capture closed', async () => {
+    const empty = snapshot()
+    empty.catalog = []
+    empty.collection = []
+    const onCreateProject = vi.fn(async () => {
+      throw new Error('Project creation refused')
+    })
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: empty,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject,
+      },
+    })
+    const collection = screen.getByRole('region', { name: 'Issues' })
+    expect(within(collection).getByText('No projects yet')).not.toBeNull()
+    await fireEvent.click(within(collection).getByRole('button', { name: 'New project' }))
+    const input = screen.getByRole('textbox', { name: 'New project name' })
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    await fireEvent.input(input, { target: { value: 'example-project' } })
+    await fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(onCreateProject).toHaveBeenCalledWith('example-project', true))
+    await expect(onCreateProject.mock.results[0]!.value).rejects.toThrow()
+    expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
+    const existing = snapshot()
+    existing.collection = []
+    await view.rerender({ snapshot: existing })
+    expect(within(collection).getByText('No tasks')).not.toBeNull()
+    expect(screen.queryByText('No projects yet')).toBeNull()
+    await view.rerender({ snapshot: empty, loading: true })
+    expect(screen.queryByText('No projects yet')).toBeNull()
+  })
+
+  test.each(['close', 'fence'])(
+    'cancels pending first-project capture after %s',
+    async (action) => {
+      const empty = snapshot()
+      empty.catalog = []
+      empty.collection = []
+      vi.stubGlobal('matchMedia', (media: string) => ({
+        matches: true,
+        media,
+        addEventListener() {},
+        removeEventListener() {},
+      }))
+      let finish = () => {}
+      const onCreateProject = vi.fn(
+        () =>
+          new Promise<{ changed: boolean }>(
+            (resolve) => (finish = () => resolve({ changed: true })),
+          ),
+      )
+      const view = render(AppShell, {
+        props: {
+          route: {
+            kind: 'kata',
+            view: 'all-open',
+            graph: false,
+            filters: { status: [], owner: [], label: [], relationship: [] },
+          },
+          snapshot: empty,
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject,
+        },
+      })
+      await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+      const drawer = screen.getByRole('dialog', { name: 'Kata navigation' })
+      const input = within(drawer).getByRole('textbox', { name: 'New project name' })
+      await fireEvent.input(input, { target: { value: 'example-project' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await waitFor(() => expect(onCreateProject).toHaveBeenCalledWith('example-project', true))
+      if (action === 'close')
+        await fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }))
+      else await view.rerender({ draftFenceGeneration: 1 })
+      finish()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      if (action === 'fence')
+        expect(screen.queryAllByRole('textbox', { name: 'New project name' })).toHaveLength(0)
+      expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
+    },
+  )
+
   test('designates an Inbox from New task before opening quick capture', async () => {
     const onDesignateInbox = vi.fn(async () => {})
     render(AppShell, {
@@ -1506,6 +1784,18 @@ describe('AppShell', () => {
 
     await view.rerender({ mutationPending: false })
     expect(create().getAttribute('aria-disabled')).toBeNull()
+    const empty = snapshot()
+    empty.catalog = []
+    empty.collection = []
+    await view.rerender({ snapshot: empty, canMutate: false, stale: true })
+    expect(
+      within(screen.getByRole('region', { name: 'Issues' }))
+        .getByRole('button', {
+          name: 'New project',
+          description: 'Changes are paused while the snapshot may be out of date.',
+        })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
   })
 
   test('keeps the canonical issue route while authority is missing or archived', async () => {

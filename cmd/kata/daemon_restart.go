@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 
 	"go.kenn.io/kit/atomicfile"
+	"go.kenn.io/kit/consolewindow"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/safefileio"
 
@@ -204,6 +205,7 @@ func validateDaemonReplacement(ctx context.Context, executable string, flags []s
 	ctx, cancel := context.WithTimeout(ctx, daemonReplacementCheckTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, daemonArgs(append(flags, "--check-startup")...)...) //nolint:gosec // selected installed executable with daemon-owned arguments
+	consolewindow.Hide(command)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("check replacement startup: %w: %s", err, output)
 	}
@@ -349,4 +351,34 @@ func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, prev
 		return kitdaemon.RuntimeRecord{}, fmt.Errorf("signal daemon pid %d: %w", previous.PID, err)
 	}
 	return waitForDaemonReplacement(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous, reply)
+}
+
+func restartRunningDaemons(ctx context.Context, ns *daemonruntime.Namespace, running []kitdaemon.RuntimeRecord, flags []string) ([]int, daemonStartOutput, error) {
+	var out daemonStartOutput
+	pids := make([]int, 0, len(running))
+	if len(running) == 0 {
+		return pids, out, nil
+	}
+	target := newDaemonRestart(io.Discard)
+	if target == nil {
+		return nil, out, errors.New("cannot resolve the installed restart executable")
+	}
+	for _, rec := range running {
+		replacement, err := requestDaemonRestart(ctx, ns, rec, target.executable, flags)
+		if err != nil {
+			return nil, out, err
+		}
+		pids = append(pids, rec.PID)
+		out = daemonStartOutputFromRecord("restarted", replacement)
+	}
+	return pids, out, nil
+}
+
+func requireRestartable(running []kitdaemon.RuntimeRecord) error {
+	for _, rec := range running {
+		if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
+			return unsupportedDaemonRestartError(rec)
+		}
+	}
+	return nil
 }

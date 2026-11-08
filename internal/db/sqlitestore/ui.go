@@ -149,8 +149,8 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 			return db.UISnapshotData{}, err
 		}
 	}
-	if query.IncludeGraph {
-		data.GraphIssues, err = readUIGraphIssues(ctx, tx, query, projectNames)
+	if query.IncludeGraph && data.SelectedIssue != nil {
+		data.GraphIssues, err = readUIGraphIssues(ctx, tx, query, projectNames, data.SelectedIssue.ID)
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
@@ -177,18 +177,36 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 
 func readUIGraphIssues(
 	ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
-	projectNames map[int64]string,
+	projectNames map[int64]string, sourceID int64,
 ) ([]db.UIIssue, error) {
-	statement := issueSelect + `
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
-	args := []any{db.SystemProjectName}
-	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
-	allowPredicate, allowArgs := uiSQLiteIssueAllowlist(`i.id`, query.AllowedIssueIDs)
-	if allowPredicate != "" {
-		statement += ` AND ` + allowPredicate // #nosec G202 -- the predicate contains only a fixed column name and count-derived ? placeholders; values stay bound.
-		args = append(args, allowArgs...)
+	args := []any{sourceID}
+	eligible := func() string {
+		args = append(args, db.SystemProjectName)
+		predicate := `i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
+		predicate += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
+		allowPredicate, allowArgs := uiSQLiteIssueAllowlist(`i.id`, query.AllowedIssueIDs)
+		if allowPredicate != "" {
+			predicate += " AND " + allowPredicate
+			args = append(args, allowArgs...)
+		}
+		return predicate
 	}
-	statement += ` ORDER BY i.uid`
+	// #nosec G202 -- eligible builds fixed predicates and placeholders; all values stay bound.
+	statement := `WITH RECURSIVE graph_reach(id) AS (
+		SELECT ?
+		UNION
+		SELECT i.id FROM graph_reach r
+		JOIN links l ON l.from_issue_id = r.id
+		JOIN issues i ON i.id = l.to_issue_id
+		JOIN projects p ON p.id = i.project_id
+		WHERE ` + eligible() + `
+		UNION
+		SELECT i.id FROM graph_reach r
+		JOIN links l ON l.to_issue_id = r.id
+		JOIN issues i ON i.id = l.from_issue_id
+		JOIN projects p ON p.id = i.project_id
+		WHERE ` + eligible() + `
+	) ` + issueSelect + ` WHERE i.id IN (SELECT id FROM graph_reach) ORDER BY i.uid`
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI graph issues: %w", err)
@@ -277,19 +295,20 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 		limit = 500
 	}
 
-	projects, _, err := readUIProjects(ctx, tx, d.uiProjectStatsRead)
-	if err != nil {
-		return db.UIReferencesData{}, err
-	}
 	data := db.UIReferencesData{
-		Projects: make([]db.Project, 0, min(limit, len(projects))),
-		Issues:   []db.UIIssueReference{}, Owners: []string{}, Labels: []string{},
+		Projects: []db.Project{}, Issues: []db.UIIssueReference{}, Owners: []string{}, Labels: []string{},
 	}
-	for _, project := range projects {
-		if len(data.Projects) == limit {
-			break
+	if query.Query == "" {
+		projects, _, err := readUIProjectRows(ctx, tx)
+		if err != nil {
+			return db.UIReferencesData{}, err
 		}
-		data.Projects = append(data.Projects, project.Project)
+		for _, project := range projects {
+			if len(data.Projects) == limit {
+				break
+			}
+			data.Projects = append(data.Projects, project.Project)
+		}
 	}
 	if d.uiReadStage != nil {
 		if err := d.uiReadStage(ctx); err != nil {
@@ -300,35 +319,51 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
-	ownerStatement := `
-		SELECT i.owner, MIN(i.id)
-		FROM issues i JOIN projects p ON p.id = i.project_id
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ? AND i.owner IS NOT NULL AND i.owner <> ''
-	`
-	ownerArgs := []any{db.SystemProjectName}
-	ownerStatement, ownerArgs = appendUIReferenceIssueScopeSQLite(ownerStatement, ownerArgs, query.AllowedIssueIDs)
-	ownerStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &ownerArgs)
-	ownerStatement += ` GROUP BY i.owner ORDER BY i.owner LIMIT ?`
-	ownerArgs = append(ownerArgs, limit)
-	data.Owners, err = readUIReferenceSuggestions(ctx, tx, ownerStatement, ownerArgs...)
-	if err != nil {
-		return db.UIReferencesData{}, err
-	}
-	labelStatement := `
-		SELECT il.label, MIN(i.id)
-		FROM issue_labels il
-		JOIN issues i ON i.id = il.issue_id
-		JOIN projects p ON p.id = i.project_id
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
-	`
-	labelArgs := []any{db.SystemProjectName}
-	labelStatement, labelArgs = appendUIReferenceIssueScopeSQLite(labelStatement, labelArgs, query.AllowedIssueIDs)
-	labelStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &labelArgs)
-	labelStatement += ` GROUP BY il.label ORDER BY il.label LIMIT ?`
-	labelArgs = append(labelArgs, limit)
-	data.Labels, err = readUIReferenceSuggestions(ctx, tx, labelStatement, labelArgs...)
-	if err != nil {
-		return db.UIReferencesData{}, err
+	if query.Query == "" {
+		_, restricted := db.AuthorizedProjects(ctx)
+		unrestricted := !restricted && query.AllowedIssueIDs == nil
+		var ownerStatement string
+		var ownerArgs []any
+		if unrestricted {
+			ownerStatement, ownerArgs = uiReferenceOwnersQuery, []any{db.SystemProjectName, limit}
+		} else {
+			ownerStatement = `
+				SELECT i.owner, MIN(i.id)
+				FROM issues i JOIN projects p ON p.id = i.project_id
+				WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ? AND i.owner IS NOT NULL AND i.owner <> ''
+			`
+			ownerArgs = []any{db.SystemProjectName}
+			ownerStatement, ownerArgs = appendUIReferenceIssueScopeSQLite(ownerStatement, ownerArgs, query.AllowedIssueIDs)
+			ownerStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &ownerArgs)
+			ownerStatement += ` GROUP BY i.owner ORDER BY i.owner LIMIT ?`
+			ownerArgs = append(ownerArgs, limit)
+		}
+		data.Owners, err = readUIReferenceSuggestions(ctx, tx, ownerStatement, ownerArgs...)
+		if err != nil {
+			return db.UIReferencesData{}, err
+		}
+		var labelStatement string
+		var labelArgs []any
+		if unrestricted {
+			labelStatement, labelArgs = uiReferenceLabelsQuery, []any{db.SystemProjectName, limit}
+		} else {
+			labelStatement = `
+				SELECT il.label, MIN(i.id)
+				FROM issue_labels il
+				JOIN issues i ON i.id = il.issue_id
+				JOIN projects p ON p.id = i.project_id
+				WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
+			`
+			labelArgs = []any{db.SystemProjectName}
+			labelStatement, labelArgs = appendUIReferenceIssueScopeSQLite(labelStatement, labelArgs, query.AllowedIssueIDs)
+			labelStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &labelArgs)
+			labelStatement += ` GROUP BY il.label ORDER BY il.label LIMIT ?`
+			labelArgs = append(labelArgs, limit)
+		}
+		data.Labels, err = readUIReferenceSuggestions(ctx, tx, labelStatement, labelArgs...)
+		if err != nil {
+			return db.UIReferencesData{}, err
+		}
 	}
 	data.Cursor, err = maxUIEventID(ctx, tx)
 	if err != nil {
@@ -339,6 +374,37 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	}
 	return data, nil
 }
+
+// CROSS JOIN keeps each seek in index order even after ANALYZE.
+const uiReferenceOwnersQuery = `WITH RECURSIVE choices(value, issue_id) AS (
+	SELECT owner, id FROM (
+		SELECT i.owner, i.id FROM issues i CROSS JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND i.owner IS NOT NULL AND i.owner <> ''
+		ORDER BY i.owner, i.id LIMIT 1
+	)
+	UNION ALL
+	SELECT i.owner, i.id FROM choices prev JOIN issues i ON i.id = (
+		SELECT i.id FROM issues i CROSS JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND i.owner IS NOT NULL AND i.owner > prev.value
+		ORDER BY i.owner, i.id LIMIT 1
+	)
+	LIMIT ?2
+) SELECT value, issue_id FROM choices ORDER BY value`
+
+const uiReferenceLabelsQuery = `WITH RECURSIVE choices(value, issue_id) AS (
+	SELECT label, issue_id FROM (
+		SELECT il.label, il.issue_id FROM issue_labels il JOIN issues i ON i.id = il.issue_id JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1
+		ORDER BY il.label LIMIT 1
+	)
+	UNION ALL
+	SELECT il.label, il.issue_id FROM choices prev JOIN issue_labels il ON il.rowid = (
+		SELECT il.rowid FROM issue_labels il JOIN issues i ON i.id = il.issue_id JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND il.label > prev.value
+		ORDER BY il.label LIMIT 1
+	)
+	LIMIT ?2
+) SELECT value, issue_id FROM choices ORDER BY value`
 
 func appendUIReferenceIssueScopeSQLite(statement string, args []any, issueIDs []int64) (string, []any) {
 	predicate, scopeArgs := uiSQLiteIssueAllowlist("i.id", issueIDs)
@@ -373,6 +439,24 @@ func maxUIEventID(ctx context.Context, queryer uiQueryer) (int64, error) {
 func readUIProjects(
 	ctx context.Context, tx *sql.Tx, onStatsRead func(),
 ) ([]db.UIProject, map[int64]string, error) {
+	projects, projectNames, err := readUIProjectRows(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if onStatsRead != nil {
+		onStatsRead()
+	}
+	stats, err := readUIProjectStats(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for idx := range projects {
+		projects[idx].Stats = stats[projects[idx].Project.ID]
+	}
+	return projects, projectNames, nil
+}
+
+func readUIProjectRows(ctx context.Context, tx *sql.Tx) ([]db.UIProject, map[int64]string, error) {
 	args := []any{db.SystemProjectName}
 	statement := projectSelect + ` WHERE deleted_at IS NULL AND name <> ?`
 	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
@@ -397,16 +481,6 @@ func readUIProjects(
 	}
 	if err := rows.Close(); err != nil {
 		return nil, nil, fmt.Errorf("close UI projects: %w", err)
-	}
-	if onStatsRead != nil {
-		onStatsRead()
-	}
-	stats, err := readUIProjectStats(ctx, tx)
-	if err != nil {
-		return nil, nil, err
-	}
-	for idx := range projects {
-		projects[idx].Stats = stats[projects[idx].Project.ID]
 	}
 	return projects, projectNames, nil
 }
@@ -836,49 +910,34 @@ func readUIIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Iss
 }
 
 func readUILinksForIssue(ctx context.Context, tx *sql.Tx, issueID int64, allowedIssueIDs []int64) ([]db.UILink, error) {
-	statement := linkSelect + `
-		WHERE (from_issue_id = ? OR to_issue_id = ?)
-		AND from_issue_id IN (SELECT endpoint.id FROM issues endpoint JOIN projects endpoint_project ON endpoint_project.id = endpoint.project_id WHERE endpoint.deleted_at IS NULL AND endpoint_project.deleted_at IS NULL)
-		AND to_issue_id IN (SELECT endpoint.id FROM issues endpoint JOIN projects endpoint_project ON endpoint_project.id = endpoint.project_id WHERE endpoint.deleted_at IS NULL AND endpoint_project.deleted_at IS NULL)`
+	statement := uiLinkSelect + `
+		WHERE (l.from_issue_id = ? OR l.to_issue_id = ?)
+		AND fi.deleted_at IS NULL AND fp.deleted_at IS NULL
+		AND ti.deleted_at IS NULL AND tp.deleted_at IS NULL`
 	args := []any{issueID, issueID}
-	fromPredicate, fromArgs := uiSQLiteIssueAllowlist(`from_issue_id`, allowedIssueIDs)
+	fromPredicate, fromArgs := uiSQLiteIssueAllowlist(`l.from_issue_id`, allowedIssueIDs)
 	if fromPredicate != "" {
 		statement += ` AND ` + fromPredicate
 		args = append(args, fromArgs...)
 	}
-	toPredicate, toArgs := uiSQLiteIssueAllowlist(`to_issue_id`, allowedIssueIDs)
+	toPredicate, toArgs := uiSQLiteIssueAllowlist(`l.to_issue_id`, allowedIssueIDs)
 	if toPredicate != "" {
 		statement += ` AND ` + toPredicate // #nosec G202 -- the predicate contains only a fixed column name and count-derived ? placeholders; values stay bound.
 		args = append(args, toArgs...)
 	}
 	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
-	statement += " AND " + authorizedLinkPredicate(ctx, "", &args)
-	statement += ` ORDER BY id`
+	statement += " AND " + authorizedLinkPredicate(ctx, "l.", &args)
+	statement += ` ORDER BY l.id`
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read selected UI links: %w", err)
 	}
-	links, err := collectUILinks(rows)
+	links, err := collectUIDetailedLinks(rows)
 	if err != nil {
 		return nil, err
 	}
-	return enrichUILinks(ctx, tx, links)
-}
-
-func enrichUILink(ctx context.Context, tx *sql.Tx, link db.Link) (db.UILink, error) {
-	var fromProject, fromShort, fromStatus, toProject, toShort, toStatus string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT fp.name, fi.short_id, fi.status, tp.name, ti.short_id, ti.status
-		FROM issues fi JOIN projects fp ON fp.id = fi.project_id
-		JOIN issues ti ON ti.id = ? JOIN projects tp ON tp.id = ti.project_id
-		WHERE fi.id = ?`, link.ToIssueID, link.FromIssueID).Scan(
-		&fromProject, &fromShort, &fromStatus, &toProject, &toShort, &toStatus); err != nil {
-		return db.UILink{}, fmt.Errorf("enrich UI link: %w", err)
-	}
-	return db.UILink{
-		Link: link, FromQualifiedID: fromProject + "#" + fromShort, FromStatus: fromStatus,
-		ToQualifiedID: toProject + "#" + toShort, ToStatus: toStatus,
-	}, nil
+	db.RecordExposedUILinks(ctx, links)
+	return links, nil
 }
 
 func readUIRecurrences(ctx context.Context, tx *sql.Tx, projectUID string) ([]db.Recurrence, error) {
@@ -962,20 +1021,21 @@ func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]d
 	for _, issue := range issues {
 		ids = append(ids, issue.ID)
 	}
-	fromSet, fromSetArgs := uiSQLiteIssueAllowlist("from_issue_id", ids)
+	fromSet, fromSetArgs := uiSQLiteIssueAllowlist("l.from_issue_id", ids)
 	// Use the destination as a filter so SQLite doesn't probe the composite
 	// index for every pair of issue IDs. Both operands remain integers.
-	toSet, toSetArgs := uiSQLiteIssueAllowlist("+to_issue_id", ids)
+	toSet, toSetArgs := uiSQLiteIssueAllowlist("+l.to_issue_id", ids)
 	args := append(fromSetArgs, toSetArgs...)
-	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE `+fromSet+` AND `+toSet+` ORDER BY id`, args...)
+	rows, err := tx.QueryContext(ctx, uiLinkSelect+` WHERE `+fromSet+` AND `+toSet+` ORDER BY l.id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI graph links: %w", err)
 	}
-	links, err := collectUILinks(rows)
+	links, err := collectUIDetailedLinks(rows)
 	if err != nil {
 		return nil, err
 	}
-	return enrichUILinks(ctx, tx, links)
+	db.RecordExposedUILinks(ctx, links)
+	return links, nil
 }
 
 func readUIGraphUnresolved(
@@ -1133,19 +1193,6 @@ func collectUILinks(rows *sql.Rows) ([]db.Link, error) {
 	return links, nil
 }
 
-func enrichUILinks(ctx context.Context, tx *sql.Tx, links []db.Link) ([]db.UILink, error) {
-	enriched := make([]db.UILink, 0, len(links))
-	for _, link := range links {
-		uiLink, err := enrichUILink(ctx, tx, link)
-		if err != nil {
-			return nil, err
-		}
-		enriched = append(enriched, uiLink)
-	}
-	db.RecordExposedUILinks(ctx, enriched)
-	return enriched, nil
-}
-
 func readUIReferenceScope(
 	ctx context.Context, tx *sql.Tx, issueUIDs []string,
 ) ([]string, []int64, error) {
@@ -1190,8 +1237,13 @@ func readUIReferenceScope(
 func readUIReferenceIssues(
 	ctx context.Context, tx *sql.Tx, query db.UIReferencesQuery, limit int,
 ) ([]db.UIIssueReference, error) {
+	from := `issues i JOIN projects p ON p.id = i.project_id`
+	if query.Query == "" && query.AllowedIssueIDs == nil && len(query.IssueUIDs) == 0 {
+		// Keep project/short-ID index order when planner statistics are absent.
+		from = `projects p CROSS JOIN issues i ON i.project_id = p.id`
+	}
 	statement := `SELECT i.id, i.project_id, i.uid, p.uid, p.name, i.short_id, i.title, i.status
-		FROM issues i JOIN projects p ON p.id = i.project_id
+		FROM ` + from + `
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
 	args := []any{db.SystemProjectName}
 	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
@@ -1235,8 +1287,9 @@ func readUIReferenceIssues(
 }
 
 // readUIReferenceSuggestions reads aggregate owner or label choices. Each row
-// carries one representative contributing issue, MIN(i.id), which is recorded
-// for the project access release. Recording every contributor would be
+// carries one representative contributing issue, MIN(i.id) for scoped callers.
+// Unrestricted label choices use any visible contributor; their release check
+// does not read the representative. Recording every contributor would be
 // unbounded; one per choice is bounded by the limit and fails closed: if the
 // representative moves out of the caller's projects mid-request the response
 // is withheld, even when another visible issue still contributes the choice.

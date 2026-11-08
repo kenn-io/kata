@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"reflect"
 
@@ -20,7 +21,8 @@ type Client struct {
 }
 
 // NewPathEscapingAPIClient wraps apiClient so string path params are URL path
-// escaped before request construction. Wrapping is idempotent.
+// escaped and numeric query params use decimal notation before request
+// construction. Wrapping is idempotent.
 func NewPathEscapingAPIClient(apiClient runtime.APIClient) runtime.APIClient {
 	if apiClient == nil {
 		return nil
@@ -92,7 +94,29 @@ func (o pathEscapingRequestOptions) GetQuery() (map[string]any, error) {
 	if o.RequestOptions == nil {
 		return nil, nil
 	}
-	return o.RequestOptions.GetQuery()
+	params, err := o.RequestOptions.GetQuery()
+	if err != nil {
+		return params, err
+	}
+	for key, value := range params {
+		params[key] = integerSafeParam(value)
+	}
+	return params, nil
+}
+
+func integerSafeParam(v any) any {
+	switch value := v.(type) {
+	case float64:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	case []any:
+		result := make([]any, len(value))
+		for i, item := range value {
+			result[i] = integerSafeParam(item)
+		}
+		return result
+	default:
+		return v
+	}
 }
 
 func (o pathEscapingRequestOptions) GetBody() any {
@@ -151,6 +175,12 @@ type ClientInterface interface {
 
 	Doctor(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*DoctorResponse, error)
 	DoctorWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*DoctorResp, error)
+
+	GetLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*GetLocalEmbeddingsResponse, error)
+	GetLocalEmbeddingsWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*GetLocalEmbeddingsResp, error)
+
+	TurnOnLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*TurnOnLocalEmbeddingsResponse, error)
+	TurnOnLocalEmbeddingsWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*TurnOnLocalEmbeddingsResp, error)
 
 	PollEvents(ctx context.Context, options *PollEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollEventsResponse, error)
 	PollEventsWithResponse(ctx context.Context, options *PollEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollEventsResp, error)
@@ -1145,6 +1175,128 @@ func (c *Client) Doctor(ctx context.Context, reqEditors ...runtime.RequestEditor
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/doctor")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) GetLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*GetLocalEmbeddingsResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/embeddings/local",
+		Method:     "GET",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*GetLocalEmbeddingsResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(GetLocalEmbeddingsErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "GetLocalEmbeddingsErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(GetLocalEmbeddingsResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "GetLocalEmbeddingsResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/embeddings/local")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) TurnOnLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*TurnOnLocalEmbeddingsResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/embeddings/local",
+		Method:     "POST",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*TurnOnLocalEmbeddingsResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 202 {
+			target := new(TurnOnLocalEmbeddingsErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "TurnOnLocalEmbeddingsErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(TurnOnLocalEmbeddingsResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "TurnOnLocalEmbeddingsResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/embeddings/local")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}
@@ -8376,6 +8528,7 @@ func (c *Client) ReadyIssues(ctx context.Context, options *ReadyIssuesRequestOpt
 	queryEncoding := map[string]runtime.QueryEncoding{
 		"limit":   {Style: "form", Explode: &[]bool{false}[0]},
 		"owner":   {Style: "form", Explode: &[]bool{false}[0]},
+		"sort":    {Style: "form", Explode: &[]bool{false}[0]},
 		"unowned": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
@@ -8887,6 +9040,7 @@ func (c *Client) ReadyIssuesGlobal(ctx context.Context, options *ReadyIssuesGlob
 	queryEncoding := map[string]runtime.QueryEncoding{
 		"limit":   {Style: "form", Explode: &[]bool{false}[0]},
 		"owner":   {Style: "form", Explode: &[]bool{false}[0]},
+		"sort":    {Style: "form", Explode: &[]bool{false}[0]},
 		"unowned": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{

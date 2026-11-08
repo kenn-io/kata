@@ -180,25 +180,21 @@ func TestOpen_UnknownSchemeIsUnsupported(t *testing.T) {
 	assert.True(t, strings.Contains(msg, "unsupported"), "error must mark scheme as unsupported, got %q", msg)
 }
 
-// TestOpen_RunsCutoverOnPreCurrentSQLite stands up a DB whose
-// schema_version is below db.CurrentSchemaVersion() and confirms storeopen
-// runs jsonl.AutoCutover before opening.
+const preIndexOnlySchemaVersion = 40
+
+// TestOpen_RunsCutoverOnPreCurrentSQLite confirms storeopen replaces schemas
+// that require more than index additions before opening.
 func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
-
-	// Stand up a fixture and rewrite meta.schema_version to a pre-current
-	// value so storeopen routes through cutover.
-	stageLegacyPreCutoverFixture(t, path, db.CurrentSchemaVersion()-1)
-
-	s, err := storeopen.Open(ctx, path)
+	stageLegacyPreCutoverFixture(t, path, preIndexOnlySchemaVersion)
+	upgraded, err := storeopen.Open(ctx, path)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = s.Close() })
-
-	v, err := s.SchemaVersion(ctx)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, db.CurrentSchemaVersion(), v)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 }
 
 func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {

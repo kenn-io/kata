@@ -101,6 +101,7 @@ var storageScenarios = []scenario{
 	{name: "issues by uids", methods: []string{"CreateProject", "CreateIssue", "SoftDeleteIssue", "IssueByUID", "IssuesByUIDs"}, run: checkIssuesByUIDs},
 	{name: "comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "CommentsByIssue"}, run: checkCommentReplies},
 	{name: "creation pagination precision", methods: []string{"ListIssues", "ListAllIssues", "SearchFTS"}, run: checkCreationPaginationPrecision},
+	{name: "list exact title", methods: []string{"ListIssues"}, run: checkListExactTitle},
 	{name: "list pagination", methods: []string{"ListIssues", "ListAllIssues", "CountIssues", "CountAllIssues"}, run: checkListPagination},
 	{name: "search pagination", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchPagination},
 	{name: "relay ingress", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "LinksByIssue", "MaterializeFederatedProject", "PinRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
@@ -141,6 +142,11 @@ var storageScenarios = []scenario{
 	}},
 	{name: "relay ingest returns local issue ids", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayIngestReturnsLocalIssueIDs(t, store)
+		return nil
+	}},
+	{name: "legacy relay admission", methods: []string{"IngestFederationEvents", "CreateRelayEnrollment", "RevokeFederationEnrollment"}, run: func(t *testing.T, store db.Storage) error {
+		RunLegacyRelayAdmission(t, store)
+		RunLegacyRelayParentUIDCollision(t, store)
 		return nil
 	}},
 	{name: "relay offers legacy ingested events", methods: []string{"IngestFederationEvents", "PendingRelayDeliveries", "PatchIssueMetadata"}, run: func(t *testing.T, store db.Storage) error {
@@ -290,6 +296,10 @@ var storageScenarios = []scenario{
 	{name: "federated move purge former streams", methods: []string{"PurgeIssue", "ReadFederation"}, run: checkFederatedMovePurgeFormerStreams},
 	{name: "federated move replay access revision", methods: []string{"IngestFederationEvents", "InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveReplayAccessRevision},
 	{name: "federated move replay embedding artifacts", methods: []string{"IngestFederationEvents", "InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveReplayEmbeddingArtifacts},
+	{name: "federated read pages", methods: []string{"ReadFederation"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		checkFederatedReadPages(t, store, backend)
+		return nil
+	}},
 	{name: "federated move payload-only history identity", methods: []string{"AdvanceFederationPushCursor", "CreateProject", "CreateIssue", "EditIssue", "EventsByUIDs", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "ResetFederatedProject", "UpsertFederationBinding", "IssueByUID", "ReadFederation"}, runWithBackend: checkFederatedMovePayloadOnlyHistory},
 	{name: "federated move snapshot payload-only comment edit", methods: []string{"CreateComment", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "IssueByUID", "CommentsByIssue"}, run: checkFederatedMoveSnapshotPayloadOnlyCommentEdit},
 	{name: "federated move authoring gates", methods: []string{"MoveIssueProject", "SetRelayBindingConfig", "CreateRelayEnrollment", "InsertRemoteEvents"}, runWithBackend: checkFederatedMoveAuthoringGates},
@@ -338,6 +348,7 @@ var storageScenarios = []scenario{
 		run:     checkIssueRevisionAuthorRewrite,
 	},
 	{name: "search status", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchStatus},
+	{name: "lookalike keeps rewritten body duplicate", methods: []string{"CreateProject", "CreateIssue", "SearchFTSAny"}, run: checkLookalikeKeepsRewrittenBodyDuplicate},
 	{name: "duplicate survives higher word count distractors", methods: []string{"CreateProject", "CreateIssue", "SearchFTSAny"}, run: checkDuplicateSurvivesHigherWordCountDistractors},
 	{name: "restricted search reads", methods: []string{"AddLabel", "CreateComment", "CreateIssue", "CreateProject", "SearchFTS", "SearchFTSAny"}, run: checkRestrictedSearchReads},
 	{
@@ -502,7 +513,7 @@ var storageScenarios = []scenario{
 		name: "issue lifecycle",
 		methods: []string{
 			"BatchProjectStats", "ClaimOwner", "CloseIssue", "CloseIssueGuarded", "CloseIssueWithEvents", "CreateIssue", "CreateProject", "EditIssue",
-			"IssueByShortID", "IssueUIDPrefixMatch", "ListAllIssues", "ReopenIssue", "RestoreIssue",
+			"InsertRemoteEvent", "IssueByShortID", "IssueUIDPrefixMatch", "ListAllIssues", "ReopenIssue", "RestoreIssue",
 			"SoftDeleteIssue", "UpdateOwner", "UpdatePriority",
 		},
 		run: checkIssueLifecycle,
@@ -670,6 +681,11 @@ var storageScenarios = []scenario{
 			"SearchFTSAny", "SoftDeleteIssue",
 		},
 		run: checkReadyQueuesAndDiscovery,
+	},
+	{
+		name:    "ready priority ordering",
+		methods: []string{"CreateProject", "CreateIssue", "ReadyIssues", "ReadyIssuesGlobal"},
+		run:     checkReadyPriorityOrder,
 	},
 	{
 		name: "api tokens and system project",
@@ -979,6 +995,14 @@ var storageScenarios = []scenario{
 			"UnresolvedClaimViolationsForIssue",
 		},
 		run: checkFederationIngestLifecycle,
+	},
+	{
+		name: "federation ingest actor rebind retry",
+		methods: []string{
+			"CommentsByIssue", "CreateFederationEnrollment", "CreateProject", "EnableProjectFederation", "EventsByUIDs",
+			"IngestFederationEvents", "InsertRemoteEvent", "IssueByUID", "MaxEventID",
+		},
+		run: checkFederationIngestActorRebindRetry,
 	},
 	{
 		name: "federation adoption ingest lifecycle",

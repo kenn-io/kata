@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-08
+last_edited: 2026-11-06
 ---
 
 # Data model and durability
@@ -123,16 +123,26 @@ mistaken reuse is caught.
 **Look-alike soft-block.** Independently, `create` runs a full-text and
 similarity search and refuses when an existing issue is too close, returning the
 candidates so the caller can comment instead. This check is bypassable with
-`force_new`.
+`force_new`. If fewer than 20 candidates qualify, an exact-title fallback
+checks up to 20 issues, shortest bodies first, when full-text search fills
+its page or the title lacks searchable terms. Non-ASCII title text also
+keeps the fallback because store tokenizers may differ. See
+[issue lifecycle](../reference/cli.md#issue-lifecycle) for matching rules
+and limits.
 
 Where the two interact, **idempotency wins**: an idempotent reuse never emits a
 duplicate even when `force_new` is set. The retry-safety guarantee takes
 precedence over the force-new escape hatch.
 
-## Schema evolution by JSONL cutover
+## Schema evolution
 
-kata does not evolve its schema with in-place table-rebuild migrations. Instead
-it exports the current database to JSONL exactly as stored, imports that JSONL
+SQLite upgrades that only add indexes register a complete version chain in
+`indexOnlyUpgrades` in `internal/db/sqlitestore/schema_upgrade.go`. Startup
+applies those indexes and the schema-version stamp in one transaction under
+the cutover lock. Schemas 41 through 48 can reach schema 49 this way.
+
+Changes to tables, triggers, or FTS use JSONL cutover. Kata exports the current
+database to JSONL exactly as stored, imports that JSONL
 into a fresh database at the binary's current schema, applies deterministic fill
 rules for anything an older export version lacked, validates, and atomically
 swaps the database files into place.
@@ -165,7 +175,7 @@ inside backend packages, SQLite-specific JSONL cutover code, and tests that
 assert SQL details.
 
 SQLite bootstraps a fresh database from its canonical `schema.sql` and upgrades
-older files through the JSONL cutover path described above. Postgres also
+older files through the upgrade paths described above. Postgres also
 installs fresh databases from a canonical current `schema.sql`. Because no
 Postgres backend predates its first public release, development-only versions
 are not represented as compatibility migrations. The first released Postgres

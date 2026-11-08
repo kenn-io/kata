@@ -44,8 +44,8 @@ type viewChrome struct {
 	modal         modalKind        // active confirmation; takes footer precedence
 	undoAvailable bool             // session history has an eligible action
 	moveStep      moveStep         // the Move form step, for its footer
-	listOpsHidden bool             // delete and move are not on offer (credentials or saved context)
-	moveHidden    bool             // move is also waiting on an undo or reopen lookup
+	deleteHidden  bool             // the connected credentials cannot delete
+	moveHidden    bool             // move is not on offer (credentials, saved context, or a pending lookup)
 }
 
 // View renders the list under the M3.5 chrome layer:

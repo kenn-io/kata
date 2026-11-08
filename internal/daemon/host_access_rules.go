@@ -57,7 +57,7 @@ func buildHostAccessRules() map[string]hostAccessRule {
 	registerHostAccessRules(rules, hostAccessRule{ResolvedByHandler: true},
 		"mergeProject", "moveIssue", "listAllIssues", "readUIReferences", "resolveUIIssueReference",
 		"readUILaunchTarget", "patchProjectMetadata", "createFederationEnrollment",
-		"rotateFederationEnrollment")
+		"rotateFederationEnrollment", "getLocalEmbeddings", "turnOnLocalEmbeddings")
 	registerHostAccessRules(rules, hostAccessRule{RequiresAllProjects: true},
 		"purgeIssue", "purgeProject", "closeIssue", "readyIssues", "showIssueByUID",
 		"importIssues", "pollProjectEvents", "streamEvents", "auditCloses",

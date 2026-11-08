@@ -39,10 +39,14 @@ var flags globalFlags
 var runEEntered bool
 var errorCommandName string
 
+// Foreground daemons retain the runtime's panic handling, including its stack.
+var daemonProcessEntered bool
+
 func newRootCmd() *cobra.Command {
 	flags = globalFlags{}
 	runEEntered = false
 	errorCommandName = ""
+	daemonProcessEntered = false
 	cliUseTarget.Store(nil)
 	cmd := &cobra.Command{
 		Use:           "kata",
@@ -170,11 +174,32 @@ func newRootCmd() *cobra.Command {
 		newWebAssetsCheckCmd(),
 	}
 	cmd.AddCommand(subs...)
+	cmd.AddCommand(newCLICmd(cmd))
 	applyRootHelp(cmd)
 	return cmd
 }
 
 func main() {
+	var cmd *cobra.Command
+	defer func() {
+		if value := recover(); value != nil {
+			if daemonProcessEntered {
+				panic(value)
+			}
+			// Never format the panic value: it may contain credentials or
+			// request bodies, or invoke an unsafe Error/String method.
+			err := &cliError{
+				Message:  "internal error: unexpected panic",
+				Kind:     kindInternal,
+				Hint:     "report this bug at https://github.com/kenn-io/kata/issues",
+				ExitCode: ExitInternal,
+			}
+			mode, _ := resolvedOutputModeForError(cmd, os.Args[1:])
+			errorCommandName = commandNameForError(cmd, os.Args[1:], runEEntered)
+			emitErrorForMode(os.Stderr, err, mode, runEEntered)
+			os.Exit(ExitInternal)
+		}
+	}()
 	// Wire SIGINT/SIGTERM into cobra's command context so long-running
 	// subcommands (notably `kata daemon start`) can shut down gracefully via
 	// their deferred cleanups instead of being torn down mid-syscall. Once the
@@ -186,7 +211,7 @@ func main() {
 		<-ctx.Done()
 		stop()
 	}()
-	cmd := newRootCmd()
+	cmd = newRootCmd()
 	if err := cmd.ExecuteContext(ctx); err != nil {
 		emitRootError(os.Stderr, cmd, os.Args[1:], err, runEEntered)
 		os.Exit(exitCodeForErr(err, runEEntered))
@@ -302,7 +327,11 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 
 func emitHumanError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
-	_, _ = fmt.Fprintln(w, "kata:", cli.Message) //nolint:gosec // G705: CLI stderr error text, not HTML.
+	message := cli.Message
+	if cli.Code == "duplicate_candidates" {
+		message = appendCreateConflictRefs(message, cli)
+	}
+	_, _ = fmt.Fprintln(w, "kata:", message) //nolint:gosec // G705: CLI stderr error text, not HTML.
 	if cli.Hint != "" {
 		_, _ = fmt.Fprintln(w, "hint:", cli.Hint)
 	}

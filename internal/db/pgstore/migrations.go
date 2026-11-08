@@ -56,6 +56,24 @@ var issueCreatedOrderIndexMigrationSQL string
 //go:embed migrations/000043_event_resolved_issue_index.up.sql
 var eventResolvedIssueIndexMigrationSQL string
 
+//go:embed migrations/000044_event_reset_from_index.up.sql
+var eventResetFromIndexMigrationSQL string
+
+//go:embed migrations/000045_issue_uid_prefix_index.up.sql
+var issueUIDPrefixIndexMigrationSQL string
+
+//go:embed migrations/000046_ready_priority_index.up.sql
+var readyPriorityIndexMigrationSQL string
+
+//go:embed migrations/000047_ready_updated_index.up.sql
+var readyUpdatedIndexMigrationSQL string
+
+//go:embed migrations/000048_event_moved_from_id_index.up.sql
+var eventMovedFromIDIndexMigrationSQL string
+
+//go:embed migrations/000049_cron_run_uid_index.up.sql
+var cronRunUIDIndexMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -110,6 +128,12 @@ var migrationAssets = []Migration{
 	{FromVersion: 39, ToVersion: 41, Name: "000041_comment_search.up.sql", SQL: commentSearchMigrationSQL},
 	{FromVersion: 41, ToVersion: 42, Name: "000042_issue_created_order_index.up.sql", SQL: issueCreatedOrderIndexMigrationSQL},
 	{FromVersion: 42, ToVersion: 43, Name: "000043_event_resolved_issue_index.up.sql", SQL: eventResolvedIssueIndexMigrationSQL},
+	{FromVersion: 43, ToVersion: 44, Name: "000044_event_reset_from_index.up.sql", SQL: eventResetFromIndexMigrationSQL},
+	{FromVersion: 44, ToVersion: 45, Name: "000045_issue_uid_prefix_index.up.sql", SQL: issueUIDPrefixIndexMigrationSQL},
+	{FromVersion: 45, ToVersion: 46, Name: "000046_ready_priority_index.up.sql", SQL: readyPriorityIndexMigrationSQL},
+	{FromVersion: 46, ToVersion: 47, Name: "000047_ready_updated_index.up.sql", SQL: readyUpdatedIndexMigrationSQL},
+	{FromVersion: 47, ToVersion: 48, Name: "000048_event_moved_from_id_index.up.sql", SQL: eventMovedFromIDIndexMigrationSQL},
+	{FromVersion: 48, ToVersion: 49, Name: "000049_cron_run_uid_index.up.sql", SQL: cronRunUIDIndexMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

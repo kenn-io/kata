@@ -35,6 +35,6 @@ const late=await emitBeforeAgentStart(lateRunner,'later prompt',base);assert.equ
 const plainRunner=new ExtensionRunner([userExt,projectExt],runtime,cwd,manager,{});
 const plain=await emitBeforeAgentStart(plainRunner,'plain prompt',base);prompt=buildSystemPrompt(plain.systemPromptOptions);assert(prompt.includes('original base'));assert(prompt.includes('other preserved'));assert.equal(prompt.split('native contract D').length-1,1);
 assert.equal(calls().filter(c=>c.args[0]==='agent-contract-hook').length,5);
-for(const call of calls()) {assert.equal(call.cwd,cwd);assert.equal(call.server,'https://daemon.example');assert.equal(call.author,'actor');assert.equal(call.teammate,'teammate');assert.equal(call.recipient,'actor/teammate');if(call.args[0]==='agent-contract-hook')assert.deepEqual(call.args,['agent-contract-hook','--source',"contract '$;`.txt"]);}
+for(const call of calls()) {assert.equal(call.cwd,cwd);assert.equal(call.server,'https://daemon.example');assert.equal(call.author,'actor');assert.equal(call.teammate,'teammate');assert.equal(call.recipient,'actor/teammate');if(call.args[0]==='agent-contract-hook')assert.deepEqual(call.args,['agent-contract-hook','--source',"contract '$;`.txt",'--workspace',cwd]);}
 assert.deepEqual(errors,[]);
 console.log('Pi installed runner passed: actual subprocess, structured/forced precedence, fresh and unavailable context');

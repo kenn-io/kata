@@ -2166,10 +2166,10 @@ type EmbeddingsHealth struct {
 	ErrorPresent     *bool   `json:"error_present,omitempty"`
 	EtaSeconds       *int64  `json:"eta_seconds,omitempty"`
 
-	// LastError Sanitized credential rejection; cleared after the next successful embedding call.
+	// LastError Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call.
 	LastError *string `json:"last_error,omitempty"`
 
-	// LastErrorAt Time of the credential rejection; cleared after the next successful embedding call.
+	// LastErrorAt Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call.
 	LastErrorAt     *time.Time `json:"last_error_at,omitempty"`
 	LastErrorStatus *int64     `json:"last_error_status,omitempty"`
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
@@ -4454,6 +4454,60 @@ func (l ListTokensResponseBody) Validate() error {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Tokens[%d]", i), err)
 			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type LocalEmbeddingsIndexing struct {
+	Done       int64  `json:"done"`
+	EtaSeconds *int64 `json:"eta_seconds,omitempty"`
+	Failed     bool   `json:"failed"`
+	Total      int64  `json:"total"`
+}
+
+type LocalEmbeddingsJob struct {
+	Downloaded int64   `json:"downloaded"`
+	ErrorData  *string `json:"error,omitempty"`
+	State      string  `json:"state" validate:"required"`
+	Total      int64   `json:"total"`
+}
+
+func (l LocalEmbeddingsJob) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type LocalEmbeddingsStatus struct {
+	CanChange       bool                          `json:"can_change"`
+	DownloadBytes   int64                         `json:"download_bytes"`
+	Indexing        *LocalEmbeddingsIndexing      `json:"indexing,omitempty"`
+	Job             *LocalEmbeddingsJob           `json:"job,omitempty"`
+	OllamaAvailable bool                          `json:"ollama_available"`
+	Provider        LocalEmbeddingsStatusProvider `json:"provider" validate:"required"`
+}
+
+func (l LocalEmbeddingsStatus) Validate() error {
+	var errors runtime.ValidationErrors
+	if l.Indexing != nil {
+		if v, ok := any(l.Indexing).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Indexing", err)
+			}
+		}
+	}
+	if l.Job != nil {
+		if v, ok := any(l.Job).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Job", err)
+			}
+		}
+	}
+	if v, ok := any(l.Provider).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Provider", err)
 		}
 	}
 	if len(errors) == 0 {

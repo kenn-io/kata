@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-03
+last_edited: 2026-11-07
 ---
 
 # Model Context Protocol server
@@ -39,16 +39,17 @@ no status text or logs to stdout. The actor is fixed when the process starts
 and uses the normal precedence: `--as`, `KATA_AUTHOR`, `USER`, Git `user.name`,
 then `anonymous`.
 
-### Server identity (unreleased)
+### Server identity
 
-On `main`, MCP clients receive Kata's website and icon in server metadata.
+MCP clients receive Kata's website and icon in server metadata.
 The icon is an embedded PNG data URI, so stdio and HTTP clients can load it
 without an external request. Whether it appears depends on the client.
 
 The standalone HTTP listener and the daemon's enabled MCP mount also serve
 the same PNG at `/icon.png` and `/favicon.ico`. These public image routes
 accept GET and HEAD without a bearer token. Listener Host validation still
-applies, and `/mcp` still requires its configured MCP bearer.
+applies, and `/mcp` still requires its configured MCP bearer or, for an
+identity-mode daemon mount on unreleased `main`, the caller's identity token.
 
 ### Discover running HTTP listeners
 
@@ -120,11 +121,38 @@ Choose the mount's scope with `[mcp] projects` or `all_projects = true`; daemon 
 An allowlist limits tools to those projects and rejects project administration operations, including purge. With `all_projects = true`, the mount includes future projects and permits project administration.
 Treat an all-project MCP bearer as equivalent to the daemon's `[auth]` token, or to owner-local access when the daemon has no token.
 The mount never exposes token administration; use `kata mcp serve --all --enable-token-admin` with an identity-mode token.
-The mount uses the actor chosen at startup and has no `/healthz` probe or `kata mcp status` record; `kata daemon status` reports it as `serving` or `unavailable`.
+Outside identity mode, the mount uses the actor chosen at startup.
+The mount has no `/healthz` probe or `kata mcp status` record; `kata daemon status` reports it as `serving` or `unavailable`.
 The daemon's `/api/v1/ping` endpoint works as a container health probe.
 When `actor` is unset, it defaults to `KATA_AUTHOR`, `USER`, or Git `user.name`, then `anonymous`.
 With a TCP daemon `listen`, a gateway using a container hostname needs that authority in `[web].allowed_hosts`.
 With a Unix-socket daemon and `[web] listen`, the gateway's Host must match the web listener's bound address or `public_origin`.
+
+### Daemon mount with identity tokens (unreleased)
+
+On unreleased `main`, a daemon with `[auth] require_token_identity = true`
+accepts each caller's database identity token at `/mcp`. Create the token with
+[`kata tokens create`](../operations/remote-daemon.md#identity-tokens) and
+configure the MCP client to send it as `Authorization: Bearer <token>` on every
+request. The daemon uses that same credential for REST reads and writes, and
+uses the token's stored actor for the session. Project scope, token grants,
+expiration, revocation, and REST authorization still apply.
+
+```toml
+[mcp]
+enabled = true
+projects = ["example-project"] # or all_projects = true
+```
+
+Remove `[mcp] token_file` and `token_env` in identity mode; startup rejects
+either setting. `[mcp] actor` and `KATA_MCP_ACTOR` have no effect in this mode.
+Missing, invalid, expired, revoked, and bootstrap tokens receive HTTP 401.
+Each session is bound to the exact token that initialized it. To switch tokens,
+initialize a new session, even when both tokens name the same actor. Token
+administration remains available only through the explicitly enabled sidecar
+tools. Kata 0.21.0 requires the sidecar in identity mode.
+
+### Separate HTTP process
 
 You can also run a separate MCP process alongside the hub using [Client configuration](#client-configuration).
 Route `/mcp` to this listener through the HTTPS proxy and give the gateway its separate MCP bearer:
@@ -233,6 +261,10 @@ project UID scope, including after project moves or renames. See the
 [CLI reference](cli.md#issue-lifecycle) for selector behavior, reply validation,
 and handle syntax.
 
+An empty first page of a lexical multi-word `kata.search` includes
+`hints: [{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}]`,
+including when status or label filters are set.
+
 `kata.search` accepts optional `status: "open"` or `status: "closed"`; omit
 it to search both statuses. It combines with labels and the selected search
 mode across every project in scope. Empty and other status values are invalid.
@@ -277,13 +309,53 @@ scope, sort, and filters. Changing these rejects a cursor. The page size and
 restart a scan after changes to filter membership, project membership, deletion,
 or imported creation timestamps. Stop only when `complete` is true.
 
+## Find tools for a task
+
+On unreleased `main`, call `kata.search_tools` to find an operation without
+knowing its section. For example:
+
+```json
+{"query":"add a comment to an issue","limit":3}
+```
+
+This searches tool metadata. `kata.search` searches issue data. Discovery
+works before loading sections and returns the same ranked results after loading
+them. It does not call issue APIs, run CLI commands, or activate public sections.
+
+Each result gives the exact tool `name`, its `summary`, section `loader`,
+applicable `guides`, and sorted top-level `inputs`. Each input lists its name,
+JSON `types`, and whether it is unconditionally required. An empty types list
+requires consulting the full schema. Call the returned loader if present,
+refresh `tools/list`, and read the tool's `inputSchema` for full constraints,
+conditional requirements, and nested inputs. Loaders are safe to call again.
+For a returned guide name, call `kata.skills` with that `name`.
+
+`query` must be non-blank UTF-8 text of at most 512 bytes. Omit `limit` for five
+results, or supply an integer from 1 through 10. Invalid input returns an MCP
+tool error. Unmatched, punctuation-only, and stopword-only queries return an
+empty `results` array. Results are deterministic; an exact tool name ranks first.
+Structured output is capped at 32 KiB, with `truncated: true` when that byte
+limit prevents returning another result.
+
+Discovery respects the server's startup scope. It omits operations that always
+require daemon-wide scope from project-limited servers. Storage tools also
+require configured host storage; token and team tools require explicit token
+administration. Discovery does not grant permission to invoke a returned tool.
+
 ## Progressive tool catalog
 
-The initial catalog exposes read-only section loaders and `kata.skills`. Call the applicable
+The initial catalog exposes read-only section loaders, `kata.skills`, and, on
+unreleased `main`, `kata.search_tools`. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
 typed tools needed for the current task instead of placing every detailed tool in the
 model context at startup.
+
+The first `tools/list` from the workspace-bound default `kata mcp serve` is about 21 KB for 19 tools.
+With every section available by default loaded, it is about 263 KB for 110 tools;
+output schemas account for about two thirds. A test keeps these catalogs under
+24 KB and 289 KB, including every section loader. Detailed storage, team, and token tools
+require startup flags and fall outside these default catalogs.
 
 | Loader | Detailed tools |
 | --- | --- |
@@ -432,7 +504,8 @@ preserved. Typed definitions and opaque option objects retain exact JSON numbers
 
 `kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
 and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`
-filters history. `kata.cron_run_observe` requires a caller-retained run UID,
+filters history. See [Run list page size](cron.md#run-list-page-size) for
+the HTTP, CLI and TUI defaults. `kata.cron_run_observe` requires a caller-retained run UID,
 `expected_revision` (`0` for new evidence), a job or workflow reference with its
 definition event UID, status, and a versioned summary. Identical retries return
 `replayed: true`; distinct run UIDs for one scheduled occurrence remain separate

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"go.kenn.io/kit/tui/termtext"
 )
 
 // reopenPrompt is the pending confirmation for a reopen that would deliver a
@@ -85,9 +87,11 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // promptReopenBacklog asks the user to confirm a reopen that delivers a
 // backlog. A modal, form or Jobs filter that took control while the lookup ran
 // keeps it: the prompt is dropped, or its keys would answer a question the user
-// never saw.
+// never saw. Help and the other full-screen views hide the issue the prompt
+// names, so an answer that lands there is dropped too; an undo keeps its entry
+// and asks again on the next undo.
 func (m Model) promptReopenBacklog(prompt reopenPrompt) Model {
-	if !m.canQuit() {
+	if !m.canQuit() || (m.view != viewList && m.view != viewDetail) {
 		return m
 	}
 	m.reopenPrompt = &prompt
@@ -138,6 +142,48 @@ func (m Model) confirmReopenBacklog() (Model, tea.Cmd) {
 func (m Model) cancelReopenBacklog() Model {
 	m.modal, m.reopenPrompt = modalNone, nil
 	return m
+}
+
+// overlayReopenBacklog draws the reopen confirmation over body with its
+// choices on a footer row of their own. The footer is reserved before the modal
+// is placed, keeping the keys visible from 40 columns and 2 rows up.
+func (m Model) overlayReopenBacklog(body string) string {
+	width := max(m.width, 1)
+	footer := renderFooterHelpTable(modalHelpRows(modalReopenBacklog, movePicking), width)
+	rows := m.height - lipgloss.Height(footer)
+	if rows < 1 {
+		return footer
+	}
+	full := renderReopenBacklogModal(m.reopenPrompt)
+	var top string
+	if lipgloss.Width(full) <= width && lipgloss.Height(full) <= rows {
+		top = overlayModal(body, full, width, rows)
+	} else {
+		top = lipgloss.Place(width, rows, lipgloss.Center, lipgloss.Center, compactReopenBacklog(m.reopenPrompt, width, rows))
+	}
+	lines := strings.Split(top, "\n")
+	return strings.Join(lines[:min(rows, len(lines))], "\n") + "\n" + footer
+}
+
+// compactReopenBacklog keeps the issue ID and backlog count within the available rows.
+func compactReopenBacklog(prompt *reopenPrompt, width, rows int) string {
+	ref := sanitizeForLine(prompt.ref)
+	bare := ref[max(strings.LastIndex(ref, "#"), 0):]
+	warning := fmt.Sprintf("%d recurring child issues", prompt.count)
+	var text string
+	for _, candidate := range []string{
+		fmt.Sprintf("Reopen %s?\n%s", ref, warning),
+		fmt.Sprintf("Reopen %s?\n%s", bare, warning),
+		ref + ": " + warning,
+		bare + ": " + warning,
+	} {
+		text = candidate
+		if lipgloss.Height(text) <= rows && lipgloss.Width(text) <= width {
+			break
+		}
+	}
+	lines := termtext.Wrap(text, width)
+	return strings.Join(lines[:min(rows, len(lines))], "\n")
 }
 
 func renderReopenBacklogModal(prompt *reopenPrompt) string {

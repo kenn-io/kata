@@ -906,3 +906,48 @@ func TestWebDaemonGatewayStreamsEventsForTokenSessionOnLocalTarget(t *testing.T)
 		})
 	}
 }
+
+func TestWebDaemonGatewayRestrictsEmbeddingsByViewer(t *testing.T) {
+	for _, administrator := range []bool{false, true} {
+		t.Run(fmt.Sprintf("viewer administrator=%t", administrator), func(t *testing.T) {
+			targetDaemon := NewServer(ServerConfig{
+				DB: openAuthTestDB(t), StartedAt: time.Now().UTC(),
+				Auth:            config.AuthConfig{Token: "target-token"},
+				LocalEmbeddings: &localEmbeddingsFixture{},
+				ReconcilerHealth: func() ReconcilerHealth {
+					return ReconcilerHealth{Configured: true, Embedded: 40, Backlog: 172, ETASeconds: new(int64(30))}
+				},
+			})
+			t.Cleanup(func() { _ = targetDaemon.Close() })
+			target := httptest.NewServer(targetDaemon.Handler())
+			t.Cleanup(target.Close)
+			handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+				Name: "example-remote", URL: target.URL, Token: "target-token", AllowInsecure: true,
+			})
+			principal := Principal{Kind: PrincipalBootstrap}
+			if !administrator {
+				token, _, err := manager.db.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+					PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor,
+				})
+				require.NoError(t, err)
+				principal = Principal{Kind: PrincipalDBToken, Actor: "member", TokenID: token.ID}
+			}
+			issued, err := manager.IssueSession(principal, "/kata")
+			require.NoError(t, err)
+			response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet, "/api/v1/embeddings/local", nil, "")
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var got api.LocalEmbeddingsStatus
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
+			assert.False(t, got.CanChange)
+			require.NotNil(t, got.Indexing)
+			if administrator {
+				assert.Equal(t, int64(212), got.Indexing.Total)
+				require.NotNil(t, got.Indexing.ETASeconds)
+				assert.Equal(t, int64(30), *got.Indexing.ETASeconds)
+			} else {
+				assert.Zero(t, got.Indexing.Total)
+				assert.Nil(t, got.Indexing.ETASeconds)
+			}
+		})
+	}
+}

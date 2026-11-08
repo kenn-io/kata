@@ -35,20 +35,59 @@ func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
 	return s
 }
 
+// deleteHidden keeps deletion hints aligned with the current credentials.
+func (m Model) deleteHidden() bool {
+	return !m.mutationAllowed(false)
+}
+
+// helpKeymap is the keymap the help overlay lists: without the delete and
+// move keys when they are not on offer.
+func (m Model) helpKeymap() keymap {
+	km := m.keymap
+	if m.deleteHidden() {
+		km.Delete = key{}
+	}
+	if m.moveHidden() {
+		km.MoveIssue = key{}
+	}
+	return km
+}
+
 func (m Model) routeDeleteKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.Delete.matches(msg) {
 		return m, nil, false
 	}
-	target, issue, ok := m.listIssueTarget()
+	if m.view != viewList && m.view != viewDetail {
+		return m, nil, true
+	}
+	target, issue, ok := m.activeIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
-	expected := issue.QualifiedID
+	expected, ok := m.deleteConfirmation(issue)
+	if !ok {
+		next, cmd := m.undoNotice("Cannot delete issue: project name is unknown", toastError)
+		return next, cmd, true
+	}
 	target.issueUID = issue.UID
 	m.nextFormGen++
 	m.input = newDeleteForm(target, issue, expected)
 	m.input.formGen = m.nextFormGen
 	return m, nil, true
+}
+
+func (m Model) deleteConfirmation(issue Issue) (string, bool) {
+	if issue.QualifiedID != "" {
+		return issue.QualifiedID, true
+	}
+	project := m.projectsByID[issue.ProjectID]
+	if project == "" && issue.ProjectID == m.scope.projectID {
+		project = m.scope.projectName
+	}
+	if project == "" || issue.ShortID == "" {
+		return "", false
+	}
+	return project + "#" + issue.ShortID, true
 }
 
 // commitDeleteForm sends the delete once the typed text is the issue's
@@ -88,51 +127,94 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 	qualified := m.input.del.expected
 	m.input = inputState{}
 	uid := target.issueUID
-	m, cmd := m.dropIssues(uid, []string{uid})
-	message := "deleted " + qualified
-	if last := len(m.undoHistory.entries) - 1; (m.view == viewList || m.view == viewDetail) && last >= 0 && m.undoHistory.entries[last].kind == "delete" && m.undoHistory.entries[last].uid == uid {
-		message += "; press u to undo"
+	// Selection refresh can replace the deleted detail before cleanup sees it.
+	if m.detail.issue != nil && m.detail.issue.UID == uid && len(m.detail.navStack) == 0 {
+		m.focus = focusList
 	}
-	m, notice := m.undoNotice(message, toastInfo)
-	return m, combineCmds(cmd, notice)
-}
-
-// dropIssues removes issues the daemon deleted or moved out of the list a
-// delete or move was started from: the rows leave the list and the selection
-// goes to the row after anchor (the one before it after the last), a detail
-// pane that shows one of them resets, the cached lists go stale, and the list
-// is fetched again. A pane on an unrelated issue stays as it is, even when it
-// no longer shows the highlighted row: the list edit does not make it follow
-// the new selection.
-func (m Model) dropIssues(anchor string, gone []string) (Model, tea.Cmd) {
-	hadIssue := m.detail.issue != nil
-	m.detail = m.detail.withoutIssues(gone...)
-	drop := func(lm listModel) listModel { return lm.droppingIssues(anchor, gone) }
-	var follow, detailCmd tea.Cmd
-	if hadIssue && m.detail.issue != nil {
-		m = m.editListDay(drop)
-	} else {
-		m, follow = m.refreshListDay(drop)
+	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
+	m, forgotten := m.forgetDeletedIssue(target)
+	var detailCmd tea.Cmd
+	if m.detail.issue == nil && m.detail.readRef == "" {
 		m, detailCmd = m.maybeBootstrapSplitDetail()
 	}
 	if m.cache != nil {
 		m.cache.markStale()
 	}
-	return m, combineCmds(follow, combineCmds(detailCmd, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)))
+	message := "deleted " + qualified
+	if last := len(m.undoHistory.entries) - 1; m.undoOffered() && last >= 0 && m.undoHistory.entries[last].kind == "delete" && m.undoHistory.entries[last].uid == uid {
+		message += "; press u to undo"
+	}
+	m, notice := m.undoNotice(message, toastInfo)
+	return m, tea.Batch(forgotten, follow, detailCmd, notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))
 }
 
-// withoutIssues resets a detail pane that shows a deleted or moved issue, as
-// itself, a child, or a Back entry, or that shows no issue yet. A pane
-// inspecting an unrelated issue keeps it and its Back history.
-func (dm detailModel) withoutIssues(gone ...string) detailModel {
-	shows := func(issue *Issue) bool { return issue != nil && slices.Contains(gone, issue.UID) }
-	if dm.issue != nil && !shows(dm.issue) &&
-		!slices.ContainsFunc(dm.children, func(child Issue) bool { return shows(&child) }) &&
-		!slices.ContainsFunc(dm.navStack, func(prev detailModel) bool { return shows(prev.issue) }) {
-		return dm
+// forgetDeletedIssue invalidates the snapshots that navigation can restore.
+func (m Model) forgetDeletedIssue(target formTarget) (Model, tea.Cmd) {
+	uid := target.issueUID
+	deleted := func(dm detailModel) bool {
+		return (dm.issue != nil && dm.issue.UID == uid) ||
+			dm.readRef == uid ||
+			(dm.scopePID == target.projectID && dm.readRef == target.issueShortID)
 	}
-	dm.cancelReads()
-	return newDetailModel()
+	forgetDetail := func(dm detailModel) (detailModel, bool) {
+		dm.navStack = slices.DeleteFunc(slices.Clone(dm.navStack), deleted)
+		for i := range dm.navStack {
+			dm.navStack[i] = dm.navStack[i].invalidated()
+		}
+		if !deleted(dm) {
+			return dm, false
+		}
+		if len(dm.navStack) > 0 {
+			next, _ := dm.handleBack()
+			return next, false
+		}
+		dm.cancelReads()
+		return newDetailModel(), true
+	}
+	forget := func(dm detailModel, focus *focusPane, views ...*viewID) detailModel {
+		dm, reset := forgetDetail(dm)
+		if reset {
+			*focus = focusList
+			for _, view := range views {
+				if *view == viewDetail {
+					*view = viewList
+				}
+			}
+		}
+		return dm.invalidated()
+	}
+	if m.inboxReturn != nil {
+		previous := *m.inboxReturn
+		previous.list = previous.list.withoutIssue(uid)
+		previous.detail = forget(previous.detail, &previous.focus, &previous.view, &previous.prevView)
+		m.inboxReturn = &previous
+	}
+	if m.attention.returnContext != nil {
+		previous := *m.attention.returnContext
+		previous.detail = forget(previous.detail, &previous.focus, &previous.view, &previous.prevView, &previous.foreground)
+		m.attention.returnContext = &previous
+	}
+	m.attention.setRows(slices.DeleteFunc(slices.Clone(m.attention.rows), func(row attentionRequest) bool { return row.issue.UID == uid }))
+	wasDeleted := deleted(m.detail)
+	detail, reset := forgetDetail(m.detail)
+	m.detail = detail
+	if reset {
+		return m.leaveDetail()
+	}
+	if wasDeleted {
+		return m, withConnGen(m.detail.refetch(m.api), m.connGen)
+	}
+	if slices.ContainsFunc(m.detail.children, func(child Issue) bool { return child.UID == uid }) {
+		m.detail.children = slices.DeleteFunc(slices.Clone(m.detail.children), func(child Issue) bool { return child.UID == uid })
+		return m, withConnGen(m.detail.refetch(m.api), m.connGen)
+	}
+	return m, nil
+}
+
+// withoutIssue drops a deleted issue from the list and selects the row after
+// it, or the row before it when it was the last.
+func (lm listModel) withoutIssue(uid string) listModel {
+	return lm.droppingIssues(uid, []string{uid})
 }
 
 // droppingIssues drops the issues from the list. When anchor was the selection,

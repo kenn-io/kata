@@ -115,6 +115,35 @@ type movePreviewMsg struct {
 	err     error
 }
 
+// M is offered only on the selected row of the plain issue list. The detail
+// view, the Inbox and a detail opened from Attention keep saved copies of an
+// issue (Back history, the split pane, the return context) that a move would
+// leave stale, so the key is not offered there. moveHidden decides the footer
+// and help, moveTarget the dispatch.
+
+// moveHidden reports whether credentials, a saved browsing context, or a
+// pending undo or reopen lookup keep M off the footer and help. The lookup owns
+// the issue until it answers, and a reopen lookup that answers opens its own
+// confirmation over an open Move form.
+func (m Model) moveHidden() bool {
+	return !m.mutationAllowed(false) || m.moveBlockedByContext() || m.moveWaiting()
+}
+
+func (m Model) moveBlockedByContext() bool {
+	return m.inboxReturn != nil || m.attention.returnContext != nil
+}
+
+func (m Model) moveWaiting() bool { return m.undoInFlight || m.reopenLookupPending }
+
+// moveTarget is the issue M acts on: the selected row of the plain issue list,
+// and nothing in any other view, pane or context.
+func (m Model) moveTarget() (formTarget, Issue, bool) {
+	if (m.view != viewList && m.view != viewDetail) || !m.listIsActive() || m.moveBlockedByContext() || m.moveWaiting() {
+		return formTarget{}, Issue{}, false
+	}
+	return m.activeIssueTarget()
+}
+
 func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.MoveIssue.matches(msg) {
 		return m, nil, false
@@ -431,7 +460,7 @@ func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 		newRef += "#" + mut.resp.NewShortID
 	}
 	m = m.closeMoveForm()
-	m, cmd := m.dropIssues(uid, gone)
+	m, cmd := m.dropMovedIssues(uid, gone)
 	// Labels travel with the issues, from projects the preview may not have
 	// named, so every cached project's counts are stale.
 	var cached []int64
@@ -441,6 +470,43 @@ func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 	m, labels := m.refreshCachedLabels(cached...)
 	m, notice := m.undoNotice(sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.target.issueShortID, newRef)), toastSuccess)
 	return m, combineCmds(cmd, combineCmds(labels, notice))
+}
+
+// dropMovedIssues removes the moved issues from the list the move was started
+// from: the rows leave the list and the selection goes to the row after anchor
+// (the one before it after the last), a detail pane that shows one of them
+// resets, the cached lists go stale, and the list is fetched again. A pane on
+// an unrelated issue stays as it is, even when it no longer shows the
+// highlighted row: the list edit does not make it follow the new selection.
+func (m Model) dropMovedIssues(anchor string, gone []string) (Model, tea.Cmd) {
+	hadIssue := m.detail.issue != nil
+	m.detail = m.detail.withoutIssues(gone...)
+	drop := func(lm listModel) listModel { return lm.droppingIssues(anchor, gone) }
+	var follow, detailCmd tea.Cmd
+	if hadIssue && m.detail.issue != nil {
+		m = m.editListDay(drop)
+	} else {
+		m, follow = m.refreshListDay(drop)
+		m, detailCmd = m.maybeBootstrapSplitDetail()
+	}
+	if m.cache != nil {
+		m.cache.markStale()
+	}
+	return m, combineCmds(follow, combineCmds(detailCmd, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)))
+}
+
+// withoutIssues resets a detail pane that shows a moved issue, as itself, a
+// child, or a Back entry, or that shows no issue yet. A pane inspecting an
+// unrelated issue keeps it and its Back history.
+func (dm detailModel) withoutIssues(gone ...string) detailModel {
+	shows := func(issue *Issue) bool { return issue != nil && slices.Contains(gone, issue.UID) }
+	if dm.issue != nil && !shows(dm.issue) &&
+		!slices.ContainsFunc(dm.children, func(child Issue) bool { return shows(&child) }) &&
+		!slices.ContainsFunc(dm.navStack, func(prev detailModel) bool { return shows(prev.issue) }) {
+		return dm
+	}
+	dm.cancelReads()
+	return newDetailModel()
 }
 
 // moveInnerWidth is the text width of the Move form: the box's interior, or the

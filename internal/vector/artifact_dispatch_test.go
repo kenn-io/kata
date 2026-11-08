@@ -83,6 +83,7 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 			artifact, err := embedding.NewArtifact(identity, embedding.EmbedText(issue.Title, issue.Body), [][]float32{{1, 0}, {0, 1}})
 			require.NoError(t, err)
 			arrived := false
+			var cursors []string
 			vector.SetArtifactArrivalBoundaryForTest(ix, func() {
 				if arrived {
 					return
@@ -91,10 +92,17 @@ func TestEmbeddingArtifactArrivalBeforeDispatch(t *testing.T) {
 				durable, err := source.(db.EmbeddingArtifactStorage).RetainEmbeddingArtifact(ctx, artifact)
 				require.NoError(t, err)
 				require.True(t, durable)
+			}, func(after *string) {
+				cursor := ""
+				if after != nil {
+					cursor = *after
+				}
+				cursors = append(cursors, cursor)
 			})
 			_, err = ix.FillWithArtifacts(ctx, key, source, recipe, client.EncodeFunc(), 1, nil, nil)
 			require.NoError(t, err)
 			require.True(t, arrived)
+			require.Equal(t, []string{"", issue.UID}, cursors, "a fully reused page advances the wrapper cursor")
 			require.Zero(t, requests.Load(), "complete bytes arrived after scan and before dispatch")
 			backlog, err := ix.Backlog(ctx, key)
 			require.NoError(t, err)

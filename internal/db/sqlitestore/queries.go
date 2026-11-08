@@ -298,46 +298,22 @@ func (d *Store) listProjects(ctx context.Context, includeArchived bool) ([]db.Pr
 	return out, rows.Err()
 }
 
-// BatchProjectStats returns aggregate stats for every active project. The
-// result includes projects with zero issues (Open=0, Closed=0) and zero
-// events (LastEventAt=nil), driven by LEFT JOINs onto pre-aggregated
-// subqueries. Pre-aggregation matters: the naive
-// projects⋈issues⋈events GROUP BY shape would multiply each issue row by
-// each event row and inflate counts. Spec §6.1.
-func (d *Store) BatchProjectStats(ctx context.Context) (map[int64]db.ProjectStats, error) {
-	const q = `
-WITH
-  issue_counts AS (
-    SELECT
-      project_id,
-      SUM(CASE WHEN status = 'open'   THEN 1 ELSE 0 END) AS open_count,
-      SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed_count
-    FROM issues
-    WHERE deleted_at IS NULL
-    GROUP BY project_id
-  ),
-  event_max AS (
-    -- julianday() normalizes both T-separated RFC3339 and space/offset
-    -- legacy layouts to a numeric julian day, so MAX picks the
-    -- absolute-latest event regardless of which text format was stored.
-    -- strftime() formats it back to RFC3339Nano with a 'Z' zone, matching
-    -- the layout the rest of the code emits via strftime() on insert.
-    SELECT project_id,
-           strftime('%Y-%m-%dT%H:%M:%fZ', MAX(julianday(created_at))) AS last_event_at
-    FROM events
-    GROUP BY project_id
-  )
+const batchProjectStatsSQL = `
 SELECT
   p.id,
-  COALESCE(ic.open_count,   0),
-  COALESCE(ic.closed_count, 0),
-  em.last_event_at
+  (SELECT count(*) FROM issues i WHERE i.project_id = p.id AND i.status = 'open' AND i.deleted_at IS NULL),
+  (SELECT count(*) FROM issues i WHERE i.project_id = p.id AND i.status = 'closed' AND i.deleted_at IS NULL),
+  (SELECT e.created_at FROM events e WHERE e.id = (SELECT max(m.id) FROM events m WHERE m.project_id = p.id))
 FROM projects p
-LEFT JOIN issue_counts ic ON ic.project_id = p.id
-LEFT JOIN event_max    em ON em.project_id = p.id
 WHERE p.deleted_at IS NULL AND p.name <> ?
 ORDER BY p.id`
-	rows, err := d.QueryContext(ctx, q, db.SystemProjectName)
+
+// BatchProjectStats returns aggregate stats for every active project, including
+// projects with zero issues or events. Correlated per-project subqueries cannot
+// multiply issue rows by event rows and inflate counts (spec §6.1).
+// LastEventAt follows the newest event by id, as in readUIProjectStats.
+func (d *Store) BatchProjectStats(ctx context.Context) (map[int64]db.ProjectStats, error) {
+	rows, err := d.QueryContext(ctx, batchProjectStatsSQL, db.SystemProjectName)
 	if err != nil {
 		return nil, fmt.Errorf("batch project stats: %w", err)
 	}
@@ -359,6 +335,7 @@ ORDER BY p.id`
 			if err != nil {
 				return nil, fmt.Errorf("parse last_event_at %q: %w", ts.String, err)
 			}
+			t = t.UTC()
 			s.LastEventAt = &t
 		}
 		out[id] = s
@@ -1062,13 +1039,22 @@ func (d *Store) IssueUIDPrefixMatch(ctx context.Context, prefix string, limit in
 	if limit <= 0 {
 		limit = 20
 	}
-	q := issueSelect + ` WHERE i.uid LIKE ? || '%'`
-	if include == db.IncludeDeletedNo {
+	q := issueSelect + ` WHERE i.uid LIKE ?`
+	args := []any{prefix + "%"}
+	if _, restricted := db.AuthorizedProjects(ctx); restricted {
+		// Bound each project's candidates before combining the authorized projects.
+		q = `SELECT ` + issueColumns + ` FROM projects p JOIN issues i ON i.id IN (
+SELECT candidate.id FROM issues candidate WHERE candidate.project_id = p.id AND candidate.uid LIKE ?`
+		if include == db.IncludeDeletedNo {
+			q += ` AND candidate.deleted_at IS NULL`
+		}
+		q += ` ORDER BY candidate.uid COLLATE NOCASE, candidate.uid LIMIT ?) WHERE `
+		args = append(args, limit)
+		q += authorizedProjectPredicate(ctx, "p.uid", &args)
+	} else if include == db.IncludeDeletedNo {
 		q += ` AND i.deleted_at IS NULL`
 	}
-	args := []any{prefix}
-	q += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
-	q += ` ORDER BY i.uid ASC LIMIT ?`
+	q += ` ORDER BY i.uid COLLATE NOCASE, i.uid LIMIT ?`
 	args = append(args, limit)
 	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -1097,6 +1083,10 @@ func buildListIssuesQuery(ctx context.Context, p db.ListIssuesParams, count bool
 	appendAllowedIssueIDsSQLite(&q, &args, p.AllowedIssueIDs)
 	q.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopeSQLite(&q, &args, p.IssueScope)
+	if p.ExactTitle != "" {
+		q.WriteString(` AND i.title = ? COLLATE BINARY`)
+		args = append(args, p.ExactTitle)
+	}
 	if p.Status != "" {
 		q.WriteString(` AND i.status = ?`)
 		args = append(args, p.Status)
@@ -1161,7 +1151,9 @@ func buildListIssuesQuery(ctx context.Context, p db.ListIssuesParams, count bool
 		args = append(args, stamp, stamp, stamp, p.After.ID)
 	}
 
-	if p.OldestFirst {
+	if p.ShortestBodyFirst {
+		q.WriteString(" ORDER BY length(i.body), i.id")
+	} else if p.OldestFirst {
 		q.WriteString(" ORDER BY " + creationKeySQL("i") + " ASC, i.id ASC")
 	} else if p.CreatedFirst {
 		q.WriteString(" ORDER BY " + creationKeySQL("i") + " DESC, i.id DESC")
@@ -2476,19 +2468,9 @@ func (d *Store) claimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.Claim
 	return result, nil
 }
 
-// ReadyIssues returns actionable open issues with no open `blocks` predecessor,
-// ordered by updated_at DESC. Issues marked someday=true or scheduled after
-// their effective local date or instant are parked and excluded. limit==0 means
-// no limit. Blockers may live in another project (links span projects, storage
-// v16), but a blocker whose project is archived (projects.deleted_at IS NOT
-// NULL) does not gate readiness — mirroring the child/close queries'
-// archived-project exclusion, so an active issue is not stranded behind hidden
-// archived work.
-func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, filter db.ReadyIssuesFilter) ([]db.Issue, error) {
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
+const readyPriorityOrderBy = ` ORDER BY COALESCE(i.priority, 5), i.updated_at DESC, i.id DESC`
+
+func buildReadyIssuesQuery(ctx context.Context, projectID int64, filter db.ReadyIssuesFilter, at time.Time) (string, []any) {
 	args := []any{projectID}
 	var q strings.Builder
 	q.WriteString(scheduledIssueSelect + `
@@ -2528,8 +2510,29 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 		args = append(args, strings.ToLower(label))
 	}
 
-	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := d.QueryContext(ctx, q.String(), args...)
+	if filter.PriorityFirst {
+		q.WriteString(readyPriorityOrderBy)
+	} else {
+		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	}
+	return q.String(), args
+}
+
+// ReadyIssues returns actionable open issues with no open `blocks` predecessor,
+// ordered by updated_at DESC. Issues marked someday=true or scheduled after
+// their effective local date or instant are parked and excluded. limit==0 means
+// no limit. Blockers may live in another project (links span projects, storage
+// v16), but a blocker whose project is archived (projects.deleted_at IS NOT
+// NULL) does not gate readiness — mirroring the child/close queries'
+// archived-project exclusion, so an active issue is not stranded behind hidden
+// archived work.
+func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, filter db.ReadyIssuesFilter) ([]db.Issue, error) {
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	query, args := buildReadyIssuesQuery(ctx, projectID, filter, at)
+	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues: %w", err)
 	}
@@ -2561,20 +2564,7 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 	return out, rows.Err()
 }
 
-// ReadyIssuesGlobal returns ready issues across every non-archived project,
-// each paired with its project name. "Ready" matches ReadyIssues: actionable,
-// open, not soft-deleted, and not blocked by an open `blocks` predecessor in
-// an active project. Issues from archived projects (projects.deleted_at IS NOT
-// NULL) are excluded, and an open blocker in an archived project does not gate
-// readiness. Ordering and filter semantics match ReadyIssues so behavior is
-// consistent.
-func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
-	// The global row also carries the project name and linked recurrence
-	// timezone, so build this projection from the shared issue columns.
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
+func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilter, at time.Time) (string, []any) {
 	args := []any{}
 	var q strings.Builder
 	q.WriteString(`SELECT ` + issueColumns + `, p.name AS project_name, schedule_recurrence.timezone
@@ -2618,8 +2608,30 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		args = append(args, strings.ToLower(label))
 	}
 
-	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := d.QueryContext(ctx, q.String(), args...)
+	if filter.PriorityFirst {
+		q.WriteString(readyPriorityOrderBy)
+	} else {
+		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	}
+	return q.String(), args
+}
+
+// ReadyIssuesGlobal returns ready issues across every non-archived project,
+// each paired with its project name. "Ready" matches ReadyIssues: actionable,
+// open, not soft-deleted, and not blocked by an open `blocks` predecessor in
+// an active project. Issues from archived projects (projects.deleted_at IS NOT
+// NULL) are excluded, and an open blocker in an archived project does not gate
+// readiness. Ordering and filter semantics match ReadyIssues so behavior is
+// consistent.
+func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
+	// The global row also carries the project name and linked recurrence
+	// timezone, so build this projection from the shared issue columns.
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	query, args := buildReadyIssuesGlobalQuery(ctx, filter, at)
+	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", err)
 	}

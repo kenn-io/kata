@@ -17,6 +17,7 @@ import (
 )
 
 type Config struct {
+	Endpoint            func(context.Context) (string, error)
 	BaseURL             string
 	Model               string
 	Credential          config.EmbeddingCredential
@@ -33,6 +34,7 @@ type Config struct {
 }
 
 type Client struct {
+	endpoint           func(context.Context) (string, error)
 	options            embedclient.Options
 	space              embedmodel.Descriptor
 	generation         kitvec.Generation
@@ -62,10 +64,12 @@ func New(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
+	baseURL := cfg.BaseURL
+	if cfg.Endpoint != nil {
+		baseURL = "http://127.0.0.1"
+	}
 	parts, err := (embedconfig.Embedder{
-		BaseURL: cfg.BaseURL, Model: cfg.Model, Dims: dims,
-		FingerprintSalt: cfg.Salt, BatchSize: batch,
-		TrustPrivateNetwork: cfg.TrustPrivateNetwork,
+		BaseURL: baseURL, Model: cfg.Model, Dims: dims, FingerprintSalt: cfg.Salt, BatchSize: batch, TrustPrivateNetwork: cfg.TrustPrivateNetwork,
 	}).Parts()
 	if err != nil {
 		return nil, fmt.Errorf("embedding: configure client: %w", err)
@@ -107,7 +111,7 @@ func New(cfg Config) (*Client, error) {
 	if err := space.Validate(); err != nil {
 		return nil, fmt.Errorf("embedding: configure identity: %w", err)
 	}
-	client := &Client{options: options, space: space, generation: generation, http: &http.Client{Timeout: timeout}}
+	client := &Client{options: options, space: space, generation: generation, http: &http.Client{Timeout: timeout}, endpoint: cfg.Endpoint}
 	client.SetCredential(cfg.Credential)
 	return client, nil
 }
@@ -155,6 +159,20 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 		return nil, err
 	}
 	options := c.options
+	if c.endpoint != nil {
+		options.Deployment.BaseURL, err = c.endpoint(ctx)
+		if err != nil {
+			c.mu.Lock()
+			if revision == c.credentialRevision {
+				now := time.Now().UTC()
+				c.credentialHealth.LastError = err.Error()
+				c.credentialHealth.LastErrorAt = &now
+				c.credentialHealth.LastErrorStatus = 0
+			}
+			c.mu.Unlock()
+			return nil, err
+		}
+	}
 	options.APIKey = credential.Key
 	options.HTTP = c.http
 	provider, err := embedclient.New(options)

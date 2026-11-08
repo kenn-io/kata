@@ -113,9 +113,7 @@ openapi: api-generate
 test-short:
 	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test -short $(GOFLAGS_TEST) ./...
 
-# gotestsum places packages after the go test flags, where go test would pass
-# them to the test binary after an unknown flag, so set rapid's checks through
-# its environment variable instead of -rapid.checks.
+# gotestsum places packages after Go flags, so use Rapid's environment setting.
 test-stress:
 	RAPID_CHECKS=5 go tool gotestsum --format pkgname-and-test-fails --format-icons text \
 		--jsonfile gotestsum/federation-stress.json --rerun-fails=2 \

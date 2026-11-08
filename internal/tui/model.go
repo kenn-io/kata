@@ -862,6 +862,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
+	case workflowOpenedMsg:
+		next, cmd := m.workflowOpened(msg)
+		return next, cmd, true
 	case cronEditOpenedMsg:
 		next, cmd := m.cronEditOpened(msg)
 		return next, cmd, true
@@ -946,7 +949,7 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			}
 			return next, cmd, true
 		}
-		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail) {
+		if m.keymap.Undo.matches(msg) && m.undoOffered() {
 			next, cmd := m.startUndo()
 			return next, cmd, true
 		}
@@ -1019,18 +1022,30 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if m.staleConnMsg(msg.connGen) {
 			return m, nil, true
 		}
-		if m.layout != splitlayout.Split {
-			m.detail.cancelReads()
-		}
-		if m.attention.returnToAttention {
-			next, cmd := m.returnFromAttentionDetail()
-			return next, cmd, true
-		}
-		m.view = viewList
-		m.focus = focusList
-		return m, nil, true
+		next, cmd := m.leaveDetail()
+		return next, cmd, true
 	}
 	return m, nil, false
+}
+
+func (m Model) leaveDetail() (Model, tea.Cmd) {
+	if m.layout != splitlayout.Split {
+		m.detail.cancelReads()
+	}
+	if m.attention.returnToAttention {
+		return m.returnFromAttentionDetail()
+	}
+	m.view = viewList
+	m.focus = focusList
+	return m, nil
+}
+
+func (m Model) undoOffered() bool {
+	if m.view == viewAttention {
+		last := len(m.undoHistory.entries) - 1
+		return last >= 0 && m.undoHistory.entries[last].kind == "delete"
+	}
+	return m.view == viewList || m.view == viewDetail
 }
 
 // inboxEntryKeptKey reports whether a keypress while an I-key entry
@@ -3698,15 +3713,6 @@ func (m Model) viewContent() string {
 		case viewCredentials:
 			body = renderCredentials(m)
 		default:
-			if m.modal == modalReopenBacklog {
-				footer := renderFooterHelpTable(modalHelpRows(m.modal, m.move.step()), m.width)
-				bodyHeight := max(0, m.height-lipgloss.Height(footer))
-				body = renderTooNarrow(m.width, bodyHeight)
-				body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
-				body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, bodyHeight)
-				lines := strings.Split(body, "\n")
-				return joinNonEmpty([]string{strings.Join(lines[:min(bodyHeight, len(lines))], "\n"), footer})
-			}
 			body = renderTooNarrow(m.width, m.height)
 		}
 		body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
@@ -3737,6 +3743,9 @@ func (m Model) overlayInputAndModal(body string) string {
 		}
 		form := renderCenteredForm(m.input, m.width, m.height, now)
 		body = overlayModal(body, form, m.width, m.height)
+	}
+	if m.modal == modalReopenBacklog {
+		return m.overlayReopenBacklog(body)
 	}
 	if m.modal == modalMoveIssue {
 		body = overlayModal(body, renderMoveModal(m.move, m.width, m.height), m.width, m.height)
@@ -3886,7 +3895,7 @@ func (m Model) chrome() viewChrome {
 		daemon:        activeDaemonDisplay(m.activeDaemon),
 		modal:         m.modal,
 		undoAvailable: len(m.undoHistory.entries) > 0,
-		listOpsHidden: m.listIssueOpsHidden(),
+		deleteHidden:  m.deleteHidden(),
 		moveHidden:    m.moveHidden(),
 		moveStep:      m.move.step(),
 	}

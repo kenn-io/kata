@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-10-30
+last_edited: 2026-11-06
 ---
 
 # Web UI
@@ -26,6 +26,8 @@ reference accepted by `kata show` to open that issue directly:
 kata ui abc4
 kata ui example-project#abc4
 ```
+
+Kata prints the URL in the selected output format before opening the browser; if the browser cannot open, the command succeeds and asks you to open that URL manually. Cancelling the command still returns an error.
 
 Kata resolves the reference before opening the browser, then uses the issue and
 project UIDs in the URL so the bookmark survives project renames and issue
@@ -55,8 +57,10 @@ individual projects:
   `scheduled_on` stays out of Inbox until that day; a deadline never hides it.
   Narrow Inbox to one project with the **Project scope** filter, and sort it
   from the column headers. New tasks are captured in the designated
-  [Inbox project](../reference/metadata.md#project-inbox-designation); if none
-  exists, the first new task asks you to choose one. To switch it later, select
+  [Inbox project](../reference/metadata.md#project-inbox-designation). With no
+  projects, **New task** asks you to create one, makes it Inbox, and opens task
+  capture. With existing projects and no Inbox, it asks you to choose one.
+  To switch it later, select
   **Change** in the **New task** dialog. This is separate from `kata inbox`,
   which reads
   [attention requests](../reference/cli.md#teammate-requests) for an actor or
@@ -113,6 +117,11 @@ project, and **Done editing** returns to the read-only view. The editor also sup
 When a close saved a
 [closing-session reference](../reference/configuration.md#closing-session-transcripts),
 the issue's events show `Session: <agent> <id>`, linked when a URL was saved. See the configuration reference for API and AgentsView compatibility.
+
+When the daemon has [Docbank configured](attachments.md#configure-the-daemon),
+the read view also lists the issue's attachments. **Attach files** uploads one
+or more files, **Preview** shows images, and **Play** plays videos in place. See
+[Issue attachments](attachments.md) for size limits and supported types.
 
 With daemon API `0.28.0` or newer, comments show handles, reply targets,
 backlinks, and edit markers. Select a reply target or backlink to open its issue
