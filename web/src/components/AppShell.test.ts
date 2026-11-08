@@ -21,8 +21,9 @@ describe('AppShell', () => {
 
   test('advances Updated labels while the task snapshot stays unchanged', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
+    vi.setSystemTime(new Date('2026-08-01T12:00:16Z'))
     const current = snapshot()
+    current.collection[0]!.updated_at = '2026-08-01T12:00:16Z'
     current.catalog[0]!.project.metadata = { role: 'inbox' }
     render(AppShell, {
       props: {
@@ -42,7 +43,7 @@ describe('AppShell', () => {
     expect(screen.getByText('now')).not.toBeNull()
     const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
     expect(normalizations).toBeGreaterThan(0)
-    await vi.advanceTimersByTimeAsync(60_000)
+    await vi.advanceTimersByTimeAsync(45_000)
     expect(screen.getByText('1m')).not.toBeNull()
     expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })

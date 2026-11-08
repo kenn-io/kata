@@ -180,7 +180,6 @@
 
   let connectionNow = $state(Date.now())
   let today = $derived(localDateString(new Date(connectionNow)))
-  let minuteNow = $derived(Math.floor(connectionNow / 60_000) * 60_000)
   onMount(() => {
     const timer = setInterval(() => {
       connectionNow = Date.now()
@@ -822,7 +821,7 @@
         onSubmitSearch={submitSearch}
       />
       <IssueCollection
-        now={minuteNow}
+        now={connectionNow}
         resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
         currentView={{

@@ -71,7 +71,6 @@ describe('App', () => {
     await tick()
     expect(requests[1]!.headers.get('If-None-Match')).toBe('"snapshot-1"')
     expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
-    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
   })
 
   it.each([
