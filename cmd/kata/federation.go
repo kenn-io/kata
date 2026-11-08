@@ -1355,6 +1355,40 @@ func federationStatusCmd() *cobra.Command {
 			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 				return err
 			}
+			if flags.Project != "" {
+				var response map[string]jsontext.Value
+				if err := json.Unmarshal(callResp.Body, &response); err != nil {
+					return err
+				}
+				var statuses []jsontext.Value
+				if err := json.Unmarshal(response["statuses"], &statuses); err != nil {
+					return err
+				}
+				filtered := make([]jsontext.Value, 0, 1)
+				for _, status := range statuses {
+					var project struct {
+						Name string `json:"project_name"`
+					}
+					if err := json.Unmarshal(status, &project); err != nil {
+						return err
+					}
+					if project.Name == flags.Project {
+						filtered = append(filtered, status)
+					}
+				}
+				if len(filtered) == 0 {
+					return &cliError{Message: fmt.Sprintf("no federation status for project %q", flags.Project), Kind: kindNotFound, ExitCode: ExitNotFound}
+				}
+				var err error
+				response["statuses"], err = json.Marshal(filtered)
+				if err != nil {
+					return err
+				}
+				callResp.Body, err = json.Marshal(response)
+				if err != nil {
+					return err
+				}
+			}
 			bs, emitted, err := emitPassthrough(cmd, callResp.Body)
 			if err != nil || emitted {
 				return err
