@@ -491,6 +491,10 @@ type PatchProjectMetadataResponse = PatchProjectMetadataResponseBody
 
 type PatchProjectMetadataErrorResponse = ErrorEnvelope
 
+type GetProjectNotificationActorResponse = ProjectNotificationActorResponseBody
+
+type GetProjectNotificationActorErrorResponse = ErrorEnvelope
+
 type ReadyIssuesResponse = ReadyResponseBody
 
 type ReadyIssuesErrorResponse = ErrorEnvelope
@@ -1702,6 +1706,14 @@ type PatchProjectMetadataResp struct {
 	JSON200      *PatchProjectMetadataResponse
 	Headers200   *PatchProjectMetadataResp200Headers
 	JSONDefault  *PatchProjectMetadataErrorResponse
+}
+
+type GetProjectNotificationActorResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetProjectNotificationActorResponse
+	JSONDefault  *GetProjectNotificationActorErrorResponse
 }
 
 type ReadyIssuesResp struct {

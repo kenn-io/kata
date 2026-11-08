@@ -363,6 +363,10 @@ func (i IssuePlanningDatesQuery) Validate() error {
 	return errors
 }
 
+type GetProjectNotificationActorQuery struct {
+	RequestedActor *string `json:"requested_actor,omitempty"`
+}
+
 type ReadyIssuesQuery struct {
 	// Sort priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
 	Sort         *ReadyIssuesQuerySort `json:"sort,omitempty"`

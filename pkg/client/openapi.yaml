@@ -4774,6 +4774,13 @@ components:
         - replay_horizon_event_id
         - baseline_through_event_id
       type: object
+    ProjectNotificationActorResponseBody:
+      properties:
+        effective_actor:
+          type: string
+      required:
+        - effective_actor
+      type: object
     ProjectOut:
       properties:
         active:
@@ -11376,6 +11383,34 @@ paths:
             ETag:
               schema:
                 type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/notifications/actor:
+    get:
+      operationId: getProjectNotificationActor
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: requested_actor
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectNotificationActorResponseBody"
+          description: OK
         default:
           content:
             application/json:

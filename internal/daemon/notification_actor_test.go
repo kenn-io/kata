@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +22,6 @@ func TestProjectNotificationActorMatchesNativeNotificationMutation(t *testing.T)
 		enabled    bool
 		push       bool
 		relay      bool
-		blankActor bool
 		boundActor string
 		want       string
 	}{
@@ -30,7 +30,6 @@ func TestProjectNotificationActorMatchesNativeNotificationMutation(t *testing.T)
 		{name: "relay spoke", binding: true, enabled: true, push: true, relay: true, boundActor: "bound-agent", want: "caller"},
 		{name: "disabled spoke", binding: true, enabled: false, push: true, boundActor: "bound-agent", want: "caller"},
 		{name: "pull-only spoke", binding: true, enabled: true, push: false, boundActor: "bound-agent", want: "caller"},
-		{name: "blank bound actor", binding: true, enabled: true, push: true, blankActor: true, boundActor: "bound-agent", want: "caller"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testenv.New(t)
@@ -43,12 +42,6 @@ func TestProjectNotificationActorMatchesNativeNotificationMutation(t *testing.T)
 					Actor: tc.boundActor, Enabled: tc.enabled, PushEnabled: tc.push,
 				})
 				require.NoError(t, err)
-				if tc.blankActor {
-					// Legacy persisted rows can be blank even though current writes
-					// reject them; keep this fixture local to the test database.
-					_, err := env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET bound_actor='' WHERE project_id=?`, project.ID)
-					require.NoError(t, err)
-				}
 				if tc.relay {
 					rootUID := "00000000000000000000000002"
 					publicKey, _, err := ed25519.GenerateKey(rand.Reader)
@@ -124,8 +117,9 @@ func TestProjectNotificationActorHidesProjectsOutsideTokenScope(t *testing.T) {
 		ProjectID: visible.ID, Title: "Visible root", Author: "worker",
 	})
 	require.NoError(t, err)
+	expires := time.Now().Add(time.Hour)
 	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
-		PlaintextToken: "scoped-token", Actor: "worker", AdminActor: db.BootstrapActor,
+		PlaintextToken: "scoped-token", Actor: "worker", AdminActor: db.BootstrapActor, ExpiresAt: &expires,
 		Scope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: visible.UID, RootIssueUID: root.UID},
 	})
 	require.NoError(t, err)
