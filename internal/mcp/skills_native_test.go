@@ -102,7 +102,7 @@ func TestNativeGuideExamplesMatchCatalog(t *testing.T) {
 }
 
 // An MCP-only client follows the published quickstart using fixture state.
-// It has no subprocess runner; setup returns content for its own file editor.
+// It has no subprocess runner, so every step goes through MCP tools.
 func TestNativeQuickstartNoShell(t *testing.T) {
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
@@ -111,12 +111,6 @@ func TestNativeQuickstartNoShell(t *testing.T) {
 	require.NoError(t, err)
 	// Multi-project scope requires an explicit create project and qualified refs.
 	session := connectRawTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
-	setup := callWorkflowTool(t, session, "kata.skills", map[string]any{"name": "setup"})
-	path := filepath.Join(t.TempDir(), "AGENTS.md")
-	require.NoError(t, os.WriteFile(path, []byte(setup["managed_block"].(string)), 0o600))
-	readback, err := os.ReadFile(path) //nolint:gosec // test fixture under t.TempDir
-	require.NoError(t, err)
-	require.Equal(t, setup["managed_block"], string(readback))
 	callWorkflowTool(t, session, "kata.skills", map[string]any{"name": "workflow"})
 	ref := ""
 	examples := nativeExamples(t, "quickstart")
