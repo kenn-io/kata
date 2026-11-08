@@ -1202,6 +1202,9 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 	}); err != nil {
 		return err
 	}
+	if err := db.RecordMCPEventsRematch(ctx, tx, db.FederationPulledEventUIDs(ctx)); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit federated materialization: %w", err)
 	}

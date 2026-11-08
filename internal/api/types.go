@@ -527,6 +527,7 @@ type MutationResponse struct {
 type ListIssuesRequest struct {
 	Cursor       string `query:"cursor,omitempty" doc:"Opaque next_cursor from a matching stable-order page"`
 	IncludeTotal bool   `query:"include_total,omitempty" doc:"Count all matching issues, ignoring cursor and limit"`
+	Compact      bool   `query:"compact,omitempty" doc:"Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read"`
 
 	ProjectID     int64    `path:"project_id" required:"true"`
 	Status        string   `query:"status,omitempty" enum:"open,closed,"`
@@ -554,6 +555,7 @@ type ListAllIssuesRequest struct {
 
 	Cursor       string `query:"cursor,omitempty" doc:"Opaque next_cursor from a matching stable-order page"`
 	IncludeTotal bool   `query:"include_total,omitempty" doc:"Count all matching issues, ignoring cursor and limit"`
+	Compact      bool   `query:"compact,omitempty" doc:"Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read"`
 
 	ProjectID     int64    `query:"project_id,omitempty"`
 	Status        string   `query:"status,omitempty" enum:"open,closed,"`

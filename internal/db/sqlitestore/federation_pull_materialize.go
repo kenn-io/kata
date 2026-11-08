@@ -54,6 +54,9 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 		if err := materialization.apply(ctx, tx, projectID, db.NewCronReplayValidator(tx, false)); err != nil {
 			return err
 		}
+		if err := db.RecordMCPEventsRematch(ctx, tx, eventUIDs); err != nil {
+			return err
+		}
 		return tx.Commit()
 	})
 }

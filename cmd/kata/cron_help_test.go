@@ -143,8 +143,14 @@ func TestCronReferenceRequestExamples(t *testing.T) {
 	require.NoError(t, err)
 	doc, err := os.ReadFile("../../docs/reference/cron.md")
 	require.NoError(t, err)
+	// The MCP walkthrough uses tool arguments rather than CLI request files.
+	before, walkthrough, found := strings.Cut(string(doc), "## MCP recurring inbox example")
+	require.True(t, found)
+	_, after, found := strings.Cut(walkthrough, "\n## ")
+	require.True(t, found)
+	requestFiles := []byte(before + after)
 	count := 0
-	for _, match := range regexp.MustCompile("(?s)```json\n(.*?)\n```").FindAllSubmatch(doc, -1) {
+	for _, match := range regexp.MustCompile("(?s)```json\n(.*?)\n```").FindAllSubmatch(requestFiles, -1) {
 		var request struct {
 			Name       string `json:"name"`
 			Definition struct {
