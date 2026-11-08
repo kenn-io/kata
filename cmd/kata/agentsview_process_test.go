@@ -23,6 +23,7 @@ func init() {
 		os.Exit(0)
 	}
 }
+
 func agentsViewSyntheticProcessEnv(home, server string) []string {
 	environment := []string{}
 	for _, name := range []string{"PATH", "SYSTEMROOT", "WINDIR", "TMPDIR", "TEMP", "TMP"} {
@@ -40,6 +41,7 @@ func agentsViewSyntheticProcessEnv(home, server string) []string {
 		"KATA_TRANSCRIPT_AGENT=pi", "KATA_TRANSCRIPT_SESSION_ID=selected", "DO_NOT_TRACK=1",
 	)
 }
+
 func TestAgentsViewUnavailableProcessSendsNoBytesToEitherDestination(t *testing.T) {
 	var company, personal atomic.Int64
 	companyReceiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { company.Add(1); w.WriteHeader(500) }))
@@ -50,7 +52,7 @@ func TestAgentsViewUnavailableProcessSendsNoBytesToEitherDestination(t *testing.
 	raw, err := json.Marshal(consent)
 	require.NoError(t, err)
 	consentPath := filepath.Join(t.TempDir(), "consent.json")
-	require.NoError(t, os.WriteFile(consentPath, raw, 0600))
+	require.NoError(t, os.WriteFile(consentPath, raw, 0o600))
 	for _, destination := range []string{companyReceiver.URL, personalReceiver.URL} {
 		home := t.TempDir()
 		process := exec.CommandContext(t.Context(), os.Args[0], "kata-agentsview-fixture-cli", "agentsview", "share", consentPath, "--issue", "example#abcd", "--snapshot", snapshot, "--close-event", "close-a", "--confirm-transcript-sha256", consent.Association.SnapshotSHA256) //nolint:gosec // fixed test executable and synthetic explicit fixture inputs
@@ -63,6 +65,7 @@ func TestAgentsViewUnavailableProcessSendsNoBytesToEitherDestination(t *testing.
 		require.Zero(t, personal.Load())
 	}
 }
+
 func TestAgentsViewSyntheticProcessEnvironmentOmitsAuthority(t *testing.T) {
 	t.Setenv("CODEX_HOME", "private-account")
 	t.Setenv("CLAUDE_CONFIG_DIR", "private-account")

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // Integration seam owned with the discovery/association prerequisites. A real
@@ -32,9 +34,12 @@ type agentsViewHTTPPort struct {
 }
 
 func agentsViewUnavailable() error {
-	return &cliError{Kind: kindDaemonUnavail, Code: "agentsview_unavailable", ExitCode: ExitDaemonUnavail,
-		Message: "AgentsView: pinned discovery/receipt integration is unavailable in this draft; no close or upload attempted"}
+	return &cliError{
+		Kind: kindDaemonUnavail, Code: "agentsview_unavailable", ExitCode: ExitDaemonUnavail,
+		Message: "AgentsView: pinned discovery/receipt integration is unavailable in this draft; no close or upload attempted",
+	}
 }
+
 func newLiveAgentsViewWorkflow(ctx context.Context) (*agentsViewWorkflow, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -50,6 +55,8 @@ func newAgentsViewHTTPPort(ctx context.Context, ref string, verifier agentsViewP
 	if verifier == nil {
 		return nil, agentsViewUnavailable()
 	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	a, err := discoverDaemonAPI(ctx)
 	if err != nil {
 		return nil, err
@@ -70,14 +77,24 @@ func newAgentsViewHTTPPort(ctx context.Context, ref string, verifier agentsViewP
 	if err != nil {
 		return nil, err
 	}
-	cloned := *a.client
-	cloned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	a.client = &cloned
-	p := &agentsViewHTTPPort{api: a, projectID: pid, verifier: verifier}
-	raw, err := p.request(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issues/%s", pid, url.PathEscape(parsed.RefForAPI)), nil, nil, 10*time.Second)
+	transport, err := longRunningClientFor(a.ctx, a.baseURL)
 	if err != nil {
 		return nil, err
 	}
+	cloned := *transport
+	cloned.Transport = agentsViewBoundedResponseTransport{transport.Transport}
+	cloned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	a.client = &cloned
+	p := &agentsViewHTTPPort{api: a, projectID: pid, verifier: verifier}
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return nil, err
+	}
+	issueResponse, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: pid, Ref: parsed.RefForAPI}})
+	if issueResponse == nil || callErr != nil || issueResponse.StatusCode != http.StatusOK {
+		return nil, errors.New("AgentsView: actual issue identity unavailable")
+	}
+	raw := issueResponse.Body
 	var out struct {
 		Issue struct {
 			UID       string `json:"uid"`
@@ -89,10 +106,11 @@ func newAgentsViewHTTPPort(ctx context.Context, ref string, verifier agentsViewP
 	}
 	p.issueUID = out.Issue.UID
 	p.projectID = out.Issue.ProjectID
-	raw, err = p.request(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d", p.projectID), nil, nil, 10*time.Second)
-	if err != nil {
-		return nil, err
+	projectResponse, callErr := apiClient.ShowProjectWithResponse(ctx, &generated.ShowProjectRequestOptions{PathParams: &generated.ShowProjectPath{ProjectID: p.projectID}})
+	if projectResponse == nil || callErr != nil || projectResponse.StatusCode != http.StatusOK {
+		return nil, errors.New("AgentsView: actual project identity unavailable")
 	}
+	raw = projectResponse.Body
 	var project struct {
 		Project struct {
 			UID string `json:"uid"`
@@ -104,6 +122,7 @@ func newAgentsViewHTTPPort(ctx context.Context, ref string, verifier agentsViewP
 	p.projectUID = project.Project.UID
 	return p, nil
 }
+
 func (p *agentsViewHTTPPort) request(ctx context.Context, method, path string, body io.Reader, headers map[string]string, budget time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
@@ -121,7 +140,7 @@ func (p *agentsViewHTTPPort) request(ctx context.Context, method, path string, b
 	}
 	response, err := p.api.client.Do(request)
 	if err != nil {
-		return nil, errors.New("AgentsView: daemon response unconfirmed")
+		return nil, &agentsViewSafeFailure{state: "daemon response unconfirmed", cause: err}
 	}
 	defer response.Body.Close()
 	headerBytes := 0
@@ -152,6 +171,7 @@ func (p *agentsViewHTTPPort) request(ctx context.Context, method, path string, b
 	}
 	return raw, nil
 }
+
 func (p *agentsViewHTTPPort) Select(ctx context.Context, _ string) (agentsViewSelection, error) {
 	raw, err := p.request(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/transcript-service", p.projectID), nil, nil, 10*time.Second)
 	if err != nil {
@@ -167,67 +187,36 @@ func (p *agentsViewHTTPPort) Select(ctx context.Context, _ string) (agentsViewSe
 	selected.Discovery = append(jsontext.Value(nil), raw...)
 	return selected, nil
 }
-func agentsViewEventFromMutation(raw []byte) (*agentsViewCloseEvent, error) {
-	var event struct {
-		UID        string `json:"uid"`
-		Type       string `json:"type"`
-		IssueUID   string `json:"issue_uid"`
-		ProjectUID string `json:"project_uid"`
-		Payload    string `json:"payload"`
+
+func (p *agentsViewHTTPPort) Close(ctx context.Context, _ string, _ map[string]any, _ map[string]string) (agentsViewCloseResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentsViewCloseResult{}, err
 	}
-	if err := json.Unmarshal(raw, &event); err != nil {
-		return nil, err
-	}
-	var payload struct {
-		Association agentsViewAssociation `json:"agentsview_association"`
-	}
-	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-		return nil, err
-	}
-	return &agentsViewCloseEvent{event.UID, event.Type, event.IssueUID, event.ProjectUID, payload.Association}, nil
+	// The generated close body on main has no association/proof fields. Do not
+	// round-trip through it and silently omit consent. Connect the real typed
+	// operation only after the association prerequisite refreshes its contract.
+	return agentsViewCloseResult{}, agentsViewUnavailable()
 }
-func (p *agentsViewHTTPPort) Close(ctx context.Context, _ string, body map[string]any, headers map[string]string) (agentsViewCloseResult, error) {
-	actor, _ := resolveActor(ctx, flags.As, nil)
-	body["actor"] = actor
-	if len(headers) > 0 {
-		body["retry_protocol"] = api.CloseRetryProtocol
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return agentsViewCloseResult{}, err
-	}
-	copied := map[string]string{"Content-Type": "application/json", "X-Kata-Surface": "cli"}
-	for key, value := range headers {
-		if key == "Idempotency-Key" || key == "If-Match" {
-			copied[key] = value
-		}
-	}
-	response, err := p.request(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", p.projectID, url.PathEscape(p.issueUID)), bytes.NewReader(raw), copied, 10*time.Second)
-	if err != nil {
-		return agentsViewCloseResult{}, err
-	}
-	var out struct {
-		Changed bool           `json:"changed"`
-		Reused  bool           `json:"reused"`
-		Event   jsontext.Value `json:"event"`
-	}
-	if err = json.Unmarshal(response, &out); err != nil {
-		return agentsViewCloseResult{}, err
-	}
-	result := agentsViewCloseResult{Changed: out.Changed, Reused: out.Reused, Raw: response}
-	if len(out.Event) > 0 && string(out.Event) != "null" {
-		result.Event, err = agentsViewEventFromMutation(out.Event)
-	}
-	return result, err
-}
+
 func (p *agentsViewHTTPPort) Original(ctx context.Context, _ string, eventUID string) (agentsViewCloseEvent, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	client := *p.api.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client.Transport = agentsViewBoundedResponseTransport{client.Transport}
+	apiClient, err := kataclient.NewWithHTTPClient(p.api.baseURL, &client)
+	if err != nil {
+		return agentsViewCloseEvent{}, err
+	}
 	var after int64
 	for page := 0; page < 128; page++ {
-		path := fmt.Sprintf("/api/v1/projects/%d/events?issue=%s&include_effective_close_event_uid=true&limit=10&after_id=%d", p.projectID, url.QueryEscape(p.issueUID), after)
-		raw, err := p.request(ctx, http.MethodGet, path, nil, nil, 10*time.Second)
-		if err != nil {
-			return agentsViewCloseEvent{}, err
+		response, callErr := apiClient.PollProjectEventsWithResponse(ctx, &generated.PollProjectEventsRequestOptions{
+			PathParams: &generated.PollProjectEventsPath{ProjectID: p.projectID}, Query: &generated.PollProjectEventsQuery{Issue: &p.issueUID, AfterID: &after, Limit: new(int64(10)), IncludeEffectiveCloseEventUID: new(true)},
+		})
+		if response == nil || callErr != nil || response.StatusCode != http.StatusOK {
+			return agentsViewCloseEvent{}, errors.New("AgentsView: original close history unavailable")
 		}
+		raw := response.Body
 		var history api.PollEventsBody
 		if err = json.Unmarshal(raw, &history); err != nil {
 			return agentsViewCloseEvent{}, err
@@ -242,13 +231,11 @@ func (p *agentsViewHTTPPort) Original(ctx context.Context, _ string, eventUID st
 			if event.IssueUID == nil {
 				break
 			}
-			var payload struct {
-				Association agentsViewAssociation `json:"agentsview_association"`
+			association, decodeErr := decodeAgentsViewEventAssociation(event.Payload)
+			if decodeErr != nil {
+				return agentsViewCloseEvent{}, decodeErr
 			}
-			if err = json.Unmarshal(event.Payload, &payload); err != nil {
-				return agentsViewCloseEvent{}, err
-			}
-			return agentsViewCloseEvent{event.EventUID, event.Type, *event.IssueUID, event.ProjectUID, payload.Association}, nil
+			return agentsViewCloseEvent{event.EventUID, event.Type, *event.IssueUID, event.ProjectUID, association}, nil
 		}
 		if len(history.Events) == 0 || history.NextAfterID <= after {
 			break
@@ -257,6 +244,7 @@ func (p *agentsViewHTTPPort) Original(ctx context.Context, _ string, eventUID st
 	}
 	return agentsViewCloseEvent{}, errors.New("AgentsView: exact original associated close proof unavailable within history limit")
 }
+
 func (p *agentsViewHTTPPort) Share(ctx context.Context, _ string, c agentsViewConsent, event string, snapshot io.Reader) error {
 	a := c.Association
 	control := struct {
@@ -284,3 +272,60 @@ func (p *agentsViewHTTPPort) Share(ctx context.Context, _ string, c agentsViewCo
 	}
 	return p.verifier.Receipt(ctx, response, c, event)
 }
+
+// Bound generated-client responses before their normal eager JSON decoder reads
+// them. The request context owns the entire header/body budget.
+type agentsViewBoundedResponseTransport struct{ http.RoundTripper }
+
+func (t agentsViewBoundedResponseTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	transport := t.RoundTripper
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	request = request.Clone(request.Context())
+	request.Header.Set("Accept-Encoding", "identity")
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		return nil, err
+	}
+	headerBytes := 0
+	for name, values := range response.Header {
+		for _, value := range values {
+			headerBytes += len(name) + len(value) + 4
+		}
+	}
+	if headerBytes > 16<<10 || response.Header.Get("Content-Encoding") != "" || response.Uncompressed {
+		response.Body.Close()
+		return nil, errors.New("AgentsView: unsupported daemon response encoding or headers")
+	}
+	raw, err := io.ReadAll(io.LimitReader(agentsViewContextReader{request.Context(), response.Body}, agentsViewRecordLimit+1))
+	response.Body.Close()
+	if err != nil || int64(len(raw)) > agentsViewRecordLimit {
+		return nil, errors.New("AgentsView: daemon response exceeds limit or was interrupted")
+	}
+	response.Body = io.NopCloser(bytes.NewReader(raw))
+	response.ContentLength = int64(len(raw))
+	return response, nil
+}
+
+func decodeAgentsViewEventAssociation(raw []byte) (agentsViewAssociation, error) {
+	var payload struct {
+		Association jsontext.Value `json:"agentsview_association"`
+	}
+	var association agentsViewAssociation
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return association, errors.New("AgentsView: invalid original event payload")
+	}
+	if err := json.Unmarshal(payload.Association, &association, json.RejectUnknownMembers(true)); err != nil {
+		return association, errors.New("AgentsView: original event association unavailable or unsupported")
+	}
+	return association, nil
+}
+
+type agentsViewSafeFailure struct {
+	state string
+	cause error
+}
+
+func (e *agentsViewSafeFailure) Error() string { return "AgentsView: " + e.state }
+func (e *agentsViewSafeFailure) Unwrap() error { return e.cause }

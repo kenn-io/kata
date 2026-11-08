@@ -21,6 +21,7 @@ func TestAgentsViewCommandsRequireExplicitFilesAndDigest(t *testing.T) {
 		require.Error(t, root.ExecuteContext(t.Context()))
 	}
 }
+
 func TestAgentsViewNamespaceAndFlags(t *testing.T) {
 	root := newRootCmd()
 	for _, name := range []string{"prepare", "share"} {

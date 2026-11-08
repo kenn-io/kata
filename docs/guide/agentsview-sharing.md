@@ -12,9 +12,9 @@ is unavailable in this main-based slice, so these commands currently refuse
 before closing or uploading. This is not a delivered end-to-end relay feature.
 
 Integration requires [root discovery](https://github.com/kenn-io/kata/pull/1009),
-the association and upload slice, [binary relay transport](https://github.com/kenn-io/kata/pull/983),
+[the association and upload slice](https://github.com/kenn-io/kata/pull/1011), [binary relay transport](https://github.com/kenn-io/kata/pull/983),
 [direct-close compatibility](https://github.com/kenn-io/kata/pull/982), and the
-export companion using [AgentsView's session-push codec](https://github.com/kenn-io/agentsview/pull/2811).
+[export companion](https://github.com/kenn-io/agentsview/pull/2847) using [AgentsView's session-push codec](https://github.com/kenn-io/agentsview/pull/2811).
 Those prerequisites are independently owned and remain unmerged dependencies.
 The [design note](https://github.com/kenn-io/kata/issues/1007) describes the full outcome.
 
@@ -52,6 +52,9 @@ URL is not upload acceptance. Root-confirmed acceptance is not indexing proof.
 ## Retain the exact files
 
 Keep both private files until sharing and any explicit retries are finished.
+Kata creates private files from the outset: mode 0600 on Unix and a protected
+user DACL on Windows. Draft consent files lacking `root_key_id` are refused;
+prepare a fresh consent before closing.
 Every close or share attempt requires an explicit snapshot path and fresh digest
 confirmation. Paths resolve from the invoking directory, not from the consent
 file. The portable close association contains identity and digest information,
@@ -59,7 +62,8 @@ never paths, receiver tokens or transcript bytes.
 
 Kata freezes the opened file into one bounded private spool per attempt and
 uses those bytes through close and upload. Cleanup removes the spool while
-retaining the user's files. Missing or replaced bytes refuse; retries never
+retaining the user's files. Abrupt process termination can leave a private
+temporary spool for manual cleanup; graceful exits remove it. Missing or replaced bytes refuse; retries never
 scan or re-export an archive. Do not reopen and close again to replace consent.
 
 ## Recover after an uncertain response

@@ -19,9 +19,11 @@ func newAgentsViewCmd() *cobra.Command {
 	// constructors when that branch lands; never duplicate its implementation.
 	return cmd
 }
+
 func newAgentsViewPrepareCmd() *cobra.Command {
 	var snapshot, output string
-	cmd := &cobra.Command{Use: "prepare <issue-ref>", Short: "bind a retained snapshot to a live project service without uploading", Args: cobra.ExactArgs(1),
+	cmd := &cobra.Command{
+		Use: "prepare <issue-ref>", Short: "bind a retained snapshot to a live project service without uploading", Args: cobra.ExactArgs(1),
 		Long: "Prepare inert local consent for an archived snapshot through its captured point. Later running-session messages may be absent. Review the exact file before confirming its digest. The receiver's first accepted snapshot is immutable, including across later closes in the same session.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if snapshot == "" || output == "" {
@@ -47,14 +49,17 @@ func newAgentsViewPrepareCmd() *cobra.Command {
 				return err
 			}
 			return printAgentsViewStatus(cmd, "prepared", consent, "")
-		}}
+		},
+	}
 	cmd.Flags().StringVar(&snapshot, "snapshot", "", "explicit exported snapshot path, relative to the invoking directory")
 	cmd.Flags().StringVar(&output, "output", "", "new private local consent file")
 	return cmd
 }
+
 func newAgentsViewShareCmd() *cobra.Command {
 	var snapshot, event, digest, issue string
-	cmd := &cobra.Command{Use: "share <consent>", Short: "explicitly retry the same frozen snapshot for its original close", Args: cobra.ExactArgs(1),
+	cmd := &cobra.Command{
+		Use: "share <consent>", Short: "explicitly retry the same frozen snapshot for its original close", Args: cobra.ExactArgs(1),
 		Long: "Retry only the retained reviewed bytes and original associated close. This never closes again, scans an archive, re-exports, changes destination, or queues a retry. An ordinary close without a snapshot association cannot acquire one later.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if snapshot == "" || event == "" || digest == "" || issue == "" {
@@ -72,15 +77,17 @@ func newAgentsViewShareCmd() *cobra.Command {
 				return err
 			}
 			return printAgentsViewStatus(cmd, "accepted", consent, event)
-		}}
+		},
+	}
 	cmd.Flags().StringVar(&issue, "issue", "", "original issue reference, resolved through the selected daemon")
 	cmd.Flags().StringVar(&snapshot, "snapshot", "", "explicit retained snapshot path, relative to the invoking directory")
 	cmd.Flags().StringVar(&event, "close-event", "", "exact original associated close event UID")
 	cmd.Flags().StringVar(&digest, "confirm-transcript-sha256", "", "SHA-256 of the reviewed frozen bytes; required on every attempt")
 	return cmd
 }
+
 func readAgentsViewConsent(ctx context.Context, path string) (agentsViewConsent, error) {
-	file, err := os.Open(path) //nolint:gosec // explicit retained consent path
+	file, err := openAgentsViewSelectedFile(ctx, path)
 	if err != nil {
 		return agentsViewConsent{}, errors.New("AgentsView: cannot open retained consent")
 	}
@@ -95,6 +102,7 @@ func readAgentsViewConsent(ctx context.Context, path string) (agentsViewConsent,
 	}
 	return decodeAgentsViewConsent(raw)
 }
+
 func captureAgentsViewNative(ctx context.Context) (agentsViewNativeIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return agentsViewNativeIdentity{}, err
@@ -115,7 +123,7 @@ func captureAgentsViewNative(ctx context.Context) (agentsViewNativeIdentity, err
 			}
 			next := agentsViewNativeIdentity{agent, value}
 			if native.Agent != "" && native != next {
-				return errors.New("AgentsView: ambiguous current native session; supply the explicit agent and session override")
+				return errors.New("AgentsView: ambiguous current native session; set KATA_TRANSCRIPT_AGENT and KATA_TRANSCRIPT_SESSION_ID explicitly")
 			}
 			native = next
 			return nil
@@ -134,6 +142,7 @@ func captureAgentsViewNative(ctx context.Context) (agentsViewNativeIdentity, err
 	_, err = native.canonical()
 	return native, err
 }
+
 func printAgentsViewStatus(cmd *cobra.Command, state string, c agentsViewConsent, event string) error {
 	summary := struct {
 		State        string `json:"state"`
@@ -159,6 +168,7 @@ func (f *agentsViewCloseFlags) register(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.snapshot, "snapshot", "", "explicit retained snapshot path; never resolved relative to consent")
 	cmd.Flags().StringVar(&f.digest, "confirm-transcript-sha256", "", "confirm reviewed frozen snapshot SHA-256 for this attempt")
 }
+
 func (f agentsViewCloseFlags) selected(cmd *cobra.Command) (bool, error) {
 	selected := cmd.Flags().Changed("share-transcript") || cmd.Flags().Changed("snapshot") || cmd.Flags().Changed("confirm-transcript-sha256")
 	if selected && (f.consent == "" || f.snapshot == "" || !validAgentsViewDigest(f.digest)) {
@@ -172,6 +182,7 @@ func (f agentsViewCloseFlags) selected(cmd *cobra.Command) (bool, error) {
 	}
 	return selected, nil
 }
+
 func (f agentsViewCloseFlags) run(ctx context.Context, cmd *cobra.Command, ref string, body map[string]any, headers map[string]string, dry bool) error {
 	comment, _, err := prepareFollowupComment(cmd)
 	if err != nil {

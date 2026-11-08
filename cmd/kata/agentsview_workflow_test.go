@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/transcript"
 )
 
 type agentsViewFixturePort struct {
@@ -18,20 +20,26 @@ type agentsViewFixturePort struct {
 	result         agentsViewCloseResult
 	original       agentsViewCloseEvent
 	closes, shares int
+	closeBody      map[string]any
 	uploaded       []byte
 	failShare      error
+	failClose      error
 }
 
 func (p *agentsViewFixturePort) Select(context.Context, string) (agentsViewSelection, error) {
 	return p.selected, nil
 }
-func (p *agentsViewFixturePort) Close(_ context.Context, _ string, _ map[string]any, _ map[string]string) (agentsViewCloseResult, error) {
+
+func (p *agentsViewFixturePort) Close(_ context.Context, _ string, body map[string]any, _ map[string]string) (agentsViewCloseResult, error) {
+	p.closeBody = body
 	p.closes++
-	return p.result, nil
+	return p.result, p.failClose
 }
+
 func (p *agentsViewFixturePort) Original(context.Context, string, string) (agentsViewCloseEvent, error) {
 	return p.original, nil
 }
+
 func (p *agentsViewFixturePort) Share(_ context.Context, _ string, _ agentsViewConsent, _ string, r io.Reader) error {
 	p.shares++
 	p.uploaded, _ = io.ReadAll(r)
@@ -42,7 +50,7 @@ func agentsViewWorkflowFixture(t *testing.T) (*agentsViewWorkflow, *agentsViewFi
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "snapshot.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"v":1,"session_id":"pi:selected","manifest":{"v":1,"native_session_id":"pi:selected","session":{"id":"pi:selected","agent":"pi"}},"segments":[]}`), 0600))
+	require.NoError(t, os.WriteFile(path, []byte(`{"v":1,"session_id":"pi:selected","manifest":{"v":1,"native_session_id":"pi:selected","session":{"id":"pi:selected","agent":"pi"}},"segments":[]}`), 0o600))
 	port := &agentsViewFixturePort{selected: agentsViewSelection{
 		InstanceUID: "daemon-a", IssueUID: "issue-a", ProjectUID: "project-a", AuthorityUID: "root-a", ServiceID: strings.Repeat("a", 64), RootKeyID: strings.Repeat("c", 64), LocatorBase: "https://archive.example",
 		Route:     []agentsViewRoute{{InstanceUID: "daemon-a", ProjectUID: "project-a", BindingUID: "binding-a", UpstreamInstanceUID: "root-a", ResetEpoch: 1}},
@@ -109,7 +117,7 @@ func TestAgentsViewConsentRejectsRetargetAndChangedBytesBeforeMutation(t *testin
 			case "digest":
 				digest = strings.Repeat("b", 64)
 			case "file":
-				require.NoError(t, os.WriteFile(path, []byte("changed"), 0600))
+				require.NoError(t, os.WriteFile(path, []byte("changed"), 0o600))
 			case "instance":
 				port.selected.InstanceUID = "other-daemon"
 			case "issue":
@@ -143,4 +151,32 @@ func TestAgentsViewPrepareCapturesExactIdentityAndNoUpload(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), path)
 	require.NotContains(t, string(raw), "selected transcript content")
+}
+
+func TestAgentsViewCloseCarriesExplicitProtocolAndNativeProvenance(t *testing.T) {
+	workflow, port, consent, path := agentsViewWorkflowFixture(t)
+	_, err := workflow.Close(t.Context(), "example#abcd", consent, path, consent.Association.SnapshotSHA256, agentsViewNativeIdentity{"pi", "selected"}, true, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "relay-v1", port.closeBody["agentsview_protocol"])
+	require.Equal(t, &transcript.Transcript{Agent: "pi", SessionID: "selected"}, port.closeBody["transcript"])
+	require.Zero(t, port.shares)
+}
+
+func TestAgentsViewClosePreservesFailureCauseAndNeverUploads(t *testing.T) {
+	workflow, port, consent, path := agentsViewWorkflowFixture(t)
+	port.failClose = context.Canceled
+	_, err := workflow.Close(t.Context(), "example#abcd", consent, path, consent.Association.SnapshotSHA256, agentsViewNativeIdentity{"pi", "selected"}, false, nil, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, port.shares)
+}
+
+func TestAgentsViewConsentRouteNormalizesRootZeroEpoch(t *testing.T) {
+	_, _, consent, _ := agentsViewWorkflowFixture(t)
+	consent.Association.Route = []agentsViewRoute{{InstanceUID: "root-a", ProjectUID: "project-a"}}
+	raw, err := json.Marshal(consent)
+	require.NoError(t, err)
+	explicit := bytes.Replace(raw, []byte(`"project_uid":"project-a"}]`), []byte(`"project_uid":"project-a","reset_epoch":0}]`), 1)
+	decoded, err := decodeAgentsViewConsent(explicit)
+	require.NoError(t, err)
+	require.Equal(t, consent, decoded)
 }

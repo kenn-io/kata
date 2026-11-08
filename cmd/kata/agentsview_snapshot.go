@@ -9,10 +9,14 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"go.kenn.io/kit/safefileio"
 )
 
-const agentsViewSnapshotLimit int64 = 64 << 20
-const agentsViewRecordLimit int64 = 16 << 10
+const (
+	agentsViewSnapshotLimit int64 = 64 << 20
+	agentsViewRecordLimit   int64 = 16 << 10
+)
 
 // A frozen snapshot owns a private transport spool, never the retained source.
 // No pathname is reopened after validation or exposed in portable records.
@@ -60,7 +64,7 @@ func captureAgentsViewSnapshot(ctx context.Context, path string) (_ *agentsViewF
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	source, err := os.Open(path) //nolint:gosec // explicit user-selected snapshot
+	source, err := openAgentsViewSelectedFile(ctx, path)
 	if err != nil {
 		return nil, errors.New("AgentsView: cannot open selected snapshot; retain the original file")
 	}
@@ -69,7 +73,7 @@ func captureAgentsViewSnapshot(ctx context.Context, path string) (_ *agentsViewF
 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > agentsViewSnapshotLimit {
 		return nil, errors.New("AgentsView: snapshot must be a nonempty regular file of at most 64 MiB")
 	}
-	file, err := os.CreateTemp("", "kata-agentsview-*")
+	file, err := safefileio.CreatePrivateTemp("", "kata-agentsview-*")
 	if err != nil {
 		return nil, errors.New("AgentsView: cannot create private snapshot spool")
 	}
@@ -79,9 +83,6 @@ func captureAgentsViewSnapshot(ctx context.Context, path string) (_ *agentsViewF
 			_ = snapshot.Close()
 		}
 	}()
-	if err = file.Chmod(0600); err != nil {
-		return nil, err
-	}
 	hash := sha256.New()
 	snapshot.size, err = io.Copy(io.MultiWriter(file, hash), io.LimitReader(agentsViewContextReader{ctx, source}, agentsViewSnapshotLimit+1))
 	if err != nil {
@@ -119,7 +120,7 @@ func writeAgentsViewConsent(ctx context.Context, path string, data []byte) (err 
 	if path == "" || len(data) == 0 || int64(len(data)) > agentsViewRecordLimit {
 		return errors.New("AgentsView: invalid consent output")
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) //nolint:gosec // explicit user-selected exclusive output
+	file, err := safefileio.CreatePrivateFile(path)
 	if err != nil {
 		return errors.New("AgentsView: consent output must be a new private file")
 	}
@@ -132,9 +133,6 @@ func writeAgentsViewConsent(ctx context.Context, path string, data []byte) (err 
 			_ = os.Remove(path)
 		}
 	}()
-	if err = file.Chmod(0600); err != nil {
-		return err
-	}
 	if _, err = io.Copy(file, agentsViewContextReader{ctx, strings.NewReader(string(data))}); err != nil {
 		return err
 	}

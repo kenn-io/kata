@@ -47,11 +47,13 @@ func TestAgentsViewHTTPRefusesRedirectCompressionAndOversize(t *testing.T) {
 		})
 	}
 }
+
 func TestAgentsViewDefaultAdapterCannotPretendSuccess(t *testing.T) {
 	workflow, err := newLiveAgentsViewWorkflow(t.Context())
 	require.ErrorContains(t, err, "integration is unavailable")
 	require.Nil(t, workflow)
 }
+
 func TestAgentsViewHistoryUsesExactEffectiveCloseAndAssociation(t *testing.T) {
 	_, _, consent, _ := agentsViewWorkflowFixture(t)
 	history := struct {
@@ -76,3 +78,24 @@ func TestAgentsViewHistoryUsesExactEffectiveCloseAndAssociation(t *testing.T) {
 
 // Keep compile-time interface coverage independent from the runtime integration.
 var _ agentsViewWorkflowPort = (*agentsViewHTTPPort)(nil)
+
+func TestAgentsViewHTTPMissingGeneratedAssociationCannotClose(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(500) }))
+	defer server.Close()
+	port := &agentsViewHTTPPort{api: daemonAPI{client: server.Client(), baseURL: server.URL}, projectID: 2, issueUID: "issue-a"}
+	_, err := port.Close(t.Context(), "example#abcd", map[string]any{"agentsview_protocol": "relay-v1"}, nil)
+	require.ErrorContains(t, err, "integration is unavailable")
+	require.Zero(t, calls)
+}
+
+func TestAgentsViewOriginalAssociationRejectsAddedFields(t *testing.T) {
+	_, _, consent, _ := agentsViewWorkflowFixture(t)
+	raw, err := json.Marshal(consent.Association)
+	require.NoError(t, err)
+	raw = append(raw[:len(raw)-1], []byte(`,"unknown_authority":"other"}`)...)
+	payload := append([]byte(`{"agentsview_association":`), raw...)
+	payload = append(payload, '}')
+	_, err = decodeAgentsViewEventAssociation(payload)
+	require.Error(t, err)
+}

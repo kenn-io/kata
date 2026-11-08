@@ -109,12 +109,14 @@ func (w agentsViewWorkflow) Prepare(ctx context.Context, ref, path string, nativ
 		Route: append([]agentsViewRoute(nil), selected.Route...),
 	}}, nil
 }
+
 func (s agentsViewSelection) valid() error {
 	if s.InstanceUID == "" || s.IssueUID == "" || s.ProjectUID == "" || s.AuthorityUID == "" || !validAgentsViewDigest(s.ServiceID) || !validAgentsViewDigest(s.RootKeyID) || s.LocatorBase == "" || len(s.Route) == 0 || len(s.Route) > 9 || len(s.Discovery) == 0 || int64(len(s.Discovery)) > agentsViewRecordLimit || s.ExpiresAt <= time.Now().Unix() {
 		return errors.New("AgentsView: current pinned service discovery unavailable or expired")
 	}
 	return nil
 }
+
 func (c agentsViewConsent) valid() error {
 	a := c.Association
 	canonical, err := (agentsViewNativeIdentity{a.Agent, a.NativeSessionID}).canonical()
@@ -123,13 +125,16 @@ func (c agentsViewConsent) valid() error {
 	}
 	return nil
 }
+
 func (c agentsViewConsent) matches(s agentsViewSelection) bool {
 	a := c.Association
 	return c.InstanceUID == s.InstanceUID && a.IssueUID == s.IssueUID && a.ProjectUID == s.ProjectUID && a.AuthorityUID == s.AuthorityUID && a.ServiceID == s.ServiceID && a.RootKeyID == s.RootKeyID && a.LocatorBase == s.LocatorBase && reflect.DeepEqual(a.Route, s.Route)
 }
+
 func (c agentsViewConsent) matchesEvent(event agentsViewCloseEvent, uid string) bool {
 	return uid != "" && event.UID == uid && event.Type == "issue.closed" && event.IssueUID == c.Association.IssueUID && event.ProjectUID == c.Association.ProjectUID && reflect.DeepEqual(event.Association, c.Association)
 }
+
 func (w agentsViewWorkflow) preflight(ctx context.Context, ref string, c agentsViewConsent, path, digest string) (*agentsViewFrozenSnapshot, agentsViewSelection, error) {
 	if err := c.valid(); err != nil {
 		return nil, agentsViewSelection{}, err
@@ -171,12 +176,14 @@ func (w agentsViewWorkflow) Close(ctx context.Context, ref string, c agentsViewC
 	for key, value := range body {
 		request[key] = value
 	}
+	request["agentsview_protocol"] = "relay-v1"
+	request["transcript"] = &transcript.Transcript{Agent: native.Agent, SessionID: native.NativeSessionID}
 	request["agentsview_association"] = c.Association
 	request["agentsview_discovery"] = selected.Discovery
 	request["dry_run"] = dry
 	result, err := w.port.Close(ctx, ref, request, headers)
 	if err != nil {
-		return result, errors.New("AgentsView: close response unconfirmed; no upload attempted. Retain files and recover the exact original event before explicit share")
+		return result, fmt.Errorf("AgentsView: close was refused or its response is unconfirmed; no upload attempted. Retain files and check the exact original event before explicit share: %w", err)
 	}
 	if dry || !result.Changed || result.Reused {
 		return result, nil
@@ -201,6 +208,7 @@ func (w agentsViewWorkflow) Close(ctx context.Context, ref string, c agentsViewC
 	}
 	return result, nil
 }
+
 func (w agentsViewWorkflow) Share(ctx context.Context, ref string, c agentsViewConsent, path, eventUID, digest string) error {
 	if eventUID == "" {
 		return errors.New("AgentsView: --close-event must name the original associated close")
@@ -229,7 +237,7 @@ func inspectAgentsViewSnapshot(ctx context.Context, snapshot *agentsViewFrozenSn
 	if _, err := snapshot.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	decoder := jsontext.NewDecoder(agentsViewContextReader{ctx, snapshot})
+	decoder := jsontext.NewDecoder(agentsViewContextReader{ctx, snapshot}, jsontext.AllowDuplicateNames(false))
 	values := map[string]string{}
 	var walk func(string) error
 	walk = func(path string) error {
