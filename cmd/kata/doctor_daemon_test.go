@@ -190,17 +190,20 @@ func TestDoctorReportsUnresolvableDocbankKey(t *testing.T) {
 
 func TestDoctorDocbankCheckFollowsHealth(t *testing.T) {
 	for _, tc := range []struct {
-		name, health, status string
+		name, health, status, summary string
 	}{
-		{"key resolves", `{"ok":true,"schema_version":28,"db_path":"/data/kata.db","docbank":{"credential":"ok"}}`, "ok"},
-		{"not configured", `{"ok":true,"schema_version":28,"db_path":"/data/kata.db"}`, "info"},
-		{"health without diagnostics", `{"ok":true,"schema_version":28}`, "info"},
+		{"key resolves", `{"ok":true,"schema_version":28,"api_schema_version":"0.44.0","db_path":"/data/kata.db","docbank":{"credential":"ok"}}`, "ok", "resolves its Docbank API key"},
+		{"not configured", `{"ok":true,"schema_version":28,"api_schema_version":"0.44.0","db_path":"/data/kata.db"}`, "info", "does not have Docbank attachments configured"},
+		{"daemon predates key health", `{"ok":true,"schema_version":28,"api_schema_version":"0.43.0","db_path":"/data/kata.db"}`, "info", "daemon API 0.44.0"},
+		{"health without diagnostics", `{"ok":true,"schema_version":28,"api_schema_version":"0.44.0"}`, "info", "did not provide Docbank health details"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, workspace := doctorTestEnv(t)
 			flags = globalFlags{Workspace: workspace, Project: "example-project"}
 			ctx := doctorServerContext(t, map[string]string{"/api/v1/health": tc.health}, nil)
-			require.EqualValues(t, tc.status, doctorFinding(t, collectDoctor(ctx), "daemon.docbank").Status)
+			finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+			require.EqualValues(t, tc.status, finding.Status)
+			require.Contains(t, finding.Summary, tc.summary)
 		})
 	}
 }

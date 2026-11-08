@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-05
+last_edited: 2026-11-08
 ---
 
 # HTTP API schema
@@ -251,6 +251,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
 | `0.41.0` | Adds `sort=priority` to both ready routes. `kata next` and MCP `kata.next` request one priority-ordered row; older daemons retain the full-queue fetch and client-side selection. |
 | `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |
 | `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |
@@ -300,8 +301,8 @@ request schema and are rejected for strict request objects.
 ## Health diagnostics
 
 `GET /api/v1/health` without credentials provides liveness and version fields.
-`db_path`, `embeddings`, `federation_config`, and `root_signing` are optional
-diagnostics:
+`db_path`, `embeddings`, `docbank`, `federation_config`, and `root_signing` are
+optional diagnostics:
 daemon-owner credentials and genuine owner-local transport receive them
 when configured. Public remote probes and scoped credentials do not. An
 explicit scoped bearer remains scoped over loopback; an invalid bearer returns
@@ -317,6 +318,15 @@ hub project it roots:
 | `key_loaded` | Whether the daemon holds a usable signing key. |
 | `key_problem` | Why no key is loaded, such as `key file is missing`. |
 | `projects` | Hub projects whose pin the loaded key cannot satisfy. Signed writes to them return `409 root_signing_key_unavailable`. |
+
+`docbank` appears when `[docbank]` is configured. The daemon resolves its key
+source for each health request without contacting Docbank:
+
+| Field | Meaning |
+| --- | --- |
+| `credential` | `ok` when the key resolves, otherwise `missing`. |
+| `credential_source` | The source that failed, `file:<path>` or `env:<NAME>`; absent when `ok`. |
+| `credential_reason` | Why that source cannot supply a key; absent when `ok`. |
 
 `GET /api/v1/federation/status` adds `root_signing_key` (`available` or
 `unavailable`) to each hub project this daemon roots, and
@@ -942,7 +952,7 @@ federated event log.
 uploads the raw request body as `application/octet-stream` to Docbank and
 returns the new `attachment_id` with its stored reference. `GET
 /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
-streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. All three routes return `docbank_not_configured` when the daemon has no Docbank. See [Issue attachments](../guide/attachments.md).
+streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. All three routes return `docbank_not_configured` when the daemon has no Docbank, and `503 docbank_key_unavailable` without contacting Docbank when the daemon cannot resolve its Docbank key; the message gives the reason, and the health `docbank` block names the source. See [Issue attachments](../guide/attachments.md).
 
 ## Project Hygiene Endpoints
 

@@ -573,9 +573,9 @@ database path still apply.
 Daemon bearer credentials use `[auth].token` > `[auth].token_file` >
 `[auth].token_env` (the name of a variable containing the token). A nonempty
 `KATA_AUTH_TOKEN` overrides the inline token. Token files follow the
-[embedding credential file restrictions](#semantic-search): absolute or `~/`
-paths, regular files owned by the daemon user, no Unix group/world permissions
-or Windows access for other users, and at most 64 KiB. Whitespace and a
+[key file rules](#credentials-and-batching): absolute or `~/` paths, regular
+files owned by the daemon user, no Unix group/world permissions, no inherited
+Windows permissions or access for other users, and at most 64 KiB. Whitespace and a
 trailing newline are trimmed. An unusable
 selected file or named environment variable fails loudly without falling back.
 For example, mount a `0600` secret file owned by the daemon user and set
@@ -1117,10 +1117,11 @@ owned by the daemon's effective user. On Unix, group/world permissions are
 rejected (`chmod 600`). On Windows, the file must not inherit permissions from
 its folder, and it may grant access only to the current user, SYSTEM, and
 Administrators. A file created in a user profile inherits its folder's
-permissions and is rejected even when they list only those accounts; run
-`icacls <file> /inheritance:r /grant:r "%USERNAME%:R"` as the daemon user to
-fix it. Files larger than 64 KiB are refused, and reads are bounded to enforce
-that limit. File contents are trimmed, including a trailing newline.
+permissions and is rejected even when they list only those accounts. To fix
+it, run this in PowerShell as the daemon user:
+`icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R"`. Files larger than
+64 KiB are refused, and reads are bounded to enforce that limit.
+File contents are trimmed, including a trailing newline.
 
 Kata resolves the selected credential once at startup and once per
 `kata daemon reload`. Reload wakes the embedding backlog; changes to provider

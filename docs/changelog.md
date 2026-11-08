@@ -10,15 +10,18 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - See why Docbank attachments fail when the daemon cannot read its own key.
-  Uploads and reads now return HTTP 503 `docbank_key_unavailable` with the
-  reason, such as `group/world-readable; use chmod 600`, instead of
-  `docbank_unauthorized`, which suggested Docbank had refused a correct key.
-  `kata doctor` adds a `daemon.docbank` check, and `/api/v1/health` adds a
-  `docbank` block naming the failing key source. On Windows, the reason now
-  says to turn off inheritance, and the
+  With daemon API 0.44.0 or newer, uploads, reads, and links return HTTP 503
+  `docbank_key_unavailable` with the reason, such as
+  `group/world-readable; use chmod 600`, instead of `docbank_unauthorized`,
+  which suggested Docbank had refused a correct key. The message never names
+  the key file or variable. For daemon-owner and owner-local callers,
+  `/api/v1/health` adds a `docbank` block naming the failing source, and
+  `kata doctor` adds a `daemon.docbank` check that reads it. On Windows, the
+  reason now says to turn off inheritance, and the
   [key file rules](reference/configuration.md#credentials-and-batching) show
-  the `icacls` fix. An unset `api_key_env`, `token_env`, or other selected
-  environment variable now reports
+  the `icacls` fix. An unset `api_key_env` for `[docbank]` or
+  `[search.embeddings]`, `token_env` for `[auth]` or `[mcp]`, or
+  `--hub-token-env` variable now reports
   `env:<NAME>: environment variable is unset or empty`.
 - Keep federation polls fast on busy hubs by skipping other projects' event history.
 - Attach oh-my-pi sessions to closes by copying the documented

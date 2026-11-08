@@ -146,8 +146,9 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 	assert.True(t, body.Embeddings.LastSuccessAt.Equal(last))
 }
 
-func TestHealth_DoesNotExposeEmbeddingProviderDiagnostics(t *testing.T) {
+func TestHealth_DoesNotExposeProviderDiagnosticsToPublicProbes(t *testing.T) {
 	d := openTestDB(t)
+	keyFile := filepath.Join(t.TempDir(), "missing", "docbank.key")
 	ts := startTestServer(t, daemon.ServerConfig{
 		DB:        d.db,
 		StartedAt: d.now,
@@ -159,16 +160,19 @@ func TestHealth_DoesNotExposeEmbeddingProviderDiagnostics(t *testing.T) {
 				Backlog:         1,
 			}
 		},
+		Docbank: docbank.NewClient("http://127.0.0.1:9", config.DocbankConfig{APIKeyFile: keyFile}.ResolveKey),
 	})
 
 	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/health", nil,
 		map[string]string{"Forwarded": "for=198.51.100.1"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
 	assert.NotContains(t, string(bs), "reflected issue title")
+	assert.NotContains(t, string(bs), "docbank.key", "the Docbank key path is a daemon-host diagnostic")
 
 	var body map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(bs, &body))
 	assert.NotContains(t, body, "embeddings")
+	assert.NotContains(t, body, "docbank")
 }
 
 func TestHealth_KeylessDaemonRejectsExplicitInvalidAuthorizationBeforeDiagnostics(t *testing.T) {

@@ -220,6 +220,13 @@ func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon did not provide Docbank health details; its attachment key state is unknown"}
 	}
 	if h == nil {
+		reported := ""
+		if health.APISchemaVersion != nil {
+			reported = *health.APISchemaVersion
+		}
+		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankKeyHealth); !current {
+			return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon predates Docbank key health (daemon API " + apiVersionDocbankKeyHealth + "); upgrade it to check its Docbank key"}
+		}
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon does not have Docbank attachments configured"}
 	}
 	if h.Credential == "ok" {
@@ -236,7 +243,7 @@ func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
 		Status:  diagnostics.StatusWarn,
 		Summary: "Daemon cannot resolve its Docbank API key; attachments fail without contacting Docbank",
 		Details: details,
-		Fix:     `Fix the [docbank] key source on the daemon host. A key file must be private to the daemon user: chmod 600 on Unix; on Windows, icacls <file> /inheritance:r /grant:r "%USERNAME%:R". An api_key_env variable must be set in the daemon's environment.`,
+		Fix:     `Fix the [docbank] key source on the daemon host. A key file must be private to the daemon user: chmod 600 on Unix; on Windows, in PowerShell, icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R". An api_key_env variable must be set in the daemon's environment.`,
 	}
 }
 
