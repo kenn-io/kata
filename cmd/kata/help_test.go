@@ -77,14 +77,20 @@ func TestHelpTopLevelCommandsHaveGroups(t *testing.T) {
 	}
 }
 
-func TestTranscriptCommandRemainsAgentsViewAlias(t *testing.T) {
+func TestAgentsViewCommandHasNoTranscriptAlias(t *testing.T) {
 	root := newRootCmd()
-	cmd, _, err := root.Find([]string{"transcript", "target"})
+	cmd, _, err := root.Find([]string{"agentsview", "target"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cmd.Name() != "target" || cmd.Parent().Name() != "agentsview" {
-		t.Fatalf("legacy transcript path resolved to %s", cmd.CommandPath())
+		t.Fatalf("agentsview target resolved to %s", cmd.CommandPath())
+	}
+	for _, args := range [][]string{{"transcript"}, {"transcript", "target", "abc4"}} {
+		_, _, err := executeRootCapture(t, t.Context(), args...)
+		if err == nil || !strings.Contains(err.Error(), `unknown command "transcript"`) {
+			t.Errorf("kata %s: got error %v, want unknown transcript command", strings.Join(args, " "), err)
+		}
 	}
 }
 

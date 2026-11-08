@@ -22,7 +22,7 @@ import (
 
 func newAgentsViewCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "agentsview", Aliases: []string{"transcript"},
+		Use:   "agentsview",
 		Short: "inspect an AgentsView target through Kata's relay route",
 	}
 	cmd.AddCommand(&cobra.Command{
