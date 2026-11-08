@@ -39,7 +39,7 @@ func TestCronPushEnrollmentLifecycle(t *testing.T) {
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID)
 	var current db.CronJob
 	var anchor string
-	for _, operation := range []string{"create", "replace", "archive", "restore"} {
+	for _, operation := range []string{"create", "replace", "pause", "resume", "archive", "restore"} {
 		method, target := http.MethodPost, path
 		body := map[string]any{"actor": "tester", "name": "Review service", "definition": definition}
 		if operation != "create" {
@@ -51,12 +51,14 @@ func TestCronPushEnrollmentLifecycle(t *testing.T) {
 			method = http.MethodPut
 			body["actor"] = ""
 			body["name"] = "Updated review"
+		case "pause", "resume":
+			target += "/" + operation
 		case "archive":
 			method = http.MethodDelete
 		case "restore":
 			target += "/restore"
 		}
-		if operation == "archive" || operation == "restore" {
+		if operation == "archive" || operation == "restore" || operation == "pause" || operation == "resume" {
 			delete(body, "name")
 			delete(body, "definition")
 		}
@@ -355,25 +357,71 @@ func TestCronEnrollmentWriteRootReceipts(t *testing.T) {
 			path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID)
 			response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "name": "Review service", "definition": definition}, headers)
 			require.Equalf(t, http.StatusCreated, response.StatusCode, "%s", raw)
+			var created struct {
+				Job db.CronJob `json:"job"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &created))
+			for _, action := range []string{"pause", "resume"} {
+				response, raw = envDoRaw(t, env, http.MethodPost, path+"/"+created.Job.UID+"/"+action, map[string]any{"actor": "tester"}, headers)
+				require.Equalf(t, 200, response.StatusCode, "%s", raw)
+			}
 			pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: env.DB.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}
 			receipts, err := env.DB.AttributionReceiptsAfter(t.Context(), project.UID, 1, 0, 100)
 			require.NoError(t, err)
 			require.NotEmpty(t, receipts, "cron write committed without a root receipt")
-			events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Types: []string{"cron.job.created"}, Limit: 10})
+			events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Types: []string{"cron.job.created", "cron.job.updated"}, Limit: 10})
 			require.NoError(t, err)
 			require.NotEmpty(t, events)
-			eventUID := events[0].UID
-			matched := false
-			for _, receipt := range receipts {
-				if receipt.EventUID != eventUID {
-					continue
+			require.Len(t, events, 3)
+			for _, event := range events {
+				eventUID := event.UID
+				matched := false
+				for _, receipt := range receipts {
+					if receipt.EventUID != eventUID {
+						continue
+					}
+					matched = true
+					require.NoError(t, db.VerifyRootReceipt(pin, receipt))
+					require.Equal(t, "tester", receipt.AccountableActor)
+					require.Equal(t, "tester", receipt.SourceActor)
 				}
-				matched = true
-				require.NoError(t, db.VerifyRootReceipt(pin, receipt))
-				require.Equal(t, "tester", receipt.AccountableActor)
-				require.Equal(t, "tester", receipt.SourceActor)
+				require.True(t, matched, "no receipt for the cron definition event")
 			}
-			require.True(t, matched, "no receipt for the cron definition event")
 		})
+	}
+}
+
+func TestCronEnabledEnrollmentBoundaries(t *testing.T) {
+	for _, action := range []string{"pause", "resume"} {
+		for _, kind := range []string{"pull-only", "actor-mismatch", "adapter", "revoked"} {
+			t.Run(action+"/"+kind, func(t *testing.T) {
+				env, project, _, definition := nativeCronEnrollmentFixture(t, testenv.WithAuthToken("owner-token"))
+				if kind == "adapter" {
+					definition = cronHTTPDefinition(t)
+				}
+				definition.Enabled = action == "pause"
+				job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "tester", Definition: definition})
+				require.NoError(t, err)
+				caps := "push"
+				if kind == "pull-only" {
+					caps = "pull"
+				}
+				enrollment := createClaimEnrollment(t, env, project.ID, cronHTTPUID(t), caps)
+				if kind == "revoked" {
+					require.NoError(t, env.DB.RevokeFederationEnrollment(t.Context(), enrollment.Enrollment.ID))
+				}
+				actor := "tester"
+				if kind == "actor-mismatch" {
+					actor = "another-operator"
+				}
+				before, err := env.DB.MaxEventID(t.Context())
+				require.NoError(t, err)
+				response, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/%s", project.ID, job.UID, action), map[string]any{"actor": actor}, map[string]string{"Authorization": "Bearer " + enrollment.Token})
+				require.Equalf(t, 403, response.StatusCode, "%s", raw)
+				after, err := env.DB.MaxEventID(t.Context())
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+			})
+		}
 	}
 }

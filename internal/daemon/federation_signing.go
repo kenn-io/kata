@@ -18,6 +18,8 @@ import (
 // These operation IDs are the explicit restricted-ingress allowlist. Paths
 // come from native registration so ingress cannot drift from actual routes.
 var signingCapabilities = map[string][]string{
+	"pauseCronJob":                  {"push"},
+	"resumeCronJob":                 {"push"},
 	"createCronJob":                 {"push"},
 	"replaceCronJob":                {"push"},
 	"archiveCronJob":                {"push"},
@@ -39,7 +41,7 @@ var signingCapabilities = map[string][]string{
 
 func isCronJobWriteOperation(operation string) bool {
 	switch operation {
-	case "createCronJob", "replaceCronJob", "archiveCronJob", "restoreCronJob":
+	case "createCronJob", "replaceCronJob", "archiveCronJob", "restoreCronJob", "pauseCronJob", "resumeCronJob":
 		return true
 	default:
 		return false

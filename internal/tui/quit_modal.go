@@ -21,6 +21,8 @@ const (
 	modalDiscardNewIssue
 	modalDiscardCronJob
 	modalReopenBacklog
+	modalCronResume
+	modalCronRequest
 )
 
 // renderQuitConfirmModal returns the centered "Are you sure?" panel.
@@ -207,4 +209,14 @@ func ansiEscapeLen(s string) int {
 		}
 	}
 	return 2
+}
+
+func (m Model) renderActiveConfirmModal() string {
+	if m.modal == modalCronRequest {
+		return renderCronRuntimeModal(m.cron.request)
+	}
+	if m.modal == modalCronResume {
+		return renderCronResumeModal(m.cron.enabled)
+	}
+	return renderConfirmModal(m.modal, m.reopenPrompt)
 }

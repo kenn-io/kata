@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -32,8 +33,13 @@ type cronList struct {
 	query  string
 }
 type cronData struct {
+	requests            []db.CronRequest
+	requestsErr         error
+	project             cronProjectState
+	projectErr          error
 	conn, scope, events uint64
 	jobs                []generated.CronJob
+	passovers           map[string]*db.CronPassoverState
 	workflows           []generated.CronWorkflow
 	runs                []generated.CronRun
 	progress            map[string]cron.RecurringProgress
@@ -57,6 +63,8 @@ func (p cronData) readError(kind int) error {
 }
 
 type cronState struct {
+	requestSeq      uint64
+	request         *cronRuntimeRequest
 	tab             int
 	lists           [4]cronList
 	filtering, help bool
@@ -67,12 +75,14 @@ type cronState struct {
 	conn, scope     uint64
 	form            *cronForm
 	editSeq         uint64
+	enabledSeq      uint64
+	enabled         *cronEnabledRequest
 }
 
 // Synchronize after every update and retain visible records during refresh.
 func (m Model) cronSync() (Model, tea.Cmd) {
 	if m.cron.conn != m.connGen || m.cron.scope != m.scopeGen {
-		if m.modal == modalDiscardCronJob {
+		if m.modal == modalDiscardCronJob || m.modal == modalCronResume || m.modal == modalCronRequest {
 			m.modal = modalNone
 		}
 		m.cron = cronState{tab: m.cron.tab, conn: m.connGen, scope: m.scopeGen}
@@ -90,7 +100,12 @@ func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID
 	data := cronData{conn: m.connGen, scope: m.scopeGen, events: m.cron.events}
 	return func() tea.Msg {
-		data.jobs, data.jobsErr = cronRead(reader.ListCronJobs, id)
+		data.project, data.projectErr = cronRead(reader.readCronProjectState, id)
+		if slices.Contains(data.project.controls, "run_request") || slices.Contains(data.project.controls, "cancel_request") {
+			data.requests, data.requestsErr = cronRead(reader.ListCronRequests, id)
+		}
+		jobs, err := cronRead(reader.readCronJobs, id)
+		data.jobs, data.passovers, data.jobsErr = jobs.Jobs, jobs.Passovers, err
 		data.workflows, data.workflowsErr = cronRead(reader.ListCronWorkflows, id)
 		data.runs, data.runsErr = cronRead(reader.ListCronRuns, id)
 		data.progress, data.parentOpen = cronReadParents(reader, id, data.jobs)
@@ -134,11 +149,17 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 	}
 	data := cronData(msg)
 	if previous := m.cron.data; previous != nil {
+		if data.projectErr != nil {
+			data.project = previous.project
+		}
 		if data.jobsErr != nil {
 			data.jobs = previous.jobs
 		}
 		if data.workflowsErr != nil {
 			data.workflows = previous.workflows
+		}
+		if data.requestsErr != nil {
+			data.requests = previous.requests
 		}
 		if data.runsErr != nil {
 			data.runs = previous.runs
@@ -254,6 +275,12 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		*cursor -= max(m.height-8, 1)
 	case m.keymap.PageDown.matches(msg):
 		*cursor += max(m.height-8, 1)
+	case key == "R":
+		return m.routeCronRuntimeKey(db.CronRequestKindRun, lines, *cursor)
+	case key == "X":
+		return m.routeCronRuntimeKey(db.CronRequestKindCancel, lines, *cursor)
+	case key == "p":
+		return m.routeCronEnabledKey(lines, *cursor)
 	case key == "n", key == "e":
 		next, cmd, handled := m.routeCronJobKey(key, lines, *cursor)
 		if handled {

@@ -490,3 +490,42 @@ func TestCronSpokeForwardPreservesUIDPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, initial.Body.Job.DefinitionEventUID, current.DefinitionEventUID)
 }
+
+// An old hub needs only replaceCronJob: the spoke must not GET a job or trust
+// a matching local enabled flag as proof of an authoritative no-op.
+func TestCronSpokeForwardEnabledActions(t *testing.T) {
+	f := newCronForwardFixture(t, nil)
+	id := cronHTTPUID(t)
+	response, raw := f.put(t, id, "")
+	require.Equalf(t, 200, response.StatusCode, "%s", raw)
+	binding, err := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
+	require.NoError(t, err)
+	require.NoError(t, federation.SyncFederationOnce(t.Context(), f.spoke.DB, binding, f.credential))
+	local, err := f.spoke.DB.CronJob(t.Context(), f.sp.ID, id)
+	require.NoError(t, err)
+	require.True(t, local.Definition.Enabled)
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s", f.sp.ID, id)
+	before := f.writes.Load()
+	// Resume looks like a no-op locally, but must reach the hub's legacy PUT.
+	response, raw = envDoRaw(t, f.target, http.MethodPost, path+"/resume", map[string]any{"actor": "local-author"}, nil)
+	require.Equalf(t, 200, response.StatusCode, "%s", raw)
+	require.Equal(t, before+1, f.writes.Load())
+	var out api.CronJobResponse
+	require.NoError(t, json.Unmarshal(raw, &out.Body))
+	require.Empty(t, out.Body.Events)
+	require.NotEqual(t, local.DefinitionEventUID, out.Body.Job.DefinitionEventUID)
+	// Hub moved; local revision remains stale. Pause must retain conflict.
+	response, raw = envDoRaw(t, f.target, http.MethodPost, path+"/pause", map[string]any{"actor": "local-author"}, nil)
+	require.Equalf(t, 409, response.StatusCode, "%s", raw)
+	current, err := f.hub.DB.CronJob(t.Context(), f.hp.ID, id)
+	require.NoError(t, err)
+	require.True(t, current.Definition.Enabled)
+	require.Equal(t, out.Body.Job.DefinitionEventUID, current.DefinitionEventUID)
+	require.NoError(t, federation.SyncFederationOnce(t.Context(), f.spoke.DB, binding, f.credential))
+	response, raw = envDoRaw(t, f.target, http.MethodPost, path+"/pause", map[string]any{"actor": "local-author"}, nil)
+	require.Equalf(t, 200, response.StatusCode, "%s", raw)
+	require.NoError(t, json.Unmarshal(raw, &out.Body))
+	require.False(t, out.Body.Job.Definition.Enabled)
+	require.Equal(t, f.sp.ID, out.Body.Job.ProjectID)
+	require.Zero(t, out.Body.Job.ID)
+}

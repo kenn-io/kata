@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ jobs [runs] workflows
+ / search                                             1 loaded run · newest 100
+
+  Status     Job            Occurrence   Started     Ended       Summary
+▶ running    Digest                      05-01 10:00 05-01 11:00 Report ready
+
+
+           ╭────────────────────────────────────────────────────────╮
+           │                                                        │
+           │  Request cancellation for 01ARZ3NDEKTSV4RRFFQ69G5FAY?  │
+           │                                                        │
+           │  An optional runtime may cancel this run.              │
+           │  The request itself changes no running process.        │
+           │                                                        │
+           ╰────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+ y send/retry▕ n/esc cancel

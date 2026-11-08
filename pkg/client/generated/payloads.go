@@ -48,7 +48,19 @@ type ArchiveCronJobBody = CronDefinitionActionBody
 
 type ReplaceCronJobBody = PutCronJobBody
 
+type PauseCronJobBody = CronJobEnabledActionBody
+
+type RequestCronJobRunBody = CronRequestBody
+
 type RestoreCronJobBody = CronDefinitionActionBody
+
+type ResumeCronJobBody = CronJobResumeBody
+
+type ResumeCronProjectBody = CronProjectPauseBody
+
+type PauseCronProjectBody = CronProjectPauseBody
+
+type RequestCronRunCancelBody = CronRequestBody
 
 type CreateCronWorkflowBody = PutCronWorkflowBody
 

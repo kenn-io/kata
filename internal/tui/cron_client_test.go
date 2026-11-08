@@ -2,13 +2,40 @@ package tui
 
 import (
 	"encoding/json/v2"
+	"errors"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
 )
+
+func TestCronClientEnabledTimeoutDoesNotChangeReadTimeout(t *testing.T) {
+	var remaining []time.Duration
+	hc := &http.Client{Timeout: defaultHTTPTimeout, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		require.True(t, ok)
+		remaining = append(remaining, time.Until(deadline))
+		return nil, errors.New("request stopped after capturing its deadline")
+	})}
+	c := NewClient("https://daemon.example", hc)
+	_, err := c.CronJobEnabled(t.Context(), 42, "example-job", "example-event", "operator", false)
+	require.Error(t, err)
+	_, err = c.ListCronJobs(t.Context(), 42)
+	require.Error(t, err)
+
+	require.Len(t, remaining, 2)
+	require.Greater(t, remaining[0], 15*time.Second, "enabled actions must outlive the daemon's 15-second federation forward")
+	require.Greater(t, remaining[1], 4*time.Second)
+	require.LessOrEqual(t, remaining[1], defaultHTTPTimeout, "ordinary reads keep the default timeout")
+	require.Equal(t, defaultHTTPTimeout, hc.Timeout, "the shared client keeps its default timeout")
+}
 
 func TestCronClientReadsStoredRecords(t *testing.T) {
 	env := testenv.New(t)
@@ -112,4 +139,64 @@ func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {
 	_, err := decodeCronJobRecord([]byte(body))
 	require.ErrorContains(t, err, "newer_member")
 	require.ErrorContains(t, err, "newer kata")
+}
+
+func TestCronClientEnabledActionsKeepRevisionAndOptions(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	definition := executeRecord(`{"large":9007199254740993}`).Definition
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+	paused, err := c.CronJobEnabled(t.Context(), project.ID, job.UID, job.DefinitionEventUID, "operator", false)
+	require.NoError(t, err)
+	require.False(t, paused.Definition.Enabled)
+	require.Equal(t, job.Definition.Options, paused.Definition.Options)
+	_, err = c.CronJobEnabled(t.Context(), project.ID, job.UID, job.DefinitionEventUID, "operator", true)
+	require.Error(t, err)
+	resumed, err := c.CronJobEnabled(t.Context(), project.ID, job.UID, paused.DefinitionEventUID, "operator", true)
+	require.NoError(t, err)
+	require.Equal(t, definition, resumed.Definition)
+}
+
+func TestCronClientRuntimeRequestsRoundTrip(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	ctx := t.Context()
+	project, err := env.DB.CreateProject(ctx, "request-project")
+	require.NoError(t, err)
+	job, _, err := env.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Summary", Actor: "operator", Definition: executeRecord(`{}`).Definition})
+	require.NoError(t, err)
+	id, err := uid.New()
+	require.NoError(t, err)
+	first, err := c.RequestCron(ctx, project.ID, id, db.CronRequestKindRun, job.UID, "operator")
+	require.NoError(t, err)
+	require.Equal(t, id, first.Request.UID)
+	require.Equal(t, job.DefinitionEventUID, first.Request.DefinitionEventUID)
+	require.NotNil(t, first.Event)
+	replay, err := c.RequestCron(ctx, project.ID, id, db.CronRequestKindRun, job.UID, "operator")
+	require.NoError(t, err)
+	require.True(t, replay.Replayed)
+	require.Equal(t, first.Request, replay.Request)
+	require.Nil(t, replay.Event)
+	requests, err := c.ListCronRequests(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, requests, 1)
+	require.Equal(t, id, requests[0].UID)
+	require.Equal(t, "pending", requests[0].State)
+	runID, err := uid.New()
+	require.NoError(t, err)
+	observed, err := env.DB.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runID, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "running", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	shown, err := c.ShowCronRun(ctx, project.ID, runID)
+	require.NoError(t, err)
+	require.Equal(t, observed.Run, shown)
+	cancelID, err := uid.New()
+	require.NoError(t, err)
+	canceled, err := c.RequestCron(ctx, project.ID, cancelID, db.CronRequestKindCancel, runID, "operator")
+	require.NoError(t, err)
+	require.Equal(t, cancelID, canceled.Request.UID)
+	require.Equal(t, runID, *canceled.Request.RunUID)
+	require.Equal(t, db.CronRequestKindCancel, canceled.Request.Kind)
 }

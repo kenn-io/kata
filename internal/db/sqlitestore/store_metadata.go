@@ -212,6 +212,9 @@ func (d *Store) PatchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 
 func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMetadataIn) (db.PatchProjectMetadataOut, error) {
 	var out db.PatchProjectMetadataOut
+	if err := db.CheckCronProjectMetadataWrite(in.Patch); err != nil {
+		return out, err
+	}
 
 	// Validate all patch keys before opening a tx. A bad key/value never starts a tx.
 	for key, raw := range in.Patch {

@@ -195,9 +195,33 @@ type ReplaceCronJobResponse = CronJobResponseBody
 
 type ReplaceCronJobErrorResponse = ErrorEnvelope
 
+type PauseCronJobResponse = CronJobResponseBody
+
+type PauseCronJobErrorResponse = ErrorEnvelope
+
+type RequestCronJobRunResponse = CronRequestResponseBody
+
+type RequestCronJobRunErrorResponse = ErrorEnvelope
+
 type RestoreCronJobResponse = CronJobResponseBody
 
 type RestoreCronJobErrorResponse = ErrorEnvelope
+
+type ResumeCronJobResponse = CronJobResponseBody
+
+type ResumeCronJobErrorResponse = ErrorEnvelope
+
+type ResumeCronProjectResponse = CronProjectPauseResponseBody
+
+type ResumeCronProjectErrorResponse = ErrorEnvelope
+
+type PauseCronProjectResponse = CronProjectPauseResponseBody
+
+type PauseCronProjectErrorResponse = ErrorEnvelope
+
+type ListCronRequestsResponse = CronRequestListResponseBody
+
+type ListCronRequestsErrorResponse = ErrorEnvelope
 
 type ListCronRunsResponse = CronRunsResponseBody
 
@@ -210,6 +234,10 @@ type ShowCronRunErrorResponse = ErrorEnvelope
 type ObserveCronRunResponse = ObserveCronRunResponseBody
 
 type ObserveCronRunErrorResponse = ErrorEnvelope
+
+type RequestCronRunCancelResponse = CronRequestResponseBody
+
+type RequestCronRunCancelErrorResponse = ErrorEnvelope
 
 type ListCronWorkflowsResponse = ListCronWorkflowsResponseBody
 
@@ -985,12 +1013,60 @@ type ReplaceCronJobResp struct {
 	JSONDefault  *ReplaceCronJobErrorResponse
 }
 
+type PauseCronJobResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PauseCronJobResponse
+	JSONDefault  *PauseCronJobErrorResponse
+}
+
+type RequestCronJobRunResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RequestCronJobRunResponse
+	JSONDefault  *RequestCronJobRunErrorResponse
+}
+
 type RestoreCronJobResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *RestoreCronJobResponse
 	JSONDefault  *RestoreCronJobErrorResponse
+}
+
+type ResumeCronJobResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ResumeCronJobResponse
+	JSONDefault  *ResumeCronJobErrorResponse
+}
+
+type ResumeCronProjectResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ResumeCronProjectResponse
+	JSONDefault  *ResumeCronProjectErrorResponse
+}
+
+type PauseCronProjectResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PauseCronProjectResponse
+	JSONDefault  *PauseCronProjectErrorResponse
+}
+
+type ListCronRequestsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListCronRequestsResponse
+	JSONDefault  *ListCronRequestsErrorResponse
 }
 
 type ListCronRunsResp struct {
@@ -1015,6 +1091,14 @@ type ObserveCronRunResp struct {
 	StatusCode   int
 	JSON200      *ObserveCronRunResponse
 	JSONDefault  *ObserveCronRunErrorResponse
+}
+
+type RequestCronRunCancelResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RequestCronRunCancelResponse
+	JSONDefault  *RequestCronRunCancelErrorResponse
 }
 
 type ListCronWorkflowsResp struct {

@@ -59,6 +59,22 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-
 		fork = idleLease.Fork
 	}
 	var errs []error
+	requestProjects, err := s.DB.ListCronRequestProjects(ctx)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	for _, projectID := range requestProjects {
+		event, err := s.DB.SweepCronRequests(ctx, projectID, now)
+		// A malformed retained value may accompany successful expiry. Publish the
+		// committed event before reporting that error or attempting another project.
+		if event != nil {
+			s.Publish.EventFrom(event.ProjectID, *event, fork)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("expire cron requests in project %d: %w", projectID, err))
+		}
+	}
+
 	if s.reachedFloor == nil {
 		// Without a floor the sweep still delivers inbox requests but records
 		// no reached schedule, so a failed read cannot replay overdue dates.

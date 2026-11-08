@@ -39,6 +39,12 @@ type CronActionInput struct {
 	ExpectedEventUID string `json:"expected_event_uid" jsonschema:"Current definition_event_uid; stale values conflict without overwriting"`
 }
 
+// CronEnabledActionInput optionally guards a pause/resume with a known revision.
+type CronEnabledActionInput struct {
+	CronIdentityInput
+	ExpectedEventUID string `json:"expected_event_uid,omitempty" jsonschema:"Optional current definition_event_uid; stale values conflict"`
+}
+
 // CronUIDOutput contains an identity without allocating any daemon state.
 type CronUIDOutput struct {
 	UID string `json:"uid"`
@@ -46,7 +52,9 @@ type CronUIDOutput struct {
 
 func registerCronTools(server *sdkmcp.Server, h toolHandlers) {
 	registerCronWorkflowTools(server, h)
+	registerCronProjectControlTools(server, h)
 	registerCronRunTools(server, h)
+	registerCronRequestTools(server, h)
 	read := toolHints(true, false, false)
 	addCronTool(server, "kata.cron_new_uid", "Generate cron UID", "Generate and retain a UID before the first create or observe call. Creates and reserves nothing; the UID is unbound until creation. Reuse it after a lost response.", nonIdempotent(toolHints(true, false, false)), h.cronNewUID)
 	addCronTool(server, "kata.cron_capabilities", "Read cron capabilities", "Read the selected project's live cron capabilities under the configured daemon authority.", read, h.cronCapabilities)
@@ -55,6 +63,8 @@ func registerCronTools(server *sdkmcp.Server, h toolHandlers) {
 	addCronTool(server, "kata.cron_job_create", "Create cron job", "Create a typed job with a caller-retained UID from kata.cron_new_uid. Native notification jobs use daemon delivery; execution jobs require an external adapter. Retry retains UID and daemon conflicts.", toolHints(false, false, false), h.cronJobCreate)
 	addCronTool(server, "kata.cron_job_update", "Replace cron job", "Replace a complete definition using its current expected_event_uid. Native parent bindings cannot change. Never launches an execution adapter.", toolHints(false, true, false), h.cronJobUpdate)
 	addCronTool(server, "kata.cron_job_delete", "Archive cron job", "Reversibly tombstone a cron definition using its current expected_event_uid.", toolHints(false, true, false), h.cronJobDelete)
+	addCronTool(server, "kata.cron_job_pause", "Pause cron job", "Pause a job without replacing its definition. Optional expected_event_uid guards a known revision.", toolHints(false, false, false), h.cronJobPause)
+	addCronTool(server, "kata.cron_job_resume", "Resume cron job", "Resume a job without replacing its definition. Native jobs with catchup all backfill missed children. Optional expected_event_uid guards a known revision.", toolHints(false, true, false), h.cronJobResume)
 	addCronTool(server, "kata.cron_job_restore", "Restore cron job", "Restore a cron tombstone using its current expected_event_uid; preserves daemon dependency checks.", toolHints(false, false, false), h.cronJobRestore)
 }
 func (h toolHandlers) cronNewUID(context.Context, *sdkmcp.CallToolRequest, CronProjectInput) (*sdkmcp.CallToolResult, CronUIDOutput, error) {
