@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-08
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -65,6 +65,70 @@ process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
+
+### Mutation receipts
+
+Add `--receipt` to job `create`, `update`, or `restore` to keep the saved response
+and optional diagnostics in one JSON value:
+
+```sh
+kata cron job create --uid 01J00000000000000000000001 --file job.json --receipt --json
+kata cron job update 01J00000000000000000000001 --expected-event-uid <event-uid> --file replacement.json --receipt --json
+```
+
+Use the [request file format](#request-files) for those files. Without `--receipt`,
+the response stays unchanged and these additional diagnostic reads do not run.
+The receipt has `kata_api_version: 1`, `receipt_version: 1`, `action`, `persisted`,
+`diagnostics`, and `warnings`. `persisted` contains the complete original response,
+including the job's UID and `definition_event_uid`, any events, unknown members,
+and exact opaque JSON numbers. Whitespace and string escaping may be reformatted.
+
+Schedule diagnostics require the daemon's `POST /cron/jobs/validate` endpoint;
+runtime inventory requires `GET /cron/runtimes`, both under the selected
+`/api/v1/projects/{project_id}` path. The daemon work is tracked separately in
+[candidate preview #902](https://github.com/kenn-io/kata/pull/902) and
+[runtime inventory #901](https://github.com/kenn-io/kata/pull/901). The receipt
+client does not add those handlers. Until the target daemon provides them,
+`unsupported` is expected and the saved response remains available.
+
+`diagnostics.as_of` is the UTC schedule request anchor. It is not an inventory
+observation timestamp or a consistent snapshot across requests. The preview and
+runtime inventory requests share a three-second budget on the same daemon and
+project. Each response is limited to 1 MiB. Neither request follows redirects.
+
+| Diagnostic status | Meaning |
+| --- | --- |
+| `available` | A recognized diagnostic response was received. |
+| `unsupported` | The daemon returned 404, 405, or 501 for this diagnostic endpoint. |
+| `unavailable` | The lookup failed, timed out, or returned incomplete, stale, or unrecognized data. |
+| `skipped` | Quiet mode or an inactive job prevented the lookup; a hypothetical paused/closed-parent preview is also skipped. |
+| `not_applicable` | Adapter inventory cannot describe this job's delivery. |
+
+`diagnostics.preview.next` is always an array. Native times require retained
+progress; no fresh anchor is invented. Paused jobs, closed parents, missing
+progress, or unsupported diagnostics show no future times. Adapter times describe
+trigger candidates, not a promise that an adapter will execute them. An adapter
+interval with an unknown anchor has no predicted times. A forwarded write may
+commit on its hub before the local replica catches up; a subsequent stale preview
+is an advisory failure and does not undo the write.
+
+`diagnostics.runtime_inventory` applies only to enabled adapter execution jobs.
+Its `inventory_state` is `unknown`, `warming`, or `ready` when available. These
+describe project inventory, not the saved job's execution readiness. The basis is
+`subsequent_project_inventory`; same-UID warnings can refer to a concurrent edit
+at a different definition revision. Native daemon delivery is `not_applicable`.
+
+Warnings have `source`, `code`, and `message` fields. Only relevant runtime
+warnings appear, and each server-controlled message is limited to 1,024 bytes.
+An inventory diagnostic can report `unavailable` while retaining individually
+recognized, relevant warnings.
+Receipt diagnostics are emitted once in JSON. `--quiet --json --receipt` keeps
+the receipt but skips diagnostic reads; quiet text mode emits nothing.
+
+A failed mutation keeps its existing error and produces no receipt or diagnostic
+reads. Once a successful response is received, diagnostic failure still returns
+the saved response successfully. A lost mutation response or output-writer failure
+cannot be recovered by a receipt: inspect the retained UID before retrying.
 
 ### Edit in place
 

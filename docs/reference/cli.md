@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-06
+last_edited: 2026-11-08
 ---
 
 # CLI reference
@@ -2331,6 +2331,12 @@ to inject its value into the consuming process. Revoke the token during teardown
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
 Commands return JSON; external adapters schedule and launch their own work.
 See [Cron](cron.md) for bounded documents and retry semantics.
+
+Job `create`, `update`, and `restore` accept `--receipt` for a versioned JSON
+envelope containing the original saved response and bounded advisory diagnostics.
+Default output is unchanged. Unsupported or failed diagnostics do not fail a
+successful mutation; `--quiet` skips those reads. See
+[mutation receipts](cron.md#mutation-receipts) for statuses and readiness limits.
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
