@@ -3006,7 +3006,7 @@ describe('App', () => {
     )
   })
 
-  it('keeps the task list when the initial SSE revalidation returns unchanged', async () => {
+  it('keeps the task list when SSE revalidation returns unchanged after load and row click', async () => {
     history.replaceState(null, '', '/kata?view=inbox#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -3037,6 +3037,26 @@ describe('App', () => {
         }
         if (target.pathname === '/api/v1/ui/snapshot') {
           snapshotRequests.push(request)
+          if (target.searchParams.has('selected_issue_uid')) {
+            if (request.headers.get('If-None-Match') === '"snapshot-selected"') {
+              return new Response(null, { status: 304 })
+            }
+            return Response.json(
+              {
+                ...current,
+                selected: {
+                  state: 'available',
+                  issue: current.collection[0],
+                  comments: [],
+                  labels: [],
+                  links: [],
+                  recurrences: [],
+                  history: [],
+                },
+              },
+              { headers: { ETag: '"snapshot-selected"' } },
+            )
+          }
           if (snapshotRequests.length > 1) return new Response(null, { status: 304 })
           return Response.json(current, { headers: { ETag: '"snapshot-1"' } })
         }
@@ -3054,6 +3074,16 @@ describe('App', () => {
       ).toBeNull(),
     )
     expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(4))
+    expect(new URL(snapshotRequests[2]!.url).searchParams.get('selected_issue_uid')).toBe(
+      '01J00000000000000000000001',
+    )
+    expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
+    expect(snapshotRequests[3]?.headers.get('If-None-Match')).toBe('"snapshot-selected"')
+    expect(await screen.findByRole('button', { name: 'Edit issue' })).not.toBeNull()
   })
 
   it('refreshes membership after an SSE reconnect opens', async () => {
