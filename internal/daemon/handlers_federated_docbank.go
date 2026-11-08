@@ -169,7 +169,15 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 }
 
 func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Project, attachment metadata.Attachment) (*http.Response, error) {
-	if attachment.Origin == cfg.DB.InstanceUID() {
+	binding, err := docbankUpstream(ctx, cfg, project.ID)
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil {
+		// Only projects without an upstream may use this daemon's Docbank origin.
+		if attachment.Origin != cfg.DB.InstanceUID() {
+			return nil, attachmentError(410, "attachment_origin_unavailable")
+		}
 		if cfg.Docbank == nil {
 			return nil, attachmentError(503, "docbank_not_configured")
 		}
@@ -189,13 +197,6 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 			return nil, docbankError(err, docbankContentErrors)
 		}
 		return resp, nil
-	}
-	binding, err := docbankUpstream(ctx, cfg, project.ID)
-	if err != nil {
-		return nil, err
-	}
-	if binding == nil {
-		return nil, attachmentError(410, "attachment_origin_unavailable")
 	}
 	caps, err := docbankOriginCapabilities(ctx, cfg, project)
 	if err != nil {

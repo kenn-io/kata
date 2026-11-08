@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
@@ -78,6 +79,80 @@ type rejectingDocbankFence struct{}
 
 func (rejectingDocbankFence) AuthorizeFederation(context.Context, daemon.HostFederationAccessRequest) (daemon.HostFederationAccessDecision, error) {
 	return daemon.HostFederationAccessDecision{TransactionFence: func(context.Context, db.Transaction) error { return daemon.ErrHostAccessDenied }}, nil
+}
+
+func TestFederatedDocbankContentRejectsRelayLocalOrigin(t *testing.T) {
+	vault := docbanktest.New(t)
+	version := uuid.MustParse(linkVersion)
+	vault.Seed("/kata/relay-local.pdf", docbank.Node{ID: 42, Name: "relay-local.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("relay-local bytes")})
+	credentials := newReplicaCredentialStore()
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.Docbank = docbank.NewClient(vault.Server.URL, func() (string, error) { return "test-key", nil })
+		cfg.DocbankFolder = "/kata"
+		cfg.FederationCredentials = credentials
+	})
+	project, _ := seedProjectAndIssue(t, env)
+	rootUID, err := uid.New()
+	require.NoError(t, err)
+	bindingUID, err := uid.New()
+	require.NoError(t, err)
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := fmt.Fprintf(w, `{"version":1,"project_uid":%q,"origin":%q}`, project.UID, rootUID); err != nil {
+			t.Errorf("write upstream capabilities: %v", err)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: upstream.URL,
+		HubProjectID: 42, HubProjectUID: project.UID, Enabled: true, PushEnabled: true,
+		Actor: "upstream-member", AllowInsecure: true,
+	})
+	require.NoError(t, err)
+	public, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, env.DB.PinRootAuthority(t.Context(), db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	}))
+	_, err = env.DB.SetRelayBindingConfig(t.Context(), project.ID, db.RelayBindingConfig{
+		ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID,
+		UpstreamInstanceUID: rootUID, AuthorityUID: rootUID,
+		HubPath: []string{rootUID, env.DB.InstanceUID()}, LocalActor: "tester",
+		ServeDownstream: true, ResetEpoch: 1,
+	})
+	require.NoError(t, err)
+	require.NoError(t, credentials.StoreFederationCredential(t.Context(), project.UID, config.FederationCredential{
+		HubURL: upstream.URL, HubProjectID: 42, Token: "upstream-docbank-test-token",
+		Actor: "upstream-member", Capabilities: "pull,push", AllowInsecure: true,
+	}))
+	parent, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "relay-docbank-parent-test-token", Actor: "tester", AdminActor: "operator",
+	})
+	require.NoError(t, err)
+	downstreamUID, err := uid.New()
+	require.NoError(t, err)
+	grant, err := env.DB.CreateRelayEnrollment(t.Context(), db.CreateRelayEnrollmentParams{
+		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: downstreamUID,
+		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-docbank-content-test-token",
+	})
+	require.NoError(t, err)
+
+	endpoint := fmt.Sprintf("%s/api/v1/projects/%d/federation/docbank/versions/%s/content?project_uid=%s&origin=%s",
+		env.URL, project.ID, version, project.UID, env.DB.InstanceUID())
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, endpoint, nil)
+	require.NoError(t, err)
+	request.Header.Set("Authorization", "Bearer "+grant.Token)
+	request.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+	response, err := env.HTTP.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusConflict, response.StatusCode, string(body))
+	require.EqualValues(t, 1, upstreamCalls.Load(), "the relay must resolve the project's upstream Docbank origin")
+	require.Empty(t, vault.Requests(), "a downstream request cannot select the relay-local vault")
 }
 
 func TestDocbankOriginServiceRejectsHostFenceBeforeIO(t *testing.T) {
