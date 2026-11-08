@@ -168,6 +168,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   way `kata restore` does.
   Issue-scoped credentials cannot delete, so they are not offered the key. See
   the [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Move an issue to another project from `kata tui` with `M` on the selected row
+  of the issue list, after a dry-run preview of the subtree that would move.
+  Daemon API `0.35.0` or newer is required. See the
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
 
 - Find matching issues from human-mode `kata create` look-alike refusals, which
   now include the existing issues' qualified refs.

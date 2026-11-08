@@ -33,6 +33,7 @@ x           close
 r           reopen
 d           set dates
 X           delete issue
+M           move to another project
 u           undo last issue action
 
 Detail
