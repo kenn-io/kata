@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-07
+last_edited: 2026-11-08
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with

@@ -4,7 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
+vi.mock('./lib/kata/projection', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./lib/kata/projection')>()
+  return { ...original, normalizeKataUISnapshot: vi.fn(original.normalizeKataUISnapshot) }
+})
+
 import App from './App.svelte'
+import { normalizeKataUISnapshot } from './lib/kata/projection'
 import { preferencesStorageKey } from './lib/state/preferences'
 
 describe('App', () => {
@@ -21,6 +27,51 @@ describe('App', () => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('keeps the normalized collection when focus revalidation returns unchanged', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const requests: Request[] = []
+    let referencesRequested = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/references')) {
+          referencesRequested = true
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        requests.push(request)
+        if (requests.length > 1) return new Response(null, { status: 304 })
+        const current = snapshot()
+        current.catalog[0]!.project.metadata = { role: 'inbox' }
+        return Response.json(current, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await screen.findByRole('button', { name: /Example issue/ })
+    await waitFor(() => expect(referencesRequested).toBe(true))
+    await tick()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    expect(normalizations).toBeGreaterThan(0)
+    await fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(requests).toHaveLength(2))
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task', exact: true }).getAttribute('aria-disabled'),
+      ).not.toBe('true'),
+    )
+    await tick()
+    expect(requests[1]!.headers.get('If-None-Match')).toBe('"snapshot-1"')
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
+    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
   })
 
   it.each([

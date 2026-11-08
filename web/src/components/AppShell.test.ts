@@ -1,12 +1,52 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
+vi.mock('../lib/kata/projection', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../lib/kata/projection')>()
+  return { ...original, normalizeKataUISnapshot: vi.fn(original.normalizeKataUISnapshot) }
+})
+
 import { setGeneratedFetch } from '../lib/api/client'
+import { normalizeKataUISnapshot } from '../lib/kata/projection'
 import type { MutationContext, MutationResult } from '../lib/mutations/controller'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
 
 describe('AppShell', () => {
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  test('advances Updated labels while the task snapshot stays unchanged', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
+    const current = snapshot()
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'inbox',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.getByText('now')).not.toBeNull()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    expect(normalizations).toBeGreaterThan(0)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(screen.getByText('1m')).not.toBeNull()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
+  })
+
   test('moves a scheduled task into Inbox at midnight without a new snapshot', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 7, 1, 23, 59, 59))
@@ -29,14 +69,11 @@ describe('AppShell', () => {
       },
     })
     expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    expect(normalizations).toBeGreaterThan(0)
     await vi.advanceTimersByTimeAsync(1000)
     expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-    vi.useRealTimers()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
   test('identifies the current browser hub when a connection needs attention', () => {
