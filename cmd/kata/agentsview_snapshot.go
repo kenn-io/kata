@@ -124,17 +124,30 @@ func writeAgentsViewConsent(ctx context.Context, path string, data []byte) (err 
 	if err != nil {
 		return errors.New("AgentsView: consent output must be a new private file")
 	}
+	err = writeAgentsViewPrivateContent(ctx, file, data)
+	if err != nil {
+		_ = os.Remove(path)
+	}
+	return err
+}
+
+type agentsViewPrivateOutput interface {
+	io.Writer
+	Sync() error
+	Close() error
+}
+
+func writeAgentsViewPrivateContent(ctx context.Context, file agentsViewPrivateOutput, data []byte) (err error) {
 	defer func() {
-		closeErr := file.Close()
-		if err == nil {
-			err = closeErr
-		}
-		if err != nil {
-			_ = os.Remove(path)
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = &agentsViewSafeFailure{state: "consent publication failed", cause: closeErr}
 		}
 	}()
 	if _, err = io.Copy(file, agentsViewContextReader{ctx, strings.NewReader(string(data))}); err != nil {
-		return err
+		return &agentsViewSafeFailure{state: "consent publication failed", cause: err}
 	}
-	return file.Sync()
+	if err = file.Sync(); err != nil {
+		return &agentsViewSafeFailure{state: "consent publication failed", cause: err}
+	}
+	return nil
 }

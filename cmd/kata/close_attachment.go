@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -58,40 +60,9 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 	if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionAttachmentEvidence, "attachment close evidence"); err != nil {
 		return nil, err
 	}
-	out := append([]api.Evidence(nil), evidence...)
-	var ids []string
-	loaded := false
-	for i, e := range out {
-		if e.Type != api.EvidenceAttachment {
-			continue
-		}
-		id := strings.TrimSpace(e.AttachmentID)
-		if uid.Valid(strings.ToUpper(id)) {
-			out[i].AttachmentID = id
-			continue
-		}
-		if !loaded {
-			issue, _, err := fetchMetaIssue(ctx, hc, base, pid, ref.RefForAPI)
-			if err != nil {
-				return nil, err
-			}
-			for key, value := range issue.Metadata {
-				if id, ok := strings.CutPrefix(key, metadata.AttachmentPrefix); ok {
-					if _, valid := metadata.Valid(value); valid {
-						ids = append(ids, id)
-					}
-				}
-			}
-			loaded = true
-		}
-		id, err = resolveAttachmentSuffix(ids, id)
-		if err != nil {
-			return nil, err
-		}
-		out[i].AttachmentID = id
-	}
-	if duplicate := findDuplicateEvidence(out); duplicate != "" {
-		return nil, externalCLIValidation("duplicate evidence item " + duplicate)
+	out, err := expandCloseAttachmentEvidence(ctx, hc, base, pid, ref.RefForAPI, evidence)
+	if err != nil {
+		return nil, err
 	}
 	seen := map[string]bool{}
 	for _, e := range out {
@@ -112,6 +83,48 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 			seen[result.AttachmentID] = true
 			out = append(out, api.Evidence{Type: api.EvidenceAttachment, AttachmentID: result.AttachmentID})
 		}
+	}
+	return out, nil
+}
+
+// expandCloseAttachmentEvidence performs read-only suffix resolution. Sharing
+// calls it after freezing/preflight, without invoking optional linking or a
+// second daemon resolution that could auto-start another service.
+func expandCloseAttachmentEvidence(ctx context.Context, hc *http.Client, base string, pid int64, issueRef string, evidence []api.Evidence) ([]api.Evidence, error) {
+	out := append([]api.Evidence(nil), evidence...)
+	var ids []string
+	loaded := false
+	for i, e := range out {
+		if e.Type != api.EvidenceAttachment {
+			continue
+		}
+		id := strings.TrimSpace(e.AttachmentID)
+		if uid.Valid(strings.ToUpper(id)) {
+			out[i].AttachmentID = id
+			continue
+		}
+		if !loaded {
+			issue, _, err := fetchMetaIssue(ctx, hc, base, pid, issueRef)
+			if err != nil {
+				return nil, err
+			}
+			for key, value := range issue.Metadata {
+				if id, ok := strings.CutPrefix(key, metadata.AttachmentPrefix); ok {
+					if _, valid := metadata.Valid(value); valid {
+						ids = append(ids, id)
+					}
+				}
+			}
+			loaded = true
+		}
+		id, err = resolveAttachmentSuffix(ids, id)
+		if err != nil {
+			return nil, err
+		}
+		out[i].AttachmentID = id
+	}
+	if duplicate := findDuplicateEvidence(out); duplicate != "" {
+		return nil, externalCLIValidation("duplicate evidence item " + duplicate)
 	}
 	return out, nil
 }

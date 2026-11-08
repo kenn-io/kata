@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"time"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/transcript"
 )
 
@@ -69,6 +70,7 @@ type agentsViewCloseResult struct {
 	Changed, Reused bool
 	Event           *agentsViewCloseEvent
 	Raw             []byte
+	OriginalEvent   *agentsViewCloseEvent
 }
 
 // Select returns live verified policy pinned to the enrolled root and route.
@@ -76,6 +78,7 @@ type agentsViewCloseResult struct {
 // that pin and the full association. Missing adapters return unavailable.
 type agentsViewWorkflowPort interface {
 	Select(context.Context, string) (agentsViewSelection, error)
+	ResolveEvidence(context.Context, []api.Evidence) ([]api.Evidence, error)
 	Close(context.Context, string, map[string]any, map[string]string) (agentsViewCloseResult, error)
 	Original(context.Context, string, string) (agentsViewCloseEvent, error)
 	Share(context.Context, string, agentsViewConsent, string, io.Reader) error
@@ -176,6 +179,18 @@ func (w agentsViewWorkflow) Close(ctx context.Context, ref string, c agentsViewC
 	for key, value := range body {
 		request[key] = value
 	}
+	if evidence, ok := request["evidence"].([]api.Evidence); ok {
+		resolved, err := w.port.ResolveEvidence(ctx, evidence)
+		if err != nil {
+			return agentsViewCloseResult{}, err
+		}
+		request["evidence"] = resolved
+	}
+	actor, _ := resolveActor(ctx, flags.As, nil)
+	request["actor"] = actor
+	if len(headers) > 0 {
+		request["retry_protocol"] = api.CloseRetryProtocol
+	}
 	request["agentsview_protocol"] = "relay-v1"
 	request["transcript"] = &transcript.Transcript{Agent: native.Agent, SessionID: native.NativeSessionID}
 	request["agentsview_association"] = c.Association
@@ -270,14 +285,26 @@ func inspectAgentsViewSnapshot(ctx context.Context, snapshot *agentsViewFrozenSn
 				}
 			case (object == envelopeObject || object == manifestObject) && name == "v":
 				token, err := decoder.ReadToken()
-				if err != nil || token.Kind() != '0' || token.String() != "1" {
-					return errors.New("unsupported envelope version")
+				if err != nil || token.Kind() != '0' {
+					return errors.New("unsupported envelope or manifest version")
 				}
+				version := token.String()
 				field := "/v"
-				if object == manifestObject {
+				if object == envelopeObject {
+					if version != "1" {
+						return errors.New("unsupported envelope version")
+					}
+				} else {
+					// Artifact manifests evolve independently from the v1 push envelope.
+					// The published companion codec accepts v2..7, emitting v5,6 or7.
+					switch version {
+					case "2", "3", "4", "5", "6", "7":
+					default:
+						return errors.New("unsupported manifest version")
+					}
 					field = "/manifest/v"
 				}
-				values[field] = "1"
+				values[field] = version
 			case object == envelopeObject && name == "session_id", object == manifestObject && name == "native_session_id", object == sessionObject && (name == "id" || name == "agent"):
 				token, err := decoder.ReadToken()
 				if err != nil || token.Kind() != '"' || len(token.String()) > 160 {
@@ -313,7 +340,7 @@ func inspectAgentsViewSnapshot(ctx context.Context, snapshot *agentsViewFrozenSn
 			err = errors.New("trailing envelope JSON")
 		}
 	}
-	if err != nil || values["/v"] != "1" || values["/manifest/v"] != "1" || values["/session_id"] != canonical || values["/manifest/native_session_id"] != canonical || values["/manifest/session/id"] != canonical || values["/manifest/session/agent"] != agent {
+	if err != nil || values["/v"] != "1" || values["/manifest/v"] == "" || values["/session_id"] != canonical || values["/manifest/native_session_id"] != canonical || values["/manifest/session/id"] != canonical || values["/manifest/session/agent"] != agent {
 		return errors.New("AgentsView: snapshot envelope identity differs from selected session or is unsupported")
 	}
 	_, err = snapshot.Seek(0, io.SeekStart)

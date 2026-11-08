@@ -36,7 +36,7 @@ type agentsViewHTTPPort struct {
 func agentsViewUnavailable() error {
 	return &cliError{
 		Kind: kindDaemonUnavail, Code: "agentsview_unavailable", ExitCode: ExitDaemonUnavail,
-		Message: "AgentsView: pinned discovery/receipt integration is unavailable in this draft; no close or upload attempted",
+		Message: "AgentsView: sharing is unavailable in this build; no close or upload attempted",
 	}
 }
 
@@ -275,6 +275,8 @@ func (p *agentsViewHTTPPort) Share(ctx context.Context, _ string, c agentsViewCo
 
 // Bound generated-client responses before their normal eager JSON decoder reads
 // them. The request context owns the entire header/body budget.
+const agentsViewDaemonResponseLimit int64 = 16 << 20
+
 type agentsViewBoundedResponseTransport struct{ http.RoundTripper }
 
 func (t agentsViewBoundedResponseTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -298,9 +300,9 @@ func (t agentsViewBoundedResponseTransport) RoundTrip(request *http.Request) (*h
 		response.Body.Close()
 		return nil, errors.New("AgentsView: unsupported daemon response encoding or headers")
 	}
-	raw, err := io.ReadAll(io.LimitReader(agentsViewContextReader{request.Context(), response.Body}, agentsViewRecordLimit+1))
+	raw, err := io.ReadAll(io.LimitReader(agentsViewContextReader{request.Context(), response.Body}, agentsViewDaemonResponseLimit+1))
 	response.Body.Close()
-	if err != nil || int64(len(raw)) > agentsViewRecordLimit {
+	if err != nil || int64(len(raw)) > agentsViewDaemonResponseLimit {
 		return nil, errors.New("AgentsView: daemon response exceeds limit or was interrupted")
 	}
 	response.Body = io.NopCloser(bytes.NewReader(raw))
@@ -329,3 +331,9 @@ type agentsViewSafeFailure struct {
 
 func (e *agentsViewSafeFailure) Error() string { return "AgentsView: " + e.state }
 func (e *agentsViewSafeFailure) Unwrap() error { return e.cause }
+
+func (p *agentsViewHTTPPort) ResolveEvidence(ctx context.Context, evidence []api.Evidence) ([]api.Evidence, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return expandCloseAttachmentEvidence(ctx, p.api.client, p.api.baseURL, p.projectID, p.issueUID, evidence)
+}

@@ -60,7 +60,7 @@ func TestAgentsViewUnavailableProcessSendsNoBytesToEitherDestination(t *testing.
 		process.Env = agentsViewSyntheticProcessEnv(home, destination)
 		out, err := process.CombinedOutput()
 		require.Error(t, err)
-		require.Contains(t, string(out), "integration is unavailable")
+		require.Contains(t, string(out), "sharing is unavailable")
 		require.Zero(t, company.Load())
 		require.Zero(t, personal.Load())
 	}

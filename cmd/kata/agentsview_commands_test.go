@@ -8,17 +8,20 @@ import (
 )
 
 func TestAgentsViewCommandsRequireExplicitFilesAndDigest(t *testing.T) {
-	for _, args := range [][]string{
-		{"agentsview", "prepare", "example#abcd"},
-		{"agentsview", "share", "consent.json"},
-		{"close", "example#abcd", "--done", "-m", "A substantive completion message for this selected issue.", "--reviewed", "README.md", "--snapshot", "snapshot.json"},
+	for _, tc := range []struct {
+		args    []string
+		message string
+	}{
+		{[]string{"agentsview", "prepare", "example#abcd"}, "--snapshot and --output are required"},
+		{[]string{"agentsview", "share", "consent.json"}, "--issue, --snapshot, --close-event and --confirm-transcript-sha256 are required"},
+		{[]string{"close", "example#abcd", "--done", "-m", "A substantive completion message for this selected issue.", "--reviewed", "README.md", "--snapshot", "snapshot.json"}, "sharing requires --share-transcript, --snapshot and --confirm-transcript-sha256"},
 	} {
 		root := newRootCmd()
 		var out bytes.Buffer
 		root.SetOut(&out)
 		root.SetErr(&out)
-		root.SetArgs(args)
-		require.Error(t, root.ExecuteContext(t.Context()))
+		root.SetArgs(tc.args)
+		require.ErrorContains(t, root.ExecuteContext(t.Context()), tc.message)
 	}
 }
 
