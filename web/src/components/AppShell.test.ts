@@ -230,6 +230,49 @@ describe('AppShell', () => {
     expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
   })
 
+  test('keeps a healthy connection hidden during refresh while preserving attention states', async () => {
+    const props = {
+      route: {
+        kind: 'kata' as const,
+        view: 'all-open' as const,
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+      snapshot: snapshot(),
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const view = render(AppShell, { props })
+    expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
+    await view.rerender({ ...props, loading: true, canMutate: false })
+    expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).toBe(
+      'true',
+    )
+
+    for (const [state, label] of [
+      [{ stale: true }, 'Connection unavailable'],
+      [{ reconnecting: true }, 'Reconnecting'],
+      [{ daemonSwitching: true }, 'Connecting'],
+      [{ daemonError: 'Authentication required' }, 'Authentication required'],
+      [{ readOnly: true }, 'Read-only'],
+    ] as const) {
+      await view.rerender({
+        ...props,
+        loading: true,
+        stale: false,
+        reconnecting: false,
+        daemonSwitching: false,
+        daemonError: undefined,
+        readOnly: false,
+        ...state,
+      })
+      expect(screen.getByRole('status', { name: 'Active connection' }).textContent).toContain(label)
+    }
+  })
+
   test('keeps the healthy workspace toolbar free of a connection banner', () => {
     const { container } = render(AppShell, {
       props: {
