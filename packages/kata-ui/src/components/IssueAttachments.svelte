@@ -34,7 +34,13 @@
     Object.entries(attachments).map(([id, e]) => ({
       ...e,
       id,
-      reference: JSON.stringify([e.name, e.media_type, e.size, e.docbank_version]),
+      reference: JSON.stringify([
+        e.origin ?? 'local',
+        e.name,
+        e.media_type,
+        e.size,
+        e.docbank_version,
+      ]),
       image:
         ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(e.media_type) &&
         e.size <= 20 << 20,

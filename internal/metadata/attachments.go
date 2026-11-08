@@ -8,6 +8,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 	"uuid"
+
+	"go.kenn.io/kata/internal/uid"
 )
 
 // AttachmentPrefix gives each file an independent, opaque metadata key.
@@ -15,6 +17,9 @@ const AttachmentPrefix = "attachment."
 
 // Attachment refers to an immutable Docbank content version.
 type Attachment struct {
+	// Origin is the serving Kata instance UID. Empty and local are legacy
+	// references; a stable UID survives signed replication unchanged.
+	Origin         string    `json:"origin,omitempty"`
 	Name           string    `json:"name"`
 	MediaType      string    `json:"media_type"`
 	Size           int64     `json:"size"`
@@ -34,6 +39,13 @@ var rejectNull = json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext
 func Valid(raw jsontext.Value) (Attachment, bool) {
 	e := Attachment{Size: -1}
 	if json.Unmarshal(raw, &e, json.RejectUnknownMembers(true), rejectNull) != nil {
+		return e, false
+	}
+	var fields map[string]jsontext.Value
+	if json.Unmarshal(raw, &fields) != nil {
+		return e, false
+	}
+	if origin, exists := fields["origin"]; exists && (len(origin) == 0 || origin[0] != '"' || e.Origin != "local" && !uid.Valid(e.Origin)) {
 		return e, false
 	}
 	return e, ValidAttachmentName(e.Name) && e.MediaType != "" && e.Size >= 0 && e.DocbankVersion != uuid.Nil()

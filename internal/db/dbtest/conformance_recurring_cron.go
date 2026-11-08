@@ -709,7 +709,9 @@ func (p *recurringCountingProbe) QueryContext(ctx context.Context, query string,
 	if closeErr != nil {
 		return nil, closeErr
 	}
-	p.candidates = append(p.candidates, count)
+	if strings.Contains(query, "'projection.job'") || strings.Contains(query, "'projection.issue'") {
+		p.candidates = append(p.candidates, count)
+	}
 	return p.recurringProbeQuerier.QueryContext(ctx, query, args...)
 }
 

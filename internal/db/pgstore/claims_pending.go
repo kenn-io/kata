@@ -328,7 +328,7 @@ func (s *Store) CheckClaimGate(ctx context.Context, input db.ClaimGateParams) er
 		if claimTimedExpired(live, now) {
 			return nil
 		}
-		if !db.SameClaimGateHolder(live, input.Principal) {
+		if (input.StrictPrincipal && !db.SameClaimPrincipal(live, input.Principal)) || (!input.StrictPrincipal && !db.SameClaimGateHolder(live, input.Principal)) {
 			return db.ErrClaimDenied
 		}
 		return nil

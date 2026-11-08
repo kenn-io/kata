@@ -40,12 +40,13 @@ func executeAttachmentCLIWithRootFlags(t *testing.T, base string, rootFlags []st
 	return b.String(), err
 }
 
-func attachmentCLIEnv(t *testing.T) (*testenv.Env, *docbanktest.Fake, string) {
+func attachmentCLIEnv(t *testing.T, options ...testenv.Option) (*testenv.Env, *docbanktest.Fake, string) {
 	t.Helper()
 	t.Setenv("KATA_AUTHOR", "operator")
 	f := docbanktest.New(t)
 	c := docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Docbank = c })
+	options = append([]testenv.Option{func(cfg *daemon.ServerConfig) { cfg.Docbank = c }}, options...)
+	env := testenv.New(t, options...)
 	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	iss, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Attachments", Author: "operator"})

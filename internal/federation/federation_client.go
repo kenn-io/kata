@@ -202,6 +202,13 @@ func (c *Client) RelayReset(ctx context.Context, projectID int64) (db.RelayReset
 		return checkpoint, callErr
 	}
 	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &checkpoint)
+	if err == nil {
+		var required string
+		required, err = db.RelayResetRequiredFeatures(checkpoint.Snapshot)
+		if err == nil {
+			err = db.RequireEventFeatures(db.SupportedEventFeatures, required)
+		}
+	}
 	return checkpoint, err
 }
 
@@ -224,11 +231,31 @@ func (c *Client) OfferRelayDeliveries(ctx context.Context, projectID int64, stre
 		return batch, callErr
 	}
 	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &batch)
+	if err == nil {
+		var required string
+		required, err = db.RelayBatchRequiredFeatures(batch)
+		if err == nil {
+			err = db.RequireEventFeatures(db.SupportedEventFeatures, required)
+		}
+	}
 	return batch, err
 }
 
 // AcceptRelayDeliveries submits an authenticated hop batch and returns its accepted prefix.
 func (c *Client) AcceptRelayDeliveries(ctx context.Context, projectID int64, batch db.RelayBatch) (db.RelayAcceptance, error) {
+	required, err := db.RelayBatchRequiredFeatures(batch)
+	if err != nil {
+		return db.RelayAcceptance{}, err
+	}
+	if required != "" {
+		_, supported, err := c.projectFederationFeatures(ctx, projectID)
+		if err != nil {
+			return db.RelayAcceptance{}, err
+		}
+		if err := db.RequireEventFeatures(supported, required); err != nil {
+			return db.RelayAcceptance{}, err
+		}
+	}
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
 	if err != nil {
 		return db.RelayAcceptance{}, err

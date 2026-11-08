@@ -263,6 +263,22 @@ type GetProjectFederationResponse = ProjectFederationBody
 
 type GetProjectFederationErrorResponse = ErrorEnvelope
 
+type FederatedDocbankCapabilitiesResponse = DocbankServiceCapabilities
+
+type FederatedDocbankCapabilitiesErrorResponse = ErrorEnvelope
+
+type LinkFederatedDocbankResponse = DocbankDescriptor
+
+type LinkFederatedDocbankErrorResponse = ErrorEnvelope
+
+type UploadFederatedDocbankResponse = DocbankDescriptor
+
+type UploadFederatedDocbankErrorResponse = ErrorEnvelope
+
+type FederatedDocbankContentResponse = []byte
+
+type FederatedDocbankContentErrorResponse = ErrorEnvelope
+
 type EnableProjectFederationResponse = ProjectFederationBody
 
 type EnableProjectFederationErrorResponse = ErrorEnvelope
@@ -1138,6 +1154,37 @@ type GetProjectFederationResp struct {
 	JSONDefault  *GetProjectFederationErrorResponse
 }
 
+type FederatedDocbankCapabilitiesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *FederatedDocbankCapabilitiesResponse
+	JSONDefault  *FederatedDocbankCapabilitiesErrorResponse
+}
+
+type LinkFederatedDocbankResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *LinkFederatedDocbankResponse
+	JSONDefault  *LinkFederatedDocbankErrorResponse
+}
+
+type UploadFederatedDocbankResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *UploadFederatedDocbankResponse
+	JSONDefault  *UploadFederatedDocbankErrorResponse
+}
+
+type FederatedDocbankContentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSONDefault  *FederatedDocbankContentErrorResponse
+}
+
 type EnableProjectFederationResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
@@ -1211,12 +1258,23 @@ type SkipFederationQuarantineResp struct {
 	JSONDefault  *SkipFederationQuarantineErrorResponse
 }
 
+type OfferRelayDeliveriesResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+}
+
 type OfferRelayDeliveriesResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *OfferRelayDeliveriesResponse
+	Headers200   *OfferRelayDeliveriesResp200Headers
 	JSONDefault  *OfferRelayDeliveriesErrorResponse
+}
+
+type GetRelayResetResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
 type GetRelayResetResp struct {
@@ -1224,6 +1282,7 @@ type GetRelayResetResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetRelayResetResponse
+	Headers200   *GetRelayResetResp200Headers
 	JSONDefault  *GetRelayResetErrorResponse
 }
 

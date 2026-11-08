@@ -206,7 +206,7 @@ func uploadAttachmentCLI(ctx context.Context, c *http.Client, base string, pid i
 	if err != nil {
 		return "", err
 	}
-	endpoint := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?", base, pid, url.PathEscape(ref)) + url.Values{"name": {filepath.Base(filename)}, "actor": {actor}}.Encode()
+	endpoint := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?", base, pid, url.PathEscape(ref)) + url.Values{"name": {filepath.Base(filename)}, "actor": {actor}, "client_kind": {"cli"}}.Encode()
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, file)
 	if err != nil {
 		return "", err

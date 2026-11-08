@@ -66,6 +66,12 @@ func requireFederatedIssueClaimForPrincipalWithRefresh(
 	principal db.ClaimPrincipal,
 	refresh bool,
 ) error {
+	return checkFederatedIssueClaim(ctx, cfg, issue, principal, refresh, false)
+}
+
+// Service calls must admit external I/O through a transaction fence and retain
+// every component of the authenticated forwarded lease identity.
+func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Issue, principal db.ClaimPrincipal, refresh, service bool) error {
 	// Claims belong to the resolved issue in its current project.
 	projectID := issue.ProjectID
 
@@ -77,19 +83,30 @@ func requireFederatedIssueClaimForPrincipalWithRefresh(
 
 	binding, err := cfg.DB.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
+		if service {
+			return attachmentError(503, "federation_offline")
+		}
 		return nil
 	}
 	if err != nil {
 		return internalAPIError(err)
 	}
 	if !binding.Enabled {
+		if service {
+			return attachmentError(503, "federation_offline")
+		}
 		return nil
 	}
 	if binding.Role == db.FederationRoleSpoke && !binding.PushEnabled {
 		return federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
 
-	principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
+	// A relay caches a downstream lease in that incoming hop's identity, just
+	// as its acquire response is remapped. Only local callers need the first
+	// binding transform here; forwarding to the next hop transforms separately.
+	if binding.RelayConfig == nil || principal.HolderInstanceUID == cfg.DB.InstanceUID() {
+		principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
+	}
 
 	if refresh && binding.Role == db.FederationRoleSpoke {
 		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue); err != nil {
@@ -98,10 +115,12 @@ func requireFederatedIssueClaimForPrincipalWithRefresh(
 	}
 
 	err = cfg.DB.CheckClaimGate(ctx, db.ClaimGateParams{
-		ProjectID: projectID,
-		IssueRef:  issue.UID,
-		Principal: principal,
-		Now:       time.Now().UTC(),
+		StrictPrincipal:       service,
+		ApplyTransactionFence: service,
+		ProjectID:             projectID,
+		IssueRef:              issue.UID,
+		Principal:             principal,
+		Now:                   time.Now().UTC(),
 	})
 	if err != nil {
 		return claimGateAPIError(err)
@@ -259,6 +278,10 @@ func isOfflineClaimHubStatusError(err error) bool {
 
 func claimGateAPIError(err error) error {
 	switch {
+	case errors.Is(err, errHostFederationAccessUnavailable), errors.Is(err, db.ErrTransactionFinalizationFailed):
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation access decision unavailable", "", nil)
+	case errors.Is(err, ErrHostAccessDenied):
+		return federationCredentialDenied()
 	case errors.Is(err, db.ErrClaimDenied):
 		return api.NewError(http.StatusConflict, "claim_denied",
 			"lease denied for federated issue mutation", "run kata federation lease acquire <ref>", nil)

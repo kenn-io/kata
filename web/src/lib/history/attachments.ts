@@ -1,6 +1,7 @@
 import type { KataTaskEvent } from '../kata/types'
 
 interface Attachment {
+  origin?: string
   name: string
   media_type: string
   size: number
@@ -16,6 +17,7 @@ function attachment(value: unknown): Attachment | undefined {
     raw.name === '.' ||
     raw.name === '..' ||
     /[/\\\p{Cc}]/u.test(raw.name) ||
+    (raw.origin !== undefined && typeof raw.origin !== 'string') ||
     typeof raw.media_type !== 'string' ||
     raw.media_type.length === 0 ||
     typeof raw.size !== 'number' ||
@@ -50,7 +52,9 @@ export function closingAttachments(
     const frozen = hasSnapshot ? attachment(evidence.attachment) : current
     if (!frozen) return [{ label: hasSnapshot ? 'Invalid attachment' : 'Attachment removed' }]
     const matches =
-      current && current.docbank_version.toLowerCase() === frozen.docbank_version.toLowerCase()
+      current &&
+      current.docbank_version.toLowerCase() === frozen.docbank_version.toLowerCase() &&
+      (current.origin ?? 'local') === (frozen.origin ?? 'local')
     const state = matches ? '' : current ? ' (changed)' : ' (removed)'
     const label = `${frozen.name} · ${frozen.size} bytes${state}`
     return [{ label, ...(matches ? { href: `#kata-attachment-${encodeURIComponent(id)}` } : {}) }]

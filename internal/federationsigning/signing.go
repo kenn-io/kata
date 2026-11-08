@@ -178,8 +178,9 @@ func profile(r *http.Request) bool {
 	return true
 }
 
-// Verify checks the MAC before reading a bounded body, then admits the nonce
-// atomically. The caller must first authenticate the live native enrollment.
+// Verify checks the MAC before reading a bounded body. Binary transfers admit
+// their nonce before body I/O; ordinary requests retain post-body admission.
+// The caller must first authenticate the live native enrollment.
 func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 	if !singleHeaders(r) || !signingpolicy.Unambiguous(r.URL) || !profile(r) {
 		return signingpolicy.ErrInvalid
@@ -227,6 +228,37 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 	if err != nil || httpsign.VerifyRequest("sig1", *verifier, cloned) != nil {
 		return signingpolicy.ErrInvalid
 	}
+	if IsAttachmentTransfer(r.Method, r.URL.Path) {
+		digestHeader := r.Header.Get("Content-Digest")
+		encoded := strings.TrimSuffix(strings.TrimPrefix(digestHeader, "sha-256=:"), ":")
+		digestBytes, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil || len(digestBytes) != sha256.Size || digestHeader != "sha-256=:"+base64.StdEncoding.EncodeToString(digestBytes)+":" {
+			return signingpolicy.ErrInvalid
+		}
+		if err := v.admit(r, k, secret, d); err != nil {
+			return err
+		}
+		bodyLimit := int64(MaxBodyBytes)
+		if r.Method == http.MethodPost {
+			bodyLimit = AttachmentMaxBodyBytes
+		}
+		body, digest, err := spoolBody(r.Context(), r.Body, r.ContentLength, bodyLimit)
+		if err != nil {
+			return errors.Join(signingpolicy.ErrInvalid, err)
+		}
+		if subtle.ConstantTimeCompare([]byte(digest), []byte(r.Header.Get("Content-Digest"))) != 1 {
+			_ = body.Close()
+			return signingpolicy.ErrInvalid
+		}
+		// Admission freshness was already durably checked. Only live authority,
+		// cancellation and clock/state safety are rechecked after a long body.
+		if err := v.transferStillAuthorized(r, k, secret); err != nil {
+			_ = body.Close()
+			return err
+		}
+		r.Body = body
+		return nil
+	}
 	if r.ContentLength > MaxBodyBytes {
 		return signingpolicy.ErrInvalid
 	}
@@ -262,9 +294,14 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 	if subtle.ConstantTimeCompare(secret, current) != 1 || (k.NotAfter != 0 && now.Unix() >= k.NotAfter) {
 		return signingpolicy.ErrKeyRejected
 	}
+	return v.admit(r, k, secret, d)
+}
+
+// admit preserves the ordinary replay watermark and restart-barrier protocol.
+func (v *Verifier) admit(r *http.Request, k signingpolicy.Key, secret []byte, d *httpsign.MessageDetails) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	now = v.now()
+	now := v.now()
 	if v.closed || v.failed {
 		return ErrState
 	}
@@ -304,7 +341,7 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 	if r.Context().Err() != nil || !fresh(d, now) {
 		return signingpolicy.ErrInvalid
 	}
-	current, err = k.Load()
+	current, err := k.Load()
 	if err != nil {
 		return err
 	}
@@ -316,12 +353,47 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 	return nil
 }
 
+func (v *Verifier) transferStillAuthorized(r *http.Request, k signingpolicy.Key, secret []byte) error {
+	current, err := k.Load()
+	if err != nil {
+		return err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	now := v.now()
+	if v.closed || v.failed {
+		return ErrState
+	}
+	if now.UnixNano() < v.last.UnixNano() {
+		return ErrWarming
+	}
+	if r.Context().Err() != nil {
+		return signingpolicy.ErrInvalid
+	}
+	if subtle.ConstantTimeCompare(secret, current) != 1 || (k.NotAfter != 0 && now.Unix() >= k.NotAfter) {
+		return signingpolicy.ErrKeyRejected
+	}
+	v.last = now
+	return nil
+}
+
 // Sign covers exact bytes and a fresh random nonce on each attempt.
 func Sign(r *http.Request, source signingpolicy.Source) error {
 	if !signingpolicy.Unambiguous(r.URL) {
 		return signingpolicy.ErrInvalid
 	}
-	r.Header.Set("Content-Type", "application/json")
+	path := r.URL.Path
+	if source.HubURL != "" {
+		base, err := signingpolicy.ExternalBase(source.HubURL)
+		if err != nil {
+			return err
+		}
+		path = strings.TrimPrefix(path, base.Path)
+	}
+	transfer := IsAttachmentTransfer(r.Method, path)
+	if !transfer || r.Method != http.MethodPost {
+		r.Header.Set("Content-Type", "application/json")
+	}
 	key, err := source.Load()
 	if err != nil {
 		return err
@@ -338,13 +410,39 @@ func Sign(r *http.Request, source signingpolicy.Source) error {
 	if err != nil {
 		return signingpolicy.ErrKey
 	}
-	digest, err := httpsign.GenerateContentDigestHeader(&r.Body, []string{httpsign.DigestSha256}, httpsign.NewDigestOptions().SetMaxBodySize(MaxBodyBytes))
+	var digest string
+	var spool *bodySpool
+	if transfer && r.Method == http.MethodPost {
+		// Client requests use zero for an unknown length when a body is present.
+		// Received requests retain exact zero validation in the shared spool.
+		length := r.ContentLength
+		if length == 0 && r.Body != nil && r.Body != http.NoBody {
+			length = -1
+		}
+		spool, digest, err = spoolBody(r.Context(), r.Body, length, AttachmentMaxBodyBytes)
+		if err == nil {
+			r.Body = spool
+			var info os.FileInfo
+			info, err = spool.Stat()
+			if err == nil {
+				r.ContentLength = info.Size()
+			}
+		}
+	} else {
+		digest, err = httpsign.GenerateContentDigestHeader(&r.Body, []string{httpsign.DigestSha256}, httpsign.NewDigestOptions().SetMaxBodySize(MaxBodyBytes))
+	}
 	if err != nil {
-		return signingpolicy.ErrInvalid
+		if spool != nil {
+			_ = spool.Close()
+		}
+		return errors.Join(signingpolicy.ErrInvalid, err)
 	}
 	r.Header.Set("Content-Digest", digest)
 	input, sig, err := httpsign.SignRequest("sig1", *signer, r)
 	if err != nil {
+		if spool != nil {
+			_ = spool.Close()
+		}
 		return signingpolicy.ErrInvalid
 	}
 	r.Header.Set("Signature-Input", input)
@@ -382,8 +480,13 @@ func (t transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	cloned.URL.Scheme, cloned.URL.Host = t.base.Scheme, t.base.Host
 	cloned.Host = t.base.Host
 	cloned.Header.Set("Authorization", "Bearer "+t.token)
-	if err := Sign(cloned, t.source); err != nil {
+	source := t.source
+	source.HubURL = t.base.String()
+	if err := Sign(cloned, source); err != nil {
 		return nil, err
+	}
+	if IsAttachmentTransfer(cloned.Method, strings.TrimPrefix(cloned.URL.Path, t.base.Path)) && cloned.Method == http.MethodPost {
+		defer func() { _ = cloned.Body.Close() }()
 	}
 	// The underlying Transport must not transparently resend a nonce after
 	// a response is lost. Native retries reenter this signer with a fresh nonce.

@@ -58,6 +58,10 @@ type ReplaceCronWorkflowBody = PutCronWorkflowBody
 
 type RestoreCronWorkflowBody = CronDefinitionActionBody
 
+type LinkFederatedDocbankBody = LinkAttachmentInput
+
+type UploadFederatedDocbankBody = runtime.File
+
 type EnableProjectFederationBody = EnableProjectFederationRequestBody
 
 type IngestFederationProjectEventsBody = FederationIngestEventsRequestBody

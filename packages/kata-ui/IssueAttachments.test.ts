@@ -49,6 +49,71 @@ it('loads image previews through the host fetch and revokes URLs on unmount', as
   result.unmount()
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
 })
+
+it('revokes an open preview when only the attachment origin changes', async () => {
+  vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:old-origin')
+  const { rerender } = render(IssueAttachments, {
+    attachmentsEnabled: true,
+    attachments: { [id]: entry },
+    baseURL: '/attachments',
+    fetchAttachment: async () => new Blob(['old origin'], { type: 'image/png' }),
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
+  await waitFor(() => expect(screen.getByAltText('screen.png').getAttribute('src')).toBe('blob:old-origin'))
+
+  await rerender({
+    attachments: { [id]: { ...entry, origin: '01ARZ3NDEKTSV4RRFFQ69G5FAV' } },
+  })
+
+  expect(screen.queryByAltText('screen.png')).toBeNull()
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:old-origin')
+  expect(screen.getByRole('button', { name: 'Preview screen.png' })).toBeTruthy()
+})
+
+it('ignores an in-flight preview response after the attachment origin changes', async () => {
+  let finishOld!: (blob: Blob) => void
+  let settleOld!: () => void
+  const oldSettled = new Promise<void>((resolve) => {
+    settleOld = resolve
+  })
+  const fetchAttachment = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Blob>((resolve) => {
+          finishOld = (blob) => {
+            resolve(blob)
+            settleOld()
+          }
+        }),
+    )
+    .mockResolvedValueOnce(new Blob(['new origin'], { type: 'image/png' }))
+  vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:new-origin')
+  const { rerender } = render(IssueAttachments, {
+    attachmentsEnabled: true,
+    attachments: { [id]: entry },
+    baseURL: '/attachments',
+    fetchAttachment,
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
+  await waitFor(() => expect(fetchAttachment).toHaveBeenCalledTimes(1))
+
+  await rerender({
+    attachments: { [id]: { ...entry, origin: '01ARZ3NDEKTSV4RRFFQ69G5FAV' } },
+  })
+  finishOld(new Blob(['old origin'], { type: 'image/png' }))
+  await oldSettled
+  await Promise.resolve()
+
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
+  expect(screen.queryByAltText('screen.png')).toBeNull()
+  const preview = screen.getByRole('button', { name: 'Preview screen.png' })
+  expect((preview as HTMLButtonElement).disabled).toBe(false)
+  await fireEvent.click(preview)
+  await waitFor(() => expect(screen.getByAltText('screen.png').getAttribute('src')).toBe('blob:new-origin'))
+  expect(fetchAttachment).toHaveBeenCalledTimes(2)
+})
+
 it.each([
   { action: 'Preview', name: 'screen.png', media_type: 'image/png' },
   { action: 'Play', name: 'clip.mp4', media_type: 'video/mp4' },

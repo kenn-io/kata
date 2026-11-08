@@ -1,6 +1,10 @@
 package daemon
 
 func registerFederationOperationPolicies(policies map[string]HostOperationPolicy) {
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate},
+		"federatedDocbankCapabilities", "federatedDocbankContent")
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate, Mutation: true},
+		"uploadFederatedDocbank", "linkFederatedDocbank")
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationRead, Capability: hostCapabilityRead,
 	}, "getFederationStatus", "getProjectFederation", "getProjectFederationStatus", "getFederationBridgeStatus")

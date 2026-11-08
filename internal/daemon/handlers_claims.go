@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/projectscope"
 )
 
@@ -681,7 +682,7 @@ func claimForwardClient(
 	if err != nil {
 		return nil, config.FederationCredential{}, internalAPIError(err)
 	}
-	return newClaimForwardClient(ctx, binding, cred)
+	return claimForwardClientWithCredential(ctx, binding, cred)
 }
 
 // Show classifies optional setup cancellation before API conversion loses
@@ -695,15 +696,20 @@ func showClaimForwardClient(ctx context.Context, cfg ServerConfig, binding db.Fe
 	if err != nil {
 		return nil, config.FederationCredential{}, err
 	}
-	return newClaimForwardClient(ctx, binding, cred)
+	return claimForwardClientWithCredential(ctx, binding, cred)
 }
 
-func newClaimForwardClient(ctx context.Context, binding db.FederationBinding, cred config.FederationCredential) (*claimHubClient, config.FederationCredential, error) {
+func claimForwardClientWithCredential(ctx context.Context, binding db.FederationBinding, cred config.FederationCredential) (*claimHubClient, config.FederationCredential, error) {
 	if cred.RelayEnrollmentPending {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "relay enrollment pending", "finish bridge enrollment before forwarding claims", nil)
 	}
 	if strings.TrimSpace(cred.Token) == "" {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "federation claim credentials are unavailable", "", nil)
+	}
+	credentialURL, credentialErr := httpurl.CanonicalHTTPBaseURL(cred.HubURL)
+	bindingURL, bindingErr := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
+	if credentialErr != nil || bindingErr != nil || credentialURL != bindingURL || cred.HubProjectID != binding.HubProjectID {
+		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "federation credential target differs from the binding", "reconnect the project before retrying", nil)
 	}
 	cred = config.FederationTransportCredential(
 		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
