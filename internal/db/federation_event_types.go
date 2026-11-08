@@ -137,6 +137,17 @@ func isCronDefinitionEvent(kind string) bool {
 	return ok && (strings.HasPrefix(kind, "cron.job.") || strings.HasPrefix(kind, "cron.workflow."))
 }
 
+// CronDefinitionEventTypesSQL is the quoted SQL list of cron definition types.
+func CronDefinitionEventTypesSQL() string {
+	var names []string
+	for _, declared := range federationEventTypes {
+		if isCronDefinitionEvent(declared.name) {
+			names = append(names, declared.name)
+		}
+	}
+	return sqlStringList(names)
+}
+
 // FederationPushEventTypesSQL is the quoted SQL list of every event type a
 // spoke pushes, for use inside IN (...).
 func FederationPushEventTypesSQL() string {

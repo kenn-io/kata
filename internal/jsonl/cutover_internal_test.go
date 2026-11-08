@@ -155,7 +155,7 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 
 // Index-only upgrades must match the fresh-store catalog without exporting.
 func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
-	for _, version := range []int{41, 44} {
+	for _, version := range []int{41, 44, 48} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			path := indexOnlySource(t, version)
@@ -241,6 +241,7 @@ func indexOnlySource(t *testing.T, version int) string {
 		{46, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}},
 		{47, []string{"idx_issues_ready_updated"}},
 		{48, []string{"idx_events_moved_from_id"}},
+		{49, []string{"idx_events_cron_run_uid"}},
 	} {
 		if step.to > version {
 			for _, name := range step.indexes {

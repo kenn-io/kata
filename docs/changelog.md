@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -10,13 +10,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Turn on search by meaning from the web's Settings page. Watch the download, then run `kata daemon restart` to finish. Reopen `kata ui` to watch indexing. Other viewers can read the status. Unconfigured `kata search` results point to Settings and the CLI setup command on stderr; `--quiet` and `--agent` suppress the line.
+- Keep local writes responsive during SQLite cron-only federation pulls by looking up only the runs carried by each page and their complete observation history. Schema 49 adds a cron event index on SQLite and PostgreSQL.
 - Keep federation polls fast on busy hubs by skipping other projects' event history.
 - Attach oh-my-pi sessions to closes by copying the documented
   [closing-session transcript](reference/configuration.md#closing-session-transcripts)
   configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
   `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
   recorded oh-my-pi closes as pi sessions.
-- Upgrade SQLite schemas 41 through 47 to 48 by adding indexes in place, avoiding
+- Upgrade SQLite schemas 41 through 48 to 49 by adding indexes in place, avoiding
   a full JSONL export/import and its retained database backup. The indexes and
   version stamp commit together; interrupted upgrades retry on the next start.
 - Create your first project from the web UI's empty task list. **New task**
