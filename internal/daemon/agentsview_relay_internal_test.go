@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/json/v2"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -91,4 +94,57 @@ func TestAgentsViewHistoryUsesEventClockInsteadOfInsertionOrder(t *testing.T) {
 	newer := db.Event{ID: 0, UID: "newer", OriginInstanceUID: "node", HLCPhysicalMS: 110}
 	require.False(t, agentsViewEventAfter(older, close))
 	require.True(t, agentsViewEventAfter(newer, close))
+}
+
+type agentsViewHistoryStore struct {
+	db.Storage
+	events []db.Event
+}
+
+func (s agentsViewHistoryStore) EventsByUIDs(_ context.Context, _ int64, uids []string) ([]db.Event, error) {
+	for _, e := range s.events {
+		if e.UID == uids[0] {
+			return []db.Event{e}, nil
+		}
+	}
+	return nil, db.ErrNotFound
+}
+func (s agentsViewHistoryStore) EventsAfter(_ context.Context, p db.EventsAfterParams) ([]db.Event, error) {
+	var out []db.Event
+	for _, e := range s.events {
+		if e.ID <= p.AfterID {
+			continue
+		}
+		if len(p.Types) > 0 && !slices.Contains(p.Types, e.Type) {
+			continue
+		}
+		out = append(out, e)
+		if len(out) == p.Limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func TestAgentsViewDelayedOlderTransitionDoesNotRevokeClose(t *testing.T) {
+	issueUID, projectUID, root := "01ARZ3NDEKTSV4RRFFQ69G5FAV", "01ARZ3NDEKTSV4RRFFQ69G5FAW", "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+	a := agentsviewrelay.Association{Version: 1, IssueUID: issueUID, ProjectUID: projectUID, AuthorityUID: root, ServiceID: strings.Repeat("a", 64), RootKeyID: strings.Repeat("c", 64), Agent: "pi", NativeSessionID: "selected", SessionID: "pi:selected", SnapshotSHA256: strings.Repeat("b", 64), SnapshotBytes: 12, LocatorBase: "https://archive.example", Route: []agentsviewrelay.RouteObservation{{InstanceUID: root, ProjectUID: projectUID}}}
+	payload, err := json.Marshal(map[string]any{"agentsview_association": a})
+	require.NoError(t, err)
+	issue := db.Issue{ID: 1, UID: issueUID, ProjectID: 1, Status: "closed"}
+	closeUID := "01ARZ3NDEKTSV4RRFFQ69G5FAZ"
+	events := []db.Event{
+		{ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAP", Type: "issue.created", IssueUID: &issueUID, ProjectUID: projectUID, OriginInstanceUID: root, HLCPhysicalMS: 1, Payload: `{"title":"example"}`},
+		{ID: 2, UID: closeUID, Type: "issue.closed", IssueUID: &issueUID, ProjectUID: projectUID, OriginInstanceUID: root, HLCPhysicalMS: 3, Payload: string(payload)},
+		{ID: 3, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAQ", Type: "issue.reopened", IssueUID: &issueUID, ProjectUID: projectUID, OriginInstanceUID: root, HLCPhysicalMS: 2, Payload: `{}`},
+	}
+	c := agentsviewrelay.Control{Version: 1, IssueUID: issueUID, ProjectUID: projectUID, AuthorityUID: root, CloseEventUID: closeUID, ServiceID: a.ServiceID, Agent: a.Agent, NativeSessionID: a.NativeSessionID, SessionID: a.SessionID, SnapshotSHA256: a.SnapshotSHA256, SnapshotBytes: a.SnapshotBytes, Route: a.Route}
+	store := agentsViewHistoryStore{events: events}
+	_, err = loadAgentsViewClose(t.Context(), ServerConfig{DB: store}, issue, c)
+	require.NoError(t, err)
+	store.events = append(store.events, db.Event{ID: 4, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAR", Type: "issue.moved", IssueUID: &issueUID, ProjectUID: projectUID, OriginInstanceUID: root, HLCPhysicalMS: 4, Payload: `{}`})
+	_, err = loadAgentsViewClose(t.Context(), ServerConfig{DB: store}, issue, c)
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "agentsview_close_changed", apiErr.Code)
 }
