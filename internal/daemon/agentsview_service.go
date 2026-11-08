@@ -14,7 +14,6 @@ import (
 
 	"go.kenn.io/kata/internal/agentsviewservice"
 	"go.kenn.io/kata/internal/api"
-	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
@@ -221,7 +220,7 @@ func fetchAgentsViewService(ctx context.Context, cfg ServerConfig, binding db.Fe
 func agentsViewForwardHTTPClient(ctx context.Context, cfg ServerConfig, credential config.FederationCredential) (*http.Client, error) {
 	// The synthetic Unix origin does not identify a socket. Resolving it via
 	// the CLI runtime registry could send this enrollment to another daemon.
-	if strings.HasPrefix(credential.HubURL, clientpkg.UnixBase) {
+	if strings.HasPrefix(credential.HubURL, "http://kata.invalid") {
 		return nil, errors.New("AgentsView upstream socket is not explicitly pinned")
 	}
 	if cfg.AgentsViewHubClient != nil {
@@ -260,18 +259,20 @@ func agentsViewForwardHTTPClient(ctx context.Context, cfg ServerConfig, credenti
 		return &bounded, nil
 	}
 
-	opts := clientpkg.Opts{
-		Timeout:                agentsViewRequestTimeout,
-		ResponseHeaderTimeout:  agentsViewHeaderTimeout,
-		MaxResponseHeaderBytes: agentsViewMaxHeaderBytes,
-		DisableCompression:     true,
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, errors.New("AgentsView upstream transport cannot enforce response bounds")
 	}
-	client, err := clientpkg.NewHTTPClientForTarget(ctx, credential.HubURL, clientpkg.TargetAuth{
-		Token:               credential.Token,
-		AllowInsecure:       credential.AllowInsecure,
-		TrustPrivateNetwork: cfg.Auth.TrustPrivateNetwork,
-	}, opts)
-	if err != nil {
+	clone := transport.Clone()
+	clone.DisableCompression = true
+	clone.ResponseHeaderTimeout = agentsViewHeaderTimeout
+	clone.MaxResponseHeaderBytes = agentsViewMaxHeaderBytes
+	client := &http.Client{Transport: clone, Timeout: agentsViewRequestTimeout}
+	policy := config.BearerPolicy{
+		TrustPrivateNetwork:    cfg.Auth.TrustPrivateNetwork,
+		AllowInsecurePlaintext: credential.AllowInsecure,
+	}
+	if err := policy.ConfigureClient(client, credential.HubURL, credential.Token); err != nil {
 		return nil, err
 	}
 	if credential.Signing != nil {
