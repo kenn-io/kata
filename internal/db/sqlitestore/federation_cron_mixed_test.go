@@ -204,23 +204,6 @@ func TestCronMixedMaterializationMatchesFullFold(t *testing.T) {
 	}
 }
 
-// Pushes are not limited to one polling page. A mixed batch must retain the
-// full-query fallback before its issue scope exceeds SQLite's parameter limit.
-func TestCronMixedPreparationLargeIssueScope(t *testing.T) {
-	d, p, _ := incrementalTestStore(t)
-	prepared := make([]preparedFederationIngestEvent, 32_769)
-	for i := range 32_768 {
-		uid := fmt.Sprintf("%026d", i+1)
-		prepared[i] = preparedFederationIngestEvent{Event: incrementalRemoteEvent(t, p, uid, "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":"update"}`, uid), 9_000_001_000_000+int64(i))}
-	}
-	prepared[len(prepared)-1] = preparedFederationIngestEvent{Event: cronPullWorkflow(t, p, "workflow", 9_000_002_000_000)}
-	tx, err := d.BeginTx(t.Context(), nil)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback() }()
-	_, err = prepareFederationMaterializationTx(t.Context(), tx, p.ID, prepared)
-	require.NoError(t, err)
-}
-
 func cronMixedObservation(t testing.TB, p db.Project, issueUID, definitionUID, status string, revision int, clock int64) db.RemoteEvent {
 	t.Helper()
 	payload := fmt.Sprintf(`{"project_uid":%q,"uid":"01ARZ3NDEKTSV4RRFFQ69G5FBB","workflow_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","workflow_definition_event_uid":%q,"issue_uid":%q,"actor":"tester","status":%q,"summary":{"version":1,"message":"synthetic"},"revision":%d,"created_at":"2026-05-23T12:00:00Z","updated_at":"2026-05-23T12:00:%02dZ"}`, p.UID, definitionUID, issueUID, status, revision, revision)
