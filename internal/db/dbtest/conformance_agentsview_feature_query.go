@@ -30,6 +30,15 @@ func checkAgentsViewFeatureQueryLayouts(t *testing.T, store db.Storage, backend 
 	_, closed, _, err := store.CloseIssueGuarded(ctx, db.CloseIssueParams{IssueID: first.ID, Reason: "done", Actor: "worker"})
 	require.NoError(t, err)
 	require.NotEmpty(t, closed)
+	var lo, hi sql.NullInt64
+	var count int64
+	readBounds := func(projectID int64) {
+		require.NoError(t, query.QueryRowContext(ctx, `SELECT MIN(id), MAX(id), COUNT(*) FROM events WHERE project_id=$1`, projectID).Scan(&lo, &hi, &count))
+	}
+	readBounds(dense.ID)
+	require.Positive(t, count)
+	require.True(t, lo.Valid && hi.Valid)
+	require.Equal(t, hi.Int64, lo.Int64+(count-1), "first layout must be dense")
 	association := agentsviewrelay.Association{Version: 1, IssueUID: first.UID, ProjectUID: dense.UID, AuthorityUID: root, ServiceID: strings.Repeat("a", 64), RootKeyID: strings.Repeat("c", 64), Agent: "pi", NativeSessionID: "selected", SessionID: "pi:selected", SnapshotSHA256: strings.Repeat("b", 64), SnapshotBytes: 12, LocatorBase: "https://archive.example", Route: []agentsviewrelay.RouteObservation{{InstanceUID: root, ProjectUID: dense.UID}}}
 	raw, err := json.Marshal(association)
 	require.NoError(t, err)
@@ -61,12 +70,24 @@ func checkAgentsViewFeatureQueryLayouts(t *testing.T, store db.Storage, backend 
 	}
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: dense.ID, Title: "later issue", Author: "worker"})
 	require.NoError(t, err)
+	readBounds(dense.ID)
+	require.Greater(t, hi.Int64, lo.Int64+(count-1), "interleaved layout must be sparse")
 	features, err = db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
 	require.NoError(t, err)
 	require.Contains(t, features, agentsviewrelay.EventFeature)
 	features, err = db.ProjectRequiredEventFeatures(ctx, query, other.UID, backend.Name == "postgres")
 	require.NoError(t, err)
 	require.NotContains(t, features, agentsviewrelay.EventFeature)
+	// A project with no retained events must select neither SQLite traversal.
+	empty, err := store.CreateProject(ctx, "empty-project")
+	require.NoError(t, err)
+	_, err = query.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, empty.ID)
+	require.NoError(t, err)
+	readBounds(empty.ID)
+	require.Zero(t, count)
+	features, err = db.ProjectRequiredEventFeatures(ctx, query, empty.UID, backend.Name == "postgres")
+	require.NoError(t, err)
+	require.Empty(t, features)
 	tx, err := query.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
