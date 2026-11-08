@@ -92,7 +92,7 @@ looked up in `error.data`; see [HTTP API errors](http-api.md#errors).
 ## Workspace initialization
 
 ```sh
-kata init [--project <name>] [--with-agents] [--with-hooks] [--with-codex-hooks]
+kata init [--project <name>] [--with-agents [--agent-mode cli|mcp]] [--with-hooks] [--with-codex-hooks]
 kata init [--replace | --reassign]
 ```
 
@@ -109,13 +109,31 @@ discipline, and the `work.*` attention conventions (see
 command updates only kata's block and leaves other content untouched, so a
 repo initialized before the `work.*` section shipped gains it on the next run.
 
+On unreleased `main`, add `--agent-mode=mcp` with `--with-agents` to install
+instructions for assistants that use Kata through MCP. The block directs them
+to native `kata.skills` workflow and quickstart guides without requiring a
+shell. The default is `cli`; explicitly selecting `--agent-mode=cli` restores
+the CLI block. Kata does not remember the mode, so `--with-agents` without
+`--agent-mode` replaces an MCP block with the CLI block. Pass
+`--agent-mode=mcp` on every refresh in an MCP-only repository. Mode changes replace only Kata's managed span, preserve other
+content and are idempotent. An invalid mode or a mode without `--with-agents`
+fails before project or file changes. Hook contracts keep their CLI guidance.
+
+Assistants with no shell can get the same managed text and a client-side edit
+plan from [`kata.skills` setup](mcp.md#install-mcp-only-instructions-unreleased).
+
 When migrating from Beads, an existing `AGENTS.md` or real `CLAUDE.md` may still
 carry a Beads integration block. kata leaves that file untouched and writes a
 `<file>.kata-proposed` sidecar with the Beads block removed and kata guidance
 added. Review the sidecar before replacing the original.
 
 A symlinked `AGENTS.md` is refused before it is read; replace it with a regular
-file before using `--with-agents`.
+file before using `--with-agents`. Symlinked `CLAUDE.md` is skipped. Malformed,
+orphaned, reversed or duplicate Kata markers are reported as guidance warnings;
+Kata leaves the affected file untouched and still updates the other file.
+Existing migration sidecars are never overwritten. Project binding still
+succeeds. `--json` reports the warning in `agent_guidance_warning`, and
+`--agent` adds an `agent_guidance_warning` line.
 
 Pass `--with-hooks` to install the `work.attention` lifecycle hooks from the
 [agent orchestration recipe](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)

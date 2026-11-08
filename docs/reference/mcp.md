@@ -530,22 +530,56 @@ list the catalog, or pass a name:
 {"name":"workflow"}
 ```
 
-The seven names are `workflow`, `issues`, `claiming`, `closing`, `teammates`,
-`scheduling`, and `events`. Read `workflow` before your first write. The guides
-reuse the contract and quickstart text shipped by `kata quickstart`, followed
-by a command-to-tool table with the section loaders and MCP differences.
+On unreleased `main`, the names are `setup`, `quickstart`, `workflow`, `issues`,
+`claiming`, `closing`, `teammates`, `scheduling`, and `events`. Read `workflow`
+at session start and before your first write. `quickstart` walks through search,
+creation, ownership, progress and completion using native JSON tool calls.
+The guides describe the connected server's scope, section loaders, required
+idempotency keys and typed close evidence. They require no shell commands.
 The Markdown body is returned once as text content; structured content holds
-only the guide's name, title, and summary.
+the guide's name, title and summary. `setup` also returns `managed_block`.
+
+### Install MCP-only instructions (unreleased)
+
+An assistant with a connected Kata server and its own local file editor can
+request the exact repository instruction block:
+
+```json
+{"name":"setup"}
+```
+
+Pass this input to `kata.skills`. The server returns content and a bounded edit
+plan. It reads or writes no client files and accepts no filesystem path or file
+content. This sets up instructions for an already authorized connection; it
+does not create a project or bind a workspace. Without a local file tool, the
+assistant presents the returned text as pending setup.
+
+The caller inspects local `AGENTS.md` and `CLAUDE.md`, refuses a symlinked
+`AGENTS.md`, skips a symlinked `CLAUDE.md`, and updates selected regular files.
+If neither exists, it creates `AGENTS.md`. It replaces only one unambiguous Kata
+managed span, or appends the block if no markers exist. Both instruction modes
+share markers, so mode changes preserve all unrelated content. Malformed,
+reversed, orphaned or duplicate markers require conflict resolution.
+
+The edit plan preserves permissions, compares the preimage before writing and
+checks readback afterward. Complete Beads integration blocks leave the original
+untouched and produce an exclusive-create `.kata-proposed` sidecar; existing
+sidecars are never overwritten. If the local editor cannot enforce these rules,
+the caller returns a proposal. Receiving content alone is never reported as a
+successful file installation.
+
+For local CLI installation and switching back to CLI guidance, see
+[workspace initialization](cli.md#workspace-initialization).
 
 This is a fixed catalog of agent workflow guidance. It cannot read arbitrary
 files or other skills. For reference documentation, load `kata.load_docs`, then
 use `kata.search_docs` and `kata.read_doc`.
 
-Some CLI workflows have no equivalent MCP call. `kata notify` requires an
+Some workflows have no equivalent MCP call in this version. Notifications require an
 operator with CLI access to send or clear requests. `kata.wait` waits on issue
 status only. For an attention wait, poll `kata.show` for every watched ref with
-your own deadline: a closed issue completes first, then a non-empty
-`work.attention` other than `ok`. `kata.inbox` lists notifications on open
+your own deadline: a closed issue completes first, then `work.attention` of
+`needs-human` or `stuck`. Report timeout distinctly. `kata.inbox` lists notifications on open
 issues; it does not replace an attention wait. In multi-project scope, use
 `project#ref` for existing-issue calls and pass `project` only where the tool's
 schema includes it.

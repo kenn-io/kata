@@ -233,12 +233,9 @@ func toolSearchInputs(raw any) ([]ToolSearchParameter, error) {
 
 func toolSearchGuides(tool string) []string {
 	names := make([]string, 0)
-	for _, name := range SkillGuides() {
-		for _, row := range SkillCommands() {
-			if slices.Contains(row.Tools, tool) && slices.Contains(SkillGuideCommands(name), row.CLI) {
-				names = append(names, name)
-				break
-			}
+	for _, guide := range skillGuides {
+		if slices.Contains(guide.tools, tool) {
+			names = append(names, guide.name)
 		}
 	}
 	return names

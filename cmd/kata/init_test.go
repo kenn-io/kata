@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -855,20 +854,23 @@ func TestInit_WithAgents_AgentsBeadsSymlinkNotMigrated(t *testing.T) {
 func captureProcessStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr
-	r, w, err := os.Pipe()
+	// A pipe drained only after fn returns can fill while fn prints a warning.
+	// Use a fixture file so capture cannot block on the platform's pipe capacity.
+	w, err := os.CreateTemp(t.TempDir(), "stderr")
 	require.NoError(t, err)
 	os.Stderr = w
-	t.Cleanup(func() { os.Stderr = old })
+	defer func() {
+		os.Stderr = old
+		_ = w.Close()
+	}()
 
 	fn()
 
-	require.NoError(t, w.Close())
-	var buf bytes.Buffer
-	_, err = io.Copy(&buf, r)
+	_, err = w.Seek(0, io.SeekStart)
 	require.NoError(t, err)
-	require.NoError(t, r.Close())
-	os.Stderr = old
-	return buf.String()
+	data, err := io.ReadAll(w)
+	require.NoError(t, err)
+	return string(data)
 }
 
 func TestRewriteGuidanceFileKeepsFileMode(t *testing.T) {

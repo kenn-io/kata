@@ -12,26 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
-	"go.kenn.io/kata/internal/agentguide"
 	"go.kenn.io/kata/internal/storageadmin"
 )
-
-func TestSkillFragmentsArePartitioned(t *testing.T) {
-	assigned := map[string]int{}
-	for _, guide := range skillGuides {
-		for _, id := range guide.fragments {
-			assigned[id]++
-		}
-	}
-	for _, id := range cliOnlyFragments {
-		assigned[id]++
-	}
-	for _, fragment := range agentguide.Fragments {
-		require.Equal(t, 1, assigned[fragment.ID], fragment.ID)
-		delete(assigned, fragment.ID)
-	}
-	require.Empty(t, assigned, "unknown fragment IDs")
-}
 
 func mutatedNameGen(names []string) *rapid.Generator[string] {
 	return rapid.Custom(func(t *rapid.T) string {
@@ -48,7 +30,7 @@ func TestSkillsLookupOutcomes(t *testing.T) {
 	previousChecks := flag.Lookup("rapid.checks").Value.String()
 	require.NoError(t, flag.Set("rapid.checks", "1000"))
 	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
-	names := []string{"workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events"}
+	names := []string{"setup", "quickstart", "workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events"}
 	gen := rapid.OneOf(rapid.String(), rapid.SampledFrom(names), mutatedNameGen(names), rapid.SampledFrom([]string{"", "\t\n\u2003", "/tmp/guide.md", "..", "workflow\x00"}))
 	rapid.Check(t, func(rt *rapid.T) {
 		raw := gen.Draw(rt, "name")
@@ -114,7 +96,12 @@ func TestSkillsGetReturnsOneTextBlock(t *testing.T) {
 		require.Equal(t, md, result.Content[0].(*sdkmcp.TextContent).Text)
 		var out map[string]any
 		require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &out))
-		require.Len(t, out, 1)
+		if name == "setup" {
+			require.Len(t, out, 2)
+			require.NotEmpty(t, out["managed_block"])
+		} else {
+			require.Len(t, out, 1)
+		}
 		entries := out["skills"].([]any)
 		require.Len(t, entries, 1)
 		entry := entries[0].(map[string]any)
@@ -164,38 +151,11 @@ func TestSkillsDeterministicAndScopeIndependent(t *testing.T) {
 	}
 }
 
-func TestSkillGuidesIncludeTheirFragmentsVerbatim(t *testing.T) {
-	for _, guide := range skillGuides {
-		md, ok := SkillMarkdown(guide.name)
-		require.True(t, ok)
-		var source strings.Builder
-		for _, id := range guide.fragments {
-			found := false
-			for _, fragment := range agentguide.Fragments {
-				if fragment.ID == id {
-					require.Contains(t, md, fragment.Text)
-					source.WriteString(fragment.Text)
-					found = true
-				}
-			}
-			require.True(t, found, id)
-		}
-		if guide.name == "workflow" {
-			require.Contains(t, md, agentguide.Contract)
-			require.Contains(t, md, "## MCP differences")
-			source.WriteString(agentguide.Contract)
-		}
-		got, ok := SkillSource(guide.name)
-		require.True(t, ok)
-		require.Equal(t, source.String(), got)
-	}
+func TestSkillMarkdownRejectsInvalidNames(t *testing.T) {
 	for _, name := range []string{"missing", "Workflow", "workflow.md", "../workflow"} {
 		md, ok := SkillMarkdown(name)
 		require.False(t, ok)
 		require.Empty(t, md)
-		source, ok := SkillSource(name)
-		require.False(t, ok)
-		require.Empty(t, source)
 	}
 }
 
@@ -208,68 +168,9 @@ func TestSkillGuidesStayBounded(t *testing.T) {
 }
 
 func TestSkillCatalogOrder(t *testing.T) {
-	want := []string{"workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events"}
+	want := []string{"setup", "quickstart", "workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events"}
 	require.Equal(t, want, SkillGuides())
 	returned := SkillGuides()
 	returned[0] = "changed"
 	require.Equal(t, want, SkillGuides(), "callers must not mutate the catalog")
-}
-
-func TestSkillCommandToolsAreRegistered(t *testing.T) {
-	session := connectTestServer(t)
-	listed, err := session.ListTools(t.Context(), nil)
-	require.NoError(t, err)
-	names := toolNames(listed.Tools)
-	for _, row := range SkillCommands() {
-		for _, tool := range row.Tools {
-			require.Contains(t, names, tool, row.CLI)
-			loader, ok := sectionLoaderForTool(tool)
-			require.True(t, ok, tool)
-			require.Contains(t, names, loader)
-		}
-	}
-}
-
-func TestSkillGuideCommandsExist(t *testing.T) {
-	rows := SkillCommands()
-	var all []string
-	for _, row := range rows {
-		all = append(all, row.CLI)
-	}
-	for _, name := range SkillGuides() {
-		for _, key := range SkillGuideCommands(name) {
-			require.Contains(t, all, key, name)
-		}
-	}
-	require.Equal(t, all, SkillGuideCommands("workflow"))
-	require.Empty(t, SkillGuideCommands("missing"))
-	rows[0].Tools[0] = "changed"
-	require.Equal(t, "kata.search", SkillCommands()[0].Tools[0])
-}
-
-func TestSkillTableEscapesCells(t *testing.T) {
-	row := renderCommandRow(SkillCommand{CLI: "kata x", Tools: []string{"kata.x"}, Note: "a|b"}, "kata.load_x")
-	require.Equal(t, "| `kata x` | `kata.x` | `kata.load_x` | a\\|b |", row)
-	for _, c := range SkillCommands() {
-		require.NotContains(t, c.CLI+c.Note+strings.Join(c.Tools, ""), "\n", c.CLI)
-		require.NotContains(t, c.CLI+c.Note+strings.Join(c.Tools, ""), "\r", c.CLI)
-	}
-	require.Equal(t, "| `kata notify` | none | — | CLI only |", renderCommandRow(SkillCommand{CLI: "kata notify", Note: "CLI only"}, ""))
-}
-
-func TestSkillGuidesRenderTheirRows(t *testing.T) {
-	for _, name := range SkillGuides() {
-		md, _ := SkillMarkdown(name)
-		for _, key := range SkillGuideCommands(name) {
-			for _, row := range SkillCommands() {
-				if row.CLI == key {
-					loader := ""
-					if len(row.Tools) != 0 {
-						loader, _ = sectionLoaderForTool(row.Tools[0])
-					}
-					require.Contains(t, md, renderCommandRow(row, loader), name)
-				}
-			}
-		}
-	}
 }
