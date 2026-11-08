@@ -13,7 +13,37 @@ Kata stores one reference per file in issue metadata. [Docbank](https://github.c
 
 Choose a Docbank vault whose contents may be shared with every issue reader and metadata writer served by this daemon. A metadata writer can reference any content version in that vault, and a reader can fetch it through Kata. Folders organize files; use separate vaults for different audiences.
 
-To use a Docbank on the same machine, add this to `<KATA_HOME>/config.toml` on each daemon that uploads or serves files, then restart the daemon:
+`kata docbank setup` turns attachments on for the current `KATA_HOME` and restarts its running daemons. Run it on each daemon that uploads or serves files.
+
+For a Docbank on the same machine:
+
+```sh
+kata docbank setup [--folder /kata]
+```
+
+Setup then:
+
+1. Prints the shared-vault warning with the vault path and asks once. Without a terminal, pass `--yes` to skip the question.
+2. Checks that the Docbank in `DOCBANK_HOME` (default `~/.docbank`) answers with its API key. If Docbank is not running, setup starts it with `docbank daemon start`, so `docbank` must be on `PATH`. Nothing starts before you approve.
+3. Adds `[docbank]` with `local = true` and `folder` to `<KATA_HOME>/config.toml` and restarts running daemons.
+
+Setup does not edit Docbank's config or store a key.
+
+Setup reads `DOCBANK_HOME` from its own shell, but the daemon reads it from its own environment, so the two must match. A daemon restart keeps the daemon's environment.
+
+For a Docbank on another host, or a local one whose port and key you already fixed in its config (loopback `http://127.0.0.1:<port>` is allowed):
+
+```sh
+kata docbank setup --url https://docbank.example --key-file /path/to/docbank-key
+```
+
+Setup reads the key from `--key-file` (allowed only with `--url`), checks it with an authenticated read of the Docbank's root folder, and adds `[docbank]` with `url`, `api_key_file`, and `folder`.
+
+Setup changes nothing while `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, or `KATA_DOCBANK_FOLDER` is set, when `config.toml` already has a different `[docbank]` section, or when the Docbank check fails.
+
+Running setup again with the same settings reports that attachments are already set up, writes nothing and does not ask; it still checks Docbank, starting it when it is not running. See the [CLI reference](../reference/cli.md#issue-attachments) for flags and output.
+
+To configure the daemon by hand for a Docbank on the same machine, add this to `<KATA_HOME>/config.toml` on each daemon that uploads or serves files, then restart the daemon:
 
 ```toml
 [docbank]
@@ -24,7 +54,7 @@ When `local = true`, the daemon reads the running Docbank's current address and 
 
 See [Docbank attachments](../reference/configuration.md#docbank-attachments) for how `local` combines with `url`, key settings, and `folder`.
 
-For a Docbank on another host, set a URL and key instead:
+To configure a Docbank on another host by hand, set a URL and key instead:
 
 ```toml
 [docbank]

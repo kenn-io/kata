@@ -97,7 +97,7 @@ func newAttachmentCmd() *cobra.Command {
 	}
 	root.AddCommand(newAttachmentLinkCmd())
 	parent := &cobra.Command{Use: "docbank", Short: "work with Docbank files"}
-	parent.AddCommand(root)
+	parent.AddCommand(root, newDocbankSetupCmd())
 	return parent
 }
 func resolveAttachmentSuffix(ids []string, suffix string) (string, error) {

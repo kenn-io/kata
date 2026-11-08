@@ -178,6 +178,7 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.projectsRefetchPending = false
 	m.input = inputState{}
 	m.modal = modalNone
+	m.move = moveState{}
 	m.closeRequiresEvidence = false
 	m.issueScoped = false
 	m.scopedWritable = false

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-06
+last_edited: 2026-11-08
 ---
 
 # CLI reference
@@ -2112,7 +2112,8 @@ requires evidence.
 There is no redo; repeat the action manually if you undo by mistake. Issue edits
 run one at a time; quick successive edits wait for the current edit to finish.
 
-Creating an issue or comment, making a timed assignment or owner edit involving
+Creating an issue or comment, moving an issue to another project, making a
+timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
 `done` clears the undo history. Switching daemons also clears it.
@@ -2163,12 +2164,46 @@ last). A deleted detail returns to the previous issue in its Back history.
 When none remain, it returns to Attention if opened there, or to the list.
 Saved views also drop the deleted issue, and a notice names `u`. In Attention,
 `u` is available when the latest undo entry is a deletion.
+
 `u` restores the issue the way `kata restore` does; if the issue was restored
 elsewhere in the meantime, the TUI says so and changes nothing. Deletions share
 the 20-entry undo limit and the history-clearing boundaries above. Use
 `kata restore` after the undo history clears or the session ends. Issue-scoped
 credentials cannot delete or restore, so `X` is not offered to them and does
 nothing.
+
+On main after 0.21.0, press `M` in the issue list to move the selected issue
+to another project. In split layout, focus the list first. Unlike `X`, `M` is
+not offered in the detail view, in Inbox, or while browsing from Attention; use
+`kata move` there:
+
+1. A picker lists the daemon's projects except the issue's own, the Inbox
+   project, and archived ones. Typing filters by name or by the text beside it.
+   Projects that share a name are told apart by their area, or by their UID when
+   another of them has the same area or they have none.
+2. `Enter` on a project sends a dry run, so nothing is written, and shows what
+   kata would do: the issue's active descendants, listed one per line (a long
+   list is cut off with "… and N more"), or a note that the issue has no
+   descendants and moves alone. If the daemon
+   refuses, such as for a recurrence-pinned issue or an archived or federated
+   project, the form shows its refusal in its own words. `Esc` returns to the
+   picker.
+3. A second `Enter` moves, guarded by `If-Match` on the revision the preview
+   read; [Issue lifecycle](#issue-lifecycle) says what advances it. If the
+   revision changed since the preview, nothing is moved and the form previews
+   again at the current one.
+4. After a move the moved issue and its descendants leave the list (the next
+   refresh lists them again where the scope shows their new project), the
+   selection goes to the next row (the previous one after the last), and a
+   notice names the issue's new `project#id`. A split detail pane resets only
+   when it shows a moved issue, a child of one, or has one in its Back history;
+   a pane on another issue keeps it and its Back history.
+
+A preview needs daemon API 0.35.0 or newer, because older daemons move only the
+selected issue; the form says so instead of previewing. A move clears the undo
+history, because the issue's project-qualified reference changes and its short
+id can too. Issue-scoped credentials cannot move, so `M`
+is not offered to them and does nothing.
 
 With the issue detail focused, press `O` to start, change, or stop the issue's recurrence, the same one `kata schedule <ref> <date> --repeat` manages. `O` is available only in the detail.
 The form has three fields. **Rule** is the RRULE text, sent with outer spaces trimmed: the
@@ -2597,3 +2632,14 @@ kata docbank attachments rm <issue> <attachment>
 ```
 
 `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
+
+Point the current `KATA_HOME`'s daemon at a Docbank:
+
+```sh
+kata docbank setup [--folder PATH] [--yes]
+kata docbank setup --url URL --key-file PATH [--folder PATH] [--yes]
+```
+
+Without `--url`, setup uses the Docbank on this machine. With `--url`, it uses a Docbank that runs elsewhere and reads its key from `--key-file`. Both ask once before writing (`--yes` skips the question), then restart running daemons. They reject `--daemon`.
+
+JSON output is `{"kata_api_version":1,"local":true,"folder":"/kata","changed":true}` for the local form and `{"kata_api_version":1,"local":false,"url":"https://docbank.example","folder":"/kata","key_file":"/abs/path","changed":true}` for the remote form. Agent output is `OK docbank-setup local=true folder=/kata changed=true` or `OK docbank-setup url=<url> folder=/kata changed=true`. See [Configure the daemon](../guide/attachments.md#configure-the-daemon) for what setup writes, when it refuses, and what a rerun does.

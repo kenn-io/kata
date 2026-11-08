@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Turn on attachments with `kata docbank setup`: without `--url` it writes
+  `[docbank] local = true` for the Docbank on this machine; with `--url` and
+  `--key-file` it uses one that runs elsewhere. Setup checks the key before
+  writing `config.toml`, restarts running daemons, and changes nothing while a
+  `KATA_DOCBANK_*` variable is set or `config.toml` has a different `[docbank]`
+  section. See [Issue attachments](guide/attachments.md#configure-the-daemon).
 - Attach files through the Docbank on the same machine with
   `[docbank] local = true`, without copying its URL or API key. Docbank restarts
   and updates need no Kata change, and the daemon runs `docbank daemon start`
@@ -121,6 +127,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   short IDs, including when the same batch carries issue updates.
 - Find matching issues from human-mode `kata create` look-alike refusals, which
   now include the existing issues' qualified refs.
+- Move an issue to another project from `kata tui` with `M` on the selected row
+  of the issue list, after a dry-run preview of the subtree that would move.
+  Daemon API `0.35.0` or newer is required. See the
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
 
 ## 0.22.0
 <small>2026-11-05</small>

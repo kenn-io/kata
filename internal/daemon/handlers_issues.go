@@ -45,9 +45,16 @@ func validateCreateMetadata(md map[string]jsontext.Value) error {
 // entries. Each raw string is "key" or "key=value", split on the FIRST "=".
 // The key is a flat metadata key that MAY contain dots — it is never a JSON
 // path. An empty key is a 400 validation error.
+// compactRowMaxBytes bounds one compact row, so a page of at most 100 rows
+// stays small however large an imported issue's fields are.
+const compactRowMaxBytes = 64 << 10
+
 // compactIssueOuts drops each row's body and every metadata key the filters
-// do not name. Imports accept bodies far larger than one list response
-// should carry, so a reader that needs only the filtered keys asks for this.
+// do not name. Imports accept bodies, titles and metadata far larger than one
+// list response should carry, so a reader that needs only the filtered keys
+// asks for this. A row still larger than compactRowMaxBytes keeps only its
+// identity and status and is marked oversized; the page cursor does not
+// depend on rows, so pagination still moves past it.
 func compactIssueOuts(outs []api.IssueOut, filters []db.MetaFilter) error {
 	for i := range outs {
 		outs[i].Body = ""
@@ -69,6 +76,19 @@ func compactIssueOuts(outs []api.IssueOut, filters []db.MetaFilter) error {
 			return fmt.Errorf("compact issue metadata: %w", err)
 		}
 		outs[i].Metadata = db.JSONBlob(compacted)
+	}
+	for i, out := range outs {
+		encoded, err := json.Marshal(out)
+		if err != nil {
+			return fmt.Errorf("measure compact issue: %w", err)
+		}
+		if len(encoded) <= compactRowMaxBytes {
+			continue
+		}
+		stub := api.IssueOut{QualifiedID: out.QualifiedID, Oversized: true}
+		stub.ID, stub.UID, stub.ProjectID, stub.ProjectUID, stub.ShortID = out.ID, out.UID, out.ProjectID, out.ProjectUID, out.ShortID
+		stub.Status, stub.Revision, stub.CreatedAt, stub.UpdatedAt = out.Status, out.Revision, out.CreatedAt, out.UpdatedAt
+		outs[i] = stub
 	}
 	return nil
 }
