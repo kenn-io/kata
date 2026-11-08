@@ -114,7 +114,8 @@
   let acceptedRoute = $state<AppRoute | undefined>()
   let returnPath = $state(launch.returnPath)
   let mode = $state(initialMode(launch, initialRoute, selectedAuthentication))
-  let authority = $state<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
+  let authority = $state.raw<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
+  const shellSnapshot = $derived(authority?.snapshot)
   let references = $state<UIReferencesResponseBody | undefined>()
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
@@ -1280,7 +1281,7 @@
         {searchSettingsPostFetch}
         route={acceptedRoute ?? route}
         onSearchEmpty={() => reportOutcome('search_empty')}
-        snapshot={authority.snapshot}
+        snapshot={shellSnapshot!}
         loading={authority.loading}
         canMutate={authority.canMutate}
         {mutationPending}

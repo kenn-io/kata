@@ -30,6 +30,7 @@
   } from '../lib/kata/authority'
   import { createKataLinkFilters } from '../lib/kata/linkFilters'
   import { normalizeKataUISnapshot } from '../lib/kata/projection'
+  import { localDateString } from '../lib/kata/dates'
   import type {
     KataTaskMutationResponse,
     KataCommentReplyIntent,
@@ -184,6 +185,7 @@
   }: Props = $props()
 
   let connectionNow = $state(Date.now())
+  let today = $derived(localDateString(new Date(connectionNow)))
   onMount(() => {
     const timer = setInterval(() => {
       connectionNow = Date.now()
@@ -274,6 +276,7 @@
       filters: searchFilters,
       snapshot: projection,
       issues: projection.issues,
+      today,
     }),
   )
   let pendingQuery = $state('')
@@ -856,6 +859,7 @@
         onSubmitSearch={submitSearch}
       />
       <IssueCollection
+        now={connectionNow}
         resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
         currentView={{
