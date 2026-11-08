@@ -830,6 +830,11 @@ query word. When the first page of a multi-word lexical search finds nothing,
 to stderr, including when status or label filters are set. `--quiet` suppresses
 it. JSON adds a `hints` entry with code `every_word_required` and that message.
 
+When a local daemon has search by meaning off, the first page of `kata search`
+prints a setup hint to stderr, including with `--lexical`. It names Settings and
+`kata daemon local-embeddings`. `--quiet` and `--agent` suppress it; JSON results
+keep the hint on stderr.
+
 By default `kata search` runs lexical (FTS) search. When the daemon has
 [semantic search](../guide/semantic-search.md) configured, search
 automatically fuses lexical and vector results. The mode flags are mutually

@@ -1625,7 +1625,21 @@ func runDaemonProcess(
 			rec.Metadata["mcp"] = "unavailable"
 		}
 	}
+	localSetup := &localEmbeddingsSetup{
+		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
+		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
+	}
+	if pg, ok := store.(*pgstore.Store); ok {
+		localSetup.vectorReady = func(ctx context.Context) error {
+			idx, err := vector.OpenPostgres(ctx, pg.DB)
+			if err != nil {
+				return fmt.Errorf("install pgvector in this daemon's database, then try again: %w", err)
+			}
+			return idx.Close()
+		}
+	}
 	srv := daemon.NewServer(daemon.ServerConfig{
+		LocalEmbeddings:           localSetup,
 		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,

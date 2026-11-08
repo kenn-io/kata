@@ -1037,6 +1037,94 @@ describe('AppShell', () => {
     expect(onBackFromCredentials).toHaveBeenCalledOnce()
   })
 
+  test('opens Settings from the gear for a viewer without access administration', async () => {
+    const onNavigate = vi.fn()
+    const member = snapshot()
+    member.capabilities.writable = false
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: member,
+        loading: false,
+        readOnly: true,
+        ...mutationProps({ canMutate: false }),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(onNavigate).toHaveBeenCalledWith({
+      kind: 'kata',
+      view: 'settings',
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    })
+  })
+
+  test('renders Settings as a daemon screen for the remote host and returns to issues', async () => {
+    const onBackFromCredentials = vi.fn()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json({
+          provider: 'none',
+          download_bytes: 290_000_000,
+          ollama_available: false,
+          rebuild: false,
+          can_change: false,
+        }),
+      ),
+    )
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'settings',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        daemons: [
+          {
+            id: 'local',
+            url: 'http://127.0.0.1:7777',
+            default: true,
+            local: true,
+            auth: 'none',
+            health: 'connected',
+          },
+          {
+            id: 'team',
+            url: 'https://kata.example.com',
+            default: false,
+            auth: 'token',
+            health: 'connected',
+          },
+        ],
+        activeDaemonID: 'team',
+        canAdministerDaemon: false,
+        onBackFromCredentials,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
+    expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
+    expect(onBackFromCredentials).toHaveBeenCalledOnce()
+  })
+
   test('drops held keyboard selection when sidebar navigation begins', async () => {
     vi.useFakeTimers()
     const onNavigate = vi.fn()

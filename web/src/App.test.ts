@@ -1617,6 +1617,76 @@ describe('App', () => {
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('admin-session')
   })
 
+  it.each(['accepted', 'rejected-session'] as const)(
+    'turns on search directly for a selected local daemon and handles %s',
+    async (outcome) => {
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const off = {
+        provider: 'none',
+        can_change: true,
+        download_bytes: 289184780,
+        ollama_available: false,
+      }
+      const posts: Request[] = []
+      let statusPath: string | undefined
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const target = new URL(request.url)
+          if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (target.pathname === '/api/v1/ui/daemons') {
+            return Response.json({
+              daemons: daemonRoster().daemons.map((daemon) => ({ ...daemon, local: true })),
+            })
+          }
+          if (target.pathname.endsWith('/references')) {
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          }
+          if (target.pathname.endsWith('/embeddings/local')) {
+            if (request.method === 'POST') {
+              posts.push(request)
+              return outcome === 'accepted'
+                ? Response.json(
+                    { ...off, can_change: false, job: { state: 'restart' } },
+                    { status: 202 },
+                  )
+                : new Response('', { status: 401 })
+            }
+            statusPath = target.pathname
+            return Response.json(off)
+          }
+          if (target.pathname.endsWith('/snapshot')) {
+            return Response.json(snapshot(), {
+              headers: { ETag: '"snapshot"', 'X-Kata-Web-Authentication': 'login' },
+            })
+          }
+          throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+        }),
+      )
+      render(App)
+      await screen.findByRole('button', { name: /Example issue/ })
+      await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+      await fireEvent.click(await screen.findByRole('button', { name: 'Turn on' }))
+
+      if (outcome === 'accepted') {
+        await waitFor(() => expect(posts).toHaveLength(1))
+        expect(sessionStorage.getItem('kata.web.session.v1')).toContain('tab-session')
+      } else {
+        await screen.findByRole('form', { name: 'Log in to Kata' })
+        expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
+      }
+      expect(statusPath).toBe('/api/v1/ui/proxy/api/v1/embeddings/local')
+      expect(posts).toHaveLength(1)
+      expect(posts[0]!.headers.get('X-Kata-Web-Daemon')).toBeNull()
+      expect(posts[0]!.headers.get('X-Kata-Web-Session')).toBe('tab-session')
+      expect(posts[0]!.headers.get('X-Kata-CSRF')).toBe('tab-csrf')
+    },
+  )
+
   it('routes a credential-list 401 through the existing authentication-loss transition', async () => {
     history.replaceState(null, '', '/kata?view=credentials#direct=1')
     sessionStorage.setItem(
