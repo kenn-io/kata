@@ -137,11 +137,15 @@ type DocbankConfig = config.DocbankConfig
 
 // AgentsViewConfig advertises default-off destinations by project UID.
 type AgentsViewConfig = config.AgentsViewConfig
+
+// AgentsViewTarget describes a project's configured destination.
 type AgentsViewTarget = config.AgentsViewTarget
 
+// TranscriptServiceConfig is the legacy policy name.
 // Deprecated: use AgentsViewConfig.
 type TranscriptServiceConfig = config.TranscriptServiceConfig
 
+// TranscriptServiceTarget is the legacy target name.
 // Deprecated: use AgentsViewTarget.
 type TranscriptServiceTarget = config.TranscriptServiceTarget
 

@@ -13,15 +13,18 @@ type AgentsViewConfig struct {
 	Project map[string]AgentsViewTarget `toml:"project"`
 }
 
+// AgentsViewTarget holds a project's advertised receiver and locator.
 type AgentsViewTarget struct {
 	Enabled     bool   `toml:"enabled"`
 	ReceiverURL string `toml:"receiver_url"`
 	LocatorURL  string `toml:"locator_url"`
 }
 
+// TranscriptServiceConfig is the legacy policy name.
 // Deprecated: use AgentsViewConfig.
 type TranscriptServiceConfig = AgentsViewConfig
 
+// TranscriptServiceTarget is the legacy target name.
 // Deprecated: use AgentsViewTarget.
 type TranscriptServiceTarget = AgentsViewTarget
 
@@ -37,6 +40,7 @@ func ResolveAgentsViewConfig(canonical, legacy AgentsViewConfig) (AgentsViewConf
 	return NormalizeAgentsViewConfig(canonical)
 }
 
+// NormalizeAgentsViewConfig copies and validates project policy.
 func NormalizeAgentsViewConfig(input AgentsViewConfig) (AgentsViewConfig, error) {
 	output := AgentsViewConfig{Project: make(map[string]AgentsViewTarget, len(input.Project))}
 	for project, target := range input.Project {

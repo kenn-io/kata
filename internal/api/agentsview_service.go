@@ -2,16 +2,20 @@ package api
 
 import "go.kenn.io/kata/internal/agentsviewwire"
 
-const AgentsViewServicePath = "/api/v1/projects/{project_id}/transcript-service"
-const FederationAgentsViewServicePath = "/api/v1/projects/{project_id}/federation/transcript-service"
-
 // These wire paths and operation IDs retain their published draft names for
 // route and federation-signature compatibility while Go APIs use AgentsView.
+// AgentsViewServicePath identifies ordinary discovery.
+const AgentsViewServicePath = "/api/v1/projects/{project_id}/transcript-service"
 
+// FederationAgentsViewServicePath identifies enrolled relay discovery.
+const FederationAgentsViewServicePath = "/api/v1/projects/{project_id}/federation/transcript-service"
+
+// AgentsViewServiceRequest selects a project for discovery.
 type AgentsViewServiceRequest struct {
 	ProjectID int64 `path:"project_id" required:"true" minimum:"1"`
 }
 
+// FederationAgentsViewServiceRequest carries the selected relay generation.
 type FederationAgentsViewServiceRequest struct {
 	ProjectID       int64  `path:"project_id" required:"true" minimum:"1"`
 	Authorization   string `header:"Authorization"`
@@ -23,20 +27,32 @@ type FederationAgentsViewServiceRequest struct {
 	ResetEpoch      int64  `query:"reset_epoch" required:"true" minimum:"1"`
 }
 
+// AgentsViewServiceResponse carries the configured discovery result.
 type AgentsViewServiceResponse struct {
 	CacheControl string `header:"Cache-Control"`
 	Body         AgentsViewDiscovery
 }
 
+// AgentsViewDescriptor is the signed destination descriptor.
 type AgentsViewDescriptor = agentsviewwire.Descriptor
+
+// AgentsViewRouteObservation describes a negotiated hop.
 type AgentsViewRouteObservation = agentsviewwire.RouteObservation
+
+// AgentsViewDiscovery contains a descriptor and observed route.
 type AgentsViewDiscovery = agentsviewwire.Discovery
 
-// The aliases preserve source compatibility for consumers of the initial
-// draft API. New code should use the AgentsView names.
+// TranscriptServicePath is the legacy name for the discovery path.
 const TranscriptServicePath = AgentsViewServicePath
+
+// FederationTranscriptServicePath is the legacy federation path name.
 const FederationTranscriptServicePath = FederationAgentsViewServicePath
 
+// TranscriptServiceRequest is the legacy discovery request name.
 type TranscriptServiceRequest = AgentsViewServiceRequest
+
+// FederationTranscriptServiceRequest is the legacy relay request name.
 type FederationTranscriptServiceRequest = FederationAgentsViewServiceRequest
+
+// TranscriptServiceResponse is the legacy discovery response name.
 type TranscriptServiceResponse = AgentsViewServiceResponse

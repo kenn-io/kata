@@ -17,14 +17,16 @@ import (
 )
 
 const (
+	// MaxDiscoveryBytes bounds a discovery response.
 	MaxDiscoveryBytes       = 16 << 10
 	MaxSnapshotBytes  int64 = 64 << 20
 	MaxLifetime             = 5 * time.Minute
 	ClockSkew               = 5 * time.Second
-	// Eight hubs plus a final leaf, matching the negotiated relay protocol.
+	// MaxRouteNodes allows eight hubs plus a final leaf.
 	MaxRouteNodes = 9
 )
 
+// Descriptor is the root-signed destination descriptor.
 type Descriptor = agentsviewwire.Descriptor
 
 // TrustedRoot must come from the daemon's already-enrolled pin. A descriptor
@@ -37,7 +39,10 @@ type TrustedRoot struct {
 	Retired      bool
 }
 
+// RouteObservation records one negotiated hop.
 type RouteObservation = agentsviewwire.RouteObservation
+
+// Discovery contains the descriptor and its observed route.
 type Discovery = agentsviewwire.Discovery
 
 // CanonicalBase rejects credential-bearing/ambiguous destinations without
@@ -110,6 +115,7 @@ func SignDescriptor(d Descriptor, key ed25519.PrivateKey) (Descriptor, error) {
 	return d, nil
 }
 
+// VerifyDescriptor validates the descriptor against the enrolled root pin.
 func VerifyDescriptor(d Descriptor, pin TrustedRoot, now time.Time) error {
 	if err := descriptorShape(d, now); err != nil {
 		return err
@@ -149,6 +155,7 @@ func validateRoute(d Discovery, project string, path []string) error {
 	return nil
 }
 
+// DecodeDiscovery parses and verifies a discovery against the enrolled root.
 func DecodeDiscovery(raw []byte, pin TrustedRoot, path []string, now time.Time) (Discovery, error) {
 	d, err := ParseDiscovery(raw, pin.ProjectUID, path, now)
 	if err != nil {

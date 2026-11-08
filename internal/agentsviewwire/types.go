@@ -26,6 +26,7 @@ type RouteObservation struct {
 	ResetEpoch          int64  `json:"reset_epoch,omitempty"`
 }
 
+// Discovery contains a signed descriptor and observed route.
 type Discovery struct {
 	Descriptor  Descriptor         `json:"descriptor"`
 	InstanceUID string             `json:"instance_uid"`
