@@ -3582,15 +3582,18 @@ type IssueOut struct {
 	Labels         []string       `json:"labels,omitempty"`
 	Metadata       map[string]any `json:"metadata"`
 	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
-	Owner          *string        `json:"owner,omitempty"`
-	Parent         *LinkPeer      `json:"parent,omitempty"`
-	Priority       *int64         `json:"priority,omitempty"`
-	ProjectID      int64          `json:"project_id"`
-	ProjectUID     *string        `json:"project_uid,omitempty"`
-	QualifiedID    string         `json:"qualified_id" validate:"required"`
-	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
-	Related        []LinkPeer     `json:"related,omitempty"`
-	Revision       int64          `json:"revision"`
+
+	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+	Oversized    *bool      `json:"oversized,omitempty"`
+	Owner        *string    `json:"owner,omitempty"`
+	Parent       *LinkPeer  `json:"parent,omitempty"`
+	Priority     *int64     `json:"priority,omitempty"`
+	ProjectID    int64      `json:"project_id"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	QualifiedID  string     `json:"qualified_id" validate:"required"`
+	RecurrenceID *int64     `json:"recurrence_id,omitempty"`
+	Related      []LinkPeer `json:"related,omitempty"`
+	Revision     int64      `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string               `json:"scheduled_on_date,omitempty"`
@@ -4238,16 +4241,19 @@ type ListGlobalIssueOut struct {
 	Labels         []string       `json:"labels,omitempty"`
 	Metadata       map[string]any `json:"metadata"`
 	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
-	Owner          *string        `json:"owner,omitempty"`
-	Parent         *LinkPeer      `json:"parent,omitempty"`
-	Priority       *int64         `json:"priority,omitempty"`
-	ProjectID      int64          `json:"project_id"`
-	ProjectName    string         `json:"project_name" validate:"required"`
-	ProjectUID     *string        `json:"project_uid,omitempty"`
-	QualifiedID    string         `json:"qualified_id" validate:"required"`
-	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
-	Related        []LinkPeer     `json:"related,omitempty"`
-	Revision       int64          `json:"revision"`
+
+	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+	Oversized    *bool      `json:"oversized,omitempty"`
+	Owner        *string    `json:"owner,omitempty"`
+	Parent       *LinkPeer  `json:"parent,omitempty"`
+	Priority     *int64     `json:"priority,omitempty"`
+	ProjectID    int64      `json:"project_id"`
+	ProjectName  string     `json:"project_name" validate:"required"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	QualifiedID  string     `json:"qualified_id" validate:"required"`
+	RecurrenceID *int64     `json:"recurrence_id,omitempty"`
+	Related      []LinkPeer `json:"related,omitempty"`
+	Revision     int64      `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string                         `json:"scheduled_on_date,omitempty"`
@@ -5765,16 +5771,19 @@ type ReadyGlobalIssueOut struct {
 	Labels         []string       `json:"labels,omitempty"`
 	Metadata       map[string]any `json:"metadata"`
 	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
-	Owner          *string        `json:"owner,omitempty"`
-	Parent         *LinkPeer      `json:"parent,omitempty"`
-	Priority       *int64         `json:"priority,omitempty"`
-	ProjectID      int64          `json:"project_id"`
-	ProjectName    string         `json:"project_name" validate:"required"`
-	ProjectUID     *string        `json:"project_uid,omitempty"`
-	QualifiedID    string         `json:"qualified_id" validate:"required"`
-	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
-	Related        []LinkPeer     `json:"related,omitempty"`
-	Revision       int64          `json:"revision"`
+
+	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+	Oversized    *bool      `json:"oversized,omitempty"`
+	Owner        *string    `json:"owner,omitempty"`
+	Parent       *LinkPeer  `json:"parent,omitempty"`
+	Priority     *int64     `json:"priority,omitempty"`
+	ProjectID    int64      `json:"project_id"`
+	ProjectName  string     `json:"project_name" validate:"required"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	QualifiedID  string     `json:"qualified_id" validate:"required"`
+	RecurrenceID *int64     `json:"recurrence_id,omitempty"`
+	Related      []LinkPeer `json:"related,omitempty"`
+	Revision     int64      `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string                          `json:"scheduled_on_date,omitempty"`

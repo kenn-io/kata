@@ -619,6 +619,9 @@ type IssueOut struct {
 	// calendar dates, resolved by the same rule as the browser snapshot.
 	ScheduledOnDate string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
 	DeadlineOnDate  string `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
+	// Oversized marks a compact row too large to send whole. It then carries
+	// only the issue's identity and status.
+	Oversized bool `json:"oversized,omitempty,omitzero" doc:"Set on a compact row too large to send whole; the row then carries only the issue's identity and status."`
 }
 
 // PageMetadata distinguishes terminal pages from bounded discovery results.

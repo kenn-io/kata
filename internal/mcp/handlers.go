@@ -1279,6 +1279,7 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 		projectUID = *issue.ProjectUID
 	}
 	return IssueSummary{
+		oversized:           issue.Oversized != nil && *issue.Oversized,
 		projectUID:          projectUID,
 		Author:              issue.Author,
 		AccountableActor:    issue.AccountableActor,
@@ -1314,6 +1315,7 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 		projectUID = *issue.ProjectUID
 	}
 	return IssueSummary{
+		oversized:        issue.Oversized != nil && *issue.Oversized,
 		projectUID:       projectUID,
 		Author:           issue.Author,
 		AccountableActor: issue.AccountableActor,

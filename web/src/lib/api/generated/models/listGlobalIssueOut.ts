@@ -26,6 +26,8 @@ export interface ListGlobalIssueOut {
   labels?: string[]
   metadata: ListGlobalIssueOutMetadata
   occurrence_key?: string
+  /** Set on a compact row too large to send whole; the row then carries only the issue's identity and status. */
+  oversized?: boolean
   owner?: string
   parent?: LinkPeer
   priority?: number
