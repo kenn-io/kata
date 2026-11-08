@@ -19,9 +19,9 @@ func IsRecurringIssueJob(j JobDefinition) bool {
 // recurringTitleSuffix is the longest occurrence suffix a child title gains.
 const recurringTitleSuffix = " — 2006-01-02T15:04:05.999999999Z"
 
-func validateRecurring(j JobDefinition) error {
+func validateRecurring(j JobDefinition, unresolvedParent bool) error {
 	p := j.Issue
-	if !validUID(p.ParentUID) || p.UID != "" || strings.TrimSpace(p.Title) == "" || utf8.RuneCountInString(p.Title+recurringTitleSuffix) > 1024 {
+	if !unresolvedParent && !validUID(p.ParentUID) || p.UID != "" || strings.TrimSpace(p.Title) == "" || utf8.RuneCountInString(p.Title+recurringTitleSuffix) > 1024 {
 		return invalid("native recurring issues require a parent UID and a bounded title")
 	}
 	if p.ScheduledOffsetSeconds != nil || p.DeadlineOffsetSeconds != nil || j.Overlap != "allow" || j.TimeoutSeconds != 0 || len(j.SecretRefs) != 0 {

@@ -70,6 +70,7 @@ type cronCLIOptions struct {
 	includeDeleted                   bool
 	limit                            int64
 	beforeUID, jobUID                string
+	author                           *cronAuthorOptions
 }
 
 func (o cronCLIOptions) mutation() bool {
@@ -117,6 +118,10 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 	if action == "list" && options.definition() {
 		command.Flags().BoolVar(&options.includeDeleted, "include-deleted", false, "include tombstoned definitions")
 	}
+	if resource == "job" && action == "create" {
+		options.author = &cronAuthorOptions{}
+		options.author.register(command)
+	}
 	if resource == "run" && action == "list" {
 		command.Flags().Int64Var(&options.limit, "limit", 100, "maximum results in one page (1-100)")
 		command.Flags().StringVar(&options.beforeUID, "before-uid", "", "run UID cursor from next_before_uid")
@@ -162,6 +167,16 @@ retrying after an uncertain response. First inspect kata cron ` + resource + ` s
 with that UID: an already-created definition conflicts on create and never
 becomes an update.`
 		if resource == "job" {
+			long += `
+Alternatively, author a common per-run job with typed flags. Explicit --name,
+--title, --enabled (or --enabled=false), --catchup, and --overlap are required.
+Choose exactly one of --cron, --every, or --once. --cron requires --timezone.
+Choose exactly one: --notify with --parent and --recipient for native recurring children,
+or --prompt with --adapter for an external adapter. Native jobs require
+--overlap=allow and a cron or interval trigger; --once is adapter-only.
+Typed authoring flags cannot be combined with --file. --uid works with either
+route; --parent works with file input or typed native jobs.
+Other actions, issue policies and advanced fields remain available through --file.`
 			long += "\nCreating or enabling a native recurring issue job activates daemon delivery. Kata never launches a process."
 			long += "\nUse --parent <ref> to set definition.issue.parent_uid from an issue ref."
 		}
@@ -264,6 +279,17 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	}
 	if err != nil {
 		return err
+	}
+	if o.author.used(cmd) {
+		var candidate api.PutCronJobBody
+		if err := json.Unmarshal(body, &candidate); err != nil {
+			return err
+		}
+		// Native validation needs the actual UID from the shared parent resolver.
+		// File input keeps its established server-side validation behavior.
+		if err := candidate.Definition.Native().Validate(); err != nil {
+			return cronCLIValidation(err.Error())
+		}
 	}
 	mutationClient := daemon.client
 	if o.mutation() {
@@ -402,9 +428,21 @@ func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// readRequest returns the bounded request file. Definition delete and restore
-// may omit it and send an empty object; every other mutation requires it.
+// readRequest selects bounded file input or a validated typed definition.
+// Definition delete and restore may omit input and send an empty object.
 func (o *cronCLIOptions) readRequest(cmd *cobra.Command) ([]byte, error) {
+	if o.author.used(cmd) {
+		if cmd.Flags().Changed("file") {
+			return nil, cronCLIValidation("--file and typed authoring flags are mutually exclusive")
+		}
+		candidate, err := o.author.build(cmd, o.parent)
+		if err != nil {
+			return nil, err
+		}
+		// build bounds the encoded definition and name, keeping this envelope
+		// below the file-input limit before actor/precondition normalization.
+		return json.Marshal(candidate)
+	}
 	if o.file == "" {
 		if o.definition() && o.action != "create" && o.action != "update" {
 			return []byte(`{}`), nil

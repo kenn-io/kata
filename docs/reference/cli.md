@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-06
+last_edited: 2026-11-08
 ---
 
 # CLI reference
@@ -2330,7 +2330,11 @@ to inject its value into the consuming process. Revoke the token during teardown
 
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
 Commands return JSON; external adapters schedule and launch their own work.
-See [Cron](cron.md) for bounded documents and retry semantics.
+See [Cron](cron.md) for bounded documents and retry semantics. For common native
+child jobs and adapter prompt jobs, use [typed creation flags](cron.md#create-with-typed-flags)
+instead of a JSON file. Explicit `--enabled`, `--catchup`, `--overlap`, schedule,
+and action choices are required. Advanced definitions and all updates retain
+the JSON file route.
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json

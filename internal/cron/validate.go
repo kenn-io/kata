@@ -64,6 +64,21 @@ func portableKey(value string) bool {
 
 // Validate checks the portable job contract without granting execution.
 func (j JobDefinition) Validate() error {
+	return j.validate(false)
+}
+
+// ValidateBeforeParentResolution checks a native recurring draft whose parent
+// reference has not been resolved. It defers only the parent UID check and
+// reserves its encoded bytes. Call Validate after resolving the actual parent;
+// this method alone never establishes that a definition can be written.
+func (j JobDefinition) ValidateBeforeParentResolution() error {
+	if !IsRecurringIssueJob(j) || j.Issue.ParentUID != "" {
+		return invalid("parent resolution requires a native recurring draft without parent_uid")
+	}
+	return j.validate(true)
+}
+
+func (j JobDefinition) validate(unresolvedParent bool) error {
 	if j.Version != 1 {
 		return invalid("unsupported job version")
 	}
@@ -106,7 +121,7 @@ func (j JobDefinition) Validate() error {
 			return invalid("notify requires an issue target")
 		}
 		if IsRecurringIssueJob(j) {
-			if err := validateRecurring(j); err != nil {
+			if err := validateRecurring(j, unresolvedParent); err != nil {
 				return err
 			}
 		} else if j.Issue != nil && (j.Issue.ParentUID != "" || j.Issue.Kind != "existing" || !validUID(j.Issue.UID) || j.Issue.Title != "" || j.Issue.Body != "" || j.Issue.ScheduledOffsetSeconds != nil || j.Issue.DeadlineOffsetSeconds != nil) {
@@ -159,7 +174,12 @@ func (j JobDefinition) Validate() error {
 	if err := validateOptions(j.Options); err != nil {
 		return err
 	}
-	return checkSize(j, DefinitionLimit)
+	limit := DefinitionLimit
+	if unresolvedParent {
+		// Resolving an omitted parent adds this member and a 26-byte ULID.
+		limit -= len(`,"parent_uid":""`) + 26
+	}
+	return checkSize(j, limit)
 }
 
 func validRecipient(value string) bool {
