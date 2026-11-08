@@ -102,4 +102,5 @@ func TestAgentsViewTargetHumanSummaryOmitsAuthorityDigestsAndIncludesBounds(t *t
 	require.Contains(t, got, "Expires:")
 	require.NotContains(t, got, d.Descriptor.AuthorityUID)
 	require.NotContains(t, got, d.Descriptor.ServiceID)
+	require.NotContains(t, got, "Route nodes:")
 }

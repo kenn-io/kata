@@ -98,11 +98,10 @@ func runAgentsViewTarget(cmd *cobra.Command, args []string) error {
 }
 
 func formatAgentsViewTarget(discovery agentsviewservice.Discovery) string {
-	return fmt.Sprintf("Locator: %s\nMaximum bytes: %d\nExpires: %s\nRoute nodes: %d\nConfigured policy only; no transcript read, upload, or indexing proof.\n",
+	return fmt.Sprintf("Locator: %s\nMaximum bytes: %d\nExpires: %s\nConfigured policy only; no transcript read, upload, or indexing proof.\n",
 		discovery.Descriptor.LocatorBase,
 		discovery.Descriptor.MaxBytes,
 		time.Unix(discovery.Descriptor.ExpiresAt, 0).UTC().Format(time.RFC3339),
-		len(discovery.Route),
 	)
 }
 
