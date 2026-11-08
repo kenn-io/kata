@@ -2,6 +2,7 @@
 package httpurl
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -42,6 +43,26 @@ func CanonicalHTTPOrigin(raw string) (string, error) {
 		host = net.JoinHostPort(strings.Trim(host, "[]"), port)
 	}
 	return (&url.URL{Scheme: scheme, Host: host}).String(), nil
+}
+
+// CanonicalHTTPSOrLoopbackBase accepts HTTPS destinations and loopback HTTP.
+// Errors deliberately omit the supplied URL, which may contain credentials.
+func CanonicalHTTPSOrLoopbackBase(raw string) (string, error) {
+	base, err := CanonicalHTTPBaseURL(raw)
+	if err != nil || len(base) > 2048 {
+		return "", errors.New("invalid service base URL")
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Opaque != "" {
+		return "", errors.New("invalid service base URL")
+	}
+	if u.Scheme == "http" && u.Hostname() != "localhost" {
+		ip := net.ParseIP(u.Hostname())
+		if ip == nil || !ip.IsLoopback() {
+			return "", errors.New("service requires HTTPS except on loopback")
+		}
+	}
+	return base, nil
 }
 
 // CanonicalHTTPBaseURL returns a canonical HTTP(S) origin plus its configured

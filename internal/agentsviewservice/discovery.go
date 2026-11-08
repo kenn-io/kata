@@ -8,8 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
-	"net"
-	"net/url"
 	"strings"
 	"time"
 
@@ -45,21 +43,7 @@ type Discovery = agentsviewwire.Discovery
 // CanonicalBase rejects credential-bearing/ambiguous destinations without
 // including their text in errors. HTTP is allowed only for loopback services.
 func CanonicalBase(raw string) (string, error) {
-	base, err := httpurl.CanonicalHTTPBaseURL(raw)
-	if err != nil || len(base) > 2048 {
-		return "", errors.New("invalid AgentsView service base URL")
-	}
-	u, err := url.Parse(base)
-	if err != nil || u.Opaque != "" {
-		return "", errors.New("invalid AgentsView service base URL")
-	}
-	if u.Scheme == "http" && u.Hostname() != "localhost" {
-		ip := net.ParseIP(u.Hostname())
-		if ip == nil || !ip.IsLoopback() {
-			return "", errors.New("AgentsView service requires HTTPS except on loopback")
-		}
-	}
-	return base, nil
+	return httpurl.CanonicalHTTPSOrLoopbackBase(raw)
 }
 
 func digest(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }

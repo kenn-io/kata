@@ -3,7 +3,7 @@ package config
 import (
 	"errors"
 
-	"go.kenn.io/kata/internal/agentsviewservice"
+	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -45,11 +45,11 @@ func NormalizeAgentsViewConfig(input AgentsViewConfig) (AgentsViewConfig, error)
 		}
 		if target.Enabled {
 			var err error
-			target.ReceiverURL, err = agentsviewservice.CanonicalBase(target.ReceiverURL)
+			target.ReceiverURL, err = httpurl.CanonicalHTTPSOrLoopbackBase(target.ReceiverURL)
 			if err != nil {
 				return AgentsViewConfig{}, err
 			}
-			target.LocatorURL, err = agentsviewservice.CanonicalBase(target.LocatorURL)
+			target.LocatorURL, err = httpurl.CanonicalHTTPSOrLoopbackBase(target.LocatorURL)
 			if err != nil {
 				return AgentsViewConfig{}, err
 			}
