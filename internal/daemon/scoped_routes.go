@@ -26,6 +26,7 @@ var issueScopedRoutes = []scopedRouteRule{
 	scopedRoute(http.MethodGet, `/api/v1/projects`),
 	scopedRoute(http.MethodPost, `/api/v1/projects/resolve`),
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+`),
+	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/notifications/actor`),
 	scopedRoute(http.MethodGet, `/api/v1/issues(?:/[^/]+)?`),
 	scopedRoute(http.MethodGet, `/api/v1/(?:ready|digest|events|events/stream|audit/closes)`),
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/(?:digest|events|issues|labels|ready|search)`),

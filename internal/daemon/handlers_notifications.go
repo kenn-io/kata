@@ -25,10 +25,7 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 
-		requestedActor := in.RequestedActor
-		if principal, ok := PrincipalFromContext(ctx); ok {
-			requestedActor = principal.Actor
-		}
+		requestedActor := actorFor(ctx, in.RequestedActor)
 		if err := validateActor(requestedActor); err != nil {
 			return nil, err
 		}

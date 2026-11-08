@@ -345,6 +345,9 @@ func TestMCPCoordinationWaitReplyResolvesActorPerProject(t *testing.T) {
 				message = "reply arrived"
 			}
 			issue := issueJSON(projectID, name, ref)
+			if projectID == 2 {
+				issue["project_uid"] = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+			}
 			issue["metadata"] = map[string]any{notification.MetadataKey(actor + "/worker"): map[string]any{"from": "reviewer", "message": message}}
 			writeJSON(w, map[string]any{"issue": issue, "labels": []any{}, "links": []any{}, "comments": []any{}})
 		default:
@@ -352,7 +355,12 @@ func TestMCPCoordinationWaitReplyResolvesActorPerProject(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "first-project", Actor: "startup-actor", Teammate: "worker", Version: "test"})
+	scope, err := NewAllowlistScope([]ProjectIdentity{
+		{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "first-project"},
+		{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "second-project"},
+	})
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{Client: client, Scope: scope, Actor: "startup-actor", Teammate: "worker", Version: "test"})
 	out := callCoordinationTool(t, session, "kata.wait", map[string]any{
 		"refs": []string{"first-project#abc1", "second-project#def2"}, "until": "reply", "timeout_seconds": 3,
 	})

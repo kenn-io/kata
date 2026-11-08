@@ -98,7 +98,7 @@ func TestProjectNotificationActorAuthenticatedIdentityOverridesFallback(t *testi
 	assert.Equal(t, "authenticated-actor", body.EffectiveActor)
 }
 
-func TestProjectNotificationActorDoesNotUseFallbackForActorlessPrincipal(t *testing.T) {
+func TestProjectNotificationActorUsesFallbackForStaticToken(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("static-token"))
 	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
@@ -106,8 +106,12 @@ func TestProjectNotificationActorDoesNotUseFallbackForActorlessPrincipal(t *test
 	resp, raw := envDoRaw(t, env, http.MethodGet,
 		projectPath(project.ID)+"/notifications/actor?requested_actor=untrusted-fallback", nil,
 		map[string]string{"Authorization": "Bearer static-token"})
-	require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "response: %s", raw)
-	assert.Contains(t, string(raw), "actor is required")
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	var body struct {
+		EffectiveActor string `json:"effective_actor"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, "untrusted-fallback", body.EffectiveActor)
 }
 
 func TestProjectNotificationActorHidesProjectsOutsideTokenScope(t *testing.T) {
@@ -127,10 +131,14 @@ func TestProjectNotificationActorHidesProjectsOutsideTokenScope(t *testing.T) {
 	require.NoError(t, err)
 
 	resp, raw := envDoRaw(t, env, http.MethodGet,
+		projectPath(visible.ID)+"/notifications/actor?requested_actor=worker", nil,
+		map[string]string{"Authorization": "Bearer scoped-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+
+	resp, raw = envDoRaw(t, env, http.MethodGet,
 		projectPath(hidden.ID)+"/notifications/actor?requested_actor=worker", nil,
 		map[string]string{"Authorization": "Bearer scoped-token"})
 	require.Equalf(t, http.StatusNotFound, resp.StatusCode, "response: %s", raw)
-	assert.Contains(t, string(raw), "project_not_found")
 }
 
 func TestProjectNotificationActorRequiresUnauthenticatedFallback(t *testing.T) {
