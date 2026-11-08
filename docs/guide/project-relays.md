@@ -15,13 +15,14 @@ can reach each other again.
 participating daemon.
 The connection preview checks the upstream daemon's protocol support.
 
-## Inspect a root transcript destination
+## Inspect the root AgentsView destination
 
-When every hop supports transcript-service discovery, inspect the root's
-configured destination without sharing a session:
+When every hop supports AgentsView discovery, inspect the root's configured
+destination without sharing a session. `target` is a Kata-only inspection
+command; the AgentsView CLI has no `target` subcommand:
 
 ```sh
-kata transcript target shared-project#abc4
+kata agentsview target shared-project#abc4
 ```
 
 Selection follows the issue's immutable project and root authority, including
@@ -34,7 +35,7 @@ without trying a personal archive.
 This command reads no transcript and contacts no receiver. Its result is
 configured policy, not evidence that a session was uploaded or indexed.
 It does not change existing close behavior or enable relay uploads. See
-[root transcript policy](../reference/configuration.md#root-transcript-service-discovery)
+[root AgentsView policy](../reference/configuration.md#root-agentsview-discovery)
 for the default-off operator configuration and current limits.
 
 ## Choose the shape you need

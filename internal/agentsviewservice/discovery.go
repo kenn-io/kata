@@ -1,6 +1,6 @@
-// Package transcriptservice describes root-owned transcript destinations.
+// Package agentsviewservice describes root-owned AgentsView destinations.
 // Discovery never reads a transcript or receiver credential and grants no upload.
-package transcriptservice
+package agentsviewservice
 
 import (
 	"crypto/ed25519"
@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -26,21 +27,7 @@ const (
 	MaxRouteNodes = 9
 )
 
-// Descriptor is a root-signed statement of configured policy, not receiver
-// availability, ingest acceptance, session consent or indexing evidence.
-type Descriptor struct {
-	Version         int    `json:"version"`
-	ProjectUID      string `json:"project_uid"`
-	AuthorityUID    string `json:"authority_uid"`
-	ServiceID       string `json:"service_id"`
-	LocatorBase     string `json:"locator_base"`
-	EnvelopeVersion int    `json:"envelope_version"`
-	MaxBytes        int64  `json:"max_bytes"`
-	IssuedAt        int64  `json:"issued_at"`
-	ExpiresAt       int64  `json:"expires_at"`
-	KeyID           string `json:"key_id"`
-	Signature       []byte `json:"signature,omitempty"`
-}
+type Descriptor = api.AgentsViewDescriptor
 
 // TrustedRoot must come from the daemon's already-enrolled pin. A descriptor
 // or a response carrying a public key cannot establish this trust input.
@@ -52,37 +39,24 @@ type TrustedRoot struct {
 	Retired      bool
 }
 
-// RouteObservation captures the negotiated generation at a single hop. The
-// authenticated hop supplies it; it does not rewrite the root signature.
-type RouteObservation struct {
-	InstanceUID         string `json:"instance_uid"`
-	ProjectUID          string `json:"project_uid"`
-	BindingUID          string `json:"binding_uid,omitempty"`
-	UpstreamInstanceUID string `json:"upstream_instance_uid,omitempty"`
-	ResetEpoch          int64  `json:"reset_epoch,omitempty"`
-}
-
-type Discovery struct {
-	Descriptor  Descriptor         `json:"descriptor"`
-	InstanceUID string             `json:"instance_uid"`
-	Route       []RouteObservation `json:"route"`
-}
+type RouteObservation = api.AgentsViewRouteObservation
+type Discovery = api.AgentsViewDiscovery
 
 // CanonicalBase rejects credential-bearing/ambiguous destinations without
 // including their text in errors. HTTP is allowed only for loopback services.
 func CanonicalBase(raw string) (string, error) {
 	base, err := httpurl.CanonicalHTTPBaseURL(raw)
 	if err != nil || len(base) > 2048 {
-		return "", errors.New("invalid transcript service base URL")
+		return "", errors.New("invalid AgentsView service base URL")
 	}
 	u, err := url.Parse(base)
 	if err != nil || u.Opaque != "" {
-		return "", errors.New("invalid transcript service base URL")
+		return "", errors.New("invalid AgentsView service base URL")
 	}
 	if u.Scheme == "http" && u.Hostname() != "localhost" {
 		ip := net.ParseIP(u.Hostname())
 		if ip == nil || !ip.IsLoopback() {
-			return "", errors.New("transcript service requires HTTPS except on loopback")
+			return "", errors.New("AgentsView service requires HTTPS except on loopback")
 		}
 	}
 	return base, nil
@@ -130,7 +104,7 @@ func descriptorShape(d Descriptor, now time.Time) error {
 		serviceErr != nil || len(service) != sha256.Size || strings.ToLower(d.ServiceID) != d.ServiceID ||
 		d.IssuedAt <= 0 || d.ExpiresAt <= d.IssuedAt || d.ExpiresAt-d.IssuedAt > int64(MaxLifetime/time.Second) ||
 		d.IssuedAt > now.Add(ClockSkew).Unix() || d.ExpiresAt < now.Add(-ClockSkew).Unix() {
-		return errors.New("invalid or expired transcript service descriptor")
+		return errors.New("invalid or expired AgentsView service descriptor")
 	}
 	return nil
 }
@@ -138,7 +112,7 @@ func descriptorShape(d Descriptor, now time.Time) error {
 // SignDescriptor uses already-loaded signing material; it creates no key or pin.
 func SignDescriptor(d Descriptor, key ed25519.PrivateKey) (Descriptor, error) {
 	if len(key) != ed25519.PrivateKeySize {
-		return Descriptor{}, errors.New("transcript service root signer unavailable")
+		return Descriptor{}, errors.New("AgentsView root signer unavailable")
 	}
 	d.KeyID = digest(key.Public().(ed25519.PublicKey))
 	if err := descriptorShape(d, time.Unix(d.IssuedAt, 0)); err != nil {
@@ -158,26 +132,26 @@ func VerifyDescriptor(d Descriptor, pin TrustedRoot, now time.Time) error {
 	}
 	if pin.Retired || len(pin.PublicKey) != ed25519.PublicKeySize || pin.KeyID != digest(pin.PublicKey) ||
 		d.KeyID != pin.KeyID || d.ProjectUID != pin.ProjectUID || d.AuthorityUID != pin.AuthorityUID || len(d.Signature) != ed25519.SignatureSize {
-		return errors.New("transcript service does not match enrolled root")
+		return errors.New("AgentsView service does not match enrolled root")
 	}
 	raw, err := descriptorBytes(d)
 	if err != nil || !ed25519.Verify(pin.PublicKey, raw, d.Signature) {
-		return errors.New("invalid transcript service root signature")
+		return errors.New("invalid AgentsView service root signature")
 	}
 	return nil
 }
 
-// ValidateRoute checks the complete observed path against negotiated identity.
+// validateRoute checks the complete observed path against negotiated identity.
 // No URL, display name or response-supplied key substitutes for that path.
-func (d Discovery) ValidateRoute(project string, path []string) error {
+func validateRoute(d Discovery, project string, path []string) error {
 	if len(path) == 0 || len(path) > MaxRouteNodes || len(path) != len(d.Route) ||
 		d.Descriptor.ProjectUID != project || d.Descriptor.AuthorityUID != path[0] || d.InstanceUID != path[len(path)-1] {
-		return errors.New("transcript service route identity mismatch")
+		return errors.New("AgentsView service route identity mismatch")
 	}
 	seen := make(map[string]bool, len(path))
 	for i, hop := range d.Route {
 		if !uid.Valid(hop.InstanceUID) || seen[hop.InstanceUID] || hop.InstanceUID != path[i] || hop.ProjectUID != project {
-			return errors.New("invalid transcript service route")
+			return errors.New("invalid AgentsView service route")
 		}
 		seen[hop.InstanceUID] = true
 		if i == 0 {
@@ -185,7 +159,7 @@ func (d Discovery) ValidateRoute(project string, path []string) error {
 				return errors.New("invalid transcript root route")
 			}
 		} else if !uid.Valid(hop.BindingUID) || hop.UpstreamInstanceUID != path[i-1] || hop.ResetEpoch <= 0 {
-			return errors.New("invalid transcript service hop generation")
+			return errors.New("invalid AgentsView service hop generation")
 		}
 	}
 	return nil
@@ -208,13 +182,13 @@ func DecodeDiscovery(raw []byte, pin TrustedRoot, path []string, now time.Time) 
 func ParseDiscovery(raw []byte, project string, path []string, now time.Time) (Discovery, error) {
 	var d Discovery
 	if len(raw) > MaxDiscoveryBytes {
-		return d, errors.New("transcript service response too large")
+		return d, errors.New("AgentsView service response too large")
 	}
 	if err := json.Unmarshal(raw, &d, json.RejectUnknownMembers(true)); err != nil {
-		return Discovery{}, errors.New("invalid transcript service response")
+		return Discovery{}, errors.New("invalid AgentsView service response")
 	}
 	if len(d.Descriptor.Signature) != ed25519.SignatureSize {
-		return Discovery{}, errors.New("invalid transcript service signature size")
+		return Discovery{}, errors.New("invalid AgentsView service signature size")
 	}
 	if err := descriptorShape(d.Descriptor, now); err != nil {
 		return Discovery{}, err
@@ -224,7 +198,7 @@ func ParseDiscovery(raw []byte, project string, path []string, now time.Time) (D
 			path = append(path, hop.InstanceUID)
 		}
 	}
-	if err := d.ValidateRoute(project, path); err != nil {
+	if err := validateRoute(d, project, path); err != nil {
 		return Discovery{}, err
 	}
 	return d, nil

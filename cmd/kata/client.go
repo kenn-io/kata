@@ -219,9 +219,13 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 }
 
 func httpClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
-	hc, err := client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
+	return httpClientForResolvedWithOpts(ctx, resolved, client.Opts{
 		Timeout: envHTTPTimeout(defaultHTTPTimeout),
 	})
+}
+
+func httpClientForResolvedWithOpts(ctx context.Context, resolved client.ResolvedDaemon, opts client.Opts) (*http.Client, error) {
+	hc, err := client.NewHTTPClientForResolved(ctx, resolved, opts)
 	if err != nil {
 		return nil, err
 	}

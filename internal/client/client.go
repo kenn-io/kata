@@ -271,13 +271,15 @@ func UnixTransport(path string) *http.Transport {
 // a stalled handshake is bounded.
 const SSEHandshakeTimeout = 10 * time.Second
 
-// Opts shapes both NewHTTPClient and NewStreamingClient. ResponseHeaderTimeout
-// is non-zero only for SSE clients.
+// Opts shapes NewHTTPClient and NewStreamingClient. Bounded reads can set
+// response-header limits without changing the body lifetime of SSE clients.
 type Opts struct {
-	FederationSigning     *signingpolicy.Source
-	Timeout               time.Duration
-	ResponseHeaderTimeout time.Duration
-	AllowInsecure         bool
+	FederationSigning      *signingpolicy.Source
+	Timeout                time.Duration
+	ResponseHeaderTimeout  time.Duration
+	MaxResponseHeaderBytes int64
+	DisableCompression     bool
+	AllowInsecure          bool
 	// WorkspaceStart is retained for URL-only compatibility callers that have
 	// not yet migrated to ResolvedDaemon. It scopes the temporary active-daemon
 	// credential lookup and must not be used by resolved construction.
@@ -403,6 +405,8 @@ func NewHTTPClientForResolved(ctx context.Context, d ResolvedDaemon, opts Opts) 
 		transport := base.Clone()
 		transport.Proxy = nil
 		transport.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
+		transport.MaxResponseHeaderBytes = opts.MaxResponseHeaderBytes
+		transport.DisableCompression = opts.DisableCompression
 		rt, err := authBearerTransport(transport, d.Token, d.BaseURL, d.TrustPrivateNetwork, d.AllowInsecure)
 		if err != nil {
 			return nil, err
@@ -459,7 +463,7 @@ func newHTTPClientWithoutAuth(ctx context.Context, baseURL string, opts Opts) (*
 
 func tcpClient(opts Opts) (*http.Client, error) {
 	c := &http.Client{Timeout: opts.Timeout}
-	if opts.ResponseHeaderTimeout == 0 {
+	if opts.ResponseHeaderTimeout == 0 && opts.MaxResponseHeaderBytes == 0 && !opts.DisableCompression {
 		return c, nil
 	}
 	// Clone http.DefaultTransport instead of building a bare *http.Transport
@@ -473,6 +477,8 @@ func tcpClient(opts Opts) (*http.Client, error) {
 	}
 	clone := t.Clone()
 	clone.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
+	clone.MaxResponseHeaderBytes = opts.MaxResponseHeaderBytes
+	clone.DisableCompression = opts.DisableCompression
 	c.Transport = clone
 	return c, nil
 }
@@ -516,6 +522,8 @@ func unixClient(socket string, opts Opts) *http.Client {
 	if opts.ResponseHeaderTimeout > 0 {
 		t.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
 	}
+	t.MaxResponseHeaderBytes = opts.MaxResponseHeaderBytes
+	t.DisableCompression = opts.DisableCompression
 	return &http.Client{Transport: t, Timeout: opts.Timeout}
 }
 

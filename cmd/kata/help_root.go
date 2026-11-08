@@ -81,6 +81,7 @@ var kataCommandGroups = map[string]string{
 	"bridge":              "admin",
 	"connector":           "admin",
 	"export":              "admin",
+	"agentsview":          "admin",
 	"import":              "admin",
 	"openapi":             "admin",
 	"delete":              "admin",

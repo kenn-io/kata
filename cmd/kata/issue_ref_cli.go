@@ -47,6 +47,36 @@ func resolveIssueRefForCommandWithOptions(
 	if err != nil {
 		return nil, "", 0, resolvedIssueRef{}, err
 	}
+	resolvedCtx, base, pid, issueRef, _, err := resolveIssueRefForCommandUsingDaemon(
+		ref, includeArchivedProject, start, a,
+	)
+	return resolvedCtx, base, pid, issueRef, err
+}
+
+// resolveIssueRefForReadOnlyCommand uses daemon discovery without starting a
+// local daemon. Inspection commands must fail when the selected daemon is not
+// already available instead of creating one as a side effect.
+func resolveIssueRefForReadOnlyCommand(
+	cmd *cobra.Command,
+	ref string,
+) (context.Context, string, int64, resolvedIssueRef, daemonAPI, error) {
+	start, err := resolveStartPath(flags.Workspace)
+	if err != nil {
+		return nil, "", 0, resolvedIssueRef{}, daemonAPI{}, err
+	}
+	a, err := discoverDaemonAPI(cmd.Context())
+	if err != nil {
+		return nil, "", 0, resolvedIssueRef{}, daemonAPI{}, err
+	}
+	return resolveIssueRefForCommandUsingDaemon(ref, false, start, a)
+}
+
+func resolveIssueRefForCommandUsingDaemon(
+	ref string,
+	includeArchivedProject bool,
+	start string,
+	a daemonAPI,
+) (context.Context, string, int64, resolvedIssueRef, daemonAPI, error) {
 	// Fallback chain for bare refs: --project flag → workspace binding → "".
 	// An explicit --project must override the workspace binding so users
 	// can target a different project from outside (or inside) a workspace
@@ -58,7 +88,7 @@ func resolveIssueRefForCommandWithOptions(
 	}
 	parsed, err := ResolveRef(ref, bareProject)
 	if err != nil {
-		return nil, "", 0, resolvedIssueRef{}, &cliError{
+		return nil, "", 0, resolvedIssueRef{}, daemonAPI{}, &cliError{
 			Message:  err.Error(),
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
@@ -68,12 +98,12 @@ func resolveIssueRefForCommandWithOptions(
 		a, start, parsed.ProjectName, includeArchivedProject,
 	)
 	if err != nil {
-		return nil, "", 0, resolvedIssueRef{}, err
+		return nil, "", 0, resolvedIssueRef{}, daemonAPI{}, err
 	}
 	return a.ctx, a.baseURL, pid, resolvedIssueRef{
 		RefForAPI:   parsed.RefForAPI,
 		ProjectName: projectName,
-	}, nil
+	}, a, nil
 }
 
 // resolveProjectIDAndNameForRef resolves the project ID + canonical project

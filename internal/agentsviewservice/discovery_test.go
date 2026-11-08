@@ -1,8 +1,9 @@
-package transcriptservice
+package agentsviewservice
 
 import (
 	"bytes"
 	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -47,7 +48,8 @@ func TestDiscoveryRejectsMalformedOrExpiredProof(t *testing.T) {
 	d, pin := discoveryFixture(t)
 	raw, err := json.Marshal(d)
 	require.NoError(t, err)
-	for _, body := range [][]byte{append(raw, []byte(`{}`)...), []byte(`{"unknown":true}`), bytes.Repeat([]byte{' '}, MaxDiscoveryBytes+1), bytes.Replace(raw, []byte(`"version":1`), []byte(`"version":1,"version":1`), 1)} {
+	oversized := append(bytes.Clone(raw), bytes.Repeat([]byte{' '}, MaxDiscoveryBytes-len(raw)+1)...)
+	for _, body := range [][]byte{append(bytes.Clone(raw), []byte(`{}`)...), []byte(`{"unknown":true}`), oversized, bytes.Replace(raw, []byte(`"version":1`), []byte(`"version":1,"version":1`), 1)} {
 		_, err = DecodeDiscovery(body, pin, []string{rootOne}, time.Unix(d.Descriptor.IssuedAt, 0))
 		require.Error(t, err)
 	}
@@ -62,15 +64,23 @@ func TestDiscoverySignatureCommitsToLocator(t *testing.T) {
 	d, pin := discoveryFixture(t)
 	hegel.Test(t, func(ht *hegel.T) {
 		value := hegel.Draw(ht, hegel.Text())
-		if value == d.Descriptor.LocatorBase {
-			return
+		if len(value) > 128 {
+			value = value[:128]
 		}
 		changed := d
-		changed.Descriptor.LocatorBase = value
+		changed.Descriptor.LocatorBase = "https://archive.example/team/case-" + hex.EncodeToString([]byte(value))
 		raw, err := json.Marshal(changed)
 		require.NoError(ht, err)
 		_, err = DecodeDiscovery(raw, pin, []string{rootOne}, time.Unix(d.Descriptor.IssuedAt, 0))
-		require.Error(ht, err)
+		require.ErrorContains(ht, err, "invalid AgentsView service root signature")
+		key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
+		changed.Descriptor, err = SignDescriptor(changed.Descriptor, key)
+		require.NoError(ht, err)
+		raw, err = json.Marshal(changed)
+		require.NoError(ht, err)
+		got, err := DecodeDiscovery(raw, pin, []string{rootOne}, time.Unix(d.Descriptor.IssuedAt, 0))
+		require.NoError(ht, err)
+		require.Equal(ht, changed, got)
 	}, hegel.WithTestCases(2000))
 }
 

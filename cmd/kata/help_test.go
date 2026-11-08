@@ -77,6 +77,17 @@ func TestHelpTopLevelCommandsHaveGroups(t *testing.T) {
 	}
 }
 
+func TestTranscriptCommandRemainsAgentsViewAlias(t *testing.T) {
+	root := newRootCmd()
+	cmd, _, err := root.Find([]string{"transcript", "target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Name() != "target" || cmd.Parent().Name() != "agentsview" {
+		t.Fatalf("legacy transcript path resolved to %s", cmd.CommandPath())
+	}
+}
+
 func TestKataGlobalFlags(t *testing.T) {
 	root := &cobra.Command{Use: "kata"}
 	root.PersistentFlags().Bool("agent", false, "")
