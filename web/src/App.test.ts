@@ -2972,8 +2972,12 @@ describe('App', () => {
         }
         if (target.pathname === '/api/v1/ui/snapshot') {
           snapshotRequests.push(request)
+          const etag = snapshotRequests.length === 1 ? '"snapshot-1"' : '"snapshot-2"'
+          if (request.headers.get('If-None-Match') === etag) {
+            return new Response(null, { status: 304 })
+          }
           return Response.json(snapshotRequests.length === 1 ? initial : refreshed, {
-            headers: { ETag: `"snapshot-${snapshotRequests.length}"` },
+            headers: { ETag: etag },
           })
         }
         throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
@@ -3000,12 +3004,13 @@ describe('App', () => {
     )
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
+    expect(snapshotRequests[1]?.headers.get('If-None-Match')).toBe('"snapshot-1"')
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /Revoked project issue/ })).toBeNull(),
     )
   })
 
-  it('conditionally revalidates when SSE opens after load and row click', async () => {
+  it('revalidates without normalizing again when SSE opens after load and row selection', async () => {
     history.replaceState(null, '', '/kata?view=inbox#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -3065,15 +3070,17 @@ describe('App', () => {
       }),
     )
 
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
     render(App)
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
-    expect(snapshotRequests[1]?.headers.get('If-None-Match')).toBe('"snapshot-1"')
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
       ).toBeNull(),
     )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 1)
     await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(4))
@@ -3082,6 +3089,13 @@ describe('App', () => {
     )
     expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
     expect(snapshotRequests[3]?.headers.get('If-None-Match')).toBe('"snapshot-selected"')
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 2)
   })
 
   it('refreshes membership after an SSE reconnect opens', async () => {
