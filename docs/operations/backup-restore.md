@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-31
+last_edited: 2026-11-06
 ---
 
 # Backup and restore
@@ -55,7 +55,14 @@ damaged database.
 
 ## Slow or interrupted upgrade startup
 
-An SQLite upgrade exports the old database and imports a replacement before
+SQLite index-only upgrades from schemas 41 through 47 to 48 add the missing
+indexes inside the existing database in one transaction. Allow free space for
+the new indexes, their WAL pages, and temporary sort files. These upgrades keep
+no `kata.db.bak.*` backup. An interrupted or failed transaction leaves the old
+schema version intact, and the next start retries. Take a backup before upgrading
+if you need to return to an older binary.
+
+Other SQLite upgrades export the old database and import a replacement before
 publishing a ready daemon. Large databases can take minutes. Detached
 `kata daemon start` and `kata daemon restart` keep waiting while an SQLite
 migration is pending and report that progress on stderr. Cancelling detached

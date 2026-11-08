@@ -10,6 +10,31 @@ This page summarizes the command surface. Run `kata <command> --help` for the
 current flag list in your installed binary. Root help includes the agent workflow,
 ref syntax, output modes, environment variables, and exit codes.
 
+## Find a command
+
+Describe a task to find the most relevant commands in your installed binary:
+
+```sh
+kata cli search "add a comment to an issue"
+kata cli search create a bug --limit 3 --json
+```
+
+Command discovery runs locally without a daemon, workspace binding, config,
+credentials, or network. It searches command names, summaries, flags and
+keywords. It excludes hidden and deprecated commands, interactive UI commands,
+and protocol or agent-hook runners. Hook management remains searchable.
+`kata search` continues to search issues.
+
+Results default to five commands; `--limit` accepts 1–20. Text prints one
+command and summary per line, followed by a help hint. `--agent` adds an
+`OK search results=N` status line. `--json` (or `--format json`) returns
+`kata_api_version`, `query`, and `results`; each result has `command`,
+`summary`, and `usage`. Results contain no scores. No matches is a success
+with an empty results array and a text hint pointing to `kata --help`.
+An empty task or an invalid limit is a usage error (exit 2).
+
+Run `kata cli` for the discovery group's help.
+
 ## Command groups
 
 Root help groups commands into find/read, issue changes, agent coordination,
@@ -58,6 +83,8 @@ Errors go to stderr in the selected output mode.
 | 6 | Confirmation required. |
 | 7 | Daemon unavailable. |
 | 8 | Wait timeout. |
+
+CLI panics exit 1 as internal errors; daemon and background task panics keep diagnostic traces.
 
 With `--json`, a `project_not_initialized` error names the alias or project Kata
 looked up in `error.data`; see [HTTP API errors](http-api.md#errors).
@@ -616,7 +643,7 @@ kata create <title> \
   [--body TEXT | --body-file PATH | --body-stdin] \
   [--label LABEL] \
   [--owner NAME] \
-  [--priority 0..4] \
+  [--priority <0..4|none>] \
   [--parent <ref>] \
   [--blocks <ref>] \
   [--blocked-by <ref>] \
@@ -628,8 +655,9 @@ kata create <title> \
 
 When `--priority` is omitted, `kata create` uses the optional
 [`create.default_priority` client setting](configuration.md#default-priority-for-issue-creation).
-An explicit `--priority` wins. With neither a flag nor a configured default,
-priority stays unset.
+An explicit `--priority` wins. Use `--priority none` to leave priority unset
+without changing the configured default. With neither a flag nor a configured
+default, priority stays unset.
 
 `--meta` binds string-valued metadata at creation and is repeatable.
 
@@ -1729,6 +1757,13 @@ kata ui abc4
 kata ui example-project#abc4
 kata ui 01HZNQ7VFPK1XGD8R5MABCD4EX
 ```
+
+Before launching the browser, Kata prints `Opening <url>` to stdout. With
+`--json`, it prints `{"kata_api_version":1,"url":"<url>"}` instead; with
+`--agent`, it prints `OK ui url=<url>`. The URL is printed even with `-q`.
+If the browser cannot open, the command exits 0 and prints
+`Could not open a browser: <error>. Open the URL above.` to stderr. Open the printed
+URL manually. Cancelling the command still returns an error.
 
 Kata resolves the ref before launching and opens the stable
 `/kata?scope=<project-uid>&issue=<issue-uid>` route. A default loopback daemon

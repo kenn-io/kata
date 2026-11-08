@@ -15,11 +15,15 @@ import (
 
 type lookalikeQueryRecordingStore struct {
 	lookalikeCandidateStore
-	query string
+	query      string
+	titleQuery string
+	titleBody  string
 }
 
 func (s *lookalikeQueryRecordingStore) SearchFTSAny(_ context.Context, params db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	s.query = params.Query
+	s.titleQuery = params.TitleQuery
+	s.titleBody = params.TitleBody
 	return nil, nil
 }
 
@@ -33,6 +37,8 @@ func TestRunLookalikeCheckBoundsSearchQuery(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, store.query, in.Body.Title)
+	assert.Equal(t, in.Body.Body, store.titleBody)
+	assert.Equal(t, in.Body.Title, store.titleQuery)
 	assert.Contains(t, store.query, "留")
 	assert.NotContains(t, store.query, "discard-this-suffix")
 	assert.True(t, utf8.ValidString(store.query))
@@ -45,8 +51,10 @@ func TestRunLookalikeCheckBoundsSearchQuery(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, store.query, "plain body")
+	assert.Equal(t, "plain body", store.titleBody)
 	assert.Contains(t, store.query, "留")
 	assert.NotContains(t, store.query, "discarded-title-suffix")
+	assert.Equal(t, strings.Repeat("界", 499)+"留", store.titleQuery)
 	assert.True(t, utf8.ValidString(store.query))
 }
 

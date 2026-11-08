@@ -212,8 +212,10 @@ func TestDaemonLocate_JSONReportsLocalUnixConfigAddress(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "1")
-	socketDir := filepath.Join(t.TempDir(), "socket dir")
-	require.NoError(t, os.Mkdir(socketDir, 0o700))
+	// Keep the socket path below the platform limit while retaining a space.
+	socketDir, err := os.MkdirTemp("", "socket dir-")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
 	socketPath := filepath.Join(socketDir, "kata.sock")
 	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socketPath)
 	require.NoError(t, err)

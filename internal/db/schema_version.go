@@ -4,7 +4,8 @@ package db
 // meta. Backends apply the canonical schema.sql to fresh databases and
 // compare on-disk state against this number when opening existing ones; a
 // mismatch surfaces either ErrSchemaCutoverRequired (for older sources, so
-// storeopen can drive a JSONL cutover) or a newer-than-binary error.
+// storeopen can apply index-only upgrades in place or run JSONL cutover under
+// the cutover lock) or a newer-than-binary error.
 const currentSchemaVersion = 48
 
 // CurrentSchemaVersion returns the schema version expected by this binary.

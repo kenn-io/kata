@@ -59,7 +59,7 @@ func TestServerPublishesOnlySectionLoadersInitially(t *testing.T) {
 	require.True(t, session.InitializeResult().Capabilities.Tools.ListChanged)
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	require.Equal(t, append(append([]string(nil), sectionLoaderNames...), "kata.skills"), toolNames(result.Tools))
+	require.Equal(t, append(append([]string(nil), sectionLoaderNames...), "kata.search_tools", "kata.skills"), toolNames(result.Tools))
 	for _, tool := range result.Tools {
 		require.True(t, tool.Annotations.ReadOnlyHint, tool.Name)
 		require.False(t, *tool.Annotations.DestructiveHint, tool.Name)
@@ -163,7 +163,7 @@ func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	want := append(append([]string(nil), sectionLoaderNames...), "kata.skills", "kata.digest", "kata.events")
+	want := append(append([]string(nil), sectionLoaderNames...), "kata.search_tools", "kata.skills", "kata.digest", "kata.events")
 	sort.Strings(want)
 	require.Equal(t, want, toolNames(result.Tools))
 
@@ -241,6 +241,25 @@ func TestTokenSectionRequiresExplicitStartupCapability(t *testing.T) {
 	require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &output))
 	require.True(t, output.Available)
 	require.True(t, output.Loaded)
+}
+
+func TestServerToolOutputSchemasAreObjects(t *testing.T) {
+	admin, err := storageadmin.New(storageadmin.Config{Root: t.TempDir(), SourceDSN: "source.db"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, admin.Close()) })
+	session := connectTestServerWithOptions(t, Options{
+		Client: inertTestClient(t), Scope: NewAllScope(), EnableTokenAdmin: true, StorageAdmin: admin,
+		Actor: "example-agent", Version: "test-version",
+	})
+	result, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Tools)
+	for _, tool := range result.Tools {
+		t.Run(tool.Name, func(t *testing.T) {
+			// MCP 2025-11-25 clients require an object root in outputSchema.
+			require.Equal(t, "object", schemaObject(t, tool.OutputSchema)["type"])
+		})
+	}
 }
 
 func TestServerPublishesCurrentToolsOnly(t *testing.T) {
@@ -369,7 +388,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.unassign",
 		"kata.wait",
 	}
-	wantNames = append(wantNames, "kata.skills")
+	wantNames = append(wantNames, "kata.search_tools", "kata.skills")
 	wantNames = append(wantNames, sectionLoaderNames...)
 	sort.Strings(wantNames)
 	gotNames := make([]string, 0, len(result.Tools))
@@ -409,7 +428,6 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		gotNames = append(gotNames, tool.Name)
 		require.NotEmpty(t, tool.Title, tool.Name)
 		require.NotEmpty(t, tool.Description, tool.Name)
-		require.NotNil(t, tool.OutputSchema, tool.Name)
 
 		input := schemaObject(t, tool.InputSchema)
 		require.Equal(t, "https://json-schema.org/draft/2020-12/schema", input["$schema"], tool.Name)
@@ -448,6 +466,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 		"kata.cron_workflows": true, "kata.cron_workflow": true, "kata.cron_runs": true, "kata.cron_run": true,
 		"kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_new_uid": true,
 		"kata.skills":                   true,
+		"kata.search_tools":             true,
 		"kata.federation_bridge_status": true,
 		"kata.teams":                    true, "kata.team_show": true, "kata.project_access_show": true,
 		"kata.audit_closes":      true,
@@ -1252,13 +1271,14 @@ func connectTestServer(t *testing.T) *sdkmcp.ClientSession {
 
 func connectTestServerWithClient(t *testing.T, apiClient *kataclient.Client) *sdkmcp.ClientSession {
 	t.Helper()
-	return connectTestServerWithOptions(t, Options{
-		Client:      apiClient,
-		ProjectID:   42,
-		ProjectName: "spoke-project",
-		Actor:       "example-agent",
-		Version:     "test-version",
-	})
+	return connectTestServerWithOptions(t, defaultCatalogOptions(apiClient))
+}
+
+func defaultCatalogOptions(apiClient *kataclient.Client) Options {
+	return Options{
+		Client: apiClient, ProjectID: 42, ProjectName: "spoke-project",
+		Actor: "example-agent", Version: "test-version",
+	}
 }
 
 func connectTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientSession {
@@ -1281,12 +1301,20 @@ func connectRawTestServerWithClientOptions(t *testing.T, options Options, client
 	t.Helper()
 	server, err := New(options)
 	require.NoError(t, err)
+	return connectServerSession(t, server, clientOptions, nil)
+}
 
+func connectServerSession(t *testing.T, server *sdkmcp.Server, clientOptions *sdkmcp.ClientOptions, capture io.Writer) *sdkmcp.ClientSession {
+	t.Helper()
 	serverConn, clientConn := net.Pipe()
+	var writer io.Writer = serverConn
+	if capture != nil {
+		writer = io.MultiWriter(capture, serverConn)
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- server.Run(ctx, NewStdioTransport(serverConn, serverConn))
+		serverDone <- server.Run(ctx, NewStdioTransport(serverConn, writer))
 	}()
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{

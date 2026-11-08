@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-11-04
+last_edited: 2026-11-06
 ---
 
 # Web UI
@@ -26,6 +26,8 @@ reference accepted by `kata show` to open that issue directly:
 kata ui abc4
 kata ui example-project#abc4
 ```
+
+Kata prints the URL in the selected output format before opening the browser; if the browser cannot open, the command succeeds and asks you to open that URL manually. Cancelling the command still returns an error.
 
 Kata resolves the reference before opening the browser, then uses the issue and
 project UIDs in the URL so the bookmark survives project renames and issue
@@ -55,8 +57,10 @@ individual projects:
   `scheduled_on` stays out of Inbox until that day; a deadline never hides it.
   Narrow Inbox to one project with the **Project scope** filter, and sort it
   from the column headers. New tasks are captured in the designated
-  [Inbox project](../reference/metadata.md#project-inbox-designation); if none
-  exists, the first new task asks you to choose one. To switch it later, select
+  [Inbox project](../reference/metadata.md#project-inbox-designation). With no
+  projects, **New task** asks you to create one, makes it Inbox, and opens task
+  capture. With existing projects and no Inbox, it asks you to choose one.
+  To switch it later, select
   **Change** in the **New task** dialog. This is separate from `kata inbox`,
   which reads
   [attention requests](../reference/cli.md#teammate-requests) for an actor or

@@ -21,6 +21,7 @@ Choose authentication explicitly; create the scheduled task through Muse itself.
 var agentQuickstartText = agentguide.Quickstart
 
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
+Find commands with kata cli search "<task>" --agent; kata search finds issues.
 Do not create practice, tutorial, example, or scratchpad issues.
 Search before creating or updating work.
 If create refuses a look-alike, reuse it; --force-new only if the work truly differs.

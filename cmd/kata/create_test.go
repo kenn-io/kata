@@ -739,6 +739,9 @@ func TestCreateDefaultPriorityRequest(t *testing.T) {
 		{name: "default zero", config: "[create]\ndefault_priority = 0", want: new(int64(0))},
 		{name: "default three", config: "[create]\ndefault_priority = 3", want: new(int64(3))},
 		{name: "explicit zero", config: "[create]\ndefault_priority = 3", args: []string{"--priority", "0"}, want: new(int64(0))},
+		{name: "explicit none", config: "[create]\ndefault_priority = 3", args: []string{"--priority", "none"}},
+		{name: "none without default", args: []string{"--priority", "none"}},
+		{name: "none ignores invalid default", config: "[create]\ndefault_priority = 'invalid'", args: []string{"--priority", "none"}},
 		{name: "ignore invalid default", config: "[create]\ndefault_priority = 'invalid'", args: []string{"--priority", "2"}, want: new(int64(2))},
 	}
 	for _, tc := range cases {
