@@ -1,7 +1,7 @@
 ---
 title: Share projects between hubs
 description: Connect a selected project to another Kata daemon, relay it to your devices, and understand sync and recovery.
-last_edited: 2026-10-17
+last_edited: 2026-11-08
 ---
 
 # Share projects between hubs
@@ -14,6 +14,28 @@ can reach each other again.
 **Availability:** project relays require Kata 0.19.0 or later on every
 participating daemon.
 The connection preview checks the upstream daemon's protocol support.
+
+## Inspect a root transcript destination
+
+When every hop supports transcript-service discovery, inspect the root's
+configured destination without sharing a session:
+
+```sh
+kata transcript target shared-project#abc4
+```
+
+Selection follows the issue's immutable project and root authority, including
+qualified references outside the current directory. Each hop uses its own
+project-scoped enrollment; no AgentsView credential travels downstream.
+Discovery returns a short-lived signed root descriptor and the negotiated
+path's binding generations. Offline, revoked and unsupported paths refuse
+without trying a personal archive.
+
+This command reads no transcript and contacts no receiver. Its result is
+configured policy, not evidence that a session was uploaded or indexed.
+It does not change existing close behavior or enable relay uploads. See
+[root transcript policy](../reference/configuration.md#root-transcript-service-discovery)
+for the default-off operator configuration and current limits.
 
 ## Choose the shape you need
 

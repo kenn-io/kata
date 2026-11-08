@@ -159,9 +159,10 @@ type ServerConfig struct {
 
 	// Embedder is the semantic-search embedding client. Nil means semantic
 	// search is disabled and the search handler falls back to lexical-only.
-	Embedder      *embedding.Client
-	Docbank       *docbank.Client
-	DocbankFolder string
+	Embedder          *embedding.Client
+	Docbank           *docbank.Client
+	DocbankFolder     string
+	TranscriptService config.TranscriptServiceConfig
 
 	// VectorIndex is the semantic-search sidecar index. Nil means semantic and
 	// hybrid search are unavailable, exactly like a nil Embedder.
@@ -742,6 +743,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerDestructive(humaAPI, cfg)
 	registerRecurrences(humaAPI, cfg)
 	registerMetadata(humaAPI, cfg)
+	registerTranscriptServiceHandlers(humaAPI, cfg)
 	registerAttachmentHandlers(humaAPI, cfg)
 	registerMove(humaAPI, cfg)
 	registerEventsHandlers(humaAPI, mux, cfg)

@@ -64,8 +64,9 @@ type DaemonConfig struct {
 	Storage StorageConfig `toml:"storage"`
 	// Search carries opt-in semantic-search settings. An empty
 	// [search.embeddings] section leaves kata on lexical-only FTS.
-	Search  SearchConfig  `toml:"search"`
-	Docbank DocbankConfig `toml:"docbank"`
+	Search            SearchConfig            `toml:"search"`
+	Docbank           DocbankConfig           `toml:"docbank"`
+	TranscriptService TranscriptServiceConfig `toml:"transcript_service"`
 	// GitHubSync carries daemon-owned GitHub API credential settings for
 	// background synchronization.
 	GitHubSync   GitHubSyncConfig   `toml:"github_sync"`
@@ -524,6 +525,11 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	if _, err := cfg.Close.Throttle.ThrottleWindow(); err != nil {
 		return nil, err
 	}
+	transcriptService, err := NormalizeTranscriptServiceConfig(cfg.TranscriptService)
+	if err != nil {
+		return nil, err
+	}
+	cfg.TranscriptService = transcriptService
 	if err := normalizeDocbank(&cfg.Docbank); err != nil {
 		return nil, err
 	}

@@ -1,0 +1,231 @@
+// Package transcriptservice describes root-owned transcript destinations.
+// Discovery never reads a transcript or receiver credential and grants no upload.
+package transcriptservice
+
+import (
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json/v2"
+	"errors"
+	"net"
+	"net/url"
+	"strings"
+	"time"
+
+	"go.kenn.io/kata/internal/httpurl"
+	"go.kenn.io/kata/internal/uid"
+)
+
+const (
+	MaxDiscoveryBytes       = 16 << 10
+	MaxSnapshotBytes  int64 = 64 << 20
+	MaxLifetime             = 5 * time.Minute
+	ClockSkew               = 5 * time.Second
+	// Eight hubs plus a final leaf, matching the negotiated relay protocol.
+	MaxRouteNodes = 9
+)
+
+// Descriptor is a root-signed statement of configured policy, not receiver
+// availability, ingest acceptance, session consent or indexing evidence.
+type Descriptor struct {
+	Version         int    `json:"version"`
+	ProjectUID      string `json:"project_uid"`
+	AuthorityUID    string `json:"authority_uid"`
+	ServiceID       string `json:"service_id"`
+	LocatorBase     string `json:"locator_base"`
+	EnvelopeVersion int    `json:"envelope_version"`
+	MaxBytes        int64  `json:"max_bytes"`
+	IssuedAt        int64  `json:"issued_at"`
+	ExpiresAt       int64  `json:"expires_at"`
+	KeyID           string `json:"key_id"`
+	Signature       []byte `json:"signature,omitempty"`
+}
+
+// TrustedRoot must come from the daemon's already-enrolled pin. A descriptor
+// or a response carrying a public key cannot establish this trust input.
+type TrustedRoot struct {
+	ProjectUID   string
+	AuthorityUID string
+	KeyID        string
+	PublicKey    ed25519.PublicKey
+	Retired      bool
+}
+
+// RouteObservation captures the negotiated generation at a single hop. The
+// authenticated hop supplies it; it does not rewrite the root signature.
+type RouteObservation struct {
+	InstanceUID         string `json:"instance_uid"`
+	ProjectUID          string `json:"project_uid"`
+	BindingUID          string `json:"binding_uid,omitempty"`
+	UpstreamInstanceUID string `json:"upstream_instance_uid,omitempty"`
+	ResetEpoch          int64  `json:"reset_epoch,omitempty"`
+}
+
+type Discovery struct {
+	Descriptor  Descriptor         `json:"descriptor"`
+	InstanceUID string             `json:"instance_uid"`
+	Route       []RouteObservation `json:"route"`
+}
+
+// CanonicalBase rejects credential-bearing/ambiguous destinations without
+// including their text in errors. HTTP is allowed only for loopback services.
+func CanonicalBase(raw string) (string, error) {
+	base, err := httpurl.CanonicalHTTPBaseURL(raw)
+	if err != nil || len(base) > 2048 {
+		return "", errors.New("invalid transcript service base URL")
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Opaque != "" {
+		return "", errors.New("invalid transcript service base URL")
+	}
+	if u.Scheme == "http" && u.Hostname() != "localhost" {
+		ip := net.ParseIP(u.Hostname())
+		if ip == nil || !ip.IsLoopback() {
+			return "", errors.New("transcript service requires HTTPS except on loopback")
+		}
+	}
+	return base, nil
+}
+
+func digest(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
+
+// ServiceID commits to canonical non-secret policy. Receiver credentials are
+// deliberately not inputs and are never needed for discovery.
+func ServiceID(receiver, locator string) (string, error) {
+	receiver, err := CanonicalBase(receiver)
+	if err != nil {
+		return "", err
+	}
+	locator, err = CanonicalBase(locator)
+	if err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(struct {
+		Receiver string
+		Locator  string
+		Version  int
+	}{receiver, locator, 1})
+	if err != nil {
+		return "", err
+	}
+	return digest(raw), nil
+}
+
+func descriptorBytes(d Descriptor) ([]byte, error) {
+	d.Signature = nil
+	return json.Marshal(struct {
+		Domain     string     `json:"domain"`
+		Descriptor Descriptor `json:"descriptor"`
+	}{"kata.project-trace-service.v1", d})
+}
+
+func descriptorShape(d Descriptor, now time.Time) error {
+	base, err := CanonicalBase(d.LocatorBase)
+	key, keyErr := hex.DecodeString(d.KeyID)
+	service, serviceErr := hex.DecodeString(d.ServiceID)
+	if d.Version != 1 || d.EnvelopeVersion != 1 || !uid.Valid(d.ProjectUID) || !uid.Valid(d.AuthorityUID) ||
+		d.MaxBytes != MaxSnapshotBytes || err != nil || base != d.LocatorBase ||
+		keyErr != nil || len(key) != sha256.Size || strings.ToLower(d.KeyID) != d.KeyID ||
+		serviceErr != nil || len(service) != sha256.Size || strings.ToLower(d.ServiceID) != d.ServiceID ||
+		d.IssuedAt <= 0 || d.ExpiresAt <= d.IssuedAt || d.ExpiresAt-d.IssuedAt > int64(MaxLifetime/time.Second) ||
+		d.IssuedAt > now.Add(ClockSkew).Unix() || d.ExpiresAt < now.Add(-ClockSkew).Unix() {
+		return errors.New("invalid or expired transcript service descriptor")
+	}
+	return nil
+}
+
+// SignDescriptor uses already-loaded signing material; it creates no key or pin.
+func SignDescriptor(d Descriptor, key ed25519.PrivateKey) (Descriptor, error) {
+	if len(key) != ed25519.PrivateKeySize {
+		return Descriptor{}, errors.New("transcript service root signer unavailable")
+	}
+	d.KeyID = digest(key.Public().(ed25519.PublicKey))
+	if err := descriptorShape(d, time.Unix(d.IssuedAt, 0)); err != nil {
+		return Descriptor{}, err
+	}
+	raw, err := descriptorBytes(d)
+	if err != nil {
+		return Descriptor{}, err
+	}
+	d.Signature = ed25519.Sign(key, raw)
+	return d, nil
+}
+
+func VerifyDescriptor(d Descriptor, pin TrustedRoot, now time.Time) error {
+	if err := descriptorShape(d, now); err != nil {
+		return err
+	}
+	if pin.Retired || len(pin.PublicKey) != ed25519.PublicKeySize || pin.KeyID != digest(pin.PublicKey) ||
+		d.KeyID != pin.KeyID || d.ProjectUID != pin.ProjectUID || d.AuthorityUID != pin.AuthorityUID || len(d.Signature) != ed25519.SignatureSize {
+		return errors.New("transcript service does not match enrolled root")
+	}
+	raw, err := descriptorBytes(d)
+	if err != nil || !ed25519.Verify(pin.PublicKey, raw, d.Signature) {
+		return errors.New("invalid transcript service root signature")
+	}
+	return nil
+}
+
+// ValidateRoute checks the complete observed path against negotiated identity.
+// No URL, display name or response-supplied key substitutes for that path.
+func (d Discovery) ValidateRoute(project string, path []string) error {
+	if len(path) == 0 || len(path) > MaxRouteNodes || len(path) != len(d.Route) ||
+		d.Descriptor.ProjectUID != project || d.Descriptor.AuthorityUID != path[0] || d.InstanceUID != path[len(path)-1] {
+		return errors.New("transcript service route identity mismatch")
+	}
+	seen := make(map[string]bool, len(path))
+	for i, hop := range d.Route {
+		if !uid.Valid(hop.InstanceUID) || seen[hop.InstanceUID] || hop.InstanceUID != path[i] || hop.ProjectUID != project {
+			return errors.New("invalid transcript service route")
+		}
+		seen[hop.InstanceUID] = true
+		if i == 0 {
+			if hop.BindingUID != "" || hop.UpstreamInstanceUID != "" || hop.ResetEpoch != 0 {
+				return errors.New("invalid transcript root route")
+			}
+		} else if !uid.Valid(hop.BindingUID) || hop.UpstreamInstanceUID != path[i-1] || hop.ResetEpoch <= 0 {
+			return errors.New("invalid transcript service hop generation")
+		}
+	}
+	return nil
+}
+
+func DecodeDiscovery(raw []byte, pin TrustedRoot, path []string, now time.Time) (Discovery, error) {
+	d, err := ParseDiscovery(raw, pin.ProjectUID, path, now)
+	if err != nil {
+		return Discovery{}, err
+	}
+	if err = VerifyDescriptor(d.Descriptor, pin, now); err != nil {
+		return Discovery{}, err
+	}
+	return d, nil
+}
+
+// ParseDiscovery validates the bounded response received from the selected
+// authenticated daemon. That daemon verifies its enrolled root pin; CLI clients
+// must not manufacture a pin from this response and claim independent trust.
+func ParseDiscovery(raw []byte, project string, path []string, now time.Time) (Discovery, error) {
+	var d Discovery
+	if len(raw) > MaxDiscoveryBytes {
+		return d, errors.New("transcript service response too large")
+	}
+	if err := json.Unmarshal(raw, &d, json.RejectUnknownMembers(true)); err != nil {
+		return Discovery{}, errors.New("invalid transcript service response")
+	}
+	if len(d.Descriptor.Signature) != ed25519.SignatureSize {
+		return Discovery{}, errors.New("invalid transcript service signature size")
+	}
+	if err := descriptorShape(d.Descriptor, now); err != nil {
+		return Discovery{}, err
+	}
+	if path == nil {
+		for _, hop := range d.Route {
+			path = append(path, hop.InstanceUID)
+		}
+	}
+	if err := d.ValidateRoute(project, path); err != nil {
+		return Discovery{}, err
+	}
+	return d, nil
+}
