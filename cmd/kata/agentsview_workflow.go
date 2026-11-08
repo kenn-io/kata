@@ -307,7 +307,7 @@ func inspectAgentsViewSnapshot(ctx context.Context, snapshot *agentsViewFrozenSn
 				values[field] = version
 			case object == envelopeObject && name == "session_id", object == manifestObject && name == "native_session_id", object == sessionObject && (name == "id" || name == "agent"):
 				token, err := decoder.ReadToken()
-				if err != nil || token.Kind() != '"' || len(token.String()) > 160 {
+				if err != nil || token.Kind() != '"' || len(token.String()) > 161 {
 					return errors.New("invalid envelope identity")
 				}
 				field := "/session_id"

@@ -20,17 +20,11 @@ import (
 
 // Contract: selected daemon is the only CLI network destination. Redirects
 // and receiver-like responses cannot become proof of root ingest acceptance.
-func TestAgentsViewHTTPRefusesRedirectCompressionAndOversize(t *testing.T) {
+func TestAgentsViewHTTPRefusesCompressionAndOversize(t *testing.T) {
 	for _, state := range []string{"compression", "oversize", "error-content"} {
 		t.Run(state, func(t *testing.T) {
-			var escaped int
-			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { escaped++; w.WriteHeader(200) }))
-			defer target.Close()
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch state {
-				case "redirect":
-					w.Header().Set("Location", target.URL)
-					w.WriteHeader(307)
 				case "compression":
 					w.Header().Set("Content-Encoding", "gzip")
 					_, _ = io.WriteString(w, "private body")
@@ -46,7 +40,6 @@ func TestAgentsViewHTTPRefusesRedirectCompressionAndOversize(t *testing.T) {
 			port := &agentsViewHTTPPort{api: daemonAPI{client: client, baseURL: server.URL}}
 			_, err := port.request(t.Context(), http.MethodPost, "/synthetic", bytes.NewReader([]byte("selected")), nil, 10*time.Second)
 			require.Error(t, err)
-			require.Zero(t, escaped)
 			require.NotContains(t, err.Error(), "private")
 		})
 	}

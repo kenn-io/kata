@@ -27,7 +27,7 @@ func newAgentsViewPrepareCmd() *cobra.Command {
 		Long: "Prepare inert local consent for an archived snapshot through its captured point. Later running-session messages may be absent. Review the exact file before confirming its digest. The receiver's first accepted snapshot is immutable, including across later closes in the same session.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if snapshot == "" || output == "" {
-				return errors.New("AgentsView: --snapshot and --output are required")
+				return externalCLIValidation("AgentsView: --snapshot and --output are required")
 			}
 			native, err := captureAgentsViewNative(cmd.Context())
 			if err != nil {
@@ -63,7 +63,7 @@ func newAgentsViewShareCmd() *cobra.Command {
 		Long: "Retry only the retained reviewed bytes and original associated close. This never closes again, scans an archive, re-exports, changes destination, or queues a retry. An ordinary close without a snapshot association cannot acquire one later.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if snapshot == "" || event == "" || digest == "" || issue == "" {
-				return errors.New("AgentsView: --issue, --snapshot, --close-event and --confirm-transcript-sha256 are required")
+				return externalCLIValidation("AgentsView: --issue, --snapshot, --close-event and --confirm-transcript-sha256 are required")
 			}
 			consent, err := readAgentsViewConsent(cmd.Context(), args[0])
 			if err != nil {
@@ -172,12 +172,12 @@ func (f *agentsViewCloseFlags) register(cmd *cobra.Command) {
 func (f agentsViewCloseFlags) selected(cmd *cobra.Command) (bool, error) {
 	selected := cmd.Flags().Changed("share-transcript") || cmd.Flags().Changed("snapshot") || cmd.Flags().Changed("confirm-transcript-sha256")
 	if selected && (f.consent == "" || f.snapshot == "" || !validAgentsViewDigest(f.digest)) {
-		return true, errors.New("AgentsView: sharing requires --share-transcript, --snapshot and --confirm-transcript-sha256")
+		return true, externalCLIValidation("AgentsView: sharing requires --share-transcript, --snapshot and --confirm-transcript-sha256")
 	}
 	if selected && cmd.Flags().Lookup("no-transcript") != nil {
 		disabled, err := cmd.Flags().GetBool("no-transcript")
 		if err != nil || disabled {
-			return true, errors.New("AgentsView: transcript disable conflicts with explicit sharing")
+			return true, externalCLIValidation("AgentsView: transcript disable conflicts with explicit sharing")
 		}
 	}
 	return selected, nil
@@ -189,7 +189,7 @@ func (f agentsViewCloseFlags) run(ctx context.Context, cmd *cobra.Command, ref s
 		return err
 	}
 	if comment != "" {
-		return errors.New("AgentsView: --comment with sharing is unavailable in this draft; post the comment separately")
+		return externalCLIValidation("AgentsView: --comment with sharing is unavailable in this draft; post the comment separately")
 	}
 	consent, err := readAgentsViewConsent(ctx, f.consent)
 	if err != nil {

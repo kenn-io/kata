@@ -21,7 +21,9 @@ func TestAgentsViewCommandsRequireExplicitFilesAndDigest(t *testing.T) {
 		root.SetOut(&out)
 		root.SetErr(&out)
 		root.SetArgs(tc.args)
-		require.ErrorContains(t, root.ExecuteContext(t.Context()), tc.message)
+		err := root.ExecuteContext(t.Context())
+		require.ErrorContains(t, err, tc.message)
+		require.Equal(t, ExitValidation, exitCodeForErr(err, true))
 	}
 }
 

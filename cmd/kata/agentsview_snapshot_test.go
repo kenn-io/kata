@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,6 +105,21 @@ func TestAgentsViewSnapshotRejectsSlashKeyIdentityAliases(t *testing.T) {
 		require.Error(t, inspectAgentsViewSnapshot(t.Context(), snapshot, "pi", "pi:selected"))
 		require.NoError(t, snapshot.Close())
 	}
+}
+
+// The canonical ID includes a separator in addition to both native limits.
+func TestAgentsViewSnapshotAcceptsMaximumCanonicalIdentity(t *testing.T) {
+	agent := strings.Repeat("a", 32)
+	native := strings.Repeat("b", 128)
+	canonical, err := (agentsViewNativeIdentity{Agent: agent, NativeSessionID: native}).canonical()
+	require.NoError(t, err)
+	raw := fmt.Sprintf(`{"v":1,"session_id":%q,"manifest":{"v":5,"native_session_id":%q,"session":{"id":%q,"agent":%q}}}`, canonical, canonical, canonical, agent)
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	require.NoError(t, os.WriteFile(path, []byte(raw), 0o600))
+	snapshot, err := captureAgentsViewSnapshot(t.Context(), path)
+	require.NoError(t, err)
+	defer snapshot.Close()
+	require.NoError(t, inspectAgentsViewSnapshot(t.Context(), snapshot, agent, canonical))
 }
 
 // Outer push v1 and artifact manifest v2..7 are independent contracts from
