@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	katadocs "go.kenn.io/kata/docs"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
@@ -27,12 +28,13 @@ The daemon schedules recurring issue jobs to create child issues and inbox
 requests. External adapters schedule other jobs, launch processes, and report
 each run with kata cron run observe. A recorded run status never controls
 whether anything runs.
-Results are JSON.
+Results are JSON except for the Markdown authoring guide.
 A job is configured work: its trigger, action, and execution settings.
 A workflow is reusable command or prompt steps with dependencies.
 A run is one execution and its reported status and results.
 For request bodies, see kata cron job create --help or kata cron workflow create --help.
-The full contract is in the Cron reference (docs/reference/cron.md).`,
+The full contract is in the Cron reference (docs/reference/cron.md).
+Agents: run kata cron guide before writing a job.`,
 		Example: `  kata cron capabilities --json
   kata cron job create --file job.json --json
   kata cron job list --json
@@ -59,7 +61,20 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
 	capabilities.Short = "discover local protocol support without creating cron state"
-	command.AddCommand(runs, capabilities)
+	guide := &cobra.Command{
+		Use:   "guide",
+		Short: "print the cron authoring guide as Markdown (not JSON)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			body, err := katadocs.Page("guide/cron-authoring.md")
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprint(cmd.OutOrStdout(), body)
+			return err
+		},
+	}
+	command.AddCommand(runs, capabilities, guide)
 	return command
 }
 

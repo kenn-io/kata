@@ -8,6 +8,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	katadocs "go.kenn.io/kata/docs"
 	"go.kenn.io/kata/internal/agentguide"
 )
 
@@ -25,6 +26,7 @@ var skillGuides = []skillGuide{
 	{name: "teammates", title: "Teammates, inbox and attention", summary: "Attribute contributions, coordinate requests and signal attention with work.* metadata.", fragments: []string{"teammates", "coordination"}, commands: []string{"kata comment", "kata create", "kata claim", "kata notify", "kata inbox", "kata meta set", "kata wait"}},
 	{name: "scheduling", title: "Park, schedule and set deadlines", summary: "Defer work, set deadlines and return deferred issues to the queue.", fragments: []string{"scheduling"}, commands: []string{"kata schedule", "kata deadline", "kata meta set", "kata meta unset"}},
 	{name: "events", title: "Follow activity with events", summary: "Resume activity from a cursor and recover from resets.", fragments: []string{"events"}, commands: []string{"kata events"}},
+	{name: "cron", title: "Author cron jobs", summary: "Pick the job kind, use known IDs, choose agent and model, stagger, verify and report the next occurrence.", commands: []string{"kata cron guide", "kata cron capabilities", "kata search", "kata show", "kata inbox", "kata tui", "kata cron job list", "kata cron job show", "kata cron job create", "kata cron job update", "kata cron job delete", "kata cron job restore", "kata cron workflow list", "kata cron workflow show", "kata cron workflow create", "kata cron run list", "kata cron run show"}},
 }
 
 var cliOnlyFragments = []string{"output-flags", "mutation-comments", "daemon-recovery", "remote-daemon"}
@@ -46,6 +48,10 @@ func SkillSource(name string) (string, bool) {
 		}
 		if name == "workflow" {
 			return agentguide.Contract, true
+		}
+		if name == "cron" {
+			page, err := katadocs.Page("guide/cron-authoring.md")
+			return page, err == nil
 		}
 		var source strings.Builder
 		for _, id := range guide.fragments {
@@ -112,7 +118,7 @@ type SkillsOutput struct {
 }
 
 func registerSkillsTool(server *sdkmcp.Server) {
-	addTool(server, "kata.skills", "Kata how-to guides", `How-to guides for this server's own Kata tools: the agent workflow contract (search first, claim, attention, close with evidence), issues, claiming, closing, teammates and inbox, scheduling, events. A short fixed catalog served by this server. It is not a general skill reader and cannot read files, paths or other skills. Call with no name to list the guides. Call kata.skills {"name":"workflow"} before your first write.`, toolHints(true, false, false), toolHandlers{}.skills)
+	addTool(server, "kata.skills", "Kata how-to guides", `How-to guides for this server's own Kata tools: the agent workflow contract (search first, claim, attention, close with evidence), issues, claiming, closing, teammates and inbox, scheduling, events, and cron authoring. A short fixed catalog served by this server. It is not a general skill reader and cannot read files, paths or other skills. Call with no name to list the guides. Call kata.skills {"name":"workflow"} before your first write.`, toolHints(true, false, false), toolHandlers{}.skills)
 }
 
 func (toolHandlers) skills(_ context.Context, _ *sdkmcp.CallToolRequest, input SkillsInput) (*sdkmcp.CallToolResult, SkillsOutput, error) {

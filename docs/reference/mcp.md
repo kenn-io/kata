@@ -527,10 +527,12 @@ list the catalog, or pass a name:
 {"name":"workflow"}
 ```
 
-The seven names are `workflow`, `issues`, `claiming`, `closing`, `teammates`,
-`scheduling`, and `events`. Read `workflow` before your first write. The guides
-reuse the contract and quickstart text shipped by `kata quickstart`, followed
-by a command-to-tool table with the section loaders and MCP differences.
+The eight names are `workflow`, `issues`, `claiming`, `closing`, `teammates`,
+`scheduling`, `events`, and `cron`. Read `workflow` before your first write. The guides
+reuse the contract and quickstart text shipped by `kata quickstart`; `cron`
+uses the embedded [cron authoring guide](../guide/cron-authoring.md) printed by
+`kata cron guide`. Each guide adds a command-to-tool table with section loaders
+and MCP differences. Read `cron` before defining a cron job.
 The Markdown body is returned once as text content; structured content holds
 only the guide's name, title, and summary.
 

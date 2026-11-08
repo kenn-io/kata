@@ -26,6 +26,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   integer query values such as `kata events --after` cursors go out as plain
   numbers.
 - Open the web UI manually over SSH or in a container: `kata ui` and `kata ui <issue-ref>` print the browser URL in the selected output format before launching the browser and exit 0 with a manual-open hint if no browser opens. Cancelling the command still returns an error.
+- Author cron jobs with version-matched decision rules from `kata cron guide`
+  or `kata.skills {"name":"cron"}`. The shared guide covers job kinds, known
+  identifiers, agent and model selection, staggered schedules, delivery checks
+  and reporting the next occurrence. See the
+  [authoring guide](guide/cron-authoring.md).
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the
