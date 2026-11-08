@@ -220,12 +220,12 @@ func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon did not provide Docbank health details; its attachment key state is unknown"}
 	}
 	if h == nil {
-		reported := "no api_schema_version"
-		if health.APISchemaVersion != nil && *health.APISchemaVersion != "" {
+		reported := ""
+		if health.APISchemaVersion != nil {
 			reported = *health.APISchemaVersion
 		}
 		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankKeyHealth); !current {
-			return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: fmt.Sprintf("Docbank key health requires daemon API %s or newer; this daemon reports %s; upgrade the daemon", apiVersionDocbankKeyHealth, reported)}
+			return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: daemonAPITooOld("Docbank key health", apiVersionDocbankKeyHealth, reported)}
 		}
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon does not have Docbank attachments configured"}
 	}

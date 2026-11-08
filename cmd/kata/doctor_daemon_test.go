@@ -194,7 +194,8 @@ func TestDoctorDocbankCheckFollowsHealth(t *testing.T) {
 	}{
 		{"key resolves", `{"ok":true,"schema_version":28,"api_schema_version":"0.44.0","db_path":"/data/kata.db","docbank":{"credential":"ok"}}`, "ok", "resolves its Docbank API key"},
 		{"not configured", `{"ok":true,"schema_version":28,"api_schema_version":"0.44.0","db_path":"/data/kata.db"}`, "info", "does not have Docbank attachments configured"},
-		{"daemon predates key health", `{"ok":true,"schema_version":28,"api_schema_version":"0.43.0","db_path":"/data/kata.db"}`, "info", "daemon API 0.44.0"},
+		{"daemon predates key health", `{"ok":true,"schema_version":28,"api_schema_version":"0.43.0","db_path":"/data/kata.db"}`, "info", "Docbank key health requires daemon API 0.44.0 or newer; this daemon reports 0.43.0; upgrade the daemon"},
+		{"daemon reports no API version", `{"ok":true,"schema_version":28,"db_path":"/data/kata.db"}`, "info", "this daemon reports no api_schema_version"},
 		{"health without diagnostics", `{"ok":true,"schema_version":28,"api_schema_version":"0.44.0"}`, "info", "did not provide Docbank health details"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
