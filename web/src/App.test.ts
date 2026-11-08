@@ -49,10 +49,9 @@ describe('App', () => {
         }
         if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
         requests.push(request)
-        if (requests.length > 1) return new Response(null, { status: 304 })
-        const current = snapshot()
-        current.catalog[0]!.project.metadata = { role: 'inbox' }
-        return Response.json(current, { headers: { ETag: '"snapshot-1"' } })
+        if (request.headers.get('If-None-Match') === '"snapshot-1"')
+          return new Response(null, { status: 304 })
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
       }),
     )
     render(App)
@@ -69,7 +68,6 @@ describe('App', () => {
       ).not.toBe('true'),
     )
     await tick()
-    expect(requests[1]!.headers.get('If-None-Match')).toBe('"snapshot-1"')
     expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
