@@ -693,6 +693,11 @@ type recurringCountingProbe struct {
 }
 
 func (p *recurringCountingProbe) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	// Count only recurring projection candidates; association payloads have a
+	// separate feature probe and do not enter the cron decoder.
+	if strings.Contains(query, "SELECT e.payload") {
+		return p.recurringProbeQuerier.QueryContext(ctx, query, args...)
+	}
 	rows, err := p.recurringProbeQuerier.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
