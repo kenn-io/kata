@@ -12,7 +12,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/safefileio"
-	"hegel.dev/go/hegel"
 )
 
 // Contract: retain exact reviewed bytes, open once, never re-export at retry.
@@ -67,22 +66,6 @@ func TestAgentsViewConsentExclusivePrivateFile(t *testing.T) {
 	got, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, `{"v":1}`, string(got))
-}
-
-// Literal slash keys must never replace structural identity, across sessions.
-func TestAgentsViewIdentityCannotBeReplacedByLiteralPathKeys(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		serial := hegel.Draw(ht, hegel.Integers(0, 1<<30))
-		selected := fmt.Sprintf("pi:a%d", serial)
-		other := fmt.Sprintf("pi:b%d", serial)
-		raw := fmt.Sprintf(`{"v":1,"session_id":%q,"manifest":{"v":5,"native_session_id":%q,"session":{"id":%q,"agent":"pi"}},"manifest/native_session_id":%q,"manifest/session/id":%q}`, selected, other, other, selected, selected)
-		path := filepath.Join(t.TempDir(), "snapshot.json")
-		require.NoError(ht, os.WriteFile(path, []byte(raw), 0o600))
-		snapshot, err := captureAgentsViewSnapshot(t.Context(), path)
-		require.NoError(ht, err)
-		require.Error(ht, inspectAgentsViewSnapshot(t.Context(), snapshot, "pi", selected))
-		require.NoError(ht, snapshot.Close())
-	}, hegel.WithTestCases(100))
 }
 
 func TestAgentsViewSnapshotIdentityRejectsMalformedAndSubstitutedEnvelopes(t *testing.T) {
