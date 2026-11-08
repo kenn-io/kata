@@ -106,5 +106,8 @@ It has not run locally. The process fixture exercises real CLI rejection;
 it does not stand in for a real root/relay/leaf with two opted-in SQLite
 AgentsView receivers. That combined process proof, PostgreSQL parity, live
 revoke/epoch races, direct-runner compatibility and signed receipt integration
-remain pending. No compile, test, lint, typecheck or generated API refresh ran
+remain pending. See the [developer integration notes](../development/agentsview-relay-integration.md)
+for the exact inspected prerequisite heads and adapter boundaries.
+
+No compile, test, lint, typecheck or generated API refresh ran
 locally for this draft.
