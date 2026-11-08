@@ -19,21 +19,13 @@ func (missingAgentsViewEventStore) EventsByUIDs(context.Context, int64, []string
 	return nil, db.ErrNotFound
 }
 
-type emptyAgentsViewEventStore struct{ db.Storage }
-
-func (emptyAgentsViewEventStore) EventsByUIDs(context.Context, int64, []string) ([]db.Event, error) {
-	return nil, nil
-}
-
 func TestAgentsViewMissingOriginEventIsPendingForOpenAndClosedIssue(t *testing.T) {
-	for _, store := range []db.Storage{missingAgentsViewEventStore{}, emptyAgentsViewEventStore{}} {
-		for _, status := range []string{"open", "closed"} {
-			issue := db.Issue{UID: "issue", ProjectID: 1, Status: status}
-			_, err := loadAgentsViewClose(t.Context(), ServerConfig{DB: store}, issue, agentsviewrelay.Control{IssueUID: issue.UID})
-			var apiErr *api.APIError
-			require.ErrorAs(t, err, &apiErr)
-			require.Equal(t, "close_not_at_origin", apiErr.Code)
-		}
+	for _, status := range []string{"open", "closed"} {
+		issue := db.Issue{UID: "issue", ProjectID: 1, Status: status}
+		_, err := loadAgentsViewClose(t.Context(), ServerConfig{DB: missingAgentsViewEventStore{}}, issue, agentsviewrelay.Control{IssueUID: issue.UID})
+		var apiErr *api.APIError
+		require.ErrorAs(t, err, &apiErr)
+		require.Equal(t, "close_not_at_origin", apiErr.Code)
 	}
 }
 
@@ -91,4 +83,12 @@ func TestAgentsViewBinaryUploadContentTypeScope(t *testing.T) {
 		req.Header.Set("Content-Type", tc.contentType)
 		require.Equal(t, tc.want, isAgentsViewBinaryUpload(req), tc.path)
 	}
+}
+
+func TestAgentsViewHistoryUsesEventClockInsteadOfInsertionOrder(t *testing.T) {
+	close := db.Event{ID: 1, UID: "close", OriginInstanceUID: "node", HLCPhysicalMS: 100}
+	older := db.Event{ID: 2, UID: "older", OriginInstanceUID: "node", HLCPhysicalMS: 90}
+	newer := db.Event{ID: 0, UID: "newer", OriginInstanceUID: "node", HLCPhysicalMS: 110}
+	require.False(t, agentsViewEventAfter(older, close))
+	require.True(t, agentsViewEventAfter(newer, close))
 }

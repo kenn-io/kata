@@ -188,14 +188,33 @@ func loadAgentsViewClose(ctx context.Context, cfg ServerConfig, issue db.Issue, 
 	}
 	// Include hidden intervening transitions for the decision only. Never return
 	// their data; moving away and back must not resurrect old consent.
-	history, err := cfg.DB.EventsAfter(db.WithAuthorizedProjects(ctx, nil), db.EventsAfterParams{AfterID: e.ID, IssueUID: issue.UID, Types: []string{"issue.moved", "issue.reopened", "issue.closed"}, Limit: 1})
-	if err != nil {
-		return agentsviewrelay.Association{}, internalAPIError(err)
+	historyCtx := db.WithAuthorizedProjects(ctx, nil)
+	var cursor int64
+	for {
+		history, err := cfg.DB.EventsAfter(historyCtx, db.EventsAfterParams{AfterID: cursor, IssueUID: issue.UID, Types: []string{"issue.moved", "issue.reopened", "issue.closed"}, Limit: pollLimitMax})
+		if err != nil {
+			return agentsviewrelay.Association{}, internalAPIError(err)
+		}
+		for _, transition := range history {
+			if agentsViewEventAfter(transition, e) {
+				return agentsviewrelay.Association{}, api.NewError(409, "agentsview_close_changed", "issue history changed after consented close", "", nil)
+			}
+			if transition.ID <= cursor {
+				return agentsviewrelay.Association{}, internalAPIError(errors.New("issue history cursor did not advance"))
+			}
+			cursor = transition.ID
+		}
+		if len(history) < pollLimitMax {
+			break
+		}
 	}
-	if len(history) > 0 {
-		return agentsviewrelay.Association{}, api.NewError(409, "agentsview_close_changed", "issue history changed after consented close", "", nil)
-	}
+
 	return a, nil
+}
+
+// agentsViewEventAfter uses the same HLC ordering as the federation fold.
+func agentsViewEventAfter(a, b db.Event) bool {
+	return db.CompareEventClocks(a, b) > 0
 }
 
 func revalidateAgentsViewCaller(ctx context.Context) error {

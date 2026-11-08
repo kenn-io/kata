@@ -221,6 +221,8 @@ func TestSignedUploadHoldsIdleForegroundDuringVerification(t *testing.T) {
 }
 
 func TestFederationAgentsViewUnavailableBeforeReadingBody(t *testing.T) {
+	t.Setenv("TEST_AGENTS_VIEW_INGRESS_KEY", strings.Repeat("k", 64))
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_AGENTS_VIEW_INGRESS_KEY"}
 	env := testenv.New(t)
 	project := createFederatedHubProject(t, env, "hub-project")
 	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
@@ -228,16 +230,29 @@ func TestFederationAgentsViewUnavailableBeforeReadingBody(t *testing.T) {
 		ProjectID: &project.ID, Capabilities: "push", Actor: "example-actor",
 	})
 	require.NoError(t, err)
-	srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB})
-	t.Cleanup(func() { require.NoError(t, srv.Close()) })
-	ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
-	require.NoError(t, err)
-	body := &relayCountingBody{reader: strings.NewReader(strings.Repeat("x", 70<<10))}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("https://hub.example/api/v1/projects/%d/federation/transcript-service/issues/example", project.ID), body)
-	req.Header.Set("Authorization", "Bearer "+enrollment.Token)
-	req.Header.Set("Signature", "example")
-	w := httptest.NewRecorder()
-	ingress.ServeHTTP(w, req)
-	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
-	require.Zero(t, body.reads)
+	synctest.Test(t, func(t *testing.T) {
+		state := filepath.Join(t.TempDir(), "replay.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		verifier, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}}, state)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, verifier.Close()) }()
+		time.Sleep(federationsigning.Quarantine)
+		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: verifier})
+		t.Cleanup(func() { require.NoError(t, srv.Close()) })
+		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
+		require.NoError(t, err)
+		for _, size := range []int{128, 70 << 10} {
+			raw := bytes.Repeat([]byte("x"), size)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("https://hub.example/api/v1/projects/%d/federation/transcript-service/issues/example", project.ID), bytes.NewReader(raw))
+			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
+			require.NoError(t, federationsigning.Sign(req, source))
+			body := &relayCountingBody{reader: bytes.NewReader(raw)}
+			req.Body = body
+			w := httptest.NewRecorder()
+			ingress.ServeHTTP(w, req)
+			require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), "agentsview_unavailable")
+			require.Zero(t, body.reads)
+		}
+	})
 }

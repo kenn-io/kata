@@ -192,13 +192,34 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		return "", err
 	}
 	required := ""
-	var associationPresent bool
-	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN projects p ON p.id=e.project_id WHERE p.uid=$1 AND e.type='issue.closed' AND e.payload LIKE '%"agentsview_association"%')`, projectUID).Scan(&associationPresent); err != nil {
+	// Inspect each close payload structurally. A transcript value can contain the
+	// feature name, and an escaped JSON key can represent the actual member.
+	rows, err := q.QueryContext(ctx, `SELECT e.payload FROM events e JOIN projects p ON p.id=e.project_id WHERE p.uid=$1 AND e.type='issue.closed' AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')`, projectUID)
+	if err != nil {
 		return "", err
 	}
-	if associationPresent {
-		required = MergeEventFeatures(required, agentsviewrelay.EventFeature)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return "", err
+		}
+		features, err := PayloadRequiredFeatures("issue.closed", payload)
+		if err != nil {
+			return "", err
+		}
+		if strings.Contains(","+features+",", ","+agentsviewrelay.EventFeature+",") {
+			required = MergeEventFeatures(required, agentsviewrelay.EventFeature)
+			break
+		}
 	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if err := rows.Close(); err != nil {
+		return "", err
+	}
+
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}

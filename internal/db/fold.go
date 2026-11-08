@@ -998,6 +998,11 @@ func clockOf(e FoldEvent) FoldClock {
 	}
 }
 
+// CompareEventClocks orders stored events by the same clock used by the fold.
+func CompareEventClocks(a, b Event) int {
+	return compareClock(FoldClock{HLCPhysicalMS: a.HLCPhysicalMS, HLCCounter: a.HLCCounter, OriginInstanceUID: a.OriginInstanceUID, EventUID: a.UID}, FoldClock{HLCPhysicalMS: b.HLCPhysicalMS, HLCCounter: b.HLCCounter, OriginInstanceUID: b.OriginInstanceUID, EventUID: b.UID})
+}
+
 func compareClock(a, b FoldClock) int {
 	switch {
 	case a.HLCPhysicalMS < b.HLCPhysicalMS:

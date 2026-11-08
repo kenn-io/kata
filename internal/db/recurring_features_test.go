@@ -54,7 +54,21 @@ func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
 	require.Equal(t, 1, state.probeQueries, "a retained native projection is scanned once per process")
 }
 
-type featureProbeState struct{ probeQueries int }
+// An ordinary transcript value matching a feature name must not fence peers.
+func TestProjectFeaturesIgnoreAssociationTextOutsideTopLevel(t *testing.T) {
+	state := &featureProbeState{noCron: true, closePayloads: []string{`{"transcript":{"session_id":"agentsview_association"}}`}}
+	database := sql.OpenDB(featureProbeConnector{state: state})
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	features, err := db.ProjectRequiredEventFeatures(t.Context(), database, "project")
+	require.NoError(t, err)
+	require.Empty(t, features)
+}
+
+type featureProbeState struct {
+	probeQueries  int
+	noCron        bool
+	closePayloads []string
+}
 
 type featureProbeConnector struct{ state *featureProbeState }
 
@@ -78,7 +92,10 @@ func (*featureProbeConn) Close() error              { return nil }
 func (*featureProbeConn) Begin() (driver.Tx, error) { return nil, errors.New("unused begin") }
 func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 	if strings.Contains(query, "SELECT EXISTS") {
-		return &featureProbeRows{presence: true}, nil
+		return &featureProbeRows{presence: true, noCron: c.state.noCron}, nil
+	}
+	if strings.Contains(query, "SELECT e.payload") {
+		return &featureProbeRows{payloads: c.state.closePayloads, payloadQuery: true}, nil
 	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++
@@ -87,9 +104,16 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	return nil, errors.New("unexpected feature probe query")
 }
 
-type featureProbeRows struct{ presence, seen bool }
+type featureProbeRows struct {
+	presence, seen, noCron, payloadQuery bool
+	payloads                             []string
+	index                                int
+}
 
 func (r *featureProbeRows) Columns() []string {
+	if r.payloadQuery {
+		return []string{"payload"}
+	}
 	if r.presence {
 		return []string{"cron_present", "issue_moved"}
 	}
@@ -97,6 +121,14 @@ func (r *featureProbeRows) Columns() []string {
 }
 func (*featureProbeRows) Close() error { return nil }
 func (r *featureProbeRows) Next(values []driver.Value) error {
+	if r.payloadQuery {
+		if r.index >= len(r.payloads) {
+			return io.EOF
+		}
+		values[0] = r.payloads[r.index]
+		r.index++
+		return nil
+	}
 	if r.seen {
 		if r.presence {
 			return io.EOF
@@ -105,7 +137,7 @@ func (r *featureProbeRows) Next(values []driver.Value) error {
 	}
 	r.seen = true
 	if r.presence {
-		values[0] = true
+		values[0] = !r.noCron
 		values[1] = false
 		return nil
 	}
