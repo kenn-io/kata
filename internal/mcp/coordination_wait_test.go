@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -369,6 +370,50 @@ func TestMCPCoordinationWaitReplyResolvesActorPerProject(t *testing.T) {
 	require.GreaterOrEqual(t, lookups[2].Load(), int64(1))
 	require.GreaterOrEqual(t, shows["abc1"], 2)
 	require.GreaterOrEqual(t, shows["def2"], 2)
+}
+
+func TestMCPCoordinationWaitReplySurvivesProjectMove(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit=%t", explicit), func(t *testing.T) {
+			var shows atomic.Int64
+			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/projects":
+					writeJSON(w, map[string]any{"projects": []any{
+						projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "first-project"),
+						projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "second-project"),
+					}})
+				case "/api/v1/projects/1/notifications/actor", "/api/v1/projects/2/notifications/actor":
+					writeJSON(w, map[string]any{"effective_actor": "worker"})
+				case "/api/v1/projects/1/issues/abc1":
+					issue := issueJSON(1, "first-project", "abc1")
+					message := "before"
+					if shows.Add(1) > 1 {
+						issue["project_id"] = 2
+						issue["project_uid"] = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+						message = "reply arrived"
+					}
+					issue["metadata"] = map[string]any{notification.MetadataKey("worker"): map[string]any{"from": "reviewer", "message": message}}
+					writeJSON(w, map[string]any{"issue": issue, "labels": []any{}, "links": []any{}, "comments": []any{}})
+				default:
+					t.Errorf("unexpected request: %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			})
+			scope, err := NewAllowlistScope([]ProjectIdentity{
+				{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "first-project"},
+				{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "second-project"},
+			})
+			require.NoError(t, err)
+			session := connectTestServerWithOptions(t, Options{Client: client, Scope: scope, Actor: "worker", Version: "test"})
+			args := map[string]any{"refs": []string{"first-project#abc1"}, "until": "reply", "timeout_seconds": 2}
+			if explicit {
+				args["for"] = "worker"
+			}
+			out := callCoordinationTool(t, session, "kata.wait", args)
+			require.Equal(t, "matched", out["reason"])
+		})
+	}
 }
 
 func TestMCPCoordinationWaitExplicitRecipientSkipsActorResolution(t *testing.T) {

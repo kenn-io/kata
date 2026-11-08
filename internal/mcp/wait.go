@@ -19,7 +19,7 @@ import (
 
 type waitTarget struct {
 	uid         string
-	projectID   int64
+	recipient   string
 	baseline    string
 	baselineSet bool
 	state       WaitState
@@ -127,10 +127,6 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				case until == "reply":
 					recipient := explicitRecipient
 					if recipient == "" {
-						if target.projectID != 0 && target.projectID != project.ID {
-							target.baselineSet = false
-						}
-						target.projectID = project.ID
 						recipient = recipientsByProject[project.ID]
 						if recipient == "" {
 							requestedActor := h.options.Actor
@@ -153,12 +149,11 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 							}
 							recipientsByProject[project.ID] = recipient
 						}
-					} else if target.projectID != 0 && target.projectID != project.ID {
+					}
+					if target.recipient != "" && target.recipient != recipient {
 						target.baselineSet = false
 					}
-					if explicitRecipient != "" {
-						target.projectID = project.ID
-					}
+					target.recipient = recipient
 					raw, err := json.Marshal(shown.Issue.Metadata[notification.MetadataKey(recipient)])
 					if err != nil {
 						return nil, WaitOutput{}, err
