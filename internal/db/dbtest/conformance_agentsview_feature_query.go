@@ -68,7 +68,7 @@ func checkAgentsViewFeatureQueryLayouts(t *testing.T, store db.Storage, backend 
 		require.NoError(t, err)
 		features, err := db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
 		require.NoError(t, err)
-		require.Contains(t, strings.Split(features, ","), tc.feature)
+		require.Equal(t, tc.feature, features)
 	}
 	_, err = query.ExecContext(ctx, `UPDATE events SET type='issue.closed' WHERE uid=$1`, closed[0].UID)
 	require.NoError(t, err)
@@ -84,8 +84,7 @@ func checkAgentsViewFeatureQueryLayouts(t *testing.T, store db.Storage, backend 
 		require.NoError(t, err)
 		features, err = db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
 		require.NoError(t, err)
-		require.Contains(t, strings.Split(features, ","), agentsviewrelay.EventFeature)
-		require.Contains(t, strings.Split(features, ","), db.IssueMoveEventFeature)
+		require.Equal(t, db.MergeEventFeatures(agentsviewrelay.EventFeature, db.IssueMoveEventFeature), features)
 		_, err = query.ExecContext(ctx, `UPDATE events SET type=$1 WHERE uid=$2`, event.Type, event.UID)
 		require.NoError(t, err)
 	}

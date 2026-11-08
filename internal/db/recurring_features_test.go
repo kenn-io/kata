@@ -80,8 +80,8 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	if strings.Contains(query, "SELECT EXISTS") {
 		return &featureProbeRows{presence: true}, nil
 	}
-	if strings.Contains(query, "SELECT e.payload") {
-		return &featureProbeRows{payloadQuery: true, eventType: strings.Contains(query, "SELECT e.payload,e.type")}, nil
+	if strings.Contains(query, "SELECT e.payload") || strings.Contains(query, "END AS payload,e.type") {
+		return &featureProbeRows{payloadQuery: true, eventType: strings.Contains(query, "END AS payload,e.type")}, nil
 	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++

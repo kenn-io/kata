@@ -313,13 +313,13 @@ const agentsViewAssociationCandidatesSQLite = `WITH bounds AS MATERIALIZED (
 ), sparse_bounds AS MATERIALIZED (
  SELECT * FROM bounds WHERE n>0 AND hi<>lo+(n-1)
 )
-SELECT e.payload,e.type FROM dense_bounds b CROSS JOIN events e NOT INDEXED
+SELECT CASE WHEN e.type='issue.closed' THEN e.payload ELSE '' END AS payload,e.type FROM dense_bounds b CROSS JOIN events e NOT INDEXED
  WHERE e.id BETWEEN b.lo AND b.hi
  AND e.project_id=b.project_id AND (
  (b.project_name<>$2 AND e.type='issue.moved') OR
  (e.type='issue.closed' AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')))
 UNION ALL
-SELECT e.payload,e.type FROM sparse_bounds b CROSS JOIN events e INDEXED BY idx_events_project
+SELECT CASE WHEN e.type='issue.closed' THEN e.payload ELSE '' END AS payload,e.type FROM sparse_bounds b CROSS JOIN events e INDEXED BY idx_events_project
  WHERE e.project_id=b.project_id
  AND ((b.project_name<>$2 AND e.type='issue.moved') OR
  (e.type='issue.closed' AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')))`
