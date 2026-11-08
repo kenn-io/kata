@@ -43,3 +43,26 @@ func TestAgentsViewSignerReadinessRejectsMissingAndWrongKeys(t *testing.T) {
 	}
 	require.True(t, agentsViewSignerMatches(db.RootAttributionSigner{AuthorityUID: "root", PrivateKey: key}, pin))
 }
+
+func TestAgentsViewRootAdmissionDistinguishesPinFromSigner(t *testing.T) {
+	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+	pin := db.RootKeyPin{AuthorityUID: "root", KeyID: db.RootPublicKeyID(key.Public().(ed25519.PublicKey))}
+	association := agentsviewrelay.Association{AuthorityUID: pin.AuthorityUID, RootKeyID: pin.KeyID}
+	signer := db.RootAttributionSigner{AuthorityUID: "root", PrivateKey: key}
+	retired := pin
+	retired.Retired = true
+	for _, tc := range []struct {
+		pin    db.RootKeyPin
+		signer db.RootAttributionSigner
+		code   string
+	}{
+		{retired, signer, "agentsview_route_changed"},
+		{db.RootKeyPin{AuthorityUID: "other", KeyID: pin.KeyID}, signer, "agentsview_route_changed"},
+		{pin, db.RootAttributionSigner{AuthorityUID: "root"}, "agentsview_unavailable"},
+	} {
+		var apiErr *api.APIError
+		require.ErrorAs(t, agentsViewRootAdmission(association, tc.pin, tc.signer), &apiErr)
+		require.Equal(t, tc.code, apiErr.Code)
+	}
+	require.NoError(t, agentsViewRootAdmission(association, pin, signer))
+}

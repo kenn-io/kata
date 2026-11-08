@@ -122,6 +122,7 @@ func TestAgentsViewRootConsumesOnlyOriginalAssociatedSnapshot(t *testing.T) {
 func TestAgentsViewForgedMemberCannotReachReceiver(t *testing.T) {
 	key := ed25519.NewKeyFromSeed(make([]byte, 32))
 	writes := 0
+	var receivedBytes int64
 	env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) {
 		cfg.RootSigning = daemon.NewRootSigning(db.RootAttributionSigner{AuthorityUID: cfg.DB.InstanceUID(), PrivateKey: key})
 		cfg.AgentsViewRelay = &daemon.AgentsViewRelayConfig{
@@ -130,8 +131,13 @@ func TestAgentsViewForgedMemberCannotReachReceiver(t *testing.T) {
 				b, err := io.ReadAll(io.LimitReader(r, 1<<20))
 				return &agentsViewFixtureSpool{bytes.NewReader(b)}, err
 			},
-			Ingest: func(_ context.Context, _ db.Issue, a agentsviewrelay.Association, _ io.ReadSeeker) (daemon.AgentsViewIngestAck, error) {
+			Ingest: func(_ context.Context, _ db.Issue, a agentsviewrelay.Association, payload io.ReadSeeker) (daemon.AgentsViewIngestAck, error) {
 				writes++
+				var err error
+				receivedBytes, err = io.Copy(io.Discard, payload)
+				if err != nil {
+					return daemon.AgentsViewIngestAck{}, err
+				}
 				return daemon.AgentsViewIngestAck{SessionID: a.SessionID, Agent: a.Agent, Status: "created"}, nil
 			},
 		}
@@ -176,6 +182,7 @@ func TestAgentsViewForgedMemberCannotReachReceiver(t *testing.T) {
 	data := readClose(t, result)
 	require.Equal(t, 400, result.StatusCode, string(data))
 	require.Zero(t, writes, "forged identity must not reach the receiver")
+	require.Zero(t, receivedBytes, "forged identity must not send bytes to the receiver")
 }
 
 func TestAgentsViewRevokedTokenCannotReachReceiver(t *testing.T) {

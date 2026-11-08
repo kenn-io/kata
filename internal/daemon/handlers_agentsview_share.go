@@ -109,8 +109,11 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return nil, agentsViewUnavailable()
 				}
 				pin, err := cfg.DB.RootAuthority(ctx, association.ProjectUID)
-				if err != nil || pin.Retired || pin.AuthorityUID != association.AuthorityUID || pin.KeyID != association.RootKeyID || !agentsViewSignerMatches(cfg.RootSigning.Signer(), pin) {
-					return nil, agentsViewUnavailable()
+				if err != nil {
+					return nil, api.NewError(409, "agentsview_route_changed", "root pin changed", "", nil)
+				}
+				if err = agentsViewRootAdmission(association, pin, cfg.RootSigning.Signer()); err != nil {
+					return nil, err
 				}
 			} else if cfg.AgentsViewRelay.Forward == nil {
 				return nil, agentsViewUnavailable()
@@ -255,4 +258,14 @@ func agentsViewUploadActor(ctx context.Context, federation bool, actor string, i
 
 func agentsViewSignerMatches(signer db.RootAttributionSigner, pin db.RootKeyPin) bool {
 	return signer.AuthorityUID == pin.AuthorityUID && len(signer.PrivateKey) == ed25519.PrivateKeySize && db.RootPublicKeyID(signer.PrivateKey.Public().(ed25519.PublicKey)) == pin.KeyID
+}
+
+func agentsViewRootAdmission(a agentsviewrelay.Association, pin db.RootKeyPin, signer db.RootAttributionSigner) error {
+	if pin.Retired || pin.AuthorityUID != a.AuthorityUID || pin.KeyID != a.RootKeyID {
+		return api.NewError(409, "agentsview_route_changed", "root pin changed", "", nil)
+	}
+	if !agentsViewSignerMatches(signer, pin) {
+		return agentsViewUnavailable()
+	}
+	return nil
 }
