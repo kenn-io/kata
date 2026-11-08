@@ -315,6 +315,7 @@ func TestAgentsViewMissingRootReceiverDoesNotSpool(t *testing.T) {
 func TestAgentsViewBrowserLogoutDuringSpoolRefusesDispatch(t *testing.T) {
 	key := ed25519.NewKeyFromSeed(make([]byte, 32))
 	writes := 0
+	spooled := 0
 	env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) {
 		cfg.RootSigning = daemon.NewRootSigning(db.RootAttributionSigner{AuthorityUID: cfg.DB.InstanceUID(), PrivateKey: key})
 		cfg.AgentsViewRelay = &daemon.AgentsViewRelayConfig{
@@ -366,6 +367,7 @@ func TestAgentsViewBrowserLogoutDuringSpoolRefusesDispatch(t *testing.T) {
 	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Auth: config.AuthConfig{Token: "tok"}, WebSessions: manager, RootSigning: daemon.NewRootSigning(db.RootAttributionSigner{AuthorityUID: env.DB.InstanceUID(), PrivateKey: key}), AgentsViewRelay: &daemon.AgentsViewRelayConfig{
 		Selection: func(context.Context, db.Issue, agentsviewrelay.Association, jsontext.Value) error { return nil },
 		Spool: func(_ context.Context, r io.Reader, _ agentsviewrelay.Control) (daemon.AgentsViewSnapshot, error) {
+			spooled++
 			b, err := io.ReadAll(r)
 			manager.Logout(issued.Session)
 			return &agentsViewFixtureSpool{bytes.NewReader(b)}, err
@@ -390,5 +392,7 @@ func TestAgentsViewBrowserLogoutDuringSpoolRefusesDispatch(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, upload)
 	require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), "web_session_required")
+	require.Equal(t, 1, spooled)
 	require.Zero(t, writes)
 }
