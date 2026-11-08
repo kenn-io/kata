@@ -367,6 +367,9 @@ func TestCronProjectArchiveAndRestoreTogglesNextRuns(t *testing.T) {
 	m, cmd := updateModel(m, eventReceivedMsg{eventType: removed.JSON200.Event.Type, projectID: project.ID})
 	refreshed := false
 	for _, msg := range runCmdTree(cmd) {
+		if _, ok := msg.(refetchTickMsg); ok {
+			m, _ = updateModel(m, msg) // The event debounce fires before the later restore event.
+		}
 		if loaded, ok := msg.(cronLoadedMsg); ok {
 			require.ErrorContains(t, loaded.jobsErr, "project_not_found")
 			m, _ = updateModel(m, loaded)

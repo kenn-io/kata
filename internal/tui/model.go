@@ -48,6 +48,13 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
+	cronStartedAt  time.Time
+	cronNotices    cronNoticeState
+	nextCronNotice uint64
+	cronSeen       cronSeenState
+
+	nextCronRequest     uint64
+	lifetime            *cronReadScope
 	telemetry           *telemetryGate
 	searchQuery         string
 	searchCounted       string
@@ -242,6 +249,7 @@ func initialModel(opts Options) Model {
 		sseStatus:             sseConnected,
 		cache:                 newIssueCache(),
 		toastNow:              time.Now,
+		cronStartedAt:         time.Now(),
 		projectLabels:         newLabelCache(),
 		authCapabilitiesReady: true,
 		projectsByID:          map[int64]string{},
@@ -283,7 +291,7 @@ func (m Model) Init() tea.Cmd {
 	// through the event loop — the v2 replacement for the v1-era
 	// blocking OSC probe at boot. Update restyles when the
 	// tea.BackgroundColorMsg answer lands.
-	cmds := []tea.Cmd{m.waitForSSE(), dayTick()}
+	cmds := []tea.Cmd{m.waitForSSE(), dayTick(), m.cronSeenCommand(false)}
 	if m.api != nil {
 		// Init runs once per launch; daemon switches and reconnects never reach it.
 		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened())
@@ -413,6 +421,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	previousConn, previousScope := m.connGen, m.scopeGen
 	next, cmd := m.update(msg)
 	m = next.(Model)
+	// Leaving issue navigation discards its Cron return authority; Help is a
+	// temporary overlay and preserves the round trip.
+	if m.cron.returnToCron && ((m.view != viewDetail && m.view != viewHelp) || (m.view == viewDetail && m.layout == splitlayout.Split && m.focus == focusList)) {
+		m.cron.returnToCron = false
+	}
 	query := strings.TrimSpace(m.list.filter.Search)
 	if query != m.searchQuery {
 		m.searchQuery = ""
@@ -420,7 +433,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if query != m.searchCounted {
 		m.searchCounted = ""
 	}
-	if m.pendingDetailFollow && m.input.kind == inputNone && m.layout == splitlayout.Split {
+	if !m.cron.returnToCron && m.pendingDetailFollow && m.input.kind == inputNone && m.layout == splitlayout.Split {
 		m.pendingDetailFollow = false
 		if len(m.detail.navStack) == 0 {
 			m, cmd = m.followSearchResultIfNeeded(cmd)
@@ -434,9 +447,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if previousReads != nil && (previousReads != m.detail.reads || previousConn != m.connGen || previousScope != m.scopeGen) {
 		previousReads.stop()
 	}
+	var issueCmd tea.Cmd
+	m, issueCmd = m.cronIssueAdopt(msg).cronIssueFeedback(msg)
 	cmd = combineCmds(cmd, m.finishDetailRefresh())
+	cmd = combineCmds(cmd, issueCmd)
 	var cronCmd tea.Cmd
 	m, cronCmd = m.cronSync()
+	cmd = combineCmds(cmd, cronCmd)
+	m = m.cronNoticeSync()
+	m, cronCmd = m.cronSeenSync()
 	cmd = combineCmds(cmd, cronCmd)
 	screenCmd := m.screenViewCommand(visit)
 	return m, tea.Batch(cmd, screenCmd)
@@ -640,7 +659,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) reconcileSplitDetailAfterRefetch(
 	prevPID int64, prevUID string, prevHas bool,
 ) (Model, tea.Cmd) {
-	if m.attention.returnToAttention || m.layout != splitlayout.Split || len(m.detail.navStack) > 0 ||
+	if m.attention.returnToAttention || m.cron.returnToCron || m.layout != splitlayout.Split || len(m.detail.navStack) > 0 ||
 		(m.input.kind == inputSearchBar && m.input.searchFocus != searchFocusResults) {
 		return m, nil
 	}
@@ -846,6 +865,14 @@ func projectIDFromMutation(m Model, mut mutationDoneMsg) int64 {
 // open/key. ok=true means the message was handled here.
 func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case cronNoticeTickMsg:
+		next, cmd := m.cronNoticeFlush(msg)
+		return next, cmd, true
+	case cronSeenResultMsg:
+		next, cmd := m.cronSeenResult(msg)
+		return next, cmd, true
+	case cronPageMsg:
+		return m.cronPageLoaded(msg), nil, true
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
 	case cronEditOpenedMsg:
@@ -906,7 +933,7 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		// Cache viewport dimensions so PgDn/PgUp use the same page
 		// sizes the renderer draws.
 		m.detail = m.applyDetailViewportCache(m.detail)
-		m = m.applyListViewportCache()
+		m = m.applyListViewportCache().cronMarkOpenSeen()
 		return m, flipCmd, true
 	case tea.KeyPressMsg:
 		if m.inboxPending && !m.inboxEntryKeptKey(msg) {
@@ -1008,6 +1035,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 func (m Model) leaveDetail() (Model, tea.Cmd) {
 	if m.layout != splitlayout.Split {
 		m.detail.cancelReads()
+	}
+	if m.cron.returnToCron {
+		return m.returnFromCronDetail()
 	}
 	if m.attention.returnToAttention {
 		return m.returnFromAttentionDetail()
@@ -1573,7 +1603,7 @@ func (m Model) markSearchSplitDetailOwned() Model {
 }
 
 func (m Model) followHighlightedIssueIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
-	if m.attention.returnToAttention {
+	if m.attention.returnToAttention || m.cron.returnToCron {
 		return m, prior
 	}
 	iss, ok := pickHighlightedIssue(m.list)
@@ -2544,6 +2574,11 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		m.focus = focusDetail
 		return m, nil, true
 	}
+	if m.focus == focusDetail && msg.String() == "tab" && m.cron.returnToCron {
+		m.cron.returnToCron = false
+		m.focus, m.view = focusList, viewList
+		return m, nil, true
+	}
 	if m.focus == focusDetail && msg.String() == "tab" && m.attention.returnToAttention {
 		m, cmd := m.prepareAttentionListNavigation()
 		m.focus = focusList
@@ -2553,6 +2588,10 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if m.focus == focusDetail && msg.String() == "esc" {
 		if len(m.detail.navStack) > 0 {
 			return m, nil, false
+		}
+		if m.cron.returnToCron {
+			next, cmd := m.returnFromCronDetail()
+			return next, cmd, true
 		}
 		if m.attention.returnToAttention {
 			next, cmd := m.returnFromAttentionDetail()
@@ -2572,7 +2611,7 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 func (m Model) toggleHelp() (Model, tea.Cmd) {
 	if m.view == viewCron {
 		m.cron.help = !m.cron.help
-		return m, nil
+		return m.cronMarkOpenSeen(), nil
 	}
 	if m.view == viewHelp {
 		m.view = m.prevView
@@ -2776,13 +2815,11 @@ func cacheKeysEqual(a, b cacheKey) bool {
 // it doesn't replace or short-circuit the list/detail refetch above.
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
+	m = m.cronEventDemand(msg)
 	if m.eventAffectsView(msg) {
-		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
-			m.cron.events++
-		}
 		m.cache.markStale()
 		if !m.pendingRefetch {
-			m.pendingRefetch = true
+			m.pendingRefetch, m.cron.fence = true, m.cron.events
 			cmds = append(cmds, debouncedRefetch(refetchDebounce))
 		}
 	}
@@ -2801,7 +2838,9 @@ func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 		m = next
 		cmds = append(cmds, cmd)
 	}
-	return m, tea.Batch(cmds...)
+	// Notices run after the change mark, which a later read settles.
+	m, noticeCmd := m.cronNoticeEvent(msg)
+	return m, tea.Batch(append(cmds, noticeCmd)...)
 }
 
 // maybeRefetchLabels invalidates the project-label cache when an SSE
@@ -3079,6 +3118,8 @@ func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 // makes the SSE id: line on this frame the authoritative resume
 // cursor, so resetRequiredMsg deliberately carries no payload.
 func (m Model) handleResetRequired(_ resetRequiredMsg) (tea.Model, tea.Cmd) {
+	m.cron.resetPages = true
+	m.cronInvalidatePages()
 	m.cron.events++
 	m.cache.drop()
 	m.pendingRefetch = false
@@ -3563,7 +3604,7 @@ func isDetailFetchMsg(msg tea.Msg) bool {
 // observe the detail pane following the cursor without standing up
 // an http server.
 func (m Model) scheduleDetailFollow() (Model, tea.Cmd) {
-	if m.attention.returnToAttention {
+	if m.attention.returnToAttention || m.cron.returnToCron {
 		return m, nil
 	}
 	m.detail.cancelReads()
@@ -3613,7 +3654,7 @@ const detailFollowDebounce = 75 * time.Millisecond
 // cursor change can drop this one's response too via applyFetched's
 // gen check.
 func (m Model) handleDetailFollowTick(msg detailFollowTickMsg) (Model, tea.Cmd) {
-	if m.attention.returnToAttention || msg.gen != m.nextDetailFollowGen {
+	if m.attention.returnToAttention || m.cron.returnToCron || msg.gen != m.nextDetailFollowGen {
 		return m, nil
 	}
 	if m.api == nil || m.detail.issue == nil {
@@ -3721,19 +3762,19 @@ func (m Model) overlayInputAndModal(body string) string {
 }
 
 func (m Model) appendNonListDetailExtras(body string) string {
-	if m.view != viewList && m.view != viewDetail {
-		extras := []string{}
-		if s := renderSSEStatus(m.sseStatus); s != "" {
-			extras = append(extras, s)
-		}
-		if s := renderToast(m.toast); s != "" {
-			extras = append(extras, s)
-		}
-		if len(extras) > 0 {
-			body = joinNonEmpty(append([]string{body}, extras...))
-		}
+	// List/detail render these beside their inline status line at normal widths.
+	// The narrow fallback replaces those renderers, so keep their notices there.
+	if (m.view == viewList || m.view == viewDetail) && (m.width == 0 || m.width >= 80) {
+		return body
 	}
-	return body
+	extras := []string{}
+	if s := renderSSEStatus(m.sseStatus); s != "" {
+		extras = append(extras, s)
+	}
+	if s := m.cronToastLine(); s != "" {
+		extras = append(extras, s)
+	}
+	return joinNonEmpty(append([]string{body}, extras...))
 }
 
 // overlaySuggestMenu places the suggestion menu above the info line
@@ -3838,7 +3879,7 @@ func (m Model) viewBody() string {
 	case viewList:
 		return m.list.View(m.width, m.height, m.chrome())
 	case viewDetail:
-		return m.detail.View(m.width, m.height, m.chrome())
+		return m.cronDetailView()
 	}
 	return ""
 }
@@ -3853,7 +3894,7 @@ func (m Model) chrome() viewChrome {
 		scope:         m.scope,
 		sseStatus:     m.sseStatus,
 		pending:       m.pendingRefetch,
-		toast:         m.toast,
+		toast:         m.cronToast(),
 		version:       kataVersion,
 		input:         m.input,
 		projectsByID:  m.projectsByID,

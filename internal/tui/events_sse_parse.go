@@ -153,6 +153,11 @@ func decodeEventReceived(f frame) eventReceivedMsg {
 		out.issueShortID = *p.IssueShortID
 	}
 	switch p.Type {
+	case "cron.run.observed":
+		var run cronRunEvent
+		if json.Unmarshal(p.Payload, &run) == nil && run.UID != "" {
+			out.cronRun = &run
+		}
 	case "issue.commented", "issue.comment_edited":
 		if len(p.Payload) == 0 {
 			break

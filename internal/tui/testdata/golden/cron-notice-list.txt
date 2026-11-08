@@ -1,0 +1,24 @@
+ Project: example-project                                                                               kata カタ · dev
+ / search                                                                                                     no issues
+    #     prio status    title                                                           kids    owner         updated
+  no issues match. press c to clear filters or n to create one.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ cron: 1 run failed: Daily summary · 3 then u to review
+ ↑↓ move   ▕ ↵ open   ▕ n new       ▕ / search     ▕ f filter▕ s status▕ v view▕ o order▕ c clear▕ x close▕ d dates
+ ! priority▕ D daemons▕ F federation▕ C credentials▕ L layout▕ ? help  ▕ q quit

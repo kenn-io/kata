@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json/v2"
 	"time"
 
 	"go.kenn.io/kata/internal/cron"
@@ -36,9 +35,8 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 	if kind := j.Definition.Trigger.Kind; !native && kind != "cron" && kind != "once" || native && kind != "cron" && kind != "interval" {
 		return "", nil
 	}
-	var def cron.JobDefinition
-	raw, err := json.Marshal(j.Definition)
-	if err != nil || json.Unmarshal(raw, &def) != nil || def.Validate() != nil {
+	def, err := cronJobDefinition(j)
+	if err != nil {
 		return label, []string{"unavailable"}
 	}
 	if !def.Enabled {
@@ -74,15 +72,19 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 	return label, lines
 }
 
-// cronParentEvent reports an event about the parent issue of a loaded native
-// job. Its status, deletion, restoration and progress metadata all change what
-// the Jobs tab shows, so the cron data reloads.
+// cronParentEvent matches native parent changes and loaded running-run issues.
+// Status, deletion, progress and attention metadata all affect Cron health.
 func (m Model) cronParentEvent(msg eventReceivedMsg) bool {
 	if m.cron.data == nil || msg.issueUID == "" {
 		return false
 	}
 	for _, j := range m.cron.data.jobs {
 		if parent := cronNativeParent(j); parent != "" && parent == msg.issueUID {
+			return true
+		}
+	}
+	for _, r := range m.cronLoadedRuns() {
+		if r.Status == "running" && deref(r.IssueUID) == msg.issueUID {
 			return true
 		}
 	}

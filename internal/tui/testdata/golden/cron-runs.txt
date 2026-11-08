@@ -2,8 +2,8 @@
 kata カタ jobs [runs] workflows
  / search                                             1 loaded run · newest 100
 
-  Status     Job            Occurrence   Started     Ended       Summary
-▶ succeeded  Daily summary               05-01 10:00 05-01 11:00 Report ready
+  Status            Job         Occurrence   Started     Ended       Summary
+▶ succeeded         Daily summ…              05-01 10:00 05-01 11:00 Report rea…
 
 
 
@@ -20,5 +20,5 @@ kata カタ jobs [runs] workflows
 
 
 
-
- j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit
+ j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ u/U unseen/clear
+ 1-4 tabs▕ ? help  ▕ q quit
