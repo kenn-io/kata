@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/agentsviewwire"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -27,7 +27,7 @@ const (
 	MaxRouteNodes = 9
 )
 
-type Descriptor = api.AgentsViewDescriptor
+type Descriptor = agentsviewwire.Descriptor
 
 // TrustedRoot must come from the daemon's already-enrolled pin. A descriptor
 // or a response carrying a public key cannot establish this trust input.
@@ -39,8 +39,8 @@ type TrustedRoot struct {
 	Retired      bool
 }
 
-type RouteObservation = api.AgentsViewRouteObservation
-type Discovery = api.AgentsViewDiscovery
+type RouteObservation = agentsviewwire.RouteObservation
+type Discovery = agentsviewwire.Discovery
 
 // CanonicalBase rejects credential-bearing/ambiguous destinations without
 // including their text in errors. HTTP is allowed only for loopback services.

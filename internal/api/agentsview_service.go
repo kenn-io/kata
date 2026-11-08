@@ -1,5 +1,7 @@
 package api
 
+import "go.kenn.io/kata/internal/agentsviewwire"
+
 const AgentsViewServicePath = "/api/v1/projects/{project_id}/transcript-service"
 const FederationAgentsViewServicePath = "/api/v1/projects/{project_id}/federation/transcript-service"
 
@@ -26,36 +28,9 @@ type AgentsViewServiceResponse struct {
 	Body         AgentsViewDiscovery
 }
 
-// AgentsViewDescriptor is the JSON wire shape signed by a project's root.
-// Field order and names preserve the existing descriptor serialization.
-type AgentsViewDescriptor struct {
-	Version         int    `json:"version"`
-	ProjectUID      string `json:"project_uid"`
-	AuthorityUID    string `json:"authority_uid"`
-	ServiceID       string `json:"service_id"`
-	LocatorBase     string `json:"locator_base"`
-	EnvelopeVersion int    `json:"envelope_version"`
-	MaxBytes        int64  `json:"max_bytes"`
-	IssuedAt        int64  `json:"issued_at"`
-	ExpiresAt       int64  `json:"expires_at"`
-	KeyID           string `json:"key_id"`
-	Signature       []byte `json:"signature,omitempty"`
-}
-
-// AgentsViewRouteObservation is the authenticated, per-hop route generation.
-type AgentsViewRouteObservation struct {
-	InstanceUID         string `json:"instance_uid"`
-	ProjectUID          string `json:"project_uid"`
-	BindingUID          string `json:"binding_uid,omitempty"`
-	UpstreamInstanceUID string `json:"upstream_instance_uid,omitempty"`
-	ResetEpoch          int64  `json:"reset_epoch,omitempty"`
-}
-
-type AgentsViewDiscovery struct {
-	Descriptor  AgentsViewDescriptor         `json:"descriptor"`
-	InstanceUID string                       `json:"instance_uid"`
-	Route       []AgentsViewRouteObservation `json:"route"`
-}
+type AgentsViewDescriptor = agentsviewwire.Descriptor
+type AgentsViewRouteObservation = agentsviewwire.RouteObservation
+type AgentsViewDiscovery = agentsviewwire.Discovery
 
 // The aliases preserve source compatibility for consumers of the initial
 // draft API. New code should use the AgentsView names.
