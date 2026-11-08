@@ -483,35 +483,6 @@ jobs:
       - name: Check generated OpenAPI artifacts
         run: make api-check
 
-      # Temporary recovery for PR 1009: retain genuine generator output from
-      # its exact head when the committed artifacts are stale.
-      - name: Check out PR 1009 head for artifact recovery
-        id: checkout-pr1009-head
-        if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.number == 1009 }}
-        uses: actions/checkout@v7.0.1
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-
-      - name: Generate PR 1009 API artifacts
-        id: generate-pr1009-api
-        if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.number == 1009 && steps.checkout-pr1009-head.outcome == 'success' }}
-        run: make api-generate
-
-      - name: Upload PR 1009 generated API artifacts
-        if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.number == 1009 && steps.generate-pr1009-api.outcome == 'success' }}
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: pr1009-api-${{ github.event.pull_request.head.sha }}
-          path: |
-            api/openapi.yaml
-            pkg/client/openapi.yaml
-            pkg/client/generated/*.go
-            !pkg/client/generated/generate.go
-          if-no-files-found: error
-          retention-days: 7
-
   postgres:
     needs: changes
     if: *go-frontend-changes
