@@ -179,7 +179,7 @@ func EventRequiredFeatures(kind string) string {
 func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, projectUID string) (string, error) {
+}, projectUID string, postgres bool) (string, error) {
 	var cronPresent, issueMoved bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
  EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=p.id) OR
@@ -194,7 +194,11 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	required := ""
 	// Inspect each close payload structurally. A transcript value can contain the
 	// feature name, and an escaped JSON key can represent the actual member.
-	rows, err := q.QueryContext(ctx, `SELECT e.payload FROM events e JOIN projects p ON p.id=e.project_id WHERE p.uid=$1 AND e.type='issue.closed' AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')`, projectUID)
+	query := agentsViewAssociationCandidatesSQLite
+	if postgres {
+		query = agentsViewAssociationCandidatesPostgres
+	}
+	rows, err := q.QueryContext(ctx, query, projectUID)
 	if err != nil {
 		return "", err
 	}
@@ -258,6 +262,33 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	}
 	return required, nil
 }
+
+// The bounds CTE is materialized once in the same statement snapshot. SQLite's
+// CROSS JOIN keeps each filtered bounds row as the outer loop; only one can
+// contain a row. A dense ID interval cannot contain another project's events.
+// This query shape is provisional until upstream page-budget CI measures it.
+const agentsViewAssociationCandidatesSQLite = `WITH bounds AS MATERIALIZED (
+ SELECT p.id AS project_id, MIN(e.id) AS lo, MAX(e.id) AS hi, COUNT(e.id) AS n
+ FROM projects p LEFT JOIN events e INDEXED BY idx_events_project ON e.project_id=p.id
+ WHERE p.uid=$1 GROUP BY p.id
+), dense_bounds AS MATERIALIZED (
+ SELECT * FROM bounds WHERE n>0 AND hi=lo+(n-1)
+), sparse_bounds AS MATERIALIZED (
+ SELECT * FROM bounds WHERE n>0 AND hi<>lo+(n-1)
+)
+SELECT e.payload FROM dense_bounds b CROSS JOIN events e NOT INDEXED
+ WHERE e.id BETWEEN b.lo AND b.hi
+ AND e.project_id=b.project_id AND e.type='issue.closed'
+ AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')
+UNION ALL
+SELECT e.payload FROM sparse_bounds b CROSS JOIN events e INDEXED BY idx_events_project
+ WHERE e.project_id=b.project_id
+ AND e.type='issue.closed'
+ AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')`
+
+// PostgreSQL retains its existing project-scoped query; SQLite plan directives
+// do not enter its SQL path.
+const agentsViewAssociationCandidatesPostgres = `SELECT e.payload FROM events e JOIN projects p ON p.id=e.project_id WHERE p.uid=$1 AND e.type='issue.closed' AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')`
 
 const nativeCronJobsQuery = `SELECT 'projection.job',j.definition_json FROM cron_jobs j JOIN projects p ON p.id=j.project_id WHERE p.uid=$1 AND ((j.definition_json LIKE '%"notify"%' AND j.definition_json LIKE '%"per-run"%') OR j.definition_json LIKE '%\u%' ESCAPE '!')`
 
@@ -332,10 +363,10 @@ type FederationReadResult struct {
 
 // ReadFederationTransaction supplies common decisions while each backend owns
 // its isolation/retry/fences, baseline event writer and event row decoder.
-func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func() ([]Event, error)) (FederationReadResult, error) {
+func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, postgres bool, refresh func() (FederationBinding, error), readEvents func() ([]Event, error)) (FederationReadResult, error) {
 	out := FederationReadResult{Project: project, Binding: binding, Events: []Event{}, NextAfterID: in.AfterID}
 	var err error
-	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID)
+	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID, postgres)
 	if err != nil {
 		return out, err
 	}

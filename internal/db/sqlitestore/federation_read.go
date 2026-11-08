@@ -42,7 +42,7 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		readEvents := func() ([]db.Event, error) {
 			return db.ReadFederationMoveHistory(ctx, tx, in.AfterID, in.Limit, readPage)
 		}
-		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, refresh, readEvents)
+		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, false, refresh, readEvents)
 		return err
 	}
 	err := d.RetryTransient(ctx, func() error {

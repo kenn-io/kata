@@ -52,7 +52,7 @@ func (s *Store) IngestFederationEvents(
 		if err != nil {
 			return err
 		}
-		required, err := db.ProjectRequiredEventFeatures(ctx, tx, projectUID)
+		required, err := db.ProjectRequiredEventFeatures(ctx, tx, projectUID, true)
 		if err != nil {
 			return err
 		}
@@ -367,7 +367,7 @@ func (s *Store) negotiateEmptyFederationIngest(ctx context.Context, params db.Fe
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
-	required, err := db.ProjectRequiredEventFeatures(ctx, s, projectUID)
+	required, err := db.ProjectRequiredEventFeatures(ctx, s, projectUID, true)
 	if err != nil {
 		return db.FederationIngestResult{}, mapSQLError(err, nil)
 	}

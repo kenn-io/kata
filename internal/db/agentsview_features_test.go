@@ -36,7 +36,7 @@ func TestProjectFeaturesRecognizeEscapedAssociationKey(t *testing.T) {
 	payload := `{"agentsview_\u0061ssociation":` + string(raw) + `}`
 	database := sql.OpenDB(featureProbeConnector{state: &featureProbeState{noCron: true, closePayloads: []string{payload}}})
 	t.Cleanup(func() { require.NoError(t, database.Close()) })
-	features, err := db.ProjectRequiredEventFeatures(t.Context(), database, project)
+	features, err := db.ProjectRequiredEventFeatures(t.Context(), database, project, false)
 	require.NoError(t, err)
 	require.Equal(t, agentsviewrelay.EventFeature, features)
 }

@@ -98,3 +98,45 @@ func TestFederationPreparationLargeIssueScope(t *testing.T) {
 	_, err = prepareFederationMaterializationTx(t.Context(), tx, p.ID, prepared)
 	require.NoError(t, err)
 }
+
+// Feature negotiation for a small interleaved project must not scan a large
+// unrelated project's event rows. This measures SQLite's cache page accesses.
+func TestAgentsViewFeatureProbeAvoidsOtherProjectHistory(t *testing.T) {
+	d, large, _ := incrementalTestStore(t)
+	d.SetMaxOpenConns(1)
+	small, err := d.CreateProject(t.Context(), "small-project")
+	require.NoError(t, err)
+	pages := func(reset bool) int {
+		conn, err := d.Conn(t.Context())
+		require.NoError(t, err)
+		defer func() { require.NoError(t, conn.Close()) }()
+		total := 0
+		require.NoError(t, conn.Raw(func(raw any) error {
+			for _, op := range []sqlite.DBStatusOp{sqlite.DBStatusCacheHit, sqlite.DBStatusCacheMiss} {
+				n, _, err := raw.(*queuedConn).inner.(sqlite.DBStatus).Status(op, reset)
+				if err != nil {
+					return err
+				}
+				total += n
+			}
+			return nil
+		}))
+		return total
+	}
+	var baseline int
+	for _, count := range []int{100, 10_000} {
+		seedFederationBenchmarkHistory(t, d, large, count)
+		_, _, err := d.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: small.ID, Title: "small issue", Author: "worker"})
+		require.NoError(t, err)
+		pages(true)
+		features, err := db.ProjectRequiredEventFeatures(t.Context(), d, small.UID, false)
+		require.NoError(t, err)
+		require.NotContains(t, features, "agentsview_association_v1")
+		used := pages(false)
+		if count == 100 {
+			baseline = used
+		} else {
+			require.LessOrEqual(t, used, baseline+1000, "unrelated history must not be scanned")
+		}
+	}
+}

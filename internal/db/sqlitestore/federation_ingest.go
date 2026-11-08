@@ -84,7 +84,7 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 	}
-	required, err := db.ProjectRequiredEventFeatures(ctx, tx, projectUID)
+	required, err := db.ProjectRequiredEventFeatures(ctx, tx, projectUID, false)
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
@@ -901,7 +901,7 @@ func (d *Store) negotiateEmptyFederationIngest(ctx context.Context, p db.Federat
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
-	required, err := db.ProjectRequiredEventFeatures(ctx, d, projectUID)
+	required, err := db.ProjectRequiredEventFeatures(ctx, d, projectUID, false)
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}

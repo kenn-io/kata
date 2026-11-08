@@ -47,7 +47,7 @@ func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
 	projectUID, err := uid.New()
 	require.NoError(t, err)
 	for range 2 {
-		features, err := db.ProjectRequiredEventFeatures(t.Context(), database, projectUID)
+		features, err := db.ProjectRequiredEventFeatures(t.Context(), database, projectUID, false)
 		require.NoError(t, err)
 		require.Equal(t, db.CronEventFeature, features)
 	}
@@ -59,7 +59,7 @@ func TestProjectFeaturesIgnoreAssociationTextOutsideTopLevel(t *testing.T) {
 	state := &featureProbeState{noCron: true, closePayloads: []string{`{"transcript":{"session_id":"agentsview_association"}}`}}
 	database := sql.OpenDB(featureProbeConnector{state: state})
 	t.Cleanup(func() { require.NoError(t, database.Close()) })
-	features, err := db.ProjectRequiredEventFeatures(t.Context(), database, "project")
+	features, err := db.ProjectRequiredEventFeatures(t.Context(), database, "project", false)
 	require.NoError(t, err)
 	require.Empty(t, features)
 }
