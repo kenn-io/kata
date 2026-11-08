@@ -45,6 +45,36 @@ func TestAgentsViewBindingFailureIsNotReportedAsRouteChange(t *testing.T) {
 	}
 }
 
+type agentsViewPinStore struct {
+	db.Storage
+	pin db.RootKeyPin
+	err error
+}
+
+func (s agentsViewPinStore) RootAuthority(context.Context, string) (db.RootKeyPin, error) {
+	return s.pin, s.err
+}
+
+func TestAgentsViewPinLookupDistinguishesRouteChangeAndStoreFailure(t *testing.T) {
+	a := agentsviewrelay.Association{ProjectUID: "project", AuthorityUID: "root", RootKeyID: "key"}
+	for _, tc := range []struct {
+		store agentsViewPinStore
+		code  string
+	}{
+		{agentsViewPinStore{err: db.ErrNotFound}, "agentsview_route_changed"},
+		{agentsViewPinStore{err: errors.New("store unavailable")}, "internal"},
+		{agentsViewPinStore{pin: db.RootKeyPin{AuthorityUID: "other", KeyID: "key"}}, "agentsview_route_changed"},
+		{agentsViewPinStore{pin: db.RootKeyPin{AuthorityUID: "root", KeyID: "key", Retired: true}}, "agentsview_route_changed"},
+	} {
+		_, err := agentsViewRootPin(t.Context(), tc.store, a)
+		var apiErr *api.APIError
+		require.ErrorAs(t, err, &apiErr)
+		require.Equal(t, tc.code, apiErr.Code)
+	}
+	_, err := agentsViewRootPin(t.Context(), agentsViewPinStore{pin: db.RootKeyPin{AuthorityUID: "root", KeyID: "key"}}, a)
+	require.NoError(t, err)
+}
+
 func (missingAgentsViewEventStore) EventsByUIDs(context.Context, int64, []string) ([]db.Event, error) {
 	return nil, db.ErrNotFound
 }

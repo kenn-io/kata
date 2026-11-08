@@ -423,6 +423,8 @@ func TestOpenAPIDocumentJSONBlobShapes(t *testing.T) {
 	assertOpenObjectProperty(t, doc, "ErrorBody", "data")
 	// api.JSONRawObject — raw bytes, on a request body.
 	assertOpenObjectProperty(t, doc, "RecurrenceTemplateInput", "metadata")
+	assertOpenObjectProperty(t, doc, "CloseActionRequestBody", "agentsview_association")
+	assertOpenObjectProperty(t, doc, "CloseActionRequestBody", "agentsview_discovery")
 
 	// db.JSONStringArray publishes an array of strings, not an object.
 	labels := doc.Components.Schemas.Map()["Recurrence"].Properties["template_labels"]

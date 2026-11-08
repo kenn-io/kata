@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -37,7 +38,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		association, err := decodeAgentsViewAssociation(in.Body.AgentsViewAssociation)
+		association, err := decodeAgentsViewAssociation(jsontext.Value(in.Body.AgentsViewAssociation))
 		if err != nil {
 			return nil, api.NewError(400, "agentsview_invalid_association", err.Error(), "", nil)
 		}
@@ -120,7 +121,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		if association != nil {
-			finish, err := validateAgentsViewClose(ctx, cfg, issue, association, in.Body.AgentsViewDiscovery)
+			finish, err := validateAgentsViewClose(ctx, cfg, issue, association, jsontext.Value(in.Body.AgentsViewDiscovery))
 			if err != nil {
 				return nil, err
 			}

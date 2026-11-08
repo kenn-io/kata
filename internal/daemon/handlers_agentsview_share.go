@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
+	"errors"
 	"io"
 	"net/http"
 	"regexp"
@@ -116,9 +117,9 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if cfg.AgentsViewRelay.Ingest == nil || cfg.RootSigning == nil {
 					return nil, agentsViewUnavailable()
 				}
-				pin, err := cfg.DB.RootAuthority(ctx, association.ProjectUID)
+				pin, err := agentsViewRootPin(ctx, cfg.DB, association)
 				if err != nil {
-					return nil, api.NewError(409, "agentsview_route_changed", "root pin changed", "", nil)
+					return nil, err
 				}
 				if err = agentsViewRootAdmission(association, pin, cfg.RootSigning.Signer()); err != nil {
 					return nil, err
@@ -184,18 +185,17 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err = requireAgentsViewClaimWhileCoordinated(ctx, cfg, current, actor, claimPeer, control.ClientKind, &mappedClaim); err != nil {
 					return err
 				}
-				livePin, err := cfg.DB.RootAuthority(ctx, association.ProjectUID)
-				if err != nil || livePin.Retired || livePin.AuthorityUID != association.AuthorityUID || livePin.KeyID != association.RootKeyID {
-					return api.NewError(409, "agentsview_route_changed", "root pin changed", "", nil)
+				if _, err := agentsViewRootPin(ctx, cfg.DB, association); err != nil {
+					return err
 				}
 				return cfg.AgentsViewRelay.Selection(ctx, current, association, nil)
 			}
 			if err = revalidate(); err != nil {
 				return nil, err
 			}
-			pin, err := cfg.DB.RootAuthority(ctx, association.ProjectUID)
-			if err != nil || pin.Retired || pin.AuthorityUID != association.AuthorityUID || pin.KeyID != association.RootKeyID {
-				return nil, api.NewError(409, "agentsview_route_changed", "root pin changed", "", nil)
+			pin, err := agentsViewRootPin(ctx, cfg.DB, association)
+			if err != nil {
+				return nil, err
 			}
 			var receipt agentsviewrelay.Receipt
 			if association.AuthorityUID == cfg.DB.InstanceUID() {
@@ -269,6 +269,20 @@ func agentsViewUploadActor(ctx context.Context, federation bool, actor string, i
 
 func agentsViewSignerMatches(signer db.RootAttributionSigner, pin db.RootKeyPin) bool {
 	return signer.AuthorityUID == pin.AuthorityUID && len(signer.PrivateKey) == ed25519.PrivateKeySize && db.RootPublicKeyID(signer.PrivateKey.Public().(ed25519.PublicKey)) == pin.KeyID
+}
+
+func agentsViewRootPin(ctx context.Context, store db.Storage, association agentsviewrelay.Association) (db.RootKeyPin, error) {
+	pin, err := store.RootAuthority(ctx, association.ProjectUID)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.RootKeyPin{}, api.NewError(409, "agentsview_route_changed", "root pin changed", "", nil)
+	}
+	if err != nil {
+		return db.RootKeyPin{}, internalAPIError(err)
+	}
+	if pin.Retired || pin.AuthorityUID != association.AuthorityUID || pin.KeyID != association.RootKeyID {
+		return db.RootKeyPin{}, api.NewError(409, "agentsview_route_changed", "root pin changed", "", nil)
+	}
+	return pin, nil
 }
 
 func agentsViewRootAdmission(a agentsviewrelay.Association, pin db.RootKeyPin, signer db.RootAttributionSigner) error {

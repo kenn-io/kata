@@ -3,7 +3,6 @@ package api //nolint:revive // package name "api" is fixed by Plan 1 §4 wire-ty
 
 import (
 	"cmp"
-	"encoding/json/jsontext"
 	"time"
 
 	"go.kenn.io/kata/internal/commentref"
@@ -995,9 +994,9 @@ type CloseActionRequest struct {
 // protocol marker and optional session provenance. Older daemons reject unknown
 // fields before they can ignore retry headers or provenance and mutate an issue.
 type CloseActionRequestBody struct {
-	AgentsViewProtocol    string         `json:"agentsview_protocol,omitempty" enum:"relay-v1,"`
-	AgentsViewAssociation jsontext.Value `json:"agentsview_association,omitempty"`
-	AgentsViewDiscovery   jsontext.Value `json:"agentsview_discovery,omitempty"`
+	AgentsViewProtocol    string        `json:"agentsview_protocol,omitempty" enum:"relay-v1,"`
+	AgentsViewAssociation JSONRawObject `json:"agentsview_association,omitempty"`
+	AgentsViewDiscovery   JSONRawObject `json:"agentsview_discovery,omitempty"`
 	ActionRequestBody
 	RetryProtocol string                 `json:"retry_protocol,omitempty" enum:"close-v1,"`
 	Transcript    *transcript.Transcript `json:"transcript,omitempty"`
