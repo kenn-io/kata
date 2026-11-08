@@ -178,6 +178,16 @@ func TestAgentsViewForwardClientUsesOnlySelectedCredentialAndPolicy(t *testing.T
 	require.Equal(t, "Bearer selected-enrollment", authorization)
 }
 
+func TestAgentsViewForwardClientRejectsUnpinnedUnixTarget(t *testing.T) {
+	var called bool
+	_, err := agentsViewForwardHTTPClient(t.Context(), ServerConfig{AgentsViewHubClient: func(context.Context, config.FederationCredential) (*http.Client, error) {
+		called = true
+		return http.DefaultClient, nil
+	}}, config.FederationCredential{HubURL: "http://kata.invalid", HubProjectID: 7, Token: "selected-enrollment"})
+	require.Error(t, err)
+	require.False(t, called, "an unpinned socket target must not select a transport")
+}
+
 func TestAgentsViewForwardingUsesOnlySelectedEnrollmentAndRejectsRedirect(t *testing.T) {
 	project := "00000000000000000000000001"
 	root := "00000000000000000000000002"

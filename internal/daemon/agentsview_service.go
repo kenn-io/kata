@@ -201,6 +201,11 @@ func fetchAgentsViewService(ctx context.Context, cfg ServerConfig, binding db.Fe
 }
 
 func agentsViewForwardHTTPClient(ctx context.Context, cfg ServerConfig, credential config.FederationCredential) (*http.Client, error) {
+	// The synthetic Unix origin does not identify a socket. Resolving it via
+	// the CLI runtime registry could send this enrollment to another daemon.
+	if strings.HasPrefix(credential.HubURL, clientpkg.UnixBase) {
+		return nil, errors.New("AgentsView upstream socket is not explicitly pinned")
+	}
 	if cfg.AgentsViewHubClient != nil {
 		injected, err := cfg.AgentsViewHubClient(ctx, credential)
 		if err != nil || injected == nil {
@@ -243,40 +248,13 @@ func agentsViewForwardHTTPClient(ctx context.Context, cfg ServerConfig, credenti
 		MaxResponseHeaderBytes: agentsViewMaxHeaderBytes,
 		DisableCompression:     true,
 	}
-	var client *http.Client
-	if strings.HasPrefix(credential.HubURL, clientpkg.UnixBase) {
-		var err error
-		client, err = newClaimHubHTTPClient(ctx, credential.HubURL)
-		if err != nil {
-			return nil, err
-		}
-		transport, ok := client.Transport.(*http.Transport)
-		if !ok {
-			return nil, errors.New("AgentsView upstream transport cannot enforce response bounds")
-		}
-		clone := transport.Clone()
-		clone.DisableCompression = true
-		clone.ResponseHeaderTimeout = agentsViewHeaderTimeout
-		clone.MaxResponseHeaderBytes = agentsViewMaxHeaderBytes
-		client.Transport = clone
-		client.Timeout = agentsViewRequestTimeout
-		policy := config.BearerPolicy{
-			TrustPrivateNetwork:    cfg.Auth.TrustPrivateNetwork,
-			AllowInsecurePlaintext: credential.AllowInsecure,
-		}
-		if err := policy.ConfigureClient(client, credential.HubURL, credential.Token); err != nil {
-			return nil, err
-		}
-	} else {
-		var err error
-		client, err = clientpkg.NewHTTPClientForTarget(ctx, credential.HubURL, clientpkg.TargetAuth{
-			Token:               credential.Token,
-			AllowInsecure:       credential.AllowInsecure,
-			TrustPrivateNetwork: cfg.Auth.TrustPrivateNetwork,
-		}, opts)
-		if err != nil {
-			return nil, err
-		}
+	client, err := clientpkg.NewHTTPClientForTarget(ctx, credential.HubURL, clientpkg.TargetAuth{
+		Token:               credential.Token,
+		AllowInsecure:       credential.AllowInsecure,
+		TrustPrivateNetwork: cfg.Auth.TrustPrivateNetwork,
+	}, opts)
+	if err != nil {
+		return nil, err
 	}
 	if credential.Signing != nil {
 		if err := federationsigning.ConfigureClient(client, credential.HubURL, credential.Token, *credential.Signing); err != nil {
