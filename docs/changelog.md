@@ -10,6 +10,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Keep local writes responsive during SQLite cron-only federation pulls by looking up only the runs carried by each page and their complete observation history. Schema 49 adds a cron event index on SQLite and PostgreSQL.
+- Keep large task lists responsive when an unchanged refresh arrives, while Inbox and Scheduled still update at midnight.
 - Keep federation polls fast on busy hubs by skipping other projects' event history.
 - Attach oh-my-pi sessions to closes by copying the documented
   [closing-session transcript](reference/configuration.md#closing-session-transcripts)

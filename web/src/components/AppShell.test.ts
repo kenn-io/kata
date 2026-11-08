@@ -7,6 +7,32 @@ import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
 
 describe('AppShell', () => {
+  test('moves a scheduled task into Inbox at midnight without a new snapshot', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 7, 1, 23, 59, 59))
+    const current = snapshot()
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    current.collection[0]!.metadata = { scheduled_on: '2026-08-02' }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'inbox',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+  })
+
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
