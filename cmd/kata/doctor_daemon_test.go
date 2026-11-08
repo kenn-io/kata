@@ -209,6 +209,18 @@ func TestDoctorDocbankCheckFollowsHealth(t *testing.T) {
 	}
 }
 
+func TestDoctorStripsTerminalControlsFromReportedAPIVersion(t *testing.T) {
+	_, workspace := doctorTestEnv(t)
+	flags = globalFlags{Workspace: workspace, Project: "example-project"}
+	health := `{"ok":true,"schema_version":28,"api_schema_version":"0.43.0\u001b[2J\n[ok] daemon.docbank: forged","db_path":"/data/kata.db"}`
+	ctx := doctorServerContext(t, map[string]string{"/api/v1/health": health}, nil)
+
+	summary := doctorFinding(t, collectDoctor(ctx), "daemon.docbank").Summary
+
+	require.NotContains(t, summary, "\x1b", "doctor prints summaries unfiltered")
+	require.NotContains(t, summary, "\n")
+}
+
 func TestDoctorProfileIdentityUsesBoundedTimeout(t *testing.T) {
 	instanceCalls := &atomic.Int32{}
 	server := setupDoctorLocalProfileTarget(t, func(uid string, w http.ResponseWriter, _ *http.Request) {

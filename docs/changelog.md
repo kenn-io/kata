@@ -21,7 +21,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   [key file rules](reference/configuration.md#credentials-and-batching) show
   the `icacls` fix. An unset `api_key_env` for `[docbank]` or
   `[search.embeddings]`, `token_env` for `[auth]` or `[mcp]`, or
-  `--hub-token-env` variable now reports
+  `--hub-token-env` or `kata mcp --http-token-env` variable now reports
   `env:<NAME>: environment variable is unset or empty`.
 - Keep federation polls fast on busy hubs by skipping other projects' event history.
 - Attach oh-my-pi sessions to closes by copying the documented
