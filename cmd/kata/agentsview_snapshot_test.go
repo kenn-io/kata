@@ -108,3 +108,20 @@ func TestAgentsViewSnapshotIdentityRejectsMalformedAndSubstitutedEnvelopes(t *te
 		require.NoError(t, snapshot.Close())
 	}
 }
+
+// Part2's Astra source finding: literal slash-containing JSON names must not
+// alias structural identity fields, even when every member name is unique.
+func TestAgentsViewSnapshotRejectsSlashKeyIdentityAliases(t *testing.T) {
+	for _, raw := range []string{
+		`{"v":1,"session_id":"pi:selected","manifest":{"v":1,"native_session_id":"pi:other","session":{"id":"pi:other","agent":"pi"}},"manifest/native_session_id":"pi:selected","manifest/session/id":"pi:selected"}`,
+		`{"v":1,"session_id":"pi:selected","manifest":{"v":1,"native_session_id":"pi:selected","session":{"id":"pi:other","agent":"other"},"session/id":"pi:selected","session/agent":"pi"}}`,
+		`{"v":1,"session_id":"pi:selected","manifest":{"v":1,"native_session_id":"pi:selected"},"manifest/session":{"id":"pi:selected","agent":"pi"}}`,
+	} {
+		path := filepath.Join(t.TempDir(), "snapshot.json")
+		require.NoError(t, os.WriteFile(path, []byte(raw), 0o600))
+		snapshot, err := captureAgentsViewSnapshot(t.Context(), path)
+		require.NoError(t, err)
+		require.Error(t, inspectAgentsViewSnapshot(t.Context(), snapshot, "pi", "pi:selected"))
+		require.NoError(t, snapshot.Close())
+	}
+}

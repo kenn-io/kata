@@ -239,33 +239,60 @@ func inspectAgentsViewSnapshot(ctx context.Context, snapshot *agentsViewFrozenSn
 	}
 	decoder := jsontext.NewDecoder(agentsViewContextReader{ctx, snapshot}, jsontext.AllowDuplicateNames(false))
 	values := map[string]string{}
-	var walk func(string) error
-	walk = func(path string) error {
+	type identityObject uint8
+	const (
+		envelopeObject identityObject = iota
+		manifestObject
+		sessionObject
+	)
+	var walk func(identityObject) error
+	walk = func(object identityObject) error {
 		token, err := decoder.ReadToken()
 		if err != nil || token.Kind() != '{' {
 			return errors.New("invalid envelope object")
 		}
 		for decoder.PeekKind() != '}' {
-			name, err := decoder.ReadToken()
-			if err != nil || name.Kind() != '"' || len(name.String()) > 256 {
+			token, err := decoder.ReadToken()
+			if err != nil || token.Kind() != '"' || len(token.String()) > 256 {
 				return errors.New("invalid envelope member")
 			}
-			field := path + "/" + name.String()
-			switch field {
-			case "/manifest", "/manifest/session":
-				if err := walk(field); err != nil {
+			name := token.String()
+			// Match the structural object and exact member independently. Literal
+			// slash-containing keys can never alias an identity field in another object.
+			switch {
+			case object == envelopeObject && name == "manifest":
+				if err := walk(manifestObject); err != nil {
 					return err
 				}
-			case "/v", "/manifest/v":
+			case object == manifestObject && name == "session":
+				if err := walk(sessionObject); err != nil {
+					return err
+				}
+			case (object == envelopeObject || object == manifestObject) && name == "v":
 				token, err := decoder.ReadToken()
 				if err != nil || token.Kind() != '0' || token.String() != "1" {
 					return errors.New("unsupported envelope version")
 				}
+				field := "/v"
+				if object == manifestObject {
+					field = "/manifest/v"
+				}
 				values[field] = "1"
-			case "/session_id", "/manifest/native_session_id", "/manifest/session/id", "/manifest/session/agent":
+			case object == envelopeObject && name == "session_id", object == manifestObject && name == "native_session_id", object == sessionObject && (name == "id" || name == "agent"):
 				token, err := decoder.ReadToken()
 				if err != nil || token.Kind() != '"' || len(token.String()) > 160 {
 					return errors.New("invalid envelope identity")
+				}
+				field := "/session_id"
+				if object == manifestObject {
+					field = "/manifest/native_session_id"
+				}
+				if object == sessionObject {
+					if name == "id" {
+						field = "/manifest/session/id"
+					} else {
+						field = "/manifest/session/agent"
+					}
 				}
 				values[field] = token.String()
 			default:
@@ -277,7 +304,7 @@ func inspectAgentsViewSnapshot(ctx context.Context, snapshot *agentsViewFrozenSn
 		_, err = decoder.ReadToken()
 		return err
 	}
-	err := walk("")
+	err := walk(envelopeObject)
 	if err == nil {
 		_, err = decoder.ReadToken()
 		if errors.Is(err, io.EOF) {
