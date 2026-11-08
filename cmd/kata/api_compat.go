@@ -82,15 +82,15 @@ func requireDaemonAPIVersionHealth(
 		return health, nil
 	}
 	return daemonAPIHealth{}, &cliError{
-		Message:  daemonAPITooOld(feature, required, reported),
+		Message:  daemonAPITooOldMessage(feature, required, reported),
 		Kind:     kindValidation,
 		Code:     "daemon_api_too_old",
 		ExitCode: ExitValidation,
 	}
 }
 
-// daemonAPITooOld is the message for a daemon whose API predates feature.
-func daemonAPITooOld(feature, required, reported string) string {
+// daemonAPITooOldMessage tells the user a daemon's API predates feature.
+func daemonAPITooOldMessage(feature, required, reported string) string {
 	if reported = strings.TrimSpace(reported); reported == "" {
 		reported = "no api_schema_version"
 	}
