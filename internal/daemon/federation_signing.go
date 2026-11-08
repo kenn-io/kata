@@ -83,6 +83,13 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			}
 			return
 		}
+		// The generic JSON signing verifier buffers bodies and cannot authenticate
+		// the control-bound binary profile. Keep this route unavailable until that
+		// profile is integrated at this ingress boundary.
+		if route.operation == "shareFederationIssueAgentsView" {
+			api.WriteEnvelope(w, http.StatusServiceUnavailable, "agentsview_unavailable", "AgentsView relay dependency is unavailable")
+			return
+		}
 		if ingress && r.Method != route.method {
 			http.NotFound(w, r)
 			return

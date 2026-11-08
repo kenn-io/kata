@@ -63,6 +63,9 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, api.NewError(400, "agentsview_invalid_control", err.Error(), "", nil)
 			}
+			if !federation && control.ClientKind != "cli" && control.ClientKind != "tui" {
+				return nil, api.NewError(400, "agentsview_invalid_control", "invalid ordinary client kind", "", nil)
+			}
 			var incoming federationPrincipal
 			if federation {
 				if cfg.AgentsViewRelay.VerifyFederationUpload == nil {
@@ -101,6 +104,13 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
+			if association.AuthorityUID == cfg.DB.InstanceUID() {
+				if cfg.AgentsViewRelay.Ingest == nil || cfg.RootSigning == nil {
+					return nil, agentsViewUnavailable()
+				}
+			} else if cfg.AgentsViewRelay.Forward == nil {
+				return nil, agentsViewUnavailable()
+			}
 			actor, err := attributedActor(ctx, in.Actor)
 			if err != nil {
 				return nil, err
@@ -112,7 +122,8 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if federation {
 				claimPeer = &incoming
 			}
-			if err = requireAgentsViewClaimWhileCoordinated(ctx, cfg, issue, actor, claimPeer, control.ClientKind); err != nil {
+			var mappedClaim db.ClaimPrincipal
+			if err = requireAgentsViewClaimWhileCoordinated(ctx, cfg, issue, actor, claimPeer, control.ClientKind, &mappedClaim); err != nil {
 				return nil, err
 			}
 			if err = cfg.AgentsViewRelay.Selection(ctx, issue, association, nil); err != nil {
@@ -133,6 +144,9 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(400, "agentsview_invalid_snapshot", err.Error(), "", nil)
 			}
 			revalidate := func() error {
+				if err := revalidateIssueScopedPrincipal(ctx, cfg.DB); err != nil {
+					return err
+				}
 				if err := revalidateAgentsViewCaller(ctx); err != nil {
 					return err
 				}
@@ -152,7 +166,7 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if _, err = loadAgentsViewClose(ctx, cfg, current, control); err != nil {
 					return err
 				}
-				if err = requireAgentsViewClaimWhileCoordinated(ctx, cfg, current, actor, claimPeer, control.ClientKind); err != nil {
+				if err = requireAgentsViewClaimWhileCoordinated(ctx, cfg, current, actor, claimPeer, control.ClientKind, &mappedClaim); err != nil {
 					return err
 				}
 				livePin, err := cfg.DB.RootAuthority(ctx, association.ProjectUID)
@@ -193,7 +207,7 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if cfg.AgentsViewRelay.Forward == nil {
 					return nil, agentsViewUnavailable()
 				}
-				receipt, err = cfg.AgentsViewRelay.Forward(ctx, issue, control, spool)
+				receipt, err = cfg.AgentsViewRelay.Forward(ctx, issue, agentsViewForwardControl(control, mappedClaim), spool)
 				if err != nil {
 					return nil, err
 				}

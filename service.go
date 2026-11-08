@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/agentsviewrelay"
+	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -133,10 +135,22 @@ type GitHubAppConfig struct {
 // DocbankConfig selects the vault used by issue attachments.
 type DocbankConfig = config.DocbankConfig
 
+// AgentsView adapter aliases let external embedders supply the explicit ports.
+type AgentsViewRelayConfig = daemon.AgentsViewRelayConfig
+type AgentsViewSnapshot = daemon.AgentsViewSnapshot
+type AgentsViewIngestAck = daemon.AgentsViewIngestAck
+type AgentsViewIssue = db.Issue
+type AgentsViewFederationBinding = db.FederationBinding
+type AgentsViewClaimStatus = api.ClaimStatusBody
+type AgentsViewAssociation = agentsviewrelay.Association
+type AgentsViewControl = agentsviewrelay.Control
+type AgentsViewReceipt = agentsviewrelay.Receipt
+type AgentsViewRouteObservation = agentsviewrelay.RouteObservation
+
 // Config contains the process-neutral inputs needed to construct a Service.
 type Config struct {
 	// AgentsViewRelay supplies explicit project service adapters. Nil disables sharing.
-	AgentsViewRelay *daemon.AgentsViewRelayConfig
+	AgentsViewRelay *AgentsViewRelayConfig
 	// DSN accepts a SQLite path, sqlite:// URL, or PostgreSQL URL.
 	DSN          string
 	Postgres     PostgresConfig

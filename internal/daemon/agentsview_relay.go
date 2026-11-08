@@ -59,8 +59,8 @@ func agentsViewUnavailable() error {
 // remapping and store gate under the caller's shared project lock. Reacquiring
 // that lock can deadlock behind a waiting rebind. Unlike ordinary offline local
 // edits, sharing requires a successful live upstream claim status response.
-func requireAgentsViewClaimWhileCoordinated(ctx context.Context, cfg ServerConfig, issue db.Issue, actor string, incoming *federationPrincipal, clientKind string) error {
-	principal := db.ClaimPrincipal{HolderInstanceUID: cfg.DB.InstanceUID(), Holder: strings.TrimSpace(actor)}
+func requireAgentsViewClaimWhileCoordinated(ctx context.Context, cfg ServerConfig, issue db.Issue, actor string, incoming *federationPrincipal, clientKind string, mapped *db.ClaimPrincipal) error {
+	principal := db.ClaimPrincipal{HolderInstanceUID: cfg.DB.InstanceUID(), Holder: strings.TrimSpace(actor), ClientKind: clientKind}
 	if incoming != nil {
 		principal = db.ClaimPrincipal{HolderInstanceUID: incoming.SpokeInstanceUID, Holder: incoming.Actor, ClientKind: clientKind}
 	} else if cfg.HostAccess != nil {
@@ -97,7 +97,15 @@ func requireAgentsViewClaimWhileCoordinated(ctx context.Context, cfg ServerConfi
 	if err := cfg.DB.CheckClaimGate(ctx, db.ClaimGateParams{ProjectID: issue.ProjectID, IssueRef: issue.UID, Principal: principal, Now: time.Now().UTC()}); err != nil {
 		return claimGateAPIError(err)
 	}
+	if mapped != nil {
+		*mapped = principal
+	}
 	return nil
+}
+
+func agentsViewForwardControl(c agentsviewrelay.Control, principal db.ClaimPrincipal) agentsviewrelay.Control {
+	c.ClientKind = principal.ClientKind
+	return c
 }
 
 func decodeAgentsViewAssociation(raw jsontext.Value) (*agentsviewrelay.Association, error) {

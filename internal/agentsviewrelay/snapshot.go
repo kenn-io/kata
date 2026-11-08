@@ -7,6 +7,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"io"
+	"strings"
 )
 
 type contextReader struct {
@@ -51,7 +52,7 @@ func VerifySnapshot(ctx context.Context, r io.ReadSeeker, c Control) error {
 	if _, err = d.ReadToken(); !errors.Is(err, io.EOF) {
 		return errors.New("trailing envelope data")
 	}
-	if identity.version != 1 || identity.manifestVersion != 1 || identity.sessionID != c.SessionID || identity.nativeID != c.SessionID || identity.id != c.SessionID || identity.agent != c.Agent || !identity.segments {
+	if identity.version != 1 || (identity.manifestVersion < 2 || identity.manifestVersion > 7) || identity.sessionID != c.SessionID || identity.nativeID != c.SessionID || identity.id != c.SessionID || identity.agent != c.Agent || !identity.segments {
 		return errors.New("snapshot envelope identity differs from consent")
 	}
 	_, err = r.Seek(0, io.SeekStart)
@@ -80,7 +81,9 @@ func readIdentityObject(d *jsontext.Decoder, path string, v *envelopeIdentity) e
 		if key.Kind() != '"' {
 			return errors.New("invalid envelope member")
 		}
-		name := path + "/" + key.String()
+		// Escape JSON Pointer segments so a literal slash cannot impersonate nesting.
+		segment := strings.ReplaceAll(strings.ReplaceAll(key.String(), "~", "~0"), "/", "~1")
+		name := path + "/" + segment
 		switch name {
 		case "/manifest", "/manifest/session":
 			if err := readIdentityObject(d, name, v); err != nil {
@@ -91,13 +94,17 @@ func readIdentityObject(d *jsontext.Decoder, path string, v *envelopeIdentity) e
 			if err != nil {
 				return err
 			}
-			if tok.Kind() != '0' || tok.String() != "1" {
+			if tok.Kind() != '0' {
+				return errors.New("invalid envelope version")
+			}
+			version, err := tok.Int()
+			if err != nil {
 				return errors.New("invalid envelope version")
 			}
 			if name == "/v" {
-				v.version = tok.Int()
+				v.version = version
 			} else {
-				v.manifestVersion = tok.Int()
+				v.manifestVersion = version
 			}
 		case "/session_id", "/manifest/native_session_id", "/manifest/session/id", "/manifest/session/agent":
 			tok, err := d.ReadToken()

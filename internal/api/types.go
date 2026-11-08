@@ -3,6 +3,7 @@ package api //nolint:revive // package name "api" is fixed by Plan 1 §4 wire-ty
 
 import (
 	"cmp"
+	"encoding/json/jsontext"
 	"time"
 
 	"go.kenn.io/kata/internal/commentref"

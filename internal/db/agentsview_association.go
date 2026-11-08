@@ -36,7 +36,8 @@ func CheckAgentsViewAssociationTx(ctx context.Context, tx *sql.Tx, issue Issue, 
 	if err := tx.QueryRowContext(ctx, `SELECT authority_uid,key_id FROM federation_root_keys WHERE project_uid=$1 AND active=1`, projectUID).Scan(&authority, &keyID); err != nil || authority != a.AuthorityUID || keyID != a.RootKeyID {
 		return ErrAgentsViewRouteChanged
 	}
-	var role, hubUID string
+	var role FederationRole
+	var hubUID string
 	var enabled, push bool
 	var relay *string
 	if err := tx.QueryRowContext(ctx, `SELECT role,hub_project_uid,enabled,push_enabled,relay_config FROM federation_bindings WHERE project_id=$1`, issue.ProjectID).Scan(&role, &hubUID, &enabled, &push, &relay); err != nil || !enabled || hubUID != projectUID {

@@ -140,7 +140,7 @@ func DecodeControl(raw []byte) (Control, error) {
 	if err := json.Unmarshal(raw, &c, json.RejectUnknownMembers(true)); err != nil {
 		return Control{}, err
 	}
-	if !uid.Valid(c.CloseEventUID) || (c.ClientKind != "cli" && c.ClientKind != "tui") {
+	if !uid.Valid(c.CloseEventUID) || !validForwardedClientKind(c.ClientKind) {
 		return Control{}, errors.New("invalid AgentsView close event or client kind")
 	}
 	a := c.Association("https://locator.example")
@@ -149,6 +149,22 @@ func DecodeControl(raw []byte) (Control, error) {
 		return Control{}, err
 	}
 	return c, nil
+}
+
+// validForwardedClientKind only recognizes kinds emitted by claim remapping.
+// Ordinary requests are separately restricted to cli/tui at the handler.
+func validForwardedClientKind(kind string) bool {
+	if kind == "cli" || kind == "tui" || kind == "host:v1" {
+		return true
+	}
+	for _, prefix := range []string{"relay:v1:", "spoke-host:v1:"} {
+		if strings.HasPrefix(kind, prefix) {
+			digest := strings.TrimPrefix(kind, prefix)
+			raw, err := base64.RawURLEncoding.Strict().DecodeString(digest)
+			return err == nil && len(raw) == 32 && base64.RawURLEncoding.EncodeToString(raw) == digest
+		}
+	}
+	return false
 }
 
 func ParseControlHeader(values []string) (Control, error) {

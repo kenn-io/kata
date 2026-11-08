@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/agentsviewrelay"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
@@ -490,4 +491,15 @@ func TestApplyForwardedAssignmentClaimRecordsReloadedIssue(t *testing.T) {
 	_, _, err = store.SetProjectAccessPolicy(ctx, db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "admin")
 	require.NoError(t, err)
 	require.ErrorContains(t, decision.revalidateRelease(requestCtx), "not found", "a project the member lost withholds the reloaded issue")
+}
+
+func TestAgentsViewForwardControlUsesMappedClaimKind(t *testing.T) {
+	incoming := db.ClaimPrincipal{HolderInstanceUID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", Holder: "worker", ClientKind: "cli"}
+	binding := db.FederationBinding{Role: db.FederationRoleSpoke, Actor: "relay", RelayConfig: &db.RelayBindingConfig{}}
+	mapped := db.BoundSpokeClaimPrincipal(binding, incoming, "01ARZ3NDEKTSV4RRFFQ69G5FAX")
+	control := agentsviewrelay.Control{ClientKind: "cli", SessionID: "pi:selected"}
+	forwarded := agentsViewForwardControl(control, mapped)
+	if forwarded.ClientKind != mapped.ClientKind || forwarded.SessionID != control.SessionID || control.ClientKind != "cli" {
+		t.Fatalf("forwarded control did not preserve selection and mapped holder: %#v", forwarded)
+	}
 }
