@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -170,6 +171,38 @@ func TestDoctorReportsLexicalSearchWhenEmbeddingsAreDisabled(t *testing.T) {
 	finding := doctorFinding(t, report, "daemon.embeddings")
 	require.EqualValues(t, "info", finding.Status)
 	require.Contains(t, finding.Summary, "lexical search remains available")
+}
+
+func TestDoctorReportsUnresolvableDocbankKey(t *testing.T) {
+	_, workspace := doctorTestEnv(t)
+	keyFile := filepath.Join(t.TempDir(), "missing", "docbank.key")
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.Docbank = docbank.NewClient("http://127.0.0.1:9", config.DocbankConfig{APIKeyFile: keyFile}.ResolveKey)
+	})
+	ctx := context.WithValue(t.Context(), client.BaseURLKey{}, env.URL)
+	flags = globalFlags{Workspace: workspace}
+
+	finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+
+	require.EqualValues(t, "warn", finding.Status)
+	require.Equal(t, []string{"source: file:" + keyFile, "reason: cannot read credential file"}, finding.Details)
+}
+
+func TestDoctorDocbankCheckFollowsHealth(t *testing.T) {
+	for _, tc := range []struct {
+		name, health, status string
+	}{
+		{"key resolves", `{"ok":true,"schema_version":28,"db_path":"/data/kata.db","docbank":{"credential":"ok"}}`, "ok"},
+		{"not configured", `{"ok":true,"schema_version":28,"db_path":"/data/kata.db"}`, "info"},
+		{"health without diagnostics", `{"ok":true,"schema_version":28}`, "info"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, workspace := doctorTestEnv(t)
+			flags = globalFlags{Workspace: workspace, Project: "example-project"}
+			ctx := doctorServerContext(t, map[string]string{"/api/v1/health": tc.health}, nil)
+			require.EqualValues(t, tc.status, doctorFinding(t, collectDoctor(ctx), "daemon.docbank").Status)
+		})
+	}
 }
 
 func TestDoctorProfileIdentityUsesBoundedTimeout(t *testing.T) {

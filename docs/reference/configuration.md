@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-06
+last_edited: 2026-11-08
 ---
 
 # Configuration
@@ -1114,10 +1114,13 @@ daemon user's home directory (not `KATA_HOME`). Other relative paths are
 rejected. Symlinks are accepted, and there is no parent-directory ownership or
 permission policy. Kata validates the opened file: it must be regular and
 owned by the daemon's effective user. On Unix, group/world permissions are
-rejected (`chmod 600`). On Windows, the file ACL must restrict access to the
-current user, SYSTEM, and Administrators. Files larger than 64 KiB are refused,
-and reads are bounded to enforce that limit. File contents are trimmed,
-including a trailing newline.
+rejected (`chmod 600`). On Windows, the file must not inherit permissions from
+its folder, and it may grant access only to the current user, SYSTEM, and
+Administrators. A file created in a user profile inherits its folder's
+permissions and is rejected even when they list only those accounts; run
+`icacls <file> /inheritance:r /grant:r "%USERNAME%:R"` as the daemon user to
+fix it. Files larger than 64 KiB are refused, and reads are bounded to enforce
+that limit. File contents are trimmed, including a trailing newline.
 
 Kata resolves the selected credential once at startup and once per
 `kata daemon reload`. Reload wakes the embedding backlog; changes to provider
@@ -1512,13 +1515,16 @@ setup and the shared-vault trust boundary.
 | --- | --- | --- |
 | `url` | empty (disabled) | Docbank base URL; HTTPS or loopback HTTP, without userinfo, query, or fragment. |
 | `api_key` | empty | Inline key, preferred over file and environment sources. |
-| `api_key_file` | empty | Mode-0600 key file, preferred over the environment source. |
+| `api_key_file` | empty | Key file, preferred over the environment source; it must follow the [key file rules](#credentials-and-batching). |
 | `api_key_env` | empty | Name of the environment variable containing the key. |
 | `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
 
-A configured URL requires a key source. A broken selected credential
-source fails explicitly; Kata does not fall back to another source. Keys are
-resolved on each request.
+A configured URL requires a key source. If the selected source cannot supply a
+key, Kata does not fall back to another source and sends nothing to Docbank:
+attachment requests fail with HTTP 503 `docbank_key_unavailable`. Its message
+gives the reason without the key file path or variable name. `kata doctor`
+(`daemon.docbank`) and the `docbank` block of `/api/v1/health` show the failing
+source. Keys are resolved on each request.
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.

@@ -1933,6 +1933,21 @@ type DisconnectRelayResponseBody struct {
 	Revoked bool `json:"revoked"`
 }
 
+type DocbankHealth struct {
+	// Credential Docbank API key state, ok or missing; an advisory warning that does not change health.ok.
+	Credential string `json:"credential" validate:"required"`
+
+	// CredentialReason Why the key source cannot supply a key.
+	CredentialReason *string `json:"credential_reason,omitempty"`
+
+	// CredentialSource Key source that failed: file:<path> or env:<NAME>; never the key value.
+	CredentialSource *string `json:"credential_source,omitempty"`
+}
+
+func (d DocbankHealth) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
 type DoctorResponseBody struct {
 	Hooks Hooks `json:"hooks"`
 }
@@ -3063,6 +3078,7 @@ func (h HLC) Validate() error {
 type HealthResponseBody struct {
 	APISchemaVersion *string                 `json:"api_schema_version,omitempty"`
 	DBPath           *string                 `json:"db_path,omitempty"`
+	Docbank          *DocbankHealth          `json:"docbank,omitempty"`
 	Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 	FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 	IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
@@ -3076,6 +3092,13 @@ type HealthResponseBody struct {
 
 func (h HealthResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if h.Docbank != nil {
+		if v, ok := any(h.Docbank).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Docbank", err)
+			}
+		}
+	}
 	if h.Embeddings != nil {
 		if v, ok := any(h.Embeddings).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {

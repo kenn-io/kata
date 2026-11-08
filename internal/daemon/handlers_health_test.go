@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/embedding"
 )
 
@@ -301,6 +303,39 @@ func TestHealthIncludesSafeEmbeddingCredentialWarning(t *testing.T) {
 	assert.Contains(t, body.Embeddings.CredentialReason, "unset")
 	require.NotNil(t, body.Embeddings.LastSuccessAt)
 	assert.True(t, body.Embeddings.LastSuccessAt.Equal(last), "credential state must not replace reconciliation time")
+}
+
+func TestHealthReportsDocbankKeySource(t *testing.T) {
+	keyFile := filepath.Join(t.TempDir(), "missing", "docbank.key")
+	for _, tc := range []struct {
+		name string
+		key  func() (string, error)
+		want api.DocbankHealth
+	}{
+		{
+			name: "unreadable key file",
+			key:  config.DocbankConfig{APIKeyFile: keyFile}.ResolveKey,
+			want: api.DocbankHealth{Credential: "missing", CredentialSource: "file:" + keyFile, CredentialReason: "cannot read credential file"},
+		},
+		{
+			name: "resolvable key",
+			key:  func() (string, error) { return "test-key", nil },
+			want: api.DocbankHealth{Credential: "ok"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := openTestDB(t)
+			ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Docbank: docbank.NewClient("http://127.0.0.1:9", tc.key)})
+			var body struct {
+				OK      bool               `json:"ok"`
+				Docbank *api.DocbankHealth `json:"docbank"`
+			}
+			getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+			require.True(t, body.OK, "a Docbank key problem is advisory")
+			require.NotNil(t, body.Docbank)
+			assert.Equal(t, tc.want, *body.Docbank)
+		})
+	}
 }
 
 func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {

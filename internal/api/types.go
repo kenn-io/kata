@@ -45,6 +45,7 @@ type HealthResponse struct {
 		Uptime           string                  `json:"uptime"`
 		StartedAt        time.Time               `json:"started_at"`
 		Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
+		Docbank          *DocbankHealth          `json:"docbank,omitempty"`
 		FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 		IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
 		RootSigning      *RootSigningHealth      `json:"root_signing,omitempty"`
@@ -94,6 +95,16 @@ type UISessionResponse struct {
 	AllowedActions        []string       `json:"allowed_actions,omitempty"`
 	CloseRequiresEvidence bool           `json:"close_requires_evidence,omitempty,omitzero"`
 	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
+}
+
+// DocbankHealth reports whether the daemon can resolve its Docbank API key.
+// It is present only when [docbank] is configured, and it never contacts Docbank.
+type DocbankHealth struct {
+	// Not an enum: a generated DocbankHealthCredential would take the Missing/Ok
+	// constant names from EmbeddingsHealthCredential in pkg/client.
+	Credential       string `json:"credential" doc:"Docbank API key state, ok or missing; an advisory warning that does not change health.ok."`
+	CredentialSource string `json:"credential_source,omitempty" doc:"Key source that failed: file:<path> or env:<NAME>; never the key value."`
+	CredentialReason string `json:"credential_reason,omitempty" doc:"Why the key source cannot supply a key."`
 }
 
 // EmbeddingsHealth is the semantic-search reconciler's operator-visible state

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -25,6 +26,19 @@ type Error struct{ Status int }
 
 func (e *Error) Error() string { return "docbank: HTTP " + strconv.Itoa(e.Status) }
 
+// KeyError reports that the daemon could not resolve its own Docbank key, so
+// no request was sent. Err may name the key source; keep it out of responses.
+type KeyError struct{ Err error }
+
+func (e *KeyError) Error() string {
+	if e.Err == nil {
+		return "docbank: API key is empty"
+	}
+	return e.Err.Error()
+}
+
+func (e *KeyError) Unwrap() error { return e.Err }
+
 // Client uses an endpoint normalized by config and resolves its key per request.
 type Client struct {
 	base string
@@ -36,14 +50,30 @@ type Client struct {
 func NewClient(base string, key func() (string, error)) *Client {
 	return &Client{base: base, key: key, http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
+
+// CheckKey resolves the key as a request would, without contacting Docbank.
+func (c *Client) CheckKey() error {
+	_, err := c.resolveKey()
+	return err
+}
+
+func (c *Client) resolveKey() (string, error) {
+	key, err := c.key()
+	if err != nil || key == "" {
+		return "", &KeyError{Err: err}
+	}
+	return key, nil
+}
+
 func (c *Client) request(ctx context.Context, method, endpoint string, body io.Reader, headers http.Header) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+endpoint, body)
 	if err != nil {
 		return nil, &Error{}
 	}
-	key, err := c.key()
-	if err != nil || key == "" {
-		return nil, &Error{Status: 401}
+	key, err := c.resolveKey()
+	if err != nil {
+		slog.WarnContext(ctx, "docbank request not sent", "error", err)
+		return nil, err
 	}
 	req.Header = headers.Clone()
 	if req.Header == nil {

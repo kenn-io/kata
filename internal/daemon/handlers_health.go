@@ -2,12 +2,14 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/version"
 )
 
@@ -77,6 +79,9 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 			}
 		}
+		if diagnostics && cfg.Docbank != nil {
+			out.Body.Docbank = docbankHealth(cfg.Docbank.CheckKey())
+		}
 		if diagnostics && cfg.FederationConfigHealth != nil {
 			health := cfg.FederationConfigHealth()
 			out.Body.FederationConfig = &health
@@ -103,4 +108,15 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		return out, nil
 	})
+}
+
+func docbankHealth(err error) *api.DocbankHealth {
+	if err == nil {
+		return &api.DocbankHealth{Credential: "ok"}
+	}
+	h := &api.DocbankHealth{Credential: "missing", CredentialReason: err.Error()}
+	if e, ok := errors.AsType[*config.CredentialSourceError](err); ok {
+		h.CredentialSource, h.CredentialReason = e.Source, e.Reason
+	}
+	return h
 }
