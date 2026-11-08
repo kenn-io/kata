@@ -15,6 +15,7 @@ import (
 )
 
 func newCloseCmd() *cobra.Command {
+	var sharing agentsViewCloseFlags
 	var (
 		reason         string
 		message        string
@@ -62,6 +63,10 @@ The close message has a minimum length that depends on the reason:
   kata close abc4 --duplicate-of d4ex -m "Same Safari race as d4ex." --agent`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			shareSelected, shareErr := sharing.selected(cmd)
+			if shareErr != nil {
+				return shareErr
+			}
 			if cmd.Flags().Changed("idempotency-key") && strings.TrimSpace(idempotencyKey) == "" {
 				return &cliError{
 					Message:  "--idempotency-key must not be blank",
@@ -141,9 +146,17 @@ The close message has a minimum length that depends on the reason:
 					Message: fmt.Sprintf("flag conflict: duplicate evidence item %s (provided more than once via canonical and/or sugar)", dup)}
 			}
 
-			parsed, err = prepareCloseAttachments(cmd, args[0], reason, message, parsed, sugarDocbank, dryRun)
-			if err != nil {
-				return err
+			if shareSelected {
+				// Do not perform optional attachment writes before the retained
+				// snapshot and live route pass the share preflight.
+				if len(sugarDocbank) > 0 {
+					return evidenceValueError("AgentsView: --docbank preparation with sharing is unavailable in this draft; attach evidence separately first")
+				}
+			} else {
+				parsed, err = prepareCloseAttachments(cmd, args[0], reason, message, parsed, sugarDocbank, dryRun)
+				if err != nil {
+					return err
+				}
 			}
 
 			extra := map[string]any{
@@ -152,7 +165,7 @@ The close message has a minimum length that depends on the reason:
 				"evidence": parsed,
 				"dry_run":  dryRun,
 			}
-			if len(parsed) > 0 {
+			if !shareSelected && len(parsed) > 0 {
 				if ref := closeTranscript(cmd); ref != nil {
 					extra["transcript"] = ref
 				}
@@ -172,6 +185,9 @@ The close message has a minimum length that depends on the reason:
 					return err
 				}
 				headers["If-Match"] = etag
+			}
+			if shareSelected {
+				return sharing.run(cmd.Context(), cmd, args[0], extra, headers, dryRun)
 			}
 			return runActionWithHeaders(cmd, args[0], "close", extra, headers)
 		},
@@ -205,6 +221,7 @@ The close message has a minimum length that depends on the reason:
 	cmd.Flags().StringArrayVar(&sugarTest, "test", nil, "sugar for --evidence test:<command>, repeatable")
 	cmd.Flags().StringArrayVar(&sugarReviewed, "reviewed", nil, "sugar for --evidence reviewed-paths:<path>, repeatable")
 	cmd.Flags().StringArrayVar(&sugarDocbank, "docbank", nil, "link a Docbank node id or absolute path as done evidence, repeatable")
+	sharing.register(cmd)
 	addCommentFlag(cmd)
 	cmd.Flags().SetNormalizeFunc(normalizeCloseBodyFlag)
 	return cmd

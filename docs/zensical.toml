@@ -26,6 +26,7 @@ nav = [
     {"Issue attachments" = "guide/attachments.md"},
     {"Workspaces and projects" = "guide/workspaces-projects.md"},
     {"Share projects between hubs" = "guide/project-relays.md"},
+    {"Share a frozen AgentsView snapshot" = "guide/agentsview-sharing.md"},
     {"Semantic search" = "guide/semantic-search.md"},
     {"Comparisons" = "guide/comparisons.md"},
     {"Migrating from Beads" = "guide/migrating-from-beads.md"},

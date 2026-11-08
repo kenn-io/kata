@@ -53,6 +53,7 @@ var kataCommandGroups = map[string]string{
 	"deadline":            "change",
 	"notify":              "change",
 	"move":                "change",
+	"agentsview":          "change",
 	"close":               "change",
 	"reopen":              "change",
 	"wait":                "coord",
