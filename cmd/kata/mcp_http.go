@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
+	mcpserver "go.kenn.io/kata/internal/mcp"
 	"go.kenn.io/kata/internal/mcpdiscovery"
 	"go.kenn.io/kata/internal/mcpicon"
 
@@ -109,7 +110,7 @@ func serveMCPHTTP(
 	status io.Writer,
 	address string,
 	token string,
-	server *sdkmcp.Server,
+	legacyServer, currentServer *sdkmcp.Server,
 	discoveryDirectory, backendURL string,
 ) (result error) {
 	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", strings.TrimSpace(address))
@@ -120,7 +121,9 @@ func serveMCPHTTP(
 
 	mux := http.NewServeMux()
 	mcpicon.RegisterRoutes(mux)
-	mux.Handle("/mcp", newMCPHTTPHandler(server, token, false))
+	// The 2026-07-28 path serves Events; legacy sessions do not.
+	mcpHandler := http.NewCrossOriginProtection().Handler(mcpserver.NewHTTPHandler(legacyServer, currentServer))
+	mux.Handle("/mcp", requireMCPHTTPBearer(token, mcpHandler))
 	mux.HandleFunc("/healthz", serveMCPHTTPHealth)
 	var handler http.Handler = mux
 	reportedAuthority := listener.Addr().String()

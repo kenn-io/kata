@@ -263,6 +263,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. |
 | `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |
 | `0.41.0` | Adds `sort=priority` to both ready routes. `kata next` and MCP `kata.next` request one priority-ordered row; older daemons retain the full-queue fetch and client-side selection. |
 | `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |

@@ -23,7 +23,7 @@ var ErrCutoverInProgress = errors.New("jsonl cutover in progress")
 
 var errSourceChangedDuringCutover = errors.New("source changed during cutover; stop all database users and retry; original source retained")
 
-// AutoCutover applies registered index-only SQLite upgrades in place. Other
+// AutoCutover applies registered additive SQLite upgrades in place. Other
 // older schemas are exported to JSONL, imported into a fresh current-schema
 // temp DB, and swapped into place. Current-schema databases stay untouched.
 func AutoCutover(ctx context.Context, path string) error {

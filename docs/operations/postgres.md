@@ -164,6 +164,11 @@ run UID. Stop daemons and imports while it scans `events` and builds the index.
 See the [schema 49 migration requirements](../development/postgres-migrations.md#schema-49-cron-run-history-index)
 for the offline window, grants, and rollback. SQLite installs this index in place.
 
+Schema 50 adds the `mcp_event_subscriptions` table for daemon-owned MCP Events
+subscriptions. Re-run the `GRANT ... ON ALL TABLES` statement below after the
+migration so the runtime role can use it. The table has no sequences. See the
+[schema 50 migration requirements](../development/postgres-migrations.md#schema-50-mcp-events-subscriptions).
+
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
 

@@ -5067,3 +5067,52 @@ func TestFederationMoveSourceProofPreservesPlaintextPolicy(t *testing.T) {
 		})
 	}
 }
+
+// A pull commits remote events before it applies them, and an MCP Events
+// worker on any daemon sharing the store may have matched them in between.
+// Applying them records where that worker must match again, in the same
+// transaction, so the record survives a crash and reaches every daemon.
+func TestSyncFederationApplyRecordsAnMCPEventsRematch(t *testing.T) {
+	ctx := t.Context()
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	hubProject, err := hub.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	_, hubEvent, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hubProject.ID, Title: "from hub", Author: "tester"})
+	require.NoError(t, err)
+	var meta api.ProjectFederationBody
+	postJSON(t, hub.URL, "/api/v1/projects/"+strconv.FormatInt(hubProject.ID, 10)+"/federation/enable",
+		map[string]any{"actor": "tester"}, &meta)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token: "pull-token", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &hubProject.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	spokeProject, err := spoke.DB.CreateProjectWithUID(ctx, "hub", hubProject.UID)
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: spokeProject.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL,
+		HubProjectID: hubProject.ID, HubProjectUID: hubProject.UID, ReplayHorizonEventID: 1, Enabled: true,
+	})
+	require.NoError(t, err)
+	_, _, _, ok, err := spoke.DB.MCPEventsRematch(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	var pulled []db.Event
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL: hub.URL, HubProjectID: hubProject.ID, Token: created.Token,
+	}, clientpkg.Opts{}, func(_ int64, events []db.Event) { pulled = append(pulled, events...) }))
+
+	var local int64
+	for _, event := range pulled {
+		if event.UID == hubEvent.UID {
+			local = event.ID
+		}
+	}
+	require.Positive(t, local, "the hub's issue creation was pulled")
+	from, through, _, ok, err := spoke.DB.MCPEventsRematch(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.LessOrEqual(t, from, local, "the record covers the applied event")
+	assert.GreaterOrEqual(t, through, local, "the record covers the applied event")
+}
