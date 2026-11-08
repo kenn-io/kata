@@ -25,6 +25,7 @@ type CronSQL struct {
 		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 	}
+	BeginRead      func(context.Context) (*sql.Tx, error)
 	Transact       func(context.Context, func(*sql.Tx) error) error
 	WriteGate      func(context.Context, *sql.Tx, int64) error
 	EffectiveActor func(context.Context, *sql.Tx, int64, string) (string, error)
@@ -329,11 +330,7 @@ func (a CronSQL) openCronProject(ctx context.Context, tx *sql.Tx, projectID int6
 	if err := LockCronProject(ctx, tx, projectID); err != nil {
 		return Project{}, err
 	}
-	project := Project{ID: projectID}
-	err := tx.QueryRowContext(ctx, `SELECT uid,name FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, projectID, SystemProjectName).Scan(&project.UID, &project.Name)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Project{}, ErrNotFound
-	}
+	project, err := a.cronProjectRow(ctx, tx, projectID)
 	if err != nil {
 		return Project{}, err
 	}
@@ -341,6 +338,15 @@ func (a CronSQL) openCronProject(ctx context.Context, tx *sql.Tx, projectID int6
 		return Project{}, err
 	}
 	return project, nil
+}
+
+func (a CronSQL) cronProjectRow(ctx context.Context, tx *sql.Tx, projectID int64) (Project, error) {
+	project := Project{ID: projectID}
+	err := tx.QueryRowContext(ctx, `SELECT uid,name FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, projectID, SystemProjectName).Scan(&project.UID, &project.Name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Project{}, ErrNotFound
+	}
+	return project, err
 }
 
 // checkCronPutState enforces whole-document compare-and-swap: a create names

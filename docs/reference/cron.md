@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -317,6 +317,127 @@ binding time, without historical backfill.
 The existing daemon sweep runs at startup and every 30 seconds by default. Keep the authoritative hub running
 for unattended delivery. Local projects deliver locally; federated projects
 deliver only on their enabled owning hub. Spokes never deliver.
+
+### Dispatch decisions and skipped occurrences
+
+Explain one job's current eligibility and this daemon's retained observation:
+
+```sh
+kata cron job show <job-uid> --why
+```
+
+`--why` requires daemon API 0.41.0 and adds a top-level `dispatch` object to the
+normal show response. Without it, show output is unchanged. `gate` checks the
+current binding, definition, parent, progress, schedule and recipient in one
+read-only snapshot. `due` means the plan is eligible to create a child; it does
+not promise that a later write gate or transaction will succeed. The live check
+omits mutation authority and row locks. `skipped` means the current plan would
+only discard old occurrences, without committing that progress.
+
+`next_due_at`, when present, is the first scheduled instant after stored
+progress. It can be in the past and does not predict which occurrence `latest`
+will deliver. `last` is this daemon's latest retained batch observation, or `null`
+when none remains. `last_non_idle` retains the latest decision other than `idle`,
+so a later idle sweep does not hide a skipped batch or failure. Both fields are
+required and nullable. Each observation describes one dispatch transaction, not
+the sum of a sweep that drains several batches. Observations are local and reset
+on restart; use `kata daemon logs --cron` for retained history. Adapter jobs
+answer `external_adapter`; spokes and relays answer `replica`. To inspect the
+hub's observation, select it with `--daemon <hub-name>`. The query is not
+forwarded. Public details use fixed messages; raw errors stay in the local log.
+
+The same explanation is available at
+`GET /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/dispatch`, with the same
+project read authorization as job show.
+
+Read the current daemon's native recurring decisions with:
+
+```sh
+kata daemon logs --cron
+kata daemon logs --cron --tail --job-uid <job-uid>
+kata daemon logs --cron --reason parent_closed --limit 20
+```
+
+Each JSONL record identifies the project, job, definition revision and evaluation
+time. It reports committed child deliveries, whether another batch remains, and
+discarded occurrences. `kind: "skipped"` includes a count and the exclusive
+`after`/`before` window. Calendar counting stops at 1000; `capped: true` means the
+count is a lower bound. Interval counts are exact. Pending `latest` scans report
+no discarded work until their frozen window is finalized. A batch can both
+deliver children and discard older occurrences: its reason is `delivered`, its
+kind is `skipped`, and `--reason skipped` includes it.
+Other `--reason` values match the recorded reason exactly, including codes added
+by newer daemons using the same record version. An unmatched value prints no
+records; the reader does not validate it against this CLI's known codes.
+
+| Reason | What the daemon observed |
+| --- | --- |
+| `due` | Live explanation only: the read-only plan has a due child. |
+| `delivered` | This recorded batch committed child issues. |
+| `idle` | The gate was open and no occurrence was due. |
+| `skipped` | Only discarded occurrences advanced progress. |
+| `scanning` | A bounded `latest` calendar scan is unfinished. |
+| `external_adapter` | An external adapter owns scheduling. |
+| `disabled`, `deleted`, `job_missing` | The definition was disabled, deleted or absent. |
+| `replica`, `binding_disabled` | Delivery belongs to the hub, or its binding was disabled. |
+| `project_unavailable` | The project was absent, archived or reserved for the system. |
+| `definition_changed` | The definition changed after enumeration; the next sweep retries. |
+| `parent_missing`, `parent_deleted`, `parent_closed` | The bound parent could not accept delivery. |
+| `progress_invalid`, `schedule_invalid`, `recipient_invalid` | Delivery failed closed on invalid stored state or recipient. |
+| `error` | Another failure occurred; recorded dispatch errors have detail in the cron log. Live check errors have detail in daemon diagnostic output. |
+
+For a failed live check, search `daemon.log` or the daemon's stderr/service logs
+for `explain recurring cron dispatch`. Embedded hosts use their configured
+`Config.Logger` output. Recorded dispatch errors remain available through
+`kata daemon logs --cron`.
+
+The daemon retains each candidate's last decision in memory and logs changes,
+deliveries and finalized skips. A first idle observation, or a return to idle
+after a delivery, skip or scan, stays in memory without writing a log entry; a
+return to idle after a failure or pause still logs. Repeated idle decisions and
+identical errors do not flood the log.
+The recorder resets on restart. The first non-idle decision after a restart logs
+an observation, even if it matches the previous process's last decision; a
+record does not by itself prove a state transition. Its JSONL history survives at
+`<KATA_HOME>/cron/<storage-hash>/dispatch.jsonl`, with five rotated files and a
+50 MiB active-file rotation threshold. Logging is best effort, separate from
+the dispatch transaction; a process failure or filesystem error can lose a
+record. Startup does not require a home for this log: when none resolves,
+`log_path` is empty and each attempted record counts as a log error. Reopening
+after an interrupted final line starts the next record on a new line. No
+diagnostic event replicates to peers.
+
+`GET /api/v1/health` includes a diagnostics-only `cron` block after the first
+sweep. It reports `last_sweep_at`, `last_sweep_ms`, the latest successfully listed
+page time in `last_enumeration_at`, `enumeration_errors_since_start`, retained
+`jobs` and `by_reason`, and lifetime delivery, skip and error counters. These
+counts cover observed candidates, rather than all configured jobs: enumeration
+filters disabled/deleted definitions and non-authoritative bindings. Successful
+complete enumerations prune missing candidates; failed or partial enumerations
+retain previous observations. Skip totals can be lower bounds when calendar
+counts are capped; `skipped_count_is_lower_bound` stays true once any capped
+count contributes to the lifetime total. A failed enumeration updates the sweep
+time and error counter but preserves the last successful enumeration time.
+`last_enumeration_at` is absent until the first successful enumeration page.
+`log_error_present` reports whether the latest attempted log operation failed;
+`log_errors_since_start` counts failed operations. A rotation error can follow a
+complete record write, so these fields do not count lost records. The next
+qualifying write retries opening the log and updates the flag. An unchanged
+decision without deliveries or skips does not retry a failed log operation,
+even after the filesystem is repaired. Health contains no job identities or
+raw error detail.
+
+`daemon logs --tail` advances only over complete newline-terminated records and
+drains unread data across retained rotations between polls. If the previous
+file has been evicted, it resumes from the oldest retained file. History already
+evicted by retention cannot be recovered. Run without `--tail` to inspect all
+retained rotated files. Unsupported newer
+record versions are skipped with a warning. Readers use brief handles that
+permit rotation on Windows.
+
+`daemon logs` reads the selected local Kata home, including when the CLI has
+remote daemons configured. Select exactly one of `--cron` and `--hooks`; their
+filters cannot be mixed. Run the command on the owning hub for its history.
 
 Direct spokes with push enabled can create, update, delete, and restore native
 recurring jobs through their existing enrollment. Each request checks hub
