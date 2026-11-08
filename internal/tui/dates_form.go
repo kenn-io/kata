@@ -165,11 +165,13 @@ func isRevisionConflict(err error) bool {
 // save, so the form can show the values that beat it. When the read fails the
 // response is returned unchanged and the form reports the refusal as it is.
 func withCurrentIssue(ctx context.Context, apiClient any, target formTarget, resp *MutationResp) *MutationResp {
-	reader, ok := apiClient.(detailAPI)
+	reader, ok := apiClient.(interface {
+		readIssue(context.Context, int64, string) (*IssueDetail, error)
+	})
 	if !ok {
 		return resp
 	}
-	detail, err := reader.GetIssueDetail(ctx, target.projectID, target.issueShortID)
+	detail, err := reader.readIssue(ctx, target.projectID, target.issueShortID)
 	if err != nil || detail == nil || detail.Issue == nil {
 		return resp
 	}

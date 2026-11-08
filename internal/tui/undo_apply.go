@@ -77,7 +77,7 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 		out.resp, out.err = c.RestoreIssue(ctx, entry.projectID, entry.uid, entry.actor)
 		return c.finishUndo(ctx, entry, out)
 	}
-	detail, err := c.GetIssueDetail(ctx, entry.projectID, entry.uid)
+	detail, err := c.readIssue(ctx, entry.projectID, entry.uid)
 	if err != nil {
 		out.err = err
 		return out
@@ -289,7 +289,7 @@ func (c *undoClient) finishUndo(ctx context.Context, entry undoEntry, out undoOu
 }
 
 func (c *undoClient) restoredAfterNoop(ctx context.Context, entry undoEntry) (bool, error) {
-	detail, err := c.GetIssueDetail(ctx, entry.projectID, entry.uid)
+	detail, err := c.readIssue(ctx, entry.projectID, entry.uid)
 	if err != nil {
 		return false, err
 	}

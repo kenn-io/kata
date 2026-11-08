@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -258,6 +259,17 @@ func (c *Client) listIssuesAt(ctx context.Context, projectID *int64, f ListFilte
 // ref is a short_id, qualified short_id, or UID — the daemon's path
 // resolver picks the matching column.
 func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
+	detail, err := c.readIssue(ctx, projectID, ref)
+	if err != nil {
+		return nil, err
+	}
+	detail.Recurrence, detail.RecurrenceErr = c.readRecurrence(ctx, detail.Issue.ProjectID, detail.Issue.RecurrenceID)
+	return detail, nil
+}
+
+// readIssue is GetIssueDetail without the recurrence read, for callers that
+// read the recurrence themselves or do not need it.
+func (c *Client) readIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
 	body, err := c.showIssue(ctx, projectID, ref)
 	if err != nil {
 		return nil, err
@@ -272,6 +284,22 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 		Children: body.Children,
 		Lease:    lease,
 	}, nil
+}
+
+// readRecurrence reads the live recurrence while preserving a daemon refusal.
+func (c *Client) readRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrenceclient.View, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	rec, err := recurrenceclient.Active(ctx, apiClient, projectID, id)
+	if err != nil {
+		if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
+			return nil, decodeError(status.Body, status.Status, status.Method, status.URI)
+		}
+		return nil, err
+	}
+	return rec, nil
 }
 
 // CreateIssue posts a new issue. body.IdempotencyKey rides the
