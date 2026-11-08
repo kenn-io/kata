@@ -109,6 +109,16 @@ func effectiveCloseEvidence(events []generated.EventEnvelope, effectiveCloseEven
 	return nil, errors.New("close history is incomplete")
 }
 
+func attachmentOriginsMatch(a, b string) bool {
+	if a == "" {
+		a = "local"
+	}
+	if b == "" {
+		b = "local"
+	}
+	return a == b
+}
+
 func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {
 	for _, e := range b.CloseEvidence {
 		if e.Type != "attachment" {
@@ -130,7 +140,8 @@ func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {
 				state := ""
 				if !live {
 					state = " (removed)"
-				} else if current.DocbankVersion != frozen.DocbankVersion {
+				} else if current.DocbankVersion != frozen.DocbankVersion ||
+					!attachmentOriginsMatch(current.Origin, frozen.Origin) {
 					state = " (changed)"
 				}
 				label = fmt.Sprintf("attachment %s: %s · %d bytes%s", e.AttachmentID, frozen.Name, frozen.Size, state)

@@ -27,6 +27,36 @@ func TestPrintShowAttachmentEvidenceOmitsMediaType(t *testing.T) {
 	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes\n", output.String())
 }
 
+func TestPrintShowAttachmentEvidenceMarksOriginOnlyChange(t *testing.T) {
+	const attachmentID = "attachment-1"
+	frozen, valid := metadata.Valid(jsontext.Value(`{"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV","name":"report.pdf","media_type":"application/pdf","size":5,"docbank_version":"00000000-0000-4000-8000-000000000001"}`))
+	require.True(t, valid)
+	var response showResponseForCLI
+	response.Issue.Metadata = map[string]jsontext.Value{
+		metadata.AttachmentPrefix + attachmentID: jsontext.Value(`{"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAW","name":"report.pdf","media_type":"application/pdf","size":5,"docbank_version":"00000000-0000-4000-8000-000000000001"}`),
+	}
+	response.CloseEvidence = []db.Evidence{{Type: "attachment", AttachmentID: attachmentID, Attachment: &frozen}}
+
+	var output bytes.Buffer
+	require.NoError(t, printShowAttachmentEvidence(&output, response))
+	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes (changed)\n", output.String())
+}
+
+func TestPrintShowAttachmentEvidenceTreatsMissingAndLocalOriginAsEquivalent(t *testing.T) {
+	const attachmentID = "attachment-1"
+	frozen, valid := metadata.Valid(jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":5,"docbank_version":"00000000-0000-4000-8000-000000000001"}`))
+	require.True(t, valid)
+	var response showResponseForCLI
+	response.Issue.Metadata = map[string]jsontext.Value{
+		metadata.AttachmentPrefix + attachmentID: jsontext.Value(`{"origin":"local","name":"report.pdf","media_type":"application/pdf","size":5,"docbank_version":"00000000-0000-4000-8000-000000000001"}`),
+	}
+	response.CloseEvidence = []db.Evidence{{Type: "attachment", AttachmentID: attachmentID, Attachment: &frozen}}
+
+	var output bytes.Buffer
+	require.NoError(t, printShowAttachmentEvidence(&output, response))
+	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes\n", output.String())
+}
+
 func TestPrintShowAttachmentEvidenceInvalidDetails(t *testing.T) {
 	var response showResponseForCLI
 	response.CloseEvidence = []db.Evidence{{

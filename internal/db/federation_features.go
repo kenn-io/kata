@@ -56,7 +56,7 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	}
 	origin, err := payloadHasDocbankOrigin(kind, payload)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
 	}
 	if origin {
 		required = MergeEventFeatures(required, DocbankOriginEventFeature)

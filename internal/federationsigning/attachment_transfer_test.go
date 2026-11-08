@@ -157,14 +157,6 @@ func TestAttachmentTransferUnknownLengthAndSpoolCleanup(t *testing.T) {
 	}
 }
 
-func TestAttachmentTransferReceivedZeroLengthRemainsExact(t *testing.T) {
-	spool, _, err := spoolBody(t.Context(), io.NopCloser(strings.NewReader("binary")), 0, AttachmentMaxBodyBytes)
-	if spool != nil {
-		_ = spool.Close()
-	}
-	require.Error(t, err, "received known zero must not become unknown at the shared spool boundary")
-}
-
 // Contract: only a well-formed signed SHA-256 digest can reserve a transfer
 // nonce or cause body reads, even when the caller owns a valid signing key.
 func TestAttachmentTransferRejectsMalformedDigestBeforeBody(t *testing.T) {

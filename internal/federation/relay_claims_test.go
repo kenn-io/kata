@@ -61,6 +61,9 @@ func TestRelayClaimHolderMappingSupportsLeafMutationAndPendingRetry(t *testing.T
 			TargetHubURL: offlineURL,
 		})
 		require.NoError(t, err)
+		credential := leaf.credential
+		credential.HubURL = offlineURL
+		require.NoError(t, leaf.credentials.StoreFederationCredential(t.Context(), leaf.project.UID, credential))
 		status, pendingResponse := relayClaimAction(t, leaf, issue.UID, "acquire", "cli")
 		require.Equal(t, http.StatusOK, status)
 		require.True(t, pendingResponse.Pending)
@@ -72,8 +75,8 @@ func TestRelayClaimHolderMappingSupportsLeafMutationAndPendingRetry(t *testing.T
 			TargetHubURL: relay.http.URL,
 		})
 		require.NoError(t, err)
-		credential := leaf.credential
 		credential.HubURL = relay.http.URL
+		require.NoError(t, leaf.credentials.StoreFederationCredential(t.Context(), leaf.project.UID, credential))
 		require.NoError(t, federation.RetryPendingClaimsOnce(
 			t.Context(), leaf.store, binding, credential, clientpkg.Opts{},
 		))
