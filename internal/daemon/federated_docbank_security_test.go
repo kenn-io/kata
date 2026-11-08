@@ -128,14 +128,14 @@ func TestFederatedDocbankContentRejectsRelayLocalOrigin(t *testing.T) {
 		Actor: "upstream-member", Capabilities: "pull,push", AllowInsecure: true,
 	}))
 	parent, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
-		PlaintextToken: "relay-docbank-parent-test-token", Actor: "tester", AdminActor: "operator",
+		PlaintextToken: "relay-docbank-parent-test-token", Actor: "tester", AdminActor: "operator", //nolint:gosec // G101: synthetic fixture credential for this isolated daemon test.
 	})
 	require.NoError(t, err)
 	downstreamUID, err := uid.New()
 	require.NoError(t, err)
 	grant, err := env.DB.CreateRelayEnrollment(t.Context(), db.CreateRelayEnrollmentParams{
 		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: downstreamUID,
-		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-docbank-content-test-token",
+		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-docbank-content-test-token", //nolint:gosec // G101: synthetic fixture credential for this isolated daemon test.
 	})
 	require.NoError(t, err)
 
