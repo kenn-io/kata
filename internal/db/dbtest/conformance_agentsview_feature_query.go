@@ -25,7 +25,7 @@ func checkAgentsViewFeatureQueryLayouts(t *testing.T, store db.Storage, backend 
 	root := store.InstanceUID()
 	dense, err := store.CreateProject(ctx, "dense-project")
 	require.NoError(t, err)
-	first, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: dense.ID, Title: "dense issue", Author: "worker"})
+	first, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: dense.ID, Title: "dense issue", Author: "worker"})
 	require.NoError(t, err)
 	_, closed, _, err := store.CloseIssueGuarded(ctx, db.CloseIssueParams{IssueID: first.ID, Reason: "done", Actor: "worker"})
 	require.NoError(t, err)
@@ -55,11 +55,40 @@ func checkAgentsViewFeatureQueryLayouts(t *testing.T, store db.Storage, backend 
 		require.NoError(t, err)
 		require.Empty(t, features)
 	}
+	// Event-only requirements must still be detected when feature negotiation
+	// inspects a project with no matching native cron projection.
+	for _, tc := range []struct {
+		eventType string
+		feature   string
+	}{
+		{"cron.fixture", db.CronEventFeature},
+		{"issue.moved", db.IssueMoveEventFeature},
+	} {
+		_, err = query.ExecContext(ctx, `UPDATE events SET type=$1, payload='{}' WHERE uid=$2`, tc.eventType, closed[0].UID)
+		require.NoError(t, err)
+		features, err := db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
+		require.NoError(t, err)
+		require.Contains(t, strings.Split(features, ","), tc.feature)
+	}
+	_, err = query.ExecContext(ctx, `UPDATE events SET type='issue.closed' WHERE uid=$1`, closed[0].UID)
+	require.NoError(t, err)
 	_, err = query.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, payload, closed[0].UID)
 	require.NoError(t, err)
 	features, err := db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
 	require.NoError(t, err)
 	require.Equal(t, agentsviewrelay.EventFeature, features)
+	_, later, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: dense.ID, Title: "ordering fixture", Author: "worker"})
+	require.NoError(t, err)
+	for _, event := range []db.Event{created, later} {
+		_, err = query.ExecContext(ctx, `UPDATE events SET type='issue.moved' WHERE uid=$1`, event.UID)
+		require.NoError(t, err)
+		features, err = db.ProjectRequiredEventFeatures(ctx, query, dense.UID, backend.Name == "postgres")
+		require.NoError(t, err)
+		require.Contains(t, strings.Split(features, ","), agentsviewrelay.EventFeature)
+		require.Contains(t, strings.Split(features, ","), db.IssueMoveEventFeature)
+		_, err = query.ExecContext(ctx, `UPDATE events SET type=$1 WHERE uid=$2`, event.Type, event.UID)
+		require.NoError(t, err)
+	}
 	// Interleave a second project, then append another event in the first. The
 	// second project's history must not inherit the first project's requirement.
 	other, err := store.CreateProject(ctx, "other-project")

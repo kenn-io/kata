@@ -184,13 +184,25 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, projectUID string, postgres bool) (string, error) {
 	var cronPresent, issueMoved bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
+	presenceQuery := `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
  EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=p.id) OR
  EXISTS(SELECT 1 FROM cron_workflows WHERE project_id=p.id) OR
  EXISTS(SELECT 1 FROM cron_runs WHERE project_id=p.id) OR
 	 EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%'))),
  EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND p.name<>$2 AND EXISTS(
-  SELECT 1 FROM events e WHERE e.project_id=p.id AND e.type='issue.moved'))`, projectUID, SystemProjectName).Scan(&cronPresent, &issueMoved)
+  SELECT 1 FROM events e WHERE e.project_id=p.id AND e.type='issue.moved'))`
+	presenceArgs := []any{projectUID, SystemProjectName}
+	if !postgres {
+		// The indexed cron probe stays separate. Move and association events
+		// share the project-history traversal below.
+		presenceQuery = `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
+ EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=p.id) OR
+ EXISTS(SELECT 1 FROM cron_workflows WHERE project_id=p.id) OR
+ EXISTS(SELECT 1 FROM cron_runs WHERE project_id=p.id) OR
+ EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%'))), 0`
+		presenceArgs = []any{projectUID}
+	}
+	err := q.QueryRowContext(ctx, presenceQuery, presenceArgs...).Scan(&cronPresent, &issueMoved)
 	if err != nil {
 		return "", err
 	}
@@ -198,18 +210,38 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	// Inspect each close payload structurally. A transcript value can contain the
 	// feature name, and an escaped JSON key can represent the actual member.
 	query := agentsViewAssociationCandidatesSQLite
+	queryArgs := []any{projectUID, SystemProjectName}
 	if postgres {
 		query = agentsViewAssociationCandidatesPostgres
+		queryArgs = []any{projectUID}
 	}
-	rows, err := q.QueryContext(ctx, query, projectUID)
+	rows, err := q.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return "", err
+		var payload, eventType string
+		var scanErr error
+		if postgres {
+			scanErr = rows.Scan(&payload)
+		} else {
+			scanErr = rows.Scan(&payload, &eventType)
+		}
+		if scanErr != nil {
+			return "", scanErr
+		}
+		if !postgres && eventType != "issue.closed" {
+			issueMoved = true
+			if strings.Contains(","+required+",", ","+agentsviewrelay.EventFeature+",") {
+				break
+			}
+			continue
+		}
+		if strings.Contains(","+required+",", ","+agentsviewrelay.EventFeature+",") {
+			// Continue looking for move events on SQLite, but mirror
+			// the existing first-positive association classification.
+			continue
 		}
 		features, err := PayloadRequiredFeatures("issue.closed", payload)
 		if err != nil {
@@ -217,7 +249,9 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		}
 		if strings.Contains(","+features+",", ","+agentsviewrelay.EventFeature+",") {
 			required = MergeEventFeatures(required, agentsviewrelay.EventFeature)
-			break
+			if postgres || issueMoved {
+				break
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -271,7 +305,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 // contain a row. A dense ID interval cannot contain another project's events.
 // This query shape is provisional until upstream page-budget CI measures it.
 const agentsViewAssociationCandidatesSQLite = `WITH bounds AS MATERIALIZED (
- SELECT p.id AS project_id, MIN(e.id) AS lo, MAX(e.id) AS hi, COUNT(e.id) AS n
+ SELECT p.id AS project_id, p.name AS project_name, MIN(e.id) AS lo, MAX(e.id) AS hi, COUNT(e.id) AS n
  FROM projects p LEFT JOIN events e INDEXED BY idx_events_project ON e.project_id=p.id
  WHERE p.uid=$1 GROUP BY p.id
 ), dense_bounds AS MATERIALIZED (
@@ -279,15 +313,16 @@ const agentsViewAssociationCandidatesSQLite = `WITH bounds AS MATERIALIZED (
 ), sparse_bounds AS MATERIALIZED (
  SELECT * FROM bounds WHERE n>0 AND hi<>lo+(n-1)
 )
-SELECT e.payload FROM dense_bounds b CROSS JOIN events e NOT INDEXED
+SELECT e.payload,e.type FROM dense_bounds b CROSS JOIN events e NOT INDEXED
  WHERE e.id BETWEEN b.lo AND b.hi
- AND e.project_id=b.project_id AND e.type='issue.closed'
- AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')
+ AND e.project_id=b.project_id AND (
+ (b.project_name<>$2 AND e.type='issue.moved') OR
+ (e.type='issue.closed' AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')))
 UNION ALL
-SELECT e.payload FROM sparse_bounds b CROSS JOIN events e INDEXED BY idx_events_project
+SELECT e.payload,e.type FROM sparse_bounds b CROSS JOIN events e INDEXED BY idx_events_project
  WHERE e.project_id=b.project_id
- AND e.type='issue.closed'
- AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')`
+ AND ((b.project_name<>$2 AND e.type='issue.moved') OR
+ (e.type='issue.closed' AND (e.payload LIKE '%"agentsview_association"%' OR e.payload LIKE '%\u%' ESCAPE '!')))`
 
 // PostgreSQL retains its existing project-scoped query; SQLite plan directives
 // do not enter its SQL path.
