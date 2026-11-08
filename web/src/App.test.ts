@@ -3000,10 +3000,60 @@ describe('App', () => {
     )
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
-    expect(snapshotRequests[1]?.headers.has('If-None-Match')).toBe(false)
+    expect(snapshotRequests[1]?.headers.get('If-None-Match')).toBe('"snapshot-1"')
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /Revoked project issue/ })).toBeNull(),
     )
+  })
+
+  it('keeps the task list when the initial SSE revalidation returns unchanged', async () => {
+    history.replaceState(null, '', '/kata?view=inbox#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const current = snapshot()
+    current.capabilities.updates = 'sse'
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/events/stream') {
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                init?.signal?.addEventListener('abort', () => controller.close(), { once: true })
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        }
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          if (snapshotRequests.length > 1) return new Response(null, { status: 304 })
+          return Response.json(current, { headers: { ETag: '"snapshot-1"' } })
+        }
+        throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(2))
+    expect(snapshotRequests[1]?.headers.get('If-None-Match')).toBe('"snapshot-1"')
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
   })
 
   it('refreshes membership after an SSE reconnect opens', async () => {
