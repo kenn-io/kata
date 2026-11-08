@@ -199,7 +199,7 @@ jobs:
       # and the check's fetch does not ask for it. /index.html is the same page
       # with the same headers.
       - name: Check first paint
-        uses: kenn-io/actions/first-paint@b523fb403607f01de5eec5f4556c7668544c70fe  # main
+        uses: kenn-io/actions/first-paint@6a8b4227ec7ce3c28c6b042b735781b1601211f4  # main
         with:
           dist: docs/site
           urls: http://127.0.0.1:7777/index.html
