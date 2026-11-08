@@ -38,7 +38,7 @@
 
   interface Props {
     currentView: KataCurrentView
-    now?: number
+    now: number
     resultsKey?: string
     issueCatalog: readonly KataTaskSummary[]
     scopeLabel?: string
@@ -60,7 +60,7 @@
 
   let {
     currentView,
-    now = Date.now(),
+    now,
     resultsKey = '',
     issueCatalog,
     scopeLabel = undefined,
