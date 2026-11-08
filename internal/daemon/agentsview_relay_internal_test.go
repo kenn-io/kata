@@ -82,18 +82,18 @@ func TestAgentsViewBinaryUploadContentTypeScope(t *testing.T) {
 		{"/api/v1/projects/1/issues/example/transcript-share", "PUT", "application/octet-stream", false},
 		{"/api/v1/projects/1/issues/example/transcript-share", "POST", "text/plain", false},
 	} {
-		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
 		req.Header.Set("Content-Type", tc.contentType)
 		require.Equal(t, tc.want, isAgentsViewBinaryUpload(req), tc.path)
 	}
 }
 
 func TestAgentsViewHistoryUsesEventClockInsteadOfInsertionOrder(t *testing.T) {
-	close := db.Event{ID: 1, UID: "close", OriginInstanceUID: "node", HLCPhysicalMS: 100}
+	closeEvent := db.Event{ID: 1, UID: "close", OriginInstanceUID: "node", HLCPhysicalMS: 100}
 	older := db.Event{ID: 2, UID: "older", OriginInstanceUID: "node", HLCPhysicalMS: 90}
 	newer := db.Event{ID: 0, UID: "newer", OriginInstanceUID: "node", HLCPhysicalMS: 110}
-	require.False(t, agentsViewEventAfter(older, close))
-	require.True(t, agentsViewEventAfter(newer, close))
+	require.False(t, agentsViewEventAfter(older, closeEvent))
+	require.True(t, agentsViewEventAfter(newer, closeEvent))
 }
 
 type agentsViewHistoryStore struct {
