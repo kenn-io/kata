@@ -1,37 +1,44 @@
-# kata カタ
+<h1 align="center">kata カタ</h1>
 
-The issue tracker built for coding agents and the humans steering them.
+<p align="center">
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/kenn-io/kata" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://katatracker.com/docs/"><img src="https://img.shields.io/badge/Docs-katatracker.com-blue" alt="Documentation"></a>
+</p>
 
-Coding agents need somewhere durable to track work: not a chat thread, not a
-markdown to-do list. kata gives them a local task ledger they can drive from the
-CLI: create, claim, relate, and close issues with evidence. Humans supervise the
-same work in a terminal UI. By default, issue state lives in a local SQLite
-database, so your repo stays clean and no hosted tracker is required. When a team
-of humans and agents needs to share, you can opt into a remote daemon or
-federation; a shared daemon can use Postgres by setting `KATA_DSN`.
-Production Postgres deployments can use separate schema-owner and runtime roles;
-see the [operator ceremony](docs/operations/postgres.md).
-Go applications can instead mount kata's listener-free HTTP service in-process;
-see [Embedding kata in Go](docs/development/embedding.md).
-MCP clients can start Kata's native server over stdio or Streamable HTTP with
-`kata mcp serve`. It binds the current workspace's project by default, and can
-serve a fixed allowlist or the complete daemon catalog on request. Section
-loaders progressively expose Kata's typed issue, administration,
-automation, and event workflows. See the [MCP reference](docs/reference/mcp.md).
+<p align="center">
+  <a href="https://katatracker.com/docs/">Documentation</a> ·
+  <a href="https://katatracker.com/docs/get-started/quickstart/">Setup Guide</a> ·
+  <a href="https://katatracker.com/docs/#two-ways-to-supervise">Interactive TUI</a>
+</p>
 
-The documentation in [`docs/`](docs/) is the definitive guide, published with
-Zensical at <https://katatracker.com/>.
+**The issue tracker built for coding agents and the humans steering them.**
 
-> **Stable:** Since v0.14.0, kata releases preserve backward compatibility
-> across upgrades.
+kata gives agents a durable task ledger they can drive from the CLI and humans
+can supervise in the terminal or browser. Issue state lives in a local SQLite
+database by default, so your repo stays clean and no hosted tracker is required.
 
-The latest release is [0.20.0](docs/changelog.md#0200). It adds an Attention
-inbox to the terminal UI, requests for replies to specific comments,
-participant broadcasts, and events for reached schedules. See
-[Updating Kata](docs/get-started/install.md#updating-kata) for installation
-and federation upgrade guidance.
+## What you can do
 
-## Install
+- **Track work from the CLI.** Create, claim, relate, and close issues with
+  evidence that records what was done and who did it.
+- **Supervise in the terminal or browser.** Browse and triage the same work with
+  `kata tui` or `kata ui`. See the [Web UI guide](docs/guide/web-ui.md).
+- **Share when you need to.** Opt into a remote daemon or
+  [federation](docs/operations/federation.md). Shared daemons can use Postgres
+  with `KATA_DSN`, including separate schema-owner and runtime roles; see the
+  [Postgres operator guide](docs/operations/postgres.md).
+- **Connect MCP clients.** Run `kata mcp serve` over stdio or Streamable HTTP.
+  It defaults to the workspace's project, with optional project allowlists or
+  the full daemon catalog and section loaders for typed workflows. See the
+  [MCP reference](docs/reference/mcp.md).
+- **Embed kata in Go.** Mount its listener-free HTTP service in your own
+  application. See [Embedding kata in Go](docs/development/embedding.md).
+- **Keep installations current.** Follow [Updating Kata](docs/get-started/install.md#updating-kata)
+  for installation and federation upgrade guidance, and the
+  [changelog](docs/changelog.md) for release notes.
+
+## Installation
 
 macOS:
 
