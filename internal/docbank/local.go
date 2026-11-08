@@ -121,50 +121,50 @@ func proveKey(ctx context.Context, address, key string) (conn net.Conn, err erro
 		}
 	}()
 	if err = conn.SetDeadline(deadline); err != nil {
-		return nil, fmt.Errorf("set key proof deadline: %w", err)
+		return nil, fmt.Errorf("set connection deadline: %w", err)
 	}
 	// Reads on the raw connection ignore ctx, so its end cuts the proof short.
 	stop := context.AfterFunc(ctx, func() { _ = c.SetDeadline(time.Now()) })
 	defer stop()
 	nonce := make([]byte, 32)
 	if _, err = rand.Read(nonce); err != nil {
-		return nil, fmt.Errorf("make key proof nonce: %w", err)
+		return nil, fmt.Errorf("prepare identity check: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+address+"/api/daemon/key-challenge?nonce="+hex.EncodeToString(nonce), nil)
 	if err != nil {
-		return nil, fmt.Errorf("build key proof request: %w", err)
+		return nil, fmt.Errorf("prepare identity check: %w", err)
 	}
 	if err = req.Write(conn); err != nil {
-		return nil, fmt.Errorf("send key proof request: %w", err)
+		return nil, fmt.Errorf("identity check failed: %w", err)
 	}
 	br := bufio.NewReader(io.LimitReader(conn, 2*keyProofLimit))
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		return nil, fmt.Errorf("read key proof response: %w", err)
+		return nil, fmt.Errorf("identity check failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("key check answered HTTP %d; this is not the Docbank that published the key", resp.StatusCode)
+		return nil, fmt.Errorf("identity check answered HTTP %d; this is not the Docbank that published the key", resp.StatusCode)
 	}
 	if resp.Close {
-		return nil, errors.New("key proof response closes the connection")
+		return nil, errors.New("the Docbank closed the connection before its identity could be verified")
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, keyProofLimit+1))
 	if err != nil {
-		return nil, fmt.Errorf("read key proof body: %w", err)
+		return nil, fmt.Errorf("identity check failed: %w", err)
 	}
 	if len(raw) > keyProofLimit || br.Buffered() != 0 {
-		return nil, errors.New("key proof response is larger than expected")
+		return nil, errors.New("the Docbank sent an unexpected response; its identity could not be verified")
 	}
 	var body struct {
 		Proof string `json:"proof"`
 	}
 	if err = json.Unmarshal(raw, &body); err != nil {
-		return nil, fmt.Errorf("decode key proof: %w", err)
+		return nil, fmt.Errorf("the Docbank sent an invalid identity check response: %w", err)
 	}
 	got, err := hex.DecodeString(body.Proof)
 	if err != nil {
-		return nil, fmt.Errorf("decode key proof: %w", err)
+		return nil, fmt.Errorf("the Docbank sent an invalid identity check response: %w", err)
 	}
 	mac := hmac.New(sha256.New, []byte(key))
 	mac.Write([]byte(keyProofDomain))
@@ -173,7 +173,7 @@ func proveKey(ctx context.Context, address, key string) (conn net.Conn, err erro
 		return nil, errors.New("the listener did not prove it holds Docbank's API key; refusing to send the key")
 	}
 	if err = conn.SetDeadline(time.Time{}); err != nil {
-		return nil, fmt.Errorf("clear key proof deadline: %w", err)
+		return nil, fmt.Errorf("clear connection deadline: %w", err)
 	}
 	return conn, nil
 }
