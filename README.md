@@ -1,6 +1,18 @@
-# kata カタ
+<h1 align="center">kata カタ</h1>
 
-The issue tracker built for coding agents and the humans steering them.
+<p align="center">
+  <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27.3+-00ADD8?logo=go" alt="Go 1.27.3+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://katatracker.com"><img src="https://img.shields.io/badge/Docs-katatracker.com-blue" alt="Docs"></a>
+</p>
+
+<p align="center">
+  <a href="https://katatracker.com/docs/">Documentation</a> ·
+  <a href="https://katatracker.com/docs/get-started/quickstart/">Quickstart</a> ·
+  <a href="https://katatracker.com/docs/reference/cli/">CLI Reference</a>
+</p>
+
+**The issue tracker built for coding agents and the humans steering them.**
 
 Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the
@@ -20,16 +32,25 @@ loaders progressively expose Kata's typed issue, administration,
 automation, and event workflows. See the [MCP reference](docs/reference/mcp.md).
 
 The documentation in [`docs/`](docs/) is the definitive guide, published with
-Zensical at <https://katatracker.com/>.
+Zensical at <https://katatracker.com/>. This README follows `main`; see the
+[changelog](docs/changelog.md) for releases and upgrade notes.
 
-> **Stable:** Since v0.14.0, kata releases preserve backward compatibility
-> across upgrades.
+## What you can do
 
-The latest release is [0.20.0](docs/changelog.md#0200). It adds an Attention
-inbox to the terminal UI, requests for replies to specific comments,
-participant broadcasts, and events for reached schedules. See
-[Updating Kata](docs/get-started/install.md#updating-kata) for installation
-and federation upgrade guidance.
+- **Track work from the CLI.** Create, claim, relate, and close issues with
+  evidence. Stable short refs, `--json` and `--agent` output, idempotent
+  creates, and predictable failure modes agents can script against.
+- **Supervise agents in the terminal or a browser.** `kata tui` and
+  `kata ui` browse, triage, and review agent-written work over the same
+  ledger.
+- **Stay local-first.** One Go binary, no runtime dependencies. Issue state
+  lives in SQLite under `KATA_HOME`; your repo commits only a small,
+  secret-free `.kata.toml`.
+- **Share when a team needs it.** Opt into a remote daemon or federation,
+  with Postgres for shared deployments.
+- **Connect your own tools.** Drive kata from MCP clients over stdio or
+  Streamable HTTP, embed its HTTP service in a Go application, or sync with
+  GitHub, Notion, Plane, Linear, Twenty, Todoist, and TickTick.
 
 ## Install
 
