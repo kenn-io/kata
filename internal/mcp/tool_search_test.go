@@ -3,15 +3,19 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 	"pgregory.net/rapid"
 
 	"go.kenn.io/kata/internal/storageadmin"
@@ -60,29 +64,130 @@ func discoveryOptions(t *testing.T) Options {
 
 // Product contract: a transient failure building the private metadata catalog
 // must not disable task discovery for the rest of the server's lifetime.
-func TestToolSearchCatalogRetriesFailedBuild(t *testing.T) {
-	want := &toolSearchCatalog{tools: map[string]ToolSearchResult{}, titles: map[string]string{}}
+func TestToolSearchRetriesFailedCatalogBuild(t *testing.T) {
+	catalog, err := newToolSearchCatalog(discoveryOptions(t))
+	require.NoError(t, err)
 	attempts := 0
-	build := func() (*toolSearchCatalog, error) {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-server", Version: "1"}, nil)
+	registerToolSearchCatalog(server, &toolSearchCatalogLoader{build: func() (*toolSearchCatalog, error) {
 		attempts++
 		if attempts == 1 {
-			return nil, fmt.Errorf("transient catalog failure")
+			return nil, errors.New("transient catalog failure")
 		}
-		return want, nil
+		return catalog, nil
+	}})
+	session := connectServerSession(t, server, nil, nil)
+
+	failed, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.search_tools", Arguments: map[string]any{"query": "add a comment to an issue"},
+	})
+	require.NoError(t, err)
+	require.True(t, failed.IsError)
+	require.Len(t, failed.Content, 1)
+	text, ok := failed.Content[0].(*sdkmcp.TextContent)
+	require.True(t, ok)
+	require.Equal(t, "tool metadata catalog is temporarily unavailable, retry the search: transient catalog failure", text.Text)
+
+	for range 2 {
+		output := searchToolSession(t, session, "add a comment to an issue", 1)
+		require.Len(t, output.Results, 1)
+		require.Equal(t, "kata.comment", output.Results[0].Name)
 	}
-	loader := &toolSearchCatalogLoader{build: build}
-
-	_, err := loader.get()
-	require.EqualError(t, err, "transient catalog failure")
-
-	got, err := loader.get()
-	require.NoError(t, err)
-	require.Same(t, want, got)
-
-	cached, err := loader.get()
-	require.NoError(t, err)
-	require.Same(t, want, cached)
 	require.Equal(t, 2, attempts)
+}
+
+// Product contract: concurrent searches on a cold server share one catalog
+// build, because each build registers every section on a private server.
+func TestToolSearchCatalogSharesConcurrentBuild(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		want := &toolSearchCatalog{}
+		release := make(chan struct{})
+		var builds atomic.Int32
+		loader := &toolSearchCatalogLoader{build: func() (*toolSearchCatalog, error) {
+			builds.Add(1)
+			<-release
+			return want, nil
+		}}
+		var waiters sync.WaitGroup
+		catalogs := make([]*toolSearchCatalog, 8)
+		errs := make([]error, len(catalogs))
+		for i := range catalogs {
+			waiters.Go(func() { catalogs[i], errs[i] = loader.get(t.Context()) })
+		}
+		synctest.Wait()
+		close(release)
+		waiters.Wait()
+
+		require.EqualValues(t, 1, builds.Load())
+		for i, catalog := range catalogs {
+			require.NoError(t, errs[i])
+			require.Same(t, want, catalog)
+		}
+	})
+}
+
+// Product contract: a cancelled search gives back its tool-call slot while a
+// slow catalog build continues for the searches that still want its result.
+func TestToolSearchCancelledWaitReleasesAdmissionSlot(t *testing.T) {
+	catalog, err := newToolSearchCatalog(discoveryOptions(t))
+	require.NoError(t, err)
+	started := make(chan struct{}, 8)
+	admitted := make(chan struct{}, 8)
+	blockBuild := make(chan struct{})
+	releaseBuild := sync.OnceFunc(func() { close(blockBuild) })
+	var builds atomic.Int32
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-server", Version: "1"}, nil)
+	server.AddReceivingMiddleware(toolAdmissionMiddleware(rate.NewLimiter(rate.Inf, 1), make(chan struct{}, 1), func() { admitted <- struct{}{} }))
+	registerToolSearchCatalog(server, &toolSearchCatalogLoader{build: func() (*toolSearchCatalog, error) {
+		builds.Add(1)
+		started <- struct{}{}
+		<-blockBuild
+		return catalog, nil
+	}})
+	session := connectServerSession(t, server, nil, nil)
+	t.Cleanup(releaseBuild)
+	params := &sdkmcp.CallToolParams{Name: "kata.search_tools", Arguments: map[string]any{"query": "add a comment to an issue", "limit": 1}}
+	receive := func(signal <-chan struct{}, failure string) {
+		t.Helper()
+		select {
+		case <-signal:
+		case <-time.After(5 * time.Second):
+			t.Fatal(failure)
+		}
+	}
+
+	firstCtx, cancelFirst := context.WithCancel(t.Context())
+	defer cancelFirst()
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		_, _ = session.CallTool(firstCtx, params)
+	}()
+	receive(admitted, "first search was not admitted")
+	receive(started, "first search did not start the catalog build")
+	cancelFirst()
+	receive(firstDone, "cancelled search did not return to its client")
+
+	type callResult struct {
+		result *sdkmcp.CallToolResult
+		err    error
+	}
+	secondDone := make(chan callResult, 1)
+	go func() {
+		result, err := session.CallTool(t.Context(), params)
+		secondDone <- callResult{result: result, err: err}
+	}()
+	receive(admitted, "cancelled search kept the only tool-call slot")
+	releaseBuild()
+
+	select {
+	case second := <-secondDone:
+		require.NoError(t, second.err)
+		require.False(t, second.result.IsError, "%s", mustJSON(t, second.result))
+	case <-time.After(5 * time.Second):
+		t.Fatal("second search did not receive the shared catalog")
+	}
+	require.EqualValues(t, 1, builds.Load())
 }
 
 // Product contract: a cold MCP-only client can find real operations without

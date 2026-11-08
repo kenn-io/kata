@@ -104,6 +104,8 @@ tmp_archive="$(mktemp)"
     -cf "$tmp_archive" .
 )
 tar -xf "$tmp_archive" -C "$tmp_docs"
+rm -f "$tmp_archive"
+tmp_archive=""
 # The docs tier renders under /docs/; the hand-written website tier owns the
 # site root.
 docs_output_dir="$site_dir/docs"
