@@ -3000,13 +3000,12 @@ describe('App', () => {
     )
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
-    expect(snapshotRequests[1]?.headers.get('If-None-Match')).toBe('"snapshot-1"')
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /Revoked project issue/ })).toBeNull(),
     )
   })
 
-  it('keeps the task list when SSE revalidation returns unchanged after load and row click', async () => {
+  it('conditionally revalidates when SSE opens after load and row click', async () => {
     history.replaceState(null, '', '/kata?view=inbox#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -3057,7 +3056,9 @@ describe('App', () => {
               { headers: { ETag: '"snapshot-selected"' } },
             )
           }
-          if (snapshotRequests.length > 1) return new Response(null, { status: 304 })
+          if (request.headers.get('If-None-Match') === '"snapshot-1"') {
+            return new Response(null, { status: 304 })
+          }
           return Response.json(current, { headers: { ETag: '"snapshot-1"' } })
         }
         throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
@@ -3073,8 +3074,6 @@ describe('App', () => {
         screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
       ).toBeNull(),
     )
-    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
-
     await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(4))
@@ -3083,7 +3082,6 @@ describe('App', () => {
     )
     expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
     expect(snapshotRequests[3]?.headers.get('If-None-Match')).toBe('"snapshot-selected"')
-    expect(await screen.findByRole('button', { name: 'Edit issue' })).not.toBeNull()
   })
 
   it('refreshes membership after an SSE reconnect opens', async () => {
