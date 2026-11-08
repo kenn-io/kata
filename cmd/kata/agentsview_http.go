@@ -182,7 +182,7 @@ func (p *agentsViewHTTPPort) Select(ctx context.Context, _ string) (agentsViewSe
 		return selected, err
 	}
 	if selected.IssueUID != p.issueUID || selected.ProjectUID != p.projectUID {
-		return agentsViewSelection{}, errors.New("AgentsView: discovery substituted issue or project")
+		return agentsViewSelection{}, errors.New("AgentsView: sharing details name a different issue or project")
 	}
 	selected.Discovery = append(jsontext.Value(nil), raw...)
 	return selected, nil
@@ -264,7 +264,7 @@ func (p *agentsViewHTTPPort) Share(ctx context.Context, _ string, c agentsViewCo
 	}{1, a.ProjectUID, a.AuthorityUID, a.IssueUID, event, a.ServiceID, a.Agent, a.NativeSessionID, a.SessionID, a.SnapshotSHA256, a.SnapshotBytes, a.Route, "cli"}
 	raw, err := json.Marshal(control)
 	if err != nil || len(raw) > 4096 {
-		return errors.New("AgentsView: share control exceeds limit")
+		return errors.New("AgentsView: sharing details too large")
 	}
 	response, err := p.request(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/transcript-share", p.projectID, url.PathEscape(p.issueUID)), snapshot, map[string]string{"Content-Type": "application/octet-stream", "X-Kata-Transcript-Control": base64.RawURLEncoding.EncodeToString(raw)}, 120*time.Second)
 	if err != nil {
@@ -316,7 +316,7 @@ func decodeAgentsViewEventAssociation(raw []byte) (agentsViewAssociation, error)
 	}
 	var association agentsViewAssociation
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return association, errors.New("AgentsView: invalid original event payload")
+		return association, errors.New("AgentsView: invalid original close record")
 	}
 	if err := json.Unmarshal(payload.Association, &association, json.RejectUnknownMembers(true)); err != nil {
 		return association, errors.New("AgentsView: original event association unavailable or unsupported")

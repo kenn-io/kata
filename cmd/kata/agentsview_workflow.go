@@ -115,7 +115,7 @@ func (w agentsViewWorkflow) Prepare(ctx context.Context, ref, path string, nativ
 
 func (s agentsViewSelection) valid() error {
 	if s.InstanceUID == "" || s.IssueUID == "" || s.ProjectUID == "" || s.AuthorityUID == "" || !validAgentsViewDigest(s.ServiceID) || !validAgentsViewDigest(s.RootKeyID) || s.LocatorBase == "" || len(s.Route) == 0 || len(s.Route) > 9 || len(s.Discovery) == 0 || int64(len(s.Discovery)) > agentsViewRecordLimit || s.ExpiresAt <= time.Now().Unix() {
-		return errors.New("AgentsView: current pinned service discovery unavailable or expired")
+		return errors.New("AgentsView: verified sharing details unavailable or expired")
 	}
 	return nil
 }
@@ -341,7 +341,7 @@ func inspectAgentsViewSnapshot(ctx context.Context, snapshot *agentsViewFrozenSn
 		}
 	}
 	if err != nil || values["/v"] != "1" || values["/manifest/v"] == "" || values["/session_id"] != canonical || values["/manifest/native_session_id"] != canonical || values["/manifest/session/id"] != canonical || values["/manifest/session/agent"] != agent {
-		return errors.New("AgentsView: snapshot envelope identity differs from selected session or is unsupported")
+		return errors.New("AgentsView: snapshot is invalid, unsupported, or belongs to another session")
 	}
 	_, err = snapshot.Seek(0, io.SeekStart)
 	return err

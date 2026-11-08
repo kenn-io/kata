@@ -75,7 +75,7 @@ func captureAgentsViewSnapshot(ctx context.Context, path string) (_ *agentsViewF
 	}
 	file, err := safefileio.CreatePrivateTemp("", "kata-agentsview-*")
 	if err != nil {
-		return nil, errors.New("AgentsView: cannot create private snapshot spool")
+		return nil, errors.New("AgentsView: cannot make a private snapshot copy")
 	}
 	snapshot := &agentsViewFrozenSnapshot{File: file}
 	defer func() {
