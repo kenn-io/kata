@@ -10,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // Issue is a strict subset of the daemon's wire shape. Labels rides on
@@ -56,18 +57,21 @@ type Issue struct {
 	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
 }
 
-// issueMetadata keeps the two planning-date keys of an issue's metadata as
-// the daemon stores them. Other keys are not read by the TUI.
+// issueMetadata keeps the two planning-date keys and the timezone of an
+// issue's metadata as the daemon stores them. Other keys are not read by the TUI.
 type issueMetadata struct {
 	ScheduledOn jsontext.Value `json:"scheduled_on,omitzero"`
 	DeadlineOn  jsontext.Value `json:"deadline_on,omitzero"`
+	Timezone    jsontext.Value `json:"timezone,omitzero"`
 }
 
-// scheduledOn and deadlineOn are the raw stored dates, "" when absent.
-func (i Issue) scheduledOn() string { return rawDate(i.Metadata.ScheduledOn) }
-func (i Issue) deadlineOn() string  { return rawDate(i.Metadata.DeadlineOn) }
+// scheduledOn, deadlineOn and timezone are the raw stored values, "" when
+// absent.
+func (i Issue) scheduledOn() string { return rawString(i.Metadata.ScheduledOn) }
+func (i Issue) deadlineOn() string  { return rawString(i.Metadata.DeadlineOn) }
+func (i Issue) timezone() string    { return rawString(i.Metadata.Timezone) }
 
-func rawDate(v jsontext.Value) string {
+func rawString(v jsontext.Value) string {
 	var s string
 	if len(v) == 0 || json.Unmarshal(v, &s) != nil {
 		return ""
@@ -416,6 +420,9 @@ type IssueDetail struct {
 	Parent   *IssueRef
 	Children []Issue
 	Lease    *api.IssueClaimOut
+	// Recurrence is nil when absent or unreadable; RecurrenceErr distinguishes them.
+	Recurrence    *recurrenceclient.View
+	RecurrenceErr error
 }
 
 // showIssueLabel is the per-label projection from showIssue's labels

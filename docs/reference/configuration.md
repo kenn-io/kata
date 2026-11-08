@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 # Configuration
@@ -996,6 +996,50 @@ typed evidence required by the normal close contract. The TUI discovers that
 requirement from `/instance`; it does not trust its own `source=tui` marker to
 widen authority. Structural guards still apply to every transport.
 
+## MCP Events
+
+`[mcp_events]` turns on daemon-owned MCP Events. The daemon then stores
+webhook subscriptions and delivers signed inbox events to them while the
+daemon runs. `kata mcp serve` only forwards requests to it.
+
+```toml
+[mcp_events]
+enabled = false
+max_ttl = "720h"
+allow_no_expiry = true
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Starts Events delivery and accepts subscriptions. |
+| `max_ttl` | `"720h"` (30 days) | Longest lifetime of a finite subscription grant. Go duration syntax; at least `"60s"`. |
+| `allow_no_expiry` | `true` | Honors requests for a subscription that never expires. Set `false` to give those requests a `max_ttl` grant instead. |
+
+Subscribers choose their own lifetime. A request without one gets 24 hours
+capped by `max_ttl`, and a finite request is clamped to between 60 seconds and
+`max_ttl`. A request for no expiry is honored unless `allow_no_expiry = false`.
+Subscriptions created before you change the setting keep their lifetime until
+the subscriber next refreshes.
+
+The daemon seals subscription secrets with a 32-byte key in
+`<KATA_HOME>/runtime/<storage-id>/mcp-events.key`. It creates the file, readable
+only by its owner, the first time Events starts against a database that has no
+Events data. Daemons that share one PostgreSQL database must use the same key
+file.
+
+Events failures never stop the daemon. If the key file is missing, unreadable
+or different from the one the database was written under, Events stays
+disabled, the daemon logs why, and every other daemon function keeps working.
+The daemon never replaces a key that is missing or corrupt. The status route,
+`GET /api/v1/mcp-events/subscriptions`, reports `enabled: false` and a
+`reason`: `events_not_configured`, `events_key_unavailable`,
+`events_key_mismatch` or `events_start_failed`.
+
+Programs that embed the Go `Service` set `Config.MCPEvents.Enabled` and
+supply `Config.MCPEvents.Key` instead. `Config.MCPEvents.MaxTTL` and
+`Config.MCPEvents.RefuseNoExpiry` match `max_ttl` and `allow_no_expiry = false`. Without a key provider, Events is
+disabled with `events_not_configured` and the other workers still run.
+
 ## Semantic search
 
 This section is the field reference; see the
@@ -1505,8 +1549,10 @@ for access tokens, field ownership, completion writeback, and recovery limits.
 ## Docbank attachments
 
 Kata 0.21.0 and later: `[docbank]` enables issue file uploads and reads through a
-separately hosted Docbank. See [Issue attachments](../guide/attachments.md) for
-setup and the shared-vault trust boundary.
+Docbank, either separately hosted (`url`) or running on the same machine
+(`local`). `kata docbank setup` writes and checks this section. See
+[Issue attachments](../guide/attachments.md#configure-the-daemon) for setup and
+the shared-vault trust boundary.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -1515,10 +1561,14 @@ setup and the shared-vault trust boundary.
 | `api_key_file` | empty | Mode-0600 key file, preferred over the environment source. |
 | `api_key_env` | empty | Name of the environment variable containing the key. |
 | `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
+| `local` | `false` | Use the Docbank running on this machine, found through its runtime record. |
 
 A configured URL requires a key source. A broken selected credential
 source fails explicitly; Kata does not fall back to another source. Keys are
 resolved on each request.
+
+A `url` in the file or `KATA_DOCBANK_URL` wins over `local`. With `local`,
+`api_key`, `api_key_file`, and `api_key_env` are unused. `folder` still applies.
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.

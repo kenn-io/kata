@@ -22,7 +22,7 @@ type keymap struct {
 	SortChildren                                                 key
 	FilterStatus, FilterForm, ClearFilters                       key
 	Close, Reopen, Undo                                          key
-	SetDates, Delete, MoveIssue                                  key
+	SetDates, Delete, MoveIssue, SetRecurrence                   key
 	NextTab, PrevTab, JumpRef, Back                              key
 	EditBody, NewComment                                         key
 	ReplyComment, NextCommentLink, PrevCommentLink               key
@@ -98,6 +98,7 @@ func newKeymap() keymap {
 		SetDates:        key{Keys: []string{"d"}, Help: "set dates"},
 		Delete:          key{Keys: []string{"X"}, Help: "delete issue"},
 		MoveIssue:       key{Keys: []string{"M"}, Help: "move to another project"},
+		SetRecurrence:   key{Keys: []string{"O"}, Help: "set repeat"},
 		NextTab:         key{Keys: []string{"tab", "ctrl+j"}, Help: "next tab", Display: "tab/C-j"},
 		PrevTab:         key{Keys: []string{"shift+tab", "ctrl+k"}, Help: "prev tab", Display: "shift+tab/C-k"},
 		JumpRef:         key{Keys: []string{"enter"}, Help: "jump to referenced issue"},

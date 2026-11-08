@@ -208,6 +208,42 @@ func TestListIssues_MetaQueryFilters(t *testing.T) {
 	assert.Len(t, presOut.Issues, 2)
 }
 
+// A compact list leaves out bodies and every metadata key the filters do not
+// name, on both list routes. Without compact the rows are unchanged.
+func TestListIssues_CompactRowsCarryOnlyFilteredMetadata(t *testing.T) {
+	env := testenv.New(t)
+	projectID := mkProject(t, env, "github.com/test/a", "a")
+	resp := envDoJSON(t, env, http.MethodPost, projectPath(projectID)+"/issues", map[string]any{
+		"actor": "tester", "title": "compact one", "body": "a long body",
+		"metadata": map[string]jsontext.Value{
+			"work.attention": jsontext.Value(`"stuck"`),
+			"other.key":      jsontext.Value(`{"large":"value"}`),
+		},
+	}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	type row struct {
+		Body     string                    `json:"body"`
+		Metadata map[string]jsontext.Value `json:"metadata"`
+	}
+	for _, path := range []string{projectPath(projectID) + "/issues?sort=created&", "/api/v1/issues?"} {
+		var compact, full struct {
+			Issues []row `json:"issues"`
+		}
+		resp = envDoJSON(t, env, http.MethodGet, path+"meta=work.attention&compact=true", nil, &compact)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Len(t, compact.Issues, 1, path)
+		assert.Empty(t, compact.Issues[0].Body, path)
+		assert.Equal(t, map[string]jsontext.Value{"work.attention": jsontext.Value(`"stuck"`)}, compact.Issues[0].Metadata, path)
+
+		resp = envDoJSON(t, env, http.MethodGet, path+"meta=work.attention", nil, &full)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Len(t, full.Issues, 1, path)
+		assert.Equal(t, "a long body", full.Issues[0].Body, path)
+		assert.Len(t, full.Issues[0].Metadata, 2, path)
+	}
+}
+
 // TestListIssues_MetaEmptyKeyRejected pins that a meta param with an empty key
 // is a validation error.
 func TestListIssues_MetaEmptyKeyRejected(t *testing.T) {

@@ -18,6 +18,7 @@ func dropLaterMigrationIndexes(ctx context.Context, t *testing.T, admin *sql.DB,
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_comments_uid_handle`, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
 	dropIssueCreatedAndEventIndexes(ctx, t, admin, schema)
+	dropMCPEventSubscriptionsSchema(ctx, t, admin, schema)
 }
 
 func dropIssueCreatedAndEventIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {

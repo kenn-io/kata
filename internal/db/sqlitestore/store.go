@@ -1,7 +1,7 @@
 // Package sqlitestore opens the kata SQLite database and bootstraps it from
 // the canonical schema.sql. A fresh DB lands at db.CurrentSchemaVersion() in
 // one transaction; an existing DB at the current version opens unchanged; an
-// older DB returns ErrSchemaCutoverRequired so storeopen can apply index-only
+// older DB returns ErrSchemaCutoverRequired so storeopen can apply additive
 // upgrades in place or drive JSONL cutover under the cutover lock before reopening.
 package sqlitestore
 
@@ -29,7 +29,7 @@ var schemaSQL string
 
 // ErrSchemaCutoverRequired reports that an existing database is older than
 // the binary's schema and must be upgraded before it can be opened. storeopen
-// applies index-only upgrades in place or runs JSONL cutover under the cutover lock.
+// applies additive upgrades in place or runs JSONL cutover under the cutover lock.
 var ErrSchemaCutoverRequired = errors.New("schema cutover required")
 
 // Store wraps *sql.DB. Use Open to construct one with PRAGMAs applied and the
@@ -72,7 +72,7 @@ var _ db.Storage = (*Store)(nil)
 // Connection-local PRAGMAs are applied via the connection string; WAL is
 // enabled once during setup. Fresh databases are bootstrapped from schema.sql
 // inside a transaction. Older databases return ErrSchemaCutoverRequired so
-// storeopen can apply index-only upgrades in place or run JSONL cutover under
+// storeopen can apply additive upgrades in place or run JSONL cutover under
 // the cutover lock before reopening; newer databases are an
 // unrecoverable state for this binary. Open is the single authoritative
 // writer of meta.instance_uid outside an import transaction. After bootstrap,
@@ -194,7 +194,7 @@ func (d *Store) InstanceCreatedAt(ctx context.Context) (time.Time, error) {
 // bootstrap initializes a fresh database from schema.sql or refuses to open
 // an older database. An existing database at the current schema version is
 // left untouched; older databases return ErrSchemaCutoverRequired so the
-// storeopen path can apply index-only upgrades in place or run JSONL cutover
+// storeopen path can apply additive upgrades in place or run JSONL cutover
 // under the cutover lock; newer databases are an unrecoverable
 // state for this binary.
 func (d *Store) bootstrap(ctx context.Context) error {

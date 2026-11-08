@@ -134,12 +134,8 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 			{Key: "enter", Description: "delete"},
 			{Key: "esc", Description: "cancel"},
 		}}
-	case kind == inputDatesForm:
-		return [][]helplayout.HelpItem{{
-			{Key: "ctrl+o", Description: "save"},
-			{Key: "esc", Description: "cancel"},
-			{Key: "tab", Description: "field"},
-		}}
+	case kind == inputDatesForm || kind == inputRecurrenceForm:
+		return [][]helplayout.HelpItem{saveCancelFieldControls()}
 	case kind == inputNewIssueForm:
 		return [][]helplayout.HelpItem{{
 			{Key: "ctrl+o", Description: "create"},
@@ -155,6 +151,14 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 		}}
 	}
 	return nil
+}
+
+func saveCancelFieldControls() []helplayout.HelpItem {
+	return []helplayout.HelpItem{
+		{Key: "ctrl+o", Description: "save"},
+		{Key: "esc", Description: "cancel"},
+		{Key: "tab", Description: "field"},
+	}
 }
 
 func (lm listModel) queueHelpRows(hideDelete, hideMove bool) [][]helplayout.HelpItem {
@@ -234,6 +238,7 @@ func (dm detailModel) detailHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 		{Key: "x", Description: "close"},
 		{Key: "r", Description: "reopen"},
 		{Key: "d", Description: "dates"},
+		{Key: "O", Description: "repeat"},
 		{Key: "p", Description: "parent"},
 		{Key: "b", Description: "block"},
 		{Key: "l", Description: "related"},

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -16,6 +16,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 	"go.kenn.io/kit/clisearch"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -61,15 +62,54 @@ type toolSearchCatalog struct {
 	titles map[string]string
 }
 
+// toolSearchCatalogLoader shares one in-flight build and caches only success,
+// so a transient initialization failure can be retried by a later search.
+type toolSearchCatalogLoader struct {
+	catalog atomic.Pointer[toolSearchCatalog]
+	group   singleflight.Group
+	build   func() (*toolSearchCatalog, error)
+}
+
+// get stops waiting when ctx ends so a cancelled search frees its tool-call
+// slot. The build itself is shared and bounded by its own deadline, so it keeps
+// running for other searches and is not tied to any one caller's context.
+func (loader *toolSearchCatalogLoader) get(ctx context.Context) (*toolSearchCatalog, error) {
+	if catalog := loader.catalog.Load(); catalog != nil {
+		return catalog, nil
+	}
+	built := loader.group.DoChan("catalog", func() (any, error) {
+		if catalog := loader.catalog.Load(); catalog != nil {
+			return catalog, nil
+		}
+		catalog, err := loader.build()
+		if err != nil {
+			return nil, err
+		}
+		loader.catalog.Store(catalog)
+		return catalog, nil
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-built:
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		return result.Val.(*toolSearchCatalog), nil
+	}
+}
+
 func registerToolSearch(server *sdkmcp.Server, options Options) {
 	// A private SDK catalog reuses the actual typed registrations, without
-	// activating public sections or calling any operation. Cancellation of one
-	// search must not poison initialization for later callers.
-	catalog := sync.OnceValues(func() (*toolSearchCatalog, error) {
+	// activating public sections or calling any operation.
+	registerToolSearchCatalog(server, &toolSearchCatalogLoader{build: func() (*toolSearchCatalog, error) {
 		return newToolSearchCatalog(options)
-	})
+	}})
+}
+
+func registerToolSearchCatalog(server *sdkmcp.Server, catalog *toolSearchCatalogLoader) {
 	addTool(server, "kata.search_tools", "Find Kata tools", "Find typed MCP tools for a task, with loader, guide and input details. Searches tool metadata only; kata.search searches issues. Available before loading sections.", toolHints(true, false, false),
-		func(_ context.Context, request *sdkmcp.CallToolRequest, input ToolSearchInput) (*sdkmcp.CallToolResult, ToolSearchOutput, error) {
+		func(ctx context.Context, request *sdkmcp.CallToolRequest, input ToolSearchInput) (*sdkmcp.CallToolResult, ToolSearchOutput, error) {
 			// The SDK repairs malformed Unicode while validating its typed
 			// copy. Decode the retained original strictly before using it.
 			if err := json.Unmarshal(request.Params.Arguments, &input); err != nil {
@@ -78,9 +118,9 @@ func registerToolSearch(server *sdkmcp.Server, options Options) {
 			if err := validateToolSearch(input); err != nil {
 				return nil, ToolSearchOutput{}, err
 			}
-			index, err := catalog()
+			index, err := catalog.get(ctx)
 			if err != nil {
-				return nil, ToolSearchOutput{}, err
+				return nil, ToolSearchOutput{}, fmt.Errorf("tool metadata catalog is temporarily unavailable, retry the search: %w", err)
 			}
 			return successResult(), index.search(input), nil
 		})

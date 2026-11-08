@@ -2205,6 +2205,22 @@ history, because the issue's project-qualified reference changes and its short
 id can too. Issue-scoped credentials cannot move, so `M`
 is not offered to them and does nothing.
 
+With the issue detail focused, press `O` to start, change, or stop the issue's recurrence, the same one `kata schedule <ref> <date> --repeat` manages. `O` is available only in the detail.
+The form has three fields. **Rule** is the RRULE text, sent with outer spaces trimmed: the
+daemon is the only validator, and its error appears in the form with your input
+kept. Clear **Rule** and save to stop an existing recurrence, keeping its occurrences. A blank rule cannot start a recurrence. **Start** requires a date when starting or changing: `YYYY-MM-DD`, `today`, `tomorrow`, `+Nd`, or
+`+Nw`. **Zone** starts as the recurrence's zone, else the issue's
+`timezone` metadata, else your own IANA zone (`TZ`, then the `/etc/localtime`
+link); it is never `Local`. Starting a recurrence rewrites the issue's
+`scheduled_on` to the first occurrence. `Ctrl+o` saves and `Esc` cancels. A
+change or stop is guarded by `If-Match` on the revision the form read, and a start on
+the issue's; if another client got there first, nothing is written, the form
+keeps what you typed and shows the daemon's error. Press `Esc`, then `O` to
+reopen the form after the detail refreshes. If the issue belongs to a recurrence that cannot be read or has stopped, `O` shows a message instead of opening the form. An issue that parents a recurring cron job is refused on save,
+exactly as the CLI refuses it. The issue detail shows a `repeats:` line with
+the rule, the next occurrence and the zone. A recurrence change clears the undo
+history, since `u` cannot reverse it.
+
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list
 order. Returning from flat to nested starts with parents collapsed. In nested
@@ -2616,3 +2632,14 @@ kata docbank attachments rm <issue> <attachment>
 ```
 
 `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
+
+Point the current `KATA_HOME`'s daemon at a Docbank:
+
+```sh
+kata docbank setup [--folder PATH] [--yes]
+kata docbank setup --url URL --key-file PATH [--folder PATH] [--yes]
+```
+
+Without `--url`, setup uses the Docbank on this machine. With `--url`, it uses a Docbank that runs elsewhere and reads its key from `--key-file`. Both ask once before writing (`--yes` skips the question), then restart running daemons. They reject `--daemon`.
+
+JSON output is `{"kata_api_version":1,"local":true,"folder":"/kata","changed":true}` for the local form and `{"kata_api_version":1,"local":false,"url":"https://docbank.example","folder":"/kata","key_file":"/abs/path","changed":true}` for the remote form. Agent output is `OK docbank-setup local=true folder=/kata changed=true` or `OK docbank-setup url=<url> folder=/kata changed=true`. See [Configure the daemon](../guide/attachments.md#configure-the-daemon) for what setup writes, when it refuses, and what a rerun does.

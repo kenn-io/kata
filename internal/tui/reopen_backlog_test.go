@@ -697,7 +697,7 @@ type slowPreflightUndoAPI struct {
 	delay time.Duration
 }
 
-func (s *slowPreflightUndoAPI) GetIssueDetail(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
+func (s *slowPreflightUndoAPI) readIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
 	<-time.After(s.delay)
 	return s.undoTestAPI.GetIssueDetail(ctx, projectID, ref)
 }

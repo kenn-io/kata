@@ -130,7 +130,7 @@ func (c *undoClient) edit(ctx context.Context, projectID int64, ref, actor, kind
 	if instance.InstanceUID == "" {
 		return &MutationResp{undo: attempt}, errors.New("daemon instance identity is unavailable")
 	}
-	before, err := c.GetIssueDetail(ctx, projectID, ref)
+	before, err := c.readIssue(ctx, projectID, ref)
 	if err != nil || before == nil || before.Issue == nil {
 		if err == nil {
 			err = errors.New("issue preflight returned no issue")
@@ -289,6 +289,16 @@ func (c *undoClient) MoveIssue(ctx context.Context, projectID int64, ref string,
 	}
 	return c.boundaryWrite(ctx, "moving an issue cannot be undone", func() (*MutationResp, error) {
 		return mover.MoveIssue(ctx, projectID, ref, in)
+	})
+}
+
+func (c *undoClient) SaveRecurrence(ctx context.Context, projectID int64, ref string, in RecurrenceInput) (*MutationResp, error) {
+	writer, ok := c.KataAPI.(recurrenceAPI)
+	if !ok {
+		return nil, errors.New("connected client cannot edit recurrences")
+	}
+	return c.boundaryWrite(ctx, "changing a recurrence cannot be undone", func() (*MutationResp, error) {
+		return writer.SaveRecurrence(ctx, projectID, ref, in)
 	})
 }
 

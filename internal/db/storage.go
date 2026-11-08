@@ -32,6 +32,64 @@ type Storage interface {
 	ExportCronWorkflows(context.Context, ExportFilter) iter.Seq2[CronWorkflowExport, error]
 	ExportCronRuns(context.Context, ExportFilter) iter.Seq2[CronRunExport, error]
 
+	// Daemon-owned MCP Events subscriptions with claim fencing.
+	ActivateMCPEventSubscription(ctx context.Context, in MCPEventActivation) (MCPEventSubscription, error)
+	RefreshMCPEventSubscription(ctx context.Context, in MCPEventRefresh) (MCPEventSubscription, error)
+	GetMCPEventSubscription(ctx context.Context, id string) (MCPEventSubscription, error)
+	ListMCPEventSubscriptions(ctx context.Context, principalKey string) ([]MCPEventSubscription, error)
+	MCPEventConsentExists(ctx context.Context, principalKey, callbackURL string) (bool, error)
+	// CountActiveMCPEventSubscriptions counts active rows daemon-wide, for a
+	// pre-check before network activity. Activate stays the authoritative check.
+	CountActiveMCPEventSubscriptions(ctx context.Context) (int, error)
+	ListDueMCPEventSubscriptions(ctx context.Context, now time.Time, limit int) ([]MCPEventSubscription, error)
+	// MarkMCPEventSubscriptionsDirty records that new changes concern the
+	// given active subscriptions. It is idempotent.
+	MarkMCPEventSubscriptionsDirty(ctx context.Context, ids []string) error
+	// MCPEventsRematch reads the range of pulled events federation pulls
+	// applied since an Events worker last matched them again, and the token
+	// AcknowledgeMCPEventsRematch needs.
+	MCPEventsRematch(ctx context.Context) (from, through int64, token string, ok bool, err error)
+	// AcknowledgeMCPEventsRematch records that a worker matched the range
+	// through matchedThrough, only while the record still holds token.
+	AcknowledgeMCPEventsRematch(ctx context.Context, token string, matchedThrough int64) (bool, error)
+	// UpdateMCPEventCatalogs stores each active subscription's visible-project
+	// fingerprint, computed after the archive head observedThrough, and marks
+	// the ones whose fingerprint changed dirty. It stores nothing, and reports
+	// false, once a change that can alter visibility follows observedThrough.
+	UpdateMCPEventCatalogs(ctx context.Context, versions map[string]string, observedThrough int64) (bool, error)
+	// ForgetMCPEventCatalogs replaces active subscriptions' fingerprints with
+	// MCPEventCatalogUnknown, so the next update marks them dirty.
+	ForgetMCPEventCatalogs(ctx context.Context, ids []string) error
+	// MCPEventsScanPosition reads the daemon-wide event position the delivery
+	// worker has matched up to; ok is false before the first scan.
+	MCPEventsScanPosition(ctx context.Context) (position int64, ok bool, err error)
+	// InitializeMCPEventsScanPosition stores head when no position exists and
+	// marks every active subscription dirty in the same transaction.
+	InitializeMCPEventsScanPosition(ctx context.Context, head int64) (bool, error)
+	// AdvanceMCPEventsScanPosition moves the position only from the expected
+	// value; false means another worker moved it first.
+	AdvanceMCPEventsScanPosition(ctx context.Context, from, to int64) (bool, error)
+	// MCPEventsAccessChangesAfter returns up to limit access audit events with
+	// ids in (after, through], ordered by id: project policy and team
+	// membership changes, which the hidden system project records.
+	MCPEventsAccessChangesAfter(ctx context.Context, after, through int64, limit int) ([]Event, error)
+	ClaimMCPEventSubscription(ctx context.Context, in MCPEventClaim) (bool, error)
+	RenewMCPEventClaim(ctx context.Context, id, incarnation string, generation int64, token string, until time.Time) (bool, error)
+	UpdateMCPEventDelivery(ctx context.Context, in MCPEventDeliveryUpdate) (bool, error)
+	EndMCPEventSubscription(ctx context.Context, in MCPEventEnd) (MCPEventSubscription, error)
+	// ExpireMCPEventSubscriptions ends expired active grants regardless of retry or
+	// claim timing, clears pending deliveries, and fences prior workers.
+	ExpireMCPEventSubscriptions(ctx context.Context, now time.Time) (int, error)
+	PruneEndedMCPEventSubscriptions(ctx context.Context, now time.Time, caps MCPEventRetention) (int, error)
+	MCPEventsKeyCheck(ctx context.Context) (value string, ok bool, err error)
+	PutMCPEventsKeyCheckIfAbsent(ctx context.Context, value string) (stored string, err error)
+	// ImportMCPEventSubscription is a validated insert-or-replace used only by
+	// full import and cutover.
+	ImportMCPEventSubscription(ctx context.Context, s MCPEventSubscription) error
+	// ExportMCPEventSubscriptions streams every subscription for a full
+	// backup. A project-scoped filter yields nothing.
+	ExportMCPEventSubscriptions(context.Context, ExportFilter) iter.Seq2[MCPEventSubscriptionExport, error]
+
 	ExportRelayState(ctx context.Context) iter.Seq2[ImportRecord, error]
 	AcceptRelayDeliveries(ctx context.Context, bindingUID string, batch RelayBatch) (RelayAcceptance, error)
 	SetRelayBindingConfig(ctx context.Context, projectID int64, config RelayBindingConfig, expected ...RelayBindingConfig) (FederationBinding, error)
