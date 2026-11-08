@@ -65,7 +65,7 @@ describe('App', () => {
     await waitFor(() => expect(requests).toHaveLength(2))
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'New task', exact: true }).getAttribute('aria-disabled'),
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
       ).not.toBe('true'),
     )
     await tick()
