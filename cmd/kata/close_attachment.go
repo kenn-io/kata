@@ -117,11 +117,11 @@ func expandCloseAttachmentEvidence(ctx context.Context, hc *http.Client, base st
 			}
 			loaded = true
 		}
-		id, err = resolveAttachmentSuffix(ids, id)
+		resolvedID, err := resolveAttachmentSuffix(ids, id)
 		if err != nil {
 			return nil, err
 		}
-		out[i].AttachmentID = id
+		out[i].AttachmentID = resolvedID
 	}
 	if duplicate := findDuplicateEvidence(out); duplicate != "" {
 		return nil, externalCLIValidation("duplicate evidence item " + duplicate)
