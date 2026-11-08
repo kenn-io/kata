@@ -49,6 +49,20 @@ type Local struct {
 	Start func(ctx context.Context, home string) error
 }
 
+// Ready checks that a Docbank on this machine is running, starting it when it
+// is not, and that it holds the key its runtime record names.
+func (l Local) Ready(ctx context.Context) error {
+	ep, key, err := l.locate(ctx)
+	if err != nil {
+		return err
+	}
+	conn, err := proveKey(ctx, ep.Address, key)
+	if err != nil {
+		return fmt.Errorf("docbank at %s: %w", ep.Address, err)
+	}
+	return conn.Close()
+}
+
 // locate finds the running Docbank, starting it when none is running, and
 // returns its endpoint and the API key its runtime record names.
 func (l Local) locate(ctx context.Context) (kitdaemon.Endpoint, string, error) {

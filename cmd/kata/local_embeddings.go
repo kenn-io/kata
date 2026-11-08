@@ -97,6 +97,9 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Service environment settings can override this configuration."); err != nil {
+			return err
+		}
 
 		switch currentOutputMode() {
 		case outputJSON:
