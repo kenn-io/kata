@@ -994,6 +994,9 @@ type CloseActionRequest struct {
 // protocol marker and optional session provenance. Older daemons reject unknown
 // fields before they can ignore retry headers or provenance and mutate an issue.
 type CloseActionRequestBody struct {
+	AgentsViewProtocol    string         `json:"agentsview_protocol,omitempty" enum:"relay-v1,"`
+	AgentsViewAssociation jsontext.Value `json:"agentsview_association,omitempty"`
+	AgentsViewDiscovery   jsontext.Value `json:"agentsview_discovery,omitempty"`
 	ActionRequestBody
 	RetryProtocol string                 `json:"retry_protocol,omitempty" enum:"close-v1,"`
 	Transcript    *transcript.Transcript `json:"transcript,omitempty"`

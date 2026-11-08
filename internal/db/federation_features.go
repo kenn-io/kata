@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"go.kenn.io/kata/internal/agentsviewrelay"
 	"sort"
 	"strings"
 	"sync"
@@ -19,7 +20,7 @@ const CronEventFeature = "cron_v1"
 const IssueMoveEventFeature = "issue_move_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + agentsviewrelay.EventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -47,6 +48,21 @@ func MergeEventFeatures(values ...string) string {
 // PayloadRequiredFeatures supplements type classification with native delivery state.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
+	if kind == "issue.closed" {
+		var body struct {
+			Association *agentsviewrelay.Association `json:"agentsview_association"`
+		}
+		if err := json.Unmarshal([]byte(payload), &body); err != nil {
+			return "", err
+		}
+		if body.Association != nil {
+			if err := body.Association.Validate(); err != nil {
+				return "", err
+			}
+			required = MergeEventFeatures(required, agentsviewrelay.EventFeature)
+		}
+	}
+
 	native, err := payloadHasNativeRecurringState(kind, payload)
 	if err != nil {
 		return "", err
@@ -175,6 +191,13 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		return "", err
 	}
 	required := ""
+	var associationPresent bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN projects p ON p.id=e.project_id WHERE p.uid=$1 AND e.type='issue.closed' AND e.payload LIKE '%"agentsview_association"%')`, projectUID).Scan(&associationPresent); err != nil {
+		return "", err
+	}
+	if associationPresent {
+		required = MergeEventFeatures(required, agentsviewrelay.EventFeature)
+	}
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}

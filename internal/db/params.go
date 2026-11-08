@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json/jsontext"
+	"go.kenn.io/kata/internal/agentsviewrelay"
 	"time"
 
 	"go.kenn.io/kata/internal/pagination"
@@ -92,6 +93,7 @@ type CreateIssueParams struct {
 // fields are written to the close event so a caller can recover its original
 // receipt after losing the response.
 type CloseIssueParams struct {
+	AgentsViewAssociation  *agentsviewrelay.Association
 	IssueID                int64
 	ExpectedProjectID      int64
 	Reason                 string

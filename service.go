@@ -135,6 +135,8 @@ type DocbankConfig = config.DocbankConfig
 
 // Config contains the process-neutral inputs needed to construct a Service.
 type Config struct {
+	// AgentsViewRelay supplies explicit project service adapters. Nil disables sharing.
+	AgentsViewRelay *daemon.AgentsViewRelayConfig
 	// DSN accepts a SQLite path, sqlite:// URL, or PostgreSQL URL.
 	DSN          string
 	Postgres     PostgresConfig
@@ -464,6 +466,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		FederationCredentials:     federationCredentials,
 		FederationPushPending:     federation.DirectSpokePushPending(store),
 		FederationHubClient:       federation.CredentialHTTPClient,
+		AgentsViewRelay:           cfg.AgentsViewRelay,
 		DisableFederationRebind:   true,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/agentsviewrelay"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/teammate"
@@ -1744,6 +1745,9 @@ func (d *Store) closeIssueGuarded(
 	if p.ExpectedProjectID != 0 && issue.ProjectID != p.ExpectedProjectID {
 		return db.Issue{}, nil, false, db.ErrIssueProjectChanged
 	}
+	if err := db.CheckAgentsViewAssociationTx(ctx, tx, issue, d.InstanceUID(), p.AgentsViewAssociation); err != nil {
+		return db.Issue{}, nil, false, err
+	}
 	if p.IfMatchRev != nil && issue.Revision != *p.IfMatchRev {
 		return db.Issue{}, nil, false, &db.RevisionConflictError{CurrentRevision: issue.Revision}
 	}
@@ -1800,21 +1804,23 @@ func (d *Store) closeIssueGuarded(
 		*parentSIDForPayload = parentSID
 	}
 	payloadBytes, err := json.Marshal(struct {
-		Reason                 string                 `json:"reason"`
-		ClosedAt               string                 `json:"closed_at"`
-		Message                string                 `json:"message,omitempty"`
-		Evidence               []db.Evidence          `json:"evidence,omitempty"`
-		Transcript             *transcript.Transcript `json:"transcript,omitempty"`
-		ParentUID              *string                `json:"parent_uid,omitzero"`
-		ParentShortID          *string                `json:"parent_short_id,omitzero"`
-		IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
-		IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
+		Reason                 string                       `json:"reason"`
+		ClosedAt               string                       `json:"closed_at"`
+		Message                string                       `json:"message,omitempty"`
+		Evidence               []db.Evidence                `json:"evidence,omitempty"`
+		Transcript             *transcript.Transcript       `json:"transcript,omitempty"`
+		AgentsViewAssociation  *agentsviewrelay.Association `json:"agentsview_association,omitempty"`
+		ParentUID              *string                      `json:"parent_uid,omitzero"`
+		ParentShortID          *string                      `json:"parent_short_id,omitzero"`
+		IdempotencyKey         string                       `json:"idempotency_key,omitempty"`
+		IdempotencyFingerprint string                       `json:"idempotency_fingerprint,omitempty"`
 	}{
 		Reason:                 p.Reason,
 		ClosedAt:               closedAt,
 		Message:                p.Message,
 		Evidence:               evidence,
 		Transcript:             p.Transcript,
+		AgentsViewAssociation:  p.AgentsViewAssociation,
 		ParentUID:              parentUIDForPayload,
 		ParentShortID:          parentSIDForPayload,
 		IdempotencyKey:         p.IdempotencyKey,

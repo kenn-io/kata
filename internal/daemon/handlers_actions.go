@@ -11,6 +11,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"go.kenn.io/kata/internal/agentsviewrelay"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/shortid"
@@ -36,10 +37,28 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		association, err := decodeAgentsViewAssociation(in.Body.AgentsViewAssociation)
+		if err != nil {
+			return nil, api.NewError(400, "agentsview_invalid_association", err.Error(), "", nil)
+		}
 		if in.Body.Transcript != nil {
 			if err := in.Body.Transcript.Validate(); err != nil {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
+		}
+		if association != nil {
+			if in.Body.AgentsViewProtocol != "relay-v1" {
+				return nil, api.NewError(400, "agentsview_protocol_required", "agentsview_protocol relay-v1 is required", "", nil)
+			}
+			locator, err := association.Locator()
+			if err != nil {
+				return nil, api.NewError(400, "agentsview_invalid_association", err.Error(), "", nil)
+			}
+			if in.Body.Transcript == nil || in.Body.Transcript.Agent != association.Agent || in.Body.Transcript.SessionID != association.NativeSessionID || (in.Body.Transcript.URL != "" && in.Body.Transcript.URL != locator) {
+				return nil, api.NewError(400, "agentsview_invalid_association", "closing native provenance differs from consent", "", nil)
+			}
+		} else if in.Body.AgentsViewProtocol != "" || len(in.Body.AgentsViewDiscovery) > 0 {
+			return nil, api.NewError(400, "agentsview_invalid_association", "sharing requires an association", "", nil)
 		}
 		// Owner-local TUI closes bypass substance / evidence validation:
 		// the interactive human path is "press x to close" and a 40-char
@@ -96,9 +115,26 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if match != nil {
 				idempotencyFingerprint = closeIdempotencyFingerprint(
 					issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-					in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
+					in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript, association)
 				return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 			}
+		}
+		if association != nil {
+			finish, err := validateAgentsViewClose(ctx, cfg, issue, association, in.Body.AgentsViewDiscovery)
+			if err != nil {
+				return nil, err
+			}
+			defer finish()
+			locator, err := association.Locator()
+			if err != nil {
+				return nil, api.NewError(400, "agentsview_invalid_association", err.Error(), "", nil)
+			}
+			if in.Body.Transcript != nil && (in.Body.Transcript.Agent != association.Agent || in.Body.Transcript.SessionID != association.NativeSessionID || (in.Body.Transcript.URL != "" && in.Body.Transcript.URL != locator)) {
+				return nil, api.NewError(400, "agentsview_invalid_association", "native provenance differs from consent", "", nil)
+			}
+			in.Body.Transcript = &transcript.Transcript{Agent: association.Agent, SessionID: association.NativeSessionID, URL: locator}
+		} else if len(in.Body.AgentsViewDiscovery) > 0 {
+			return nil, api.NewError(400, "agentsview_invalid_association", "discovery requires an association", "", nil)
 		}
 		if issue.DeletedAt != nil {
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
@@ -106,7 +142,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.IdempotencyKey != "" {
 			idempotencyFingerprint = closeIdempotencyFingerprint(
 				issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-				in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
+				in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript, association)
 		}
 		if ifMatchRev != nil && issue.Revision != *ifMatchRev {
 			return nil, api.NewError(412, "revision_conflict",
@@ -129,7 +165,11 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			out.Body.Issue = issue
 			return out, nil
 		}
-		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+		if association != nil {
+			if err := requireAgentsViewClaimWhileCoordinated(ctx, cfg, issue, actor, nil, ""); err != nil {
+				return nil, err
+			}
+		} else if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
 		}
 		if !tuiBypass {
@@ -211,8 +251,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				IssueID: issue.ID, ExpectedProjectID: issue.ProjectID,
 				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
-				Transcript:     in.Body.Transcript,
-				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
+				Transcript:            in.Body.Transcript,
+				AgentsViewAssociation: association,
+				IdempotencyKey:        in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
 				DisallowRecurrenceEffects: issueScopeFromContext(ctx) != nil,
 			})
 			if len(events) > 0 {
@@ -242,6 +283,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 					}
 					return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 				}
+			}
+			if errors.Is(err, db.ErrAgentsViewRouteChanged) {
+				return nil, api.NewError(409, "agentsview_route_changed", err.Error(), "", nil)
 			}
 			if errors.Is(err, db.ErrAttachmentEvidence) {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
@@ -579,6 +623,7 @@ func closeIdempotencyFingerprint(
 	dryRun bool,
 	ifMatchRev *int64,
 	ref *transcript.Transcript,
+	associations ...*agentsviewrelay.Association,
 ) string {
 	// The session identifies the request; its URL is a derived locator, so a
 	// changed AgentsView base still replays the original close.
@@ -586,22 +631,31 @@ func closeIdempotencyFingerprint(
 	if ref != nil {
 		session = &transcript.Transcript{Agent: ref.Agent, SessionID: ref.SessionID}
 	}
+	var association *agentsviewrelay.Association
+	if len(associations) > 0 {
+		association = associations[0]
+	}
+	if association != nil {
+		session = &transcript.Transcript{Agent: association.Agent, SessionID: association.NativeSessionID}
+	}
 	encoded, _ := json.Marshal(struct {
-		IssueUID   string                 `json:"issue_uid"`
-		RequestRef string                 `json:"request_ref"`
-		Actor      string                 `json:"actor"`
-		Reason     string                 `json:"reason"`
-		Message    string                 `json:"message"`
-		Source     string                 `json:"source"`
-		Evidence   []api.Evidence         `json:"evidence"`
-		DryRun     bool                   `json:"dry_run"`
-		IfMatchRev *int64                 `json:"if_match_revision"`
-		Transcript *transcript.Transcript `json:"transcript,omitempty"`
+		IssueUID              string                       `json:"issue_uid"`
+		RequestRef            string                       `json:"request_ref"`
+		Actor                 string                       `json:"actor"`
+		Reason                string                       `json:"reason"`
+		Message               string                       `json:"message"`
+		Source                string                       `json:"source"`
+		Evidence              []api.Evidence               `json:"evidence"`
+		DryRun                bool                         `json:"dry_run"`
+		IfMatchRev            *int64                       `json:"if_match_revision"`
+		Transcript            *transcript.Transcript       `json:"transcript,omitempty"`
+		AgentsViewAssociation *agentsviewrelay.Association `json:"agentsview_association,omitempty"`
 	}{
 		IssueUID: issueUID, RequestRef: requestRef,
 		Actor: actor, Reason: reason, Message: message,
 		Source: source, Evidence: evidence, DryRun: dryRun, IfMatchRev: ifMatchRev,
-		Transcript: session,
+		Transcript:            session,
+		AgentsViewAssociation: association,
 	})
 	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:])

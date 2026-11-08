@@ -46,6 +46,7 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	AgentsViewRelay           *AgentsViewRelayConfig
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage
@@ -292,6 +293,10 @@ type ListenerBinding struct {
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
+	if cfg.AgentsViewRelay != nil {
+		local := *cfg.AgentsViewRelay
+		cfg.AgentsViewRelay = &local
+	}
 	if cfg.TwentySyncProgress == nil {
 		cfg.TwentySyncProgress = issuesync.NewProgressTracker()
 	}
@@ -437,7 +442,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 		base := s.withFederationSigning(s.baseHandler, true)
 		base = withProjectAuthorization(s.cfg.DB, s.cfg.HostAccess != nil, s.cfg.TrustCallerAuthentication,
 			s.authPolicy.SelfAuthenticatedRoutes, s.noProjectDataRoutes, base)
-		return base, nil
+		return withAgentsViewRelayBudget(base), nil
 	}
 	base := s.baseHandler
 	if base == nil {
@@ -466,7 +471,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return handler, nil
+	return withAgentsViewRelayBudget(handler), nil
 }
 
 // API returns the underlying huma.API for handler registration in tests.
@@ -780,6 +785,7 @@ func registerComments(humaAPI huma.API, cfg ServerConfig) {
 // registerActions registers close/reopen action routes.
 func registerActions(humaAPI huma.API, cfg ServerConfig) {
 	registerActionsHandlers(humaAPI, cfg)
+	registerAgentsViewShareHandlers(humaAPI, cfg)
 }
 
 // registerLinks registers POST/DELETE /links routes.

@@ -196,6 +196,7 @@ require (
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	gotest.tools/gotestsum v1.13.0 // indirect
+	hegel.dev/go/hegel v0.9.30
 	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
