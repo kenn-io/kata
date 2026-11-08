@@ -143,7 +143,7 @@ func (w agentsViewWorkflow) preflight(ctx context.Context, ref string, c agentsV
 		return nil, agentsViewSelection{}, err
 	}
 	if digest != c.Association.SnapshotSHA256 {
-		return nil, agentsViewSelection{}, errors.New("AgentsView: confirm the exact reviewed snapshot with --confirm-transcript-sha256")
+		return nil, agentsViewSelection{}, externalCLIValidation("AgentsView: confirm the exact reviewed snapshot with --confirm-transcript-sha256")
 	}
 	snapshot, err := freezeAgentsViewSnapshot(ctx, path, digest, c.Association.SnapshotBytes)
 	if err != nil {
@@ -168,7 +168,7 @@ func (w agentsViewWorkflow) preflight(ctx context.Context, ref string, c agentsV
 
 func (w agentsViewWorkflow) Close(ctx context.Context, ref string, c agentsViewConsent, path, digest string, native agentsViewNativeIdentity, dry bool, body map[string]any, headers map[string]string) (agentsViewCloseResult, error) {
 	if native.Agent != c.Association.Agent || native.NativeSessionID != c.Association.NativeSessionID {
-		return agentsViewCloseResult{}, errors.New("AgentsView: closing native session differs from prepared snapshot")
+		return agentsViewCloseResult{}, externalCLIValidation("AgentsView: closing native session differs from prepared snapshot")
 	}
 	snapshot, selected, err := w.preflight(ctx, ref, c, path, digest)
 	if err != nil {
@@ -226,7 +226,7 @@ func (w agentsViewWorkflow) Close(ctx context.Context, ref string, c agentsViewC
 
 func (w agentsViewWorkflow) Share(ctx context.Context, ref string, c agentsViewConsent, path, eventUID, digest string) error {
 	if eventUID == "" {
-		return errors.New("AgentsView: --close-event must name the original associated close")
+		return externalCLIValidation("AgentsView: --close-event must name the original associated close")
 	}
 	snapshot, _, err := w.preflight(ctx, ref, c, path, digest)
 	if err != nil {

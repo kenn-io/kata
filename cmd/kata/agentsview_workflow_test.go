@@ -149,6 +149,9 @@ func TestAgentsViewConsentRejectsRetargetAndChangedBytesBeforeMutation(t *testin
 			}
 			_, err := workflow.Close(t.Context(), "example#abcd", consent, path, digest, native, false, nil, nil)
 			require.Error(t, err)
+			if state == "native" || state == "digest" {
+				require.Equal(t, ExitValidation, exitCodeForErr(err, true))
+			}
 			require.Zero(t, port.closes)
 			require.Zero(t, port.shares)
 		})
