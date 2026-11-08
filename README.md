@@ -24,6 +24,21 @@ database by default, so your repo stays clean and no hosted tracker is required.
   evidence that records what was done and who did it.
 - **Supervise in the terminal or browser.** Browse and triage the same work with
   `kata tui` or `kata ui`. See the [Web UI guide](docs/guide/web-ui.md).
+- **Automate recurring work.** Schedule `kata cron` jobs and workflows that run
+  on triggers, keep per-run evidence, and let you preview and prune old terminal
+  runs in batches. See the [cron reference](docs/reference/cron.md).
+- **Request attention where the work is.** `kata notify <ref> --to
+  <actor>/<teammate>` flags an issue for a person or agent with a reason and
+  resolves it with `--clear` once handled. See the
+  [CLI reference](docs/reference/cli.md).
+- **Give subagents their own identity.** `KATA_TEAMMATE` attributes a helper's
+  comments and new issues, while `KATA_INBOX_USER` points `kata inbox` and the
+  TUI at that helper's own inbox, so delegated work stays separable. See
+  [Configuration](docs/reference/configuration.md).
+- **Answer evidence with evidence.** Reply to any comment, or record a verdict
+  with `kata comment --confirm`, `--refute`, or `--supersede`, each backed by
+  its own evidence note. See
+  [Teammate requests](docs/reference/cli.md#teammate-requests).
 - **Share when you need to.** Opt into a remote daemon or
   [federation](docs/operations/federation.md). Shared daemons can use Postgres
   with `KATA_DSN`, including separate schema-owner and runtime roles; see the
