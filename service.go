@@ -135,16 +135,34 @@ type GitHubAppConfig struct {
 // DocbankConfig selects the vault used by issue attachments.
 type DocbankConfig = config.DocbankConfig
 
-// AgentsView adapter aliases let external embedders supply the explicit ports.
+// AgentsViewRelayConfig supplies the explicit relay adapter ports.
 type AgentsViewRelayConfig = daemon.AgentsViewRelayConfig
+
+// AgentsViewSnapshot is a private, immutable snapshot spool.
 type AgentsViewSnapshot = daemon.AgentsViewSnapshot
+
+// AgentsViewIngestAck is the receiver acknowledgement.
 type AgentsViewIngestAck = daemon.AgentsViewIngestAck
+
+// AgentsViewIssue identifies the issue passed to an adapter.
 type AgentsViewIssue = db.Issue
+
+// AgentsViewFederationBinding identifies the selected federation binding.
 type AgentsViewFederationBinding = db.FederationBinding
+
+// AgentsViewClaimStatus describes the live claim at the upstream.
 type AgentsViewClaimStatus = api.ClaimStatusBody
+
+// AgentsViewAssociation is the stable close-to-snapshot selection.
 type AgentsViewAssociation = agentsviewrelay.Association
+
+// AgentsViewControl binds an upload to its selected snapshot.
 type AgentsViewControl = agentsviewrelay.Control
+
+// AgentsViewReceipt is the signed root receiver acknowledgement.
 type AgentsViewReceipt = agentsviewrelay.Receipt
+
+// AgentsViewRouteObservation identifies one selected route hop.
 type AgentsViewRouteObservation = agentsviewrelay.RouteObservation
 
 // Config contains the process-neutral inputs needed to construct a Service.

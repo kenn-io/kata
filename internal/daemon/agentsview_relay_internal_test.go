@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,4 +74,21 @@ func TestAgentsViewRootAdmissionDistinguishesPinFromSigner(t *testing.T) {
 		require.Equal(t, tc.code, apiErr.Code)
 	}
 	require.NoError(t, agentsViewRootAdmission(association, pin, signer))
+}
+
+func TestAgentsViewBinaryUploadContentTypeScope(t *testing.T) {
+	for _, tc := range []struct {
+		path, method, contentType string
+		want                      bool
+	}{
+		{"/api/v1/projects/1/issues/example/transcript-share", "POST", "application/octet-stream", true},
+		{"/api/v1/projects/1/federation/transcript-service/issues/example", "POST", "application/octet-stream", true},
+		{"/api/v1/projects/1/issues/example/transcript-share/extra", "POST", "application/octet-stream", false},
+		{"/api/v1/projects/1/issues/example/transcript-share", "PUT", "application/octet-stream", false},
+		{"/api/v1/projects/1/issues/example/transcript-share", "POST", "text/plain", false},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req.Header.Set("Content-Type", tc.contentType)
+		require.Equal(t, tc.want, isAgentsViewBinaryUpload(req), tc.path)
+	}
 }

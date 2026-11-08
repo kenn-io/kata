@@ -23,6 +23,7 @@ type AgentsViewSnapshot interface {
 	io.Closer
 }
 
+// AgentsViewIngestAck identifies the snapshot accepted by the receiver.
 type AgentsViewIngestAck struct {
 	SessionID string
 	Agent     string

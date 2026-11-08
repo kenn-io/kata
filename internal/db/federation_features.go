@@ -7,10 +7,11 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"go.kenn.io/kata/internal/agentsviewrelay"
 	"sort"
 	"strings"
 	"sync"
+
+	"go.kenn.io/kata/internal/agentsviewrelay"
 )
 
 // CronEventFeature identifies support for all cron definitions, runs and native delivery state.

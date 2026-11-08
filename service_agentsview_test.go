@@ -11,7 +11,7 @@ import (
 
 // External embedders must be able to name every callback type without
 // importing Kata's internal packages.
-func TestAgentsViewAdapterTypesArePublic(t *testing.T) {
+func TestAgentsViewAdapterTypesArePublic(_ *testing.T) {
 	_ = kata.Config{AgentsViewRelay: &kata.AgentsViewRelayConfig{
 		LiveClaimStatus: func(context.Context, kata.AgentsViewFederationBinding, string) (kata.AgentsViewClaimStatus, error) {
 			return kata.AgentsViewClaimStatus{}, nil

@@ -10,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/agentsviewrelay"
 )
 
+// ErrAgentsViewRouteChanged means the stored route no longer matches the selection.
 var ErrAgentsViewRouteChanged = errors.New("AgentsView selection no longer matches the stored project route")
 
 // CheckAgentsViewAssociationTx validates the local selection in the actual

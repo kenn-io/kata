@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"encoding/json/v2"
 	"io"
+	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +16,12 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
 )
+
+var agentsViewUploadRoute = regexp.MustCompile(`^/api/v1/projects/[^/]+/(?:issues/[^/]+/transcript-share|federation/transcript-service/issues/[^/]+)$`)
+
+func isAgentsViewBinaryUpload(r *http.Request) bool {
+	return r.Method == http.MethodPost && r.Header.Get("Content-Type") == "application/octet-stream" && agentsViewUploadRoute.MatchString(r.URL.Path)
+}
 
 type agentsViewShareRequest struct {
 	ProjectID     int64  `path:"project_id"`

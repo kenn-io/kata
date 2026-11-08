@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+// Relay bounds and identifiers apply to the version 1 protocol.
 const (
 	MaxSnapshotBytes int64 = 64 << 20
 	MaxControlBytes        = 4096
@@ -24,6 +25,7 @@ const (
 	EventFeature           = "agentsview_association_v1"
 )
 
+// RouteObservation identifies one pinned hop in a selected route.
 type RouteObservation struct {
 	InstanceUID         string `json:"instance_uid"`
 	ProjectUID          string `json:"project_uid"`
@@ -50,13 +52,16 @@ type Association struct {
 	Route           []RouteObservation `json:"route"`
 }
 
+// Clone copies the association and its route.
 func (a Association) Clone() Association { a.Route = slices.Clone(a.Route); return a }
 
+// ValidDigest reports whether value is a canonical SHA-256 hex digest.
 func ValidDigest(value string) bool {
 	b, err := hex.DecodeString(value)
 	return err == nil && len(b) == 32 && value == strings.ToLower(value)
 }
 
+// Validate checks the association identity, destination, and route.
 func (a Association) Validate() error {
 	if a.Version != 1 || !uid.Valid(a.IssueUID) || !uid.Valid(a.ProjectUID) || !uid.Valid(a.AuthorityUID) || !ValidDigest(a.ServiceID) || !ValidDigest(a.RootKeyID) || !ValidDigest(a.SnapshotSHA256) || a.SnapshotBytes <= 0 || a.SnapshotBytes > MaxSnapshotBytes {
 		return errors.New("invalid AgentsView association identity, digest or size")
@@ -101,6 +106,7 @@ func (a Association) Validate() error {
 	return nil
 }
 
+// Locator derives the receiver URL for the associated session.
 func (a Association) Locator() (string, error) {
 	if err := a.Validate(); err != nil {
 		return "", err
@@ -108,10 +114,12 @@ func (a Association) Locator() (string, error) {
 	return (transcript.Transcript{Agent: a.Agent, SessionID: a.NativeSessionID}).Link(a.LocatorBase)
 }
 
+// Equal compares all stable association fields.
 func (a Association) Equal(b Association) bool {
 	return a.Version == b.Version && a.IssueUID == b.IssueUID && a.ProjectUID == b.ProjectUID && a.AuthorityUID == b.AuthorityUID && a.ServiceID == b.ServiceID && a.RootKeyID == b.RootKeyID && a.Agent == b.Agent && a.NativeSessionID == b.NativeSessionID && a.SessionID == b.SessionID && a.SnapshotSHA256 == b.SnapshotSHA256 && a.SnapshotBytes == b.SnapshotBytes && a.LocatorBase == b.LocatorBase && slices.Equal(a.Route, b.Route)
 }
 
+// Control binds an upload to its selected close and snapshot.
 type Control struct {
 	Version         int                `json:"v"`
 	ProjectUID      string             `json:"project_uid"`
@@ -128,10 +136,12 @@ type Control struct {
 	ClientKind      string             `json:"client_kind"`
 }
 
+// Association reconstructs the selection using its separately retained locator.
 func (c Control) Association(locatorBase string) Association {
 	return Association{Version: c.Version, IssueUID: c.IssueUID, ProjectUID: c.ProjectUID, AuthorityUID: c.AuthorityUID, ServiceID: c.ServiceID, Agent: c.Agent, NativeSessionID: c.NativeSessionID, SessionID: c.SessionID, SnapshotSHA256: c.SnapshotSHA256, SnapshotBytes: c.SnapshotBytes, LocatorBase: locatorBase, Route: slices.Clone(c.Route)}
 }
 
+// DecodeControl validates a bounded control document.
 func DecodeControl(raw []byte) (Control, error) {
 	var c Control
 	if len(raw) > MaxControlBytes {
@@ -158,8 +168,7 @@ func validForwardedClientKind(kind string) bool {
 		return true
 	}
 	for _, prefix := range []string{"relay:v1:", "spoke-host:v1:"} {
-		if strings.HasPrefix(kind, prefix) {
-			digest := strings.TrimPrefix(kind, prefix)
+		if digest, ok := strings.CutPrefix(kind, prefix); ok {
 			raw, err := base64.RawURLEncoding.Strict().DecodeString(digest)
 			return err == nil && len(raw) == 32 && base64.RawURLEncoding.EncodeToString(raw) == digest
 		}
@@ -167,6 +176,7 @@ func validForwardedClientKind(kind string) bool {
 	return false
 }
 
+// ParseControlHeader decodes exactly one canonical control header.
 func ParseControlHeader(values []string) (Control, error) {
 	if len(values) != 1 || len(values[0]) > base64.RawURLEncoding.EncodedLen(MaxControlBytes) {
 		return Control{}, errors.New("one bounded AgentsView control header required")

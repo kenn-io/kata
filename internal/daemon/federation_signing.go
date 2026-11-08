@@ -87,6 +87,15 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		// the control-bound binary profile. Keep this route unavailable until that
 		// profile is integrated at this ingress boundary.
 		if route.operation == "shareFederationIssueAgentsView" {
+			authorization, err := evaluateFederationRequestForCapabilities(r.Context(), s.cfg, r.Header.Get("Authorization"), route.projectID, route.capabilities, federationTransportOperation(route.operation))
+			if err != nil {
+				writeFederationPreauthorizationError(w, err)
+				return
+			}
+			if ingress && authorization.principal.ScopedProjectID != route.projectID {
+				api.WriteEnvelope(w, http.StatusForbidden, "auth_invalid", "project-scoped enrollment required")
+				return
+			}
 			api.WriteEnvelope(w, http.StatusServiceUnavailable, "agentsview_unavailable", "AgentsView relay dependency is unavailable")
 			return
 		}

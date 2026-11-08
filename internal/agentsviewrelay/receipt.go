@@ -43,6 +43,7 @@ func receiptBytes(r Receipt) ([]byte, error) {
 	}{"kata.project-trace-receipt.v1", r})
 }
 
+// SignReceipt signs a validated receiver acknowledgement.
 func SignReceipt(r Receipt, key ed25519.PrivateKey) (Receipt, error) {
 	if len(key) != ed25519.PrivateKeySize {
 		return Receipt{}, errors.New("AgentsView receipt signer unavailable")
@@ -57,6 +58,7 @@ func SignReceipt(r Receipt, key ed25519.PrivateKey) (Receipt, error) {
 	return r, nil
 }
 
+// VerifyReceipt checks the receipt against the pinned root key.
 func VerifyReceipt(r Receipt, key ed25519.PublicKey) error {
 	if len(key) != ed25519.PublicKeySize || len(r.Signature) != ed25519.SignatureSize {
 		return errors.New("invalid AgentsView receipt key or signature")

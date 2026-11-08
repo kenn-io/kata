@@ -702,7 +702,7 @@ func requireJSONMutation(next http.Handler, mcpMounted bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (!mcpMounted || r.URL.Path != mcpPath) && isMutation(r.Method) && r.ContentLength != 0 {
 			ct := r.Header.Get("Content-Type")
-			if !strings.HasPrefix(ct, "application/json") && !isAttachmentUpload(r) {
+			if !strings.HasPrefix(ct, "application/json") && !isAttachmentUpload(r) && !isAgentsViewBinaryUpload(r) {
 				api.WriteEnvelope(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
 					"Content-Type must be application/json")
 				return
