@@ -123,8 +123,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   changes and move history retain complete replay, and link reconciliation
   keeps its existing scope.
 
-- Pull shared cron updates faster on large SQLite spokes by replaying cron
-  history without reconciling unrelated issues and their short IDs.
+- Sync shared cron updates faster on large SQLite hubs and spokes. Pushes and
+  pulls replay cron history without reconciling unrelated issues and their
+  short IDs, including when the same batch carries issue updates.
 
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
