@@ -80,7 +80,9 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		if diagnostics && cfg.Docbank != nil {
-			out.Body.Docbank = docbankHealth(cfg.Docbank.CheckKey())
+			if checked, err := cfg.Docbank.CheckKey(); checked {
+				out.Body.Docbank = docbankHealth(err)
+			}
 		}
 		if diagnostics && cfg.FederationConfigHealth != nil {
 			health := cfg.FederationConfigHealth()

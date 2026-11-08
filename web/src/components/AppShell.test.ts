@@ -1,7 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
+vi.mock('../lib/kata/projection', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../lib/kata/projection')>()
+  return { ...original, normalizeKataUISnapshot: vi.fn(original.normalizeKataUISnapshot) }
+})
+
 import { setGeneratedFetch } from '../lib/api/client'
+import { normalizeKataUISnapshot } from '../lib/kata/projection'
 import type { MutationContext, MutationResult } from '../lib/mutations/controller'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
@@ -11,6 +17,64 @@ describe('AppShell', () => {
     cleanup()
     vi.unstubAllGlobals()
     vi.useRealTimers()
+  })
+
+  test('advances Updated labels while the task snapshot stays unchanged', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T12:00:16Z'))
+    const current = snapshot()
+    current.collection[0]!.updated_at = '2026-08-01T12:00:16Z'
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'inbox',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.getByText('now')).not.toBeNull()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    expect(normalizations).toBeGreaterThan(0)
+    await vi.advanceTimersByTimeAsync(45_000)
+    expect(screen.getByText('1m')).not.toBeNull()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
+  })
+
+  test('moves a scheduled task into Inbox at midnight without a new snapshot', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 7, 1, 23, 59, 59))
+    const current = snapshot()
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    current.collection[0]!.metadata = { scheduled_on: '2026-08-02' }
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'inbox',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    expect(normalizations).toBeGreaterThan(0)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
   test('identifies the current browser hub when a connection needs attention', () => {
@@ -228,6 +292,48 @@ describe('AppShell', () => {
 
     await view.rerender({ ...props, loading: true })
     expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+  })
+
+  test('keeps a healthy connection hidden during refresh while preserving attention states', async () => {
+    const props = {
+      route: {
+        kind: 'kata' as const,
+        view: 'all-open' as const,
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+      snapshot: snapshot(),
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const view = render(AppShell, { props })
+    expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
+    await view.rerender({ ...props, loading: true, canMutate: false })
+    expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).toBe(
+      'true',
+    )
+
+    for (const [state, label] of [
+      ['stale', 'Connection unavailable'],
+      ['reconnecting', 'Reconnecting'],
+      ['switching', 'Connecting'],
+      ['authentication', 'Authentication required'],
+      ['readonly', 'Read-only'],
+    ] as const) {
+      await view.rerender({
+        ...props,
+        loading: true,
+        stale: state === 'stale',
+        reconnecting: state === 'reconnecting',
+        daemonSwitching: state === 'switching',
+        daemonError: state === 'authentication' ? 'Authentication required' : undefined,
+        readOnly: state === 'readonly',
+      })
+      expect(screen.getByRole('status', { name: 'Active connection' }).textContent).toContain(label)
+    }
   })
 
   test('keeps the healthy workspace toolbar free of a connection banner', () => {
@@ -1032,6 +1138,94 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Credentials' }).classList).toContain('active')
     expect(screen.getByRole('button', { name: 'Today' }).classList).not.toContain('active')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
+    expect(onBackFromCredentials).toHaveBeenCalledOnce()
+  })
+
+  test('opens Settings from the gear for a viewer without access administration', async () => {
+    const onNavigate = vi.fn()
+    const member = snapshot()
+    member.capabilities.writable = false
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: member,
+        loading: false,
+        readOnly: true,
+        ...mutationProps({ canMutate: false }),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(onNavigate).toHaveBeenCalledWith({
+      kind: 'kata',
+      view: 'settings',
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    })
+  })
+
+  test('renders Settings as a daemon screen for the remote host and returns to issues', async () => {
+    const onBackFromCredentials = vi.fn()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json({
+          provider: 'none',
+          download_bytes: 290_000_000,
+          ollama_available: false,
+          rebuild: false,
+          can_change: false,
+        }),
+      ),
+    )
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'settings',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        daemons: [
+          {
+            id: 'local',
+            url: 'http://127.0.0.1:7777',
+            default: true,
+            local: true,
+            auth: 'none',
+            health: 'connected',
+          },
+          {
+            id: 'team',
+            url: 'https://kata.example.com',
+            default: false,
+            auth: 'token',
+            health: 'connected',
+          },
+        ],
+        activeDaemonID: 'team',
+        canAdministerDaemon: false,
+        onBackFromCredentials,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    expect(screen.getByRole('heading', { name: 'Settings' })).not.toBeNull()
+    expect(await screen.findByText(/kata\.example\.com/)).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /layout/ })).toBeNull()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
     expect(onBackFromCredentials).toHaveBeenCalledOnce()

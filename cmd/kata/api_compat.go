@@ -24,7 +24,6 @@ const (
 	apiVersionDocbankKeyHealth          = "0.44.0"
 	apiVersionEffectiveCloseEventUID    = "0.40.0"
 	apiVersionCommentLinks              = "0.28.0"
-	apiVersionRecurrenceIfMatch         = "0.37.0"
 	apiVersionReadyAndSearchFilters     = "0.8.0"
 	apiVersionReadyPrioritySort         = "0.41.0"
 	apiVersionGlobalListFilters         = "0.9.0"

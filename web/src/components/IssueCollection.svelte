@@ -38,6 +38,7 @@
 
   interface Props {
     currentView: KataCurrentView
+    now: number
     resultsKey?: string
     issueCatalog: readonly KataTaskSummary[]
     scopeLabel?: string
@@ -59,6 +60,7 @@
 
   let {
     currentView,
+    now,
     resultsKey = '',
     issueCatalog,
     scopeLabel = undefined,
@@ -1116,7 +1118,7 @@
       </span>
       {#if columnVisibility.updated}
         <span class="cell cell-updated" title={issue.updated_at}>
-          {relativeTime(issue.updated_at)}
+          {relativeTime(issue.updated_at, new Date(now))}
         </span>
       {/if}
       {#if columnVisibility.priority}

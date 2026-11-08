@@ -114,7 +114,8 @@
   let acceptedRoute = $state<AppRoute | undefined>()
   let returnPath = $state(launch.returnPath)
   let mode = $state(initialMode(launch, initialRoute, selectedAuthentication))
-  let authority = $state<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
+  let authority = $state.raw<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
+  const shellSnapshot = $derived(authority?.snapshot)
   let references = $state<UIReferencesResponseBody | undefined>()
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
@@ -159,6 +160,11 @@
   const browserFetch = createCredentialedFetch(
     undefined,
     daemonFetch,
+    rejectCredentialsAndRequireAuthentication,
+  )
+  const searchSettingsPostFetch = createCredentialedFetch(
+    undefined,
+    fetch,
     rejectCredentialsAndRequireAuthentication,
   )
   setGeneratedFetch(browserFetch)
@@ -232,9 +238,13 @@
   })
 
   function canAdministerAccess(): boolean {
+    return authority?.snapshot?.capabilities.access_admin === true && canAdministerDaemon()
+  }
+
+  function canAdministerDaemon(): boolean {
     const expiresAt = authority?.snapshot?.capabilities.expires_at
     return (
-      authority?.snapshot?.capabilities.access_admin === true &&
+      authority?.snapshot !== undefined &&
       !authority.stale &&
       !authority.loading &&
       !authority.authenticationRequired &&
@@ -258,7 +268,7 @@
       if (state === 'reconnecting' || (state === 'online' && wasReconnecting)) {
         invalidations.reconnect()
       } else if (state === 'online') {
-        invalidations.refreshAll()
+        invalidations.refresh()
       }
     },
   })
@@ -394,7 +404,7 @@
 
   function navigate(next: AppRoute): void {
     const opensCredentials =
-      route.kind !== 'route-error' && route.view !== 'credentials' && next.view === 'credentials'
+      route.kind !== 'route-error' && !isDaemonView(route.view) && isDaemonView(next.view)
     if (opensCredentials && route.kind !== 'route-error') {
       credentialReturnRoutes.set(credentialRouteKey(activeDaemonID), route)
     }
@@ -1201,6 +1211,10 @@
     credentialError = undefined
   }
 
+  function isDaemonView(view: AppRoute['view']): boolean {
+    return view === 'credentials' || view === 'settings'
+  }
+
   function credentialRouteKey(daemonID: string | undefined): string {
     return daemonID ?? '__direct__'
   }
@@ -1264,9 +1278,10 @@
     {/if}
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
       <AppShell
+        {searchSettingsPostFetch}
         route={acceptedRoute ?? route}
         onSearchEmpty={() => reportOutcome('search_empty')}
-        snapshot={authority.snapshot}
+        snapshot={shellSnapshot!}
         loading={authority.loading}
         canMutate={authority.canMutate}
         {mutationPending}
@@ -1286,6 +1301,7 @@
         {credentialError}
         onAccessMutation={(draft, mutate) => runMutation({ draft }, mutate, accessMutations)}
         onRefreshCredentials={refreshCredentials}
+        canAdministerDaemon={canAdministerDaemon()}
         onBackFromCredentials={returnFromCredentials}
         onSelectDaemon={(id) => void switchDaemon(id)}
         onPreferencesChange={updatePreferences}

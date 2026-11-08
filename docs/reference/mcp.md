@@ -516,7 +516,10 @@ Enabled native `notify` jobs activate the existing daemon delivery. Execution
 jobs and workflows require an installed external adapter. Check
 `kata.cron_capabilities` for the selected daemon's actual advertised features;
 permission denial, unsupported capability, and temporary unavailability remain
-distinct errors. See [Native cron](cron.md) for job definitions and adapters.
+distinct errors. See [Native cron](cron.md) for job definitions and adapters,
+its [MCP recurring inbox example](cron.md#mcp-recurring-inbox-example), and
+[MCP Events](../operations/mcp-events.md) for signed webhook pings.
+
 ## Agent guides (`kata.skills`)
 
 `kata.skills` is always in the first tool catalog. It is not a section loader:
@@ -742,7 +745,9 @@ other calls that carry 2026-07-28 per-request metadata with an
 unsupported-version error listing the session versions it accepts. JSON-RPC
 batches are rejected. Each compact JSON message is limited to 8 MiB.
 
-Kata advertises tools only, including tool-list changes. It does not advertise prompts, resources, roots,
+Kata advertises tools, including tool-list changes, and the webhook Events
+capability described in [Native inbox events](#native-inbox-events). It does
+not advertise prompts, resources, roots,
 logging, sampling, subscriptions, or server-to-client requests. Discovery uses
 a five-minute private cache hint. Tool execution allows 20 starts per second,
 a burst of 20, and at most eight concurrent daemon calls per server process.
@@ -750,3 +755,35 @@ a burst of 20, and at most eight concurrent daemon calls per server process.
 Host process control stays outside MCP: daemon lifecycle, the TUI and Web UI,
 install/update, database migrations and cutovers, and raw internal replication
 endpoints remain CLI or operator workflows.
+
+## Native inbox events
+
+The daemon owns MCP Events. Turn it on with `[mcp_events] enabled = true` in the
+daemon configuration (see [MCP Events](configuration.md#mcp-events)). Then
+`kata mcp serve` forwards `events/list`, `events/subscribe`, and
+`events/unsubscribe` to the daemon and keeps no Events state of its own. It has
+no Events flag. A forwarder advertises Events on stdio and on the MCP
+2026-07-28 HTTP path. It does not advertise or serve Events on legacy-session
+HTTP, where `events/*` gets the SDK's plain HTTP 400 "not handled" answer.
+
+`kata.inbox.changed` accepts an exact `for` recipient and optional
+`project_uids` and `issue_uid` filters. `project_uids` must be non-empty, sorted
+ascending, and free of duplicates. Every forwarder mode except `--all` (the
+default workspace scope, `--project`, and `--projects`) requires an explicit
+`project_uids` list that stays inside the projects it serves. Delivery is a
+signed HTTPS webhook ping that names only the recipient. The event type does
+not replay: a supplied cursor is ignored and results carry `cursor: null`.
+Receivers deduplicate by `webhook-id`, exhaust `kata.inbox` pages, and read the
+issue. A ping does not claim, clear, or complete work.
+
+On the HTTP path, `events/subscribe` and `events/unsubscribe` need an `Mcp-Name`
+header equal to `params.name`. A missing or mismatched header gets 400 and
+`-32020`, and a body over 1 MiB gets 413. The capability is
+`extensions["io.modelcontextprotocol/events"]` plus a top-level `events` alias.
+
+The [MCP Events operator guide](../operations/mcp-events.md) owns subscription
+ownership, project selection, lifetimes, what triggers a ping, delivery and
+retry rules, terminated notices, and key handling. `kata.event_subscriptions`,
+available through `kata.load_coordination`, shows the caller's subscriptions
+and their delivery health. For a narrowed forwarder it lists only
+subscriptions inside that forwarder's projects.

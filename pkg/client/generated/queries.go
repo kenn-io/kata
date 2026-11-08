@@ -59,9 +59,12 @@ type ListAllIssuesQuery struct {
 	Cursor *string `json:"cursor,omitempty"`
 
 	// IncludeTotal Count all matching issues, ignoring cursor and limit
-	IncludeTotal *bool                     `json:"include_total,omitempty"`
-	ProjectID    *int64                    `json:"project_id,omitempty"`
-	Status       *ListAllIssuesQueryStatus `json:"status,omitempty"`
+	IncludeTotal *bool `json:"include_total,omitempty"`
+
+	// Compact Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+	Compact   *bool                     `json:"compact,omitempty"`
+	ProjectID *int64                    `json:"project_id,omitempty"`
+	Status    *ListAllIssuesQueryStatus `json:"status,omitempty"`
 
 	// Priority exact priority filter (0..4 or none for unset); empty = no filter
 	Priority *string `json:"priority,omitempty"`
@@ -241,8 +244,11 @@ type ListIssuesQuery struct {
 	Cursor *string `json:"cursor,omitempty"`
 
 	// IncludeTotal Count all matching issues, ignoring cursor and limit
-	IncludeTotal *bool                  `json:"include_total,omitempty"`
-	Status       *ListIssuesQueryStatus `json:"status,omitempty"`
+	IncludeTotal *bool `json:"include_total,omitempty"`
+
+	// Compact Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+	Compact *bool                  `json:"compact,omitempty"`
+	Status  *ListIssuesQueryStatus `json:"status,omitempty"`
 
 	// Priority exact priority filter (0..4 or none for unset); empty = no filter
 	Priority *string `json:"priority,omitempty"`

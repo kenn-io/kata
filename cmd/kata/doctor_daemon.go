@@ -227,7 +227,7 @@ func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
 		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankKeyHealth); !current {
 			return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: daemonAPITooOldMessage("Docbank key health", apiVersionDocbankKeyHealth, reported)}
 		}
-		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon does not have Docbank attachments configured"}
+		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon has no Docbank key source to check: Docbank is not configured, or it uses the Docbank on this machine"}
 	}
 	if h.Credential == "ok" {
 		return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}

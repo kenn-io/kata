@@ -28,14 +28,14 @@ func helpSections(km keymap) []helpSection {
 			r(km.PageUp), r(km.PageDown), r(km.Home),
 			r(km.End), r(km.Open), r(km.ExpandCollapse),
 			r(km.Expand), r(km.Collapse), r(km.ExpandAll), r(km.NewIssue),
-			r(km.ToggleIssueView), r(km.SortChildren), r(km.Close), r(km.Reopen), r(km.SetDates), r(km.Delete), r(km.Undo),
+			r(km.ToggleIssueView), r(km.SortChildren), r(km.Close), r(km.Reopen), r(km.SetDates), r(km.Delete), r(km.MoveIssue), r(km.Undo),
 		}},
 		{"Detail", []helplayout.HelpItem{
 			r(km.NextTab), r(km.PrevTab), r(km.JumpRef), r(km.Back),
 			r(km.EditBody), r(km.NewComment), r(km.ReplyComment), r(km.NextCommentLink), r(km.PrevCommentLink), r(km.SetParent),
 			r(km.AddBlocker), r(km.AddLink), r(km.AddLabel),
 			r(km.RemoveLabel), r(km.AssignOwner), r(km.ClearOwner), r(km.TimedAssignment),
-			r(km.SetPriority),
+			r(km.SetPriority), r(km.SetRecurrence),
 		}},
 		{"Children", []helplayout.HelpItem{
 			r(km.NewChild),

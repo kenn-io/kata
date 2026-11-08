@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -258,6 +259,17 @@ func (c *Client) listIssuesAt(ctx context.Context, projectID *int64, f ListFilte
 // ref is a short_id, qualified short_id, or UID — the daemon's path
 // resolver picks the matching column.
 func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
+	detail, err := c.readIssue(ctx, projectID, ref)
+	if err != nil {
+		return nil, err
+	}
+	detail.Recurrence, detail.RecurrenceErr = c.readRecurrence(ctx, detail.Issue.ProjectID, detail.Issue.RecurrenceID)
+	return detail, nil
+}
+
+// readIssue is GetIssueDetail without the recurrence read, for callers that
+// read the recurrence themselves or do not need it.
+func (c *Client) readIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
 	body, err := c.showIssue(ctx, projectID, ref)
 	if err != nil {
 		return nil, err
@@ -272,6 +284,22 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 		Children: body.Children,
 		Lease:    lease,
 	}, nil
+}
+
+// readRecurrence reads the live recurrence while preserving a daemon refusal.
+func (c *Client) readRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrenceclient.View, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	rec, err := recurrenceclient.Active(ctx, apiClient, projectID, id)
+	if err != nil {
+		if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
+			return nil, decodeError(status.Body, status.Status, status.Method, status.URI)
+		}
+		return nil, err
+	}
+	return rec, nil
 }
 
 // CreateIssue posts a new issue. body.IdempotencyKey rides the
@@ -543,6 +571,52 @@ func (c *Client) SetDates(ctx context.Context, projectID int64, ref string, in D
 	var resp MutationResp
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
+	}
+	return &resp, nil
+}
+
+// moveSubtreeAPIVersion is the first daemon API that moves an issue together
+// with its descendants; older daemons move only the selected issue and would
+// ignore the difference. It also answers dry runs, so one check covers both.
+const moveSubtreeAPIVersion = "0.35.0"
+
+// MoveIssue moves an issue and its active descendants to another project, or
+// previews that with DryRun. A move is guarded by If-Match on
+// in.IfMatchRevision; a stale revision comes back as a 412 *APIError and moves
+// nothing. A preview first checks the daemon is new enough to answer with the
+// subtree, so an old daemon is refused before any move request is sent.
+func (c *Client) MoveIssue(ctx context.Context, projectID int64, ref string, in MoveInput) (*MutationResp, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	if in.DryRun {
+		if err := requireAPIVersion(ctx, apiClient, moveSubtreeAPIVersion,
+			"moving an issue with its subtree requires daemon API "+moveSubtreeAPIVersion+" or newer"); err != nil {
+			return nil, err
+		}
+	}
+	options := &generated.MoveIssueRequestOptions{
+		PathParams: &generated.MoveIssuePath{ProjectID: projectID, Ref: ref},
+		Body:       &generated.MoveIssueBody{Actor: &in.Actor, ToProjectUID: in.ToProjectUID},
+	}
+	if in.DryRun {
+		options.Body.DryRun = &in.DryRun
+	}
+	if in.IfMatchRevision != 0 {
+		etag := fmt.Sprintf(`"rev-%d"`, in.IfMatchRevision)
+		options.Header = &generated.MoveIssueHeaders{IfMatch: &etag}
+	}
+	wire, callErr := apiClient.MoveIssueWithResponse(ctx, options)
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	if rev, ok := strings.CutPrefix(strings.Trim(wire.HTTPResponse.Header.Get("ETag"), `"`), "rev-"); ok {
+		_, _ = fmt.Sscan(rev, &resp.Revision)
 	}
 	return &resp, nil
 }

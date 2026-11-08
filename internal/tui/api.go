@@ -20,6 +20,7 @@ type KataAPI interface {
 	listAPI
 	detailAPI
 	federationSpokeAPI
+	readIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error)
 
 	Reopen(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
 	ListProjectsWithStats(ctx context.Context) ([]ProjectSummaryWithStats, error)

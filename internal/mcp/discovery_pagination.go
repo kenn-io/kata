@@ -76,7 +76,7 @@ func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		}
 		return successResult(), out, nil
 	}
-	query := &generated.ListIssuesQuery{Status: status, Priority: priority, MaxPriority: maxPriority, Limit: new(int64(limit)), Sort: new(generated.ListIssuesQuerySort(sortOrder)), Cursor: optionalString(input.Cursor), IncludeTotal: optionalTrue(input.IncludeTotal), Unowned: optionalTrue(input.Unowned), Owner: optionalString(input.Owner), Label: compactStrings(input.Labels), ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata)}
+	query := &generated.ListIssuesQuery{Status: status, Priority: priority, MaxPriority: maxPriority, Limit: new(int64(limit)), Sort: new(generated.ListIssuesQuerySort(sortOrder)), Cursor: optionalString(input.Cursor), IncludeTotal: optionalTrue(input.IncludeTotal), Unowned: optionalTrue(input.Unowned), Owner: optionalString(input.Owner), Label: compactStrings(input.Labels), ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata), Compact: optionalTrue(input.compact)}
 	if len(projects) == 1 && (h.options.Scope.Mode() == ScopeBound || strings.TrimSpace(input.Project) != "") {
 		response, err := h.options.Client.ListIssues(ctx, &generated.ListIssuesRequestOptions{PathParams: &generated.ListIssuesPath{ProjectID: projects[0].ID}, Query: query})
 		if err != nil {
@@ -100,7 +100,7 @@ func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		if status != nil {
 			globalStatus = new(generated.ListAllIssuesQueryStatus(*status))
 		}
-		response, err := h.options.Client.ListAllIssues(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{Status: globalStatus, Priority: priority, MaxPriority: maxPriority, Limit: query.Limit, Sort: new(generated.ListAllIssuesQuerySort(sortOrder)), Cursor: query.Cursor, IncludeTotal: query.IncludeTotal, ProjectIds: projectIDs, Unowned: query.Unowned, Owner: query.Owner, Label: query.Label, ExcludeLabel: query.ExcludeLabel, Meta: query.Meta}})
+		response, err := h.options.Client.ListAllIssues(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{Status: globalStatus, Priority: priority, MaxPriority: maxPriority, Limit: query.Limit, Sort: new(generated.ListAllIssuesQuerySort(sortOrder)), Cursor: query.Cursor, IncludeTotal: query.IncludeTotal, ProjectIds: projectIDs, Unowned: query.Unowned, Owner: query.Owner, Label: query.Label, ExcludeLabel: query.ExcludeLabel, Meta: query.Meta, Compact: query.Compact}})
 		if err != nil {
 			return nil, IssueListOutput{}, err
 		}

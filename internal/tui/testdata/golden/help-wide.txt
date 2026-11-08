@@ -19,13 +19,13 @@ up/C-p      scroll up                  a              assign owner
 down/C-n    scroll down                A              clear owner
 pgup/M-v    page up                    t              timed assignment
 pgdown/C-v  page down                  !              set priority
-g/C-M-<     first
-G/C-M->     last                       Children
-enter       open detail                N      new child
-space       expand/collapse            j/k    move child cursor
-right       expand                     ↑↓     scroll detail viewport
-left        collapse                   enter  open child
-E           expand/collapse all
+g/C-M-<     first                      O              set repeat
+G/C-M->     last
+enter       open detail                Children
+space       expand/collapse            N      new child
+right       expand                     j/k    move child cursor
+left        collapse                   ↑↓     scroll detail viewport
+E           expand/collapse all        enter  open child
 n           new issue (form)
 v           toggle flat/nested view
 o           toggle graph order
@@ -33,6 +33,7 @@ x           close
 r           reopen
 d           set dates
 X           delete issue
+M           move to another project
 u           undo last issue action
 
 press ? to return

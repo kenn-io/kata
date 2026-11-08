@@ -149,7 +149,7 @@ func (m Model) cancelReopenBacklog() Model {
 // is placed, keeping the keys visible from 40 columns and 2 rows up.
 func (m Model) overlayReopenBacklog(body string) string {
 	width := max(m.width, 1)
-	footer := renderFooterHelpTable(modalHelpRows(modalReopenBacklog), width)
+	footer := renderFooterHelpTable(modalHelpRows(modalReopenBacklog, movePicking), width)
 	rows := m.height - lipgloss.Height(footer)
 	if rows < 1 {
 		return footer

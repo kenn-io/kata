@@ -342,6 +342,14 @@ func TestHealthReportsDocbankKeySource(t *testing.T) {
 	}
 }
 
+func TestHealthOmitsDocbankKeyStateForLocalDocbank(t *testing.T) {
+	d := openTestDB(t)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Docbank: docbank.NewLocalClient(docbank.Local{})})
+	var body map[string]jsontext.Value
+	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	assert.NotContains(t, body, "docbank", "the local Docbank's key comes from its runtime record, not a key source")
+}
+
 func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {
 	d := openTestDB(t)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

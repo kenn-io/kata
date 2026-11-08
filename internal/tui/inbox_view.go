@@ -51,10 +51,24 @@ func (m Model) lookupInboxProject() (Model, tea.Cmd) {
 	}
 }
 
+// jsonString reads a metadata value that holds a string; anything else is "".
+func jsonString(raw []byte) string {
+	var s string
+	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// isInboxProject reports whether the project's role metadata designates it as
+// the Inbox, the way the Inbox lookup reads it.
+func isInboxProject(p ProjectSummary) bool {
+	return jsonString(p.Metadata.Role) == "inbox"
+}
+
 func designatedInboxProject(projects []ProjectSummary) (ProjectSummary, bool) {
 	for _, project := range projects {
-		var role string
-		if project.ID > 0 && json.Unmarshal(project.Metadata.Role, &role) == nil && role == "inbox" {
+		if project.ID > 0 && isInboxProject(project) {
 			return project, true
 		}
 	}

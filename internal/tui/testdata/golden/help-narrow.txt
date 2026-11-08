@@ -33,6 +33,7 @@ x           close
 r           reopen
 d           set dates
 X           delete issue
+M           move to another project
 u           undo last issue action
 
 Detail
@@ -54,6 +55,7 @@ a              assign owner
 A              clear owner
 t              timed assignment
 !              set priority
+O              set repeat
 
 Children
 N      new child

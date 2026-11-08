@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-05
+last_edited: 2026-11-07
 ---
 
 # PostgreSQL operations
@@ -158,6 +158,16 @@ index. PostgreSQL's event query stays unchanged. Stop daemons and imports while
 the migration reads `events` and builds the index. See the
 [schema 48 migration requirements](../development/postgres-migrations.md#schema-48-project-departure-cursor-index)
 for the offline window, grants, and rollback.
+
+The schema 48→49 migration indexes cron event histories by project, type, and
+run UID. Stop daemons and imports while it scans `events` and builds the index.
+See the [schema 49 migration requirements](../development/postgres-migrations.md#schema-49-cron-run-history-index)
+for the offline window, grants, and rollback. SQLite installs this index in place.
+
+Schema 50 adds the `mcp_event_subscriptions` table for daemon-owned MCP Events
+subscriptions. Re-run the `GRANT ... ON ALL TABLES` statement below after the
+migration so the runtime role can use it. The table has no sequences. See the
+[schema 50 migration requirements](../development/postgres-migrations.md#schema-50-mcp-events-subscriptions).
 
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:

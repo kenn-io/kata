@@ -42,10 +42,15 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 			continue
 		}
 		ev := input.Event
+		// Cron rows replay their complete history separately, so cron events do
+		// not widen the issue scope.
+		if db.EventRequiredFeatures(ev.Type) == db.CronEventFeature {
+			continue
+		}
 		uid := db.FederationEventIssueUID(ev.IssueUID, string(ev.Payload))
-		// Project/cron events, moves and unidentified events can affect the entire
+		// Project events, moves and unidentified events can affect the entire
 		// projection. Ordinary issue batches use the same scope as pulled pages.
-		if uid == "" || strings.HasPrefix(ev.Type, "project.") || strings.HasPrefix(ev.Type, "cron.") || ev.Type == "issue.moved" {
+		if uid == "" || strings.HasPrefix(ev.Type, "project.") || ev.Type == "issue.moved" {
 			scope = nil
 			break
 		}
@@ -61,13 +66,13 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 }
 
 // alreadyStored selects pull preparation: the page is in the log already.
-// Cron-only pages fold cron history; other pages reconcile the supplied issue
-// histories and rows (nil is full).
+// Cron-only pages fold cron history. Other pages reconcile the supplied issue
+// scope (nil is full); a scoped page with cron events adds complete cron history.
 func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string) (federationMaterialization, error) {
 	var fresh []db.FoldEvent
 	var accepted []string
 	linksAffected := false
-	cronOnly := alreadyStored
+	cronOnly := true
 	for _, in := range prepared {
 		if in.Duplicate {
 			continue
@@ -95,11 +100,29 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		return federationMaterialization{}, err
 	}
 	if cronOnly {
-		return prepareCronPullMaterialization(ctx, tx, projectID, binding)
+		if alreadyStored {
+			return prepareCronPullMaterialization(ctx, tx, projectID, binding, prepared)
+		}
+		return prepareCronFederationMaterialization(ctx, tx, projectID, binding, fresh, alreadyStored)
 	}
 	events, err := federationFoldEventsForIssues(ctx, tx, projectID, issueScope)
 	if err != nil {
 		return federationMaterialization{}, err
+	}
+	if len(issueScope) > 0 && slices.ContainsFunc(fresh, func(event db.FoldEvent) bool {
+		return db.EventRequiredFeatures(event.Type) == db.CronEventFeature
+	}) {
+		// Scoped history can include observations referencing a touched issue.
+		// Folding them twice is harmless but wasted work, so replace them with
+		// the complete project cron history.
+		events = slices.DeleteFunc(events, func(event db.FoldEvent) bool {
+			return db.EventRequiredFeatures(event.Type) == db.CronEventFeature
+		})
+		cronEvents, err := federationCronFoldEvents(ctx, tx, projectID)
+		if err != nil {
+			return federationMaterialization{}, err
+		}
+		events = append(events, cronEvents...)
 	}
 	if !alreadyStored {
 		events = append(events, fresh...)

@@ -538,6 +538,7 @@ type MutationResponse struct {
 type ListIssuesRequest struct {
 	Cursor       string `query:"cursor,omitempty" doc:"Opaque next_cursor from a matching stable-order page"`
 	IncludeTotal bool   `query:"include_total,omitempty" doc:"Count all matching issues, ignoring cursor and limit"`
+	Compact      bool   `query:"compact,omitempty" doc:"Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read"`
 
 	ProjectID     int64    `path:"project_id" required:"true"`
 	Status        string   `query:"status,omitempty" enum:"open,closed,"`
@@ -565,6 +566,7 @@ type ListAllIssuesRequest struct {
 
 	Cursor       string `query:"cursor,omitempty" doc:"Opaque next_cursor from a matching stable-order page"`
 	IncludeTotal bool   `query:"include_total,omitempty" doc:"Count all matching issues, ignoring cursor and limit"`
+	Compact      bool   `query:"compact,omitempty" doc:"Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read"`
 
 	ProjectID     int64    `query:"project_id,omitempty"`
 	Status        string   `query:"status,omitempty" enum:"open,closed,"`
@@ -628,6 +630,9 @@ type IssueOut struct {
 	// calendar dates, resolved by the same rule as the browser snapshot.
 	ScheduledOnDate string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
 	DeadlineOnDate  string `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
+	// Oversized marks a compact row too large to send whole. It then carries
+	// only the issue's identity and status.
+	Oversized bool `json:"oversized,omitempty,omitzero" doc:"Set on a compact row too large to send whole; the row then carries only the issue's identity and status."`
 }
 
 // PageMetadata distinguishes terminal pages from bounded discovery results.
@@ -1469,7 +1474,8 @@ type SearchHit struct {
 // response is byte-identical to its pre-semantic shape apart from the
 // always-present mode echo.
 type SearchResponse struct {
-	Body struct {
+	EmbeddingsConfigured string `header:"X-Kata-Embeddings-Configured" doc:"Whether the daemon has an embeddings provider configured."`
+	Body                 struct {
 		PageMetadata
 
 		Query          string      `json:"query"`
@@ -1812,3 +1818,32 @@ const (
 const (
 	ProjectMetadataKeyArea = "area"
 )
+
+// LocalEmbeddingsStatus reports daemon-wide search setup and its current work.
+type LocalEmbeddingsStatus struct {
+	Provider        string                   `json:"provider" enum:"none,ollama,built_in,other"`
+	DownloadBytes   int64                    `json:"download_bytes"`
+	OllamaAvailable bool                     `json:"ollama_available"`
+	CanChange       bool                     `json:"can_change"`
+	Job             *LocalEmbeddingsJob      `json:"job,omitempty"`
+	Indexing        *LocalEmbeddingsIndexing `json:"indexing,omitempty"`
+}
+
+// LocalEmbeddingsJob reports the current installation or restart.
+type LocalEmbeddingsJob struct {
+	State      string `json:"state"`
+	Downloaded int64  `json:"downloaded"`
+	Total      int64  `json:"total"`
+	Error      string `json:"error,omitempty"`
+}
+
+// LocalEmbeddingsIndexing reports indexing progress.
+type LocalEmbeddingsIndexing struct {
+	Done       int64  `json:"done"`
+	Total      int64  `json:"total"`
+	ETASeconds *int64 `json:"eta_seconds,omitempty"`
+	Failed     bool   `json:"failed"`
+}
+
+// LocalEmbeddingsResponse carries the daemon-wide setup status.
+type LocalEmbeddingsResponse struct{ Body LocalEmbeddingsStatus }

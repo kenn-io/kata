@@ -232,6 +232,11 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 			return err
 		}
 	}
+	// Schema 50 introduced the table; earlier sources have nothing to export.
+	// Subscriptions travel only in full exports and cutover.
+	if sourceSchemaVersion >= 50 && opts.ProjectID == 0 {
+		return streamExport(enc, KindMCPEventSubscription, db.ExportMCPEventSubscriptionsSQL(ctx, d.QueryContext, db.ExportFilter{IncludeDeleted: opts.IncludeDeleted}))
+	}
 	return nil
 }
 
@@ -279,6 +284,15 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 			continue
 		}
 		if opts.ProjectID != 0 && rec.Key == "project_access_revision" {
+			continue
+		}
+		// The key check travels with the subscription rows: full backups only.
+		if opts.ProjectID != 0 && rec.Key == db.MetaKeyMCPEventsKeyCheck {
+			continue
+		}
+		// The Events scan position never travels: a restored database marks
+		// every active subscription dirty once instead.
+		if rec.Key == db.MetaKeyMCPEventsScanPosition || rec.Key == db.MetaKeyMCPEventsRematch {
 			continue
 		}
 		if opts.ProjectID != 0 && strings.HasPrefix(rec.Key, db.RootKeyTransitionMetadataPrefix) && (selectedProjectUID == "" || !strings.HasPrefix(rec.Key, db.RootKeyTransitionMetadataPrefix+selectedProjectUID+".")) {

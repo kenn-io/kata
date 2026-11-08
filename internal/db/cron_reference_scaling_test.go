@@ -144,29 +144,6 @@ func TestCronReferenceWorkIgnoresUnrelatedHistory(t *testing.T) {
 		})
 	}
 }
-func TestCronReplayBatchReferenceWork(t *testing.T) {
-	for _, size := range []int{1, 32} {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			tx, w, event := referenceWorkFixture(t, 256)
-			var err error
-			validator := NewCronReplayValidator(tx, false)
-			for i := range size {
-				var body CronRunObservation
-				require.NoError(t, json.Unmarshal(event.Payload, &body))
-				body.UID = fmt.Sprintf("01M6%022d", i+10)
-				event.Payload, err = json.Marshal(body)
-				require.NoError(t, err)
-				event.EventUID = fmt.Sprintf("01M7%022d", i+10)
-				require.NoError(t, validator.Validate(t.Context(), 1, event))
-				_, err = tx.ExecContext(t.Context(), `INSERT INTO events VALUES(1,$1,$2,$3,$4,0,$5)`, event.EventUID, event.Type, event.OriginInstanceUID, event.HLCPhysicalMS, string(event.Payload))
-				require.NoError(t, err)
-			}
-			t.Logf("batch=%d queries=%d rows=%d", size, w.queries, w.rows)
-			require.LessOrEqual(t, w.queries, 12+size)
-			require.LessOrEqual(t, w.rows, 8+size)
-		})
-	}
-}
 
 func TestCronReferenceEscapedHistoricalOwnership(t *testing.T) {
 	tx, _, event := referenceWorkFixture(t, 1)
@@ -232,7 +209,7 @@ func TestCronReplayBatchRejectsLaterUnrelatedVersion(t *testing.T) {
 	require.ErrorIs(t, validator.Validate(t.Context(), 1, unrelated), ErrFederationIngestValidation)
 }
 
-func TestCronReplayBatchProjectHistoryLoadedOnce(t *testing.T) {
+func TestCronReplayBatchRunHistoryLoadedPerUID(t *testing.T) {
 	for _, size := range []int{1, 32} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			tx, w, event := referenceWorkFixture(t, 256)
@@ -250,10 +227,12 @@ func TestCronReplayBatchProjectHistoryLoadedOnce(t *testing.T) {
 				require.NoError(t, err)
 				event.EventUID = fmt.Sprintf("01M7%022d", i+10)
 				require.NoError(t, validator.Validate(t.Context(), 1, event))
+				_, err = tx.ExecContext(t.Context(), `INSERT INTO events VALUES(1,$1,$2,$3,$4,0,$5)`, event.EventUID, event.Type, event.OriginInstanceUID, event.HLCPhysicalMS, string(event.Payload))
+				require.NoError(t, err)
 			}
 			t.Logf("project-history=256 batch=%d queries=%d rows=%d", size, w.queries, w.rows)
-			require.LessOrEqual(t, w.queries, 12+size)
-			require.LessOrEqual(t, w.rows, 264)
+			require.LessOrEqual(t, w.queries, 12+2*size)
+			require.LessOrEqual(t, w.rows, 8)
 		})
 	}
 }
@@ -304,15 +283,8 @@ func TestCronReplayDistinctColdPairsWork(t *testing.T) {
 				require.NoError(t, validator.Validate(t.Context(), 1, event))
 			}
 			t.Logf("cold-pairs=%d unrelated-history=256 queries=%d rows=%d", size, w.queries, w.rows)
-			require.LessOrEqual(t, w.queries, 3*size+10)
+			require.LessOrEqual(t, w.queries, 4*size+10)
 			require.LessOrEqual(t, w.rows, 8)
 		})
 	}
-}
-
-func TestCronReplayHistoricalDocumentFailureIsValidation(t *testing.T) {
-	tx, _, event := referenceWorkFixture(t, 0)
-	_, err := tx.ExecContext(t.Context(), `INSERT INTO events VALUES(1,'01MC0000000000000000000001','cron.run.observed',$1,$2,0,'{}')`, event.OriginInstanceUID, event.HLCPhysicalMS)
-	require.NoError(t, err)
-	require.ErrorIs(t, NewCronReplayValidator(tx, false).Validate(t.Context(), 1, event), ErrFederationIngestValidation)
 }

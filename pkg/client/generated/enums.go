@@ -520,6 +520,25 @@ func (l ListGlobalIssueOutVerification) Validate() error {
 	}
 }
 
+type LocalEmbeddingsStatusProvider string
+
+const (
+	BuiltIn                           LocalEmbeddingsStatusProvider = "built_in"
+	LocalEmbeddingsStatusProviderNone LocalEmbeddingsStatusProvider = "none"
+	Ollama                            LocalEmbeddingsStatusProvider = "ollama"
+	Other                             LocalEmbeddingsStatusProvider = "other"
+)
+
+// Validate checks if the LocalEmbeddingsStatusProvider value is valid
+func (l LocalEmbeddingsStatusProvider) Validate() error {
+	switch l {
+	case BuiltIn, LocalEmbeddingsStatusProviderNone, Ollama, Other:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid LocalEmbeddingsStatusProvider value, got: %v", l))
+	}
+}
+
 type MetadataPatchGuardOneOf1IfAbsent bool
 
 const (
