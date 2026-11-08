@@ -1,7 +1,7 @@
 ---
 title: Issue attachments
 description: Attach files through Docbank and view images and videos in Kata.
-last_edited: 2026-11-04
+last_edited: 2026-11-07
 ---
 
 # Issue attachments
@@ -13,7 +13,18 @@ Kata stores one reference per file in issue metadata. [Docbank](https://github.c
 
 Choose a Docbank vault whose contents may be shared with every issue reader and metadata writer served by this daemon. A metadata writer can reference any content version in that vault, and a reader can fetch it through Kata. Folders organize files; use separate vaults for different audiences.
 
-Add this to `<KATA_HOME>/config.toml` on each daemon that uploads or serves files:
+To use a Docbank on the same machine, add this to `<KATA_HOME>/config.toml` on each daemon that uploads or serves files, then restart the daemon:
+
+```toml
+[docbank]
+local = true
+```
+
+When `local = true`, the daemon reads the running Docbank's current address and API key on every request, so a Docbank restart, reboot, or self-update needs no Kata change. Kata uses the Docbank in `DOCBANK_HOME` from the daemon's environment, or `~/.docbank` when unset. That is the vault the `docbank` CLI uses for the same user. When no Docbank is running, the daemon runs `docbank daemon start`, so `docbank` must be on the daemon's `PATH`. `local` needs Docbank 0.16.0 or later, which can prove it holds its key before Kata sends it.
+
+See [Docbank attachments](../reference/configuration.md#docbank-attachments) for how `local` combines with `url`, key settings, and `folder`.
+
+For a Docbank on another host, set a URL and key instead:
 
 ```toml
 [docbank]

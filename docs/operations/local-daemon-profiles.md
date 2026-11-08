@@ -1,7 +1,7 @@
 ---
 title: Local daemon profiles
 description: Keep personal and work spokes separate and recover a stopped spoke without changing its database identity.
-last_edited: 2026-10-17
+last_edited: 2026-11-07
 ---
 
 # Local daemon profiles
@@ -155,7 +155,9 @@ selected home/storage settings. Reserved daemon, PostgreSQL, proxy, and hosted
 variable names cannot be credential references. Other `KATA_` names, including
 `KATA_TEAM_HUB_TOKEN` and `KATA_SHARED_TOKEN`, are allowed. `SSL_CERT_FILE` and
 `SSL_CERT_DIR` pass through to child daemons so private certificate authorities
-remain available for HTTPS connections.
+remain available for HTTPS connections. `DOCBANK_HOME` passes through so a
+profile daemon with `[docbank] local = true` finds the same Docbank vault as the
+`docbank` CLI instead of falling back to `~/.docbank`.
 
 The profile's own auth token is used for its API and identity checks. A catalog
 `token` or `token_env` can select a client credential for identity-token mode;

@@ -270,10 +270,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if err != nil {
 		return nil, fmt.Errorf("kata: Docbank config: %w", err)
 	}
-	var docbankClient *docbank.Client
-	if docbankConfig.Enabled() {
-		docbankClient = docbank.NewClient(docbankConfig.URL, docbankConfig.ResolveKey)
-	}
+	docbankClient := docbank.New(docbankConfig)
 	gitHubSyncConfig, err := resolveGitHubSyncConfig(cfg.GitHubSync)
 	if err != nil {
 		return nil, fmt.Errorf("kata: GitHub sync config: %w", err)

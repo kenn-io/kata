@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 	"uuid"
+
+	"go.kenn.io/kata/internal/config"
 )
 
 // Error exposes only the upstream status, keeping credentials and response details private.
@@ -25,32 +27,55 @@ type Error struct{ Status int }
 
 func (e *Error) Error() string { return "docbank: HTTP " + strconv.Itoa(e.Status) }
 
-// Client uses an endpoint normalized by config and resolves its key per request.
+// Client resolves its endpoint and key on every request.
 type Client struct {
-	base string
-	key  func() (string, error)
-	http *http.Client
+	target func(context.Context) (base, key string, hc *http.Client, err error)
+}
+
+// New returns the client for cfg, or nil when Docbank is not configured.
+// cfg must already be normalized.
+func New(cfg config.DocbankConfig) *Client {
+	switch {
+	case !cfg.Enabled():
+		return nil
+	case cfg.UsesLocal():
+		return NewLocalClient(Local{})
+	default:
+		return NewClient(cfg.URL, cfg.ResolveKey)
+	}
 }
 
 // NewClient uses the normalized endpoint and resolves credentials on each request.
 func NewClient(base string, key func() (string, error)) *Client {
-	return &Client{base: base, key: key, http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	hc := noRedirectClient(nil)
+	return &Client{target: func(context.Context) (string, string, *http.Client, error) {
+		k, err := key()
+		if err != nil || k == "" {
+			return "", "", nil, &Error{Status: 401}
+		}
+		return base, k, hc, nil
+	}}
 }
+
+func noRedirectClient(rt http.RoundTripper) *http.Client {
+	return &http.Client{Transport: rt, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
 func (c *Client) request(ctx context.Context, method, endpoint string, body io.Reader, headers http.Header) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.base+endpoint, body)
+	base, key, hc, err := c.target(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, base+endpoint, body)
 	if err != nil {
 		return nil, &Error{}
-	}
-	key, err := c.key()
-	if err != nil || key == "" {
-		return nil, &Error{Status: 401}
 	}
 	req.Header = headers.Clone()
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
 	req.Header.Set("X-Api-Key", key)
-	resp, err := c.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, &Error{}
 	}
