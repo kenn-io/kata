@@ -17,6 +17,10 @@ export type ListAllIssuesParams = {
    * Count all matching issues, ignoring cursor and limit
    */
   include_total?: boolean
+  /**
+   * Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+   */
+  compact?: boolean
   project_id?: number
   status?: ListAllIssuesStatus
   /**

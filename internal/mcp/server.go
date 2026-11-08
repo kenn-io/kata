@@ -684,6 +684,10 @@ type ListInput struct {
 	Labels        []string `json:"labels,omitempty" jsonschema:"Labels that every issue must have"`
 	ExcludeLabels []string `json:"exclude_labels,omitempty" jsonschema:"Labels that issues must not have"`
 	Metadata      []string `json:"metadata,omitempty" jsonschema:"Metadata filters as key or key=value"`
+
+	// compact asks for rows without bodies and with only the filtered
+	// metadata keys. It is set by callers inside this package, not by tools.
+	compact bool
 }
 
 // ReadyInput filters unblocked open work.

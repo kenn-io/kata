@@ -11,9 +11,43 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/notification"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
+
+// An imported issue can carry a body larger than the inbox's response bound.
+// Its request must still be listed, and pagination must reach the next one.
+func TestInboxPagesPastAnIssueWithAHugeBody(t *testing.T) {
+	session, store := newCoordinationSession(t)
+	project, err := store.ProjectByName(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	request := map[string]any{notification.MetadataKey("reader"): map[string]any{"from": "example-agent", "message": "Review"}}
+	var want []string
+	for i, body := range []string{"short", strings.Repeat("a", 9<<20)} {
+		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprint("Imported ", i), Body: body, Author: "importer"})
+		require.NoError(t, err)
+		callAdministrationTool(t, session, "kata.set_metadata", map[string]any{"ref": issue.ShortID, "patch": request})
+		want = append(want, issue.UID)
+	}
+
+	var got []string
+	cursor := ""
+	for range 4 {
+		arguments := map[string]any{"for": "reader", "limit": 1}
+		if cursor != "" {
+			arguments["cursor"] = cursor
+		}
+		page := callAdministrationTool(t, session, "kata.inbox", arguments)
+		for _, raw := range page["requests"].([]any) {
+			got = append(got, raw.(map[string]any)["issue_uid"].(string))
+		}
+		if cursor, _ = page["next_cursor"].(string); cursor == "" {
+			break
+		}
+	}
+	require.ElementsMatch(t, want, got)
+}
 
 func TestInboxPaginationPreservesEmptyCandidatePage(t *testing.T) {
 	session, _ := newCoordinationSession(t)

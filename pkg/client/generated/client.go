@@ -2499,6 +2499,7 @@ func (c *Client) ListAllIssues(ctx context.Context, options *ListAllIssuesReques
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"compact":       {Style: "form", Explode: &[]bool{false}[0]},
 		"cursor":        {Style: "form", Explode: &[]bool{false}[0]},
 		"include_total": {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":         {Style: "form", Explode: &[]bool{false}[0]},
@@ -5967,6 +5968,7 @@ func (c *Client) ListIssues(ctx context.Context, options *ListIssuesRequestOptio
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"compact":       {Style: "form", Explode: &[]bool{false}[0]},
 		"cursor":        {Style: "form", Explode: &[]bool{false}[0]},
 		"include_total": {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":         {Style: "form", Explode: &[]bool{false}[0]},

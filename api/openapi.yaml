@@ -8344,6 +8344,13 @@ paths:
           schema:
             description: Count all matching issues, ignoring cursor and limit
             type: boolean
+        - description: Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+          explode: false
+          in: query
+          name: compact
+          schema:
+            description: Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+            type: boolean
         - explode: false
           in: query
           name: project_id
@@ -10181,6 +10188,13 @@ paths:
           name: include_total
           schema:
             description: Count all matching issues, ignoring cursor and limit
+            type: boolean
+        - description: Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+          explode: false
+          in: query
+          name: compact
+          schema:
+            description: Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
             type: boolean
         - in: path
           name: project_id

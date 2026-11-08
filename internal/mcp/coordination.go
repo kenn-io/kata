@@ -142,7 +142,9 @@ func (h toolHandlers) inbox(ctx context.Context, request *sdkmcp.CallToolRequest
 	h.options.Client = h.options.Client.WithResponseLimit(8 << 20)
 	var listed IssueListOutput
 	for {
-		_, listed, err = h.list(ctx, request, ListInput{Project: input.Project, Status: "open", Metadata: []string{key}, Limit: limit, Cursor: input.Cursor})
+		// Compact rows carry no body, so an imported issue with a huge one
+		// cannot make even a one-row page too large to read.
+		_, listed, err = h.list(ctx, request, ListInput{Project: input.Project, Status: "open", Metadata: []string{key}, Limit: limit, Cursor: input.Cursor, compact: true})
 		if !errors.Is(err, kataclient.ErrResponseTooLarge) || limit == 1 {
 			break
 		}
