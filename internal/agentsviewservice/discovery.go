@@ -18,10 +18,13 @@ import (
 
 const (
 	// MaxDiscoveryBytes bounds a discovery response.
-	MaxDiscoveryBytes       = 16 << 10
-	MaxSnapshotBytes  int64 = 64 << 20
-	MaxLifetime             = 5 * time.Minute
-	ClockSkew               = 5 * time.Second
+	MaxDiscoveryBytes = 16 << 10
+	// MaxSnapshotBytes bounds a shared snapshot.
+	MaxSnapshotBytes int64 = 64 << 20
+	// MaxLifetime bounds descriptor validity.
+	MaxLifetime = 5 * time.Minute
+	// ClockSkew permits small differences between participant clocks.
+	ClockSkew = 5 * time.Second
 	// MaxRouteNodes allows eight hubs plus a final leaf.
 	MaxRouteNodes = 9
 )

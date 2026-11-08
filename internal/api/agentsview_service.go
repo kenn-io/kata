@@ -2,9 +2,8 @@ package api
 
 import "go.kenn.io/kata/internal/agentsviewwire"
 
-// These wire paths and operation IDs retain their published draft names for
-// route and federation-signature compatibility while Go APIs use AgentsView.
-// AgentsViewServicePath identifies ordinary discovery.
+// AgentsViewServicePath identifies ordinary discovery. The wire path retains
+// its draft name for route and federation-signature compatibility.
 const AgentsViewServicePath = "/api/v1/projects/{project_id}/transcript-service"
 
 // FederationAgentsViewServicePath identifies enrolled relay discovery.
