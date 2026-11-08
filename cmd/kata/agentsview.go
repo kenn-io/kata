@@ -28,7 +28,7 @@ func newAgentsViewCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "target <issue-ref>",
 		Short: "inspect Kata's configured root AgentsView target (Kata-only command)",
-		Long:  "Inspect Kata's root-owned AgentsView policy through the selected project's negotiated relay route. This is a Kata-only routing inspection; the AgentsView CLI has no target command. It reads no session or archive, contacts no receiver, and uploads nothing. Configured policy is not proof of receiver availability or indexing.",
+		Long:  "This command is available only in Kata. Inspect the root-owned AgentsView policy through the selected project's negotiated relay route. It reads no session or archive, contacts no receiver, and uploads nothing. Configured policy is not proof of receiver availability or indexing.",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runAgentsViewTarget,
 	})
