@@ -3032,6 +3032,28 @@ func TestFederationIngestInvalidBatchReturnsErrorAndDoesNotBroadcast(t *testing.
 	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "invalid ingest should not broadcast") //nolint:kennlint // deadlinetest: bounded absence checks that invalid ingest should not broadcast
 }
 
+func TestFederationIngestMalformedWorkflowReturnsValidation(t *testing.T) {
+	env := testenv.New(t)
+	project := createFederatedHubProject(t, env, "hub")
+	created, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID:        &project.ID, Capabilities: "push", Actor: "tester",
+	})
+	require.NoError(t, err)
+	event := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
+	event.Type = "cron.workflow.created"
+	event.Payload = jsontext.Value(`{"definition":{"steps":[{"kind":null}]}}`)
+	body := federationIngestBody(federationIngestEnvelope(t, 18, event))
+	before := countEvents(t, env.DB)
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/events:ingest", body, bearer(created.Token))
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, "response: %s", raw)
+	var envelope api.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(raw, &envelope))
+	require.Equal(t, "validation", envelope.Error.Code)
+	require.Equal(t, before, countEvents(t, env.DB))
+}
+
 func TestFederationIngestRejectsInvalidSourceCursor(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()

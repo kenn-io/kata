@@ -60,3 +60,34 @@ func TestCronHistoryIsNotRevalidatedAgainstCurrentRules(t *testing.T) {
 	record.DeletedAt = nil
 	require.NoError(t, ValidateCronRecord(&record), "a backup taken under older rules must restore its live definitions")
 }
+
+func TestCronWorkflowBackupRejectsReservedKind(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	record := CronWorkflowExport{
+		ID: 1, ProjectID: 1, UID: newUID(t), Name: "Review", DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: now.UnixMilli(), OriginInstanceUID: newUID(t)}, Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "first", Kind: "argv"}}},
+	}
+	project := &ProjectExport{ID: 1, UID: newUID(t), Name: "example-project", CreatedAt: now.Format(time.RFC3339Nano), Revision: 1}
+	records := []ImportRecord{project, &record} // Projection-only backup, without a cron event.
+	for _, deleted := range []bool{false, true} {
+		if deleted {
+			record.DeletedAt = &now
+		}
+		require.Error(t, ValidateCronRecord(&record), "reserved workflow must not enter via a backup projection")
+		require.Error(t, ValidateImportReplay(records, ImportOptions{}))
+	}
+	record.Definition.Steps[0].Kind = "command"
+	require.NoError(t, ValidateCronRecord(&record), "historical content is not subject to current authoring rules")
+	require.NoError(t, ValidateImportReplay(records, ImportOptions{}))
+}
+
+func TestAcceptedWorkflowEventsRejectNullShapes(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	projectUID := newUID(t)
+	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`} {
+		payload, err := json.Marshal(CronDefinitionEvent{UID: newUID(t), ProjectUID: projectUID, Name: "Review", Definition: jsontext.Value(document), Author: "worker", CreatedAt: now, UpdatedAt: now})
+		require.NoError(t, err)
+		event := RemoteEvent{EventUID: newUID(t), OriginInstanceUID: newUID(t), ProjectUID: projectUID, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now, Payload: payload}
+		require.ErrorIs(t, ValidateAcceptedCronEvent(event), ErrFederationIngestValidation, "null shape must not be admitted before feature classification: %s", document)
+	}
+}

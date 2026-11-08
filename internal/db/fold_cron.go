@@ -190,9 +190,9 @@ func validateCronEvent(event RemoteEvent, applyRules bool) error {
 }
 
 // validateCronDefinitionDocument applies the current rules to a document
-// unless decodeOnly is set. A tombstone keeps whatever document it had, so the
-// deletion of an older definition that today's rules reject still propagates;
-// it only has to decode.
+// unless decodeOnly is set. A tombstone keeps its older document and need not
+// satisfy today's authoring rules. It still must decode: reserved argv workflow
+// kinds and null workflow shapes are rejected, including in tombstones.
 func validateCronDefinitionDocument(job, decodeOnly bool, document []byte) error {
 	var err error
 	switch {

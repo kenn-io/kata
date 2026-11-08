@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -22,6 +23,9 @@ func ValidateCronRecord(record ImportRecord) error {
 	case *CronWorkflowExport:
 		if value == nil {
 			return fmt.Errorf("nil cron workflow")
+		}
+		if err := cron.CheckWorkflowSupported(value.Definition); err != nil {
+			return err
 		}
 		return validateCronDefinition(value.CronDefinition)
 	case *CronRunExport:
