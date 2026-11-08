@@ -153,11 +153,11 @@ func loadAgentsViewClose(ctx context.Context, cfg ServerConfig, issue db.Issue, 
 		return agentsviewrelay.Association{}, api.NewError(409, "agentsview_close_changed", "original close is no longer current", "", nil)
 	}
 	events, err := cfg.DB.EventsByUIDs(ctx, issue.ProjectID, []string{c.CloseEventUID})
-	if errors.Is(err, db.ErrNotFound) || (err == nil && len(events) != 1) {
-		return agentsviewrelay.Association{}, api.NewError(409, "close_not_at_origin", "original close is not available here", "retry explicitly after normal replication", nil)
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return agentsviewrelay.Association{}, internalAPIError(err)
+	}
+	if events == nil || len(events) != 1 || errors.Is(err, db.ErrNotFound) {
+		return agentsviewrelay.Association{}, api.NewError(409, "close_not_at_origin", "original close is not available here", "retry explicitly after normal replication", nil)
 	}
 	if issue.Status != "closed" {
 		return agentsviewrelay.Association{}, api.NewError(409, "agentsview_close_changed", "original close is no longer current", "", nil)
