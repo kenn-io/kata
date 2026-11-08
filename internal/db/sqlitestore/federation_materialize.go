@@ -95,7 +95,7 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		return federationMaterialization{}, err
 	}
 	if cronOnly {
-		return prepareCronPullMaterialization(ctx, tx, projectID, binding)
+		return prepareCronPullMaterialization(ctx, tx, projectID, binding, prepared)
 	}
 	events, err := federationFoldEventsForIssues(ctx, tx, projectID, issueScope)
 	if err != nil {

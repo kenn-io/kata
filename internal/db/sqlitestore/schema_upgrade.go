@@ -19,6 +19,7 @@ var indexOnlyUpgrades = []struct {
 	{45, 46, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}},
 	{46, 47, []string{"idx_issues_ready_updated"}},
 	{47, 48, []string{"idx_events_moved_from_id"}},
+	{48, 49, []string{"idx_events_cron_run_uid"}},
 }
 
 // UpgradesInPlace reports whether index-only steps reach the current schema.

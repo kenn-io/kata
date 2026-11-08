@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-11-06
+last_edited: 2026-11-07
 ---
 
 # Backup and restore
@@ -55,7 +55,7 @@ damaged database.
 
 ## Slow or interrupted upgrade startup
 
-SQLite index-only upgrades from schemas 41 through 47 to 48 add the missing
+SQLite index-only upgrades from schemas 41 through 48 to 49 add the missing
 indexes inside the existing database in one transaction. Allow free space for
 the new indexes, their WAL pages, and temporary sort files. These upgrades keep
 no `kata.db.bak.*` backup. An interrupted or failed transaction leaves the old
