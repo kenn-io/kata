@@ -3590,6 +3590,9 @@ components:
           type: object
         occurrence_key:
           type: string
+        oversized:
+          description: Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+          type: boolean
         owner:
           type: string
         parent:
@@ -4226,6 +4229,9 @@ components:
           type: object
         occurrence_key:
           type: string
+        oversized:
+          description: Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+          type: boolean
         owner:
           type: string
         parent:
@@ -5684,6 +5690,9 @@ components:
           type: object
         occurrence_key:
           type: string
+        oversized:
+          description: Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+          type: boolean
         owner:
           type: string
         parent:

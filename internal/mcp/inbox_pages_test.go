@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,63 @@ import (
 	"go.kenn.io/kata/internal/notification"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
+
+// Imports can also make a title or the request itself larger than the inbox's
+// response bound. Such a candidate is named instead of listed, and pagination
+// still reaches the requests after it.
+func TestInboxPagesPastOversizedImportedRequests(t *testing.T) {
+	session, store := newCoordinationSession(t)
+	project, err := store.ProjectByName(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	huge := strings.Repeat("a", 9<<20)
+	request := func(message string) map[string]jsontext.Value {
+		value, err := json.Marshal(map[string]string{"from": "example-agent", "message": message})
+		require.NoError(t, err)
+		return map[string]jsontext.Value{notification.MetadataKey("reader"): value}
+	}
+	var listed string
+	var oversized []string
+	for i, tc := range []struct {
+		title   string
+		message string
+	}{{"Readable", "Review"}, {huge, "Review"}, {"Huge request", huge}} {
+		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: tc.title, Author: "importer"})
+		require.NoError(t, err, i)
+		_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "importer", Patch: request(tc.message)})
+		require.NoError(t, err, i)
+		if i == 0 {
+			listed = issue.UID
+		} else {
+			oversized = append(oversized, project.Name+"#"+issue.ShortID)
+		}
+	}
+
+	var got, named []string
+	cursor := ""
+	for range 6 {
+		arguments := map[string]any{"for": "reader", "limit": 1}
+		if cursor != "" {
+			arguments["cursor"] = cursor
+		}
+		page := callAdministrationTool(t, session, "kata.inbox", arguments)
+		for _, raw := range page["requests"].([]any) {
+			got = append(got, raw.(map[string]any)["issue_uid"].(string))
+		}
+		for _, raw := range asSlice(page["oversized"]) {
+			named = append(named, raw.(string))
+		}
+		if cursor, _ = page["next_cursor"].(string); cursor == "" {
+			break
+		}
+	}
+	require.Equal(t, []string{listed}, got)
+	require.ElementsMatch(t, oversized, named)
+}
+
+func asSlice(v any) []any {
+	s, _ := v.([]any)
+	return s
+}
 
 // An imported issue can carry a body larger than the inbox's response bound.
 // Its request must still be listed, and pagination must reach the next one.

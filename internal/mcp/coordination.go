@@ -51,6 +51,7 @@ type InboxOutput struct {
 	NextCursor *string        `json:"next_cursor,omitempty"`
 	Recipient  string         `json:"recipient"`
 	Requests   []InboxRequest `json:"requests"`
+	Oversized  []string       `json:"oversized,omitempty" jsonschema:"Qualified refs of candidate issues too large to read here, such as imports with huge fields"`
 	Truncated  bool           `json:"truncated" jsonschema:"More candidate issues remain; follow next_cursor until absent, including empty filtered pages"`
 }
 
@@ -155,6 +156,10 @@ func (h toolHandlers) inbox(ctx context.Context, request *sdkmcp.CallToolRequest
 	}
 	output := InboxOutput{Recipient: recipient, Requests: make([]InboxRequest, 0, len(listed.Issues)), Truncated: listed.Truncated, NextCursor: listed.NextCursor}
 	for _, issue := range listed.Issues {
+		if issue.oversized {
+			output.Oversized = append(output.Oversized, issue.QualifiedRef)
+			continue
+		}
 		// Skip malformed requests the same way the CLI inbox does.
 		value, valid := parseInboxNotification(issue.metadata[key])
 		if !valid {

@@ -609,8 +609,10 @@ permissions, independent of the cursor and page size.
 
 `compact=true` returns each row without its `body` and with only the metadata
 keys that `meta` filters name. Use it when only those keys matter: an imported
-issue can carry a body larger than a client is willing to read, and a compact
-page stays small enough to reach the next cursor. It requires API 0.43.0;
+issue can carry a body, title, or metadata value larger than a client is
+willing to read. A compact row larger than 64 KiB carries only the issue's
+identity and status, with `oversized: true`, so a page of up to 100 compact
+rows stays under 8 MiB and still reaches the next cursor. It requires API 0.43.0;
 older daemons ignore it and return full rows.
 
 Use `priority=none` for issues with unset priority. It is mutually exclusive

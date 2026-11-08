@@ -872,6 +872,8 @@ type IssueSummary struct {
 	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`
 	updatedAt           time.Time
 	metadata            map[string]any
+	// oversized marks a compact row the daemon sent as identity only.
+	oversized bool
 }
 
 // IssueListOutput is a bounded collection without issue bodies or comments.
