@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
@@ -298,17 +297,15 @@ func TestAgentsViewForwardingBoundsInjectedHeadersAndRejectsCompressedOrOversize
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		switch responseKind.Load() {
 		case 0:
-			var compressed bytes.Buffer
-			writer := gzip.NewWriter(&compressed)
-			_, _ = writer.Write(discovery)
-			require.NoError(t, writer.Close())
 			w.Header().Set("Content-Encoding", "gzip")
-			_, _ = w.Write(compressed.Bytes())
+			_, _ = w.Write(discovery)
 		case 1:
 			w.Header().Set("X-Oversized", strings.Repeat("x", agentsViewMaxHeaderBytes+1))
 			_, _ = w.Write(discovery)
-		default:
+		case 2:
 			_, _ = w.Write(oversized)
+		default:
+			_, _ = w.Write(discovery)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -317,6 +314,9 @@ func TestAgentsViewForwardingBoundsInjectedHeadersAndRejectsCompressedOrOversize
 	relay := db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: "00000000000000000000000004", ResetEpoch: 3}
 	public := key.Public().(ed25519.PublicKey)
 	pin := db.RootKeyPin{ProjectUID: project, AuthorityUID: root, KeyID: descriptor.KeyID, PublicKey: public}
+	responseKind.Store(3)
+	_, err = fetchAgentsViewService(t.Context(), ServerConfig{}, binding, credential, project, pin, []string{root}, relay, "00000000000000000000000003")
+	require.NoError(t, err)
 	for _, kind := range []int32{0, 2} {
 		responseKind.Store(kind)
 		_, err := fetchAgentsViewService(t.Context(), ServerConfig{}, binding, credential, project, pin, []string{root}, relay, "00000000000000000000000003")

@@ -96,7 +96,7 @@ func descriptorShape(d Descriptor, now time.Time) error {
 		serviceErr != nil || len(service) != sha256.Size || strings.ToLower(d.ServiceID) != d.ServiceID ||
 		d.IssuedAt <= 0 || d.ExpiresAt <= d.IssuedAt || d.ExpiresAt-d.IssuedAt > int64(MaxLifetime/time.Second) ||
 		d.IssuedAt > now.Add(ClockSkew).Unix() || d.ExpiresAt < now.Add(-ClockSkew).Unix() {
-		return errors.New("invalid or expired AgentsView service descriptor")
+		return errors.New("AgentsView destination invalid or expired")
 	}
 	return nil
 }
@@ -139,7 +139,7 @@ func VerifyDescriptor(d Descriptor, pin TrustedRoot, now time.Time) error {
 func validateRoute(d Discovery, project string, path []string) error {
 	if len(path) == 0 || len(path) > MaxRouteNodes || len(path) != len(d.Route) ||
 		d.Descriptor.ProjectUID != project || d.Descriptor.AuthorityUID != path[0] || d.InstanceUID != path[len(path)-1] {
-		return errors.New("AgentsView service route identity mismatch")
+		return errors.New("AgentsView destination mismatch")
 	}
 	seen := make(map[string]bool, len(path))
 	for i, hop := range d.Route {
@@ -182,7 +182,7 @@ func ParseDiscovery(raw []byte, project string, path []string, now time.Time) (D
 		return Discovery{}, errors.New("invalid AgentsView service response")
 	}
 	if len(d.Descriptor.Signature) != ed25519.SignatureSize {
-		return Discovery{}, errors.New("invalid AgentsView service signature size")
+		return Discovery{}, errors.New("invalid AgentsView response")
 	}
 	if err := descriptorShape(d.Descriptor, now); err != nil {
 		return Discovery{}, err

@@ -74,7 +74,7 @@ func TestAgentsViewTargetRejectsCompressedResponse(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	_, err = fetchAgentsViewTarget(t.Context(), server.Client(), server.URL, 7, "00000000000000000000000001")
-	require.Error(t, err)
+	require.ErrorContains(t, err, "compressed service response rejected")
 }
 
 func TestAgentsViewTargetBoundsResponseHeaders(t *testing.T) {
