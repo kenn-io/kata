@@ -36,6 +36,24 @@ const (
 	agentsViewRequestTimeout = 10 * time.Second
 )
 
+// withAgentsViewDiscoveryBudget starts the budget before host and federation
+// authorization. ServeMux applies the same path and method matching as the API.
+func withAgentsViewDiscoveryBudget(next http.Handler) http.Handler {
+	matcher := http.NewServeMux()
+	matcher.HandleFunc(http.MethodGet+" "+api.AgentsViewServicePath, func(http.ResponseWriter, *http.Request) {})
+	matcher.HandleFunc(http.MethodGet+" "+api.FederationAgentsViewServicePath, func(http.ResponseWriter, *http.Request) {})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, pattern := matcher.Handler(r)
+		if pattern == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), agentsViewRequestTimeout)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func tryBeginAgentsViewTransport(ctx context.Context, cfg ServerConfig, projectID int64) (func(), error) {
 	finish, err := federationcoord.TryBeginSync(
 		ctx,

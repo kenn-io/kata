@@ -441,7 +441,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 		base := s.withFederationSigning(s.baseHandler, true)
 		base = withProjectAuthorization(s.cfg.DB, s.cfg.HostAccess != nil, s.cfg.TrustCallerAuthentication,
 			s.authPolicy.SelfAuthenticatedRoutes, s.noProjectDataRoutes, base)
-		return base, nil
+		return withAgentsViewDiscoveryBudget(base), nil
 	}
 	base := s.baseHandler
 	if base == nil {
@@ -470,7 +470,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return handler, nil
+	return withAgentsViewDiscoveryBudget(handler), nil
 }
 
 // API returns the underlying huma.API for handler registration in tests.

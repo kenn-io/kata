@@ -119,6 +119,9 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			return
 		}
 		deadline := time.Now().Add(60 * time.Second)
+		if earlier, ok := r.Context().Deadline(); ok && earlier.Before(deadline) {
+			deadline = earlier
+		}
 		_ = http.NewResponseController(w).SetReadDeadline(deadline)
 		_ = http.NewResponseController(w).SetWriteDeadline(deadline)
 		ctx, cancel := context.WithDeadline(r.Context(), deadline)

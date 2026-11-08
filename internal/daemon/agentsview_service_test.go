@@ -96,11 +96,25 @@ func TestAgentsViewDiscoveryBoundsFinalHostAuthorization(t *testing.T) {
 	server.Handler().ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.GreaterOrEqual(t, len(deadlines), 2)
-	var final bool
 	for len(deadlines) > 0 {
-		final = <-deadlines
+		require.True(t, <-deadlines, "all host authorization calls must have a deadline")
 	}
-	require.True(t, final, "final host authorization must have a deadline")
+}
+
+func TestAgentsViewDiscoveryBudgetCoversBothRoutes(t *testing.T) {
+	for _, path := range []string{"/api/v1/projects/7/transcript-service", "/api/v1/projects/7/federation/transcript-service"} {
+		t.Run(path, func(t *testing.T) {
+			called := false
+			handler := withAgentsViewDiscoveryBudget(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				called = true
+				deadline, ok := r.Context().Deadline()
+				require.True(t, ok)
+				require.LessOrEqual(t, time.Until(deadline), agentsViewRequestTimeout)
+			}))
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+			require.True(t, called)
+		})
+	}
 }
 
 func TestAgentsViewDiscoveryRequiresExistingRootAndExplicitPolicy(t *testing.T) {

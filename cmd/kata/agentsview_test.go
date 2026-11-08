@@ -78,9 +78,11 @@ func TestAgentsViewTargetRejectsCompressedResponse(t *testing.T) {
 }
 
 func TestAgentsViewTargetBoundsResponseHeaders(t *testing.T) {
+	d, err := json.Marshal(cliAgentsViewDiscovery(t))
+	require.NoError(t, err)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Oversized", strings.Repeat("x", 16<<10+1))
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(d)
 	}))
 	t.Cleanup(server.Close)
 	client, err := httpClientForResolvedWithOpts(t.Context(), daemonclient.ResolvedDaemon{BaseURL: server.URL, Direct: true}, daemonclient.Opts{
