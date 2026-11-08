@@ -19,6 +19,35 @@ import (
 )
 
 func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
+	huma.Register(humaAPI, huma.Operation{OperationID: "getProjectNotificationActor", Method: http.MethodGet, Path: "/api/v1/projects/{project_id}/notifications/actor"}, func(ctx context.Context, in *api.ProjectNotificationActorRequest) (*api.ProjectNotificationActorResponse, error) {
+		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+
+		requestedActor := in.RequestedActor
+		if principal, ok := PrincipalFromContext(ctx); ok {
+			requestedActor = principal.Actor
+		}
+		if err := validateActor(requestedActor); err != nil {
+			return nil, err
+		}
+
+		binding, err := cfg.DB.FederationBindingByProject(ctx, project.ID)
+		if errors.Is(err, db.ErrNotFound) {
+			binding = db.FederationBinding{}
+		} else if err != nil {
+			return nil, internalAPIError(err)
+		}
+		actor := notificationMutationActor(requestedActor, notificationActorBinding{
+			role: binding.Role, actor: binding.Actor, enabled: binding.Enabled,
+			pushEnabled: binding.PushEnabled, hasRelay: binding.RelayConfig != nil,
+		})
+		out := &api.ProjectNotificationActorResponse{}
+		out.Body.EffectiveActor = actor
+		return out, nil
+	})
+
 	huma.Register(humaAPI, huma.Operation{OperationID: "notifyIssue", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/issues/{ref}/notifications"}, withResolvedProject(cfg, func(ctx context.Context, in *api.NotifyIssueRequest) (*api.NotifyIssueResponse, error) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {

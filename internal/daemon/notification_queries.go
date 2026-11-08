@@ -41,29 +41,43 @@ func notificationIssueAllowed(allowed map[int64]bool, id int64) bool {
 	return allowed == nil || allowed[id]
 }
 
+type notificationActorBinding struct {
+	role        db.FederationRole
+	actor       string
+	enabled     bool
+	pushEnabled bool
+	hasRelay    bool
+}
+
+func notificationMutationActor(requestedActor string, binding notificationActorBinding) string {
+	if binding.role == db.FederationRoleSpoke && binding.enabled && binding.pushEnabled && !binding.hasRelay {
+		if actor := strings.TrimSpace(binding.actor); actor != "" {
+			return actor
+		}
+	}
+	return requestedActor
+}
+
 // notificationMutationActorTx resolves the actor used by local mutations on
-// a push-enabled spoke while the notification patch transaction is open.
-// Event insertion applies the same binding in that transaction.
+// a project while the notification patch transaction is open. Event insertion
+// applies the same binding in that transaction.
 func notificationMutationActorTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
 	requestedActor string,
 ) (string, error) {
-	var actor string
-	err := tx.QueryRowContext(ctx, `SELECT COALESCE(bound_actor, '') FROM federation_bindings
-WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1 AND relay_config IS NULL`,
-		projectID, string(db.FederationRoleSpoke)).Scan(&actor)
+	var binding notificationActorBinding
+	err := tx.QueryRowContext(ctx, `SELECT role, COALESCE(bound_actor, ''), enabled, push_enabled, relay_config IS NOT NULL
+FROM federation_bindings WHERE project_id=$1`, projectID).Scan(
+		&binding.role, &binding.actor, &binding.enabled, &binding.pushEnabled, &binding.hasRelay)
 	if errors.Is(err, sql.ErrNoRows) {
 		return requestedActor, nil
 	}
 	if err != nil {
 		return "", err
 	}
-	if actor = strings.TrimSpace(actor); actor != "" {
-		return actor, nil
-	}
-	return requestedActor, nil
+	return notificationMutationActor(requestedActor, binding), nil
 }
 
 // Pin a selected comment to its currently authorized issue. B's comment

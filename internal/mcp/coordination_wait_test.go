@@ -23,6 +23,8 @@ func coordinationWaitSession(t *testing.T, snapshot func(*http.Request) map[stri
 		switch r.URL.Path {
 		case "/api/v1/projects":
 			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/projects/1/notifications/actor":
+			writeJSON(w, map[string]any{"effective_actor": "bound-actor"})
 		case "/api/v1/instance":
 			writeJSON(w, map[string]any{"instance_uid": "01HAAAAAAAAAAAAAAAAAAAAAAA", "version": "test", "auth": map[string]any{"kind": "token", "actor": "bound-actor"}})
 		default:
@@ -117,6 +119,8 @@ func TestMCPCoordinationWaitReplyNormalizesDefaultIdentity(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/projects":
 			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/projects/1/notifications/actor":
+			writeJSON(w, map[string]any{"effective_actor": r.URL.Query().Get("requested_actor")})
 		case "/api/v1/instance":
 			writeJSON(w, map[string]any{"instance_uid": "01HAAAAAAAAAAAAAAAAAAAAAAA", "auth": map[string]any{"kind": "token"}})
 		default:
@@ -239,12 +243,20 @@ func TestMCPCoordinationWaitValidation(t *testing.T) {
 func TestMCPCoordinationWaitDeadlineCoversReplyIdentityDiscovery(t *testing.T) {
 	var reached atomic.Bool
 	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/instance" {
+		if r.URL.Path == "/api/v1/projects" {
+			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+			return
+		}
+		if r.URL.Path == "/api/v1/projects/1/notifications/actor" {
 			reached.Store(true)
 			<-r.Context().Done()
 			return
 		}
-		writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		if r.URL.Path == "/api/v1/instance" {
+			writeJSON(w, map[string]any{"instance_uid": "01HAAAAAAAAAAAAAAAAAAAAAAA", "auth": map[string]any{"kind": "token", "actor": "worker"}})
+			return
+		}
+		writeJSON(w, map[string]any{"issue": issueJSON(1, "spoke-project", "abc1")})
 	})
 	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
 	start := time.Now()
@@ -252,6 +264,185 @@ func TestMCPCoordinationWaitDeadlineCoversReplyIdentityDiscovery(t *testing.T) {
 	require.True(t, reached.Load())
 	require.Equal(t, "timeout", out["reason"])
 	require.Less(t, time.Since(start), 3*time.Second)
+}
+
+func TestMCPCoordinationWaitParentCancellationStopsActorResolution(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	cancelled := make(chan struct{})
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/projects/1/notifications/actor":
+			entered <- struct{}{}
+			<-r.Context().Done()
+			close(cancelled)
+		case "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			writeJSON(w, map[string]any{"issue": issue, "labels": []any{}, "links": []any{}, "comments": []any{}})
+		default:
+			t.Errorf("unexpected request before actor resolution: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+			Name: "kata.wait", Arguments: map[string]any{"refs": []string{"abc1"}, "until": "reply", "timeout_seconds": 5},
+		})
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reply wait never resolved its project actor")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("parent cancellation did not stop actor resolution")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("actor request did not observe parent cancellation")
+	}
+}
+
+func TestMCPCoordinationWaitReplyResolvesActorPerProject(t *testing.T) {
+	actors := map[string]string{"/api/v1/projects/1/notifications/actor": "first-bound-actor", "/api/v1/projects/2/notifications/actor": "second-bound-actor"}
+	lookups := map[int64]*atomic.Int64{1: new(atomic.Int64), 2: new(atomic.Int64)}
+	shows := map[string]int{}
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(w, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "first-project"),
+				projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "second-project"),
+			}})
+		case "/api/v1/instance":
+			writeJSON(w, map[string]any{"instance_uid": "01HAAAAAAAAAAAAAAAAAAAAAAA", "auth": map[string]any{"kind": "token", "actor": "global-actor"}})
+		case "/api/v1/projects/1/notifications/actor", "/api/v1/projects/2/notifications/actor":
+			projectID := int64(1)
+			if strings.Contains(r.URL.Path, "/2/") {
+				projectID = 2
+			}
+			lookups[projectID].Add(1)
+			writeJSON(w, map[string]any{"effective_actor": actors[r.URL.Path]})
+		case "/api/v1/projects/1/issues/abc1", "/api/v1/projects/2/issues/def2":
+			projectID, name, ref, actor := int64(1), "first-project", "abc1", "first-bound-actor"
+			if strings.Contains(r.URL.Path, "/2/") {
+				projectID, name, ref, actor = 2, "second-project", "def2", "second-bound-actor"
+			}
+			shows[ref]++
+			message := "before"
+			if shows[ref] > 1 {
+				message = "reply arrived"
+			}
+			issue := issueJSON(projectID, name, ref)
+			issue["metadata"] = map[string]any{notification.MetadataKey(actor + "/worker"): map[string]any{"from": "reviewer", "message": message}}
+			writeJSON(w, map[string]any{"issue": issue, "labels": []any{}, "links": []any{}, "comments": []any{}})
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "first-project", Actor: "startup-actor", Teammate: "worker", Version: "test"})
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{
+		"refs": []string{"first-project#abc1", "second-project#def2"}, "until": "reply", "timeout_seconds": 3,
+	})
+	require.Equal(t, "matched", out["reason"])
+	require.GreaterOrEqual(t, lookups[1].Load(), int64(1))
+	require.GreaterOrEqual(t, lookups[2].Load(), int64(1))
+	require.GreaterOrEqual(t, shows["abc1"], 2)
+	require.GreaterOrEqual(t, shows["def2"], 2)
+}
+
+func TestMCPCoordinationWaitExplicitRecipientSkipsActorResolution(t *testing.T) {
+	var lookups atomic.Int64
+	var shows atomic.Int64
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/projects/1/notifications/actor":
+			lookups.Add(1)
+			writeJSON(w, map[string]any{"effective_actor": "unexpected"})
+		case "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			message := "before"
+			if shows.Add(1) > 1 {
+				message = "reply arrived"
+			}
+			issue["metadata"] = map[string]any{notification.MetadataKey("explicit-recipient/worker"): map[string]any{"from": "reviewer", "message": message}}
+			writeJSON(w, map[string]any{"issue": issue, "labels": []any{}, "links": []any{}, "comments": []any{}})
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "startup-actor", Teammate: "worker", Version: "test"})
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{
+		"refs": []string{"abc1"}, "until": "reply", "for": "explicit-recipient/worker", "timeout_seconds": 2,
+	})
+	require.Equal(t, "matched", out["reason"])
+	require.Zero(t, lookups.Load())
+}
+
+func TestMCPCoordinationWaitOldDaemonRequiresExplicitRecipient(t *testing.T) {
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			writeJSON(w, map[string]any{"issue": issue, "labels": []any{}, "links": []any{}, "comments": []any{}})
+		case "/api/v1/projects/1/notifications/actor":
+			http.NotFound(w, r)
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "startup-actor", Version: "test"})
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.wait", Arguments: map[string]any{"refs": []string{"abc1"}, "until": "reply", "timeout_seconds": 2},
+	})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, string(mustJSON(t, result)), "explicit for")
+}
+
+func TestMCPCoordinationWaitPreservesStructuredActorReadNotFound(t *testing.T) {
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			writeJSON(w, map[string]any{"issue": issue, "labels": []any{}, "links": []any{}, "comments": []any{}})
+		case "/api/v1/projects/1/notifications/actor":
+			w.WriteHeader(http.StatusNotFound)
+			writeJSON(w, map[string]any{"status": http.StatusNotFound, "error": map[string]any{"code": "not_found", "message": "resource not found"}})
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "startup-actor", Version: "test"})
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.wait", Arguments: map[string]any{"refs": []string{"abc1"}, "until": "reply", "timeout_seconds": 2},
+	})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	text := string(mustJSON(t, result))
+	require.Contains(t, text, "resource not found")
+	require.NotContains(t, text, "explicit for")
 }
 
 func TestMCPCoordinationWaitParentCancellation(t *testing.T) {

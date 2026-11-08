@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -12,11 +13,13 @@ import (
 
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/notification"
+	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type waitTarget struct {
 	uid         string
+	projectID   int64
 	baseline    string
 	baselineSet bool
 	state       WaitState
@@ -77,25 +80,15 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		}
 		return nil, WaitOutput{}, err
 	}
-	recipient := input.For
-	if until == "reply" {
-		if recipient == "" {
-			instance, err := h.options.Client.Instance(waitContext)
-			if err != nil {
-				return finishError(err)
-			}
-			actor := h.options.Actor
-			if instance.Auth.Actor != nil && *instance.Auth.Actor != "" {
-				actor = *instance.Auth.Actor
-			}
-			recipient = notification.RecipientOf(notification.Identity{Actor: actor, Teammate: h.options.Teammate})
-		}
+	explicitRecipient := input.For
+	if until == "reply" && explicitRecipient != "" {
 		var err error
-		recipient, err = notification.NormalizeRecipient(recipient)
+		explicitRecipient, err = notification.NormalizeRecipient(explicitRecipient)
 		if err != nil {
 			return nil, WaitOutput{}, err
 		}
 	}
+	recipientsByProject := make(map[int64]string)
 	for {
 		states := make([]WaitState, 0, len(input.Refs))
 		matches := 0
@@ -132,6 +125,40 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				case state.Status == "closed":
 					state.Matched, state.Reason = true, "closed"
 				case until == "reply":
+					recipient := explicitRecipient
+					if recipient == "" {
+						if target.projectID != 0 && target.projectID != project.ID {
+							target.baselineSet = false
+						}
+						target.projectID = project.ID
+						recipient = recipientsByProject[project.ID]
+						if recipient == "" {
+							requestedActor := h.options.Actor
+							resolved, err := h.options.Client.GetProjectNotificationActor(waitContext, &generated.GetProjectNotificationActorRequestOptions{
+								PathParams: &generated.GetProjectNotificationActorPath{ProjectID: project.ID},
+								Query:      &generated.GetProjectNotificationActorQuery{RequestedActor: &requestedActor},
+							})
+							if err != nil {
+								if notificationActorLookupUnsupported(err) {
+									return nil, WaitOutput{}, errors.New("daemon does not support project notification actor lookup; use an explicit for recipient with until=reply")
+								}
+								return finishError(err)
+							}
+							recipient = notification.RecipientOf(notification.Identity{
+								Actor: resolved.EffectiveActor, Teammate: h.options.Teammate,
+							})
+							recipient, err = notification.NormalizeRecipient(recipient)
+							if err != nil {
+								return nil, WaitOutput{}, err
+							}
+							recipientsByProject[project.ID] = recipient
+						}
+					} else if target.projectID != 0 && target.projectID != project.ID {
+						target.baselineSet = false
+					}
+					if explicitRecipient != "" {
+						target.projectID = project.ID
+					}
 					raw, err := json.Marshal(shown.Issue.Metadata[notification.MetadataKey(recipient)])
 					if err != nil {
 						return nil, WaitOutput{}, err
@@ -171,4 +198,12 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+func notificationActorLookupUnsupported(err error) bool {
+	if kataclient.StatusCode(err) != http.StatusNotFound {
+		return false
+	}
+	_, structured := errors.AsType[generated.ErrorEnvelope](err)
+	return !structured
 }
