@@ -2972,8 +2972,12 @@ describe('App', () => {
         }
         if (target.pathname === '/api/v1/ui/snapshot') {
           snapshotRequests.push(request)
+          const etag = snapshotRequests.length === 1 ? '"snapshot-1"' : '"snapshot-2"'
+          if (request.headers.get('If-None-Match') === etag) {
+            return new Response(null, { status: 304 })
+          }
           return Response.json(snapshotRequests.length === 1 ? initial : refreshed, {
-            headers: { ETag: `"snapshot-${snapshotRequests.length}"` },
+            headers: { ETag: etag },
           })
         }
         throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
@@ -3000,10 +3004,98 @@ describe('App', () => {
     )
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
-    expect(snapshotRequests[1]?.headers.has('If-None-Match')).toBe(false)
+    expect(snapshotRequests[1]?.headers.get('If-None-Match')).toBe('"snapshot-1"')
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /Revoked project issue/ })).toBeNull(),
     )
+  })
+
+  it('revalidates without normalizing again when SSE opens after load and row selection', async () => {
+    history.replaceState(null, '', '/kata?view=inbox#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const current = snapshot()
+    current.capabilities.updates = 'sse'
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/events/stream') {
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                init?.signal?.addEventListener('abort', () => controller.close(), { once: true })
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        }
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          if (target.searchParams.has('selected_issue_uid')) {
+            if (request.headers.get('If-None-Match') === '"snapshot-selected"') {
+              return new Response(null, { status: 304 })
+            }
+            return Response.json(
+              {
+                ...current,
+                selected: {
+                  state: 'available',
+                  issue: current.collection[0],
+                  comments: [],
+                  labels: [],
+                  links: [],
+                  recurrences: [],
+                  history: [],
+                },
+              },
+              { headers: { ETag: '"snapshot-selected"' } },
+            )
+          }
+          if (request.headers.get('If-None-Match') === '"snapshot-1"') {
+            return new Response(null, { status: 304 })
+          }
+          return Response.json(current, { headers: { ETag: '"snapshot-1"' } })
+        }
+        throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    render(App)
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(2))
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 1)
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(4))
+    expect(new URL(snapshotRequests[2]!.url).searchParams.get('selected_issue_uid')).toBe(
+      '01J00000000000000000000001',
+    )
+    expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
+    expect(snapshotRequests[3]?.headers.get('If-None-Match')).toBe('"snapshot-selected"')
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 2)
   })
 
   it('refreshes membership after an SSE reconnect opens', async () => {
