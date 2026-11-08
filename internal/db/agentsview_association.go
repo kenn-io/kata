@@ -28,20 +28,26 @@ func CheckAgentsViewAssociationTx(ctx context.Context, tx *sql.Tx, issue Issue, 
 	}
 	var projectUID string
 	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1 AND deleted_at IS NULL`, issue.ProjectID).Scan(&projectUID); err != nil {
-		return ErrAgentsViewRouteChanged
+		return agentsViewSelectionLookupError(err)
 	}
 	if projectUID != a.ProjectUID || !ProjectAttributionVisible(ctx, projectUID) {
 		return ErrAgentsViewRouteChanged
 	}
 	var authority, keyID string
-	if err := tx.QueryRowContext(ctx, `SELECT authority_uid,key_id FROM federation_root_keys WHERE project_uid=$1 AND active=1`, projectUID).Scan(&authority, &keyID); err != nil || authority != a.AuthorityUID || keyID != a.RootKeyID {
+	if err := tx.QueryRowContext(ctx, `SELECT authority_uid,key_id FROM federation_root_keys WHERE project_uid=$1 AND active=1`, projectUID).Scan(&authority, &keyID); err != nil {
+		return agentsViewSelectionLookupError(err)
+	}
+	if authority != a.AuthorityUID || keyID != a.RootKeyID {
 		return ErrAgentsViewRouteChanged
 	}
 	var role FederationRole
 	var hubUID string
 	var enabled, push bool
 	var relay *string
-	if err := tx.QueryRowContext(ctx, `SELECT role,hub_project_uid,enabled,push_enabled,relay_config FROM federation_bindings WHERE project_id=$1`, issue.ProjectID).Scan(&role, &hubUID, &enabled, &push, &relay); err != nil || !enabled || hubUID != projectUID {
+	if err := tx.QueryRowContext(ctx, `SELECT role,hub_project_uid,enabled,push_enabled,relay_config FROM federation_bindings WHERE project_id=$1`, issue.ProjectID).Scan(&role, &hubUID, &enabled, &push, &relay); err != nil {
+		return agentsViewSelectionLookupError(err)
+	}
+	if !enabled || hubUID != projectUID {
 		return ErrAgentsViewRouteChanged
 	}
 	if role == FederationRoleHub {
@@ -66,4 +72,11 @@ func CheckAgentsViewAssociationTx(ctx context.Context, tx *sql.Tx, issue Issue, 
 		return ErrAgentsViewRouteChanged
 	}
 	return nil
+}
+
+func agentsViewSelectionLookupError(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrAgentsViewRouteChanged
+	}
+	return err
 }

@@ -72,7 +72,13 @@ func requireAgentsViewClaimWhileCoordinated(ctx context.Context, cfg ServerConfi
 		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, p.Subject).ClaimPrincipal
 	}
 	binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
-	if err != nil || !binding.Enabled {
+	if errors.Is(err, db.ErrNotFound) {
+		return api.NewError(409, "agentsview_route_changed", "selected project route is unavailable", "", nil)
+	}
+	if err != nil {
+		return internalAPIError(err)
+	}
+	if !binding.Enabled {
 		return api.NewError(409, "agentsview_route_changed", "selected project route is unavailable", "", nil)
 	}
 	if binding.Role == db.FederationRoleSpoke {

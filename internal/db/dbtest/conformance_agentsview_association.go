@@ -1,7 +1,9 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -29,6 +31,15 @@ func checkAgentsViewAssociation(t *testing.T, store db.Storage) error {
 	}
 	// Missing enrolled root pin is a refusal even for a locally enabled hub.
 	a := agentsviewrelay.Association{Version: 1, IssueUID: i.UID, ProjectUID: p.UID, AuthorityUID: store.InstanceUID(), ServiceID: strings.Repeat("a", 64), RootKeyID: strings.Repeat("c", 64), Agent: "claude", NativeSessionID: "00000000-0000-4000-8000-000000000001", SessionID: "00000000-0000-4000-8000-000000000001", SnapshotSHA256: strings.Repeat("b", 64), SnapshotBytes: 12, LocatorBase: "https://archive.example", Route: []agentsviewrelay.RouteObservation{{InstanceUID: store.InstanceUID(), ProjectUID: p.UID}}}
+	// A failed transaction is a store error, not evidence that the selected
+	// route changed. Run against each real backend used by this conformance test.
+	txStore := store.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	tx, err := txStore.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, tx.Rollback())
+	require.ErrorIs(t, db.CheckAgentsViewAssociationTx(ctx, tx, i, store.InstanceUID(), &a), sql.ErrTxDone)
 	_, _, changed, err := store.CloseIssueGuarded(ctx, db.CloseIssueParams{IssueID: i.ID, Reason: "done", Actor: "worker", AgentsViewAssociation: &a})
 	require.ErrorIs(t, err, db.ErrAgentsViewRouteChanged)
 	require.False(t, changed)

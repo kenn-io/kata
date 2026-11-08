@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
+	"errors"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -17,6 +18,32 @@ import (
 )
 
 type missingAgentsViewEventStore struct{ db.Storage }
+
+type failedAgentsViewBindingStore struct {
+	db.Storage
+	err error
+}
+
+func (failedAgentsViewBindingStore) InstanceUID() string { return "instance" }
+
+func (s failedAgentsViewBindingStore) FederationBindingByProject(context.Context, int64) (db.FederationBinding, error) {
+	return db.FederationBinding{}, s.err
+}
+
+func TestAgentsViewBindingFailureIsNotReportedAsRouteChange(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{db.ErrNotFound, "agentsview_route_changed"},
+		{errors.New("store unavailable"), "internal"},
+	} {
+		err := requireAgentsViewClaimWhileCoordinated(t.Context(), ServerConfig{DB: failedAgentsViewBindingStore{err: tc.err}}, db.Issue{ProjectID: 1}, "worker", nil, "cli", nil)
+		var apiErr *api.APIError
+		require.ErrorAs(t, err, &apiErr)
+		require.Equal(t, tc.code, apiErr.Code)
+	}
+}
 
 func (missingAgentsViewEventStore) EventsByUIDs(context.Context, int64, []string) ([]db.Event, error) {
 	return nil, db.ErrNotFound
