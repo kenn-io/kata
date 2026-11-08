@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/termtext"
@@ -119,17 +120,25 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	headers := [][]string{
 		nil,
-		{"Job", "State", "Trigger", "Action", "Last loaded run"},
-		{"Status", "Job", "Occurrence", "Started", "Ended", "Summary"},
-		{"Workflow", "Steps", "Used by", "Last loaded run", "Updated"},
+		{"Job", "State", "Trigger", "Author", "Actor", "Runtime"},
+		{"Status", "Job", "Actor", "Runtime", "Summary"},
+		{"Workflow", "Steps", "Used by", "Author", "Actor", "Runtime"},
 	}[m.cron.tab]
 	// Fixed columns leave the name and summary the remaining cells.
 	widths := [][]int{
 		nil,
-		{0, 7, 17, 18, 18},
-		{10, 0, 12, 11, 11, 0},
-		{0, 5, 7, 18, 11},
+		{0, 7, 17, 12, 7, 13},
+		{10, 0, 12, 13, 0},
+		{0, 5, 7, 12, 7, 13},
 	}[m.cron.tab]
+	compact := m.width < 70
+	if compact {
+		headers = []string{headers[0], "Author", "Actor", "Runtime"}
+		widths = []int{0, 8, 7, 13}
+		if m.cron.tab == cronRuns {
+			headers, widths = []string{"Status", "Job", "Actor", "Runtime"}, []int{9, 0, 8, 13}
+		}
+	}
 	fixed := 2 + len(widths) - 1
 	flex := 0
 	for _, w := range widths {
@@ -149,11 +158,11 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		for i, c := range cells {
 			out[i] = padToWidth(truncate(sanitizeForLine(c), widths[i]), widths[i])
 		}
-		return strings.Join(out, " ")
+		return truncate(strings.Join(out, " "), max(m.width-2, 0))
 	}
 	lines := []cronLine{}
-	add := func(uid string, cells []string) {
-		if cronMatches(sanitizeForLine(strings.Join(cells, " ")), m.cron.lists[m.cron.tab].query) {
+	add := func(uid string, cells []string, extra string) {
+		if cronMatches(sanitizeForLine(strings.Join(cells, " ")+" "+extra), m.cron.lists[m.cron.tab].query) {
 			lines = append(lines, cronLine{format(cells), cronRef{m.cron.tab, uid}})
 		}
 	}
@@ -162,15 +171,33 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		switch m.cron.tab {
 		case cronJobs:
 			for _, j := range p.jobs {
-				add(j.UID, []string{j.Name, cronJobState(j), cronSchedule(j.Definition.Trigger), cronAction(*p, j), cronLast(runs, j.UID, false)})
+				r := cronJobResponsibility(j)
+				cells := []string{j.Name, cronJobState(j), cronSchedule(j.Definition.Trigger), j.Author, "unknown", cronRuntime(r)}
+				search := strings.Join(cells, " ") + " " + cronPreferenceSearch(r) + " " + cronAction(*p, j) + " " + cronLast(runs, j.UID, false)
+				if compact {
+					cells = []string{j.Name, j.Author, "unknown", cronRuntime(r)}
+				}
+				add(j.UID, cells, search)
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				runtime := cronRuntime(cron.RunResponsibility(r.Actor, r.ExecutorLabel))
+				cells := []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), r.Actor, runtime, deref(r.Summary.Message)}
+				search := strings.Join(cells, " ") + " " + deref(r.OccurrenceKey) + " " + deref(r.Teammate) + " " + cronTime(r.StartedAt) + " " + cronTime(r.EndedAt)
+				if compact {
+					cells = []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), r.Actor, runtime}
+				}
+				add(r.UID, cells, search)
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
-				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronWorkflowUsage(*p, w.UID), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)})
+				r := cronPreferences(w.Definition.Options, false)
+				cells := []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronWorkflowUsage(*p, w.UID), w.Author, "unknown", cronRuntime(r)}
+				search := strings.Join(cells, " ") + " " + cronPreferenceSearch(r) + " " + cronLast(runs, w.UID, true) + " " + cronTime(&w.UpdatedAt)
+				if compact {
+					cells = []string{w.Name, w.Author, "unknown", cronRuntime(r)}
+				}
+				add(w.UID, cells, search)
 			}
 		}
 	}
@@ -223,6 +250,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	case cronJobs:
 		if j := p.job(ref.uid); j != nil {
 			name = j.Name
+			cronResponsibilityFields(&d, j.Author, cronJobResponsibility(*j))
 			d.field("State", cronJobState(*j))
 			d.field("Schedule", cronSchedule(j.Definition.Trigger))
 			if label, times := cronNextRuns(p, *j, renderNow()); len(times) > 0 {
@@ -262,7 +290,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.field("Ended", cronTime(r.EndedAt))
 			d.field("Recorded", r.CreatedAt.Format(time.RFC3339))
 			d.field("Actor", r.Actor)
-			d.field("Executor", ownerText(r.ExecutorLabel))
+			d.field("Runtime", cronRuntime(cron.RunResponsibility(r.Actor, r.ExecutorLabel)))
 			d.field("Teammate", ownerText(r.Teammate))
 			d.field("Issue", deref(r.IssueUID))
 			if r.Summary.InputTokens != nil || r.Summary.OutputTokens != nil {
@@ -277,6 +305,8 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	case cronWorkflows:
 		if w := p.workflow(ref.uid); w != nil {
 			name = w.Name
+			cronResponsibilityFields(&d, w.Author, cronPreferences(w.Definition.Options, false))
+			d.field("Updated", cronTime(&w.UpdatedAt))
 			d.section("About")
 			d.text(deref(w.Definition.About), cronRef{})
 			d.section("Input")
@@ -364,7 +394,7 @@ func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 		d.text("no loaded runs", cronRef{})
 	}
 	for _, r := range runs {
-		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
+		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+cronRunAttribution(r)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
 	}
 }
 

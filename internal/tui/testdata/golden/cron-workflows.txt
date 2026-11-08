@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ jobs runs [workflows]
+ / search                                                            1 workflow
+
+  Workflow                      Steps Used by Author       Actor   Runtime
+▶ Summary flow                  1     1 job   worker       unknown unknown
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

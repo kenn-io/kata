@@ -2,7 +2,11 @@
 kata カタ jobs runs [workflows]
  workflows / Summary flow
 
-▶
+▶ Author:  worker (creator)
+  Actor:   unknown (execution responsibility)
+  Runtime: unknown
+  Updated: 05-01 12:00
+
   About
   A daily report
 
@@ -16,9 +20,5 @@ kata カタ jobs runs [workflows]
   Retries: 2
   echo first
   echo second
-  {
-    "shell": "sh"
-  }
-
 
  j/k move▕ ↵/l follow▕ h/esc back▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

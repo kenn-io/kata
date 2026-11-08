@@ -530,7 +530,7 @@ func TestCronFilterAndTabState(t *testing.T) {
 
 func TestSnapshot_Cron(t *testing.T) {
 	defer snapshotInit(t)()
-	for _, name := range []string{"jobs", "jobs-filter", "jobs-unavailable", "runs", "job-detail", "run-detail", "workflow-detail", "help", "all-projects"} {
+	for _, name := range []string{"jobs", "jobs-filter", "jobs-unavailable", "runs", "workflows", "job-detail", "run-detail", "workflow-detail", "help", "all-projects"} {
 		t.Run(name, func(t *testing.T) {
 			m := cronFixture(t)
 			switch name {
@@ -542,6 +542,8 @@ func TestSnapshot_Cron(t *testing.T) {
 				m.cron.data.jobsErr = errors.New("no cron permission (403)")
 			case "runs":
 				m = sendRune(m, '3')
+			case "workflows":
+				m = sendRune(m, '4')
 			case "job-detail":
 				m = sendKey(m, tea.KeyEnter)
 			case "run-detail":
