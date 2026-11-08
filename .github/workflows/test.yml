@@ -86,6 +86,39 @@ jobs:
       - name: Run shared UI and web static checks
         run: make web-check web-test
 
+      # Temporary recovery for PR 1009: retain the browser client generated
+      # from its exact head's committed OpenAPI schema.
+      - name: Check out PR 1009 head for browser client recovery
+        id: checkout-pr1009-web
+        if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.number == 1009 }}
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr1009-web-head
+          persist-credentials: false
+
+      - name: Install PR 1009 web dependencies
+        id: install-pr1009-web
+        if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.number == 1009 && steps.checkout-pr1009-web.outcome == 'success' }}
+        working-directory: pr1009-web-head
+        run: kit-retry 3 5 make web-install
+
+      - name: Generate PR 1009 browser client
+        id: generate-pr1009-web
+        if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.number == 1009 && steps.install-pr1009-web.outcome == 'success' }}
+        working-directory: pr1009-web-head
+        run: make web-generate
+
+      - name: Upload PR 1009 generated browser client
+        if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.number == 1009 && steps.generate-pr1009-web.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: pr1009-web-api-${{ github.event.pull_request.head.sha }}
+          path: pr1009-web-head/web/src/lib/api/generated/**/*.ts
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload vitest kata-ui results
         if: always()
         uses: actions/upload-artifact@v7.0.2
