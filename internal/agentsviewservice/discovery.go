@@ -143,7 +143,7 @@ func validateRoute(d Discovery, project string, path []string) error {
 				return errors.New("invalid transcript root route")
 			}
 		} else if !uid.Valid(hop.BindingUID) || hop.UpstreamInstanceUID != path[i-1] || hop.ResetEpoch <= 0 {
-			return errors.New("invalid AgentsView service hop generation")
+			return errors.New("invalid relay connection")
 		}
 	}
 	return nil
