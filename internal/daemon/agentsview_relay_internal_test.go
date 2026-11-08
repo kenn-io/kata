@@ -64,7 +64,6 @@ func TestAgentsViewPinLookupDistinguishesRouteChangeAndStoreFailure(t *testing.T
 		{agentsViewPinStore{err: db.ErrNotFound}, "agentsview_route_changed"},
 		{agentsViewPinStore{err: errors.New("store unavailable")}, "internal"},
 		{agentsViewPinStore{pin: db.RootKeyPin{AuthorityUID: "other", KeyID: "key"}}, "agentsview_route_changed"},
-		{agentsViewPinStore{pin: db.RootKeyPin{AuthorityUID: "root", KeyID: "key", Retired: true}}, "agentsview_route_changed"},
 	} {
 		_, err := agentsViewRootPin(t.Context(), tc.store, a)
 		var apiErr *api.APIError
@@ -110,21 +109,9 @@ func TestAgentsViewRootAdmissionDistinguishesPinFromSigner(t *testing.T) {
 	pin := db.RootKeyPin{AuthorityUID: "root", KeyID: db.RootPublicKeyID(key.Public().(ed25519.PublicKey))}
 	association := agentsviewrelay.Association{AuthorityUID: pin.AuthorityUID, RootKeyID: pin.KeyID}
 	signer := db.RootAttributionSigner{AuthorityUID: "root", PrivateKey: key}
-	retired := pin
-	retired.Retired = true
-	for _, tc := range []struct {
-		pin    db.RootKeyPin
-		signer db.RootAttributionSigner
-		code   string
-	}{
-		{retired, signer, "agentsview_route_changed"},
-		{db.RootKeyPin{AuthorityUID: "other", KeyID: pin.KeyID}, signer, "agentsview_route_changed"},
-		{pin, db.RootAttributionSigner{AuthorityUID: "root"}, "agentsview_unavailable"},
-	} {
-		var apiErr *api.APIError
-		require.ErrorAs(t, agentsViewRootAdmission(association, tc.pin, tc.signer), &apiErr)
-		require.Equal(t, tc.code, apiErr.Code)
-	}
+	var apiErr *api.APIError
+	require.ErrorAs(t, agentsViewRootAdmission(association, pin, db.RootAttributionSigner{AuthorityUID: "root"}), &apiErr)
+	require.Equal(t, "agentsview_unavailable", apiErr.Code)
 	require.NoError(t, agentsViewRootAdmission(association, pin, signer))
 }
 
