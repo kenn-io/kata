@@ -1521,11 +1521,10 @@ setup and the shared-vault trust boundary.
 | `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
 
 A configured URL requires a key source. If the selected source cannot supply a
-key, Kata does not fall back to another source and sends nothing to Docbank:
-attachment requests fail with HTTP 503 `docbank_key_unavailable`. Its message
-gives the reason without the key file path or variable name. `kata doctor`
-(`daemon.docbank`) and the `docbank` block of `/api/v1/health` show the failing
-source. Keys are resolved on each request.
+key, Kata does not fall back to another source and sends nothing to Docbank;
+attachment requests fail with `docbank_key_unavailable` (see
+[attachment endpoints](http-api.md#attachment-endpoints)). `kata doctor`
+(`daemon.docbank`) shows the failing source. Keys are resolved on each request.
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.
