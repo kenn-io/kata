@@ -86,6 +86,7 @@ import type {
   DisconnectRelayEnrollmentPathParameters,
   DisconnectRelayRequestBody,
   DisconnectRelayResponseBody,
+  Discovery,
   DoctorResponseBody,
   EditCommentPathParameters,
   EditCommentRequestBody,
@@ -119,6 +120,8 @@ import type {
   GetFederationBridgeStatusPathParameters,
   GetFederationProjectMetadataPathParameters,
   GetFederationStatusParams,
+  GetFederationTranscriptServiceParams,
+  GetFederationTranscriptServicePathParameters,
   GetIssueLeaseStatusPathParameters,
   GetIssueMetadataPathParameters,
   GetIssueMetadataResponseBody,
@@ -127,6 +130,7 @@ import type {
   GetProjectFederationParams,
   GetProjectFederationPathParameters,
   GetProjectFederationStatusPathParameters,
+  GetProjectTranscriptServicePathParameters,
   GetRelayResetPathParameters,
   HealthResponseBody,
   ImportBatchResult,
@@ -3606,6 +3610,62 @@ export const getProjectFederationStatus = async (
   )
 }
 
+export type getFederationTranscriptServiceResponse200 = {
+  data: Discovery
+  status: 200
+}
+
+export type getFederationTranscriptServiceResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getFederationTranscriptServiceResponseSuccess =
+  getFederationTranscriptServiceResponse200 & {
+    headers: Headers
+  }
+export type getFederationTranscriptServiceResponseError =
+  getFederationTranscriptServiceResponseDefault & {
+    headers: Headers
+  }
+
+export type getFederationTranscriptServiceResponse =
+  | getFederationTranscriptServiceResponseSuccess
+  | getFederationTranscriptServiceResponseError
+
+export const getGetFederationTranscriptServiceUrl = (
+  { projectId }: GetFederationTranscriptServicePathParameters,
+  params: GetFederationTranscriptServiceParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/transcript-service?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/transcript-service`
+}
+
+export const getFederationTranscriptService = async (
+  { projectId }: GetFederationTranscriptServicePathParameters,
+  params: GetFederationTranscriptServiceParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getFederationTranscriptServiceResponse> => {
+  return orvalFetch<getFederationTranscriptServiceResponse>(
+    getGetFederationTranscriptServiceUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
 export type importIssuesResponse200 = {
   data: ImportBatchResult
   status: 200
@@ -6301,6 +6361,47 @@ export const searchIssues = async (
     ...options,
     method: 'GET',
   })
+}
+
+export type getProjectTranscriptServiceResponse200 = {
+  data: Discovery
+  status: 200
+}
+
+export type getProjectTranscriptServiceResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getProjectTranscriptServiceResponseSuccess = getProjectTranscriptServiceResponse200 & {
+  headers: Headers
+}
+export type getProjectTranscriptServiceResponseError =
+  getProjectTranscriptServiceResponseDefault & {
+    headers: Headers
+  }
+
+export type getProjectTranscriptServiceResponse =
+  | getProjectTranscriptServiceResponseSuccess
+  | getProjectTranscriptServiceResponseError
+
+export const getGetProjectTranscriptServiceUrl = ({
+  projectId,
+}: GetProjectTranscriptServicePathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/transcript-service`
+}
+
+export const getProjectTranscriptService = async (
+  { projectId }: GetProjectTranscriptServicePathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getProjectTranscriptServiceResponse> => {
+  return orvalFetch<getProjectTranscriptServiceResponse>(
+    getGetProjectTranscriptServiceUrl({ projectId }),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
 }
 
 export type readyIssuesGlobalResponse200 = {
