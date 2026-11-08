@@ -268,7 +268,7 @@
       if (state === 'reconnecting' || (state === 'online' && wasReconnecting)) {
         invalidations.reconnect()
       } else if (state === 'online') {
-        invalidations.refreshAll()
+        invalidations.refresh()
       }
     },
   })

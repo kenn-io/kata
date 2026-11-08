@@ -211,11 +211,9 @@
               ? 'Connection unavailable'
               : activeConnection?.health === 'upgrade_required'
                 ? 'Upgrade required'
-                : loading
-                  ? 'Connecting'
-                  : readOnly || !snapshot.capabilities.writable
-                    ? 'Read-only'
-                    : 'Connected',
+                : readOnly || !snapshot.capabilities.writable
+                  ? 'Read-only'
+                  : 'Connected',
   )
   const actorlessConnectionLabels: Record<string, string> = {
     none: 'Local connection',

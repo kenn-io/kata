@@ -974,6 +974,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if next, cmd, ok := m.routeDeleteKey(msg); ok {
 			return next, cmd, true
 		}
+		if next, cmd, ok := m.routeRecurrenceKey(msg); ok {
+			return next, cmd, true
+		}
 		if next, cmd, ok := m.routeReopenKey(msg); ok {
 			return next, cmd, true
 		}
@@ -1080,6 +1083,8 @@ func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool
 		return true, true
 	case !m.detailIsActive():
 		return false, false
+	case m.keymap.SetRecurrence.matches(msg):
+		return true, true
 	case m.keymap.SetParent.matches(msg):
 		return false, true
 	default:
@@ -1852,6 +1857,12 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
+		if m.input.kind == inputRecurrenceForm {
+			m.input.err = fmt.Sprintf(successTemplates[mut.kind].failure, mut.err.Error())
+			if isRevisionConflict(mut.err) {
+				return m, tea.Batch(m.reportShownError(mut.kind), m.scheduleDetailRefresh())
+			}
+		}
 		return m, m.reportShownError(mut.kind)
 	}
 	if m.input.kind == inputNewIssueForm {
@@ -1891,7 +1902,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	// detail's body / comments list updates. Re-classify as if it
 	// came from detail (gen=current detail gen) so existing
 	// applyMutation logic kicks in.
-	if formKind == inputCloseForm || formKind == inputDatesForm {
+	if formKind == inputCloseForm || formKind == inputDatesForm || formKind == inputRecurrenceForm {
 		mut.origin = target.origin
 		mut.gen = target.detailGen
 	} else {
@@ -2123,6 +2134,9 @@ func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 	}
 	if kind == inputDeleteForm {
 		return m.commitDeleteForm()
+	}
+	if kind == inputRecurrenceForm {
+		return m.commitRecurrenceForm()
 	}
 	if kind == inputCloseForm {
 		in, err := closeInputFromForm(m.input, m.list.actor)
@@ -2879,9 +2893,12 @@ func (m *Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 		return nil
 	}
 	projectCommentArrival := msg.eventType == "issue.snapshot" || (m.issueScoped && msg.eventType == "issue.commented")
+	// Refresh events for this recurrence, retrying when its read failed.
+	recurrenceChange := m.detail.issue.RecurrenceID != nil && strings.HasPrefix(msg.eventType, "recurrence.") &&
+		(m.detail.recurrenceErr != nil || (m.detail.recurrence != nil && msg.recurrenceUID == m.detail.recurrence.UID))
 	ref := m.detail.issue.ShortID
 	uid := m.detail.issue.UID
-	if !msg.matchesIssue(ref, uid) && !commentMatch && !relationLifecycleMatch && !projectCommentArrival {
+	if !msg.matchesIssue(ref, uid) && !commentMatch && !relationLifecycleMatch && !projectCommentArrival && !recurrenceChange {
 		return nil
 	}
 	return m.scheduleDetailRefresh()
@@ -3708,7 +3725,7 @@ func (m Model) viewContent() string {
 func (m Model) overlayInputAndModal(body string) string {
 	if m.input.kind.isCenteredForm() {
 		var now time.Time
-		if m.input.kind == inputDatesForm {
+		if m.input.kind == inputDatesForm || m.input.kind == inputRecurrenceForm {
 			now = m.toastNow()
 		}
 		form := renderCenteredForm(m.input, m.width, m.height, now)
