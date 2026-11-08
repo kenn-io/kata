@@ -3458,6 +3458,68 @@ func (o *GetProjectFederationStatusRequestOptions) GetHeader() (map[string]strin
 	return nil, nil
 }
 
+// GetFederationTranscriptServiceRequestOptions is the options needed to make a request to GetFederationTranscriptService.
+type GetFederationTranscriptServiceRequestOptions struct {
+	PathParams *GetFederationTranscriptServicePath
+	Query      *GetFederationTranscriptServiceQuery
+	Header     *GetFederationTranscriptServiceHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *GetFederationTranscriptServiceRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *GetFederationTranscriptServiceRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *GetFederationTranscriptServiceRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *GetFederationTranscriptServiceRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *GetFederationTranscriptServiceRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
 // ImportIssuesRequestOptions is the options needed to make a request to ImportIssues.
 type ImportIssuesRequestOptions struct {
 	PathParams *ImportIssuesPath
@@ -6602,6 +6664,50 @@ func (o *SearchIssuesRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *SearchIssuesRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// GetProjectTranscriptServiceRequestOptions is the options needed to make a request to GetProjectTranscriptService.
+type GetProjectTranscriptServiceRequestOptions struct {
+	PathParams *GetProjectTranscriptServicePath
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *GetProjectTranscriptServiceRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *GetProjectTranscriptServiceRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *GetProjectTranscriptServiceRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *GetProjectTranscriptServiceRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *GetProjectTranscriptServiceRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 

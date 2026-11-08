@@ -295,6 +295,10 @@ type GetProjectFederationStatusResponse = FederationStatusBody
 
 type GetProjectFederationStatusErrorResponse = ErrorEnvelope
 
+type GetFederationTranscriptServiceResponse = Discovery
+
+type GetFederationTranscriptServiceErrorResponse = ErrorEnvelope
+
 type ImportIssuesResponse = ImportBatchResult
 
 type ImportIssuesErrorResponse = ErrorEnvelope
@@ -534,6 +538,10 @@ type SearchIssuesErrorResponseJSON500 = ErrorEnvelope
 type SearchIssuesErrorResponseJSON503 = ErrorEnvelope
 
 type SearchIssuesErrorResponseJSONDefault = ErrorEnvelope
+
+type GetProjectTranscriptServiceResponse = Discovery
+
+type GetProjectTranscriptServiceErrorResponse = ErrorEnvelope
 
 type ReadyIssuesGlobalResponse = ReadyGlobalResponseBody
 
@@ -1223,6 +1231,19 @@ type GetProjectFederationStatusResp struct {
 	JSONDefault  *GetProjectFederationStatusErrorResponse
 }
 
+type GetFederationTranscriptServiceResp200Headers struct {
+	CacheControl string `header:"Cache-Control"`
+}
+
+type GetFederationTranscriptServiceResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetFederationTranscriptServiceResponse
+	Headers200   *GetFederationTranscriptServiceResp200Headers
+	JSONDefault  *GetFederationTranscriptServiceErrorResponse
+}
+
 type ImportIssuesResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -1777,6 +1798,19 @@ type SearchIssuesResp struct {
 	JSON500      *SearchIssuesErrorResponseJSON500
 	JSON503      *SearchIssuesErrorResponseJSON503
 	JSONDefault  *SearchIssuesErrorResponseJSONDefault
+}
+
+type GetProjectTranscriptServiceResp200Headers struct {
+	CacheControl string `header:"Cache-Control"`
+}
+
+type GetProjectTranscriptServiceResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetProjectTranscriptServiceResponse
+	Headers200   *GetProjectTranscriptServiceResp200Headers
+	JSONDefault  *GetProjectTranscriptServiceErrorResponse
 }
 
 type ReadyIssuesGlobalResp struct {

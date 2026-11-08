@@ -325,6 +325,14 @@ type GetProjectFederationStatusPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type GetFederationTranscriptServicePath struct {
+	ProjectID int64 `json:"project_id" validate:"gte=1"`
+}
+
+func (g GetFederationTranscriptServicePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
 type ImportIssuesPath struct {
 	ProjectID int64 `json:"project_id"`
 }
@@ -794,6 +802,14 @@ type RestoreProjectPath struct {
 
 type SearchIssuesPath struct {
 	ProjectID int64 `json:"project_id"`
+}
+
+type GetProjectTranscriptServicePath struct {
+	ProjectID int64 `json:"project_id" validate:"gte=1"`
+}
+
+func (g GetProjectTranscriptServicePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
 }
 
 type DeleteTeamPath struct {

@@ -378,6 +378,9 @@ type ClientInterface interface {
 	GetProjectFederationStatus(ctx context.Context, options *GetProjectFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectFederationStatusResponse, error)
 	GetProjectFederationStatusWithResponse(ctx context.Context, options *GetProjectFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectFederationStatusResp, error)
 
+	GetFederationTranscriptService(ctx context.Context, options *GetFederationTranscriptServiceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationTranscriptServiceResponse, error)
+	GetFederationTranscriptServiceWithResponse(ctx context.Context, options *GetFederationTranscriptServiceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationTranscriptServiceResp, error)
+
 	ImportIssues(ctx context.Context, options *ImportIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ImportIssuesResponse, error)
 	ImportIssuesWithResponse(ctx context.Context, options *ImportIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ImportIssuesResp, error)
 
@@ -548,6 +551,9 @@ type ClientInterface interface {
 
 	SearchIssues(ctx context.Context, options *SearchIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*SearchIssuesResponse, error)
 	SearchIssuesWithResponse(ctx context.Context, options *SearchIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*SearchIssuesResp, error)
+
+	GetProjectTranscriptService(ctx context.Context, options *GetProjectTranscriptServiceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectTranscriptServiceResponse, error)
+	GetProjectTranscriptServiceWithResponse(ctx context.Context, options *GetProjectTranscriptServiceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectTranscriptServiceResp, error)
 
 	ReadyIssuesGlobal(ctx context.Context, options *ReadyIssuesGlobalRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadyIssuesGlobalResponse, error)
 	ReadyIssuesGlobalWithResponse(ctx context.Context, options *ReadyIssuesGlobalRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadyIssuesGlobalResp, error)
@@ -5253,6 +5259,78 @@ func (c *Client) GetProjectFederationStatus(ctx context.Context, options *GetPro
 	return responseParser(ctx, resp)
 }
 
+func (c *Client) GetFederationTranscriptService(ctx context.Context, options *GetFederationTranscriptServiceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationTranscriptServiceResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"authority_uid":     {Style: "form", Explode: &[]bool{false}[0]},
+		"binding_uid":       {Style: "form", Explode: &[]bool{false}[0]},
+		"peer_instance_uid": {Style: "form", Explode: &[]bool{false}[0]},
+		"project_uid":       {Style: "form", Explode: &[]bool{false}[0]},
+		"protocol_version":  {Style: "form", Explode: &[]bool{false}[0]},
+		"reset_epoch":       {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/transcript-service",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*GetFederationTranscriptServiceResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(GetFederationTranscriptServiceErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "GetFederationTranscriptServiceErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(GetFederationTranscriptServiceResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "GetFederationTranscriptServiceResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/transcript-service")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
 func (c *Client) ImportIssues(ctx context.Context, options *ImportIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ImportIssuesResponse, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
@@ -8900,6 +8978,68 @@ func (c *Client) SearchIssues(ctx context.Context, options *SearchIssuesRequestO
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/search")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) GetProjectTranscriptService(ctx context.Context, options *GetProjectTranscriptServiceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectTranscriptServiceResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/transcript-service",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*GetProjectTranscriptServiceResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(GetProjectTranscriptServiceErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "GetProjectTranscriptServiceErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(GetProjectTranscriptServiceResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "GetProjectTranscriptServiceResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/transcript-service")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

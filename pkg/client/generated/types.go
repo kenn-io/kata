@@ -1780,6 +1780,24 @@ func (c CronWorkflowStepResponse) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type Descriptor struct {
+	AuthorityUID    string  `json:"authority_uid" validate:"required"`
+	EnvelopeVersion int64   `json:"envelope_version"`
+	ExpiresAt       int64   `json:"expires_at"`
+	IssuedAt        int64   `json:"issued_at"`
+	KeyID           string  `json:"key_id" validate:"required"`
+	LocatorBase     string  `json:"locator_base" validate:"required"`
+	MaxBytes        int64   `json:"max_bytes"`
+	ProjectUID      string  `json:"project_uid" validate:"required"`
+	ServiceID       string  `json:"service_id" validate:"required"`
+	Signature       *string `json:"signature,omitempty"`
+	Version         int64   `json:"version"`
+}
+
+func (d Descriptor) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
 type DestructiveActionRequestBody struct {
 	Actor  string  `json:"actor" validate:"required"`
 	Reason *string `json:"reason,omitempty"`
@@ -1931,6 +1949,38 @@ func (d DisconnectRelayRequestBody) Validate() error {
 
 type DisconnectRelayResponseBody struct {
 	Revoked bool `json:"revoked"`
+}
+
+type Discovery struct {
+	Descriptor  Descriptor         `json:"descriptor"`
+	InstanceUID string             `json:"instance_uid" validate:"required"`
+	Route       []RouteObservation `json:"route" validate:"required"`
+}
+
+func (d Discovery) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(d.Descriptor).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Descriptor", err)
+		}
+	}
+	if err := typesValidator.Var(d.InstanceUID, "required"); err != nil {
+		errors = errors.Append("InstanceUID", err)
+	}
+	if err := typesValidator.Var(d.Route, "required"); err != nil {
+		errors = errors.Append("Route", err)
+	}
+	for i, item := range d.Route {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Route[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type DoctorResponseBody struct {
@@ -6337,6 +6387,18 @@ type RotateFederationEnrollmentRequestBody struct {
 }
 
 func (r RotateFederationEnrollmentRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type RouteObservation struct {
+	BindingUID          *string `json:"binding_uid,omitempty"`
+	InstanceUID         string  `json:"instance_uid" validate:"required"`
+	ProjectUID          string  `json:"project_uid" validate:"required"`
+	ResetEpoch          *int64  `json:"reset_epoch,omitempty"`
+	UpstreamInstanceUID *string `json:"upstream_instance_uid,omitempty"`
+}
+
+func (r RouteObservation) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 

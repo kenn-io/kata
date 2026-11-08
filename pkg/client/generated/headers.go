@@ -78,6 +78,10 @@ type DisconnectRelayEnrollmentHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 
+type GetFederationTranscriptServiceHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
 type CreateIssueHeaders struct {
 	// XKataSurface Client interface for action telemetry (web, tui, or cli); other values are ignored.
 	XKataSurface *string `json:"X-Kata-Surface,omitempty"`

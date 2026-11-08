@@ -236,6 +236,19 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 	return errors
 }
 
+type GetFederationTranscriptServiceQuery struct {
+	ProjectUID      string `json:"project_uid" validate:"required,max=26"`
+	AuthorityUID    string `json:"authority_uid" validate:"required,max=26"`
+	BindingUID      string `json:"binding_uid" validate:"required,max=26"`
+	PeerInstanceUID string `json:"peer_instance_uid" validate:"required,max=26"`
+	ProtocolVersion int64  `json:"protocol_version" validate:"gte=1"`
+	ResetEpoch      int64  `json:"reset_epoch" validate:"gte=1"`
+}
+
+func (g GetFederationTranscriptServiceQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
 type ListIssuesQuery struct {
 	// Cursor Opaque next_cursor from a matching stable-order page
 	Cursor *string `json:"cursor,omitempty"`

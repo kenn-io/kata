@@ -4070,6 +4070,64 @@ func (c *Client) GetProjectFederationStatusWithResponse(ctx context.Context, opt
 	}
 }
 
+func (c *Client) GetFederationTranscriptServiceWithResponse(ctx context.Context, options *GetFederationTranscriptServiceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationTranscriptServiceResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/transcript-service",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/transcript-service")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &GetFederationTranscriptServiceResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(GetFederationTranscriptServiceResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "GetFederationTranscriptServiceResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		out.Headers200 = &GetFederationTranscriptServiceResp200Headers{
+			CacheControl: resp.Headers.Get("Cache-Control"),
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(GetFederationTranscriptServiceErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
 func (c *Client) ImportIssuesWithResponse(ctx context.Context, options *ImportIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ImportIssuesResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
@@ -7447,6 +7505,64 @@ func (c *Client) SearchIssuesWithResponse(ctx context.Context, options *SearchIs
 	default:
 		if len(resp.Content) > 0 {
 			body := new(SearchIssuesErrorResponseJSONDefault)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) GetProjectTranscriptServiceWithResponse(ctx context.Context, options *GetProjectTranscriptServiceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectTranscriptServiceResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/transcript-service",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/transcript-service")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &GetProjectTranscriptServiceResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(GetProjectTranscriptServiceResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "GetProjectTranscriptServiceResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		out.Headers200 = &GetProjectTranscriptServiceResp200Headers{
+			CacheControl: resp.Headers.Get("Cache-Control"),
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(GetProjectTranscriptServiceErrorResponse)
 			if json.Unmarshal(resp.Content, body) == nil {
 				out.JSONDefault = body
 				if errTarget, ok := any(*body).(error); ok {
