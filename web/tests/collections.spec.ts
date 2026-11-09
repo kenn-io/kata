@@ -2,6 +2,28 @@ import { expect, test } from './fixtures'
 
 test.use({ trace: 'off' })
 
+test('keyboard selection opens detail when search hides its row', async ({ page, kata }) => {
+  const credentials = await kata.launch(page)
+  await kata.seedIssue(page, credentials, { title: 'Example second task' })
+  await kata.seedIssue(page, credentials, { title: 'Example first task' })
+  const first = page.getByRole('button', { name: /Example first task/ })
+  const second = page.getByRole('button', { name: /Example second task/ })
+  await expect(second).toBeVisible()
+  await first.focus()
+  await page.clock.install()
+  await page.clock.pauseAt(Date.now())
+  await first.press('ArrowDown')
+  await expect(second).toBeFocused()
+  await page.getByRole('searchbox', { name: 'Search tasks' }).fill('unmatched')
+  await expect(page).toHaveURL(/text=unmatched/)
+  await expect(second).toHaveCount(0)
+  await page.clock.runFor(50)
+  await expect(
+    page.getByRole('heading', { name: 'Example second task', exact: true }),
+  ).toBeVisible()
+  await expect(page).toHaveURL(/issue=.*text=unmatched/)
+})
+
 test('views, projects, filters, columns, hierarchy, and keyboard stay first-class', async ({
   page,
   kata,
