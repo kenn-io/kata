@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-07
+last_edited: 2026-11-09
 ---
 
 # PostgreSQL operations
@@ -152,6 +152,11 @@ runtime grants remain sufficient. See the [schema 45 migration requirements](../
 for downtime and rollback. SQLite's JSONL cutover installs global and
 project-scoped prefix indexes; candidates sort by case-insensitive UID value,
 then original bytes.
+
+The schema 46→47 migration adds an update-order index for limited cross-project
+ready lists. Stop daemons and imports while it scans `issues` and builds the
+index. See the [schema 47 migration requirements](../development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index)
+for the offline window, grants, and rollback. SQLite installs this index in place.
 
 The schema 47→48 migration adds a project departure cursor index to match SQLite's event polling
 index. PostgreSQL's event query stays unchanged. Stop daemons and imports while

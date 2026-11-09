@@ -33,13 +33,14 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 ```
 </section>
 
-## New in 0.21.0
+## New in 0.23.0
 
-Attach files to issues, move whole issue subtrees between projects, repeat
-issues from the CLI, and manage planning dates and cron jobs in the terminal UI.
-Remote MCP gateways can connect to the daemon directly, and large stores open,
-page, and search much faster. The [0.21.0 release notes](changelog.md#0210)
-cover the schema 43 upgrade, PostgreSQL migration, and contributor credits.
+Turn on search by meaning with one command or from web Settings. Move issues,
+change repeating schedules, and edit workflows in the terminal UI, and set up
+attachments with `kata docbank setup`. Assistants that use MCP can set up without
+a shell and wake when their inbox changes. Large stores and federated projects
+search, create, and sync faster. The [0.23.0 release notes](changelog.md#0230)
+cover the schema 50 upgrade, PostgreSQL migration, and contributor credits.
 See [Updating Kata](get-started/install.md#updating-kata) for installation
 and federation upgrade guidance.
 

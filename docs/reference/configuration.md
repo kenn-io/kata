@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-08
+last_edited: 2026-11-09
 ---
 
 # Configuration
@@ -545,12 +545,12 @@ loader-only progressive loading. Loaders remain available in both modes.
 Unknown, duplicate, or unavailable sections disable `/mcp` (503, reason logged);
 REST and the web UI keep serving. Correct the setting and restart. See
 [Startup sections](mcp.md#startup-sections) for IDs and availability rules.
-On unreleased `main`, identity mode (`[auth] require_token_identity = true`)
+In Kata 0.23.0 and later, identity mode (`[auth] require_token_identity = true`)
 uses each caller's identity bearer at `/mcp`. Remove `[mcp] token_file` and
 `token_env`; either setting stops startup in identity mode. The token determines
 the actor, so `[mcp] actor` is ignored. See
-[Daemon mount with identity tokens](mcp.md#daemon-mount-with-identity-tokens-unreleased)
-for authentication and session behavior. Kata 0.21.0 requires
+[Daemon mount with identity tokens](mcp.md#daemon-mount-with-identity-tokens)
+for authentication and session behavior. Kata 0.21.0 and 0.22.0 require
 `kata mcp serve --http` with a user token in this mode.
 Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header. The sidecar must reach the daemon through a REST listener outside `trusted_proxy_listeners` or through the proxy that sets the actor header.
 See [MCP transport](mcp.md#transport) for gateway setup and scope.
