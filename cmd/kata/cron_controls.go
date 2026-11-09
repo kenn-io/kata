@@ -12,6 +12,39 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+// runCronProjectCommand resolves the selected project, sends one request, and
+// prints the daemon's raw response. honorQuiet lets --quiet suppress it.
+func runCronProjectCommand(cmd *cobra.Command, honorQuiet bool, call func(context.Context, *kataclient.Client, int64, string) ([]byte, error)) error {
+	daemon, err := dialDaemon(cmd.Context())
+	if err != nil {
+		return err
+	}
+	project, err := resolveCronProject(daemon)
+	if err != nil {
+		return err
+	}
+	actor, _ := resolveActor(cmd.Context(), flags.As, nil)
+	client, err := kataclient.NewWithHTTPClient(daemon.baseURL, daemon.client)
+	if err != nil {
+		return err
+	}
+	raw, err := call(cmd.Context(), client, project.ID, actor)
+	if err != nil {
+		return err
+	}
+	if honorQuiet && flags.Quiet && currentOutputMode() != outputJSON {
+		return nil
+	}
+	return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
+}
+
+func resolveCronProject(daemon daemonAPI) (projectRef, error) {
+	if strings.TrimSpace(flags.Project) != "" {
+		return resolveProjectSelectorIncludingArchived(daemon, flags.Project)
+	}
+	return resolveProjectArgFlagOrWorkspace(daemon, nil)
+}
+
 func newCronProjectPauseCmd(paused bool) *cobra.Command {
 	action := "resume"
 	if paused {
@@ -22,62 +55,35 @@ func newCronProjectPauseCmd(paused bool) *cobra.Command {
 	cmd := &cobra.Command{Use: action, Short: action + " cron delivery for the whole project", Args: cobra.NoArgs,
 		Long: "Change cron delivery policy at the project's owning hub. Running work may finish; adapters must honor the pause before starting new work. Resuming preserves job flags and catch-up policies.",
 	}
-	if !paused {
-		cmd.Flags().BoolVar(&discard, "discard-missed", false, "discard all undelivered scheduled occurrences through the resume cutoff (root only)")
-	}
 	if paused {
 		cmd.Flags().StringVar(&reason, "reason", "", "pause reason (up to 256 bytes)")
+	} else {
+		cmd.Flags().BoolVar(&discard, "discard-missed", false, "discard all undelivered scheduled occurrences through the resume cutoff (root only)")
 	}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		daemon, err := dialDaemon(cmd.Context())
-		if err != nil {
-			return err
-		}
-		var project projectRef
-		if strings.TrimSpace(flags.Project) != "" {
-			project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
-		} else {
-			project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
-		}
-		if err != nil {
-			return err
-		}
-		actor, _ := resolveActor(cmd.Context(), flags.As, nil)
-		client, err := kataclient.NewWithHTTPClient(daemon.baseURL, daemon.client)
-		if err != nil {
-			return err
-		}
-		var raw []byte
-		if paused {
-			response, callErr := client.PauseCronProjectWithResponse(cmd.Context(), &generated.PauseCronProjectRequestOptions{PathParams: &generated.PauseCronProjectPath{ProjectID: project.ID}, Body: &generated.PauseCronProjectBody{Actor: &actor, Reason: &reason}})
-			if response == nil {
-				return externalCLITransportError(response, callErr)
-			}
-			raw, err = cronCLIResponse(response.StatusCode, response.Body, callErr)
-		} else {
-			options := &generated.ResumeCronProjectRequestOptions{PathParams: &generated.ResumeCronProjectPath{ProjectID: project.ID}, Body: &generated.ResumeCronProjectBody{Actor: &actor}}
-			if discard {
-				revision, capErr := cronDiscardCapabilities(cmd.Context(), client, project.ID, true)
-				if capErr != nil {
-					return capErr
+		return runCronProjectCommand(cmd, true, func(ctx context.Context, c *kataclient.Client, projectID int64, actor string) ([]byte, error) {
+			if paused {
+				wire, err := c.PauseCronProjectWithResponse(ctx, &generated.PauseCronProjectRequestOptions{PathParams: &generated.PauseCronProjectPath{ProjectID: projectID}, Body: &generated.PauseCronProjectBody{Actor: &actor, Reason: &reason}})
+				if wire == nil {
+					return nil, externalCLITransportError(wire, err)
 				}
-				match := fmt.Sprintf("rev-%d", revision)
+				return cronCLIResponse(wire.StatusCode, wire.Body, err)
+			}
+			options := &generated.ResumeCronProjectRequestOptions{PathParams: &generated.ResumeCronProjectPath{ProjectID: projectID}, Body: &generated.ResumeCronProjectBody{Actor: &actor}}
+			if discard {
+				revision, err := cronDiscardCapabilities(ctx, c, projectID, true)
+				if err != nil {
+					return nil, err
+				}
 				options.Query = &generated.ResumeCronProjectQuery{DiscardMissed: &discard}
-				options.Header = &generated.ResumeCronProjectHeaders{IfMatch: &match}
+				options.Header = &generated.ResumeCronProjectHeaders{IfMatch: new(fmt.Sprintf("rev-%d", revision))}
 			}
-			response, callErr := client.ResumeCronProjectWithResponse(cmd.Context(), options)
-			if response == nil {
-				return externalCLITransportError(response, callErr)
+			wire, err := c.ResumeCronProjectWithResponse(ctx, options)
+			if wire == nil {
+				return nil, externalCLITransportError(wire, err)
 			}
-			raw, err = cronCLIResponse(response.StatusCode, response.Body, callErr)
-		}
-		if err != nil {
-			return err
-		}
-		if flags.Quiet && currentOutputMode() != outputJSON {
-			return nil
-		}
-		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
+			return cronCLIResponse(wire.StatusCode, wire.Body, err)
+		})
 	}
 	return cmd
 }

@@ -277,10 +277,8 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	var project projectRef
 	if o.parent != "" {
 		project, body, err = o.applyParent(cmd, daemon, body)
-	} else if strings.TrimSpace(flags.Project) != "" {
-		project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
 	} else {
-		project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
+		project, err = resolveCronProject(daemon)
 	}
 	if err != nil {
 		return err
@@ -306,26 +304,15 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		if _, err = cronDiscardCapabilities(cmd.Context(), client, project.ID, false); err != nil {
 			return err
 		}
+		// Retain one revision guard; callLifecycle sends it with the discard.
 		if o.expectedEventUID == "" {
 			shown, showErr := client.ShowCronJob(cmd.Context(), &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: project.ID, CronUID: o.identity}})
 			if showErr != nil {
 				return showErr
 			}
-			o.expectedEventUID, err = normalizedCronCLIUID(shown.Job.DefinitionEventUID)
-			if err != nil {
+			if o.expectedEventUID, err = normalizedCronCLIUID(shown.Job.DefinitionEventUID); err != nil {
 				return err
 			}
-		}
-		var fields map[string]jsontext.Value
-		if err = json.Unmarshal(body, &fields); err != nil {
-			return err
-		}
-		if err = setCronStringField(fields, "expected_event_uid", o.expectedEventUID); err != nil {
-			return err
-		}
-		body, err = json.Marshal(fields)
-		if err != nil {
-			return err
 		}
 	}
 	raw, err := o.call(daemon, client, project.ID, body)
@@ -446,13 +433,8 @@ func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
 		return nil, err
 	}
 	if o.resource == "job" && o.action == "resume" {
-		var supplied bool
-		if raw, ok := fields["discard_missed"]; ok {
-			if err := json.Unmarshal(raw, &supplied); err != nil {
-				return nil, err
-			}
-		}
-		o.discardMissed = o.discardMissed || supplied
+		// decodeRequest already proved discard_missed, if present, is a boolean.
+		o.discardMissed = o.discardMissed || string(fields["discard_missed"]) == "true"
 		if o.discardMissed {
 			fields["discard_missed"] = jsontext.Value("true")
 		}
@@ -547,9 +529,6 @@ func cronStringField(fields map[string]jsontext.Value, key string) (string, erro
 }
 
 func setCronStringField(fields map[string]jsontext.Value, key, value string) error {
-	if fields == nil {
-		return cronCLIValidation("cron request body must be an object")
-	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("encode cron request %s: %w", key, err)
@@ -783,6 +762,9 @@ func (o cronCLIOptions) callLifecycle(a daemonAPI, c *kataclient.Client, project
 		var body generated.CronJobResumeBody
 		if err := decodeCronCLIRequest(raw, &body); err != nil {
 			return nil, err
+		}
+		if o.expectedEventUID != "" {
+			body.ExpectedEventUID = &o.expectedEventUID
 		}
 		if o.action == "pause" {
 			response, err := c.PauseCronJobWithResponse(a.ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: projectID, CronUID: o.identity}, Body: &generated.CronJobEnabledActionBody{Actor: body.Actor, ExpectedEventUID: body.ExpectedEventUID}})
