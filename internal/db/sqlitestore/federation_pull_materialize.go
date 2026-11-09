@@ -199,15 +199,12 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 				return errStaleFederationPreparation
 			}
 		}
-		for i, id := range m.linkReadProjects {
-			if id == projectID {
-				continue
-			}
+		for id, expected := range m.linkStamps {
 			stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
 			if err != nil {
 				return err
 			}
-			if stamp != m.linkStamps[i] {
+			if stamp != expected {
 				return errStaleFederationPreparation
 			}
 		}

@@ -22,7 +22,7 @@ type federationMaterialization struct {
 	eventStamp       [32]byte
 	rowStamp         [32]byte
 	shortIDChecks    []federatedShortIDCheck
-	linkStamps       [][32]byte
+	linkStamps       map[int64][32]byte
 	linkReadProjects []int64
 	maxEventID       int64
 	moveIssueUIDs    map[string]struct{}
@@ -182,16 +182,16 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	}
 	if m.fullHistory {
 		if linksAffected {
+			m.linkStamps = make(map[int64][32]byte)
 			for _, id := range m.linkReadProjects {
 				if id == projectID {
-					m.linkStamps = append(m.linkStamps, m.eventStamp)
 					continue
 				}
 				stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
 				if err != nil {
 					return federationMaterialization{}, err
 				}
-				m.linkStamps = append(m.linkStamps, stamp)
+				m.linkStamps[id] = stamp
 			}
 		}
 		m.rowStamp, err = federationRowStamp(ctx, tx, projectID, m.linkProjects)
@@ -287,9 +287,9 @@ func federationRowStamp(ctx context.Context, tx *sql.Tx, projectID int64, group 
 		{`SELECT json_array(l.issue_id,l.label) FROM issues i JOIN issue_labels l ON l.issue_id=i.id WHERE i.project_id=? ORDER BY l.issue_id,l.label`, []any{projectID}},
 	}
 	if len(group) > 0 {
-		placeholders, args := projectIDPlaceholders(group)
-		//nolint:gosec // The IN clauses contain generated placeholders; IDs are bound.
-		queries = append(queries, stampQuery{`SELECT json_array(uid,id,project_id) FROM issues WHERE project_id IN (` + placeholders + `) ORDER BY project_id,id`, args})
+		placeholders, args := projectIDPlaceholders(slices.DeleteFunc(slices.Clone(group), func(id int64) bool { return id == projectID }))
+		queries = append(queries, stampQuery{`SELECT json_array(uid,id,project_id) FROM issues WHERE project_id IN (` + placeholders + `) ORDER BY project_id,id`, args}) //nolint:gosec // IDs are bound.
+		placeholders, args = projectIDPlaceholders(group)
 		//nolint:gosec // The IN clauses contain generated placeholders; IDs are bound.
 		queries = append(queries, stampQuery{`SELECT json_array(l.id,l.from_issue_id,l.to_issue_id,l.from_issue_uid,l.to_issue_uid,l.type,l.author,CAST(l.created_at AS TEXT)) FROM links l JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id WHERE f.project_id IN (` + placeholders + `) AND t.project_id IN (` + placeholders + `) ORDER BY l.id`, append(slices.Clone(args), args...)})
 	}
