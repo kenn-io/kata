@@ -100,18 +100,75 @@ All notable changes to kata, grouped by release. Versioned releases start with
   session starts under a `.kata.toml`; elsewhere they return an empty response
   instead of telling the agent to search, create, and close kata issues in a
   repository that does not use kata.
-- Poll and stream one project's events faster on large SQLite stores by skipping unrelated history and earlier departures. Existing stores upgrade to schema 48 through SQLite's JSONL cutover or the [offline PostgreSQL migration from schema 47](development/postgres-migrations.md#schema-48-project-departure-cursor-index).
+- Poll and stream one project's events faster on large SQLite stores by skipping unrelated history and earlier departures. SQLite adds the index in place on upgrade; PostgreSQL needs the [offline migration from schema 47](development/postgres-migrations.md#schema-48-project-departure-cursor-index).
 - Create issues faster on large SQLite stores by reading look-alike match flags from the returned page.
-- Load web UI suggestions faster on large SQLite stores with unrestricted local owner access; scoped and account-bound access keep today's speed.
 - See why a multi-word `kata search` came back empty. Lexical search returns
   only issues that contain every word, so an empty multi-word search now
   prints a hint on stderr to search again with fewer words, instead of letting
   an agent conclude that no related issue exists and file a duplicate.
-- Fetch cross-project ready lists with a limit quickly as stores grow. SQLite and PostgreSQL use an ordered index for `kata ready --all --limit N`, MCP `kata.ready`, and `GET /api/v1/ready` without changing their filters or order. Existing stores upgrade to schema 47 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index).
-- Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
-- Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
+- Fetch cross-project ready lists with a limit quickly as stores grow. SQLite and PostgreSQL use an ordered index for `kata ready --all --limit N`, MCP `kata.ready`, and `GET /api/v1/ready` without changing their filters or order. SQLite adds the index in place on upgrade; PostgreSQL needs the [offline migration](development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index).
 - Let SQLite federation pushes and pulls reach the writer-held fallback after
   slow snapshot preparation instead of exhausting contention retries first.
+- CLI crashes now exit 1 with an internal error and bug-report hint in the selected human, JSON, or agent format, instead of exit 2 with a raw panic trace. Foreground daemon crashes keep their trace. See [CLI reference](reference/cli.md). Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
+- Create and edit workflows in the `kata tui` Workflows tab with `n` and `e`. Edit the JSON definition with `Ctrl+e` and save with `Ctrl+o`. The form keeps your draft after errors and shows the current definition after concurrent changes. See [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Start, change, or stop an issue's recurrence in `kata tui` with `O` only while the detail is focused.
+  The form takes an RRULE (outer spaces trimmed), a start date, and an IANA zone, and
+  shows the daemon's error with your input kept. Saves are revision-guarded;
+  after a conflict, press `Esc`, then `O` once the detail refreshes.
+  An issue that parents a recurring cron job is refused on save, as in
+  `kata schedule --repeat`. Clear the rule and save to stop an existing recurrence, keeping its occurrences. A blank rule cannot start a recurrence.
+  The detail shows the rule, the next occurrence, and the zone.
+  See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Push ordinary issue changes to large SQLite hubs without replaying every
+  unrelated issue. Preparation folds touched issue histories; project-wide
+  changes and move history retain complete replay, and link reconciliation
+  keeps its existing scope.
+- Sync shared cron updates faster on large SQLite hubs and spokes. Pushes and
+  pulls replay cron history without reconciling unrelated issues and their
+  short IDs, including when the same batch carries issue updates.
+- Find matching issues from human-mode `kata create` look-alike refusals, which
+  now include the existing issues' qualified refs.
+- Move an issue to another project from `kata tui` with `M` on the selected row
+  of the issue list, after a dry-run preview of the subtree that would move.
+  Daemon API `0.35.0` or newer is required. See the
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
+
+## 0.22.0
+<small>2026-11-05</small>
+
+Kata 0.22.0 adds issue deletion in the terminal UI. Large stores get faster
+ready queues, issue creation, label loading, project statistics, and GitHub
+sync.
+
+[Release downloads](https://github.com/kenn-io/kata/releases/tag/v0.22.0)
+· [Changes since 0.21.0](https://github.com/kenn-io/kata/compare/v0.21.0...v0.22.0)
+
+**Before upgrading**
+
+- Keep a [backup](operations/backup-restore.md) from before the upgrade. Kata
+  0.22.0 upgrades the database from schema 43 to schema 46, and older binaries
+  cannot open the result. Rollback requires that backup and its matching binary.
+- PostgreSQL: stop daemons and imports, then run
+  `kata storage postgres migrate` with schema-owner credentials. The migration
+  builds indexes on the events and issues tables and blocks their writes, so
+  allow an offline window that fits their size. Existing runtime grants remain
+  sufficient. See the [upgrade procedure](operations/postgres.md#upgrade-ceremony).
+
+**New features**
+
+- Delete an issue from `kata tui` with `X` from the list or detail, including
+  Inbox and a detail opened from Attention. Saved views drop the deleted
+  issue. Type `DELETE <project>#<id>` to confirm; the selection moves to the
+  neighbouring row and `u` restores the issue, including from Attention, the
+  way `kata restore` does.
+  Issue-scoped credentials cannot delete, so they are not offered the key. See
+  the [CLI reference](reference/cli.md#daemon-and-diagnostics).
+
+**Improvements**
+
+- Load web UI suggestions faster on large SQLite stores with unrestricted local owner access; scoped and account-bound access keep today's speed.
+- Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
+- Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.
@@ -123,28 +180,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   stores upgrade to schema 45 through SQLite's JSONL cutover or the
   [offline PostgreSQL index build](development/postgres-migrations.md#schema-45-issue-uid-prefix-index).
 - Fetch the highest-priority ready issue with flat lookup cost as ready queues grow using `kata next` and MCP `kata.next`. SQLite and PostgreSQL walk priority indexes instead of sorting every ready row; PostgreSQL bounds each request and expands it when scheduled issues fill the batch. Daemons with API `0.41.0` or newer return one priority-ordered row per request; older daemons keep the existing selection behavior. Existing stores upgrade to schema 46 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-46-ready-priority-indexes).
-- CLI crashes now exit 1 with an internal error and bug-report hint in the selected human, JSON, or agent format, instead of exit 2 with a raw panic trace. Foreground daemon crashes keep their trace. See [CLI reference](reference/cli.md). Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
-- Create and edit workflows in the `kata tui` Workflows tab with `n` and `e`. Edit the JSON definition with `Ctrl+e` and save with `Ctrl+o`. The form keeps your draft after errors and shows the current definition after concurrent changes. See [CLI reference](reference/cli.md#daemon-and-diagnostics).
-- Start, change, or stop an issue's recurrence in `kata tui` with `O` only while the detail is focused.
-  The form takes an RRULE (outer spaces trimmed), a start date, and an IANA zone, and
-  shows the daemon's error with your input kept. Saves are revision-guarded;
-  after a conflict, press `Esc`, then `O` once the detail refreshes.
-  An issue that parents a recurring cron job is refused on save, as in
-  `kata schedule --repeat`. Clear the rule and save to stop an existing recurrence, keeping its occurrences. A blank rule cannot start a recurrence.
-  The detail shows the rule, the next occurrence, and the zone.
-  See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.
-- Push ordinary issue changes to large SQLite hubs without replaying every
-  unrelated issue. Preparation folds touched issue histories; project-wide
-  changes and move history retain complete replay, and link reconciliation
-  keeps its existing scope.
-
-- Sync shared cron updates faster on large SQLite hubs and spokes. Pushes and
-  pulls replay cron history without reconciling unrelated issues and their
-  short IDs, including when the same batch carries issue updates.
-
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding
@@ -154,28 +192,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep issue creation and missing short ID lookups fast as event history grows.
   Existing stores upgrade to schema 44 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-44-reset-reference-lookup-index).
-- Keep creates and comments responsive during issue syncs by committing imports
-  in smaller chunks.
+
+**Bug fixes**
+
 - Keep legacy spokes from adding stored sibling-project references after either
   project enrolls for relay. The hub rejects the whole fresh push batch with
   `400 validation` and identifies the offending event; accepted history,
   duplicate retries, missing peers, and cleanup keep their existing behavior.
   See [quarantine recovery](operations/federation.md#quarantine) before skipping
   a refused batch.
-- Delete an issue from `kata tui` with `X` from the list or detail, including
-  Inbox and a detail opened from Attention. Saved views drop the deleted
-  issue. Type `DELETE <project>#<id>` to confirm; the selection moves to the
-  neighbouring row and `u` restores the issue, including from Attention, the
-  way `kata restore` does.
-  Issue-scoped credentials cannot delete, so they are not offered the key. See
-  the [CLI reference](reference/cli.md#daemon-and-diagnostics).
-- Move an issue to another project from `kata tui` with `M` on the selected row
-  of the issue list, after a dry-run preview of the subtree that would move.
-  Daemon API `0.35.0` or newer is required. See the
-  [CLI reference](reference/cli.md#daemon-and-diagnostics).
-
-- Find matching issues from human-mode `kata create` look-alike refusals, which
-  now include the existing issues' qualified refs.
+- Keep creates and comments responsive during issue syncs by committing imports
+  in smaller chunks.
 
 ## 0.21.0
 <small>2026-11-04</small>
