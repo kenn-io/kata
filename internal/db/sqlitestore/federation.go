@@ -2744,7 +2744,7 @@ func federationGroupFoldProjection(
 		}
 		events = append(events, projectEvents...)
 	}
-	events, err := filterRelayCrossProjectLinkEvents(ctx, tx, projectIDs, events)
+	events, _, _, err := filterRelayCrossProjectLinkEvents(ctx, tx, projectIDs, events)
 	if err != nil {
 		return db.FoldProjection{}, err
 	}

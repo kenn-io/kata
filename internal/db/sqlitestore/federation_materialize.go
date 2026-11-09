@@ -24,6 +24,7 @@ type federationMaterialization struct {
 	linkReadProjects []int64
 	maxEventID       int64
 	relayOrigins     relayOriginClassifier
+	relayEndpoints   map[string]string
 	projection       db.FoldProjection
 	cronAffected     bool
 	status           []federatedStatusIntentUpdate
@@ -177,10 +178,6 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	}
 	if m.fullHistory {
 		if linksAffected {
-			m.relayOrigins, err = loadRelayOriginClassifier(ctx, tx, m.linkProjects)
-			if err != nil {
-				return federationMaterialization{}, err
-			}
 			for _, id := range m.linkReadProjects {
 				if id == projectID {
 					m.linkStamps = append(m.linkStamps, m.eventStamp)
@@ -245,7 +242,7 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 			}
 		}
 	}
-	events, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
+	events, m.relayOrigins, m.relayEndpoints, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
 	if err != nil {
 		return err
 	}

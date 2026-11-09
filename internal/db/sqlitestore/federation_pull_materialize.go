@@ -35,7 +35,11 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 				return err
 			}
 		}
-		materialization, err := preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, false, !locked)
+		mode := pullPrepareComplete
+		if !locked {
+			mode = pullPrepareDetectFull
+		}
+		materialization, err := preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, mode)
 		if err != nil {
 			return err
 		}
@@ -75,7 +79,15 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 	})
 }
 
-func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, fullOnly, detectFull bool) (federationMaterialization, error) {
+type pullPrepareMode int
+
+const (
+	pullPrepareComplete pullPrepareMode = iota
+	pullPrepareDetectFull
+	pullPrepareFullSnapshot
+)
+
+func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, mode pullPrepareMode) (federationMaterialization, error) {
 	events, err := eventsByUIDs(ctx, tx, projectID, eventUIDs)
 	if err != nil {
 		return federationMaterialization{}, err
@@ -104,13 +116,13 @@ func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, pro
 	if full {
 		scope = nil
 	}
-	if fullOnly && !full {
+	if mode == pullPrepareFullSnapshot && !full {
 		return federationMaterialization{}, nil
 	}
-	if detectFull && full {
+	if mode == pullPrepareDetectFull && full {
 		return federationMaterialization{fullHistory: true}, nil
 	}
-	return foldFederationMaterialization(ctx, tx, projectID, prepared, true, scope, fullOnly)
+	return foldFederationMaterialization(ctx, tx, projectID, prepared, true, scope, mode == pullPrepareFullSnapshot)
 }
 
 var errStaleFederationPreparation = errors.New("stale federation preparation")
@@ -121,7 +133,7 @@ func (d *Store) prepareFullPull(ctx context.Context, projectID int64, eventUIDs 
 		return federationMaterialization{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	return preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, true, false)
+	return preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, pullPrepareFullSnapshot)
 }
 
 func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []string, m federationMaterialization) error {
@@ -146,6 +158,7 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 		binding.Enabled != m.binding.Enabled || !reflect.DeepEqual(binding.RelayConfig, m.binding.RelayConfig) {
 		return errStaleFederationPreparation
 	}
+	// A move in another project can add history to the group link fold.
 	var moved bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id>? AND type='issue.moved')`, m.maxEventID).Scan(&moved); err != nil {
 		return err
@@ -161,12 +174,23 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 		if !slices.Equal(projects, m.linkProjects) {
 			return errStaleFederationPreparation
 		}
-		origins, err := loadRelayOriginClassifier(ctx, tx, projects)
-		if err != nil {
-			return err
+		if len(projects) > 0 {
+			origins, err := loadRelayOriginClassifier(ctx, tx, projects)
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(origins, m.relayOrigins) {
+				return errStaleFederationPreparation
+			}
 		}
-		if !reflect.DeepEqual(origins, m.relayOrigins) {
-			return errStaleFederationPreparation
+		if m.relayEndpoints != nil {
+			endpoints, err := relayLinkEndpointProjects(ctx, tx, projects)
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(endpoints, m.relayEndpoints) {
+				return errStaleFederationPreparation
+			}
 		}
 		for i, id := range m.linkReadProjects {
 			if id == projectID {
