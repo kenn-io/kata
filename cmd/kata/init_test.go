@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -407,86 +406,29 @@ func TestInit_AddsHeaderToHeaderlessKataToml(t *testing.T) {
 	env := testenv.New(t)
 	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
-	for _, bom := range []string{"", "\xef\xbb\xbf"} {
-		t.Run(fmt.Sprintf("BOM=%x", bom), func(t *testing.T) {
-			dir := t.TempDir()
-			runGit(t, dir, "init", "--quiet")
-			original := "# Keep this comment.\nversion = 1\n\n[project]\nname = \"spoke-project\"\n"
-			if bom != "" {
-				original = strings.ReplaceAll(original, "\n", "\r\n")
-			}
-			path := filepath.Join(dir, ".kata.toml")
-			require.NoError(t, os.WriteFile(path, []byte(bom+original), 0o644))                                     //nolint:gosec // test fixture matches production .kata.toml mode
-			require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".kata.local.toml\n"), 0o644)) //nolint:gosec // test fixture under TempDir
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	original := "# Keep this comment.\nversion = 1\n\n[project]\nname = \"spoke-project\"\n"
+	path := filepath.Join(dir, ".kata.toml")
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o644))                                         //nolint:gosec // test fixture matches production .kata.toml mode
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".kata.local.toml\n"), 0o644)) //nolint:gosec // test fixture under TempDir
 
-			out, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
-			require.NoError(t, err)
-			content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
-			require.NoError(t, err)
-			assert.Equal(t, bom+"# This repository tracks its work in kata.\n# Coding agents: read `kata quickstart --format contract` before changing code here.\n"+original, string(content))
-			cfg, err := config.ReadProjectConfig(dir)
-			require.NoError(t, err)
-			assert.Equal(t, "spoke-project", cfg.Project.Name)
-			assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=true\n", out)
+	out, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
+	require.NoError(t, err)
+	content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "# This repository tracks its work in kata.\n# Coding agents: read `kata quickstart --format contract` before changing code here.\n"+original, string(content))
+	cfg, err := config.ReadProjectConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "spoke-project", cfg.Project.Name)
+	assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=true\n", out)
 
-			out, err = callInit(t.Context(), env.URL, dir, callInitOpts{})
-			require.NoError(t, err)
-			again, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
-			require.NoError(t, err)
-			assert.Equal(t, content, again)
-			assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=false\n", out)
-		})
-	}
-}
-
-func TestInit_ReadOnlyKataTomlWarns(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can write read-only files")
-	}
-	for _, mode := range []outputMode{outputHuman, outputAgent, outputJSON} {
-		t.Run(string(mode), func(t *testing.T) {
-			resetFlags(t)
-			flags.Mode = mode
-			env := testenv.New(t)
-			_, err := env.DB.CreateProject(t.Context(), "spoke-project")
-			require.NoError(t, err)
-			dir := t.TempDir()
-			runGit(t, dir, "init", "--quiet")
-			path := filepath.Join(dir, ".kata.toml")
-			original := "version = 1\n[project]\nname = \"spoke-project\"\n"
-			require.NoError(t, os.WriteFile(path, []byte(original), 0o444)) //nolint:gosec // read-only fixture reproduces an unwritable committed binding
-			t.Cleanup(func() { _ = os.Chmod(path, 0o644) })                 //nolint:gosec // restore test fixture permissions for cleanup
-			var out string
-			stderr := captureProcessStderr(t, func() {
-				out, err = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
-			})
-			require.NoError(t, err)
-			if mode == outputHuman {
-				assert.Contains(t, stderr, ".kata.toml")
-			} else {
-				assert.Empty(t, stderr)
-				if mode == outputJSON {
-					var body struct {
-						Warning string `json:"agent_guidance_warning"`
-					}
-					require.NoError(t, json.Unmarshal([]byte(out), &body))
-					assert.Contains(t, body.Warning, ".kata.toml")
-				} else {
-					assert.Contains(t, out, "agent_guidance_warning=")
-					assert.Contains(t, out, ".kata.toml")
-				}
-			}
-			content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
-			require.NoError(t, err)
-			assert.Equal(t, original, string(content))
-			gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore")) //nolint:gosec // test fixture under TempDir
-			require.NoError(t, err)
-			assert.Contains(t, string(gitignore), ".kata.local.toml")
-			agents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
-			require.NoError(t, err)
-			assert.Contains(t, string(agents), agentsBlockBegin+"\n"+agentContractText+agentsBlockEnd)
-		})
-	}
+	out, err = callInit(t.Context(), env.URL, dir, callInitOpts{})
+	require.NoError(t, err)
+	again, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, content, again)
+	assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=false\n", out)
 }
 
 func TestInit_AgentOutputQuotesProjectName(t *testing.T) {

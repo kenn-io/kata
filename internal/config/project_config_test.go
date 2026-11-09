@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -121,12 +122,10 @@ func TestEnsureProjectConfigHeader(t *testing.T) {
 		changed bool
 	}{
 		{"headerless", body, header + body, true},
-		{"headerless CRLF", strings.ReplaceAll(body, "\n", "\r\n"), header + strings.ReplaceAll(body, "\n", "\r\n"), true},
 		{"UTF-8 BOM", "\xef\xbb\xbf" + body, "\xef\xbb\xbf" + header + body, true},
-		{"headed", header + body, header + body, false},
-		{"comment above", "# User comment.\n" + header + body, "# User comment.\n" + header + body, false},
+		{"CRLF", strings.ReplaceAll(body, "\n", "\r\n"), header + strings.ReplaceAll(body, "\n", "\r\n"), true},
+		{"comment above moved header", "# User comment.\n" + header + body, "# User comment.\n" + header + body, false},
 		{"reworded", "# Read kata quickstart --format contract first.\n" + body, "# Read kata quickstart --format contract first.\n" + body, false},
-		{"CRLF", strings.ReplaceAll(header+body, "\n", "\r\n"), strings.ReplaceAll(header+body, "\n", "\r\n"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := setupKataProjectDir(t, tc.content)
@@ -147,6 +146,29 @@ func TestEnsureProjectConfigHeader(t *testing.T) {
 			assert.Equal(t, content, again)
 		})
 	}
+}
+
+func TestEnsureProjectConfigHeader_WriteFailurePreservesBinding(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions don't block writes on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can write to read-only directories")
+	}
+	body := "version = 1\n[project]\nname = \"spoke-project\"\n"
+	dir := setupKataProjectDir(t, body)
+	require.NoError(t, os.Chmod(dir, 0o555))       //nolint:gosec // read-only directory blocks the atomic rename
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) }) //nolint:gosec // restore so TempDir cleanup can remove it
+
+	changed, err := config.EnsureProjectConfigHeader(dir)
+	require.Error(t, err)
+	assert.False(t, changed)
+	content, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, body, string(content))
+	cfg, err := config.ReadProjectConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "spoke-project", cfg.Project.Name)
 }
 
 func TestWriteProjectConfig_RejectsBlankName(t *testing.T) {
