@@ -33,6 +33,5 @@ INSERT INTO issues(uid,project_id,short_id,title,author) SELECT printf('%026d',x
 		pages[i] = cronPullPageFetches(t, conn, false)
 		require.NoError(t, conn.Close())
 	}
-	t.Logf("project-only=%d mixed=%d page fetches", pages[0], pages[1])
-	require.LessOrEqual(t, pages[1], 559, "a mixed pull with no sibling rows must avoid scanning the project twice")
+	require.LessOrEqual(t, pages[1], pages[0]+100, "a mixed pull with no sibling rows must avoid scanning the project twice")
 }
