@@ -16,23 +16,27 @@ import (
 // in a read-only snapshot and compare the event stamp under the writer lock.
 // Both paths fall back to preparation under the lock after retry attempts.
 type federationMaterialization struct {
-	fullReplay    bool
-	fullHistory   bool
-	linksAffected bool
-	eventStamp    [32]byte
-	projection    db.FoldProjection
-	cronAffected  bool
-	status        []federatedStatusIntentUpdate
-	binding       db.FederationBinding
-	linkProjects  []int64
-	links         db.FoldProjection
-	issueRows     map[string]federatedIssueRow
-	issueIDs      map[string]int64
-	commentRows   map[string]federatedCommentRow
-	labelRows     map[federatedLabelKey]struct{}
-	staleIssues   map[string]int64
-	linkIDs       map[string]int64
-	linkRows      map[db.FoldLinkKey]federatedLinkRow
+	fullReplay       bool
+	fullHistory      bool
+	linksAffected    bool
+	eventStamp       [32]byte
+	linkStamps       [][32]byte
+	linkReadProjects []int64
+	maxEventID       int64
+	relayOrigins     relayOriginClassifier
+	projection       db.FoldProjection
+	cronAffected     bool
+	status           []federatedStatusIntentUpdate
+	binding          db.FederationBinding
+	linkProjects     []int64
+	links            db.FoldProjection
+	issueRows        map[string]federatedIssueRow
+	issueIDs         map[string]int64
+	commentRows      map[string]federatedCommentRow
+	labelRows        map[federatedLabelKey]struct{}
+	staleIssues      map[string]int64
+	linkIDs          map[string]int64
+	linkRows         map[db.FoldLinkKey]federatedLinkRow
 }
 
 // Large issue sets keep the established complete queries. This bounds SQL
@@ -66,16 +70,12 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 			break
 		}
 	}
-	return prepareFederationMaterialization(ctx, tx, projectID, prepared, false, scope)
+	return foldFederationMaterialization(ctx, tx, projectID, prepared, false, scope, false)
 }
 
 // alreadyStored selects pull preparation: the page is in the log already.
 // Cron-only pages fold cron history. Other pages reconcile the supplied issue
 // scope (nil is full); a scoped page with cron events adds complete cron history.
-func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string) (federationMaterialization, error) {
-	return foldFederationMaterialization(ctx, tx, projectID, prepared, alreadyStored, issueScope, false)
-}
-
 func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string, deferRows bool) (federationMaterialization, error) {
 	var fresh []db.FoldEvent
 	var accepted []string
@@ -149,8 +149,11 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	if deferRows && len(issueScope) == 0 {
 		m.fullHistory = true
 		m.linksAffected = linksAffected
-		m.eventStamp, err = federationEventStamp(ctx, tx, projectID)
+		m.eventStamp, err = federationEventStamp(ctx, tx, projectID, nil)
 		if err != nil {
+			return federationMaterialization{}, err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events`).Scan(&m.maxEventID); err != nil {
 			return federationMaterialization{}, err
 		}
 	}
@@ -167,13 +170,30 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 			return federationMaterialization{}, err
 		}
 	}
-	if m.fullHistory {
-		return m, nil
-	}
 	if linksAffected {
 		if err := m.foldLinks(ctx, tx, fresh, alreadyStored); err != nil {
 			return federationMaterialization{}, err
 		}
+	}
+	if m.fullHistory {
+		if linksAffected {
+			m.relayOrigins, err = loadRelayOriginClassifier(ctx, tx, m.linkProjects)
+			if err != nil {
+				return federationMaterialization{}, err
+			}
+			for _, id := range m.linkReadProjects {
+				if id == projectID {
+					m.linkStamps = append(m.linkStamps, m.eventStamp)
+					continue
+				}
+				stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+				if err != nil {
+					return federationMaterialization{}, err
+				}
+				m.linkStamps = append(m.linkStamps, stamp)
+			}
+		}
+		return m, nil
 	}
 	if err := m.prepareRows(ctx, tx, projectID, issueScope); err != nil {
 		return federationMaterialization{}, err
@@ -200,6 +220,24 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 		}
 		events = append(events, history...)
 	}
+	if m.fullHistory {
+		m.linkReadProjects = slices.Clone(m.linkProjects)
+		seen := map[string]bool{}
+		for _, event := range events {
+			if seen[event.ProjectUID] {
+				continue
+			}
+			seen[event.ProjectUID] = true
+			var id int64
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=?`, event.ProjectUID).Scan(&id); err != nil {
+				return err
+			}
+			if !slices.Contains(m.linkReadProjects, id) {
+				m.linkReadProjects = append(m.linkReadProjects, id)
+			}
+		}
+		slices.Sort(m.linkReadProjects)
+	}
 	if !alreadyStored {
 		for _, event := range fresh {
 			if db.FederationEventAffectsLinks(event.Type) {
@@ -215,9 +253,18 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 	return nil
 }
 
-// Project merges can rewrite cron payloads without updating their content hash.
-func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64) ([32]byte, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id, content_hash, payload FROM events WHERE project_id=? ORDER BY id`, projectID)
+func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes []string) ([32]byte, error) {
+	query := `SELECT id, content_hash FROM events WHERE project_id=?`
+	args := []any{projectID}
+	if len(eventTypes) > 0 {
+		//nolint:gosec // Only generated placeholders enter the query; event types are bound.
+		query += ` AND type IN (?` + strings.Repeat(",?", len(eventTypes)-1) + `)`
+		for _, eventType := range eventTypes {
+			args = append(args, eventType)
+		}
+	}
+	query += ` ORDER BY id`
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("list federation event stamps: %w", err)
 	}
@@ -225,17 +272,14 @@ func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64) ([32
 	h := sha256.New()
 	for rows.Next() {
 		var id int64
-		var contentHash, payload string
-		if err := rows.Scan(&id, &contentHash, &payload); err != nil {
+		var contentHash string
+		if err := rows.Scan(&id, &contentHash); err != nil {
 			return [32]byte{}, fmt.Errorf("scan federation event stamp: %w", err)
 		}
 		var encoded [8]byte
 		binary.BigEndian.PutUint64(encoded[:], uint64(id)) //nolint:gosec // Preserve every bit of the SQLite row ID.
 		_, _ = h.Write(encoded[:])
 		_, _ = h.Write([]byte(contentHash))
-		binary.BigEndian.PutUint64(encoded[:], uint64(len(payload)))
-		_, _ = h.Write(encoded[:])
-		_, _ = h.Write([]byte(payload))
 	}
 	if err := rows.Err(); err != nil {
 		return [32]byte{}, err

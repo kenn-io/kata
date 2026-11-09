@@ -71,18 +71,8 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 				return err
 			}
 		}
-		if err := materialization.apply(ctx, tx, projectID, db.NewCronReplayValidator(tx, false)); err != nil {
-			return err
-		}
-		if err := db.RecordMCPEventsRematch(ctx, tx, eventUIDs); err != nil {
-			return err
-		}
-		return tx.Commit()
+		return applyPulledFederationMaterialization(ctx, tx, projectID, eventUIDs, materialization)
 	})
-}
-
-func preparePulledFederationMaterializationTx(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string) (federationMaterialization, error) {
-	return preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, false, false)
 }
 
 func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, fullOnly, detectFull bool) (federationMaterialization, error) {
@@ -147,7 +137,7 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 	if err != nil {
 		return err
 	}
-	stamp, err := federationEventStamp(ctx, tx, projectID)
+	stamp, err := federationEventStamp(ctx, tx, projectID, nil)
 	if err != nil {
 		return err
 	}
@@ -156,9 +146,39 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 		binding.Enabled != m.binding.Enabled || !reflect.DeepEqual(binding.RelayConfig, m.binding.RelayConfig) {
 		return errStaleFederationPreparation
 	}
+	var moved bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id>? AND type='issue.moved')`, m.maxEventID).Scan(&moved); err != nil {
+		return err
+	}
+	if moved {
+		return errStaleFederationPreparation
+	}
 	if m.linksAffected {
-		if err := m.foldLinks(ctx, tx, nil, true); err != nil {
+		projects, err := federationBindingGroupProjectIDs(ctx, tx, binding)
+		if err != nil {
 			return err
+		}
+		if !slices.Equal(projects, m.linkProjects) {
+			return errStaleFederationPreparation
+		}
+		origins, err := loadRelayOriginClassifier(ctx, tx, projects)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(origins, m.relayOrigins) {
+			return errStaleFederationPreparation
+		}
+		for i, id := range m.linkReadProjects {
+			if id == projectID {
+				continue
+			}
+			stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+			if err != nil {
+				return err
+			}
+			if stamp != m.linkStamps[i] {
+				return errStaleFederationPreparation
+			}
 		}
 	}
 	if err := m.prepareRows(ctx, tx, projectID, nil); err != nil {
@@ -169,6 +189,10 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 			return err
 		}
 	}
+	return applyPulledFederationMaterialization(ctx, tx, projectID, eventUIDs, m)
+}
+
+func applyPulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, m federationMaterialization) error {
 	if err := m.apply(ctx, tx, projectID, db.NewCronReplayValidator(tx, false)); err != nil {
 		return err
 	}

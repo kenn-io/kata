@@ -40,7 +40,7 @@ func TestCronPreparationBoundsIssueRows(t *testing.T) {
 					defer func() { _ = tx.Rollback() }()
 					var m federationMaterialization
 					if pull {
-						m, err = preparePulledFederationMaterializationTx(t.Context(), tx, p.ID, uids)
+						m, err = preparePulledFederationMaterialization(t.Context(), tx, p.ID, uids, false, false)
 					} else {
 						m, err = prepareFederationMaterializationTx(t.Context(), tx, p.ID, prepared)
 					}

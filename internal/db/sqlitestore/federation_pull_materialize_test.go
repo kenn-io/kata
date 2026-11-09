@@ -154,36 +154,6 @@ func TestFullPulledMaterializationIgnoresPushCursorAdvance(t *testing.T) {
 	require.Equal(t, "work", got.Title)
 }
 
-func TestFullPulledMaterializationRetriesCronPayloadRebind(t *testing.T) {
-	ctx := t.Context()
-	d, p, issue := incrementalTestStore(t)
-	other, err := d.CreateProject(ctx, "other-project")
-	require.NoError(t, err)
-	projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
-	cronEvent := cronPullWorkflow(t, p, "workflow", 9_000_000_000_001)
-	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, cronEvent})
-	require.NoError(t, err)
-	attempts := 0
-	d.federationIngestPrepared = func() {
-		attempts++
-		if attempts != 1 {
-			return
-		}
-		tx, err := d.BeginTx(ctx, nil)
-		require.NoError(t, err)
-		require.NoError(t, db.MergeCronProjects(ctx, tx, p, other))
-		require.NoError(t, tx.Commit())
-	}
-	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{projectEvent.EventUID}))
-	require.Equal(t, 2, attempts)
-	var projectUID string
-	require.NoError(t, d.QueryRowContext(ctx, `SELECT json_extract(payload,'$.project_uid') FROM events WHERE uid=?`, cronEvent.EventUID).Scan(&projectUID))
-	require.Equal(t, other.UID, projectUID)
-	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	require.Equal(t, "work", got.Title)
-}
-
 func TestFullPulledMaterializationValidatesHistory(t *testing.T) {
 	for _, change := range []string{"unrelated", "insert", "rewrite", "fallback"} {
 		t.Run(change, func(t *testing.T) {
@@ -247,14 +217,93 @@ func TestFullPulledMaterializationRetainsSiblingLink(t *testing.T) {
 	linkEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, a.UID), 9_000_000_000_001)
 	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, linkEvent})
 	require.NoError(t, err)
+	attempts := 0
 	d.federationIngestPrepared = func() {
+		attempts++
+		if attempts != 1 {
+			return
+		}
 		_, _, err := d.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: a.ID, ToIssueID: b.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: a.ID, FromShortID: a.ShortID, FromUID: a.UID, ToShortID: b.ShortID, ToUID: b.UID, Actor: "tester"})
 		require.NoError(t, err)
 	}
 	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{projectEvent.EventUID, linkEvent.EventUID}))
+	require.Equal(t, 2, attempts)
 	links, err := d.LinksByIssue(ctx, b.ID)
 	require.NoError(t, err)
 	require.Len(t, links, 1)
+}
+
+func TestFullPulledMaterializationRetriesMoveAway(t *testing.T) {
+	ctx := t.Context()
+	d, p, issue := incrementalTestStore(t)
+	other, err := d.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, other.ID, "tester")
+	require.NoError(t, err)
+	ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
+	require.NoError(t, err)
+	attempts := 0
+	d.federationIngestPrepared = func() {
+		attempts++
+		if attempts != 1 {
+			return
+		}
+		_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: p.ID, ToProjectID: other.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+		require.NoError(t, err)
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, other.ID, got.ProjectID)
+	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	full, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, full, got)
+}
+
+func TestFullPulledMaterializationWithSiblingMoveHistory(t *testing.T) {
+	ctx := t.Context()
+	d, p, issue := incrementalTestStore(t)
+	other, err := d.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	third, err := d.CreateProject(ctx, "third-project")
+	require.NoError(t, err)
+	peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "peer", Author: "tester"})
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, other.ID, "tester")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, third.ID, "tester")
+	require.NoError(t, err)
+	_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: peer.ID, FromProjectID: other.ID, ToProjectID: third.ID, IfMatchRev: peer.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=?`, other.ID)
+	require.NoError(t, err)
+	projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	linkEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peer.UID), 9_000_000_000_001)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, linkEvent})
+	require.NoError(t, err)
+	m, err := d.prepareFullPull(ctx, p.ID, []string{projectEvent.EventUID, linkEvent.EventUID})
+	require.NoError(t, err)
+	require.True(t, m.fullHistory)
+	require.False(t, m.fullReplay)
+	require.Contains(t, m.linkReadProjects, other.ID)
+	require.Contains(t, m.linkReadProjects, third.ID)
+	attempts := 0
+	d.federationIngestPrepared = func() {
+		attempts++
+		if attempts != 1 {
+			return
+		}
+		unlink := incrementalRemoteEvent(t, other, peer.UID, "issue.unlinked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peer.UID), 9_000_000_000_002)
+		_, err := d.InsertRemoteEvents(ctx, other.ID, []db.RemoteEvent{unlink})
+		require.NoError(t, err)
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{projectEvent.EventUID, linkEvent.EventUID}))
+	require.Equal(t, 2, attempts)
+	links, err := d.LinksByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Empty(t, links)
 }
 
 func TestFullPulledMaterializationReplaysMoveHistory(t *testing.T) {

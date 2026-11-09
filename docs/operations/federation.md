@@ -1962,6 +1962,10 @@ A timed-out
 request leaves the cursor unchanged and retries through the normal sync loop.
 
 SQLite push and pull application first prepare without holding the writer.
+For a full-history pull, Kata folds project and link history in a read-only
+snapshot, then checks the event history and link group before applying current
+rows under the writer. A changed history or a newly recorded move retries the
+preparation.
 If a concurrent write invalidates that snapshot, Kata tries once more the same
 way, unless the invalidated preparation took a second or longer. After that,
 the next attempt acquires the writer before preparing. Optimistic preparation
