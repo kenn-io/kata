@@ -118,7 +118,7 @@ func WriteProjectConfig(workspaceRoot, name string) error {
 		return err
 	}
 	body := fmt.Sprintf("version = 1\n\n[project]\nname = %q\n", name)
-	return writeProjectConfigFile(filepath.Join(workspaceRoot, ProjectConfigFilename), []byte(projectConfigHeader+body))
+	return os.WriteFile(filepath.Join(workspaceRoot, ProjectConfigFilename), []byte(projectConfigHeader+body), 0o644) //nolint:gosec // committed project file, world-readable by design
 }
 
 // EnsureProjectConfigHeader prepends agent guidance while preserving existing contents.
@@ -136,16 +136,10 @@ func EnsureProjectConfigHeader(workspaceRoot string) (bool, error) {
 	if hasBOM {
 		header = "\ufeff" + header
 	}
-	if err := writeProjectConfigFile(path, []byte(header+body)); err != nil {
+	if err := atomicfile.WriteFile(path, []byte(header+body), atomicfile.WithCreatePerm(0o644), atomicfile.WithPreserveMode(), atomicfile.WithFollowLink()); err != nil {
 		return false, err
 	}
 	return true, nil
-}
-
-// writeProjectConfigFile replaces path atomically, keeping os.WriteFile's
-// mode and symlink behavior, so a failed write leaves the old binding intact.
-func writeProjectConfigFile(path string, data []byte) error {
-	return atomicfile.WriteFile(path, data, atomicfile.WithCreatePerm(0o644), atomicfile.WithPreserveMode(), atomicfile.WithFollowLink())
 }
 
 // ValidateProjectName rejects names that can spoof terminal output when echoed

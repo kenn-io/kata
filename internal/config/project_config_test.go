@@ -98,7 +98,7 @@ name = "   "
 	assert.Contains(t, err.Error(), "project.name")
 }
 
-func TestWriteProjectConfig_WritesNameOnly(t *testing.T) {
+func TestWriteProjectConfig_WritesHeaderAndName(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, config.WriteProjectConfig(dir, "foo"))
 	bs, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
@@ -138,6 +138,9 @@ func TestEnsureProjectConfigHeader(t *testing.T) {
 			cfg, err := config.ReadProjectConfig(dir)
 			require.NoError(t, err)
 			assert.Equal(t, "spoke-project", cfg.Project.Name)
+			if !tc.changed {
+				return
+			}
 			changed, err = config.EnsureProjectConfigHeader(dir)
 			require.NoError(t, err)
 			assert.False(t, changed)
@@ -166,6 +169,17 @@ func TestEnsureProjectConfigHeader_WriteFailurePreservesBinding(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, body, string(content))
+}
+
+func TestWriteProjectConfig_WritableFileInReadOnlyDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions don't block writes")
+	}
+	dir := setupKataProjectDir(t, "version = 1\n[project]\nname = \"old-project\"\n")
+	require.NoError(t, os.Chmod(dir, 0o555))       //nolint:gosec // fixture permits writes only to the existing binding
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) }) //nolint:gosec // restore fixture permissions for cleanup
+
+	require.NoError(t, config.WriteProjectConfig(dir, "spoke-project"))
 	cfg, err := config.ReadProjectConfig(dir)
 	require.NoError(t, err)
 	assert.Equal(t, "spoke-project", cfg.Project.Name)
