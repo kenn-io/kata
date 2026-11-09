@@ -174,6 +174,7 @@ func (a *Adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, star
 
 // RunnerConfig supplies daemon-owned dependencies to the shared issue runner.
 type RunnerConfig struct {
+	RouteBinding   func(context.Context, db.IssueSyncBinding) (context.Context, error)
 	Store          db.Storage
 	Fetcher        Fetcher
 	Progress       *issuesync.ProgressTracker
@@ -188,7 +189,7 @@ type RunnerConfig struct {
 
 // NewRunner applies the fixed Notion claim and deadline limits with the shared import chunk default.
 func NewRunner(c RunnerConfig) *issuesync.Runner {
-	return issuesync.NewRunner(issuesync.RunnerConfig{
+	return issuesync.NewRunner(issuesync.RunnerConfig{RouteBinding: c.RouteBinding,
 		Store:          c.Store,
 		Adapter:        NewAdapter(c.Store, c.Fetcher),
 		Progress:       c.Progress,

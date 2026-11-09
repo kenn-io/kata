@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
@@ -34,6 +35,9 @@ func TestRoundtripRichDatabaseAcrossPostgres(t *testing.T) {
 	var postgresJSONL bytes.Buffer
 	require.NoError(t, jsonl.Export(ctx, postgresStore, &postgresJSONL,
 		jsonl.ExportOptions{IncludeDeleted: true}))
+	blocked, err := postgresStore.TrackerRestoreHistoryBlocked(ctx, fixture.Project.UID)
+	require.NoError(t, err)
+	assert.True(t, blocked, "same-instance restore retains the history barrier")
 	assert.Equal(t, replayWireRecordsWithoutSequences(t, sourceJSONL.Bytes()),
 		replayWireRecordsWithoutSequences(t, postgresJSONL.Bytes()))
 
@@ -65,9 +69,17 @@ func replayWireRecordsWithoutSequences(t *testing.T, data []byte) []string {
 	for scanner.Scan() {
 		line := append([]byte(nil), scanner.Bytes()...)
 		var envelope struct {
-			Kind string `json:"kind"`
+			Kind string          `json:"kind"`
+			Data json.RawMessage `json:"data"`
 		}
 		require.NoError(t, json.Unmarshal(line, &envelope))
+		if envelope.Kind == db.ImportKindMeta {
+			var meta db.MetaKV
+			require.NoError(t, json.Unmarshal(envelope.Data, &meta))
+			if strings.HasPrefix(meta.Key, db.TrackerMetadataPrefix+"restore_barrier.") {
+				continue
+			}
+		}
 		if envelope.Kind != db.ImportKindSQLiteSequence {
 			records = append(records, string(line))
 		}

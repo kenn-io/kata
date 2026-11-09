@@ -253,11 +253,12 @@ type GitHubSyncRunner interface {
 // GitHubSyncRunnerConfig is the daemon-side configuration passed to a runner
 // factory. Tests use this seam to replace the runner without replacing DB state.
 type GitHubSyncRunnerConfig struct {
-	Progress  *githubsync.ProgressTracker
-	Store     db.Storage
-	Fetcher   githubsync.Fetcher
-	EventSink func(context.Context, int64, []db.Event) error
-	Logger    *slog.Logger
+	RouteBinding func(context.Context, db.IssueSyncBinding) (context.Context, error)
+	Progress     *githubsync.ProgressTracker
+	Store        db.Storage
+	Fetcher      githubsync.Fetcher
+	EventSink    func(context.Context, int64, []db.Event) error
+	Logger       *slog.Logger
 }
 
 // GitHubSyncRunnerFactory creates a runner for one daemon-side sync request.
@@ -266,11 +267,12 @@ type GitHubSyncRunnerFactory func(GitHubSyncRunnerConfig) GitHubSyncRunner
 // NewDefaultGitHubSyncRunner adapts the public daemon seam to githubsync.Runner.
 func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 	return githubsync.NewRunner(githubsync.RunnerConfig{
-		Progress:  cfg.Progress,
-		Store:     cfg.Store,
-		Fetcher:   cfg.Fetcher,
-		EventSink: cfg.EventSink,
-		Logger:    cfg.Logger,
+		RouteBinding: cfg.RouteBinding,
+		Progress:     cfg.Progress,
+		Store:        cfg.Store,
+		Fetcher:      cfg.Fetcher,
+		EventSink:    cfg.EventSink,
+		Logger:       cfg.Logger,
 	})
 }
 

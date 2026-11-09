@@ -27,6 +27,9 @@ func (s *Store) ImportReplay(ctx context.Context, records []db.ImportRecord, opt
 		if err := s.importReplayTx(ctx, tx, db.OrderImportRecords(records), opts); err != nil {
 			return err
 		}
+		if err := db.EnsureTrackerRestoreBarriersSQL(ctx, tx, opts, records); err != nil {
+			return err
+		}
 		if err := tx.QueryRowContext(ctx,
 			`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&finalInstanceUID); err != nil {
 			return fmt.Errorf("read restored instance_uid: %w", mapSQLError(err, nil))
@@ -207,9 +210,16 @@ func (s *Store) pgReplayClearTarget(
 		db.MetaKeyInstanceCreatedAt).Scan(&preservedCreatedAt); err != nil {
 		return "", "", fmt.Errorf("preserve target %s: %w", db.MetaKeyInstanceCreatedAt, mapSQLError(err, nil))
 	}
+	trackerEvidence, err := db.RetainTrackerMetadataSQL(ctx, tx)
+	if err != nil {
+		return "", "", err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`TRUNCATE TABLE `+strings.Join(quotedAll, ", ")+` RESTART IDENTITY`); err != nil {
 		return "", "", fmt.Errorf("clear import target: %w", mapSQLError(err, nil))
+	}
+	if err := db.RestoreRetainedTrackerMetadataSQL(ctx, tx, trackerEvidence); err != nil {
+		return "", "", err
 	}
 	return preservedInstanceUID, preservedCreatedAt, nil
 }

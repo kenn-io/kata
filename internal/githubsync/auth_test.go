@@ -446,3 +446,20 @@ func TestGraphQLIncrementalParentQueryGuardAcceptsOnlyGeneratedShape(t *testing.
 		assert.False(t, graphQLQueryMatchesParentQuery(bad))
 	}
 }
+
+// Contract: an explicitly selected account never borrows gh auth or the
+// daemon's default token when its own selector is blank/unavailable.
+func TestNamedCredentialResolverNeverFallsBack(t *testing.T) {
+	const selector = "EXAMPLE_NAMED_GITHUB_TOKEN"
+	t.Setenv(selector, "")
+	runner := &fakeCommandRunner{responses: []fakeCommandResponse{{stdout: []byte("fixture-fallback\n")}}}
+	resolver := NewNamedCredentialResolver(config.GitHubSyncConfig{TokenEnv: selector}, runner)
+	_, err := resolver.ResolveKind(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"})
+	require.Error(t, err)
+	assert.Empty(t, runner.calls)
+	assert.NotContains(t, err.Error(), selector)
+	appOnly := NewNamedCredentialResolver(config.GitHubSyncConfig{Apps: []config.GitHubAppConfig{{Host: "github.com", Owner: "another-owner", AppID: 1, InstallationID: 2, PrivateKeyPath: "example-key.pem"}}}, runner)
+	_, err = appOnly.ResolveKind(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"})
+	require.Error(t, err)
+	assert.Empty(t, runner.calls)
+}

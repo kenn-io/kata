@@ -153,10 +153,10 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 	require.ErrorIs(t, CheckCutoverSource(ctx, path), ErrCutoverInProgress)
 }
 
-// Index-only upgrades, and the one that adds the MCP Events table, must
-// match the fresh-store catalog without exporting.
-func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
-	for _, version := range []int{41, 44, 48} {
+// The schema 51 boundary rebuilds earlier schemas, including versions that
+// formerly had a wholly in-place upgrade path.
+func TestAutoCutoverRebuildsEarlierVersions(t *testing.T) {
+	for _, version := range []int{41, 44, 48, 50} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			path := indexOnlySource(t, version)
@@ -172,7 +172,7 @@ func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
 				},
 			})
 			require.NoError(t, err)
-			require.False(t, exported)
+			require.True(t, exported)
 			upgraded, err := sqlitestore.Open(t.Context(), path)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, upgraded.Close()) })
@@ -197,28 +197,24 @@ func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
 	}
 }
 
-func TestAutoCutoverInPlaceFailureLeavesSourceRetryable(t *testing.T) {
+func TestAutoCutoverExportFailureLeavesSourceRetryable(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	path := indexOnlySource(t, 41)
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, raw.Close()) })
-	// Inject a conflicting index to fail the last step after earlier DDL ran.
-	_, err = raw.ExecContext(t.Context(), `CREATE INDEX idx_events_moved_from_id ON events(id)`)
-	require.NoError(t, err)
+	injected := errors.New("injected export failure")
 	ops := cutoverOperations{exportSource: func(context.Context, string, string) (int64, error) {
-		t.Fatal("index-only upgrade exported the source")
-		return 0, nil
+		return 0, injected
 	}, replaceFile: atomicfile.Replace}
-	require.ErrorContains(t, autoCutover(t.Context(), path, ops), "add index idx_events_moved_from_id")
+	require.ErrorIs(t, autoCutover(t.Context(), path, ops), injected)
 	var version, indexes int
 	require.NoError(t, raw.QueryRowContext(t.Context(), `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
 	require.Equal(t, 41, version)
 	require.NoError(t, raw.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE name='idx_issues_project_created'`).Scan(&indexes))
 	require.Zero(t, indexes)
-	_, err = raw.ExecContext(t.Context(), `DROP INDEX idx_events_moved_from_id`)
-	require.NoError(t, err)
 	require.NoError(t, raw.Close())
+	ops.exportSource = exportCutoverSource
 	require.NoError(t, autoCutover(t.Context(), path, ops))
 	version, err = sqlitestore.PeekSchemaVersion(t.Context(), path)
 	require.NoError(t, err)
@@ -257,6 +253,8 @@ func indexOnlySource(t *testing.T, version int) string {
 			}
 		}
 	}
+	_, err = source.ExecContext(t.Context(), `ALTER TABLE issue_sync_bindings DROP COLUMN connection_uid`)
+	require.NoError(t, err)
 	_, err = source.ExecContext(t.Context(), `UPDATE meta SET value=? WHERE key='schema_version'`, version)
 	require.NoError(t, err)
 	require.NoError(t, source.Close())

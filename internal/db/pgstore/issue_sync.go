@@ -14,7 +14,7 @@ import (
 
 const issueSyncBindingSelect = `SELECT b.id, b.project_id, b.provider, b.source_key,
        b.remote_id, b.display_name, b.config_json, b.enabled, b.interval_seconds,
-       b.last_cursor_at, b.created_at, b.updated_at
+       b.last_cursor_at, b.created_at, b.updated_at, b.connection_uid
   FROM issue_sync_bindings b`
 
 const issueSyncStatusSelect = `SELECT binding_id, project_id, sync_started_at, last_attempt_at,
@@ -69,7 +69,7 @@ func (s *Store) UpsertIssueSyncBinding(
 			if err != nil {
 				return err
 			}
-			config, err := db.PreserveIssueStatusScanConfig(existing.Config, params.Config)
+			config, _, err := db.PrepareIssueSyncBindingConfig(&existing, params)
 			if err != nil {
 				return err
 			}
@@ -107,16 +107,16 @@ VALUES($1,$2) ON CONFLICT(binding_id) DO NOTHING`, existing.ID, existing.Project
 		if !errors.Is(err, db.ErrNotFound) {
 			return err
 		}
-		insertConfig, err := db.PublicIssueSyncConfig(params.Config)
+		insertConfig, connectionUID, err := db.PrepareIssueSyncBindingConfig(nil, params)
 		if err != nil {
 			return err
 		}
 		var bindingID int64
 		err = tx.QueryRowContext(ctx, `INSERT INTO issue_sync_bindings(
- project_id, provider, source_key, remote_id, display_name, config_json, enabled, interval_seconds
-) VALUES($1,$2,$3,$4,$5,$6,1,$7) RETURNING id`,
+ project_id, provider, source_key, remote_id, display_name, config_json, enabled, interval_seconds, connection_uid
+) VALUES($1,$2,$3,$4,$5,$6,1,$7,$8) RETURNING id`,
 			params.ProjectID, params.Provider, params.SourceKey, params.RemoteID,
-			params.DisplayName, string(insertConfig), params.IntervalSeconds,
+			params.DisplayName, string(insertConfig), params.IntervalSeconds, connectionUID,
 		).Scan(&bindingID)
 		if err != nil {
 			return mapSQLError(err, nil)
@@ -314,14 +314,18 @@ WHERE binding_id=$6 AND sync_started_at=$7`,
 		if affected == 0 {
 			return db.ErrIssueSyncAlreadyRunning
 		}
+		committedRevision := db.NextIssueSyncBindingUpdatedAt(binding.UpdatedAt, time.Now())
 		if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings
 SET last_cursor_at=$1, updated_at=$2 WHERE id=$3`,
-			storedTime(params.CursorAt), storedTime(db.NextIssueSyncBindingUpdatedAt(binding.UpdatedAt, time.Now())), params.BindingID,
+			storedTime(params.CursorAt), storedTime(committedRevision), params.BindingID,
 		); err != nil {
 			return mapSQLError(err, nil)
 		}
 		status, err = scanIssueSyncStatus(tx.QueryRowContext(ctx,
 			issueSyncStatusSelect+` WHERE binding_id=$1`, params.BindingID))
+		if err == nil {
+			status.CommittedBindingUpdatedAt = committedRevision
+		}
 		return err
 	})
 	return status, err
@@ -440,7 +444,7 @@ func scanIssueSyncBinding(row rowScanner) (db.IssueSyncBinding, error) {
 		&binding.ID, &binding.ProjectID, &binding.Provider, &binding.SourceKey,
 		&binding.RemoteID, &binding.DisplayName, &config,
 		(*storedBool)(&binding.Enabled), &binding.IntervalSeconds,
-		&lastCursorAt, (*storedTime)(&binding.CreatedAt), (*storedTime)(&binding.UpdatedAt),
+		&lastCursorAt, (*storedTime)(&binding.CreatedAt), (*storedTime)(&binding.UpdatedAt), &binding.ConnectionUID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.IssueSyncBinding{}, db.ErrNotFound
@@ -449,6 +453,9 @@ func scanIssueSyncBinding(row rowScanner) (db.IssueSyncBinding, error) {
 		return db.IssueSyncBinding{}, fmt.Errorf("scan issue sync binding: %w", mapSQLError(err, nil))
 	}
 	binding.Config = jsontext.Value(config)
+	if err := db.ValidateIssueSyncConnectionMarker(binding.ConnectionUID, binding.Config); err != nil {
+		return db.IssueSyncBinding{}, err
+	}
 	binding.LastCursorAt = lastCursorAt.Time
 	return binding, nil
 }

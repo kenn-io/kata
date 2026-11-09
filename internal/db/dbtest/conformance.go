@@ -51,6 +51,22 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "tracker project import history scope", methods: []string{"CreateProject", "ImportReplay", "UpsertIssueSyncBinding"}, runWithBackend: checkTrackerProjectImportHistoryScope},
+	{name: "tracker restore without execution history", methods: []string{"CreateProject", "ImportReplay", "UpsertIssueSyncBinding"}, runWithBackend: checkTrackerRestoreWithoutJournal},
+	{name: "tracker pending control capacity", methods: []string{"CreateProject"}, run: checkTrackerControlCapacity},
+	{name: "tracker control UID receipts", methods: []string{"CreateProject"}, run: checkTrackerControlReceipts},
+	{name: "tracker disabled binding receipt recovery", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding"}, run: checkTrackerRecoveryReceipt},
+	{name: "tracker executor admission and receipt", methods: []string{"CreateProject", "UpsertFederationBinding", "SetRelayBindingConfig", "PinRootAuthority"}, run: checkTrackerExecutorAdmission},
+	{name: "tracker remote reservation and acknowledgement", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding"}, runWithBackend: checkTrackerRemoteStatusAdmission},
+	{name: "tracker remote non-send after permit", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding"}, runWithBackend: checkTrackerNonSendAfterPermit},
+	{name: "tracker atomic status admission", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding"}, run: checkTrackerStatusAdmission},
+	{name: "tracker activation", methods: []string{"CreateProject", "UpsertIssueSyncBinding"}, run: checkTrackerActivation},
+	{name: "tracker registry history", run: checkTrackerRegistry},
+	{name: "tracker binding selection", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding", "DisableIssueSyncBinding"}, run: checkTrackerBindingSelection},
+	{name: "tracker run committed revision", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding", "RecordIssueSyncSuccess"}, run: checkTrackerRunCommittedRevision},
+	{name: "tracker execution fence", methods: []string{"CreateProject", "ExportMeta"}, runWithBackend: checkTrackerExecutionFence},
+	{name: "tracker non-send proof", methods: []string{"CreateProject"}, run: checkTrackerNonSendProof},
+	{name: "tracker execution history", methods: []string{"CreateProject"}, run: checkTrackerExecutionHistory},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},

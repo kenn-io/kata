@@ -92,6 +92,10 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		if targetIdentity, err = readReplayInstanceIdentity(ctx, tx); err != nil {
 			return err
 		}
+		trackerEvidence, err := db.RetainTrackerMetadataSQL(ctx, tx)
+		if err != nil {
+			return err
+		}
 		// Installing an already-prepared replacement has file-replacement
 		// semantics for metadata as well as rows. Ordinary replay keeps its
 		// existing target-metadata policy. Ownership was checked before either.
@@ -99,6 +103,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 			if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key NOT IN ('instance_uid','instance_created_at')`); err != nil {
 				return fmt.Errorf("clear replacement metadata: %w", err)
 			}
+		}
+		if err := db.RestoreRetainedTrackerMetadataSQL(ctx, tx, trackerEvidence); err != nil {
+			return err
 		}
 		// Labels describe the restored enrollment inventory, so target-only
 		// labels must not survive a replacement restore.
@@ -154,6 +161,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		fmt.Fprintf(os.Stderr,
 			"note: skipped %d import mapping record(s) referencing skipped link(s)\n",
 			skippedMappings)
+	}
+	if err := db.EnsureTrackerRestoreBarriersSQL(ctx, tx, opts, recs); err != nil {
+		return err
 	}
 	if err := ensureSystemProject(ctx, tx); err != nil {
 		return err
@@ -558,6 +568,14 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 }
 
 func importMeta(ctx context.Context, tx *sql.Tx, m *db.MetaKV, opts db.ImportOptions) error {
+	normalized, keep, err := db.TrackerMetadataForImport(*m, opts)
+	if err != nil || !keep {
+		return err
+	}
+	m = &normalized
+	if err := db.CheckTrackerMetadataRestoreSQL(ctx, tx, *m, false); err != nil {
+		return err
+	}
 	// Always ignore the source's export_version/schema_version; ImportReplay
 	// stamps the current schema_version after the loop (recordImportSchemaVersion).
 	if m.Key == "export_version" || m.Key == "schema_version" {
@@ -567,7 +585,7 @@ func importMeta(ctx context.Context, tx *sql.Tx, m *db.MetaKV, opts db.ImportOpt
 	if m.Key == "instance_uid" && opts.NewInstance {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO meta(key, value) VALUES(?, ?)
 		 ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
 		m.Key, m.Value)
@@ -635,6 +653,9 @@ func importAlias(ctx context.Context, tx *sql.Tx, a *db.AliasExport) error {
 }
 
 func importIssueSyncBinding(ctx context.Context, tx *sql.Tx, b *db.IssueSyncBindingExport, preserveEnabled bool) error {
+	if err := db.ValidateIssueSyncConnectionMarker(b.ConnectionUID, b.Config); err != nil {
+		return err
+	}
 	config := b.Config
 	if !preserveEnabled {
 		var err error
@@ -650,12 +671,12 @@ func importIssueSyncBinding(ctx context.Context, tx *sql.Tx, b *db.IssueSyncBind
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO issue_sync_bindings(
 		   id, project_id, provider, source_key, remote_id, display_name, config_json,
-		   enabled, interval_seconds, last_cursor_at, created_at, updated_at
+		   enabled, interval_seconds, last_cursor_at, created_at, updated_at, connection_uid
 		 )
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ID, b.ProjectID, b.Provider, b.SourceKey, b.RemoteID, b.DisplayName,
 		string(config), enabled, b.IntervalSeconds, b.LastCursorAt, b.CreatedAt,
-		b.UpdatedAt)
+		b.UpdatedAt, b.ConnectionUID)
 	return wrapImportErr(db.ImportKindIssueSyncBinding, err)
 }
 

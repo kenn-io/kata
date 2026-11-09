@@ -165,6 +165,7 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, startedAt 
 
 // RunnerConfig supplies storage, source reads, and scheduling for Linear sync.
 type RunnerConfig struct {
+	RouteBinding   func(context.Context, db.IssueSyncBinding) (context.Context, error)
 	Store          db.Storage
 	Fetcher        Fetcher
 	Progress       *issuesync.ProgressTracker
@@ -179,5 +180,5 @@ type RunnerConfig struct {
 
 // NewRunner reuses durable claims, status intents, and scheduling from issuesync.
 func NewRunner(c RunnerConfig) *issuesync.Runner {
-	return issuesync.NewRunner(issuesync.RunnerConfig{Store: c.Store, Adapter: NewAdapter(c.Store, c.Fetcher), Progress: c.Progress, Clock: c.Clock, Logger: c.Logger, Interval: c.Interval, Wake: c.Wake, EventSink: c.EventSink, EventSinkFrom: c.EventSinkFrom, DrainAdmission: c.DrainAdmission, RunTimeout: 20 * time.Minute, StaleLockTTL: 30 * time.Minute})
+	return issuesync.NewRunner(issuesync.RunnerConfig{RouteBinding: c.RouteBinding, Store: c.Store, Adapter: NewAdapter(c.Store, c.Fetcher), Progress: c.Progress, Clock: c.Clock, Logger: c.Logger, Interval: c.Interval, Wake: c.Wake, EventSink: c.EventSink, EventSinkFrom: c.EventSinkFrom, DrainAdmission: c.DrainAdmission, RunTimeout: 20 * time.Minute, StaleLockTTL: 30 * time.Minute})
 }

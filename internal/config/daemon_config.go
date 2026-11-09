@@ -77,6 +77,10 @@ type DaemonConfig struct {
 	TwentySync   TwentySyncConfig   `toml:"twenty_sync"`
 	TodoistSync  TodoistSyncConfig  `toml:"todoist_sync"`
 	TickTickSync TickTickSyncConfig `toml:"ticktick_sync"`
+	// TrackerConnections are named owner-local accounts. TrackerAccess maps
+	// qualified source principals to root-local actors; neither implies a grant.
+	TrackerConnections []TrackerConnectionConfig `toml:"tracker_connection"`
+	TrackerAccess      []TrackerAccessMapping    `toml:"tracker_access"`
 	// Connectors declares operator-controlled external root connector processes.
 	Connectors []ConnectorConfig `toml:"connector"`
 }
@@ -536,6 +540,14 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 		return nil, err
 	}
 	if err := validateGitHubSync(cfg.GitHubSync); err != nil {
+		return nil, err
+	}
+	connections, err := NormalizeTrackerConnections(cfg.TrackerConnections)
+	if err != nil {
+		return nil, err
+	}
+	cfg.TrackerConnections = connections
+	if err := ValidateTrackerAccess(cfg.TrackerAccess); err != nil {
 		return nil, err
 	}
 	notionSync, err := NormalizeNotionSyncConfig(cfg.NotionSync)

@@ -10,6 +10,7 @@ import (
 
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/tracker"
 )
 
 const (
@@ -32,9 +33,13 @@ type Runner struct {
 
 // RunnerConfig configures an issue sync runner.
 type RunnerConfig struct {
-	Progress *ProgressTracker
-	Store    db.Storage
-	Adapter  Adapter
+	// RouteBinding checks live service authority and selects the exact account
+	// before a named binding reaches any content or status adapter. Nil means
+	// named execution is unavailable, never a legacy credential fallback.
+	RouteBinding func(context.Context, db.IssueSyncBinding) (context.Context, error)
+	Progress     *ProgressTracker
+	Store        db.Storage
+	Adapter      Adapter
 	// RunTimeout bounds preparation, imports, and finalization after claim.
 	// Zero preserves detached GitHub finalization after caller cancellation.
 	RunTimeout time.Duration
@@ -104,19 +109,29 @@ func NewRunner(config RunnerConfig) *Runner {
 
 // RunOnce syncs one binding if it can claim the binding lock.
 func (r *Runner) RunOnce(ctx context.Context, bindingID int64) (RunResult, error) {
-	return r.runOnce(ctx, bindingID, nil)
+	return r.runOnce(ctx, bindingID, nil, nil)
+}
+
+// RunOnceWithBinding claims only the binding snapshot authorized by the caller.
+func (r *Runner) RunOnceWithBinding(ctx context.Context, binding db.IssueSyncBinding) (RunResult, error) {
+	return r.runOnce(ctx, binding.ID, nil, &binding)
 }
 
 func (r *Runner) runOnce(
 	ctx context.Context,
 	bindingID int64,
 	eventFork activity.Admission,
+	expected *db.IssueSyncBinding,
 ) (RunResult, error) {
 	if err := r.validate(); err != nil {
 		return RunResult{}, err
 	}
 	syncStartedAt := r.now().Truncate(time.Millisecond)
-	binding, claimed, err := r.config.Store.ClaimIssueSyncBinding(ctx, bindingID, r.config.Adapter.Provider(), syncStartedAt, syncStartedAt.Add(-r.staleLockTTL()))
+	claimCtx := ctx
+	if expected != nil {
+		claimCtx = db.WithAdditionalTransactionFence(ctx, db.IssueSyncBindingFence(*expected))
+	}
+	binding, claimed, err := r.config.Store.ClaimIssueSyncBinding(claimCtx, bindingID, r.config.Adapter.Provider(), syncStartedAt, syncStartedAt.Add(-r.staleLockTTL()))
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -235,9 +250,9 @@ func (r *Runner) runDue(ctx context.Context) (<-chan struct{}, bool, error) {
 		_, runErr := func() (RunResult, error) {
 			if drain != nil {
 				defer drain.Release()
-				return r.runOnce(ctx, binding.ID, drain.Fork)
+				return r.runOnce(ctx, binding.ID, drain.Fork, nil)
 			}
-			return r.runOnce(ctx, binding.ID, nil)
+			return r.runOnce(ctx, binding.ID, nil, nil)
 		}()
 		if runErr != nil {
 			err := runErr
@@ -255,6 +270,37 @@ func (r *Runner) runDue(ctx context.Context) (<-chan struct{}, bool, error) {
 }
 
 func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, syncStartedAt time.Time, eventFork activity.Admission) (result RunResult, runErr error) {
+	if err := db.ValidateIssueSyncConnectionMarker(binding.ConnectionUID, binding.Config); err != nil {
+		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+	}
+	selection, err := db.IssueSyncConnectionFromConfig(binding.Config)
+	if err != nil {
+		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+	}
+	if selection != nil {
+		if r.config.RouteBinding == nil {
+			return r.recordError(ctx, binding, syncStartedAt, tracker.ErrUnavailable, db.ImportBatchResult{})
+		}
+		routed, err := r.config.RouteBinding(ctx, binding)
+		if err != nil {
+			return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+		}
+		if routed == nil {
+			return r.recordError(ctx, binding, syncStartedAt, tracker.ErrUnavailable, db.ImportBatchResult{})
+		}
+		actual, ok := tracker.RunSelection(routed)
+		if !ok || actual != *selection {
+			return r.recordError(ctx, binding, syncStartedAt, tracker.ErrUnavailable, db.ImportBatchResult{})
+		}
+		ctx = routed
+		// Release remote read/status sessions after the whole run. This bounded
+		// cleanup must survive caller cancellation; durable receipts are untouched.
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			_ = tracker.CloseRun(cleanup)
+		}()
+	}
 	statusUpdated := 0
 	defer func() { result.StatusUpdated = statusUpdated }()
 	binding, separateStatus, statusErr := r.runStatuses(ctx, binding, syncStartedAt, eventFork, &statusUpdated)
@@ -344,6 +390,7 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 		return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, err), importResult)
 	}
 	binding.LastCursorAt = &syncStartedAt
+	binding.UpdatedAt = status.CommittedBindingUpdatedAt
 	return RunResult{Binding: binding, Status: status, Import: importResult}, statusErr
 }
 

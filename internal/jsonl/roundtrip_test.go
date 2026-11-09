@@ -31,7 +31,35 @@ func TestRoundtripRichDatabaseIsByteEquivalent(t *testing.T) {
 
 	second := exportToBuffer(ctx, t, dst)
 
-	assert.Equal(t, first.String(), second.String())
+	// Restoring a same-instance backup records a history gap even when the
+	// snapshot predates named connections; all other exported records roundtrip.
+	var retained strings.Builder
+	var barriers int
+	scanner := bufio.NewScanner(bytes.NewReader(second.Bytes()))
+	scanner.Buffer(make([]byte, 4096), 16<<20)
+	for scanner.Scan() {
+		line := scanner.Text()
+		var envelope struct {
+			Kind string          `json:"kind"`
+			Data json.RawMessage `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(line), &envelope))
+		var meta db.MetaKV
+		if envelope.Kind == "meta" {
+			require.NoError(t, json.Unmarshal(envelope.Data, &meta))
+		}
+		if strings.HasPrefix(meta.Key, db.TrackerMetadataPrefix+"restore_barrier.") {
+			barriers++
+			var barrier db.TrackerRestoreBarrier
+			require.NoError(t, json.Unmarshal([]byte(meta.Value), &barrier))
+			assert.Equal(t, db.TrackerRestoreBarrier{Version: 1, RootInstanceUID: src.InstanceUID()}, barrier)
+			continue
+		}
+		retained.WriteString(line + "\n")
+	}
+	require.NoError(t, scanner.Err())
+	assert.Equal(t, 1, barriers)
+	assert.Equal(t, first.String(), retained.String())
 	assertRoundtripTableCounts(t, src, dst)
 	assertSQLiteSequenceRows(t, src, dst)
 	assertSearchResultsMatch(t, src, dst, fixture.Project.ID, "orchid")

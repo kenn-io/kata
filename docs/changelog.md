@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-08
+last_edited: 2026-11-09
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -46,10 +46,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
   `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
   recorded oh-my-pi closes as pi sessions.
-- Upgrade SQLite schemas 41 through 49 to 50 in place by adding indexes and the
-  empty MCP Events subscriptions table, avoiding a full JSONL export/import and
-  its retained database backup. The indexes and
-  version stamp commit together; interrupted upgrades retry on the next start.
+- Upgrade SQLite stores to schema 51 through the JSONL cutover. Schema 50
+  binaries upgrade schemas 41 through 49 in place, adding indexes and the empty
+  MCP Events subscriptions table in one transaction.
 - Create your first project from the web UI's empty task list. **New task**
   makes that project Inbox and opens task capture when no projects exist.
 - Keep pulling from a federation hub after its event history passes one million
@@ -115,13 +114,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   session starts under a `.kata.toml`; elsewhere they return an empty response
   instead of telling the agent to search, create, and close kata issues in a
   repository that does not use kata.
-- Poll and stream one project's events faster on large SQLite stores by skipping unrelated history and earlier departures. SQLite adds the index in place on upgrade; PostgreSQL needs the [offline migration from schema 47](development/postgres-migrations.md#schema-48-project-departure-cursor-index).
+- Poll and stream one project's events faster on large SQLite stores by skipping unrelated history and earlier departures. PostgreSQL needs the [offline migration from schema 47](development/postgres-migrations.md#schema-48-project-departure-cursor-index).
 - Create issues faster on large SQLite stores by reading look-alike match flags from the returned page.
 - See why a multi-word `kata search` came back empty. Lexical search returns
   only issues that contain every word, so an empty multi-word search now
   prints a hint on stderr to search again with fewer words, instead of letting
   an agent conclude that no related issue exists and file a duplicate.
-- Fetch cross-project ready lists with a limit quickly as stores grow. SQLite and PostgreSQL use an ordered index for `kata ready --all --limit N`, MCP `kata.ready`, and `GET /api/v1/ready` without changing their filters or order. SQLite adds the index in place on upgrade; PostgreSQL needs the [offline migration](development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index).
+- Fetch cross-project ready lists with a limit quickly as stores grow. SQLite and PostgreSQL use an ordered index for `kata ready --all --limit N`, MCP `kata.ready`, and `GET /api/v1/ready` without changing their filters or order. PostgreSQL needs the [offline migration](development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index).
 - Let SQLite federation pushes and pulls reach the writer-held fallback after
   slow snapshot preparation instead of exhausting contention retries first.
 - CLI crashes now exit 1 with an internal error and bug-report hint in the selected human, JSON, or agent format, instead of exit 2 with a raw panic trace. Foreground daemon crashes keep their trace. See [CLI reference](reference/cli.md). Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).

@@ -55,7 +55,7 @@ func TestValidateImportRecordsAcceptsEveryPayloadType(t *testing.T) {
 	mappingTime := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
 	records := []db.ImportRecord{
 		&db.MetaKV{}, &db.ProjectExport{}, &db.AliasExport{},
-		&db.IssueSyncBindingExport{}, &db.IssueSyncStatusExport{},
+		&db.IssueSyncBindingExport{Config: []byte(`{}`)}, &db.IssueSyncStatusExport{},
 		&db.RecurrenceExport{}, &db.IssueExport{}, &db.IssueEmbeddingExport{},
 		&db.CommentExport{}, &db.IssueLabelExport{}, &db.LinkExport{},
 		&db.ImportMappingExport{}, &db.ExternalFieldMappingExport{

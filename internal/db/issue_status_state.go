@@ -106,6 +106,9 @@ type IssueStatusReader interface {
 // IssueStatusObservationParams carries a verified status-only read and, for
 // delivery, the exact event serviced. Identity is rechecked in the transaction.
 type IssueStatusObservationParams struct {
+	// TrackerWriteUID joins a named coordinator receipt to exact-event
+	// application. Empty preserves the legacy observation path.
+	TrackerWriteUID  string
 	Guard            IssueSyncImportGuard
 	MappingID        int64
 	ExternalID       string

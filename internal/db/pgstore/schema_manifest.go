@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "2c573a26533e056618e458d7addc7836bf7d95e98b0ad258b6b7c2a50725186d"
+	canonicalColumnFingerprint     = "f33e32fc5932fb22251fa0b3de5a339f6211eae2ec1da17aad2d6f1069f50392"
 	canonicalConstraintFingerprint = "21a6429d8b06093928339598c69f71d48d65330c78e3274cbe8bcabc9fd5ed14"
 	canonicalIndexFingerprint      = "49e4ef892933e98de9171cc6932d8137221b410d3caba1486c5bcbe3f8aca876"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
@@ -52,7 +52,7 @@ var canonicalTableColumns = map[string]string{
 	"import_mappings":                "id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at,observed_status,observed_status_at,pending_event_uid,remote_locator",
 	"issue_claims":                   "id,claim_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,purpose,claim_kind,acquired_at,expires_at,released_at,release_reason,revision,updated_at",
 	"issue_labels":                   "issue_id,label,author,created_at",
-	"issue_sync_bindings":            "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at",
+	"issue_sync_bindings":            "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at,connection_uid",
 	"issue_sync_status":              "binding_id,project_id,sync_started_at,last_attempt_at,last_success_at,last_error_at,last_error,last_created,last_updated,last_unchanged,last_comments",
 	"issues":                         "id,uid,project_id,short_id,title,body,status,closed_reason,owner,assignment_expires_on,priority,author,created_at,updated_at,closed_at,deleted_at,metadata,revision,content_revision,recurrence_id,occurrence_key",
 	"issues_search":                  "issue_id,tsv",

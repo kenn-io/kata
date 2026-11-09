@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-07
+last_edited: 2026-11-09
 ---
 
 # PostgreSQL operations
@@ -162,7 +162,7 @@ for the offline window, grants, and rollback.
 The schema 48→49 migration indexes cron event histories by project, type, and
 run UID. Stop daemons and imports while it scans `events` and builds the index.
 See the [schema 49 migration requirements](../development/postgres-migrations.md#schema-49-cron-run-history-index)
-for the offline window, grants, and rollback. SQLite installs this index in place.
+for the offline window, grants, and rollback. See [SQLite upgrade behavior](backup-restore.md#slow-or-interrupted-upgrade-startup).
 
 Schema 50 adds the `mcp_event_subscriptions` table for daemon-owned MCP Events
 subscriptions. Re-run the `GRANT ... ON ALL TABLES` statement below after the

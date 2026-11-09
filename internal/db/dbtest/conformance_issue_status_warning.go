@@ -42,9 +42,11 @@ func checkIssueStatusContentWarning(t *testing.T, store db.Storage) error {
 		require.Equal(t, previousCount, status.LastComments)
 		persisted, err := store.IssueSyncStatusByProject(ctx, project.ID)
 		require.NoError(t, err)
-		require.Equal(t, status, persisted)
 		refreshed, err := store.IssueSyncBindingByID(ctx, binding.ID)
 		require.NoError(t, err)
+		require.True(t, status.CommittedBindingUpdatedAt.Equal(refreshed.UpdatedAt))
+		status.CommittedBindingUpdatedAt = time.Time{} // Return-only revision is not a stored status field.
+		require.Equal(t, status, persisted)
 		require.Equal(t, &started, refreshed.LastCursorAt, "blocked status does not stall the content cursor")
 	}
 	return nil

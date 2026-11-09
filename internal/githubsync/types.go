@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 const (
@@ -153,6 +155,11 @@ func EncodeConfig(c Config) (jsontext.Value, error) {
 // DecodeConfig unmarshals and validates a GitHub sync config from an issue sync
 // binding.
 func DecodeConfig(raw jsontext.Value) (Config, error) {
+	public, err := db.ProviderIssueSyncConfig(raw)
+	if err != nil {
+		return Config{}, err
+	}
+	raw = public
 	var c Config
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return Config{}, fmt.Errorf("decode GitHub sync config: %w", err)

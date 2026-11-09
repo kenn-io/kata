@@ -339,7 +339,10 @@ func validateImportRecord(record ImportRecord) error {
 	case *AliasExport:
 		return requireImportPayload(rec, ImportKindProjectAlias)
 	case *IssueSyncBindingExport:
-		return requireImportPayload(rec, ImportKindIssueSyncBinding)
+		if err := requireImportPayload(rec, ImportKindIssueSyncBinding); err != nil {
+			return err
+		}
+		return ValidateIssueSyncConnectionMarker(rec.ConnectionUID, rec.Config)
 	case *IssueSyncStatusExport:
 		return requireImportPayload(rec, ImportKindIssueSyncStatus)
 	case *RecurrenceExport:

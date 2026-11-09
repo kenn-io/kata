@@ -71,6 +71,9 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 		if opts.ProjectID > 0 && (strings.HasPrefix(record.Key, db.FederationSpokeNamePrefix) || strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(record.Key, db.ProjectStreamResetMetadataPrefix) || strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(record.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(record.Key, db.PendingCreationMetadataPrefix)) {
 			continue
 		}
+		if opts.ProjectID > 0 && strings.HasPrefix(record.Key, db.TrackerMetadataPrefix) {
+			continue
+		}
 		if opts.ProjectID > 0 && record.Key == "project_access_revision" {
 			continue
 		}

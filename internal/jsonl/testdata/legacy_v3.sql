@@ -105,7 +105,7 @@ CREATE TABLE purge_log (
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO meta(key, value) VALUES('schema_version', '3');
 INSERT INTO meta(key, value) VALUES('created_by_version', '0.1.0');
-INSERT INTO meta(key, value) VALUES('instance_uid', '01HZZZZZZZZZZZZZZZZZINST01');
+INSERT INTO meta(key, value) VALUES('instance_uid', '01HZZZZZZZZZZZZZZZZZZZZZ01');
 
 INSERT INTO projects(id, uid, identity, name, created_at, next_issue_number)
 VALUES(1, '01HZZZZZZZZZZZZZZZZZZZZ001', 'proj-a', 'Proj A', '2026-05-03T00:00:00.000Z', 1);

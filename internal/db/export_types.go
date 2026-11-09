@@ -130,6 +130,7 @@ type IssueSyncBindingExport struct {
 	RemoteID        string         `json:"remote_id"`
 	DisplayName     string         `json:"display_name"`
 	Config          jsontext.Value `json:"config"`
+	ConnectionUID   *string        `json:"connection_uid,omitempty"`
 	Enabled         bool           `json:"enabled"`
 	IntervalSeconds int            `json:"interval_seconds"`
 	LastCursorAt    *string        `json:"last_cursor_at,omitempty"`

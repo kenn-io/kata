@@ -68,6 +68,23 @@ func receive[T any](t *testing.T, ch <-chan T) T {
 	}
 }
 
+// An authorized snapshot can run, and the returned revision is the one committed.
+func TestRunnerOnceWithBindingReturnsCommittedRevision(t *testing.T) {
+	s := testStore(t)
+	binding := testBinding(t, s, "example-project", "synthetic")
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	adapter := &testAdapter{prepare: func(_ context.Context, b db.IssueSyncBinding, _ time.Time) (Prepared, error) {
+		return testPrepared(b, at), nil
+	}}
+	result, err := NewRunner(RunnerConfig{Store: s, Adapter: adapter, Clock: func() time.Time { return at }}).RunOnceWithBinding(t.Context(), binding)
+	require.NoError(t, err)
+	current, err := s.IssueSyncBindingByID(t.Context(), binding.ID)
+	require.NoError(t, err)
+	require.True(t, result.Binding.UpdatedAt.Equal(current.UpdatedAt))
+	require.True(t, result.Status.CommittedBindingUpdatedAt.Equal(current.UpdatedAt))
+	require.True(t, current.UpdatedAt.After(binding.UpdatedAt))
+}
+
 // A missing provider filter imports the other provider; a missing stable source duplicates replay events.
 func TestRunnerAdapterIsolationAndReplay(t *testing.T) {
 	s := testStore(t)

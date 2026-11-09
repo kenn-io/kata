@@ -82,6 +82,7 @@ nav = [
     {"Packaging kata" = "development/packaging.md"},
     {"Embedding kata in Go" = "development/embedding.md"},
     {"PostgreSQL migrations" = "development/postgres-migrations.md"},
+    {"Tracker connection persistence" = "development/tracker-connection-persistence.md"},
     {"Deploying docs" = "development/deploying-docs.md"},
   ]},
 ]

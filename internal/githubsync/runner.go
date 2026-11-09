@@ -23,11 +23,12 @@ type Runner struct{ config RunnerConfig }
 
 // RunnerConfig configures a GitHub sync runner.
 type RunnerConfig struct {
-	Progress  *ProgressTracker
-	Store     db.Storage
-	Fetcher   Fetcher
-	Clock     func() time.Time
-	EventSink func(context.Context, int64, []db.Event) error
+	RouteBinding func(context.Context, db.IssueSyncBinding) (context.Context, error)
+	Progress     *ProgressTracker
+	Store        db.Storage
+	Fetcher      Fetcher
+	Clock        func() time.Time
+	EventSink    func(context.Context, int64, []db.Event) error
 	// EventSinkFrom takes precedence over EventSink when set. Its fork source
 	// is nil when the pass has no parent activity lease.
 	EventSinkFrom    func(context.Context, int64, []db.Event, activity.Admission) error
@@ -67,6 +68,7 @@ func (r *Runner) shared() (*issuesync.Runner, error) {
 		return nil, fmt.Errorf("github sync runner requires fetcher")
 	}
 	return issuesync.NewRunner(issuesync.RunnerConfig{
+		RouteBinding:     r.config.RouteBinding,
 		Store:            r.config.Store,
 		Adapter:          &adapter{config: r.config},
 		Progress:         r.config.Progress,
@@ -98,4 +100,13 @@ func (r *Runner) RunOnce(ctx context.Context, id int64) (RunResult, error) {
 		return RunResult{}, err
 	}
 	return shared.RunOnce(ctx, id)
+}
+
+// RunOnceWithBinding claims only the binding snapshot authorized by the caller.
+func (r *Runner) RunOnceWithBinding(ctx context.Context, binding db.IssueSyncBinding) (RunResult, error) {
+	shared, err := r.shared()
+	if err != nil {
+		return RunResult{}, err
+	}
+	return shared.RunOnceWithBinding(ctx, binding)
 }

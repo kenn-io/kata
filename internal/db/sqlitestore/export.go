@@ -259,7 +259,7 @@ func (d *Store) ExportIssueSyncBindings(ctx context.Context, f db.ExportFilter) 
 	query := `SELECT id, project_id, provider, source_key, remote_id,
 	                 display_name, config_json, enabled, interval_seconds,
 	                 CAST(last_cursor_at AS TEXT),
-	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT)
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), connection_uid
 	          FROM issue_sync_bindings`
 	query, args := withProjectIDFilter(query, f, "project_id")
 	query += ` ORDER BY id ASC`
@@ -270,10 +270,13 @@ func (d *Store) ExportIssueSyncBindings(ctx context.Context, f db.ExportFilter) 
 			var config string
 			if err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.Provider, &rec.SourceKey,
 				&rec.RemoteID, &rec.DisplayName, &config, &enabled, &rec.IntervalSeconds,
-				&rec.LastCursorAt, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
+				&rec.LastCursorAt, &rec.CreatedAt, &rec.UpdatedAt, &rec.ConnectionUID); err != nil {
 				return db.IssueSyncBindingExport{}, scanError("issue_sync_binding", err)
 			}
 			rec.Config = jsontext.Value(config)
+			if err := db.ValidateIssueSyncConnectionMarker(rec.ConnectionUID, rec.Config); err != nil {
+				return db.IssueSyncBindingExport{}, err
+			}
 			rec.Enabled = enabled == 1
 			return rec, nil
 		})
