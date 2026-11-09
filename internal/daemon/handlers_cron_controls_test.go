@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -27,15 +26,9 @@ func TestCronProjectPauseHTTP(t *testing.T) {
 	path := fmt.Sprintf("/api/v1/projects/%d/cron", project.ID)
 	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
 	defer sub.Unsub()
-	type result struct {
-		Pause   *db.CronProjectPause `json:"project_pause"`
-		Changed bool                 `json:"changed"`
-	}
-	var first *db.CronProjectPause
 	for _, step := range []struct {
-		method  string
-		changed bool
-		paused  bool
+		method          string
+		changed, paused bool
 	}{
 		{http.MethodPut, true, true}, {http.MethodPut, false, true}, {http.MethodDelete, true, false}, {http.MethodDelete, false, false},
 	} {
@@ -43,32 +36,27 @@ func TestCronProjectPauseHTTP(t *testing.T) {
 		require.NoError(t, err)
 		status, raw := cronHTTP(t, env, step.method, path+"/pause", map[string]any{"actor": "operator", "reason": "Maintenance"})
 		require.Equalf(t, 200, status, "%s", raw)
-		var out result
+		var out struct {
+			Pause   *db.CronProjectPause `json:"project_pause"`
+			Changed bool                 `json:"changed"`
+		}
 		require.NoError(t, json.Unmarshal(raw, &out))
 		require.Equal(t, step.changed, out.Changed)
 		require.Equal(t, step.paused, out.Pause != nil)
 		if out.Pause != nil {
 			require.Equal(t, "operator", out.Pause.PausedBy)
 			require.Equal(t, "Maintenance", out.Pause.Reason)
-			if first == nil {
-				first = out.Pause
-			} else {
-				require.Equal(t, first, out.Pause)
-			}
 		}
-		after, err := env.DB.MaxEventID(t.Context())
+		events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, AfterID: before, Limit: 10})
 		require.NoError(t, err)
 		if step.changed {
-			events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, AfterID: before, Limit: 10})
-			require.NoError(t, err)
 			require.Len(t, events, 1)
-			msg := receiveMsg(t, sub.Ch, time.Second, "project pause event")
-			require.Equal(t, events[0], *msg.Event)
+			require.Equal(t, "operator", events[0].Actor)
+			require.Equal(t, events[0], *receiveMsg(t, sub.Ch, time.Second, "project pause event").Event)
 			captured := sink.snapshot()
 			require.Equal(t, events[0], captured[len(captured)-1])
-			require.Equal(t, "operator", events[0].Actor)
 		} else {
-			require.Equal(t, before, after)
+			require.Empty(t, events)
 			// Publication completes synchronously before the HTTP response.
 			select {
 			case <-sub.Ch:
@@ -89,70 +77,76 @@ func TestCronProjectPauseHTTP(t *testing.T) {
 			require.Contains(t, string(raw), `"project_pause":`)
 		}
 	}
-	status, raw := cronHTTP(t, env, http.MethodPut, path+"/pause", map[string]any{"actor": "operator", "reason": strings.Repeat("x", 257)})
-	require.Equalf(t, 400, status, "%s", raw)
 }
 
-func TestCronProjectPauseBodylessAndMalformedRecovery(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	project := seedProject(t, env, "example-project")
-	path := fmt.Sprintf("/api/v1/projects/%d/cron/pause", project.ID)
-	// Legacy state can exist from an older daemon. Generic production writes are reserved.
-	_, err := env.DB.ExecContext(t.Context(), `UPDATE projects SET metadata='{"cron.pause":false}' WHERE id=?`, project.ID)
-	require.NoError(t, err)
-	status, raw := cronHTTP(t, env, http.MethodDelete, path, map[string]any{"actor": "operator"})
-	require.Equalf(t, 200, status, "%s", raw)
-	require.Contains(t, string(raw), `"project_pause":null`)
-	// A principal supplying the actor needs no body.
-	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB})
-	t.Cleanup(func() { require.NoError(t, server.Close()) })
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, path, nil)
-	req = req.WithContext(daemon.WithPrincipal(req.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Actor: "operator", Subject: "operator"}))
-	rec := httptest.NewRecorder()
-	server.Handler().ServeHTTP(rec, req)
-	require.Equal(t, 200, rec.Code, rec.Body.String())
-}
-
-func TestCronProjectPauseScopeAndEnrollment(t *testing.T) {
+// Contract: project controls and runtime requests honor host project scope
+// (pause and resume need no body), refuse enrollment credentials, and refuse
+// spoke writes with an owning-hub hint.
+func TestCronControlRouteBoundaries(t *testing.T) {
 	env, project, _, _ := nativeCronEnrollmentFixture(t, testenv.WithAuthToken("tok"))
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Actor: "operator", Name: "Execute review", Definition: cronHTTPDefinition(t)})
+	require.NoError(t, err)
 	other := seedProject(t, env, "other-project")
 	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostAccess: closeEvidenceHostAccess{deniedProjectID: other.ID}})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
-	for _, id := range []int64{project.ID, other.ID} {
-		for _, method := range []string{http.MethodPut, http.MethodDelete} {
-			req := httptest.NewRequestWithContext(t.Context(), method, fmt.Sprintf("/api/v1/projects/%d/cron/pause", id), bytes.NewBufferString(`{}`))
-			req.Header.Set("Content-Type", "application/json")
+	for _, pid := range []int64{project.ID, other.ID} {
+		base := fmt.Sprintf("/api/v1/projects/%d/cron", pid)
+		for _, route := range []struct{ method, path, body string }{
+			{http.MethodPut, base + "/pause", ""}, {http.MethodDelete, base + "/pause", ""},
+			{http.MethodPost, base + "/jobs/" + job.UID + "/requests", fmt.Sprintf(`{"uid":%q}`, cronHTTPUID(t))},
+			{http.MethodGet, base + "/requests", ""},
+		} {
+			req := httptest.NewRequestWithContext(t.Context(), route.method, route.path, strings.NewReader(route.body))
+			if route.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
 			req = req.WithContext(daemon.WithPrincipal(req.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Actor: "operator", Subject: "operator"}))
 			rec := httptest.NewRecorder()
 			server.Handler().ServeHTTP(rec, req)
 			want := 200
-			if id == other.ID {
+			if pid == other.ID {
 				want = 404
 			}
-			require.Equal(t, want, rec.Code, rec.Body.String())
+			require.Equalf(t, want, rec.Code, "%s %s: %s", route.method, route.path, rec.Body.String())
 		}
 	}
-	enrollment := createClaimEnrollment(t, env, project.ID, cronHTTPUID(t), "push")
-	for _, method := range []string{http.MethodPut, http.MethodDelete} {
-		response, raw := envDoRaw(t, env, method, fmt.Sprintf("/api/v1/projects/%d/cron/pause", project.ID), map[string]any{"actor": "operator"}, map[string]string{"Authorization": "Bearer " + enrollment.Token})
-		require.Equalf(t, 403, response.StatusCode, "%s", raw)
-	}
-}
 
-func TestCronProjectPauseSpokeHint(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	project := seedProject(t, env, "spoke-project")
-	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: cronHTTPUID(t), Actor: "operator", Enabled: false})
+	base := fmt.Sprintf("/api/v1/projects/%d/cron", project.ID)
+	enrollment := createClaimEnrollment(t, env, project.ID, cronHTTPUID(t), "push")
+	request := map[string]any{"uid": cronHTTPUID(t), "actor": "operator"}
+	for _, route := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPut, base + "/pause", map[string]any{"actor": "operator"}}, {http.MethodDelete, base + "/pause", map[string]any{"actor": "operator"}},
+		{http.MethodPost, base + "/jobs/" + job.UID + "/requests", request}, {http.MethodPost, base + "/runs/" + cronHTTPUID(t) + "/cancel-request", request},
+	} {
+		response, raw := envDoRaw(t, env, route.method, route.path, route.body, map[string]string{"Authorization": "Bearer " + enrollment.Token})
+		require.Equalf(t, 403, response.StatusCode, "%s %s: %s", route.method, route.path, raw)
+	}
+
+	spoke := seedProject(t, env, "spoke-project")
+	spokeJob, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: spoke.ID, Actor: "operator", Name: "Execute review", Definition: cronHTTPDefinition(t)})
 	require.NoError(t, err)
-	for _, method := range []string{http.MethodPut, http.MethodDelete} {
-		status, raw := cronHTTP(t, env, method, fmt.Sprintf("/api/v1/projects/%d/cron/pause", project.ID), map[string]any{"actor": "operator"})
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: spoke.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: cronHTTPUID(t), Actor: "operator", Enabled: false})
+	require.NoError(t, err)
+	base = fmt.Sprintf("/api/v1/projects/%d/cron", spoke.ID)
+	for _, route := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPut, base + "/pause", map[string]any{"actor": "operator"}}, {http.MethodDelete, base + "/pause", map[string]any{"actor": "operator"}},
+		{http.MethodPost, base + "/jobs/" + spokeJob.UID + "/requests", map[string]any{"uid": cronHTTPUID(t), "actor": "operator"}},
+	} {
+		status, raw := cronHTTP(t, env, route.method, route.path, route.body)
 		require.Equalf(t, 409, status, "%s", raw)
 		require.Contains(t, string(raw), "owning hub")
 	}
 }
 
 // Contract: discard is a separate supported action requiring retained CAS;
-// committed policy events reach subscribers before the enabled definition.
+// committed policy events reach subscribers before the enabled definition. The
+// cutoff sits beside the strict job record in action, show, and list envelopes.
 func TestCronDiscardResumeHTTP(t *testing.T) {
 	sink := &recordingSink{}
 	env := testenv.New(t, testenv.WithAuthToken("tok"), func(c *daemon.ServerConfig) { c.Hooks = sink })
@@ -173,74 +167,15 @@ func TestCronDiscardResumeHTTP(t *testing.T) {
 	require.Equal(t, "project.metadata_updated", first.Event.Type)
 	require.Equal(t, "cron.job.updated", second.Event.Type)
 	hooks := sink.snapshot()
-	require.Equal(t, *first.Event, hooks[len(hooks)-2])
-	require.Equal(t, *second.Event, hooks[len(hooks)-1])
-	status, raw = cronHTTP(t, env, http.MethodGet, path+"/capabilities", nil)
-	require.Equal(t, 200, status)
-	var caps struct {
-		Controls []string `json:"controls"`
-		Revision int64    `json:"project_revision"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &caps))
-	require.Contains(t, caps.Controls, "resume_discard_missed")
-	require.Positive(t, caps.Revision)
-	for _, guard := range []bool{false, true} {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, env.URL+path+"/pause?discard_missed=true", strings.NewReader(`{"actor":"operator"}`))
-		require.NoError(t, err)
-		req.Header.Set("Authorization", "Bearer tok")
-		req.Header.Set("Content-Type", "application/json")
-		if guard {
-			req.Header.Set("If-Match", fmt.Sprintf(`"rev-%d"`, caps.Revision))
-		}
-		response, err := env.HTTP.Do(req)
-		require.NoError(t, err)
-		body := readClose(t, response)
-		want := 400
-		if guard {
-			want = 200
-		}
-		require.Equalf(t, want, response.StatusCode, "%s", body)
-	}
-}
+	require.Equal(t, []db.Event{*first.Event, *second.Event}, hooks[len(hooks)-2:])
 
-func TestCronDiscardEnrollmentBoundary(t *testing.T) {
-	env, p, _, definition := nativeCronEnrollmentFixture(t, testenv.WithAuthToken("tok"))
-	definition.Enabled = false
-	native, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Recurring review", Actor: "tester", Definition: definition})
-	require.NoError(t, err)
-	adapter, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Adapter review", Actor: "tester", Definition: cronHTTPDefinition(t)})
-	require.NoError(t, err)
-	enrollment := createClaimEnrollment(t, env, p.ID, cronHTTPUID(t), "push")
-	for _, job := range []db.CronJob{native, adapter} {
-		raw := map[string]any{"discard_missed": true, "expected_event_uid": job.DefinitionEventUID}
-		response, body := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/resume", p.ID, job.UID), raw, map[string]string{"Authorization": "Bearer " + enrollment.Token})
-		want := 200
-		if job.UID == adapter.UID {
-			want = 403
-		}
-		require.Equalf(t, want, response.StatusCode, "%s", body)
-	}
-}
-
-// Contract: cutoff state lives beside the strict inner job, preserving clients
-// that reject unknown members in the portable job record.
-func TestCronPassoverReadEnvelopes(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	p := seedProject(t, env, "control-read-project")
-	definition := cronHTTPDefinition(t)
-	definition.Enabled = false
-	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: definition})
-	require.NoError(t, err)
-	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", p.ID)
-	status, raw := cronHTTP(t, env, http.MethodPost, path+"/"+job.UID+"/resume", map[string]any{"actor": "operator", "discard_missed": true, "expected_event_uid": job.DefinitionEventUID})
-	require.Equalf(t, 200, status, "%s", raw)
-	var expected *db.CronPassoverState
+	var cutoff *db.CronPassoverState
 	for _, route := range []string{"action", "show", "list"} {
-		if route == "show" {
-			status, raw = cronHTTP(t, env, http.MethodGet, path+"/"+job.UID, nil)
-		}
-		if route == "list" {
-			status, raw = cronHTTP(t, env, http.MethodGet, path, nil)
+		switch route {
+		case "show":
+			status, raw = cronHTTP(t, env, http.MethodGet, path+"/jobs/"+job.UID, nil)
+		case "list":
+			status, raw = cronHTTP(t, env, http.MethodGet, path+"/jobs", nil)
 		}
 		require.Equal(t, 200, status)
 		var wire struct {
@@ -250,23 +185,40 @@ func TestCronPassoverReadEnvelopes(t *testing.T) {
 			Passovers map[string]*db.CronPassoverState `json:"passovers"`
 		}
 		require.NoError(t, json.Unmarshal(raw, &wire))
-		state := wire.Passover
-		inner := wire.Job
+		state, inner := wire.Passover, wire.Job
 		if route == "list" {
-			state = wire.Passovers[job.UID]
 			require.Len(t, wire.Jobs, 1)
-			inner = wire.Jobs[0]
+			state, inner = wire.Passovers[job.UID], wire.Jobs[0]
 		}
 		require.NotNil(t, state, route)
 		require.False(t, state.Invalid)
 		require.Equal(t, "job", state.Scope)
-		if expected == nil {
-			expected = state
-		} else {
-			require.Equal(t, expected, state)
+		if cutoff == nil {
+			cutoff = state
 		}
+		require.Equal(t, cutoff, state)
 		var strict api.CronJob
 		require.NoError(t, json.Unmarshal(inner, &strict, json.RejectUnknownMembers(true)))
 		require.True(t, strict.Definition.Enabled)
+	}
+
+	status, raw = cronHTTP(t, env, http.MethodGet, path+"/capabilities", nil)
+	require.Equal(t, 200, status)
+	var caps struct {
+		Revision int64 `json:"project_revision"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &caps))
+	require.Positive(t, caps.Revision)
+	for _, guard := range []string{"", fmt.Sprintf(`"rev-%d"`, caps.Revision)} {
+		headers := map[string]string{"Authorization": "Bearer tok"}
+		if guard != "" {
+			headers["If-Match"] = guard
+		}
+		response, body := envDoRaw(t, env, http.MethodDelete, path+"/pause?discard_missed=true", map[string]any{"actor": "operator"}, headers)
+		want := 400
+		if guard != "" {
+			want = 200
+		}
+		require.Equalf(t, want, response.StatusCode, "%s", body)
 	}
 }

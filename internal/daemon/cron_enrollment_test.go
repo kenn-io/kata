@@ -371,13 +371,11 @@ func TestCronEnrollmentWriteRootReceipts(t *testing.T) {
 			require.NotEmpty(t, receipts, "cron write committed without a root receipt")
 			events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Types: []string{"cron.job.created", "cron.job.updated"}, Limit: 10})
 			require.NoError(t, err)
-			require.NotEmpty(t, events)
 			require.Len(t, events, 3)
 			for _, event := range events {
-				eventUID := event.UID
 				matched := false
 				for _, receipt := range receipts {
-					if receipt.EventUID != eventUID {
+					if receipt.EventUID != event.UID {
 						continue
 					}
 					matched = true
@@ -391,32 +389,25 @@ func TestCronEnrollmentWriteRootReceipts(t *testing.T) {
 	}
 }
 
+// The pause and resume operations require push authority and, like other job
+// writes, never let an enrollment change an adapter job. Generic credential
+// checks are covered by TestCronEnrollmentWriteBoundaries.
 func TestCronEnabledEnrollmentBoundaries(t *testing.T) {
 	for _, action := range []string{"pause", "resume"} {
-		for _, kind := range []string{"pull-only", "actor-mismatch", "adapter", "revoked"} {
+		for _, kind := range []string{"pull-only", "adapter"} {
 			t.Run(action+"/"+kind, func(t *testing.T) {
 				env, project, _, definition := nativeCronEnrollmentFixture(t, testenv.WithAuthToken("owner-token"))
+				caps := "pull"
 				if kind == "adapter" {
-					definition = cronHTTPDefinition(t)
+					definition, caps = cronHTTPDefinition(t), "push"
 				}
 				definition.Enabled = action == "pause"
 				job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "tester", Definition: definition})
 				require.NoError(t, err)
-				caps := "push"
-				if kind == "pull-only" {
-					caps = "pull"
-				}
 				enrollment := createClaimEnrollment(t, env, project.ID, cronHTTPUID(t), caps)
-				if kind == "revoked" {
-					require.NoError(t, env.DB.RevokeFederationEnrollment(t.Context(), enrollment.Enrollment.ID))
-				}
-				actor := "tester"
-				if kind == "actor-mismatch" {
-					actor = "another-operator"
-				}
 				before, err := env.DB.MaxEventID(t.Context())
 				require.NoError(t, err)
-				response, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/%s", project.ID, job.UID, action), map[string]any{"actor": actor}, map[string]string{"Authorization": "Bearer " + enrollment.Token})
+				response, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/%s", project.ID, job.UID, action), map[string]any{"actor": "tester"}, map[string]string{"Authorization": "Bearer " + enrollment.Token})
 				require.Equalf(t, 403, response.StatusCode, "%s", raw)
 				after, err := env.DB.MaxEventID(t.Context())
 				require.NoError(t, err)
