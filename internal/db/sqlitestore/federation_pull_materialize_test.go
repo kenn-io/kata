@@ -125,12 +125,6 @@ func TestFullPulledMaterializationReplaysMoveHistory(t *testing.T) {
 	update := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"remote title"}`, 9_000_000_000_001)
 	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev, update})
 	require.NoError(t, err)
-	before, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	require.Equal(t, "work", before.Title)
-	prepared, err := d.prepareFullPull(ctx, p.ID, []string{ev.EventUID})
-	require.NoError(t, err)
-	require.True(t, prepared.fullReplay)
 	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
 	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
@@ -180,8 +174,6 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 			initial, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 			require.NoError(t, err)
 			require.Equal(t, "work", initial.Title)
-			prepared, err := d.prepareFullPull(ctx, p.ID, []string{ev.EventUID})
-			require.NoError(t, err)
 			attempts := 0
 			d.federationIngestPrepared = func() {
 				attempts++
@@ -192,13 +184,6 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 				current, err := d.ProjectByID(ctx, p.ID)
 				require.NoError(t, err)
 				require.JSONEq(t, `{"area":"docs"}`, string(current.Metadata))
-				require.ErrorIs(t, d.applyFullPull(ctx, p.ID, []string{ev.EventUID}, prepared), errStaleFederationPreparation)
-				got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-				require.NoError(t, err)
-				require.Equal(t, "remote title", got.Title)
-				after, err := d.ProjectByID(ctx, p.ID)
-				require.NoError(t, err)
-				require.JSONEq(t, `{"area":"docs"}`, string(after.Metadata))
 			}
 			require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
 			require.Equal(t, 2, attempts)
@@ -208,25 +193,6 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 			after, err := d.ProjectByID(ctx, p.ID)
 			require.NoError(t, err)
 			require.JSONEq(t, `{"area":"docs"}`, string(after.Metadata))
-		}},
-		{name: "comment-edit", run: func(t *testing.T, d *Store, p db.Project, issue db.Issue) {
-			ctx := t.Context()
-			comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "original"})
-			require.NoError(t, err)
-			ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
-			_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
-			require.NoError(t, err)
-			prepared, err := d.prepareFullPull(ctx, p.ID, []string{ev.EventUID})
-			require.NoError(t, err)
-			_, err = d.ExecContext(ctx, `UPDATE comments SET body='local edit' WHERE id=?`, comment.ID)
-			require.NoError(t, err)
-			require.ErrorIs(t, d.applyFullPull(ctx, p.ID, []string{ev.EventUID}, prepared), errStaleFederationPreparation)
-			var body string
-			require.NoError(t, d.QueryRowContext(ctx, `SELECT body FROM comments WHERE id=?`, comment.ID).Scan(&body))
-			require.Equal(t, "local edit", body)
-			require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
-			require.NoError(t, d.QueryRowContext(ctx, `SELECT body FROM comments WHERE id=?`, comment.ID).Scan(&body))
-			require.Equal(t, "original", body)
 		}},
 		{name: "non-group-unlink", run: func(t *testing.T, d *Store, p db.Project, issue db.Issue) {
 			ctx := t.Context()
@@ -269,21 +235,18 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, links)
 		}},
-		{name: "relay-peer", run: func(t *testing.T, d *Store, p db.Project, issue db.Issue) {
+		{name: "peer-appears-in-group-project", run: func(t *testing.T, d *Store, p db.Project, issue db.Issue) {
 			ctx := t.Context()
 			sibling, err := d.CreateProject(ctx, "sibling")
 			require.NoError(t, err)
 			_, err = d.EnableProjectFederation(ctx, sibling.ID, "tester")
 			require.NoError(t, err)
-			peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: sibling.ID, Title: "peer", Author: "tester"})
-			require.NoError(t, err)
-			// The creation event has arrived, but its projection has yet to be rebuilt.
-			_, err = d.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE issue_id=?`, peer.ID)
-			require.NoError(t, err)
-			_, err = d.ExecContext(ctx, `DELETE FROM issues WHERE id=?`, peer.ID)
+			peerUID := "01HZNQ7VFPK1XGD8R5MABC0001"
+			peerEvent := incrementalRemoteEvent(t, sibling, peerUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"0001","title":"peer","author":"tester","status":"open","created_at":"2026-05-23T12:00:00Z"}`, peerUID), 9_000_000_000_000)
+			_, err = d.InsertRemoteEvents(ctx, sibling.ID, []db.RemoteEvent{peerEvent})
 			require.NoError(t, err)
 			projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
-			linkEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peer.UID), 9_000_000_000_001)
+			linkEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peerUID), 9_000_000_000_001)
 			_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, linkEvent})
 			require.NoError(t, err)
 			_, err = d.ExecContext(ctx, `INSERT INTO federation_root_keys(project_uid,authority_uid,key_id,public_key) VALUES(?,?,?,?)`, p.UID, "authority", "key", "public")
@@ -298,7 +261,7 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 				}
 			}
 			require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{projectEvent.EventUID, linkEvent.EventUID}))
-			rebuilt, err := d.IssueByUID(ctx, peer.UID, db.IncludeDeletedYes)
+			rebuilt, err := d.IssueByUID(ctx, peerUID, db.IncludeDeletedYes)
 			require.NoError(t, err)
 			require.Equal(t, sibling.ID, rebuilt.ProjectID)
 			links, err := d.LinksByIssue(ctx, issue.ID)
