@@ -20,6 +20,8 @@ type federationMaterialization struct {
 	fullHistory      bool
 	linksAffected    bool
 	eventStamp       [32]byte
+	rowStamp         [32]byte
+	shortIDChecks    []federatedShortIDCheck
 	linkStamps       [][32]byte
 	linkReadProjects []int64
 	maxEventID       int64
@@ -190,7 +192,10 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 				m.linkStamps = append(m.linkStamps, stamp)
 			}
 		}
-		return m, nil
+		m.rowStamp, err = federationRowStamp(ctx, tx, projectID, m.linkProjects)
+		if err != nil {
+			return federationMaterialization{}, err
+		}
 	}
 	if err := m.prepareRows(ctx, tx, projectID, issueScope); err != nil {
 		return federationMaterialization{}, err
@@ -248,6 +253,56 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 	}
 	m.links = db.FoldEvents(events)
 	return nil
+}
+
+// federationRowStamp reads the persisted inputs used by row and link preparation.
+func federationRowStamp(ctx context.Context, tx *sql.Tx, projectID int64, group []int64) ([32]byte, error) {
+	type stampQuery struct {
+		query string
+		args  []any
+	}
+	queries := []stampQuery{
+		{`SELECT json_array(uid,id,short_id,title,body,status,closed_reason,owner,CAST(assignment_expires_on AS TEXT),priority,author,CAST(created_at AS TEXT),CAST(updated_at AS TEXT),CAST(closed_at AS TEXT),CAST(deleted_at AS TEXT),metadata) FROM issues WHERE project_id=? ORDER BY id`, []any{projectID}},
+		{`SELECT json_array(c.uid,c.id,c.issue_id,c.author,CAST(c.created_at AS TEXT),c.body,c.teammate) FROM issues i JOIN comments c ON c.issue_id=i.id WHERE i.project_id=? ORDER BY c.id`, []any{projectID}},
+		{`SELECT json_array(l.issue_id,l.label) FROM issues i JOIN issue_labels l ON l.issue_id=i.id WHERE i.project_id=? ORDER BY l.issue_id,l.label`, []any{projectID}},
+		{`SELECT json_array(id,short_id) FROM purge_log WHERE project_id=? ORDER BY id`, []any{projectID}},
+	}
+	if len(group) > 0 {
+		placeholders, args := projectIDPlaceholders(group)
+		//nolint:gosec // The IN clauses contain generated placeholders; IDs are bound.
+		queries = append(queries, stampQuery{`SELECT json_array(uid,id,project_id) FROM issues WHERE project_id IN (` + placeholders + `) ORDER BY project_id,id`, args})
+		//nolint:gosec // The IN clauses contain generated placeholders; IDs are bound.
+		queries = append(queries, stampQuery{`SELECT json_array(l.id,l.from_issue_id,l.to_issue_id,l.from_issue_uid,l.to_issue_uid,l.type,l.author,CAST(l.created_at AS TEXT)) FROM links l JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id WHERE f.project_id IN (` + placeholders + `) AND t.project_id IN (` + placeholders + `) ORDER BY l.id`, append(slices.Clone(args), args...)})
+	}
+	h := sha256.New()
+	for _, q := range queries {
+		rows, err := tx.QueryContext(ctx, q.query, q.args...)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		for rows.Next() {
+			var value string
+			if err := rows.Scan(&value); err != nil {
+				_ = rows.Close()
+				return [32]byte{}, err
+			}
+			var length [8]byte
+			binary.BigEndian.PutUint64(length[:], uint64(len(value))) //nolint:gosec // A string length is nonnegative.
+			_, _ = h.Write(length[:])
+			_, _ = h.Write([]byte(value))
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return [32]byte{}, err
+		}
+		if err := rows.Close(); err != nil {
+			return [32]byte{}, err
+		}
+		_, _ = h.Write([]byte{0})
+	}
+	var stamp [32]byte
+	copy(stamp[:], h.Sum(nil))
+	return stamp, nil
 }
 
 func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes []string) ([32]byte, error) {
@@ -320,6 +375,11 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 	return updateFederatedProjectMetadataTx(ctx, tx, projectID, m.projection.ProjectMetadata[m.binding.HubProjectUID])
 }
 
+type federatedShortIDCheck struct {
+	uid, preferred, resolved string
+	row                      federatedIssueRow
+}
+
 // prepareRows compares against persisted values, rather than a previous fold:
 // local writes and imports can leave values that a full rebuild would repair.
 func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {
@@ -345,6 +405,9 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 		shortID, err := resolveFederatedIssueShortID(ctx, tx, projectID, issue.UID, issue.ShortID, &row)
 		if err != nil {
 			return err
+		}
+		if m.fullHistory && issue.ShortID != "" && issue.ShortID != row.shortID {
+			m.shortIDChecks = append(m.shortIDChecks, federatedShortIDCheck{issue.UID, issue.ShortID, shortID, row})
 		}
 		values, err := federatedIssueValues(issue, shortID, m.projection.IssueMetadata[issue.UID])
 		if err != nil {

@@ -205,12 +205,20 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 			}
 		}
 	}
-	if err := m.prepareRows(ctx, tx, projectID, nil); err != nil {
+	rowStamp, err := federationRowStamp(ctx, tx, projectID, m.linkProjects)
+	if err != nil {
 		return err
 	}
-	if m.linkProjects != nil {
-		if err := m.prepareLinks(ctx, tx, projectID, nil); err != nil {
+	if rowStamp != m.rowStamp {
+		return errStaleFederationPreparation
+	}
+	for _, check := range m.shortIDChecks {
+		shortID, err := resolveFederatedIssueShortID(ctx, tx, projectID, check.uid, check.preferred, &check.row)
+		if err != nil {
 			return err
+		}
+		if shortID != check.resolved {
+			return errStaleFederationPreparation
 		}
 	}
 	return applyPulledFederationMaterialization(ctx, tx, projectID, eventUIDs, m)

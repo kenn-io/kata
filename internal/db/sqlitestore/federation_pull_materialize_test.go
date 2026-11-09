@@ -110,26 +110,59 @@ func TestPulledMaterializationRetriesPreparedSnapshot(t *testing.T) {
 	}
 }
 
-func TestFullPulledMaterializationReadsCurrentRows(t *testing.T) {
+func TestFullPulledMaterializationRejectsChangedRows(t *testing.T) {
 	ctx := t.Context()
 	d, p, issue := incrementalTestStore(t)
 	ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
 	_, err := d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
 	require.NoError(t, err)
+	before, err := d.ProjectByID(ctx, p.ID)
+	require.NoError(t, err)
+	prepared, err := d.prepareFullPull(ctx, p.ID, []string{ev.EventUID})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE issues SET title='local edit' WHERE id=?`, issue.ID)
+	require.NoError(t, err)
+	require.ErrorIs(t, d.applyFullPull(ctx, p.ID, []string{ev.EventUID}, prepared), errStaleFederationPreparation)
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, "local edit", got.Title)
+	after, err := d.ProjectByID(ctx, p.ID)
+	require.NoError(t, err)
+	require.Equal(t, before.Metadata, after.Metadata)
 	attempts := 0
 	d.federationIngestPrepared = func() {
 		attempts++
-		_, err := d.ExecContext(ctx, `UPDATE issues SET title='local edit' WHERE id=?`, issue.ID)
-		require.NoError(t, err)
-		edited, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-		require.NoError(t, err)
-		require.Equal(t, "local edit", edited.Title)
+		if attempts == 1 {
+			_, err := d.ExecContext(ctx, `UPDATE issues SET title='second edit' WHERE id=?`, issue.ID)
+			require.NoError(t, err)
+		}
 	}
 	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
-	require.Equal(t, 1, attempts)
-	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.Equal(t, 2, attempts)
+	got, err = d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, "work", got.Title)
+}
+
+func TestFullPulledMaterializationRejectsChangedComment(t *testing.T) {
+	ctx := t.Context()
+	d, p, issue := incrementalTestStore(t)
+	comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "original"})
+	require.NoError(t, err)
+	ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
+	require.NoError(t, err)
+	prepared, err := d.prepareFullPull(ctx, p.ID, []string{ev.EventUID})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE comments SET body='local edit' WHERE id=?`, comment.ID)
+	require.NoError(t, err)
+	require.ErrorIs(t, d.applyFullPull(ctx, p.ID, []string{ev.EventUID}, prepared), errStaleFederationPreparation)
+	var body string
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT body FROM comments WHERE id=?`, comment.ID).Scan(&body))
+	require.Equal(t, "local edit", body)
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT body FROM comments WHERE id=?`, comment.ID).Scan(&body))
+	require.Equal(t, "original", body)
 }
 
 func TestFullPulledMaterializationIgnoresPushCursorAdvance(t *testing.T) {
