@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,13 +16,23 @@ import (
 
 // Discard is opt-in only after a successful capability read, with one retained
 // revision and one mutation even if the server returns an uncertain outcome.
+// Ordinary resume reads nothing first and omits discard_missed for older hubs.
 func TestCronMCPDiscardContract(t *testing.T) {
-	for _, projectAction := range []bool{false, true} {
-		for _, mode := range []string{"missing", "unknown", "unavailable", "supported", "conflict", "uncertain", "explicit"} {
-			if projectAction && mode == "explicit" {
+	for _, project := range []bool{false, true} {
+		for _, tc := range []struct {
+			mode, controls string
+			write          int // 0 when no write may happen
+			explicit       bool
+		}{
+			{"missing", `[]`, 0, false}, {"unknown", `["future_control"]`, 0, false}, {"unavailable", "", 0, false},
+			{"supported", `["resume_discard_missed"]`, 200, false}, {"explicit", `["resume_discard_missed"]`, 200, true},
+			{"conflict", `["resume_discard_missed"]`, 409, false}, {"uncertain", `["resume_discard_missed"]`, 502, false},
+			{"ordinary", `["resume_discard_missed"]`, 200, false},
+		} {
+			if project && (tc.explicit || tc.mode == "ordinary") {
 				continue
 			}
-			t.Run(fmt.Sprintf("project=%v/%s", projectAction, mode), func(t *testing.T) {
+			t.Run(fmt.Sprintf("project=%v/%s", project, tc.mode), func(t *testing.T) {
 				id, err := uid.New()
 				require.NoError(t, err)
 				revision, err := uid.New()
@@ -33,43 +42,36 @@ func TestCronMCPDiscardContract(t *testing.T) {
 					switch {
 					case strings.HasSuffix(r.URL.Path, "/cron/capabilities"):
 						capabilities++
-						if mode == "unavailable" {
+						if tc.controls == "" {
 							http.Error(w, "unavailable", http.StatusServiceUnavailable)
 							return
 						}
-						controls := `[]`
-						if mode == "unknown" {
-							controls = `["future_control"]`
-						} else if mode != "missing" {
-							controls = `["resume_discard_missed"]`
-						}
-						_, _ = fmt.Fprintf(w, `{"controls":%s,"project_revision":7}`, controls)
+						_, _ = fmt.Fprintf(w, `{"controls":%s,"project_revision":7}`, tc.controls)
 					case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/jobs/"+id):
 						shows++
 						_, _ = fmt.Fprintf(w, `{"job":{"uid":%q,"definition_event_uid":%q}}`, id, revision)
 					case r.Method == http.MethodPost || r.Method == http.MethodDelete:
 						writes++
-						if projectAction {
+						if project {
 							assert.Equal(t, "rev-7", r.Header.Get("If-Match"))
 							assert.Equal(t, "true", r.URL.Query().Get("discard_missed"))
 						} else {
-							var body struct {
-								Discard  bool   `json:"discard_missed"`
-								Expected string `json:"expected_event_uid"`
-							}
+							var body map[string]any
 							assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-							assert.True(t, body.Discard)
-							assert.Equal(t, revision, body.Expected)
+							if tc.mode == "ordinary" {
+								assert.NotContains(t, body, "discard_missed")
+							} else {
+								assert.Equal(t, true, body["discard_missed"])
+								assert.Equal(t, revision, body["expected_event_uid"])
+							}
 						}
-						if mode == "conflict" {
-							http.Error(w, `{"error":{"code":"revision_conflict","message":"changed"}}`, http.StatusConflict)
-							return
+						body := `{"changed":true,"job":{}}`
+						if tc.write != http.StatusOK {
+							body = `{"error":{"code":"revision_conflict","message":"changed"}}`
 						}
-						if mode == "uncertain" {
-							http.Error(w, "uncertain", http.StatusBadGateway)
-							return
-						}
-						_, _ = fmt.Fprint(w, `{"changed":true}`)
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(tc.write)
+						_, _ = fmt.Fprint(w, body)
 					default:
 						_, _ = fmt.Fprint(w, `{"projects":[{"id":7,"name":"spoke-project"}],"project":{"id":7,"name":"spoke-project"}}`)
 					}
@@ -78,58 +80,28 @@ func TestCronMCPDiscardContract(t *testing.T) {
 				client, err := kataclient.NewWithHTTPClient(proxy.URL, proxy.Client())
 				require.NoError(t, err)
 				session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 7, ProjectName: "spoke-project", Actor: "operator", Version: "test"})
-				tool := "cron_job_resume"
-				args := map[string]any{"uid": id, "discard_missed": true}
-				if projectAction {
-					tool = "cron_project_resume"
-					delete(args, "uid")
-				} else if mode == "explicit" {
+				tool, args := "cron_job_resume", map[string]any{"uid": id, "discard_missed": true}
+				switch {
+				case project:
+					tool, args = "cron_project_resume", map[string]any{"discard_missed": true}
+				case tc.explicit:
 					args["expected_event_uid"] = revision
+				case tc.mode == "ordinary":
+					delete(args, "discard_missed")
 				}
 				result := cronCall(t, session, tool, args)
 
-				require.Equal(t, 1, capabilities)
-				supported := mode == "supported" || mode == "conflict" || mode == "uncertain" || mode == "explicit"
-				if supported {
-					require.Equal(t, 1, writes)
-					if !projectAction && mode != "explicit" {
-						require.Equal(t, 1, shows)
-					} else {
-						require.Zero(t, shows)
-					}
-				} else {
-					require.Zero(t, writes)
-					require.Zero(t, shows)
+				wantCapabilities, wantShows := 1, 0
+				if tc.mode == "ordinary" {
+					wantCapabilities = 0
+				} else if tc.write != 0 && !project && !tc.explicit {
+					wantShows = 1
 				}
-				if mode == "supported" || mode == "explicit" {
-					require.False(t, result.IsError, "%s", mustJSON(t, result))
-				} else {
-					require.True(t, result.IsError)
-				}
+				require.Equal(t, wantCapabilities, capabilities)
+				require.Equal(t, wantShows, shows)
+				require.Equal(t, min(tc.write, 1), writes)
+				require.Equal(t, tc.write != http.StatusOK, result.IsError, "%s", mustJSON(t, result))
 			})
 		}
 	}
-}
-
-func TestCronMCPOrdinaryResumeOldWire(t *testing.T) {
-	client, err := kataclient.NewWithHTTPClient("http://daemon.example", &http.Client{Transport: cronOrdinaryTransport(t)})
-	require.NoError(t, err)
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 7, ProjectName: "spoke-project", Actor: "operator", Version: "test"})
-	id, err := uid.New()
-	require.NoError(t, err)
-	result := cronCall(t, session, "cron_job_resume", map[string]any{"uid": id})
-	require.False(t, result.IsError, "%s", mustJSON(t, result))
-}
-
-type cronRoundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f cronRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-func cronOrdinaryTransport(t *testing.T) http.RoundTripper {
-	return cronRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-		require.Equal(t, http.MethodPost, r.Method)
-		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.NotContains(t, body, "discard_missed")
-		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"job":{}}`)), Request: r}, nil
-	})
 }
