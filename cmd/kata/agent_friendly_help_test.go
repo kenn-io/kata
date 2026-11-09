@@ -19,9 +19,19 @@ func TestAgentWorkflowHelpFollowsContract(t *testing.T) {
 	for _, surface := range []string{workflow, agentguide.Contract} {
 		assert.Contains(t, surface, `kata search "<one or two distinctive words>" --agent`)
 		assert.Contains(t, surface, `--test "<command>" --agent`)
-		for _, command := range []string{"kata search", "kata create", "kata claim", "kata close", "kata label add"} {
-			assert.Contains(t, surface, command, "workflow command must appear in help and the short contract")
-		}
+	}
+
+	// Valid commands can still fall outside the short workflow. Check every
+	// advertised command against the contract, including nested command paths.
+	commands, err := helpCommandLines(workflow, true)
+	require.NoError(t, err)
+	require.NotEmpty(t, commands, "workflow must advertise commands")
+	for _, command := range commands {
+		argv, err := splitHelpWords(command)
+		require.NoError(t, err)
+		cmd, _, err := newRootCmd().Find(argv[1:])
+		require.NoError(t, err)
+		assert.Contains(t, agentguide.Contract, cmd.CommandPath(), "workflow command must appear in the short contract")
 	}
 
 	claimHelp := string(executeRoot(t, newRootCmd(), "claim", "--help"))
