@@ -166,6 +166,7 @@ name = "product"
 
 Rerunning `kata init` on a binding that lacks the contract command adds these
 two lines above its existing contents and changes nothing else in the file.
+If the header can't be written, init reports a warning and continues setup.
 
 Do not put tokens or host-specific daemon URLs in `.kata.toml`.
 

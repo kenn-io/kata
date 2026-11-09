@@ -431,6 +431,49 @@ func TestInit_AddsHeaderToHeaderlessKataToml(t *testing.T) {
 	assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=false\n", out)
 }
 
+func TestInit_HeaderWriteFailureWarns(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions don't block writes")
+	}
+	for _, mode := range []outputMode{outputHuman, outputAgent, outputJSON} {
+		t.Run(string(mode), func(t *testing.T) {
+			resetFlags(t)
+			flags.Mode = mode
+			env := testenv.New(t)
+			_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			dir := t.TempDir()
+			original := "version = 1\n[project]\nname = \"spoke-project\"\n"
+			path := filepath.Join(dir, ".kata.toml")
+			require.NoError(t, os.WriteFile(path, []byte(original), 0o644)) //nolint:gosec // test fixture matches committed binding mode
+			require.NoError(t, os.Chmod(dir, 0o555))                        //nolint:gosec // read-only directory makes the header update fail
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })                  //nolint:gosec // restore test fixture permissions for cleanup
+			var out string
+			stderr := captureProcessStderr(t, func() {
+				out, err = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
+			})
+			require.NoError(t, err)
+			warning := stderr
+			switch mode {
+			case outputJSON:
+				var body struct {
+					Warning string `json:"agent_guidance_warning"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(out), &body))
+				warning = body.Warning
+			case outputAgent:
+				assert.Contains(t, out, "agent_guidance_warning=")
+				warning = out
+			}
+			assert.Contains(t, warning, ".kata.toml")
+			assert.Contains(t, warning, "AGENTS.md", "guidance setup must continue after the failed header update")
+			content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+			require.NoError(t, err)
+			assert.Equal(t, original, string(content))
+		})
+	}
+}
+
 func TestInit_AgentOutputQuotesProjectName(t *testing.T) {
 	resetFlags(t)
 	flags.Mode = outputAgent
