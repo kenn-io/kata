@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Agents opening `.kata.toml` learn that the repository tracks work in kata and where to read the agent contract. Rerun `kata init` to add the header to an existing binding.
 - Turn on attachments with `kata docbank setup`: without `--url` it writes
   `[docbank] local = true` for the Docbank on this machine; with `--url` and
   `--key-file` it uses one that runs elsewhere. Setup checks the key before
