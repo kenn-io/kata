@@ -113,11 +113,12 @@ func TestPulledMaterializationRetriesPreparedSnapshot(t *testing.T) {
 func TestFullPulledMaterializationRejectsChangedRows(t *testing.T) {
 	ctx := t.Context()
 	d, p, issue := incrementalTestStore(t)
-	ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	ev := incrementalRemoteEvent(t, p, "", "project.metadata_updated", `{"diff":{"area":{"from":null,"to":"docs"}}}`, 9_000_000_000_000)
 	_, err := d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
 	require.NoError(t, err)
 	before, err := d.ProjectByID(ctx, p.ID)
 	require.NoError(t, err)
+	require.JSONEq(t, `{}`, string(before.Metadata))
 	prepared, err := d.prepareFullPull(ctx, p.ID, []string{ev.EventUID})
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `UPDATE issues SET title='local edit' WHERE id=?`, issue.ID)
@@ -128,7 +129,7 @@ func TestFullPulledMaterializationRejectsChangedRows(t *testing.T) {
 	require.Equal(t, "local edit", got.Title)
 	after, err := d.ProjectByID(ctx, p.ID)
 	require.NoError(t, err)
-	require.Equal(t, before.Metadata, after.Metadata)
+	require.JSONEq(t, `{}`, string(after.Metadata))
 	attempts := 0
 	d.federationIngestPrepared = func() {
 		attempts++
@@ -142,6 +143,9 @@ func TestFullPulledMaterializationRejectsChangedRows(t *testing.T) {
 	got, err = d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, "work", got.Title)
+	after, err = d.ProjectByID(ctx, p.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"area":"docs"}`, string(after.Metadata))
 }
 
 func TestFullPulledMaterializationRejectsChangedComment(t *testing.T) {
