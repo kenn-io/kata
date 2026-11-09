@@ -240,6 +240,76 @@ jobs:
           docker stop "$CONTAINER_ID" || true
           docker rm --force "$CONTAINER_ID"
 
+  first-paint:
+    name: First paint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 26.12.1
+
+      - name: Set up Bun
+        uses: step-security/setup-bun@v2.1.3
+        with:
+          bun-version: 1.4.4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.2
+
+      - name: Install frozen web dependencies
+        run: make web-install
+
+      - name: Build kata with the embedded web UI
+        run: make build
+
+      - name: Build the docs site
+        run: make docs-install docs-build
+
+      # Check the web UI as the daemon serves it.
+      - name: Start an isolated daemon
+        env:
+          KATA_HOME: ${{ runner.temp }}/kata-first-paint/home
+          KATA_DB: ${{ runner.temp }}/kata-first-paint/home/kata.db
+          KATA_WORKSPACE: ${{ runner.temp }}/kata-first-paint/workspace
+        run: |
+          mkdir -p "$KATA_HOME" "$KATA_WORKSPACE"
+          install -m 600 /dev/null "$KATA_HOME/config.toml"
+          printf '[web]\nlisten = "127.0.0.1:7777"\npublic_origin = "http://127.0.0.1:7777"\n' \
+            > "$KATA_HOME/config.toml"
+          cd "$KATA_WORKSPACE"
+          env -u KATA_AUTH_TOKEN "$GITHUB_WORKSPACE/kata" daemon start --foreground \
+            > "$RUNNER_TEMP/kata-first-paint/daemon.log" 2>&1 &
+          # workflowretry: allow Poll the local daemon for readiness.
+          curl --fail --silent --show-error --output /dev/null --retry 60 --retry-delay 1 \
+            --retry-all-errors --header 'Accept: text/html' http://127.0.0.1:7777/kata
+
+      # The daemon serves the shell at /kata only to requests that accept HTML,
+      # and the check's fetch does not ask for it. /index.html is the same page
+      # with the same headers.
+      - name: Check first paint
+        uses: kenn-io/actions/first-paint@6a8b4227ec7ce3c28c6b042b735781b1601211f4  # main
+        with:
+          dist: docs/site
+          urls: http://127.0.0.1:7777/index.html
+
+      - name: Show the daemon log
+        if: failure()
+        run: cat "$RUNNER_TEMP/kata-first-paint/daemon.log"
+
   go:
     needs: changes
     if: *go-frontend-changes
