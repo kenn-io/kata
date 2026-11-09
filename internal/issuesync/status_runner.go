@@ -327,7 +327,7 @@ func (p *statusPass) service(m db.IssueStatusMapping, pending bool) error {
 		}
 		obs, err = coordinator.WriteNamedStatus(p.statusCtx, p.binding, m, desired, p.guard, func(ctx context.Context, admit func() error) (StatusObservation, error) {
 			return p.run.WriteStatus(ctx, m, desired, admit)
-		}, p.admission(m))
+		}, p.admissionWithContext(m))
 	} else {
 		obs, err = p.run.WriteStatus(p.statusCtx, m, desired, p.admission(m))
 	}
@@ -340,8 +340,14 @@ func (p *statusPass) service(m db.IssueStatusMapping, pending bool) error {
 // admission runs immediately before a PATCH. It refuses dispatch when the
 // claim may soon be recovered or a newer local mutation replaced the intent.
 func (p *statusPass) admission(m db.IssueStatusMapping) func() error {
-	return func() error {
-		if err := p.statusCtx.Err(); err != nil {
+	return func() error { return p.admissionWithContext(m)(p.statusCtx) }
+}
+
+// Named remote admission supplies the current native stage lifetime. Preserve
+// its tighter deadline through the storage read instead of borrowing the pass.
+func (p *statusPass) admissionWithContext(m db.IssueStatusMapping) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		// Request timeouts are at most30s. Leave five minutes before abandoned
@@ -350,7 +356,7 @@ func (p *statusPass) admission(m db.IssueStatusMapping) func() error {
 		if horizon <= 0 || !p.r.now().Before(p.startedAt.Add(horizon)) {
 			return fmt.Errorf("issue status dispatch recovery horizon expired")
 		}
-		fresh, err := p.reader.IssueStatusMappingByID(p.statusCtx, p.guard, m.Mapping.ID)
+		fresh, err := p.reader.IssueStatusMappingByID(ctx, p.guard, m.Mapping.ID)
 		if err != nil {
 			return err
 		}

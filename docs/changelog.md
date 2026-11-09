@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Choose a granted work or personal account for GitHub, Notion, Linear, Plane,
+  TickTick, Todoist or Twenty through hub relays. Discover named connections and
+  bind an explicit owner, connection UID and generation. Provider calls stay on
+  the account owner while the project root keeps sync authority; uncertain
+  writes remain blocked. See [Tracker connections](operations/tracker-connections.md).
 - Agents opening `.kata.toml` learn that the repository tracks work in kata and where to read the agent contract. Rerun `kata init` to add the header to an existing binding.
 - Turn on attachments with `kata docbank setup`: without `--url` it writes
   `[docbank] local = true` for the Docbank on this machine; with `--url` and

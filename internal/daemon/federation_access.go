@@ -26,6 +26,7 @@ type HostFederationOperation struct {
 // hostOperationPolicies declares for the same route, which is why this table is
 // its own source of truth and not derived from that registry.
 var federationTransportOperations = map[string]HostFederationOperation{
+	"pollTrackerWorker": {ID: "pollTrackerWorker"}, "replyTrackerWorker": {ID: "replyTrackerWorker", Mutation: true}, "uploadTrackerWorkerChunk": {ID: "uploadTrackerWorkerChunk", Mutation: true}, "admitTrackerWorker": {ID: "admitTrackerWorker", Mutation: true}, "settleTrackerWorkerMetadata": {ID: "settleTrackerWorkerMetadata", Mutation: true},
 	"readTrackerRelay":    {ID: "readTrackerRelay"},
 	"executeTrackerRelay": {ID: "executeTrackerRelay", Mutation: true},
 	"createCronJob":       {ID: "createCronJob", Mutation: true},

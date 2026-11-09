@@ -104,3 +104,15 @@ type TrackerControlSettlementRequest struct {
 	UID       string `path:"uid"`
 	Body      struct{}
 }
+
+type TrackerRecoveryRefreshRequest struct {
+	Client    string `header:"X-Kata-Tracker-Client"`
+	ProjectID int64  `path:"project_id"`
+	Body      struct{}
+}
+type TrackerRecoveryRefreshOut struct {
+	RootInstanceUID   string `json:"root_instance_uid"`
+	ProjectUID        string `json:"project_uid"`
+	ReceiptsRefreshed bool   `json:"receipts_refreshed"`
+}
+type TrackerRecoveryRefreshResponse struct{ Body TrackerRecoveryRefreshOut }

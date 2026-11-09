@@ -25,7 +25,7 @@ func TestTrackerOwnerInspectsUnknownAfterPolicySuspension(t *testing.T) {
 			return issuesync.StatusObservation{}, err
 		}
 		return issuesync.StatusObservation{}, errors.New("fixture lost response")
-	}, func() error { return nil })
+	}, func(context.Context) error { return nil })
 	require.Error(t, err)
 	f.runtime.Suspend()
 	server := NewServer(ServerConfig{DB: f.store, TrackerRuntime: f.runtime, Auth: config.AuthConfig{Token: "fixture-owner"}})
@@ -79,5 +79,32 @@ func TestTrackerSettlementRejectsMemberAndMCPSelfCallWithoutChangingReceipt(t *t
 		retained, err := f.store.ReadTrackerControl(ctx, project.UID, original.UID)
 		require.NoError(t, err)
 		require.Equal(t, original, retained)
+	}
+}
+
+func TestTrackerRecoveryRefreshRejectsMemberAndMCPOwner(t *testing.T) {
+	f := newTrackerCoordinatorFixture(t)
+	ctx := t.Context()
+	_, _, err := f.store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "fixture-refresh-member", Actor: "member", AdminActor: db.BootstrapActor})
+	require.NoError(t, err)
+	for _, mode := range []string{"member", "mcp-owner"} {
+		server := NewServer(ServerConfig{DB: f.store, TrackerRuntime: f.runtime, Auth: config.AuthConfig{Token: "fixture-owner", RequireTokenIdentity: mode == "member"}})
+		t.Cleanup(func() { _ = server.Close() })
+		request := httptest.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1/api/v1/projects/%d/tracker-recovery/refresh", f.binding.ProjectID), bytes.NewBufferString(`{}`))
+		request.RemoteAddr = "127.0.0.1:12345"
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer fixture-refresh-member")
+		if mode == "mcp-owner" {
+			request.Header.Set("Authorization", "Bearer fixture-owner")
+			request.Header.Set("X-Kata-Tracker-Client", "mcp")
+		}
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+		project, err := f.store.ProjectByID(ctx, f.binding.ProjectID)
+		require.NoError(t, err)
+		_, found, err := f.store.LoadTrackerExecutionFence(ctx, f.store.InstanceUID(), project.UID, "coordinator")
+		require.NoError(t, err)
+		require.False(t, found)
 	}
 }

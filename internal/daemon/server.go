@@ -766,6 +766,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerFederationHandlers(humaAPI, cfg)
 	registerIssueSyncHandlers(humaAPI, cfg)
 	registerTrackerHandlers(humaAPI, cfg)
+	registerTrackerWorkerHandlers(humaAPI, cfg)
 	registerExternalRootHandlers(humaAPI, cfg)
 	registerClaimHandlers(humaAPI, cfg)
 	registerDigestHandlers(humaAPI, cfg)

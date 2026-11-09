@@ -1,8 +1,8 @@
 package daemon
 
 func registerFederationOperationPolicies(policies map[string]HostOperationPolicy) {
-	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate, restricted: true}, "readTrackerRelay")
-	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate, Mutation: true, restricted: true}, "executeTrackerRelay")
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate, restricted: true}, "readTrackerRelay", "pollTrackerWorker")
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate, Mutation: true, restricted: true}, "executeTrackerRelay", "replyTrackerWorker", "uploadTrackerWorkerChunk", "admitTrackerWorker", "settleTrackerWorkerMetadata")
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationRead, Capability: hostCapabilityRead,
 	}, "getFederationStatus", "getProjectFederation", "getProjectFederationStatus", "getFederationBridgeStatus")

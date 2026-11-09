@@ -148,7 +148,7 @@ func TestTrackerControlSettlementRefusesLiveAttemptAndRetainsUnknown(t *testing.
 			return issuesync.StatusObservation{}, err
 		}
 		return issuesync.StatusObservation{}, errors.New("fixture lost response")
-	}, func() error { return nil })
+	}, func(context.Context) error { return nil })
 	require.Error(t, err)
 	project, err := f.store.ProjectByID(t.Context(), f.binding.ProjectID)
 	require.NoError(t, err)

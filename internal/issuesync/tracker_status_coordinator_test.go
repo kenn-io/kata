@@ -14,7 +14,7 @@ type denyNamedCoordinator struct {
 	target string
 }
 
-func (c *denyNamedCoordinator) WriteNamedStatus(_ context.Context, _ db.IssueSyncBinding, _ db.IssueStatusMapping, target string, guard db.IssueSyncImportGuard, _ NamedStatusSend, _ func() error) (StatusObservation, error) {
+func (c *denyNamedCoordinator) WriteNamedStatus(_ context.Context, _ db.IssueSyncBinding, _ db.IssueStatusMapping, target string, guard db.IssueSyncImportGuard, _ NamedStatusSend, _ func(context.Context) error) (StatusObservation, error) {
 	c.calls++
 	c.guard = guard
 	c.target = target
@@ -48,4 +48,31 @@ func TestNamedPendingStatusNeverBypassesDurableCoordinator(t *testing.T) {
 	require.Equal(t, 1, coordinator.calls)
 	require.Equal(t, guard, coordinator.guard)
 	require.Equal(t, "closed", coordinator.target)
+}
+
+// A remote native admission can have a shorter lifetime than the status pass.
+// Its mapping read must observe cancellation without canceling the whole pass.
+type blockingTrackerAdmissionReader struct {
+	db.IssueStatusReader
+	entered chan context.Context
+}
+
+func (r *blockingTrackerAdmissionReader) IssueStatusMappingByID(ctx context.Context, _ db.IssueSyncImportGuard, _ int64) (db.IssueStatusMapping, error) {
+	r.entered <- ctx
+	<-ctx.Done()
+	return db.IssueStatusMapping{}, ctx.Err()
+}
+func TestNamedAdmissionMappingReadUsesStageContext(t *testing.T) {
+	now := time.Now()
+	reader := &blockingTrackerAdmissionReader{entered: make(chan context.Context, 1)}
+	pass := &statusPass{r: NewRunner(RunnerConfig{Clock: func() time.Time { return now }}), statusCtx: t.Context(), reader: reader, startedAt: now}
+	stage, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- pass.admissionWithContext(db.IssueStatusMapping{})(stage) }()
+	received := <-reader.entered
+	require.Equal(t, stage, received)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.NoError(t, pass.statusCtx.Err())
 }

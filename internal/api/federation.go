@@ -84,6 +84,7 @@ type FederationProjectMetadataRequest struct {
 // ProjectFederationBody is the hub metadata a trusted spoke needs before it
 // begins project-scoped event polling.
 type ProjectFederationBody struct {
+	TrackerWorkerVersion   int             `json:"tracker_worker_version,omitempty" doc:"Versioned account-owner worker execution through signed project relays."`
 	TrackerControlVersion  int             `json:"tracker_control_version,omitempty" doc:"Versioned qualified tracker control forwarding over signed negotiated project relays."`
 	NativeCronWrites       bool            `json:"native_cron_writes,omitempty" doc:"Supports native recurring job writes using direct project-scoped push enrollments."`
 	Relay                  *RelayHandshake `json:"relay,omitempty"`

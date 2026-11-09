@@ -107,6 +107,11 @@ func federationBodyProjectID(method, path string) (int64, string, string, string
 		return 0, "", "", "", false, false
 	}
 	for _, route := range []struct{ suffix, operation, capability string }{
+		{"/federation/tracker/worker/poll", "pollTrackerWorker", "pull"},
+		{"/federation/tracker/worker/reply", "replyTrackerWorker", "push"},
+		{"/federation/tracker/worker/chunk", "uploadTrackerWorkerChunk", "push"},
+		{"/federation/tracker/worker/admit", "admitTrackerWorker", "push"},
+		{"/federation/tracker/worker/metadata", "settleTrackerWorkerMetadata", "push"},
 		{"/federation/tracker/read", "readTrackerRelay", "pull"},
 		{"/federation/tracker/control", "executeTrackerRelay", "push"},
 		{federationIngestPathSuffix, "ingestFederationProjectEvents", "push"},

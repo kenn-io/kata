@@ -138,6 +138,13 @@ func runTrackerOperation(ctx context.Context, cfg ServerConfig, project db.Proje
 	if err != nil {
 		return api.TrackerOperationOut{}, err
 	}
+	// Close any remote member preflight session after the complete control.
+	// Cleanup outlives cancellation only for its bounded reduction-only call.
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = tracker.CloseRun(cleanup)
+	}()
 	if connection.descriptor.Provider != body.Provider {
 		return api.TrackerOperationOut{}, tracker.ErrInvalid
 	}

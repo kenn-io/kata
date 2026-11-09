@@ -1724,6 +1724,9 @@ func runDaemonProcess(
 		IdleAdmission:          idleAdmission,
 		IdleShutdownHealth:     idleHealth,
 	})
+	// The daemon worker group owns reverse tracker polling, provider sessions
+	// and their bounded finalizers until shutdown has joined every child.
+	workers.Go(func() { srv.RunTrackerWorkers(ctx) })
 	defer func() { _ = srv.Close() }()
 	var stopAdmission func()
 	if idleController != nil {

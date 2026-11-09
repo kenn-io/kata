@@ -17,7 +17,7 @@ type trackerSessionGuard struct {
 }
 
 func (r *TrackerRuntime) sessionGuard(ctx context.Context, provider string) (trackerSessionGuard, error) {
-	if _, err := r.selectedConnection(ctx, provider, tracker.ActionRead); err != nil {
+	if _, err := r.selectedMethodConnection(ctx, provider, tracker.ActionRead); err != nil {
 		return trackerSessionGuard{}, err
 	}
 	selection, _ := tracker.RunSelection(ctx)
@@ -30,7 +30,7 @@ func (g trackerSessionGuard) authorize(ctx context.Context) (context.Context, er
 	}
 	ctx = tracker.WithRunSelection(ctx, g.selection)
 	ctx = context.WithValue(ctx, trackerRunAuthorityKey{}, g.authority)
-	_, err := g.runtime.selectedConnection(ctx, g.provider, tracker.ActionRead)
+	_, err := g.runtime.selectedMethodConnection(ctx, g.provider, tracker.ActionRead)
 	return ctx, err
 }
 
@@ -42,7 +42,7 @@ func (g trackerSessionGuard) writeContext(ctx context.Context, target string) (c
 	if err != nil {
 		return ctx, err
 	}
-	if _, err := g.runtime.selectedConnection(ctx, g.provider, tracker.ActionStatus); err != nil {
+	if _, err := g.runtime.selectedMethodConnection(ctx, g.provider, tracker.ActionStatus); err != nil {
 		return ctx, err
 	}
 	attempt, ok := ctx.Value(trackerStatusAttemptKey{}).(trackerStatusAttempt)

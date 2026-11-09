@@ -11,7 +11,7 @@ type NamedStatusSend func(context.Context, func() error) (StatusObservation, err
 // provider call. The callback is invoked by the provider after pacing. The
 // shared engine supplies the original claim guard, never a rediscovered claim.
 type NamedStatusCoordinator interface {
-	WriteNamedStatus(context.Context, db.IssueSyncBinding, db.IssueStatusMapping, string, db.IssueSyncImportGuard, NamedStatusSend, func() error) (StatusObservation, error)
+	WriteNamedStatus(context.Context, db.IssueSyncBinding, db.IssueStatusMapping, string, db.IssueSyncImportGuard, NamedStatusSend, func(context.Context) error) (StatusObservation, error)
 }
 
 // NamedStatusRecovery acknowledges already retained completed responses before

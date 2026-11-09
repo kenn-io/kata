@@ -19,7 +19,7 @@ import (
 type signedTrackerHopKey struct{}
 
 func isTrackerRelayOperation(operation string) bool {
-	return operation == "readTrackerRelay" || operation == "executeTrackerRelay"
+	return operation == "readTrackerRelay" || operation == "executeTrackerRelay" || isTrackerWorkerOperation(operation)
 }
 func trackerControlProtocol(cfg ServerConfig) int {
 	if cfg.TrackerRuntime == nil || cfg.HostAccess != nil || cfg.FederationSigning == nil {

@@ -17,7 +17,7 @@ func (f trackerNotionFetcher) ForRun(ctx context.Context) (notionsync.Session, e
 	if _, named := tracker.RunSelection(ctx); !named {
 		return f.legacy.ForRun(ctx)
 	}
-	connection, err := f.runtime.selectedConnection(ctx, "notion", tracker.ActionRead)
+	connection, err := f.runtime.selectedMethodConnection(ctx, "notion", tracker.ActionRead)
 	if err != nil {
 		return nil, err
 	}

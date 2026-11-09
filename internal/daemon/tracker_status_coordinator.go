@@ -22,7 +22,7 @@ var _ issuesync.NamedStatusCoordinator = (*TrackerRuntime)(nil)
 // WriteNamedStatus is the root-local coordinator. Read-before-dispatch no-ops
 // create no acknowledgement claim; admitted outcomes persist before returning.
 // Unknowns never become fresh writes through claim expiry or another caller.
-func (r *TrackerRuntime) WriteNamedStatus(ctx context.Context, binding db.IssueSyncBinding, m db.IssueStatusMapping, target string, guard db.IssueSyncImportGuard, send issuesync.NamedStatusSend, admit func() error) (issuesync.StatusObservation, error) {
+func (r *TrackerRuntime) WriteNamedStatus(ctx context.Context, binding db.IssueSyncBinding, m db.IssueStatusMapping, target string, guard db.IssueSyncImportGuard, send issuesync.NamedStatusSend, admit func(context.Context) error) (issuesync.StatusObservation, error) {
 	if send == nil || admit == nil || m.PendingEvent == nil || m.Mapping.IssueID == nil {
 		return issuesync.StatusObservation{}, db.ErrTrackerFenceInvalid
 	}
@@ -79,6 +79,10 @@ func (r *TrackerRuntime) WriteNamedStatus(ctx context.Context, binding db.IssueS
 		return issuesync.StatusObservation{}, err
 	}
 	attemptCtx := context.WithValue(ctx, trackerStatusAttemptKey{}, trackerStatusAttempt{runtime: r, source: binding.SourceKey, target: target})
+	if selection.OwnerInstanceUID != r.store.InstanceUID() {
+		metadata := trackerRemoteStatus{identity: identity, originalAdmit: admit, admission: db.TrackerStatusAdmission{Guard: guard, MappingID: m.Mapping.ID, ExternalID: m.Mapping.ExternalID, IssueUID: issue.UID, PendingEventUID: m.PendingEvent.UID, Target: target, Connection: *selection, ProcessEpoch: r.epoch}}
+		return send(context.WithValue(attemptCtx, trackerRemoteStatusKey{}, metadata), func() error { return admit(attemptCtx) })
+	}
 	var dispatched *db.TrackerExecutionFence
 	callbackUsed := false
 	obs, callErr := send(attemptCtx, func() error {
@@ -86,7 +90,7 @@ func (r *TrackerRuntime) WriteNamedStatus(ctx context.Context, binding db.IssueS
 			return db.ErrTrackerOutcomeUnknown
 		}
 		callbackUsed = true
-		if err := admit(); err != nil {
+		if err := admit(ctx); err != nil {
 			return err
 		}
 		if _, err := r.selectedConnection(ctx, binding.Provider, tracker.ActionStatus); err != nil {
@@ -152,6 +156,20 @@ func trackerUnknownOutcome(cause error) error {
 // RecoverNamedStatus consumes only a retained original completed response. It
 // does not read the provider, rewrite observation clocks or clear newer intent.
 func (r *TrackerRuntime) RecoverNamedStatus(ctx context.Context, binding db.IssueSyncBinding, guard db.IssueSyncImportGuard) error {
+	selection, err := db.IssueSyncConnectionFromConfig(binding.Config)
+	if err != nil {
+		return err
+	}
+	if selection != nil && selection.OwnerInstanceUID != r.store.InstanceUID() {
+		project, err := r.store.ProjectByID(ctx, binding.ProjectID)
+		if err != nil {
+			return err
+		}
+		if err := r.recoverRemoteOwner(ctx, project.UID, binding.Provider, *selection); err != nil {
+			return err
+		}
+	}
+
 	if _, err := r.selectedConnection(ctx, binding.Provider, tracker.ActionRead); err != nil {
 		return err
 	}

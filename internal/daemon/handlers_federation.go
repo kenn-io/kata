@@ -325,13 +325,14 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			handshake.PendingArtifactOffers = len(pendingArtifacts) > 0
 			body.Relay = handshake
 			body.TrackerControlVersion = trackerControlProtocol(cfg)
+			body.TrackerWorkerVersion = trackerWorkerProtocol(cfg)
 			return &api.ProjectFederationResponse{Body: body}, nil
 		}
 		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, Metadata: true})
 		if err != nil {
 			return nil, federationFeatureError(err)
 		}
-		body := api.ProjectFederationBody{TrackerControlVersion: trackerControlProtocol(cfg), NativeCronWrites: result.Binding.Role == db.FederationRoleHub && result.Binding.Enabled, ProjectID: result.Project.ID, ProjectUID: result.Project.UID, ProjectName: result.Project.Name, ReplayHorizonEventID: result.Binding.ReplayHorizonEventID, BaselineThroughEventID: result.BaselineThroughEventID}
+		body := api.ProjectFederationBody{TrackerControlVersion: trackerControlProtocol(cfg), TrackerWorkerVersion: trackerWorkerProtocol(cfg), NativeCronWrites: result.Binding.Role == db.FederationRoleHub && result.Binding.Enabled, ProjectID: result.Project.ID, ProjectUID: result.Project.UID, ProjectName: result.Project.Name, ReplayHorizonEventID: result.Binding.ReplayHorizonEventID, BaselineThroughEventID: result.BaselineThroughEventID}
 		return &api.ProjectFederationResponse{Body: body, EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures}, nil
 	})
 

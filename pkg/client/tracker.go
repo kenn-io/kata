@@ -211,3 +211,18 @@ func validateTrackerReceipt(r *TrackerReceipt, expectedUID string) error {
 	}
 	return nil
 }
+
+// RefreshTrackerRecovery retrieves only original retained owner receipts and
+// exact non-send proofs. Actual root-daemon owner authority is required; this
+// never retries provider writes or clears missing restored history.
+type TrackerRecoveryRefresh struct {
+	RootInstanceUID   string `json:"root_instance_uid"`
+	ProjectUID        string `json:"project_uid"`
+	ReceiptsRefreshed bool   `json:"receipts_refreshed"`
+}
+
+func (c *Client) RefreshTrackerRecovery(ctx context.Context, projectID int64, editors ...RequestEditorFn) (*TrackerRecoveryRefresh, error) {
+	result := new(TrackerRecoveryRefresh)
+	err := c.trackerRequest(ctx, http.MethodPost, projectID, "/tracker-recovery/refresh", struct{}{}, result, editors...)
+	return result, err
+}

@@ -16,7 +16,7 @@ func (f trackerTwentyFetcher) ForRun(ctx context.Context, c twentysync.Config) (
 	if _, named := tracker.RunSelection(ctx); !named {
 		return f.legacy.ForRun(ctx, c)
 	}
-	connection, err := f.runtime.selectedConnection(ctx, "twenty", tracker.ActionRead)
+	connection, err := f.runtime.selectedMethodConnection(ctx, "twenty", tracker.ActionRead)
 	if err != nil {
 		return nil, err
 	}

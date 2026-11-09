@@ -25,6 +25,7 @@ func trackerOperatorContext(ctx context.Context, cfg ServerConfig, projectID int
 	return activeProjectByID(ctx, cfg.DB, projectID)
 }
 func registerTrackerInspectionHandlers(humaAPI huma.API, cfg ServerConfig) {
+	registerTrackerRecoveryRefresh(humaAPI, cfg)
 	huma.Register(humaAPI, huma.Operation{OperationID: "settleTrackerControl", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/tracker-operations/{uid}/settle"}, func(ctx context.Context, in *api.TrackerControlSettlementRequest) (*api.TrackerOperationResponse, error) {
 		if err := ensureAttributedWriteAllowed(ctx); err != nil {
 			return nil, err

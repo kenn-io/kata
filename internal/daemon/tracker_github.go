@@ -20,7 +20,7 @@ func (f trackerGitHubFetcher) ForBinding(ctx context.Context, b githubsync.Bindi
 		}
 		return f.legacy, nil
 	}
-	connection, err := f.runtime.selectedConnection(ctx, "github", tracker.ActionRead)
+	connection, err := f.runtime.selectedMethodConnection(ctx, "github", tracker.ActionRead)
 	if err != nil {
 		return nil, err
 	}

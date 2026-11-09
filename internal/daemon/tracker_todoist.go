@@ -17,7 +17,7 @@ func (f trackerTodoistFetcher) Account(ctx context.Context) (string, error) {
 	if _, named := tracker.RunSelection(ctx); !named {
 		return f.legacy.Account(ctx)
 	}
-	connection, err := f.runtime.selectedConnection(ctx, "todoist", tracker.ActionRead)
+	connection, err := f.runtime.selectedMethodConnection(ctx, "todoist", tracker.ActionRead)
 	if err != nil {
 		return "", err
 	}
@@ -27,7 +27,7 @@ func (f trackerTodoistFetcher) ForRun(ctx context.Context, c todoistsync.Config)
 	if _, named := tracker.RunSelection(ctx); !named {
 		return f.legacy.ForRun(ctx, c)
 	}
-	connection, err := f.runtime.selectedConnection(ctx, "todoist", tracker.ActionRead)
+	connection, err := f.runtime.selectedMethodConnection(ctx, "todoist", tracker.ActionRead)
 	if err != nil {
 		return nil, err
 	}

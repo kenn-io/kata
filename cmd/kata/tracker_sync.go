@@ -17,7 +17,7 @@ import (
 
 func newTrackerSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "tracker", Short: "choose named tracker accounts and inspect durable operations"}
-	cmd.AddCommand(&cobra.Command{Use: "recovery", Short: "inspect local tracker uncertainty as the daemon owner", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	recovery := &cobra.Command{Use: "recovery", Short: "inspect local tracker uncertainty as the daemon owner", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		a, project, err := githubSyncProjectAPI(cmd.Context())
 		if err != nil {
 			return err
@@ -25,6 +25,11 @@ func newTrackerSyncCmd() *cobra.Command {
 		client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 		if err != nil {
 			return err
+		}
+		if refresh, _ := cmd.Flags().GetBool("refresh"); refresh {
+			if _, err := client.RefreshTrackerRecovery(a.ctx, project); err != nil {
+				return err
+			}
 		}
 		result, err := client.TrackerRecovery(a.ctx, project)
 		if err != nil {
@@ -35,7 +40,9 @@ func newTrackerSyncCmd() *cobra.Command {
 		}
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "tracker recovery role=%s phase=%s write_uid=%s provider_acknowledged=%t writes_blocked=%t activation_required=%t restored_history_gap=%t\n", result.Role, result.Phase, result.WriteUID, result.ProviderAcknowledged, result.WritesBlocked, result.ActivationRequired, result.RestoredHistoryGap)
 		return err
-	}})
+	}}
+	recovery.Flags().Bool("refresh", false, "recover retained receipts without provider writes (actual root daemon owner only)")
+	cmd.AddCommand(recovery)
 	cmd.AddCommand(&cobra.Command{Use: "settle <uid>", Short: "record an unresolved stopped control as the local daemon owner", Long: "Record an unresolved outcome for a stopped caller control and release its pending-operation capacity. This never retries its effects, clears provider uncertainty, or permits new writes across an unknown outcome. Run against the daemon that owns the control receipt.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if !uid.Valid(args[0]) {
 			return trackerCLIValidation("operation UID must be a normalized ULID")

@@ -14,6 +14,9 @@ func (r *TrackerRuntime) memberConnection(ctx context.Context, project string, p
 	if selection.Validate() != nil || !tracker.ValidIdentityText(resource, 2048) {
 		return ctx, trackerLocalConnection{}, tracker.ErrInvalid
 	}
+	if r != nil && selection.OwnerInstanceUID != r.store.InstanceUID() {
+		return r.remoteMemberConnection(ctx, project, principal, selection, action, resource)
+	}
 	snapshot, err := r.current()
 	if err != nil {
 		return ctx, trackerLocalConnection{}, err

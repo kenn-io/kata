@@ -18,6 +18,7 @@ import (
 // These operation IDs are the explicit restricted-ingress allowlist. Paths
 // come from native registration so ingress cannot drift from actual routes.
 var signingCapabilities = map[string][]string{
+	"pollTrackerWorker": {"pull"}, "replyTrackerWorker": {"push"}, "uploadTrackerWorkerChunk": {"push"}, "admitTrackerWorker": {"push"}, "settleTrackerWorkerMetadata": {"push"},
 	"readTrackerRelay":              {"pull"},
 	"executeTrackerRelay":           {"push"},
 	"createCronJob":                 {"push"},
@@ -196,13 +197,16 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 	})
 }
 
-// Waiting tracker relay calls have their own bounded pool. Dependent
-// project metadata negotiation retains the control pool; bulk bodies
+// Waiting tracker relay calls have their own bounded pool. Their dependent
+// worker traffic and metadata negotiation retain the control pool; bulk bodies
 // retain the smaller ingest pool. Increasing a shared limit cannot ensure
 // progress when every caller is waiting for another request in that same pool.
 func (s *Server) federationSigningAdmission(operation string) (chan struct{}, int64) {
 	if operation == "readTrackerRelay" || operation == "executeTrackerRelay" {
 		return s.federationTrackerRelayAdmission, 64 << 10
+	}
+	if operation == "uploadTrackerWorkerChunk" {
+		return s.federationIngestAdmission, 1 << 20
 	}
 	if operation == "ingestFederationProjectEvents" || operation == "acceptRelayDeliveries" || isCronJobWriteOperation(operation) {
 		return s.federationIngestAdmission, federationsigning.MaxBodyBytes

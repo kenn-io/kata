@@ -107,11 +107,17 @@ func forwardTrackerRelay(ctx context.Context, cfg ServerConfig, project db.Proje
 }
 
 func trackerHubRequest(ctx context.Context, client *http.Client, method, path string, body, out any) error {
+	return trackerHubRequestBounded(ctx, client, method, path, body, out, 64<<10)
+}
+func trackerHubRequestBounded(ctx context.Context, client *http.Client, method, path string, body, out any, limit int) error {
+	if limit != 64<<10 && limit != 1<<20 {
+		return tracker.ErrInvalid
+	}
 	var payload []byte
 	var err error
 	if body != nil {
 		payload, err = json.Marshal(body, json.Deterministic(true))
-		if err != nil || len(payload) > 64<<10 {
+		if err != nil || len(payload) > limit {
 			return tracker.ErrInvalid
 		}
 	}

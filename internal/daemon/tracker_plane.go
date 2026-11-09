@@ -16,7 +16,7 @@ func (f trackerPlaneFetcher) ForRun(ctx context.Context, c planesync.Config) (pl
 	if _, named := tracker.RunSelection(ctx); !named {
 		return f.legacy.ForRun(ctx, c)
 	}
-	connection, err := f.runtime.selectedConnection(ctx, "plane", tracker.ActionRead)
+	connection, err := f.runtime.selectedMethodConnection(ctx, "plane", tracker.ActionRead)
 	if err != nil {
 		return nil, err
 	}

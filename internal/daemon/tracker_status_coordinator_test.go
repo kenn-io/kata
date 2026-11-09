@@ -69,7 +69,7 @@ func TestNamedStatusRetainsResultBeforeRootAcknowledgement(t *testing.T) {
 		calls++
 		return issuesync.StatusObservation{Status: "closed", Version: time.Now().UTC(), Locator: f.mapping.Mapping.ExternalID}, nil
 	}
-	obs, err := f.runtime.WriteNamedStatus(f.ctx, f.binding, f.mapping, "closed", f.guard, send, func() error { return nil })
+	obs, err := f.runtime.WriteNamedStatus(f.ctx, f.binding, f.mapping, "closed", f.guard, send, func(context.Context) error { return nil })
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
 	require.NotEmpty(t, obs.TrackerWriteUID)
@@ -81,7 +81,7 @@ func TestNamedStatusRetainsResultBeforeRootAcknowledgement(t *testing.T) {
 	require.True(t, found)
 	require.Equal(t, db.TrackerWriteConfirmed, fence.Phase)
 	// Lost response/root application replays only its retained observation.
-	replay, err := f.runtime.WriteNamedStatus(f.ctx, f.binding, f.mapping, "closed", f.guard, send, func() error { return nil })
+	replay, err := f.runtime.WriteNamedStatus(f.ctx, f.binding, f.mapping, "closed", f.guard, send, func(context.Context) error { return nil })
 	require.NoError(t, err)
 	require.Equal(t, obs, replay)
 	require.Equal(t, 1, calls)
@@ -103,9 +103,9 @@ func TestNamedStatusUnknownNeverResendsAndReadNoopIsNotAnAcknowledgement(t *test
 			calls++
 			return issuesync.StatusObservation{}, context.DeadlineExceeded
 		}
-		_, err := f.runtime.WriteNamedStatus(f.ctx, f.binding, f.mapping, "closed", f.guard, send, func() error { return nil })
+		_, err := f.runtime.WriteNamedStatus(f.ctx, f.binding, f.mapping, "closed", f.guard, send, func(context.Context) error { return nil })
 		require.Error(t, err)
-		_, err = f.runtime.WriteNamedStatus(f.ctx, f.binding, f.mapping, "closed", f.guard, send, func() error { return nil })
+		_, err = f.runtime.WriteNamedStatus(f.ctx, f.binding, f.mapping, "closed", f.guard, send, func(context.Context) error { return nil })
 		require.ErrorIs(t, err, db.ErrTrackerOutcomeUnknown)
 		require.Equal(t, 1, calls)
 	})
@@ -113,7 +113,7 @@ func TestNamedStatusUnknownNeverResendsAndReadNoopIsNotAnAcknowledgement(t *test
 		f := newTrackerCoordinatorFixture(t)
 		obs, err := f.runtime.WriteNamedStatus(f.ctx, f.binding, f.mapping, "closed", f.guard, func(context.Context, func() error) (issuesync.StatusObservation, error) {
 			return issuesync.StatusObservation{Status: "closed", Version: time.Now().UTC(), TrackerWriteUID: "untrusted-result-field"}, nil
-		}, func() error { t.Fatal("read noop requested mutation admission"); return nil })
+		}, func(context.Context) error { t.Fatal("read noop requested mutation admission"); return nil })
 		require.NoError(t, err)
 		require.Empty(t, obs.TrackerWriteUID)
 		project, err := f.store.ProjectByID(t.Context(), f.binding.ProjectID)

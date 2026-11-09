@@ -16,7 +16,7 @@ func (f trackerTickTickFetcher) ForRun(ctx context.Context, c tickticksync.Confi
 	if _, named := tracker.RunSelection(ctx); !named {
 		return f.legacy.ForRun(ctx, c)
 	}
-	connection, err := f.runtime.selectedConnection(ctx, "ticktick", tracker.ActionRead)
+	connection, err := f.runtime.selectedMethodConnection(ctx, "ticktick", tracker.ActionRead)
 	if err != nil {
 		return nil, err
 	}

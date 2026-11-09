@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -153,4 +154,35 @@ func TestTrackerMappingAuthorityChangeNeedsFreshConnectionGeneration(t *testing.
 	require.ErrorIs(t, err, tracker.ErrUnavailable)
 	c.Generation = "second"
 	require.NoError(t, r.Reconfigure(ctx, []config.TrackerConnectionConfig{c}, maps))
+}
+
+// Contract: a captured remote typed-method guard checks current root policy
+// locally; the actual owner method checks owner grants. Authority-only checks
+// such as two-way bind status permission still require their explicit RPC.
+func TestTrackerRemoteTypedGuardDoesNotQueueRedundantAuthorization(t *testing.T) {
+	ctx := t.Context()
+	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "method-guard.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(ctx, "method-project")
+	require.NoError(t, err)
+	p := tracker.Principal{AuthorityInstanceUID: store.InstanceUID(), Kind: tracker.SubjectService, Subject: "sync"}
+	r, err := NewTrackerRuntime(ctx, store, nil, []config.TrackerAccessMapping{{ProjectUID: project.UID, Principal: p, Actor: "root-service"}})
+	require.NoError(t, err)
+	snapshot, err := r.current()
+	require.NoError(t, err)
+	selection := tracker.Selection{OwnerInstanceUID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", ConnectionUID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", Generation: "first"}
+	run := &trackerRemoteRun{runtime: r, snapshot: snapshot, project: project.UID, principal: p, descriptor: tracker.PublicDescriptor{Selection: selection, Provider: "notion", Label: "Example account"}}
+	authority := trackerRunAuthority{remote: run, root: store.InstanceUID(), project: project.UID, principal: p, source: "notion:source", incarnation: snapshot.incarnation, action: tracker.ActionRead}
+	ctx = context.WithValue(tracker.WithRunSelection(ctx, selection), trackerRunAuthorityKey{}, authority)
+	guard, err := r.sessionGuard(ctx, "notion")
+	require.NoError(t, err)
+	_, err = guard.authorize(ctx)
+	require.NoError(t, err)
+	require.Empty(t, r.workerBroker.calls, "guard alone must not spend another owner RPC")
+	_, err = r.selectedConnection(ctx, "notion", tracker.ActionStatus)
+	require.ErrorIs(t, err, tracker.ErrUnavailable, "authority-only proof still needs pinned root/provider RPC")
+	r.Suspend()
+	_, err = guard.authorize(ctx)
+	require.ErrorIs(t, err, tracker.ErrUnavailable)
 }

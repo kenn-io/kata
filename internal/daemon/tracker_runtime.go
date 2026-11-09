@@ -28,14 +28,15 @@ type trackerRuntimeSnapshot struct {
 // owner config. Reconfiguration suspends old sessions before validating/replacing
 // authority; an error keeps named use unavailable while legacy sync is separate.
 type TrackerRuntime struct {
-	controlsMu sync.Mutex
-	controls   map[string]struct{}
-	store      db.Storage
-	signing    *RootSigning
-	epoch      string
-	mu         sync.RWMutex
-	reload     sync.Mutex
-	snapshot   *trackerRuntimeSnapshot
+	workerBroker *trackerWorkerBroker
+	controlsMu   sync.Mutex
+	controls     map[string]struct{}
+	store        db.Storage
+	signing      *RootSigning
+	epoch        string
+	mu           sync.RWMutex
+	reload       sync.Mutex
+	snapshot     *trackerRuntimeSnapshot
 }
 
 func NewTrackerRuntime(ctx context.Context, store db.Storage, connections []config.TrackerConnectionConfig, mappings []config.TrackerAccessMapping, signing ...*RootSigning) (*TrackerRuntime, error) {
@@ -46,7 +47,7 @@ func NewTrackerRuntime(ctx context.Context, store db.Storage, connections []conf
 	if err != nil {
 		return nil, err
 	}
-	r := &TrackerRuntime{store: store, epoch: epoch}
+	r := &TrackerRuntime{store: store, epoch: epoch, workerBroker: newTrackerWorkerBroker()}
 	if len(signing) == 1 {
 		r.signing = signing[0]
 	}
@@ -171,13 +172,19 @@ func (r *TrackerRuntime) Connections(ctx context.Context, projectUID string, p t
 	if _, err := r.mappedContext(ctx, snapshot, projectUID, p); err != nil {
 		return nil, err
 	}
-	out := []tracker.PublicDescriptor{}
+	out := r.remoteConnections(ctx, snapshot, projectUID, p)
 	for _, c := range snapshot.connections {
 		if public, ok := c.descriptor.Public(r.store.InstanceUID(), projectUID, p); ok {
 			out = append(out, public)
 		}
 	}
 	slices.SortFunc(out, func(a, b tracker.PublicDescriptor) int {
+		if a.Selection.OwnerInstanceUID < b.Selection.OwnerInstanceUID {
+			return -1
+		}
+		if a.Selection.OwnerInstanceUID > b.Selection.OwnerInstanceUID {
+			return 1
+		}
 		if a.Selection.ConnectionUID < b.Selection.ConnectionUID {
 			return -1
 		}
@@ -203,6 +210,9 @@ func (r *TrackerRuntime) RouteBinding(ctx context.Context, binding db.IssueSyncB
 	snapshot, err := r.current()
 	if err != nil {
 		return ctx, err
+	}
+	if selection.OwnerInstanceUID != r.store.InstanceUID() {
+		return r.routeRemoteBinding(ctx, snapshot, binding, *selection)
 	}
 	connection, ok := snapshot.connections[selection.ConnectionUID]
 	if !ok || connection.descriptor.Selection != *selection || connection.descriptor.Provider != binding.Provider {
@@ -241,6 +251,7 @@ func (r *TrackerRuntime) RouteBinding(ctx context.Context, binding db.IssueSyncB
 
 type trackerRunAuthorityKey struct{}
 type trackerRunAuthority struct {
+	remote                                       *trackerRemoteRun
 	root, project, source, resource, incarnation string
 	principal                                    tracker.Principal
 	action                                       tracker.Action
@@ -260,6 +271,9 @@ func (r *TrackerRuntime) selectedConnection(ctx context.Context, provider string
 	authority, ok := ctx.Value(trackerRunAuthorityKey{}).(trackerRunAuthority)
 	if !ok || authority.incarnation != snapshot.incarnation {
 		return trackerLocalConnection{}, tracker.ErrUnavailable
+	}
+	if selection.OwnerInstanceUID != r.store.InstanceUID() {
+		return r.selectedRemoteConnection(ctx, authority, selection, provider, action)
 	}
 	c, ok := snapshot.connections[selection.ConnectionUID]
 	if !ok || c.descriptor.Selection != selection || c.descriptor.Provider != provider {

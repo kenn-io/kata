@@ -207,3 +207,28 @@ func TestTrackerClientPublicErrorProjectionProperty(t *testing.T) {
 		}
 	}, hegel.WithTestCases(100))
 }
+
+func TestTrackerRecoveryRefreshKeepsScopeAndCarriesNoProviderOptions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v1/projects/7/tracker-recovery/refresh", r.URL.Path)
+		require.Equal(t, `["id:7"]`, r.Header.Get("X-Kata-Project-Scope"))
+		require.Equal(t, "Bearer fixture-owner", r.Header.Get("Authorization"))
+		var body map[string]any
+		require.NoError(t, json.UnmarshalRead(r.Body, &body))
+		require.Empty(t, body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"receipts_refreshed":true}`))
+	}))
+	t.Cleanup(server.Close)
+	c, err := kataclient.NewWithHTTPClient(server.URL, server.Client(), kataclient.WithRequestEditor(func(_ context.Context, r *http.Request) error {
+		r.Header.Set("Authorization", "Bearer fixture-owner")
+		return nil
+	}))
+	require.NoError(t, err)
+	c, err = c.WithProjectScope([]string{"id:7"})
+	require.NoError(t, err)
+	result, err := c.RefreshTrackerRecovery(t.Context(), 7)
+	require.NoError(t, err)
+	require.True(t, result.ReceiptsRefreshed)
+}
