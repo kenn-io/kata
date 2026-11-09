@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -23,10 +24,7 @@ func registerCronControlHandlers(h huma.API, cfg ServerConfig) {
 		{"pause", http.MethodPut, true}, {"resume", http.MethodDelete, false},
 	} {
 		huma.Register(h, huma.Operation{OperationID: action.name + "CronProject", Method: action.method, Path: "/api/v1/projects/{project_id}/cron/pause"}, func(ctx context.Context, in *api.CronProjectPauseRequest) (*api.CronProjectPauseResponse, error) {
-			body := api.CronProjectPauseBody{}
-			if in.Body != nil {
-				body = *in.Body
-			}
+			body := cmp.Or(in.Body, &api.CronProjectPauseBody{})
 			ctx, actor, err := cronWriteContext(ctx, body.Actor)
 			if err != nil {
 				return nil, err

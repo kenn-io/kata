@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 
@@ -54,18 +55,13 @@ func registerCronJobEnabledHandlers(h huma.API, cfg ServerConfig, put func(conte
 		}
 		return put(ctx, projectID, id, write, false, enrollment)
 	}
-	huma.Register(h, huma.Operation{OperationID: "pauseCronJob", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/pause"}, func(ctx context.Context, in *api.CronJobEnabledActionRequest) (*api.CronJobResponse, error) {
-		body := api.CronJobEnabledActionBody{}
-		if in.Body != nil {
-			body = *in.Body
-		}
-		return handle(ctx, in.ProjectID, in.UID, in.Authorization, body, false, false)
+	// Pause and resume keep separate request types so pause never advertises discard_missed.
+	path := "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/"
+	huma.Register(h, huma.Operation{OperationID: "pauseCronJob", Method: http.MethodPost, Path: path + "pause"}, func(ctx context.Context, in *api.CronJobEnabledActionRequest) (*api.CronJobResponse, error) {
+		return handle(ctx, in.ProjectID, in.UID, in.Authorization, *cmp.Or(in.Body, &api.CronJobEnabledActionBody{}), false, false)
 	})
-	huma.Register(h, huma.Operation{OperationID: "resumeCronJob", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/resume"}, func(ctx context.Context, in *api.CronJobResumeRequest) (*api.CronJobResponse, error) {
-		body := api.CronJobResumeBody{}
-		if in.Body != nil {
-			body = *in.Body
-		}
+	huma.Register(h, huma.Operation{OperationID: "resumeCronJob", Method: http.MethodPost, Path: path + "resume"}, func(ctx context.Context, in *api.CronJobResumeRequest) (*api.CronJobResponse, error) {
+		body := cmp.Or(in.Body, &api.CronJobResumeBody{})
 		return handle(ctx, in.ProjectID, in.UID, in.Authorization, api.CronJobEnabledActionBody{Actor: body.Actor, ExpectedEventUID: body.ExpectedEventUID}, true, body.DiscardMissed)
 	})
 }
