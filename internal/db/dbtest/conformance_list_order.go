@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -13,7 +12,7 @@ import (
 
 func checkListOrdering(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	p1, err := store.CreateProject(ctx, "list-ordering-one")
 	if err != nil {
 		return fmt.Errorf("create first project: %w", err)

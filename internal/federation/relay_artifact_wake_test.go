@@ -111,7 +111,7 @@ func TestEmbeddingArtifactOnlyArrivalWakesWorker(t *testing.T) {
 						t.Error("artifact worker did not stop")
 					}
 				}()
-				//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+				//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 				require.Eventually(t, func() bool { return worker.Health().LastSuccessAt != nil }, 10*time.Second, 10*time.Millisecond)
 				require.EqualValues(t, 1, worker.Health().Backlog)
 				require.Zero(t, calls.Load())
@@ -136,7 +136,7 @@ func TestEmbeddingArtifactOnlyArrivalWakesWorker(t *testing.T) {
 				retained, err := receiver.store.(db.EmbeddingArtifactStorage).StoredEmbeddingArtifact(ctx, project.UID, artifact.Digest)
 				require.NoError(t, err)
 				require.Equal(t, artifact, retained, "wake follows complete durable artifact retention")
-				//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+				//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 				require.Eventually(t, func() bool { return worker.Health().Backlog == 0 }, 5*time.Second, 10*time.Millisecond, "artifact-only durable arrival must wake local reconciliation")
 				require.Zero(t, calls.Load(), "received compatible chunks must avoid document calls")
 				if direction == "pull_lost_ack" {

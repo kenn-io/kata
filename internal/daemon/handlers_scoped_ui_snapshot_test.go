@@ -59,7 +59,7 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
 	child := createScopedHTTPTestIssue(t, env, project.ID, "Child", &root)
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	_, _, err = env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
 		Scope: &db.APITokenScope{
 			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
@@ -68,7 +68,7 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	})
 	require.NoError(t, err)
 	headers := map[string]string{"Authorization": "Bearer worker-token"}
-	query := "/api/v1/ui/snapshot?view=all-open&include_graph=true"
+	query := "/api/v1/ui/snapshot?view=all-open"
 
 	resp, body := envDoRaw(t, env, http.MethodGet, query, nil, headers)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)

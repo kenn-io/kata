@@ -180,7 +180,7 @@ func TestBindWaitsForImmediateReconcileAndReadsIssueAndBindingAfterward(t *testi
 	}
 	done := make(chan result, 1)
 	go func() {
-		binding, events, err := h.service.Bind(context.Background(), BindParams{
+		binding, events, err := h.service.Bind(t.Context(), BindParams{
 			ProjectID: h.project.ID, IssueID: h.issue.ID, ConnectorInstance: "notes",
 			Locator: "root-1", Actor: "tester",
 		})
@@ -225,7 +225,7 @@ func TestBindDeliversCommittedBindingBeforeImmediateReconcileReturns(t *testing.
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		_, events, err := h.service.Bind(context.Background(), BindParams{
+		_, events, err := h.service.Bind(t.Context(), BindParams{
 			ProjectID: h.project.ID, IssueID: h.issue.ID, ConnectorInstance: "notes",
 			Locator: "root-1", Actor: "tester",
 		})
@@ -1032,7 +1032,7 @@ func TestResolveFieldConflictRenewsClaimDuringLongConnectorWrite(t *testing.T) {
 	done := make(chan outcome, 1)
 	go func() {
 		state, events, err := service.ResolveFieldConflict(
-			context.Background(), h.issue.ID, "scheduled_on", "kata", "operator",
+			t.Context(), h.issue.ID, "scheduled_on", "kata", "operator",
 		)
 		done <- outcome{state: state, events: events, err: err}
 	}()

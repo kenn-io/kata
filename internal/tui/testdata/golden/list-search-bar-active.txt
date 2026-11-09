@@ -1,5 +1,5 @@
  Project: kata                                                                                       kata カタ · v0.1.0
- open: 1 · closed: 1 · all: 3
+ /login                                                                                    open: 1 · closed: 1 · all: 3
     #     prio status    title                                                           kids    owner         updated
 ▶   #aaa1 P1   open      fix login bug on Safari                                                 claude-4.7    3h ago
     #bbb2 —    closed    rebuild search index                                                    wesm          1h ago
@@ -26,5 +26,5 @@
 
 
 
- /login
+ [kata カタ] jobs runs workflows                                                                                  [1/3]
  ↑↓/enter results▕ esc cancel▕ ctrl+u clear

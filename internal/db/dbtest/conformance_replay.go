@@ -76,7 +76,7 @@ func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Stor
 
 func checkSnapshotReplayCore(t *testing.T, target db.Storage, backend Backend) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	source := backend.Open(t)
 	require.NotNil(t, source)
 	t.Cleanup(func() {
@@ -382,6 +382,12 @@ func CollectImportRecords(
 		}
 	}
 	for value, err := range store.ExportCronRuns(ctx, filter) {
+		v := value
+		if err := appendRecord(&v, err); err != nil {
+			return nil, err
+		}
+	}
+	for value, err := range store.ExportMCPEventSubscriptions(ctx, filter) {
 		v := value
 		if err := appendRecord(&v, err); err != nil {
 			return nil, err

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-24
+last_edited: 2026-11-09
 ---
 
 # CLI reference
@@ -9,6 +9,31 @@ last_edited: 2026-10-24
 This page summarizes the command surface. Run `kata <command> --help` for the
 current flag list in your installed binary. Root help includes the agent workflow,
 ref syntax, output modes, environment variables, and exit codes.
+
+## Find a command
+
+Describe a task to find the most relevant commands in your installed binary:
+
+```sh
+kata cli search "add a comment to an issue"
+kata cli search create a bug --limit 3 --json
+```
+
+Command discovery runs locally without a daemon, workspace binding, config,
+credentials, or network. It searches command names, summaries, flags and
+keywords. It excludes hidden and deprecated commands, interactive UI commands,
+and protocol or agent-hook runners. Hook management remains searchable.
+`kata search` continues to search issues.
+
+Results default to five commands; `--limit` accepts 1–20. Text prints one
+command and summary per line, followed by a help hint. `--agent` adds an
+`OK search results=N` status line. `--json` (or `--format json`) returns
+`kata_api_version`, `query`, and `results`; each result has `command`,
+`summary`, and `usage`. Results contain no scores. No matches is a success
+with an empty results array and a text hint pointing to `kata --help`.
+An empty task or an invalid limit is a usage error (exit 2).
+
+Run `kata cli` for the discovery group's help.
 
 ## Command groups
 
@@ -29,6 +54,9 @@ compactly; `kata --help` has their full descriptions.
 | `--json` | Emit the full JSON envelope for scripts. |
 | `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
 | `--quiet` | Suppress non-essential output. |
+
+Human-mode `kata create` look-alike refusals include matching issues' qualified
+refs, as agent mode does.
 
 `kata --version` prints the same build identity as the `version` command below
 and honors `--json`/`--agent`. It is a root-level flag, so it is not accepted
@@ -56,10 +84,15 @@ Errors go to stderr in the selected output mode.
 | 7 | Daemon unavailable. |
 | 8 | Wait timeout. |
 
+CLI panics exit 1 as internal errors; daemon and background task panics keep diagnostic traces.
+
+With `--json`, a `project_not_initialized` error names the alias or project Kata
+looked up in `error.data`; see [HTTP API errors](http-api.md#errors).
+
 ## Workspace initialization
 
 ```sh
-kata init [--project <name>] [--with-agents] [--with-hooks] [--with-codex-hooks]
+kata init [--project <name>] [--with-agents [--agent-mode cli|mcp]] [--with-hooks] [--with-codex-hooks]
 kata init [--replace | --reassign]
 ```
 
@@ -76,13 +109,31 @@ discipline, and the `work.*` attention conventions (see
 command updates only kata's block and leaves other content untouched, so a
 repo initialized before the `work.*` section shipped gains it on the next run.
 
+In Kata 0.23.0 and later, add `--agent-mode=mcp` with `--with-agents` to install
+instructions for assistants that use Kata through MCP. The block directs them
+to native `kata.skills` workflow and quickstart guides without requiring a
+shell. The default is `cli`; explicitly selecting `--agent-mode=cli` restores
+the CLI block. Kata does not remember the mode, so `--with-agents` without
+`--agent-mode` replaces an MCP block with the CLI block. Pass
+`--agent-mode=mcp` on every refresh in an MCP-only repository. Mode changes replace only Kata's managed span, preserve other
+content and are idempotent. An invalid mode or a mode without `--with-agents`
+fails before project or file changes. Hook contracts keep their CLI guidance.
+
+Assistants with no shell can get the same managed text and a client-side edit
+plan from [`kata.skills` setup](mcp.md#install-mcp-only-instructions).
+
 When migrating from Beads, an existing `AGENTS.md` or real `CLAUDE.md` may still
 carry a Beads integration block. kata leaves that file untouched and writes a
 `<file>.kata-proposed` sidecar with the Beads block removed and kata guidance
 added. Review the sidecar before replacing the original.
 
 A symlinked `AGENTS.md` is refused before it is read; replace it with a regular
-file before using `--with-agents`.
+file before using `--with-agents`. Symlinked `CLAUDE.md` is skipped. Malformed,
+orphaned, reversed or duplicate Kata markers are reported as guidance warnings;
+Kata leaves the affected file untouched and still updates the other file.
+Existing migration sidecars are never overwritten. Project binding still
+succeeds. `--json` reports the warning in `agent_guidance_warning`, and
+`--agent` adds an `agent_guidance_warning` line.
 
 Pass `--with-hooks` to install the `work.attention` lifecycle hooks from the
 [agent orchestration recipe](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
@@ -258,7 +309,12 @@ kata agent-hook contract codex
 
 The command reads one finite native JSON payload from stdin through EOF and
 prints the unchanged [agent contract](#agent-contract-output) in that harness's
-native response. It works in directories without a `.kata.toml`. Repeating a
+native response when the session directory is inside a kata workspace: a
+`.kata.toml` found by the same discovery that project resolution uses. The
+session directory is the payload's `cwd` (or its first `workspace_roots` or
+`workspacePaths` entry), then `--workspace`, then the hook's working directory.
+Outside a workspace the command returns the harness's empty response, so a
+user-scope hook stays silent in unrelated repositories. Repeating a
 session payload returns the contract again; this command does not deduplicate
 independently configured hooks. Stdout contains only the native response,
 including when `--agent` or `--json` is supplied. Diagnostics go to stderr.
@@ -272,7 +328,8 @@ a fix in Kit. For accepted messages, later turns and payloads without the flag
 receive an empty native response. Hermes's `on_session_start` is an observer
 event and does not inject context.
 
-For a Codex response without a stdin payload, run the bare command:
+For a Codex response without a stdin payload, run the bare command. It applies
+the same workspace check to `--workspace`, or to its working directory:
 
 ```sh
 kata agent-contract-hook
@@ -304,6 +361,7 @@ kata agent-hook install
 kata agent-hook install codex pi
 kata agent-hook install codex --config /path/to/second-codex-home/hooks.json
 kata agent-hook install claude --executable /path/to/stable/bin/kata
+kata agent-hook install claude --executable kata
 kata agent-hook uninstall codex
 kata agent-hook uninstall --all
 ```
@@ -396,11 +454,14 @@ commands; bare hooks do not provide session-ownership fencing.
 
 Project setup uses the portable `kata` command by default so teammates do not
 inherit the installer's machine-specific path. `--executable` overrides it.
-User setup chooses an absolute executable path in this order:
+User setup chooses its executable in this order:
 
-1. `--executable <path-or-command>`. Bare commands are resolved on `PATH`;
-   relative paths are made absolute. The result must be an existing regular
-   executable file. Invalid values fail before any config is written.
+1. `--executable <path-or-command>`. Bare `kata` and `kata.exe` are checked on
+   `PATH` and recorded as given, so hooks can move between machines. Kata must
+   be on the harness's runtime `PATH`. Other bare commands are resolved on
+   `PATH` and saved as absolute paths; explicit paths are also made absolute.
+   Use a path to pin an executable. Every override must resolve to an existing
+   regular executable file; invalid values fail before any config is written.
 2. The first executable `kata` on `PATH` whose resolved symlink target matches
    the running binary. This keeps a stable package-manager shim when possible.
 3. The running binary's path, with a warning that it may not survive an upgrade.
@@ -600,7 +661,7 @@ kata create <title> \
   [--body TEXT | --body-file PATH | --body-stdin] \
   [--label LABEL] \
   [--owner NAME] \
-  [--priority 0..4] \
+  [--priority <0..4|none>] \
   [--parent <ref>] \
   [--blocks <ref>] \
   [--blocked-by <ref>] \
@@ -612,19 +673,25 @@ kata create <title> \
 
 When `--priority` is omitted, `kata create` uses the optional
 [`create.default_priority` client setting](configuration.md#default-priority-for-issue-creation).
-An explicit `--priority` wins. With neither a flag nor a configured default,
-priority stays unset.
+An explicit `--priority` wins. Use `--priority none` to leave priority unset
+without changing the configured default. With neither a flag nor a configured
+default, priority stays unset.
 
 `--meta` binds string-valued metadata at creation and is repeatable.
 
 Before creating an issue, the daemon checks existing non-deleted look-alikes,
 including closed ones, using the first 500 Unicode code points of the title
-and body. `--force-new` bypasses that check; idempotency still wins
-when an idempotency key matches. If create times out, the request is canceled
-or the connection drops before the response arrives, or the response is cut
-off before it completes, the CLI reports `create_outcome_unknown`: check whether
-the issue exists before retrying, and use `--force-new` only after confirming
-that no issue was created.
+and body. When either body has no searchable words, the check requires
+identical full title text. In that case, case, whitespace, and punctuation
+changes make titles different. The exact-title lookup checks at most 20
+issues with the shortest bodies. It may miss a longer body with no
+searchable words if 20 shorter same-title issues come first and full-text
+search also misses it. `--force-new` bypasses that check; idempotency
+still wins when an idempotency key matches. If create times out, the request
+is canceled or the connection drops before the response arrives, or the
+response is cut off before it completes, the CLI reports
+`create_outcome_unknown`: check whether the issue exists before retrying,
+and use `--force-new` only after confirming that no issue was created.
 
 Create conflicts identify existing issues. With `--json`, `error.data` carries
 the prior issue's `uid`, `short_id`, and `qualified_id` for an idempotency
@@ -678,6 +745,20 @@ response as-is, so `.issue.labels` requires daemon API `0.24.0` or newer; an
 older daemon omits the key. The top-level `.labels` array keeps each label's
 `author` and `created_at` on every daemon version.
 
+`kata show --json` and `kata list --json` rows also carry `scheduled_on_date`
+and `deadline_on_date` when the issue has `scheduled_on` or `deadline_on`
+metadata. They are `YYYY-MM-DD` calendar dates in the issue's timezone. A row
+that has the metadata key but no date has a value that could not be read.
+Daemons older than API `0.36.0` omit them. The web UI snapshot uses the same
+field names but reads RFC 3339 instants in the viewer's zone. See
+[Calendar dates on issue rows](metadata.md#calendar-dates-on-issue-rows).
+
+For an issue that belongs to a recurrence, `kata show` prints a `repeat:` line
+with the rule, start, timezone, and next occurrence, and `kata show --json`
+returns the same under `.recurrence` (`id`, `uid`, `rrule`, `dtstart`,
+`timezone`, `next_occurrence_key`, `revision`). `next_occurrence_key` is `null`
+once the rule is exhausted. The key is absent for an issue with no recurrence.
+
 With daemon API `0.28.0` or newer, comments include copyable handles, typed
 reply lines, backlinks, and edit markers in human, `--agent`, and `--json`
 output. `--thread COMMENT` follows the root and all its transitive replies
@@ -709,7 +790,13 @@ reject a stale attention update after another worker claims or closes the issue.
 
 For `kata list`, `--meta` is repeatable. A bare key filters on presence,
 while `key=value` filters on string equality. Multiple filters combine with
-AND logic.
+AND logic. To list issues due on or before a day, select the issues that carry
+the key and compare their row dates with `jq`:
+
+```sh
+kata list --all --meta deadline_on --json \
+  | jq '.issues[] | select(.deadline_on_date <= "2026-10-29")'
+```
 
 `--sort oldest` orders matching issues by `created_at` ascending, then `id`
 ascending for equal timestamps. The daemon applies this order before
@@ -746,6 +833,25 @@ with box-drawing connectors. When a parent is absent because it did not match
 the filters, belongs to another project, or fell outside `--limit`, its child
 stays visible as a top-level row. JSON and agent output remain flat in the
 server's order. This grouping applies when `--sort` is omitted or empty.
+
+When the first page of an open or closed `kata list` is empty, it counts
+matching issues with the other status and prints, for example,
+`Hint: no open issues; 4 closed; see kata list --status all` to stderr.
+`--quiet` suppresses it. JSON carries a `hints` entry with code
+`excluded_closed` or `excluded_open`, the message, and `next`. Each `next`
+keeps the scope, output, and filter flags, and omits `--as` and `--cursor`.
+Retry commands use POSIX syntax on Unix and PowerShell syntax on Windows.
+
+Lexical search returns only issues whose title, body, or comments contain every
+query word. When the first page of a multi-word lexical search finds nothing,
+`kata search` prints `Hint: no issue contains every word; search again with fewer words`
+to stderr, including when status or label filters are set. `--quiet` suppresses
+it. JSON adds a `hints` entry with code `every_word_required` and that message.
+
+When a local daemon has search by meaning off, the first page of `kata search`
+prints a setup hint to stderr, including with `--lexical`. It names Settings and
+`kata daemon local-embeddings`. `--quiet` and `--agent` suppress it; JSON results
+keep the hint on stderr.
 
 By default `kata search` runs lexical (FTS) search. When the daemon has
 [semantic search](../guide/semantic-search.md) configured, search
@@ -830,28 +936,47 @@ archived projects are rejected with a hint to unarchive the project first.
 Move between projects:
 
 ```sh
-kata move <issue-ref> <project> [--dry] [--comment TEXT]
+kata move <issue-ref> <project> [--single] [--dry] [--comment TEXT]
 ```
 
-`move` keeps the issue UID and history, then assigns the issue to the target
-project. The target project is resolved the same way as `kata projects show`.
+`move` moves the issue and all active descendants in one transaction, including
+closed descendants and children in other projects. It preserves their nesting,
+status, UIDs, comments, and history. A soft-deleted descendant stays where it
+is, together with its own descendants, so restoring it keeps its subtree whole.
+Use `--single` to move only the selected issue. The output lists each moved
+descendant's new reference. Old project-qualified short IDs resolve while their move history and
+original project identity remain. While retained, those IDs stay reserved so
+new issues cannot reuse them. Purging history or merging a former project ends
+that compatibility; use the current reference returned by the move. Stable issue
+UIDs remain unchanged. The target project is resolved the same way as `kata projects show`.
+When an old reference resolves a moved issue, human and agent output from
+`show`, `edit`, and label commands qualifies its current project.
 The issue's target `short_id` is assigned by the daemon during the move, so it
 may differ from the source `short_id` if the target project already has a
 collision. `--dry` asks the daemon to validate the same move restrictions
-without changing the issue, claims, comments, or event cursor. It rejects
-recurrence-pinned issues, archived projects, federation bindings, active external
-root claims, and import mapping or issue-sync ownership conflicts just as a real
-move does. A preview validates the current state; a later move checks it again.
+without changing issues, claims, comments, or the event cursor. The preview lists
+every issue that would move. It rejects recurrence-pinned issues, archived projects,
+incompatible federation bindings, active external root claims, and import mapping
+or issue-sync ownership conflicts just as a real move does. Any descendant that
+fails a rule rejects the whole move, and the error names that descendant. A
+descendant in an archived project also rejects the move with
+`issue_move_descendant_archived`; restore its project or remove its parent link
+first. A preview validates the current state; a later move checks it again.
 The target short ID is assigned only during the real move. `--comment` is ignored
-by a preview. Previews require daemon API 0.23.0 or newer; the CLI checks before
-sending the `dry_run` request field.
+by a preview. Subtree moves require daemon API 0.35.0 or newer. With older
+daemons, `--single` preserves the legacy move request; `--single --dry` requires
+daemon API 0.23.0 or newer. The CLI checks compatibility before sending new
+request fields.
 A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
 
-Moves involving any federated project are unsupported on both hubs and spokes,
-including projects whose sync is disabled. The daemon returns
-`federated_move_unsupported` rather than treating a hub as a read-only spoke.
-See [Federation](../operations/federation.md#moving-issues-between-projects).
+Federated moves require both projects to use the same active hub. Spokes require
+both projects to be joined, use the same federation actor, and have push enabled
+for a local move. Relay-connected projects are unsupported. Different hubs,
+paused bindings, and mixed local/federated projects return
+`federated_move_unsupported`; create an issue in the target project and link it to
+the original. See [Federation](../operations/federation.md#moving-issues-between-projects)
+for peer requirements.
 
 Links survive a move: `parent`, `blocks`/`blocked-by`, and `related` edges
 are never removed or rewritten. See the link-flag reference above for
@@ -925,6 +1050,7 @@ kata close <ref> --done --message <text> \
   [--pr <url>] \
   [--test <command>] \
   [--reviewed <path>] \
+  [--docbank <node-id|/path>] \
   [--evidence <type:value>] \
   [--idempotency-key <key>] \
   [--if-match <revision>] \
@@ -933,6 +1059,15 @@ kata close <ref> --done --message <text> \
 
 Repeat `--commit`, `--pr`, `--test`, `--reviewed`, or `--evidence` to record
 more than one item, for example a fix that landed in two pull requests.
+
+`--evidence attachment:<id-or-unique-suffix>` cites a live issue attachment
+as done evidence and freezes its descriptor in history. Repeat `--docbank`
+with a Docbank node ID or absolute path to link current file versions and cite
+them in one close. Both forms require daemon API 0.39.0. `--docbank` is
+done-only and rejects `--dry`, `--if-match` and `--idempotency-key`; link first
+for those workflows. Partial link failures leave the issue open and list the
+IDs already linked. See [document close evidence](../guide/attachments.md#cite-a-document-when-closing-work)
+for historical versions, offline closes and stable retries.
 
 `--dry` validates the close without changing the issue and reports the close
 event it would record. Releases before 0.19.0 spelled this flag `--dry-run`.
@@ -953,14 +1088,17 @@ exact retry with a matching idempotency key returns the committed receipt even
 after the original close advanced the issue state.
 
 An opt-in [closing-session transcript setting](configuration.md#closing-session-transcripts)
-attaches the current agent session and optional AgentsView link alongside the
-close evidence. It never supplies completion evidence on its own.
+records the current session ID and optional AgentsView link alongside the
+close evidence. The setting maps each additional agent name to its session
+variable. See the configuration reference for session ID requirements, agent names,
+and daemon API compatibility.
+Session provenance supplies no completion evidence on its own.
 
 Evidence is validated against the close reason:
 
 | Reason | Evidence rule |
 | --- | --- |
-| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, or `external` |
+| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, `external`, or `attachment` |
 | `wontfix` | No evidence; any evidence item is rejected |
 | `duplicate` | Exactly one `duplicate-of` item |
 | `superseded` | Exactly one `superseded-by` item |
@@ -1062,6 +1200,8 @@ unassignment.
 
 ```sh
 kata schedule <ref> <date-or-time|-> [--if-match <rev>]
+kata schedule <ref> <date> --repeat '<rrule>' [--timezone <iana-zone>] [--if-match <rev>]
+kata schedule <ref> --repeat - [--if-match <rev>]
 kata deadline <ref> <date-or-time|-> [--if-match <rev>]
 kata meta set <ref> <key> <value> [--json-value] [--if-match <rev>]
 kata meta unset <ref> <key> [--if-match <rev>]
@@ -1092,6 +1232,8 @@ the date remains eligible after that request is cleared:
 ```sh
 kata schedule abc4 2026-09-01T09:30
 kata schedule abc4 -
+kata schedule abc4 2026-11-02 --repeat 'FREQ=WEEKLY;BYDAY=MO' --timezone Europe/Paris
+kata schedule abc4 --repeat -
 kata deadline abc4 2026-09-01T17:00
 kata deadline abc4 -
 kata meta set abc4 someday true --json-value
@@ -1099,6 +1241,43 @@ kata meta unset abc4 someday
 ```
 
 See the [metadata conventions](metadata.md) for all reserved and standard keys.
+
+### Repeat an issue
+
+`kata schedule <ref> <date> --repeat '<rrule>'` makes the issue the first
+occurrence of a recurrence that starts on `<date>`. The date is
+`YYYY-MM-DD`. Starting a recurrence rewrites the issue's `scheduled_on` to the
+first occurrence, so a future date takes the issue out of `ready` until then.
+The command prints the issue's `scheduled_on` and `timezone` and the rule as it
+now stands. A change prints the recurrence's new rule, start, and zone too, and
+notes that the issue's own date and zone did not change, so its `timezone` can
+differ from the recurrence's. The recurrence template copies
+the issue's title, body, priority, and labels, never its owner or metadata. For
+an issue that already belongs to a recurrence, the same command changes its
+rule, start, and zone. If the recurrence changed after the CLI read it, nothing
+is written and the error reports the recurrence's current rule.
+
+The rule is sent as written. The daemon is the only validator, and its error is
+printed. The zone is `--timezone`, else, when changing, the recurrence's own
+zone, else the issue's `timezone` metadata, else your own IANA zone (`TZ`, then
+the zone the `/etc/localtime` link names; a `TZ` that is set but empty means
+UTC). With none of those, pass `--timezone`.
+`Local` is never sent. `--if-match` checks the issue revision before anything is
+written. When starting a recurrence the daemon checks it again inside the
+transaction that attaches the issue, so a competing write in between fails with
+a revision conflict instead of being overwritten; that needs daemon API 0.36.0
+or newer. A moved issue is found through its old ref and the recurrence belongs
+to the project it is in now.
+
+`kata schedule <ref> --repeat -` stops the recurrence. Occurrences that already
+exist stay. Stopping an issue with no active recurrence fails and writes
+nothing. A stopped recurrence leaves the issue linked to it, so the issue cannot
+start another; start a new recurrence from a new issue. Spokes and
+issue-scoped tokens get the daemon's refusal.
+
+An issue that parents a recurring cron job, one with `cron.progress.*` keys in
+its metadata, is refused: closing it as done would pause the job. Put the
+repeating work under the issue with `kata cron job create --parent` instead.
 
 ## Teammate requests
 
@@ -1602,6 +1781,13 @@ kata ui example-project#abc4
 kata ui 01HZNQ7VFPK1XGD8R5MABCD4EX
 ```
 
+Before launching the browser, Kata prints `Opening <url>` to stdout. With
+`--json`, it prints `{"kata_api_version":1,"url":"<url>"}` instead; with
+`--agent`, it prints `OK ui url=<url>`. The URL is printed even with `-q`.
+If the browser cannot open, the command exits 0 and prints
+`Could not open a browser: <error>. Open the URL above.` to stderr. Open the printed
+URL manually. Cancelling the command still returns an error.
+
 Kata resolves the ref before launching and opens the stable
 `/kata?scope=<project-uid>&issue=<issue-uid>` route. A default loopback daemon
 opens directly; the browser transparently creates its local-web session on that
@@ -1642,7 +1828,7 @@ after login. Kata never puts a remote token or another credential in the URL.
 
 ## Daemon and diagnostics
 
-`kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity and name each skipped PID on stderr.
+`kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity. Each skipped record is printed on stderr with its PID and reason, for example `skipping daemon pid=54 (another PID namespace)`.
 
 ```sh
 kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly]
@@ -1653,6 +1839,7 @@ kata daemon recover [--expect-project-uid <uid>] [--json | --agent]
 kata daemon stop
 kata daemon restart [--listen <host:port>] [--insecure-readonly]
 kata daemon reload
+kata daemon local-embeddings [--yes]
 kata daemon logs --hooks [--tail]
 kata health
 kata doctor [--json | --agent] [--workspace <path>] [--project <name>] [--daemon <name>]
@@ -1663,6 +1850,9 @@ kata --version
 kata update [--check] [--force] [--yes]
 kata tui [issue-ref]
 ```
+
+Search stays visible above the issue list and the Jobs, Runs, and Workflows
+lists. Press `/` or, with `--mouse`, click the search line to edit the current query.
 
 `kata tui` asks for confirmation when you press `q`. To quit immediately,
 set `[tui] confirm_quit = false`; see
@@ -1739,12 +1929,14 @@ restart it. Restart output, including the new web UI address, goes to stderr
 so JSON and agent stdout remain a single update result. If the replacement
 fails to start, or the running daemon does not support automatic restart, the command
 returns an error identifying the installed version and directs you to
-`kata daemon restart` with the daemon's original startup options. Remote
-daemons must be updated on their own hosts.
+`kata daemon stop` followed by `kata daemon start` with the daemon's original
+startup options. Run the start command in its original host shell or service
+environment. Remote daemons must be updated on their own hosts.
 
 Local commands auto-start the daemon when appropriate. When the running local
-daemon reports a different version, a local command stops it and starts one from
-the current binary. It leaves the daemon running and fails instead in these
+daemon reports a different version and supports executable replacement, a local
+command asks it to restart in place using the current binary. Older daemons
+use stop-and-start replacement. It leaves the daemon running and fails in these
 cases:
 
 - The database schema is newer than the current binary supports, or the current
@@ -1762,11 +1954,50 @@ daemon was auto-started with `autostart_idle_timeout` in effect, `daemon start`
 stops it and starts an explicit daemon in its place, reporting the replaced
 PID; a resident daemon is reported as already running. Use
 `daemon start --foreground` for service managers, hosted deployments, and any
-setup where the daemon process should stay attached to the terminal. `daemon
-restart` gracefully stops any running local daemon, waits for it to exit, and
-starts a replacement using the configured listener. It validates replacement
-settings before stopping the current daemon; use the restart flags to repeat
-transient startup overrides. Background start and restart output reports the
+setup where the daemon process should stay attached to the terminal.
+`daemon stop` waits until the daemon stops serving before reporting success.
+
+`daemon restart` asks each running local daemon to replace itself in its original
+environment, using the installed executable invoked by the CLI and retaining
+its startup options, credentials, network, and idle policy. The CLI and daemon
+must see the same process IDs and executable paths. Separate PID or filesystem
+views can prevent daemon discovery or executable handoff. The selected
+executable validates configuration in the daemon's environment before stopping
+it. Configuration validation errors leave the daemon serving; listener binding
+happens during replacement startup. Explicit restart flags override startup
+options and persist through later restarts. `kata daemon stop` followed by
+`kata daemon start` clears these overrides and uses the current startup settings.
+
+`kata daemon local-embeddings` configures semantic search for the current
+`KATA_HOME` and rejects `--daemon`. A home without embeddings configured uses
+a running Ollama without a download. Run the command again to switch that
+home to the built-in server. Otherwise, it shows the missing download size, about
+290 MB on a fresh install, and asks before downloading files shared by all
+Kenn apps. Use `--yes` without a terminal. It keeps compatible Nomic vectors,
+config comments, and formatting outside the rewritten settings. Widths below
+768 are kept only with `request_dimensions = true`. Other recipes get a rebuild warning.
+If this daemon shares embeddings, replicas need the same recipe before they
+can reuse its vectors. Running daemons must support restart before the command
+writes the config. It waits for every restart; rerun the command to retry a
+failed restart. A refused restart restores the configuration file. Older Kata
+releases reject the `local` config key.
+
+When the shared files are already installed, a fresh home needs no prompt;
+switching an existing provider still asks before starting the server. To return
+to Ollama, set `local = false`, delete each setting that has a commented copy
+below it, uncomment the copies, and run `kata daemon restart`.
+
+The result includes `index`, one of `new`, `kept`, or `rebuilt`, and `progress`,
+the command `kata health --json` for watching indexing progress. JSON and agent
+output use those field names.
+
+Start and restart keep waiting while an SQLite migration runs and report that
+progress on stderr.
+
+To replace an older daemon that supports only restart signals rather than
+executable selection, run `kata daemon stop` followed by `kata daemon start`
+with the desired options in its original host shell or service environment.
+Background start and restart output reports the
 resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
@@ -1800,6 +2031,36 @@ such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
+**Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Runs is read-only; Jobs and Workflows can create and change records (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
+
+A job's detail lists its next three run times in the trigger's timezone, with the zone abbreviation so daylight-saving changes read clearly. A native recurring job shows them as **Next**, stepping from the progress the daemon saved on its parent issue. An adapter job shows its cron and `once` trigger times as **Triggers**; they are when the adapter's trigger fires, because Kata holds no anchor or catch-up for an adapter, and an adapter interval shows no time. A paused job shows none, as does a native job whose parent issue is closed or deleted, because the daemon delivers only while the parent is open. A native job whose parent or progress cannot be read shows **unavailable**. An adapter cron expression is read in its own `TZ=` or `CRON_TZ=` zone when it has one, and an `@every` expression shows no time.
+
+| Key | Cron lists and details |
+| --- | --- |
+| `j` / `k` | Move through records or every line of a detail. |
+| Enter / `l` | Open a record or follow a detail link. |
+| `h` / Esc | Return from a detail. Esc clears a list filter; h or Esc on an unfiltered list returns to Kata. |
+| `/` | Filter a list; Enter applies the filter and Esc clears it. |
+| `r` | Refresh the loaded data. |
+| `1`–`4` | Switch tabs. |
+| `?` | Explain jobs, workflows, and runs, and show keybindings. |
+| `q` | Quit. |
+
+On the Jobs tab, or on a job's detail, these keys change jobs. On the Kata tab, `n` creates an issue. Runs ignores `n`.
+
+| Key | Jobs |
+| --- | --- |
+| `n` | Create a job. |
+| `e` | Edit the selected job. |
+
+The job form offers four kinds: a recurring child issue (a native job with a parent issue), an agent prompt, a workflow run, and a notification. Each kind offers the triggers that fit it: cron with its time zone, interval, once at an RFC 3339 instant, manual, an issue's scheduled date, and an issue's deadline with its lead. Issue fields take a short ID or a full UID. A prompt or workflow job on an issue-date trigger runs on the trigger's issue when its policy is the existing issue, so the form asks for it once. The form also edits `enabled`, `checkout_key`, `secret_refs`, and `options`; `options` is a raw JSON object, and unknown keys and exact numbers are kept across an edit. Job validation messages appear below the form. `Ctrl+o` or `Ctrl+s` saves. `Tab`, `Shift+Tab`, and `Enter` change fields. On an issue body, prompt, message, or options field, `Ctrl+e` opens `$VISUAL` or `$EDITOR`, with `vi` as the fallback. These fields keep their complete text, including tabs and line endings, until you edit them. `Esc` on a changed draft asks `y`/`n` before it discards the changes. Definitions with unsupported versions or unknown members require a newer kata for editing.
+
+The form mints the job UID when it opens, so retrying a failed create never makes a second job. An edit is guarded on the job's `definition_event_uid`. If the revision changed while you edited, the form keeps your draft. If the current definition supports editing, it shows the current name, revision, and complete definition; otherwise it shows an error. Use the arrow keys to scroll, or press `Ctrl+o` to save your whole draft against the current revision. Saving the draft replaces the current definition, including settings changed by another writer. `Esc` returns to the draft. Other save errors keep the form open with the error. A recurring child issue's parent cannot change after creation. On a federated project, native jobs are written on the owning hub; a direct, push-enabled spoke forwards the save there (see [Cron](cron.md)).
+
+On the Workflows tab or a workflow's detail, `n` creates a workflow and `e` edits it in the same form as jobs, with Name and Definition fields. Definition is JSON: press `Ctrl+e` to edit it in `$VISUAL` or `$EDITOR`, then `Ctrl+o` to save. JSON errors show a line, column, and path; invalid steps show their number and key. The form keeps drafts, confirms discard, and handles concurrent changes like the job form above. Unknown option keys and exact numbers in `options` survive edits.
+
+Runs loads the newest 100 observations for the current project. Job and workflow details show matching runs from that loaded project history. Run details distinguish the recorded definition revision from the current job or workflow, including definitions that have changed or disappeared.
+
 In the detail Comments tab, press `R` to reply to the selected comment.
 `Ctrl+r` changes the reply kind and `Ctrl+o` submits. After a duplicate-reply
 refusal, `Ctrl+f` enables a forced retry. Use `[` and `]` to select a reply
@@ -1820,6 +2081,21 @@ project is designated, the TUI shows a notice. [Choose the Inbox project](metada
 in the web UI or through the project metadata API. This view is separate from
 `kata inbox`, which lists attention requests sent to an actor.
 
+Press `f` in the issue list to open the filter form. Its **Date** choice,
+the last field, narrows the list by each row's resolved dates. **today** keeps
+open issues whose `scheduled_on_date` or `deadline_on_date` is today or earlier.
+**scheduled** keeps open issues with either date after today. Row dates are
+resolved in the issue's or daemon's time zone, while "today" is the TUI's local
+day. The choice combines with status, owner, labels, and search, and shows as a
+`date:` chip. The choice filters the current project scope and does not change
+it; for Today across every project, choose All projects in the projects view
+(`P`) and then set **today**. Rows show their dates as `s:MM-DD` and `d:MM-DD`,
+with the year added for other years; the dates are left off where the title
+column is too narrow. An issue missing a date never matches on it, and daemons
+older than API `0.36.0` send no dates, so neither choice lists anything from
+them. See
+[Calendar dates on issue rows](metadata.md#calendar-dates-on-issue-rows).
+
 Press `T` to open Attention: the requests `kata notify` addressed to you, read
 from open issues in the current project or across all projects when the TUI is
 in that scope. The recipient is `KATA_INBOX_USER`, else the daemon's authenticated
@@ -1834,22 +2110,33 @@ position; `c` clears the selected request
 (daemon API `0.13.0` or newer, guarded against a concurrent replacement);
 `r` refreshes. Press `T` or Esc to return to the previous view.
 
+Press `r` in the issue list or detail view to reopen an issue. When the issue
+is the parent of native recurring jobs, the TUI first counts the children that
+reopening would deliver, summed across its jobs from their stored progress. If
+more than one child is due, it shows the exact count and asks you to reopen or
+cancel; zero or one due child reopens without a prompt. The prompt names
+[`kata cron job update`](cron.md) for changing a job's catch-up and does not
+choose a policy for you. Undoing a close asks the same way. If the TUI cannot
+read the jobs, it reopens without a prompt.
+
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
-including close, reopen, owner, priority, label, body, and newly added parent,
-blocker, or related links. Undo follows the recorded issue across navigation
-and projects; it does not target whichever row is currently selected. It makes
-a new attributed change, so the original audit event remains. Undoing a reopen
-may open the normal completion form when the daemon requires evidence.
+including close, reopen, owner, priority, label, body, dates, delete, and newly added
+parent, blocker, or related links. Undo follows the recorded issue across
+navigation and projects; it does not target whichever row is currently
+selected. It makes a new attributed change, so the original audit event
+remains. Undoing a reopen may open the normal completion form when the daemon
+requires evidence.
 There is no redo; repeat the action manually if you undo by mistake. Issue edits
 run one at a time; quick successive edits wait for the current edit to finish.
 
-Creating an issue or comment, making a timed assignment or owner edit involving
+Creating an issue or comment, moving an issue to another project, making a
+timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
 `done` clears the undo history. Switching daemons also clears it.
-Before undo writes, the TUI reads the affected issue or exact link and refuses
-an observed conflicting change. It skips that history entry without changing
+Except when restoring a deletion, undo reads the affected issue or exact link
+and refuses an observed conflicting change. It skips that history entry without changing
 the issue, so pressing `u` again reaches earlier edits. The revision check also
 rejects intervening status or owner changes, including changes away and back
 to the same value. These checks are not atomic: another client can edit the
@@ -1867,6 +2154,90 @@ In issue detail, press `t` to start or renew a temporary assignment for the
 current actor. Enter a duration from one minute through 24 hours, such as
 `15m`, `1h`, or `8h`. The detail properties show the resulting absolute
 assignment expiry.
+
+In the issue list or detail, press `d` to edit the selected issue's Scheduled
+and Deadline dates. Each field starts with the stored `scheduled_on` or
+`deadline_on` value and accepts what `kata schedule` and `kata deadline`
+accept (see [Issue metadata](#issue-metadata)): `YYYY-MM-DD`, local
+`YYYY-MM-DDTHH:MM[:SS]`, or RFC 3339 UTC ending in `Z`. Leave a field blank to
+clear that date. The form also reads `today`, `tomorrow`, `+Nd` and `+Nw`,
+counted from your local date; a line under the field previews the resolved day,
+such as `2026-11-05 Thu`, and only that day is sent. Weekday names are not
+accepted, and the CLI, MCP and daemon still reject relative input.
+`Ctrl+o` saves, `Esc` cancels, and `Tab` moves between fields. A save sends one
+metadata patch with only the dates you changed, guarded by `If-Match` on the
+revision the form read, like `kata schedule --if-match`. If the issue changed
+since the form opened, nothing is written; the form stays open and shows the
+current dates so you can edit them again. The detail properties show both
+dates once either is set, and `u` writes the previous dates back under the
+same revision check.
+
+In Kata 0.22.0 and later, press `X` in the issue list or detail to soft-delete the
+selected issue, including in Inbox and a detail opened from Attention. The form
+shows the issue's title and the header `DELETE <project>#<id>`, the string
+`kata delete --confirm` takes. Type `DELETE <project>#<id>` and press `Enter`.
+`Enter` does nothing until the text matches. `Esc` cancels before the request
+starts. The selection then moves to the next row (the previous one after the
+last). A deleted detail returns to the previous issue in its Back history.
+When none remain, it returns to Attention if opened there, or to the list.
+Saved views also drop the deleted issue, and a notice names `u`. In Attention,
+`u` is available when the latest undo entry is a deletion.
+
+`u` restores the issue the way `kata restore` does; if the issue was restored
+elsewhere in the meantime, the TUI says so and changes nothing. Deletions share
+the 20-entry undo limit and the history-clearing boundaries above. Use
+`kata restore` after the undo history clears or the session ends. Issue-scoped
+credentials cannot delete or restore, so `X` is not offered to them and does
+nothing.
+
+In Kata 0.23.0 and later, press `M` in the issue list to move the selected issue
+to another project. In split layout, focus the list first. Unlike `X`, `M` is
+not offered in the detail view, in Inbox, or while browsing from Attention; use
+`kata move` there:
+
+1. A picker lists the daemon's projects except the issue's own, the Inbox
+   project, and archived ones. Typing filters by name or by the text beside it.
+   Projects that share a name are told apart by their area, or by their UID when
+   another of them has the same area or they have none.
+2. `Enter` on a project sends a dry run, so nothing is written, and shows what
+   kata would do: the issue's active descendants, listed one per line (a long
+   list is cut off with "… and N more"), or a note that the issue has no
+   descendants and moves alone. If the daemon
+   refuses, such as for a recurrence-pinned issue or an archived or federated
+   project, the form shows its refusal in its own words. `Esc` returns to the
+   picker.
+3. A second `Enter` moves, guarded by `If-Match` on the revision the preview
+   read; [Issue lifecycle](#issue-lifecycle) says what advances it. If the
+   revision changed since the preview, nothing is moved and the form previews
+   again at the current one.
+4. After a move the moved issue and its descendants leave the list (the next
+   refresh lists them again where the scope shows their new project), the
+   selection goes to the next row (the previous one after the last), and a
+   notice names the issue's new `project#id`. A split detail pane resets only
+   when it shows a moved issue, a child of one, or has one in its Back history;
+   a pane on another issue keeps it and its Back history.
+
+A preview needs daemon API 0.35.0 or newer, because older daemons move only the
+selected issue; the form says so instead of previewing. A move clears the undo
+history, because the issue's project-qualified reference changes and its short
+id can too. Issue-scoped credentials cannot move, so `M`
+is not offered to them and does nothing.
+
+With the issue detail focused, press `O` to start, change, or stop the issue's recurrence, the same one `kata schedule <ref> <date> --repeat` manages. `O` is available only in the detail.
+The form has three fields. **Rule** is the RRULE text, sent with outer spaces trimmed: the
+daemon is the only validator, and its error appears in the form with your input
+kept. Clear **Rule** and save to stop an existing recurrence, keeping its occurrences. A blank rule cannot start a recurrence. **Start** requires a date when starting or changing: `YYYY-MM-DD`, `today`, `tomorrow`, `+Nd`, or
+`+Nw`. **Zone** starts as the recurrence's zone, else the issue's
+`timezone` metadata, else your own IANA zone (`TZ`, then the `/etc/localtime`
+link); it is never `Local`. Starting a recurrence rewrites the issue's
+`scheduled_on` to the first occurrence. `Ctrl+o` saves and `Esc` cancels. A
+change or stop is guarded by `If-Match` on the revision the form read, and a start on
+the issue's; if another client got there first, nothing is written, the form
+keeps what you typed and shows the daemon's error. Press `Esc`, then `O` to
+reopen the form after the detail refreshes. If the issue belongs to a recurrence that cannot be read or has stopped, `O` shows a message instead of opening the form. An issue that parents a recurring cron job is refused on save,
+exactly as the CLI refuses it. The issue detail shows a `repeats:` line with
+the rule, the next occurrence and the zone. A recurrence change clears the undo
+history, since `u` cannot reverse it.
 
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list
@@ -2031,16 +2402,18 @@ issuance output, not a worker authentication input. Follow the
 [worker provisioning example](../operations/remote-daemon.md#identity-tokens)
 to inject its value into the consuming process. Revoke the token during teardown.
 
-## Native cron
+## Cron
 
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
 Commands return JSON; external adapters schedule and launch their own work.
-See [Native cron](cron.md) for bounded documents and retry semantics.
+See [Cron](cron.md) for bounded documents and retry semantics.
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
 kata cron job list [--include-deleted] --json
 kata cron job show <job-uid> --json
+kata cron job edit <job-uid>
+kata cron workflow edit <workflow-uid>
 kata cron job update <job-uid> --expected-event-uid <event-uid> --file replacement.json --json
 kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 kata cron job restore <job-uid> --expected-event-uid <event-uid> --json
@@ -2076,7 +2449,7 @@ kata federation bridge status --project <local-project>
 kata federation bridge disconnect --project <local-project> [--preflight] [--local-only]
 kata federation enable --project <project>
 kata federation enroll [project] [--project <project>] --spoke-instance <uid> --hub-url <url> \
-  --actor <actor> [--hub-token-env <env-name>] [--allow-insecure]
+  --actor <actor> [--spoke-name laptop] [--hub-token-env <env-name>] [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation join --project <existing-project> --hub-url <url> \
@@ -2086,6 +2459,8 @@ kata federation rebind --all --hub <catalog-name>
 kata federation root-key repin --project <project> [--preflight] [--previous-key-file <path>] [--strand-relays]
 kata federation status
 kata federation enrollments list
+kata federation enrollments name <spoke-instance-uid> <name>
+kata federation enrollments name <spoke-instance-uid> --clear
 kata federation revoke <enrollment-id>
 kata federation lease acquire <issue-ref> [--ttl 30m]
 kata federation lease renew <issue-ref> --ttl 30m
@@ -2156,6 +2531,14 @@ prints a warning to stderr that the hub grant was not revoked; the hub operator
 must revoke it. Active downstream enrollments block it. Combine it with
 `--preflight` to check first. See
 [Detach a bridge whose hub is gone](../operations/federation.md#detach-a-bridge-whose-hub-is-gone).
+
+Use `federation enroll --spoke-name laptop` to assign a hub-local name when
+enrolling, or `federation enrollments name <uid> build-box` to change it later.
+Use `federation enrollments name <uid> --clear` to remove it. Names are unique
+on the hub, shared by an instance's enrollments across projects, and shown in
+enrollment lists and ordinary hub event responses. Naming requires hub
+administration authority. See [spoke names](../operations/federation.md#operator-commands)
+for naming rules, backups and relay enrollment.
 
 `kata federation enroll --project <project> --hub-url <url>` sends the
 enrollment API call to `<url>` using `--hub-token-env` or a daemon catalog
@@ -2253,3 +2636,28 @@ kata#abc4
 ```
 
 Legacy numeric refs no longer resolve.
+
+## Issue attachments
+
+Attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
+
+```sh
+kata docbank attachments add <issue> <file>...
+kata docbank attachments link <issue> <node-id|/path> [--version UUID]
+kata docbank attachments ls <issue>
+kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
+kata docbank attachments rm <issue> <attachment>
+```
+
+`<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
+
+Point the current `KATA_HOME`'s daemon at a Docbank:
+
+```sh
+kata docbank setup [--folder PATH] [--yes]
+kata docbank setup --url URL --key-file PATH [--folder PATH] [--yes]
+```
+
+Without `--url`, setup uses the Docbank on this machine. With `--url`, it uses a Docbank that runs elsewhere and reads its key from `--key-file`. Both ask once before writing (`--yes` skips the question), then restart running daemons. They reject `--daemon`.
+
+JSON output is `{"kata_api_version":1,"local":true,"folder":"/kata","changed":true}` for the local form and `{"kata_api_version":1,"local":false,"url":"https://docbank.example","folder":"/kata","key_file":"/abs/path","changed":true}` for the remote form. Agent output is `OK docbank-setup local=true folder=/kata changed=true` or `OK docbank-setup url=<url> folder=/kata changed=true`. See [Configure the daemon](../guide/attachments.md#configure-the-daemon) for what setup writes, when it refuses, and what a rerun does.

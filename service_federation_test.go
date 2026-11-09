@@ -22,7 +22,7 @@ import (
 
 func TestServiceRunWakesFederationOnCommittedEvent(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	hubService, err := New(ctx, Config{
 		DSN:  filepath.Join(t.TempDir(), "hub.db"),
 		Auth: AuthConfig{TrustCallerAuthentication: true},
@@ -114,7 +114,7 @@ func TestServiceRunWakesFederationOnCommittedEvent(t *testing.T) {
 }
 
 func TestMountedServiceOmitsUnsupportedFederationRebindRoute(t *testing.T) {
-	service, err := New(context.Background(), Config{
+	service, err := New(t.Context(), Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -123,11 +123,10 @@ func TestMountedServiceOmitsUnsupportedFederationRebindRoute(t *testing.T) {
 	server := httptest.NewServer(service.Handler())
 	t.Cleanup(server.Close)
 
-	response, err := server.Client().Post(
-		server.URL+"/api/v1/federation/replicas/1/actions/rebind",
-		"application/json",
-		bytes.NewBufferString(`{"hub_catalog":"primary-hub"}`),
-	)
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/federation/replicas/1/actions/rebind", bytes.NewBufferString(`{"hub_catalog":"primary-hub"}`))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	response, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 
@@ -135,7 +134,7 @@ func TestMountedServiceOmitsUnsupportedFederationRebindRoute(t *testing.T) {
 }
 
 func TestServicesIsolateFederationCredentialsForSharedProjectUID(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	projectUID := "01HZNQ7VFPK1XGD8R5MABCD4EX"
 	capabilities := []string{"pull", "pull,push"}
 	services := make([]*Service, len(capabilities))
@@ -159,7 +158,7 @@ func TestServicesIsolateFederationCredentialsForSharedProjectUID(t *testing.T) {
 			"capabilities":            capabilities[i],
 		})
 		require.NoError(t, err)
-		request := httptest.NewRequest(http.MethodPost, "/api/v1/federation/replicas", bytes.NewReader(requestBody))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/federation/replicas", bytes.NewReader(requestBody))
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		service.Handler().ServeHTTP(response, request)
@@ -177,7 +176,7 @@ func TestServicesIsolateFederationCredentialsForSharedProjectUID(t *testing.T) {
 
 	leaveBody, err := json.Marshal(map[string]any{"actor": "example-user"})
 	require.NoError(t, err)
-	request := httptest.NewRequest(
+	request := httptest.NewRequestWithContext(t.Context(),
 		http.MethodPost,
 		"/api/v1/federation/replicas/"+fmt.Sprint(projectIDs[0])+"/actions/leave",
 		bytes.NewReader(leaveBody),
@@ -194,7 +193,7 @@ func TestServicesIsolateFederationCredentialsForSharedProjectUID(t *testing.T) {
 
 func serviceFederationStatuses(t *testing.T, service *Service) []api.FederationProjectStatus {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/federation/status", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/federation/status", nil)
 	response := httptest.NewRecorder()
 	service.Handler().ServeHTTP(response, request)
 	require.Equal(t, http.StatusOK, response.Code)
@@ -267,7 +266,7 @@ func (s *recordingHookSink) snapshot() []db.Event {
 // only broadcast pulled events over SSE, so webhooks never fired for them.
 func TestServiceRunEnqueuesHooksForFederationPulledEvents(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	hubService, err := New(ctx, Config{
 		DSN:  filepath.Join(t.TempDir(), "hub.db"),
 		Auth: AuthConfig{TrustCallerAuthentication: true},

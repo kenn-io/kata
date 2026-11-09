@@ -69,7 +69,9 @@ func New(tb testing.TB, opts ...Option) *Server {
 	if err != nil {
 		tb.Fatalf("katatest: start kata service: %v", err)
 	}
-	runCtx, stopRun := context.WithCancel(context.Background())
+	// The service must keep running until the cleanup below closes the HTTP
+	// server first; tb.Context() is canceled before cleanups run.
+	runCtx, stopRun := context.WithCancel(context.WithoutCancel(tb.Context()))
 	runDone := make(chan error, 1)
 	go func() { runDone <- service.Run(runCtx) }()
 
@@ -77,7 +79,7 @@ func New(tb testing.TB, opts ...Option) *Server {
 	endpoint := ""
 	if o.unix {
 		socket := unixSocketPath(tb)
-		listener, err := net.Listen("unix", socket)
+		listener, err := new(net.ListenConfig).Listen(tb.Context(), "unix", socket)
 		if err != nil {
 			tb.Fatalf("katatest: listen on %s: %v", socket, err)
 		}

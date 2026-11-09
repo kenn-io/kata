@@ -86,6 +86,8 @@ func TestPiNativeAuthoredAndEditedFilesPreserved(t *testing.T) {
 			for _, remove := range []bool{false, true} {
 				if _, err := planPiAgentHooks(opts, remove); err == nil {
 					t.Fatal("authored collision accepted")
+				} else if !strings.HasPrefix(body, piAgentHookMetadataPrefix) && !strings.Contains(err.Error(), "PI_CODING_AGENT_DIR") {
+					t.Fatalf("collision diagnostic does not explain shared Pi/OMP roots: %v", err)
 				}
 			}
 			got, _ := os.ReadFile(path) //nolint:gosec // G304: fixture file is created by the test under its temporary home or SDK setup.
@@ -111,6 +113,60 @@ func TestPiNativeAuthoredAndEditedFilesPreserved(t *testing.T) {
 		t.Fatal("edited generated file accepted")
 	}
 }
+
+func TestPiNativeAttentionSkipsUnsupportedRefs(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for native Pi execution fixture")
+	}
+	for _, test := range []struct {
+		name string
+		ref  string
+	}{
+		{name: "empty"},
+		{name: "whitespace", ref: " \t"},
+		{name: "option-like", ref: "-unsupported"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			opts := piTestOptions(t)
+			opts.Attention = true
+			plan, err := planPiAgentHooks(opts, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			extension := filepath.Join(t.TempDir(), "kata.js")
+			if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
+				t.Fatal(err)
+			}
+			command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi-empty-ref.mjs", extension, opts.Dir, test.ref) //nolint:gosec // G204: fixed fixture executes a generated adapter in a temporary directory.
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("Pi unsupported ref started attention: %v\n%s", err, output)
+			}
+		})
+	}
+}
+
+func TestPiNativeIgnoresOMPHost(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for native Pi execution fixture")
+	}
+	opts := piTestOptions(t)
+	opts.Attention = true
+	plan, err := planPiAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extension := filepath.Join(t.TempDir(), "kata.js")
+	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi-omp-host.mjs", extension) //nolint:gosec // G204: fixed fixture executes a generated adapter in a temporary directory.
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("Pi adapter registered on an OMP host: %v\n%s", err, output)
+	}
+}
+
 func TestPiNativeUserRootAndUnsupportedOverrides(t *testing.T) {
 	opts := piTestOptions(t)
 	opts.Scope = "user"
@@ -161,7 +217,7 @@ func TestPiNativeGeneratedExecution(t *testing.T) {
 	if err = os.WriteFile(userPath, user.Changes[0].Content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, "testdata/agent-hooks/pi.mjs", path, userPath, opts.Dir) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
+	command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi.mjs", path, userPath, opts.Dir) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
 	command.Env = append(os.Environ(), "KATA_REF=issue-ref", "KATA_INBOX_USER=actor/teammate", "KATA_SERVER=https://daemon.example", "KATA_AUTHOR=actor", "KATA_TEAMMATE=teammate")
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -218,7 +274,7 @@ func TestPiNativeProjectSourceUsesWorkspaceFromNestedCWD(t *testing.T) {
 	if err = os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, "testdata/agent-hooks/pi-project-source.mjs", extension, executable, workspace, nested) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
+	command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi-project-source.mjs", extension, executable, workspace, nested) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
 	command.Env = append(os.Environ(), "KATA_INBOX_USER=")
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -246,11 +302,82 @@ func TestPiNativeAttentionRetriesFailures(t *testing.T) {
 				if err = os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
 					t.Fatal(err)
 				}
-				command := exec.Command(node, "testdata/agent-hooks/pi-attention-retry.mjs", extension, opts.Dir, mode, failure) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
+				command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi-attention-retry.mjs", extension, opts.Dir, mode, failure) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
 				if output, err := command.CombinedOutput(); err != nil {
 					t.Fatalf("Pi attention %s/%s: %v\n%s", mode, failure, err, output)
 				}
 			})
+		}
+	}
+}
+
+func TestPiNativeAttentionCleansUpLostStartResponse(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for native Pi execution fixture")
+	}
+	opts := piTestOptions(t)
+	opts.Scope = "user"
+	opts.Contract = false
+	opts.Attention = true
+	plan, err := planPiAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extension := filepath.Join(t.TempDir(), "extension.mjs")
+	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi-lost-start-response.mjs", extension, opts.Dir) //nolint:gosec // G204: fixed fixture executes the generated adapter and simulates a lost CLI response.
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("Pi attention cleanup after a lost start response: %v\n%s", err, output)
+	}
+}
+
+func TestPiNativeAttentionEndsBaselineFromPreviousAdapter(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for native Pi execution fixture")
+	}
+	opts := piTestOptions(t)
+	opts.Contract = false
+	opts.Attention = true
+	plan, err := planPiAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extension := filepath.Join(t.TempDir(), "extension.mjs")
+	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, started := range []string{"true", "false"} {
+		command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi-upgraded-baseline.mjs", extension, opts.Dir, started) //nolint:gosec // G204: fixed fixture executes the generated adapter over a retained baseline.
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("Pi attention end after adapter upgrade (started=%s): %v\n%s", started, err, output)
+		}
+	}
+}
+
+func TestPiNativeAttentionLeadClaimsDaemonAfterStart(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for native Pi execution fixture")
+	}
+	opts := piTestOptions(t)
+	opts.Contract = false
+	opts.Attention = true
+	plan, err := planPiAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extension := filepath.Join(t.TempDir(), "extension.mjs")
+	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, before := range []string{"", "unix:///tmp/older.sock"} {
+		command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi-lead-daemon.mjs", extension, opts.Dir, before) //nolint:gosec // G204: fixed fixture executes the generated adapter while its start changes the daemon.
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("Pi lead marker after the start changes the daemon from %q: %v\n%s", before, err, output)
 		}
 	}
 }
@@ -437,7 +564,7 @@ func piNativeInstalledCommand(t *testing.T, fixture, source string) *exec.Cmd {
 	}
 	state := filepath.Join(artifactRoot, "state.json")
 	calls := filepath.Join(artifactRoot, "calls.ndjson")
-	command := exec.Command(node, fixture, root, project, user, opts.Dir) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
+	command := exec.CommandContext(t.Context(), node, fixture, root, project, user, opts.Dir) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
 	command.Env = append(os.Environ(), "KATA_REF=issue-ref", "KATA_INBOX_USER=actor/teammate", "KATA_SERVER=https://daemon.example", "KATA_AUTHOR=actor", "KATA_TEAMMATE=teammate", "KATA_PI_TEST_STATE="+state, "KATA_PI_TEST_CALLS="+calls)
 	return command
 }
@@ -483,7 +610,7 @@ func TestPiNativeCapabilityPrecedenceAndReload(t *testing.T) {
 			if err = os.WriteFile(user, plan.Changes[0].Content, 0600); err != nil {
 				t.Fatal(err)
 			}
-			command := exec.Command(node, "testdata/agent-hooks/pi-capabilities.mjs", project, user, opts.Dir, mode) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
+			command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi-capabilities.mjs", project, user, opts.Dir, mode) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
 			command.Env = append(os.Environ(), "KATA_REF=issue-ref", "KATA_INBOX_USER=")
 			output, err := command.CombinedOutput()
 			if err != nil {
@@ -503,12 +630,7 @@ func TestPiNativeRealKataTransport(t *testing.T) {
 	opts.Attention = true
 	opts.SourceSet = true
 	opts.Source = "contract '$;`.txt"
-	binary := filepath.Join(t.TempDir(), "kata")
-	build := exec.Command("go", "build", "-o", binary, ".") //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("compile Kata: %v\n%s", err, output)
-	}
-	opts.Executable = binary
+	opts.Executable = kataTestBinary(t, "v1.2.3")
 	plan, err := planPiAgentHooks(opts, false)
 	if err != nil {
 		t.Fatal(err)
@@ -520,7 +642,7 @@ func TestPiNativeRealKataTransport(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(opts.Dir, ".kata.toml"), []byte("version = 1\n[project]\nname = \"example-workspace\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, "testdata/agent-hooks/pi-transport.mjs", root, extension, opts.Dir, filepath.Join(opts.Dir, opts.Source)) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
+	command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/pi-transport.mjs", root, extension, opts.Dir, filepath.Join(opts.Dir, opts.Source)) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "KATA_") && !strings.HasPrefix(entry, "CLAUDE_") {
 			command.Env = append(command.Env, entry)

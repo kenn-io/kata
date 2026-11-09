@@ -16,7 +16,8 @@ test('SSE disruption surfaces reconnecting state and resumes authority', async (
   const connectedHeader = await page.locator('.kata-header').boundingBox()
   const connectedLayout = await page.locator('.kata-layout').boundingBox()
   expect(connectedHeader?.height).toBe(reconnectingHeader?.height)
-  expect(connectedLayout?.y).toBe(reconnectingLayout?.y)
+  expect(connectedHeader?.y).toBe(0)
+  expect(connectedLayout!.y).toBeLessThan(reconnectingLayout!.y)
 })
 
 test('a 412 refresh preserves the current checklist draft for explicit retry', async ({

@@ -130,7 +130,7 @@ func TestCommentGraphResponseRejectsReparentedBacklink(t *testing.T) {
 				require.NoError(t, err)
 			}))
 			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx))
+			handler.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil).WithContext(ctx))
 			require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 			require.NotContains(t, response.Body.String(), reply.UID)
 		})
@@ -168,7 +168,7 @@ func TestDuplicateReplyResponseRejectsReparentedExistingReply(t *testing.T) {
 		"reply_to": finding.UID, "kind": "reply",
 	})
 	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		fmt.Sprintf("/api/v1/projects/%d/issues/%s/comments", project.ID, requestIssue.ShortID),
 		bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")

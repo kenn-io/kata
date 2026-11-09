@@ -39,7 +39,16 @@ func resolveIssueRef(ctx context.Context, store db.Storage, projectID int64, ref
 			return db.Issue{}, internalAPIError(err)
 		}
 		if issue.ProjectID != projectID {
-			return db.Issue{}, api.NewError(404, "issue_not_found", "issue not found", "", nil)
+			historical, err := store.IssueByShortID(ctx, projectID, parsed.ULID, include)
+			if errors.Is(err, db.ErrNotFound) {
+				return db.Issue{}, api.NewError(404, "issue_not_found", "issue not found", "", nil)
+			}
+			if err != nil {
+				return db.Issue{}, internalAPIError(err)
+			}
+			if historical.UID != issue.UID {
+				return db.Issue{}, api.NewError(404, "issue_not_found", "issue not found", "", nil)
+			}
 		}
 		return issue, nil
 	}
@@ -77,6 +86,14 @@ func activeIssueByRef(ctx context.Context, store db.Storage, projectID int64, re
 	issue, err := resolveIssueRef(ctx, store, projectID, ref, include)
 	if err != nil {
 		return db.Issue{}, err
+	}
+	if issue.ProjectID != projectID {
+		if _, err := activeProjectByID(ctx, store, issue.ProjectID); err != nil {
+			return db.Issue{}, err
+		}
+		if _, err := authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false); err != nil {
+			return db.Issue{}, err
+		}
 	}
 	if err := authorizeIssueScopedIssue(ctx, store, issue); err != nil {
 		return db.Issue{}, err

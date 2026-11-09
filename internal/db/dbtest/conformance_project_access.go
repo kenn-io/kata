@@ -13,7 +13,7 @@ import (
 // an existing project is visible to an authenticated actor, never anonymous.
 func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "shared-project")
 	require.NoError(t, err)
 	access, ok := store.(interface {
@@ -255,14 +255,14 @@ func assertProjectAccessUIDs(t *testing.T, access interface {
 	AccessibleProjectUIDs(context.Context, string) ([]string, error)
 }, actor string, expected []string) {
 	t.Helper()
-	ids, err := access.AccessibleProjectUIDs(context.Background(), actor)
+	ids, err := access.AccessibleProjectUIDs(t.Context(), actor)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, expected, ids)
 }
 
 func assertProjectAccessAudit(t *testing.T, store db.Storage, event db.Event, kind string) {
 	t.Helper()
-	system, err := store.SystemProject(context.Background())
+	system, err := store.SystemProject(t.Context())
 	require.NoError(t, err)
 	require.NotEmpty(t, event.UID)
 	require.Equal(t, system.ID, event.ProjectID, "policy audit stays daemon-local")

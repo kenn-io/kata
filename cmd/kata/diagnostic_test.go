@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -80,7 +79,7 @@ func TestProjectsRename_AcceptsProjectSelector(t *testing.T) {
 func TestProjectsMerge_MergesSourceSelectorIntoSurvivingTarget(t *testing.T) {
 	env := testenv.New(t)
 	alpha, beta := setupMergeProjects(t, env)
-	created, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	created, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: alpha.ID, Title: "carry history forward", Author: "tester",
 	})
 	require.NoError(t, err)
@@ -91,10 +90,10 @@ func TestProjectsMerge_MergesSourceSelectorIntoSurvivingTarget(t *testing.T) {
 
 	// After merge the issue is in beta; look it up by short_id (stable
 	// across the move) rather than by the removed legacy #N counter.
-	issue, err := env.DB.IssueByShortID(context.Background(), beta.ID, created.ShortID, db.IncludeDeletedNo)
+	issue, err := env.DB.IssueByShortID(t.Context(), beta.ID, created.ShortID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	assert.Equal(t, "carry history forward", issue.Title)
-	_, err = env.DB.ProjectByID(context.Background(), alpha.ID)
+	_, err = env.DB.ProjectByID(t.Context(), alpha.ID)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 

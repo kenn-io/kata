@@ -133,7 +133,7 @@ func TestUISnapshotReadyTimeAdvanceInvalidatesETagAndAuthorityCache(t *testing.T
 
 func getUISnapshot(t *testing.T, ts *httptest.Server, query url.Values, etag string) (*http.Response, []byte) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/ui/snapshot?"+query.Encode(), nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/ui/snapshot?"+query.Encode(), nil)
 	require.NoError(t, err)
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
@@ -774,7 +774,7 @@ func TestUIReferencesRejectsTooManyIssueUIDFilters(t *testing.T) {
 
 func getUIReferences(t *testing.T, ts *httptest.Server, query url.Values, etag string) (*http.Response, []byte) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/ui/references?"+query.Encode(), nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/ui/references?"+query.Encode(), nil)
 	require.NoError(t, err)
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)

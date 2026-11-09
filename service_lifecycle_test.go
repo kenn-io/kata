@@ -2,7 +2,6 @@ package kata
 
 import (
 	"bufio"
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +17,7 @@ import (
 )
 
 func TestServiceCloseTerminatesActiveEventStream(t *testing.T) {
-	service, err := New(context.Background(), Config{
+	service, err := New(t.Context(), Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -27,7 +26,7 @@ func TestServiceCloseTerminatesActiveEventStream(t *testing.T) {
 	server := httptest.NewServer(service.Handler())
 	t.Cleanup(server.Close)
 
-	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/events/stream?after_id=0", nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/events/stream?after_id=0", nil)
 	require.NoError(t, err)
 	request.Header.Set("Accept", "text/event-stream")
 	response, err := server.Client().Do(request)
@@ -35,9 +34,9 @@ func TestServiceCloseTerminatesActiveEventStream(t *testing.T) {
 	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusOK, response.StatusCode)
 
-	project, err := service.store.CreateProject(context.Background(), "example-project")
+	project, err := service.store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	_, event, err := service.store.CreateIssue(context.Background(), db.CreateIssueParams{
+	_, event, err := service.store.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "observe shutdown",
 		Author:    "example-user",
@@ -88,14 +87,16 @@ func TestServiceCloseTerminatesActiveEventStream(t *testing.T) {
 		require.Fail(t, "active event stream outlived Close")
 	}
 
-	postClose, err := server.Client().Get(server.URL + "/api/v1/health")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/health", nil)
+	require.NoError(t, reqErr)
+	postClose, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer func() { _ = postClose.Body.Close() }()
 	assert.Equal(t, http.StatusServiceUnavailable, postClose.StatusCode)
 }
 
 func TestServiceEnsureProjectBroadcastsAndEnqueuesExactCreatedEvent(t *testing.T) {
-	service, err := New(context.Background(), Config{
+	service, err := New(t.Context(), Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -107,7 +108,7 @@ func TestServiceEnsureProjectBroadcastsAndEnqueuesExactCreatedEvent(t *testing.T
 	subscription := service.broadcaster.Subscribe(daemon.SubFilter{})
 	defer subscription.Unsub()
 
-	result, err := service.EnsureProject(context.Background(), ProjectSpec{
+	result, err := service.EnsureProject(t.Context(), ProjectSpec{
 		UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Name: "example-project",
 	})
 	require.NoError(t, err)
@@ -125,7 +126,7 @@ func TestServiceEnsureProjectBroadcastsAndEnqueuesExactCreatedEvent(t *testing.T
 	assert.Equal(t, db.SystemActor, msg.Event.Actor)
 	require.Len(t, sink.events, 1)
 	assert.Equal(t, *msg.Event, sink.events[0])
-	persisted, err := service.store.EventsAfter(context.Background(), db.EventsAfterParams{
+	persisted, err := service.store.EventsAfter(t.Context(), db.EventsAfterParams{
 		ProjectID: result.Project.ID, Limit: 10,
 	})
 	require.NoError(t, err)

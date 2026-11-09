@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -292,9 +291,11 @@ func TestHubAdminClientNeverSendsGlobalTokenWithoutHubCredential(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	hc, err := hubAdminClient(context.Background(), hubAdminAuth{url: srv.URL})
+	hc, err := hubAdminClient(t.Context(), hubAdminAuth{url: srv.URL})
 	require.NoError(t, err)
-	resp, err := hc.Get(srv.URL + "/api/v1/federation/enrollments")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/api/v1/federation/enrollments", nil)
+	require.NoError(t, reqErr)
+	resp, err := hc.Do(req)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 
@@ -311,7 +312,7 @@ func TestHubAdminClientHonorsTrustPrivateNetwork(t *testing.T) {
 	configBody := fmt.Sprintf("[auth]\ntrust_private_network = true\ntoken_file = %q\n", localTokenFile)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(configBody), 0o600))
 
-	hc, err := hubAdminClient(context.Background(), hubAdminAuth{
+	hc, err := hubAdminClient(t.Context(), hubAdminAuth{
 		url:   "http://100.64.0.5:7373",
 		token: "hub-admin-token",
 	})

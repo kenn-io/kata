@@ -20,7 +20,7 @@ func TestExplicitPostgresServiceUsesConfiguredServer(t *testing.T) {
 	if baseDSN == "" {
 		t.Skip("explicit PostgreSQL service requires KATA_TEST_POSTGRES_DSN")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	base, err := sql.Open("pgx", baseDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = base.Close() })
@@ -46,7 +46,7 @@ func TestAutomaticPostgresContainersShareOneServerWithIsolatedDatabases(t *testi
 		t.Skip("testcontainer requires docker; skip on -short")
 	}
 	t.Setenv("KATA_TEST_POSTGRES_DSN", "")
-	ctx := context.Background()
+	ctx := t.Context()
 	open := func(t *testing.T) (*sql.DB, func()) {
 		t.Helper()
 		dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
@@ -81,7 +81,7 @@ func TestPostgresTemplateClonesPreparedDatabase(t *testing.T) {
 	if testing.Short() {
 		t.Skip("PostgreSQL template test skipped on -short")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	prepared := 0
 	template := testenv.NewPostgresTemplate(func(ctx context.Context, dsn string) error {
 		prepared++
@@ -126,7 +126,7 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("PostgreSQL template test skipped on -short")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	serverDSN, serverCleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(serverCleanup)
 	t.Setenv("KATA_TEST_POSTGRES_DSN", serverDSN)
@@ -137,7 +137,8 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	_, err = server.ExecContext(ctx, `CREATE DATABASE "`+abandoned+`"`)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = server.ExecContext(context.Background(), `DROP DATABASE IF EXISTS "`+abandoned+`"`)
+		// t.Context() is already canceled when cleanup runs.
+		_, _ = server.ExecContext(context.WithoutCancel(t.Context()), `DROP DATABASE IF EXISTS "`+abandoned+`"`)
 	})
 	exists := func(name string) bool {
 		var found bool

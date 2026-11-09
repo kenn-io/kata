@@ -102,13 +102,13 @@ hlc_physical_ms,hlc_counter,content_hash
 				EXECUTE FUNCTION fail_federation_enrollment_rotation_insert()`)
 			return func() error {
 				if _, dropErr := postgresStore.ExecContext(
-					context.Background(),
+					t.Context(),
 					`DROP TRIGGER IF EXISTS fail_federation_enrollment_rotation_insert ON federation_enrollments`,
 				); dropErr != nil {
 					return dropErr
 				}
 				_, dropErr := postgresStore.ExecContext(
-					context.Background(),
+					t.Context(),
 					`DROP FUNCTION IF EXISTS fail_federation_enrollment_rotation_insert()`,
 				)
 				return dropErr

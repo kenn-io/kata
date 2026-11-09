@@ -208,7 +208,7 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	workspaceStart := workspaceStartForRemote()
 	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
 		Timeout:        envHTTPTimeout(defaultHTTPTimeout),
-		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart), //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
+		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(ctx, baseURL, workspaceStart), //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
 	})
@@ -237,7 +237,7 @@ func longRunningClientFor(ctx context.Context, baseURL string) (*http.Client, er
 	}
 	workspaceStart := workspaceStartForRemote()
 	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
-		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart), //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
+		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(ctx, baseURL, workspaceStart), //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
 	})
@@ -265,7 +265,7 @@ func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, erro
 	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
 		ResponseHeaderTimeout: sseHandshakeTimeout,
 		AllowInsecure: client.RemoteAllowInsecureForBaseURL( //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
-			baseURL, workspaceStart,
+			ctx, baseURL, workspaceStart,
 		),
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
@@ -440,6 +440,14 @@ type daemonErrorTransport struct {
 	http.RoundTripper
 	origin  *url.URL
 	timeout time.Duration
+}
+
+// CloseIdleConnections lets http.Client.CloseIdleConnections reach the
+// wrapped transport.
+func (t daemonErrorTransport) CloseIdleConnections() {
+	if closer, ok := t.RoundTripper.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
 }
 
 func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {

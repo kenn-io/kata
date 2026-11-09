@@ -1,7 +1,6 @@
 package vector_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -17,7 +16,7 @@ func TestPostgresReconcilerLeaseFencesWorkAfterSessionLoss(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires pgvector testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
@@ -47,7 +46,7 @@ func TestPostgresReconcilerLeaseFencesWorkAfterSessionLoss(t *testing.T) {
 	select {
 	case <-secondAcquired:
 		require.FailNow(t, "standby acquired reconciler lease before leader loss")
-	case <-time.After(300 * time.Millisecond): //nolint:kennlint // absence window; the leader's session holds the lease, so the standby must not acquire it
+	case <-time.After(300 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; the leader's session holds the lease, so the standby must not acquire it
 	}
 
 	var terminated bool

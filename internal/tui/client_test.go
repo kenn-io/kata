@@ -19,7 +19,9 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/testfix"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // newTestClient stands up an httptest server with handler, registers
@@ -65,7 +67,7 @@ func respondJSON(t *testing.T, w http.ResponseWriter, body any) {
 
 func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
-	ctx := context.Background()
+	ctx := t.Context()
 	var spokeInstanceAuth, spokeStatusAuth, spokeJoinAuth string
 	var hubListAuth, hubEnsureAuth, hubEnsureActor, hubEnableAuth, hubEnrollmentAuth, hubMetadataAuth string
 	var joinBody CreateFederationReplicaInput
@@ -223,7 +225,7 @@ func TestClientGetInstanceDecodesAuthPrincipal(t *testing.T) {
 		})
 	})
 
-	instance, err := c.GetInstance(context.Background())
+	instance, err := c.GetInstance(t.Context())
 
 	require.NoError(t, err)
 	assert.Equal(t, "db_token", instance.Auth.Kind)
@@ -249,7 +251,7 @@ func TestClientListTokensDecodesRedactedAuditInventory(t *testing.T) {
 		})
 	})
 
-	tokens, gotObserved, err := c.ListTokens(context.Background())
+	tokens, gotObserved, err := c.ListTokens(t.Context())
 
 	require.NoError(t, err)
 	require.Len(t, tokens, 1)
@@ -263,7 +265,7 @@ func TestClientListTokensDecodesRedactedAuditInventory(t *testing.T) {
 }
 
 func TestTUIHubAdminClientRejectsPlainHTTPHostnameWithoutAllowInsecure(t *testing.T) {
-	_, _, err := newHubAdminClient(context.Background(), daemonTarget{
+	_, _, err := newHubAdminClient(t.Context(), daemonTarget{
 		Name: "hub",
 		URL:  "http://hub.internal:7777",
 		resolved: clientpkg.ResolvedDaemon{
@@ -436,11 +438,11 @@ local = true
 }
 
 func TestTUIHubEnrollmentClientCarriesAllowInsecureForPlainHTTPHostname(t *testing.T) {
-	_, err := newHubEnrollmentClient(context.Background(), "http://hub.internal:7777", "enrollment-token", false)
+	_, err := newHubEnrollmentClient(t.Context(), "http://hub.internal:7777", "enrollment-token", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "allow_insecure")
 
-	client, err := newHubEnrollmentClient(context.Background(), "http://hub.internal:7777", "enrollment-token", true)
+	client, err := newHubEnrollmentClient(t.Context(), "http://hub.internal:7777", "enrollment-token", true)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 }
@@ -456,7 +458,7 @@ func TestClient_ListIssues_BuildsExpectedURLAndDecodes(t *testing.T) {
 			},
 		})
 	})
-	got, err := c.ListIssues(context.Background(), 7, ListFilter{Status: "open"})
+	got, err := c.ListIssues(t.Context(), 7, ListFilter{Status: "open"})
 	require.NoError(t, err)
 	if !strings.Contains(gotURL, "/api/v1/projects/7/issues") {
 		t.Fatalf("unexpected URL: %s", gotURL)
@@ -476,7 +478,7 @@ func TestClient_ListIssues_SendsLimit(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issues":[]}`))
 	})
-	_, err := c.ListIssues(context.Background(), 7, ListFilter{Limit: 2001})
+	_, err := c.ListIssues(t.Context(), 7, ListFilter{Limit: 2001})
 	require.NoError(t, err)
 	if !strings.Contains(gotQuery, "limit=2001") {
 		t.Fatalf("limit not sent: %q", gotQuery)
@@ -507,7 +509,7 @@ func TestClient_LocalUnixTransportFailureRetriesWithRefreshedClient(t *testing.T
 		},
 	)})
 
-	got, err := c.ListIssues(context.Background(), 7, ListFilter{Limit: 2001})
+	got, err := c.ListIssues(t.Context(), 7, ListFilter{Limit: 2001})
 	require.NoError(t, err)
 	require.True(t, refreshed.Load(), "local socket failure should refresh the daemon client")
 	require.Len(t, got, 1)
@@ -532,7 +534,7 @@ func TestClient_LocalUnixTransportFailureDoesNotRetryMutationWithoutIdempotencyK
 		},
 	)})
 
-	_, err := c.AddComment(context.Background(), 7, "abc4", "note", "alice")
+	_, err := c.AddComment(t.Context(), 7, "abc4", "note", "alice")
 	require.Error(t, err)
 	require.True(t, refreshed.Load(), "non-idempotent mutation should refresh the stale client")
 	assert.Contains(t, err.Error(), "local kata daemon connection failed")
@@ -560,7 +562,7 @@ func TestClient_LocalUnixTransportFailureRetriesMutationWithIdempotencyKey(t *te
 		},
 	)})
 
-	_, err := c.CreateIssue(context.Background(), 7, CreateIssueBody{
+	_, err := c.CreateIssue(t.Context(), 7, CreateIssueBody{
 		Title: "created", Actor: "alice", IdempotencyKey: "create-issue-key",
 	})
 	require.NoError(t, err)
@@ -586,7 +588,7 @@ func TestClient_LocalUnixTransportFailureLogsAndHidesSyntheticHost(t *testing.T)
 		},
 	)})
 
-	_, err := c.ListIssues(context.Background(), 7, ListFilter{Limit: 2001})
+	_, err := c.ListIssues(t.Context(), 7, ListFilter{Limit: 2001})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "local kata daemon connection failed")
 	assert.NotContains(t, err.Error(), "kata.invalid")
@@ -639,11 +641,15 @@ func TestModel_FetchInitialUsesQueueFetchFilter(t *testing.T) {
 func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 	var gotPath string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects/7/recurrences" {
+			respondJSON(t, w, map[string]any{"recurrences": []any{}})
+			return
+		}
 		gotPath = r.URL.Path
 		respondJSON(t, w, map[string]any{
 			"issue": map[string]any{
 				"uid": "01JZ0000000000000000000001", "project_uid": "01JZ0000000000000000000002",
-				"short_id": "abc4", "title": "fix", "status": "open",
+				"short_id": "abc4", "project_id": 7, "title": "fix", "status": "open",
 				"revision": 9, "recurrence_id": 23,
 			},
 			"lease":    map[string]any{"claim_uid": "lease-1", "issue_uid": "01JZ0000000000000000000001"},
@@ -664,7 +670,7 @@ func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 			"labels": []any{},
 		})
 	})
-	detail, err := c.GetIssueDetail(context.Background(), 7, "abc4")
+	detail, err := c.GetIssueDetail(t.Context(), 7, "abc4")
 	require.NoError(t, err)
 	if gotPath != "/api/v1/projects/7/issues/abc4" {
 		t.Fatalf("unexpected path: %s", gotPath)
@@ -685,7 +691,7 @@ func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 	if detail.Lease == nil || detail.Lease.ClaimUID != "lease-1" {
 		t.Fatalf("lease not decoded: %+v", detail.Lease)
 	}
-	links, err := c.ListLinks(context.Background(), 7, "abc4")
+	links, err := c.ListLinks(t.Context(), 7, "abc4")
 	require.NoError(t, err)
 	if len(links) != 1 || links[0].From.UID != "01JZ0000000000000000000001" ||
 		links[0].To.UID != "01JZ0000000000000000000003" {
@@ -709,7 +715,7 @@ func TestClient_AddLinkDecodesExactCreatedLink(t *testing.T) {
 			},
 		})
 	})
-	resp, err := c.AddLink(context.Background(), 7, "abc4", LinkBody{Type: "related", ToRef: "def4"}, "alice")
+	resp, err := c.AddLink(t.Context(), 7, "abc4", LinkBody{Type: "related", ToRef: "def4"}, "alice")
 	require.NoError(t, err)
 	require.True(t, resp.Changed)
 	if resp.Link == nil || resp.Link.ID != 42 || resp.Link.Type != "related" ||
@@ -744,7 +750,7 @@ func TestClient_ShowIssue_DecodesHierarchy(t *testing.T) {
 			},
 		})
 	})
-	got, err := c.GetIssueDetail(context.Background(), 7, "abc4")
+	got, err := c.GetIssueDetail(t.Context(), 7, "abc4")
 	require.NoError(t, err)
 	if got.Issue == nil || got.Issue.ShortID != "abc4" {
 		t.Fatalf("unexpected issue: %+v", got.Issue)
@@ -775,7 +781,7 @@ func TestClient_CreateIssue_SendsIdempotencyHeader(t *testing.T) {
 			"changed": true,
 		})
 	})
-	_, err := c.CreateIssue(context.Background(), 7, CreateIssueBody{
+	_, err := c.CreateIssue(t.Context(), 7, CreateIssueBody{
 		Title: "t", Actor: "alice", IdempotencyKey: "my-key",
 	})
 	require.NoError(t, err)
@@ -792,7 +798,7 @@ func TestClient_DecodeError_ReturnsAPIError(t *testing.T) {
 			`{"status":404,"error":{"code":"project_not_initialized",` +
 				`"message":"no .kata.toml ancestor","hint":"run kata init"}}`))
 	})
-	_, err := c.GetIssueDetail(context.Background(), 7, "abc4")
+	_, err := c.GetIssueDetail(t.Context(), 7, "abc4")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -825,7 +831,7 @@ func TestClient_RemoveLabel_PathEscapesLabel(t *testing.T) {
 			"changed": true,
 		})
 	})
-	_, err := c.RemoveLabel(context.Background(), 7, "abc4", "team/backend", "alice")
+	_, err := c.RemoveLabel(t.Context(), 7, "abc4", "team/backend", "alice")
 	require.NoError(t, err)
 	if gotMethod != http.MethodDelete {
 		t.Fatalf("method = %s, want DELETE", gotMethod)
@@ -849,7 +855,7 @@ func TestClient_ListComments_RoutesThroughShowIssue(t *testing.T) {
 			"labels":   []any{},
 		})
 	})
-	got, err := c.ListComments(context.Background(), 7, "abc4")
+	got, err := c.ListComments(t.Context(), 7, "abc4")
 	require.NoError(t, err)
 	if gotPath != "/api/v1/projects/7/issues/abc4" {
 		t.Fatalf("unexpected path: %s", gotPath)
@@ -868,7 +874,7 @@ func TestClient_AssignEmptyOwnerRoutesToUnassign(t *testing.T) {
 			"changed": true,
 		})
 	})
-	_, err := c.Assign(context.Background(), 7, "abc4", "", "alice")
+	_, err := c.Assign(t.Context(), 7, "abc4", "", "alice")
 	require.NoError(t, err)
 	if !strings.HasSuffix(gotPath, "/actions/unassign") {
 		t.Fatalf("expected unassign path, got %s", gotPath)
@@ -890,7 +896,7 @@ func TestClient_ClaimTimedAssignmentSendsTTL(t *testing.T) {
 		})
 	})
 
-	_, err := c.ClaimTimedAssignment(context.Background(), 7, "abc4", "alice", time.Hour)
+	_, err := c.ClaimTimedAssignment(t.Context(), 7, "abc4", "alice", time.Hour)
 	require.NoError(t, err)
 	assert.Equal(t, "/api/v1/projects/7/issues/abc4/actions/claim", gotPath)
 	assert.Equal(t, map[string]any{"actor": "alice", "ttl_seconds": float64(3600)}, gotBody)
@@ -912,7 +918,7 @@ func TestClient_AddLinkSendsToRef(t *testing.T) {
 			"changed": true,
 		})
 	})
-	_, err := c.AddLink(context.Background(), 7, "abc4",
+	_, err := c.AddLink(t.Context(), 7, "abc4",
 		LinkBody{Type: "blocks", ToRef: "xyz4"}, "alice")
 	require.NoError(t, err)
 	assert.Equal(t, "blocks", gotBody["type"])
@@ -965,7 +971,7 @@ func TestClient_ListEvents_FiltersByIssueShortID(t *testing.T) {
 			"reset_required": false,
 		})
 	})
-	got, err := c.ListEvents(context.Background(), 7, "abc4")
+	got, err := c.ListEvents(t.Context(), 7, "abc4")
 	require.NoError(t, err)
 	if len(got) != 2 {
 		t.Fatalf("got %d events for abc4, want 2", len(got))
@@ -1014,7 +1020,7 @@ func TestClient_ListEvents_MatchesByIssueUID(t *testing.T) {
 			"reset_required": false,
 		})
 	})
-	got, err := c.ListEvents(context.Background(), 7, wantUID)
+	got, err := c.ListEvents(t.Context(), 7, wantUID)
 	require.NoError(t, err)
 	require.Len(t, got, 1, "events tab must populate when the ref is the issue UID")
 	require.Equal(t, int64(1), got[0].ID)
@@ -1057,7 +1063,7 @@ func TestClient_ListEvents_PaginatesProjectEventStream(t *testing.T) {
 		}
 	})
 
-	got, err := c.ListEvents(context.Background(), 7, "abc4")
+	got, err := c.ListEvents(t.Context(), 7, "abc4")
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.Equal(t, int64(2), got[0].ID)
@@ -1073,7 +1079,7 @@ func TestClient_ListIssues_NotNilOnSuccess(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issues":[{"short_id":"aaa1","title":"a","status":"open"}]}`))
 	})
-	got, err := c.ListIssues(context.Background(), 7, ListFilter{})
+	got, err := c.ListIssues(t.Context(), 7, ListFilter{})
 	require.NoError(t, err)
 	if len(got) != 1 || got[0].ShortID != "aaa1" {
 		t.Fatalf("got %+v, want one issue with short_id=aaa1", got)
@@ -1087,7 +1093,7 @@ func TestClient_ListAllIssues_NotNilOnSuccess(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issues":[{"short_id":"bbb2","title":"b","status":"open"}]}`))
 	})
-	got, err := c.ListAllIssues(context.Background(), ListFilter{})
+	got, err := c.ListAllIssues(t.Context(), ListFilter{})
 	require.NoError(t, err)
 	if len(got) != 1 || got[0].ShortID != "bbb2" {
 		t.Fatalf("got %+v, want one issue with short_id=bbb2", got)
@@ -1100,7 +1106,7 @@ func TestClient_ListProjects_NotNilOnSuccess(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"projects":[{"id":7,"identity":"x","name":"k"}]}`))
 	})
-	got, err := c.ListProjects(context.Background())
+	got, err := c.ListProjects(t.Context())
 	require.NoError(t, err)
 	if len(got) != 1 || got[0].ID != 7 {
 		t.Fatalf("got %+v, want one project with id=7", got)
@@ -1117,7 +1123,7 @@ func TestClient_ListIssues_FilterShape(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issues":[]}`))
 	})
-	_, err := c.ListIssues(context.Background(), 7, ListFilter{
+	_, err := c.ListIssues(t.Context(), 7, ListFilter{
 		Status: "open",
 		Owner:  "alice",
 		Author: "bob",
@@ -1160,7 +1166,7 @@ func TestListIssues_TUIDecodePopulatesLabels(t *testing.T) {
 			},
 		})
 	})
-	got, err := c.ListIssues(context.Background(), 7, ListFilter{})
+	got, err := c.ListIssues(t.Context(), 7, ListFilter{})
 	require.NoError(t, err)
 	if len(got) != 3 {
 		t.Fatalf("got %d issues, want 3", len(got))
@@ -1204,7 +1210,7 @@ func TestShowIssue_PopulatesLabelsFromTopLevel(t *testing.T) {
 			},
 		})
 	})
-	resp, err := c.showIssue(context.Background(), 7, "abc4")
+	resp, err := c.showIssue(t.Context(), 7, "abc4")
 	require.NoError(t, err)
 	got := resp.Issue.Labels
 	want := []string{"bug", "needs-design", "prio-1"}
@@ -1225,7 +1231,7 @@ func TestAPIError_EmptyBodyFallback(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
-	_, err := c.GetIssueDetail(context.Background(), 7, "abc4")
+	_, err := c.GetIssueDetail(t.Context(), 7, "abc4")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1505,4 +1511,29 @@ func TestTelemetrySkipsLocalDaemonRecovery(t *testing.T) {
 	})
 	require.Error(t, c.ReportScreenViewed(t.Context(), "issues"))
 	require.False(t, refreshed)
+}
+
+func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	oldProject, oldRef := h.issue.ProjectID, h.issue.ShortID
+	destination, err := h.env.DB.CreateProject(t.Context(), "destination-project")
+	require.NoError(t, err)
+	moved, err := h.api.MoveIssueWithResponse(t.Context(), &generated.MoveIssueRequestOptions{
+		PathParams: &generated.MoveIssuePath{ProjectID: oldProject, Ref: oldRef},
+		Body:       &generated.MoveIssueBody{ToProjectUID: destination.UID, Actor: new("alice")},
+		Header:     &generated.MoveIssueHeaders{IfMatch: new(recurrenceclient.ETag(h.issue.Revision))},
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, moved.HTTPResponse.StatusCode, string(moved.Body))
+	h.issue.ProjectID = destination.ID
+	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	detail, err := h.client.GetIssueDetail(t.Context(), oldProject, oldRef)
+	require.NoError(t, err)
+	assert.NotNil(t, detail.Recurrence, "historical references show the destination's recurrence")
+	changed, err := h.client.SaveRecurrence(t.Context(), oldProject, oldRef, RecurrenceInput{
+		Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Recurrence: new(h.rows()[0]), Actor: "alice",
+	})
+	require.NoError(t, err)
+	assert.True(t, changed.Changed)
+	assert.Equal(t, "FREQ=DAILY", h.rows()[0].RRule, "saves through a historical reference use the current project")
 }

@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-10-17
+last_edited: 2026-11-06
 ---
 
 # Web UI
@@ -26,6 +26,8 @@ reference accepted by `kata show` to open that issue directly:
 kata ui abc4
 kata ui example-project#abc4
 ```
+
+Kata prints the URL in the selected output format before opening the browser; if the browser cannot open, the command succeeds and asks you to open that URL manually. Cancelling the command still returns an error.
 
 Kata resolves the reference before opening the browser, then uses the issue and
 project UIDs in the URL so the bookmark survives project renames and issue
@@ -55,8 +57,10 @@ individual projects:
   `scheduled_on` stays out of Inbox until that day; a deadline never hides it.
   Narrow Inbox to one project with the **Project scope** filter, and sort it
   from the column headers. New tasks are captured in the designated
-  [Inbox project](../reference/metadata.md#project-inbox-designation); if none
-  exists, the first new task asks you to choose one. To switch it later, select
+  [Inbox project](../reference/metadata.md#project-inbox-designation). With no
+  projects, **New task** asks you to create one, makes it Inbox, and opens task
+  capture. With existing projects and no Inbox, it asks you to choose one.
+  To switch it later, select
   **Change** in the **New task** dialog. This is separate from `kata inbox`,
   which reads
   [attention requests](../reference/cli.md#teammate-requests) for an actor or
@@ -76,6 +80,13 @@ The collection toolbar filters by text, project, status, relationship, owner,
 and label. Parent and child issues can be expanded inline, and the column
 picker controls the visible fields. Collection, scope, filter, and
 selected-issue state stays in the URL, making the current view bookmarkable.
+
+The optional **Blocked by** column is off by default. Turn it on from the
+column picker to see each task's open blockers in every collection view,
+including Inbox and Today: up to three IDs, then `+N` for the rest, with all of
+them in the hover title. Blockers from the task's own project show their short
+ID; blockers from another project show the qualified ID. Closed blockers are
+left out, and the column hides at narrow list widths.
 
 At narrow window widths the task list stays primary: below 700px the sidebar
 moves into a drawer, and filter controls wrap to fit the list pane, including
@@ -105,7 +116,12 @@ project, and **Done editing** returns to the read-only view. The editor also sup
 
 When a close saved a
 [closing-session reference](../reference/configuration.md#closing-session-transcripts),
-the issue's events show the agent and session ID, linked when a URL was saved.
+the issue's events show `Session: <agent> <id>`, linked when a URL was saved. See the configuration reference for API and AgentsView compatibility.
+
+When the daemon has [Docbank configured](attachments.md#configure-the-daemon),
+the read view also lists the issue's attachments. **Attach files** uploads one
+or more files, **Preview** shows images, and **Play** plays videos in place. See
+[Issue attachments](attachments.md) for size limits and supported types.
 
 With daemon API `0.28.0` or newer, comments show handles, reply targets,
 backlinks, and edit markers. Select a reply target or backlink to open its issue
@@ -167,10 +183,17 @@ network, authentication, and proxy setup.
 
 The yellow summary at the top shows the active hub, account, and credential
 status. It stays visible while you navigate and wraps on narrow screens.
-The TUI shows the same information in its existing header row.
+A healthy TUI connection keeps its normal title bar. The TUI shows the summary
+only when credentials expire, authentication is required, or the connection is
+read-only, unavailable, connecting, reconnecting, or disconnected. The summary
+keeps the header row's existing label and adds the status and hub. The account
+appears only for read-only connections; every other attention state shows a dash,
+including Reconnecting and Disconnected.
 
 Account-bound credentials show their canonical actor. A connection without an
-account identity shows how it authenticated instead:
+account identity shows how it authenticated instead. The web summary uses these
+account labels. The TUI's read-only state uses the bootstrap, proxy, and anonymous
+labels:
 
 | Connection | Account label |
 | --- | --- |
@@ -180,6 +203,11 @@ account identity shows how it authenticated instead:
 | `--insecure-readonly` anonymous reader | **Anonymous (read-only)** |
 | Tokenless private-network writes | **Unauthenticated private network** |
 | Trusted proxy request without an asserted actor | **Proxy without account** |
+| Daemon too old to report how it authenticated | **Not reported by hub** |
+
+When a configured target's `[[daemon]]` token belongs to an account, changes
+you make through the switcher are recorded as that account, the same as
+`kata --daemon <name>`.
 
 Switching daemons or losing current authority clears the previous account
 while reconnection is pending. Finite credentials show **Credential expired**

@@ -190,7 +190,9 @@ func TestArchivedProject_ShowIssueByUIDReturns404(t *testing.T) {
 
 	archiveProject(t, h, projectID, true)
 
-	resp2, err := http.Get(ts.URL + "/api/v1/issues/" + created.Issue.UID) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/issues/"+created.Issue.UID, nil)
+	require.NoError(t, reqErr)
+	resp2, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = resp2.Body.Close() }()
 	bs2, _ := io.ReadAll(resp2.Body)
@@ -205,7 +207,9 @@ func TestListAllIssues_NegativeProjectIDReturns400(t *testing.T) {
 	h, _ := bootstrapProject(t)
 	ts := h.ts.(*httptest.Server)
 
-	resp, err := http.Get(ts.URL + "/api/v1/issues?project_id=-1") //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/issues?project_id=-1", nil)
+	require.NoError(t, reqErr)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	bs, _ := io.ReadAll(resp.Body)

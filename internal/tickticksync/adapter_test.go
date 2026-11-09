@@ -42,29 +42,29 @@ func sourceData() *sourceFixture {
 func adapterDB(t *testing.T) (*sqlitestore.Store, db.IssueSyncBinding) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	s, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
-	p, err := s.CreateProject(context.Background(), "example-project")
+	p, err := s.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	raw, err := EncodeConfig(Config{ProjectID: "project-1", TitlePrefix: new(false)})
 	require.NoError(t, err)
-	b, err := s.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "ticktick", SourceKey: "ticktick:project-1", RemoteID: "project-1", DisplayName: "Example tasks", Config: raw, IntervalSeconds: 300})
+	b, err := s.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "ticktick", SourceKey: "ticktick:project-1", RemoteID: "project-1", DisplayName: "Example tasks", Config: raw, IntervalSeconds: 300})
 	require.NoError(t, err)
 	return s, b
 }
 
 func mappedIssue(t *testing.T, s db.Storage, b db.IssueSyncBinding, id string) db.Issue {
 	t.Helper()
-	m, err := s.ImportMappingBySource(context.Background(), b.ProjectID, b.SourceKey, "issue", "task:"+id)
+	m, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "task:"+id)
 	require.NoError(t, err)
-	i, err := s.IssueByID(context.Background(), *m.IssueID)
+	i, err := s.IssueByID(t.Context(), *m.IssueID)
 	require.NoError(t, err)
 	return i
 }
 
 func TestAdapterReplayAndMissingTaskRecovery(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	at := time.Now().UTC().Add(-time.Minute)
@@ -97,7 +97,7 @@ func TestAdapterReplayAndMissingTaskRecovery(t *testing.T) {
 }
 
 func TestPrefixedContentUpdateKeepsTimestampForOneWayCompletion(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	raw, err := EncodeConfig(Config{ProjectID: "project-1", StatusSync: "two-way", TitlePrefix: new(true)})
 	require.NoError(t, err)
@@ -150,7 +150,7 @@ func TestPrefixedContentUpdateKeepsTimestampForOneWayCompletion(t *testing.T) {
 }
 
 func TestOneWayStatusChangeFromTwoWayPreservesNewerLocalEdit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	wrapped := &failOnceImportStore{Store: store}
 	raw, err := EncodeConfig(Config{ProjectID: "project-1", StatusSync: "two-way", TitlePrefix: new(false)})
@@ -220,7 +220,7 @@ func TestOneWayStatusChangeFromTwoWayPreservesNewerLocalEdit(t *testing.T) {
 }
 
 func TestOneWaySyncRetiresLocallyClosedMissingTaskCheckpoint(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	fixture := sourceData()
 	at := time.Now().UTC().Truncate(time.Millisecond).Add(-time.Minute)
@@ -244,7 +244,7 @@ func TestOneWaySyncRetiresLocallyClosedMissingTaskCheckpoint(t *testing.T) {
 }
 
 func TestOneWayStatusBaselineSurvivesReappearanceAndImportFailure(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	wrapped := &failOnceImportStore{Store: store}
 	fixture := sourceData()
@@ -307,7 +307,7 @@ func TestTwoWayRetiresClosedMissingTaskAfterTerminalReadback(t *testing.T) {
 		{name: "note", readback: &Task{ID: "task-1", ProjectID: "project-1", Title: "Note task", Kind: "NOTE", Status: new(0)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, b := adapterDB(t)
 			fixture := sourceData()
 			at := time.Now().UTC().Truncate(time.Millisecond).Add(-time.Minute)
@@ -362,7 +362,7 @@ func TestTwoWayRetiresClosedMissingTaskAfterTerminalReadback(t *testing.T) {
 }
 
 func TestTwoWayCompletedMissingTaskRecoverySurvivesStatusPageAdvance(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	wrapped := &failOnceImportStore{Store: store}
 	raw, err := EncodeConfig(Config{ProjectID: "project-1", StatusSync: "two-way", TitlePrefix: new(false)})
@@ -459,7 +459,7 @@ func TestTwoWayCompletedMissingTaskRecoverySurvivesStatusPageAdvance(t *testing.
 // One-way sync resends the current status every run; a repeat of the recorded
 // completion must not undo a later local reopen.
 func TestOneWayRepeatedStatusDoesNotUndoLocalReopen(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	wrapped := &failOnceFinalizeStore{Store: store}
 	raw, err := EncodeConfig(Config{ProjectID: "project-1", StatusSync: "two-way", TitlePrefix: new(false)})
@@ -517,7 +517,7 @@ func TestOneWayRepeatedStatusDoesNotUndoLocalReopen(t *testing.T) {
 }
 
 func TestTwoWayRecoveryKeepsContentCheckpointAcrossFinalizeFailure(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	wrapped := &failOnceFinalizeStore{Store: store}
 	raw, err := EncodeConfig(Config{ProjectID: "project-1", StatusSync: "two-way", TitlePrefix: new(false)})
@@ -609,7 +609,7 @@ func TestTwoWayRecoveryKeepsContentCheckpointAcrossFinalizeFailure(t *testing.T)
 }
 
 func TestTwoWayCompletionImportsFinalContentWhenTaskDisappearsBetweenPolls(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	wrapped := &failOnceImportStore{Store: store}
 	raw, err := EncodeConfig(Config{ProjectID: "project-1", StatusSync: "two-way", TitlePrefix: new(false)})
@@ -680,7 +680,7 @@ func TestTwoWayCompletionImportsFinalContentWhenTaskDisappearsBetweenPolls(t *te
 }
 
 func TestReenablingTitlePrefixRemovesSourceManagedLabel(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	f := sourceData()
 	at := time.Now().UTC().Truncate(time.Millisecond).Add(time.Hour)
@@ -751,7 +751,7 @@ func (s *failingImportStore) ImportBatch(ctx context.Context, p db.ImportBatchPa
 	return s.Storage.ImportBatch(ctx, p)
 }
 func TestAdapterStagedVersionsSurvivePartialImport(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	f.data.Tasks = append(f.data.Tasks, Task{ID: "task-2", ProjectID: "project-1", Title: "Second", Status: new(0)})
@@ -780,7 +780,7 @@ func TestAdapterStagedVersionsSurvivePartialImport(t *testing.T) {
 }
 
 func TestAdapterMissingLookupIsBoundedAndResumes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	at := time.Now().UTC().Add(-time.Minute)
@@ -807,7 +807,7 @@ func TestAdapterMissingLookupIsBoundedAndResumes(t *testing.T) {
 }
 
 func TestAdapterTwoWayCompletionRetainsReopenIntent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, b := adapterDB(t)
 	raw, err := EncodeConfig(Config{ProjectID: "project-1", StatusSync: "two-way", TitlePrefix: new(false)})
 	require.NoError(t, err)
@@ -870,7 +870,7 @@ func TestAdapterTwoWayCompletionRetainsReopenIntent(t *testing.T) {
 // Duplicate collection rows do not consume the unique-task allowance needed
 // to recover a previously mapped task missing from the current collection.
 func TestAdapterRecoversMissingAtUniqueTaskLimit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	at := time.Now().UTC().Add(-time.Minute)
@@ -905,7 +905,7 @@ func TestAdapterRecoversMissingAtUniqueTaskLimit(t *testing.T) {
 // Completed history must not accumulate lookups or checkpoint entries: a
 // missing task whose Kata issue is closed stops being read until it reappears.
 func TestAdapterRetiresClosedMissingTasks(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	f.data.Tasks = append(f.data.Tasks, Task{ID: "task-2", ProjectID: "project-1", Title: "Second", Status: new(0)})
@@ -938,7 +938,7 @@ func TestAdapterRetiresClosedMissingTasks(t *testing.T) {
 // A task moved to another TickTick project stays local and does not stop
 // content sync for the rest of the selected project.
 func TestAdapterSkipsMissingTaskMovedToAnotherProject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	moved := false
 	client, now := testClient(t, func(req *http.Request) (*http.Response, error) {
@@ -969,7 +969,7 @@ func TestAdapterSkipsMissingTaskMovedToAnotherProject(t *testing.T) {
 // One-way imports and two-way status reads record the same observed_status
 // value for one TickTick state, so switching modes compares like with like.
 func TestObservedStatusEncodingMatchesAcrossModes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	completed := Task{ID: "task-1", ProjectID: "project-1", Title: "Task", Status: new(2), CompletedTime: "2026-10-01T09:00:00.000+0000"}
@@ -994,7 +994,7 @@ func TestObservedStatusEncodingMatchesAcrossModes(t *testing.T) {
 // A task that sync stopped tracking keeps its saved source version when it
 // returns, so unchanged TickTick content cannot replace newer local edits.
 func TestReturningRetiredTaskKeepsNewerLocalEdits(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	at := time.Now().UTC().Add(-time.Hour)
@@ -1028,7 +1028,7 @@ func TestReturningRetiredTaskKeepsNewerLocalEdits(t *testing.T) {
 // In one-way mode, a locally closed task that TickTick completes is read once
 // before sync stops tracking it, so a later TickTick reopen reopens the issue.
 func TestOneWayRemoteReopenAfterLocalCloseReopensIssue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	at := time.Now().UTC().Add(-time.Hour)
@@ -1071,7 +1071,7 @@ func (f *dataHookFixture) Data(ctx context.Context) (ProjectData, error) {
 // Content is dated when the task list is fetched, not when the run started, so
 // a local edit made earlier in the same run cannot hide a newer TickTick change.
 func TestContentIsDatedWhenFetched(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := &dataHookFixture{sourceFixture: sourceData(), onData: func() {}}
 	at := time.Now().UTC().Add(-time.Hour)
@@ -1095,7 +1095,7 @@ func TestContentIsDatedWhenFetched(t *testing.T) {
 // One-way sync sends the current status on every import, so a completion the
 // two-way status pass never reached still closes the issue after a mode switch.
 func TestOneWayAppliesCompletionCheckpointedByTwoWay(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	setMode := func(mode string) {
 		current, err := s.IssueSyncBindingByID(ctx, b.ID)
@@ -1145,7 +1145,7 @@ func (f *taskHookFixture) Task(ctx context.Context, id string) (Task, error) {
 // A task read individually is dated when that read happens, so a local edit
 // made earlier in the same run cannot hide its newer TickTick content.
 func TestRecoveredTaskIsDatedWhenRead(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := &taskHookFixture{sourceFixture: sourceData(), onTask: func() {}}
 	at := time.Now().UTC().Add(-time.Hour)
@@ -1170,7 +1170,7 @@ func TestRecoveredTaskIsDatedWhenRead(t *testing.T) {
 // A TickTick completion of an issue already closed in Kata keeps the local
 // close reason and time.
 func TestRemoteCompletionKeepsLocalCloseDetails(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	at := time.Now().UTC().Add(-time.Hour)
@@ -1194,7 +1194,7 @@ func TestRemoteCompletionKeepsLocalCloseDetails(t *testing.T) {
 // it completes in TickTick before the retry, it leaves the open-task list; sync
 // must still read and import it.
 func TestFailedFirstImportStillImportsTaskCompletedBeforeRetry(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, b := adapterDB(t)
 	f := sourceData()
 	f.data.Tasks = append(f.data.Tasks, Task{ID: "task-2", ProjectID: "project-1", Title: "Second", Status: new(0)})

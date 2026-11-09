@@ -45,6 +45,7 @@ func (ix *Index) AcquireReconcilerLease(ctx context.Context) (func() error, erro
 	}
 	return func() error {
 		ix.pg.releaseLease(conn)
+		// Unlock even after the acquiring context is canceled.
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, unlockErr := conn.ExecContext(releaseCtx, reconcilerUnlockSQL)

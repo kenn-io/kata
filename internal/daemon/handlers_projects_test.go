@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -25,7 +24,8 @@ func TestResolve_FailsOutsideKataTomlAndWithoutAlias(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"start_path": t.TempDir(),
 	})
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_initialized")
+	envelope := assertAPIError(t, resp.StatusCode, bs, 404, "project_not_initialized")
+	assert.Empty(t, envelope.Error.Data, string(bs))
 }
 
 func TestInit_FromGitRemoteCreatesProject(t *testing.T) {
@@ -72,7 +72,7 @@ func TestProjectMutations_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 				return http.MethodPost, "/api/v1/projects", map[string]any{"name": "new-project"}
 			},
 			verify: func(t *testing.T, env *testenv.Env) {
-				_, err := env.DB.ProjectByName(context.Background(), "new-project")
+				_, err := env.DB.ProjectByName(t.Context(), "new-project")
 				assert.ErrorIs(t, err, db.ErrNotFound)
 			},
 		},
@@ -85,9 +85,9 @@ func TestProjectMutations_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 					map[string]any{"source_project_id": source}
 			},
 			verify: func(t *testing.T, env *testenv.Env) {
-				_, err := env.DB.ProjectByName(context.Background(), "source")
+				_, err := env.DB.ProjectByName(t.Context(), "source")
 				require.NoError(t, err)
-				_, err = env.DB.ProjectByName(context.Background(), "target")
+				_, err = env.DB.ProjectByName(t.Context(), "target")
 				require.NoError(t, err)
 			},
 		},
@@ -99,9 +99,9 @@ func TestProjectMutations_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 					map[string]any{"name": "new-name"}
 			},
 			verify: func(t *testing.T, env *testenv.Env) {
-				_, err := env.DB.ProjectByName(context.Background(), "old-name")
+				_, err := env.DB.ProjectByName(t.Context(), "old-name")
 				require.NoError(t, err)
-				_, err = env.DB.ProjectByName(context.Background(), "new-name")
+				_, err = env.DB.ProjectByName(t.Context(), "new-name")
 				assert.ErrorIs(t, err, db.ErrNotFound)
 			},
 		},
@@ -159,7 +159,7 @@ func TestProjectMutations_RequireAttributedActor(t *testing.T) {
 
 func TestResolveProject_IdentityModeBootstrapCanResolveWithoutMutatingAliases(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	project, err := env.DB.CreateProject(context.Background(), "target")
+	project, err := env.DB.CreateProject(t.Context(), "target")
 	require.NoError(t, err)
 
 	resp, bs := envDoRaw(t, env, http.MethodPost, "/api/v1/projects/resolve",
@@ -180,7 +180,7 @@ func TestResolveProject_IdentityModeBootstrapCanResolveWithoutMutatingAliases(t 
 	require.NoError(t, json.Unmarshal(bs, &resolved))
 	assert.Equal(t, project.ID, resolved.Project.ID)
 
-	aliases, err := env.DB.ProjectAliases(context.Background(), project.ID)
+	aliases, err := env.DB.ProjectAliases(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Empty(t, aliases)
 
@@ -259,9 +259,8 @@ func TestResolve_ByProjectName_NotRegistered(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"name": "never-registered",
 	})
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(bs))
-	assert.Contains(t, string(bs), "project_not_initialized")
-	assert.Contains(t, string(bs), "never-registered")
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"project": "never-registered"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
 // TestResolve_NeitherFieldSet rejects a request that supplies neither
@@ -317,7 +316,34 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 			"kind":     "git",
 		},
 	})
-	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
+
+	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
+		"alias": map[string]any{
+			"identity": "github.com/wesm/never-seen",
+			"kind":     "git",
+		},
+		"name": "ghost-project",
+	})
+	envelope = assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
+}
+
+// TestResolve_ByStartPath_KataTomlNamesUnregisteredProject reports the
+// bound project name in error.data when .kata.toml names a project the
+// daemon does not know.
+func TestResolve_ByStartPath_KataTomlNamesUnregisteredProject(t *testing.T) {
+	ts := newTestServer(t)
+	dir := t.TempDir()
+	testfix.RunGit(t, dir, "init", "--quiet")
+	testfix.WriteKataToml(t, dir, "ghost-project")
+
+	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
+		"start_path": dir,
+	})
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
 func TestListProjects_IncludeArchived(t *testing.T) {
@@ -514,7 +540,8 @@ func TestResolve_ByAliasInput_RejectsArchivedProject(t *testing.T) {
 			"kind":     "git",
 		},
 	})
-	assertAPIError(t, resp2.StatusCode, bs2, http.StatusNotFound, "project_not_initialized")
+	envelope := assertAPIError(t, resp2.StatusCode, bs2, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"alias": "github.com/wesm/kata"}, map[string]any(envelope.Error.Data), string(bs2))
 	assert.Contains(t, string(bs2), "archived")
 }
 

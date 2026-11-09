@@ -35,19 +35,10 @@ func ensureProjectWritableTx(ctx context.Context, query rowQueryer, projectID in
 }
 
 func ensureFederatedMoveAllowedTx(ctx context.Context, query rowQueryer, projectIDs ...int64) error {
-	for _, projectID := range projectIDs {
-		var exists int
-		err := query.QueryRowContext(ctx,
-			`SELECT 1 FROM federation_bindings WHERE project_id = $1`, projectID).Scan(&exists)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("check federated move gate: %w", mapSQLError(err, nil))
-		}
-		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederatedMoveUnsupported)
+	if projectIDs == nil || len(projectIDs) != 2 {
+		return fmt.Errorf("issue move requires source and target projects, got %d", len(projectIDs))
 	}
-	return nil
+	return db.CheckFederatedIssueMove(ctx, query, projectIDs[0], projectIDs[1])
 }
 
 // ensureFederatedSpokeUnsupportedTx rejects operations whose projection

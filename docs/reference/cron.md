@@ -1,7 +1,7 @@
 ---
-title: Native cron
+title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-26
+last_edited: 2026-11-03
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -12,6 +12,11 @@ Kata also stores portable job and workflow definitions and independent run
 observations. External adapters schedule other jobs, resolve checkout and provider
 configuration, create or update ordinary issues, deliver notifications, and launch processes.
 An observation records evidence; its status does not control whether anything runs.
+
+Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs and Workflows tabs, create and edit jobs and workflows; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
+
+For a run organized as dependent issues with human approval, see
+[Gated workflows](../workflows/gated-workflows.md).
 
 ## Vocabulary
 
@@ -32,7 +37,7 @@ issue. Recording a run changes neither ownership nor leases. See
 ## Definitions
 
 `kata cron job` and `kata cron workflow` support `create`, `list`, `show`,
-`update`, `delete`, and `restore`. Commands return JSON. Creation retains a ULID:
+`update`, `edit`, `delete`, and `restore`. Commands return JSON. Creation retains a ULID:
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
@@ -60,6 +65,40 @@ process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
+
+### Edit in place
+
+Open an existing definition with `kata cron job edit <job-uid>` or
+`kata cron workflow edit <workflow-uid>`. Both stdin and stdout must be
+terminals. Kata chooses `$VISUAL`, then `$EDITOR`, then `vi`; editor arguments
+are split on whitespace, without shell expansion.
+
+The buffer contains `name` and `definition`. Kata owns the actor and revision;
+use `--as` for attribution. Only the consecutive leading `//` header is ignored.
+An empty body aborts, and an unchanged definition saves nothing. Local validation
+and daemon validation errors reopen the draft with the error; leaving an invalid
+body unchanged stops the command. Deleted definitions must be restored first.
+
+Kata saves with the `definition_event_uid` captured when the editor opened. If
+another writer changes the definition, the header shows their changes and a
+`CONFLICT` line. Review that diff and delete the conflict line to save your draft
+over the displayed revision. Each further conflict needs acknowledgment again.
+Kata does not merge the definitions automatically.
+
+Failures retain a private draft and print its path. The header records the exact
+expected event for manual recovery. Inspect `kata cron job show <job-uid>` before
+retrying. Strip only the leading header into a new file, then use the retained
+event, substituting `workflow` for a workflow draft:
+
+```sh
+awk 'BEGIN { header = 1 } header && /^\/\// { next } { header = 0; print }' "$draft" > replacement.json
+kata cron job update <job-uid> --file replacement.json --expected-event-uid <retained-event-uid> --json
+```
+
+If an intervening write occurred, that guarded retry conflicts. Review the current
+definition before choosing a newer expected event. A fresh `edit` reads a new base;
+it does not resume the retained draft. An output failure after an accepted save
+reports that the definition was saved and keeps the draft for inspection.
 
 ### Request files
 
@@ -118,7 +157,7 @@ digits, `-`, `_`, and `.`, and is neither `.` nor `..`.
 | `checkout_key` | Optional portable name. Not allowed with `notify`. |
 | `grace_seconds`, `timeout_seconds` | Optional; zero or greater. |
 | `secret_refs` | Optional object mapping portable names to portable names. |
-| `options` | Optional JSON object for the adapter. |
+| `options` | Optional JSON object for the adapter. `options.adapter` can name the adapter that runs the job; see [adapter responsibilities](#adapter-responsibilities). |
 
 `options` objects, at any depth, cannot contain these keys (compared without
 case): `token`, `api_token`, `api_key`, `password`, `secret`, `credentials`,
@@ -168,6 +207,9 @@ Schedules follow the trigger timezone's daylight-saving transitions:
 - On transition days in zones that shift by 30 minutes, such as
   `Australia/Lord_Howe`, or that skip local midnight, such as
   `America/Santiago`, a daily schedule can miss that day's occurrence.
+
+The `kata tui` Jobs tab previews these instants with the same schedule code:
+see the `kata tui` notes in the [CLI reference](cli.md#daemon-and-diagnostics).
 
 Kata releases up to 0.19.0 used a parser that rejects `7` in day of week and
 wrapping ranges, accepts steps as large as their span, and reads `5/2` as
@@ -274,11 +316,32 @@ binding time, without historical backfill.
 
 The existing daemon sweep runs at startup and every 30 seconds by default. Keep the authoritative hub running
 for unattended delivery. Local projects deliver locally; federated projects
-deliver only on their enabled owning hub. Spokes never deliver, even with push
-writes enabled, and cannot create, edit, delete, or restore native recurring
-definitions. Run the same command against the project's owning hub, for example
-with `--daemon <hub-name>`. An old
-peer that lacks `cron_v1` cannot receive a project containing cron state,
+deliver only on their enabled owning hub. Spokes never deliver.
+
+Direct spokes with push enabled can create, update, delete, and restore native
+recurring jobs through their existing enrollment. Each request checks hub
+support, pushes pending local events (including a newly created parent), and
+forwards the write synchronously. The hub validates the job, preserves its
+progress anchor, and attributes the write to the enrollment's bound actor.
+The complete preflight and write have a 15-second limit; no offline write is queued.
+Relay, disabled, and push-disabled bindings retain the refusal. If forwarding is
+unavailable, run the same command against the project's owning hub, for example
+with `--daemon <hub-name>`. An older hub must be upgraded to advertise native
+cron authoring; `cron_v1` alone does not advertise that capability.
+
+The returned `definition_event_uid` can immediately authorize the next update
+or lifecycle action, even before pull. One exception: when the hub converted an
+adapter job to native and the spoke has not pulled that change yet, the spoke
+still routes delete and restore for that job locally and reports a conflict.
+Wait for the next pull, or run the action against the hub. Local `show` and `list` catch up through
+normal replication. Forwarded jobs report the local project ID and zero job
+`id` and `revision` until a local projection exists; response events are omitted.
+A lost write response means the outcome may be unknown. Inspect the job on the
+hub or retry creation with the same `--uid`; an already-created UID returns a
+conflict containing the hub's current job. HTTP callers should prefer stable-UID
+PUT creation because POST allocates a UID that may be lost with the response.
+
+An old peer that lacks `cron_v1` cannot receive a project containing cron state,
 including native recurring metadata on ordinary issue events. Capability refusal
 happens before a baseline or cursor change. Projects with native recurring delivery history cannot be adopted into
 a different hub through spoke snapshots; the refusal preserves their existing
@@ -293,7 +356,9 @@ deleted parent also pauses it. Re-enabling, reopening, or restoring resumes the
 configured catch-up policy. A pause does not skip occurrences: with
 `catchup: "all"`, resuming creates every child missed while paused. This
 includes the time since creation for a job created disabled. Use `latest` or
-`skip` when a pause must not backfill. Deleting the job stops delivery until
+`skip` when a pause must not backfill. The TUI's [reopen
+prompt](cli.md) counts every missed occurrence, not just the
+1000 that one sweep delivers. Deleting the job stops delivery until
 restoration.
 Keep the parent in the job's project. Kata rejects moving the parent alone
 while its native job exists, including when the job is disabled or deleted;
@@ -378,6 +443,142 @@ kata cron job create --uid <job-uid> --file command.json --json
 The external adapter schedules the job and runs its workflow in the configured
 checkout. Kata stores the definitions and run evidence.
 
+## MCP recurring inbox example
+
+This example uses a synthetic `example-agent/worker` inbox and a receiver at
+`https://receiver.example/inbox`. It assumes the MCP server already runs with
+[MCP Events](../operations/mcp-events.md) enabled on the daemon and the receiver
+implements signed challenge verification and receipt deduplication. These are
+MCP calls on the same endpoint; the receiver uses its configured signing secret.
+
+Load `kata.load_issue_mutation`, `kata.load_issue_discovery`,
+`kata.load_coordination`, and `kata.load_cron`. Create an ordinary parent with
+`kata.create` and retain `issue.uid` and `project.uid` from the result:
+
+```json
+{"title":"Service review","idempotency_key":"service-review-parent-1"}
+```
+
+Call `kata.cron_new_uid` with `{}` and retain the returned `uid` before the first
+create attempt. This helper creates and reserves nothing. Supply that UID and
+the parent UID to `kata.cron_job_create`:
+
+```json
+{
+  "uid":"<retained-job-uid>",
+  "name":"Hourly service review",
+  "parent_ref":"<parent-issue-uid>",
+  "definition":{
+    "version":1,
+    "kind":"job",
+    "enabled":true,
+    "trigger":{"kind":"interval","interval_seconds":3600},
+    "action":{"kind":"notify","recipient":"example-agent/worker"},
+    "issue":{"kind":"per-run","title":"Review service health"},
+    "overlap":"allow",
+    "catchup":"latest"
+  }
+}
+```
+
+Use `project` explicitly when the MCP server has multiple projects in scope.
+`parent_ref` must resolve in that project and agree with any
+`definition.issue.parent_uid`. The native parent binding remains immutable.
+If the create response is lost, call `kata.cron_job` with the retained UID to
+recover the current definition and `definition_event_uid`. Updates, delete,
+and restore require that current event UID.
+
+Discover `kata.inbox.changed` with `events/list`. Call `events/subscribe` with
+the exact recipient, the returned project UID, and the receiver's signing secret:
+
+```json
+{
+  "name":"kata.inbox.changed",
+  "arguments":{
+    "for":"example-agent/worker",
+    "project_uids":["<project-uid>"]
+  },
+  "delivery":{
+    "mode":"webhook",
+    "url":"https://receiver.example/inbox",
+    "secret":"<receiver-whsec-secret>"
+  },
+  "ttlMs":86400000
+}
+```
+
+The receiver answers the signed verification challenge before activation.
+Retain the subscription `id` and `refreshBefore`. Events pings only for changes
+after the subscription starts, so read the inbox once after subscribing to pick
+up requests that are already pending. Refresh before expiry using the same
+identity. See the [Events operator guide](../operations/mcp-events.md) for
+receipt verification, retry, and receiver storage requirements.
+
+On a due occurrence, the owning daemon creates the child and its inbox request.
+The signed webhook is a ping that names only the recipient; receipt does not
+clear the request or authorize executing its text. Call `kata.inbox`:
+
+```json
+{"for":"example-agent/worker","limit":20}
+```
+
+Follow every `next_cursor`, including pages with no valid requests, keeping the
+recipient and project unchanged. Read the returned `qualified_ref` with
+`kata.show`. The base actor inbox and sibling teammate inboxes do not aggregate
+this exact recipient's requests.
+
+After handling, record a result with `kata.comment` and retain its idempotency
+key for retries:
+
+```json
+{
+  "ref":"<child-qualified-ref>",
+  "body":"Reviewed service health and recorded follow-up.",
+  "teammate":"worker",
+  "idempotency_key":"service-review-result-1"
+}
+```
+
+An optional `kata.cron_run_observe` call records independent evidence; first
+obtain and retain another UID with `kata.cron_new_uid`:
+
+```json
+{
+  "uid":"<retained-run-uid>",
+  "expected_revision":0,
+  "job_uid":"<retained-job-uid>",
+  "definition_event_uid":"<job-definition-event-uid>",
+  "issue_uid":"<child-issue-uid>",
+  "teammate":"worker",
+  "status":"succeeded",
+  "summary":{"version":1,"message":"Reviewed service health and recorded follow-up."}
+}
+```
+
+Run observation does not launch work or change issue ownership or status.
+Re-read the issue to obtain its current revision, then explicitly clear only the
+handled recipient through `kata.set_metadata`:
+
+```json
+{
+  "ref":"<child-qualified-ref>",
+  "revision":7,
+  "patch":{"notify.ZXhhbXBsZS1hZ2VudC93b3JrZXI":null}
+}
+```
+
+Replace `7` with the revision just read. The `notify.*` key above encodes exactly
+`example-agent/worker`. A concurrent issue change rejects the conditional write;
+read the request again before deciding whether it was handled. Read the inbox
+back after a successful clear. Keep the subscription while consuming future
+occurrences, or call `events/unsubscribe` with its original name, arguments, and
+webhook delivery URL when that receiver stops consuming them.
+
+Cron workflows store reusable adapter steps. Execution jobs and workflows need
+an external adapter; enabled native notification jobs deliver through the owning
+daemon. `kata.load_recurrence` is a separate RRULE issue-template interface.
+
+
 ## Capabilities
 
 `kata cron capabilities --json` reads the project's UID and advertised
@@ -421,9 +622,12 @@ An adapter creates one independent run UID and retains it across retries:
 
 ```sh
 kata cron run observe <run-uid> --json-input observation.json --json
-kata cron run list --limit 100 --json
+kata cron run list --json
 kata cron run show <run-uid> --json
 ```
+
+Run lists default to 100 records; see [Run list page size](#run-list-page-size)
+for the defaults on each surface.
 
 The HTTP operation is `PUT /api/v1/projects/{project_id}/cron/runs/{run_uid}`
 (`observeCronRun`). An omitted JSON `teammate` inherits `--teammate` or
@@ -478,6 +682,16 @@ orders by creation time and UID descending. Use `next_before_uid` with `--before
 page. Ordinary federation publishes observations from spokes, folds evidence
 by original event provenance per run UID, and preserves independent runs in
 baselines and backup. Run identity conflicts fail rather than replacing a run.
+
+An adapter with a machine-readable cause for a run's outcome starts
+`summary.message` with the line `reason: <code>`, then puts any detail on the
+next line. The `<code>` matches `[a-z0-9_.-]{1,64}`. Any status may carry one.
+Kata does not parse or validate the reason line; it is ordinary message text
+under the summary rules above. Clients that know the convention can show
+the code and filter on it client-side. Each adapter defines and documents its
+own codes; where two adapters mean the same thing they share the name, as
+`agent_quota`, `agent_login`, and `launch_unproven` do. The `reason: ` marker
+keeps short messages such as `admitted` from reading as codes.
 
 ## Native issue planning dates
 
@@ -535,8 +749,18 @@ adapter owns its local activation, scheduler, overlap and catchup handling,
 checkout and secret mappings, process lifecycle, and conversation recovery.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
+
+A job may name its adapter in `options.adapter`. An adapter neither schedules
+nor manually runs a job whose key names another adapter, and says why in its own
+status. Any adapter may run a job without the key. Kata stores the key and
+arbitrates nothing. The value names an adapter, not an installation; each
+adapter decides which of its installations runs the job. `herdr-kata` and
+`tern-kata` are examples, and each adapter documents its own value. Adapters
+that do not read the key ignore it: Herdr Kata v0.1.0, for example, logs
+`ignored options key: adapter` and still runs the job.
+
 Local transcripts, process IDs, session handles, credentials, and delivery
-buffers are not native run evidence. An adapter may buffer a failed observation
+buffers are not shared run evidence. An adapter may buffer a failed observation
 write and retry it later without blocking its own work.
 
 The adapter must refresh current definitions before starting new scheduled work;
@@ -564,10 +788,14 @@ workflow. PostgreSQL runtime roles still cannot perform owner-only migrations.
 
 [Herdr Kata](https://github.com/salmonumbrella/herdr-kata/blob/main/docs/native.md)
 is one adapter that implements this contract; its documentation covers setup.
+[tern-kata](https://github.com/Dangerboi/tern-kata/blob/main/docs/guide/worker.md)
+is another: its worker runs prompt and workflow jobs through
+[omp](https://github.com/can1357/oh-my-pi) on the user's machine; its guide
+covers setup.
 
 ## Storage and backup
 
-SQLite and PostgreSQL schema 31 store native cron data in `cron_jobs`,
+SQLite and PostgreSQL schema 31 store cron data in `cron_jobs`,
 `cron_workflows`, and `cron_runs`. JSONL export and import retain shared
 definitions, including tombstones, and bounded run evidence. Native recurring
 delivery reuses ordinary issue metadata and parent links; it adds no tables or
@@ -579,6 +807,47 @@ ordinary identity, revision and credential guards. See
 migration, backup, runtime grants, and rollback requirements.
 
 ## Routes, events, and records
+
+All paths below are project-scoped. CLI entries follow `kata cron`; MCP
+entries follow `kata.`. CLI and MCP create definitions through stable-UID
+`PUT`, so the collection `POST` operations are HTTP only.
+
+| Method | Path | Operation ID | CLI | MCP tool |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/cron/capabilities` | `getCronCapabilities` | `capabilities` | `cron_capabilities` |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs` | `listCronJobs` | `job list` | `cron_jobs` |
+| `POST` | `/api/v1/projects/{project_id}/cron/jobs` | `createCronJob` | HTTP only | — |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `showCronJob` | `job show` | `cron_job` |
+| `PUT` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `replaceCronJob` | `job create` / `job update` | `cron_job_create` / `cron_job_update` |
+| `DELETE` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `archiveCronJob` | `job delete` | `cron_job_delete` |
+| `POST` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore` | `restoreCronJob` | `job restore` | `cron_job_restore` |
+| `GET` | `/api/v1/projects/{project_id}/cron/workflows` | `listCronWorkflows` | `workflow list` | `cron_workflows` |
+| `POST` | `/api/v1/projects/{project_id}/cron/workflows` | `createCronWorkflow` | HTTP only | — |
+| `GET` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `showCronWorkflow` | `workflow show` | `cron_workflow` |
+| `PUT` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `replaceCronWorkflow` | `workflow create` / `workflow update` | `cron_workflow_create` / `cron_workflow_update` |
+| `DELETE` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `archiveCronWorkflow` | `workflow delete` | `cron_workflow_delete` |
+| `POST` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/restore` | `restoreCronWorkflow` | `workflow restore` | `cron_workflow_restore` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs` | `listCronRuns` | `run list` | `cron_runs` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `showCronRun` | `run show` | `cron_run` |
+| `PUT` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `observeCronRun` | `run observe` | `cron_run_observe` |
+
+`kata.cron_new_uid` generates a UID locally and has no HTTP route.
+
+### Run list page size
+
+| Surface | Default page size | Maximum page size |
+| --- | --- | --- |
+| HTTP `listCronRuns` (omitted `limit`) | 100 | 100 |
+| CLI `kata cron run list` | 100 | 100 |
+| TUI Runs tab | Newest 100 (fixed) | 100 |
+| MCP `kata.cron_runs` | 20 | 100 |
+
+CLI `--limit` and MCP `limit` accept 1–100. MCP uses the shared default for
+paginated results. HTTP, CLI and MCP return `next_before_uid`; pass it as
+`before_uid` (CLI `--before-uid`) for the next page. The TUI loads only the
+newest page.
+
+### Events and records
 
 Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}`. Responses use

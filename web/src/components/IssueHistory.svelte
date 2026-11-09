@@ -2,13 +2,17 @@
   import type { KataTaskEvent } from '../lib/kata/types'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
 
+  import { closingAttachments } from '../lib/history/attachments'
+
   import { describeKataEvent } from '../lib/history/format'
 
   interface Props {
     events: readonly KataTaskEvent[]
+    metadata?: Record<string, unknown> | undefined
+    attachmentLinks?: boolean | undefined
   }
 
-  let { events }: Props = $props()
+  let { events, metadata = {}, attachmentLinks = true }: Props = $props()
 
   const fullTimestamp = new Intl.DateTimeFormat(undefined, {
     dateStyle: 'full',
@@ -27,9 +31,11 @@
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
     const ref = value as Record<string, unknown>
     if (
-      (ref.agent !== 'codex' && ref.agent !== 'claude') ||
+      typeof ref.agent !== 'string' ||
+      ref.agent.length > 32 ||
+      !/^[a-z0-9][a-z0-9-]*$/.test(ref.agent) ||
       typeof ref.session_id !== 'string' ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref.session_id)
+      !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(ref.session_id)
     ) {
       return undefined
     }
@@ -78,6 +84,13 @@
               >{time.short}</time
             >
           {/if}
+          {#each closingAttachments(event, metadata) as attachment, index (index)}
+            <span class="event-session">
+              {#if attachmentLinks && attachment.href}<a href={attachment.href}
+                  >{attachment.label}</a
+                >{:else}{attachment.label}{/if}
+            </span>
+          {/each}
           {#if session}
             <span class="event-session">
               {#if session.url}

@@ -37,7 +37,7 @@ func cronHTTPDefinition(_ *testing.T) cron.JobDefinition {
 	return cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60}, Action: cron.Action{Kind: "execute", Prompt: "Inspect"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Inspection result"}, Overlap: "forbid", Catchup: "all", Options: []byte(`{"model":"example"}`)}
 }
 
-func TestCronNativeSpokeWriteHint(t *testing.T) {
+func TestCronNativePushDisabledSpokeWriteHint(t *testing.T) {
 	for _, operation := range []string{"create", "update", "delete", "restore"} {
 		t.Run(operation, func(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("tok"))
@@ -73,9 +73,9 @@ func TestCronNativeSpokeWriteHint(t *testing.T) {
 					delete(body, "definition")
 				}
 			}
-			_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID,
+			binding, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID,
 				Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 42,
-				HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
+				HubProjectUID: project.UID, Enabled: true, PushEnabled: false, Actor: "operator"})
 			require.NoError(t, err)
 			before, err := env.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
@@ -89,6 +89,10 @@ func TestCronNativeSpokeWriteHint(t *testing.T) {
 			after, err := env.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, before, after)
+			// Ordinary adapter jobs remain writable on push-enabled spokes.
+			binding.PushEnabled = true
+			_, err = env.DB.UpsertFederationBinding(t.Context(), binding)
+			require.NoError(t, err)
 			status, raw = cronHTTP(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID),
 				map[string]any{"actor": "operator", "name": "Adapter job", "definition": cronHTTPDefinition(t)})
 			require.Equalf(t, http.StatusCreated, status, "%s", raw)

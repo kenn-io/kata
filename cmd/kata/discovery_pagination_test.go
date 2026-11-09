@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -22,7 +21,7 @@ func TestCLIDiscoveryPagination(t *testing.T) {
 	})
 	require.NoError(t, err)
 	run := func(args ...string) (string, string, error) {
-		return executeRootCapture(t, contextWithBaseURL(context.Background(), env.URL), append([]string{"--workspace", dir}, args...)...)
+		return executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), append([]string{"--workspace", dir}, args...)...)
 	}
 	for _, tool := range []string{"list", "search"} {
 		args := []string{"--json", tool}

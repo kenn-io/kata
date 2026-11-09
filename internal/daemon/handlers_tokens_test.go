@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -39,7 +38,7 @@ func TestCreateTokenEndpoint_BootstrapCreatesToken(t *testing.T) {
 	assert.True(t, strings.HasPrefix(out.Plaintext, "kata_"))
 	assert.Equal(t, 1, strings.Count(string(bs), out.Plaintext))
 
-	resolved, err := env.DB.ResolveAPIToken(context.Background(), out.Plaintext)
+	resolved, err := env.DB.ResolveAPIToken(t.Context(), out.Plaintext)
 	require.NoError(t, err)
 	assert.Equal(t, out.Token.ID, resolved.ID)
 	assert.Equal(t, "wesm", resolved.Actor)
@@ -47,7 +46,7 @@ func TestCreateTokenEndpoint_BootstrapCreatesToken(t *testing.T) {
 
 func TestCreateTokenEndpoint_DBTokenForbidden(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "user-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -91,7 +90,7 @@ func TestListTokenEndpoint_RedactsPlaintextAndHash(t *testing.T) {
 }
 
 func TestListTokenEndpointReportsLifecycleAtOneServerObservationTime(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -149,7 +148,7 @@ func TestListTokenEndpointReportsLifecycleAtOneServerObservationTime(t *testing.
 
 func TestRevokeTokenEndpoint_AppendsRevocation(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	tok, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	tok, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "user-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -173,7 +172,7 @@ func TestRevokeTokenEndpoint_AppendsRevocation(t *testing.T) {
 	require.NotNil(t, out.Token.RevokedAt)
 	assert.Equal(t, "token.revoked", out.Event.Type)
 	assert.Equal(t, db.BootstrapActor, out.Event.Actor)
-	_, err = env.DB.ResolveAPIToken(context.Background(), "user-token")
+	_, err = env.DB.ResolveAPIToken(t.Context(), "user-token")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
@@ -194,11 +193,11 @@ func TestCreateTokenEndpoint_StaticModeRejectsUnusableIdentityToken(t *testing.T
 	assert.Contains(t, string(bs), "require_token_identity")
 
 	var tokens int
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM api_tokens`).Scan(&tokens))
 	assert.Zero(t, tokens)
 	var events int
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM events WHERE type = 'token.created'`).Scan(&events))
 	assert.Zero(t, events)
 }
@@ -216,14 +215,14 @@ func TestCreateTokenEndpoint_LocalNoAuthCanAdmin(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(bs, &out))
 	var actor string
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT actor FROM events WHERE type = 'token.created' AND json_extract(payload, '$.token_id') = ?`,
 		out.Token.ID).Scan(&actor))
 	assert.Equal(t, db.BootstrapActor, actor)
 }
 
 func TestCreateTokenEndpoint_CreatesIssueSubtreeGrant(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -285,7 +284,7 @@ func TestCreateTokenEndpoint_CreatesIssueSubtreeGrant(t *testing.T) {
 }
 
 func TestCreateTokenEndpoint_RejectsIncompleteOrMismatchedIssueScope(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -321,7 +320,7 @@ func TestCreateTokenEndpoint_RejectsIncompleteOrMismatchedIssueScope(t *testing.
 }
 
 func TestCreateTokenEndpoint_ScopedGrantRequiresIdentityMode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -339,7 +338,7 @@ func TestCreateTokenEndpoint_ScopedGrantRequiresIdentityMode(t *testing.T) {
 }
 
 func TestCreateTokenEndpoint_RejectsSpokeReplicaRoot(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)

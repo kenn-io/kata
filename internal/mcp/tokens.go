@@ -142,6 +142,10 @@ func (h toolHandlers) scopedTokenCreate(ctx context.Context, input TokenCreateIn
 	if err != nil {
 		return nil, TokenCreateOutput{}, err
 	}
+	project, err = h.currentIssueProject(ctx, project, issueFromShow(shown.Issue))
+	if err != nil {
+		return nil, TokenCreateOutput{}, err
+	}
 	if project.UID == "" || shown.Issue.UID == "" || shown.Issue.ShortID == "" || shown.Issue.ProjectID != project.ID {
 		return nil, TokenCreateOutput{}, errors.New("daemon returned incomplete issue identity for scoped token creation")
 	}
@@ -181,10 +185,10 @@ func (h toolHandlers) scopedTokenCreate(ctx context.Context, input TokenCreateIn
 	}, actor, tokenissuance.Scope{
 		Kind: string(scope.Kind), ProjectUID: scope.ProjectUID, RootIssueUID: scope.RootIssueUID,
 	}, duration); err != nil {
-		return nil, TokenCreateOutput{}, h.cleanupScopedToken(response.Token.ID, err)
+		return nil, TokenCreateOutput{}, h.cleanupScopedToken(ctx, response.Token.ID, err)
 	}
 	if err := reservation.Commit(response.Plaintext); err != nil {
-		return nil, TokenCreateOutput{}, h.cleanupScopedToken(response.Token.ID, err)
+		return nil, TokenCreateOutput{}, h.cleanupScopedToken(ctx, response.Token.ID, err)
 	}
 	return successResult(), TokenCreateOutput{
 		TokenFile: reservation.Path(), Issue: project.Name + "#" + shown.Issue.ShortID,
@@ -192,11 +196,12 @@ func (h toolHandlers) scopedTokenCreate(ctx context.Context, input TokenCreateIn
 	}, nil
 }
 
-func (h toolHandlers) cleanupScopedToken(tokenID int64, cause error) error {
+func (h toolHandlers) cleanupScopedToken(ctx context.Context, tokenID int64, cause error) error {
 	if tokenID <= 0 {
 		return fmt.Errorf("scoped token delivery failed; creation outcome is ambiguous: %w", cause)
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Revoke even when the request was canceled after the token was issued.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	_, err := h.options.Client.RevokeToken(cleanupCtx, &generated.RevokeTokenRequestOptions{
 		PathParams: &generated.RevokeTokenPath{ID: tokenID},

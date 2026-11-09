@@ -104,7 +104,7 @@ func TestConnectDaemonTargetLocalUsesLocalOnlyEnsurePath(t *testing.T) {
 		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
 	}
 
-	conn, err := connectDaemonTarget(context.Background(), daemonTarget{Name: "local", Local: true})
+	conn, err := connectDaemonTarget(t.Context(), daemonTarget{Name: "local", Local: true})
 
 	require.NoError(t, err)
 	assert.True(t, ensured, "explicit local daemon must use local-only ensure path")
@@ -360,7 +360,7 @@ func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *t
 	}
 
 	conn, err := bootDaemonConnection(
-		context.Background(), Options{Workspace: workspace},
+		t.Context(), Options{Workspace: workspace},
 	)
 
 	require.NoError(t, err)
@@ -430,7 +430,7 @@ func TestBootDaemonConnectionOptionsDaemonNameOverridesActiveDaemon(t *testing.T
 	}
 	workspace := t.TempDir()
 
-	conn, err := bootDaemonConnection(context.Background(), Options{
+	conn, err := bootDaemonConnection(t.Context(), Options{
 		DaemonName:  "selected",
 		ProjectName: "project-b",
 		Workspace:   workspace,
@@ -478,7 +478,7 @@ func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testin
 	}
 	bootResolveScopePathFreeForTUI = bootResolveScopeForTUI
 
-	conn, err := bootDaemonConnection(context.Background(), Options{})
+	conn, err := bootDaemonConnection(t.Context(), Options{})
 
 	require.NoError(t, err)
 	assert.False(t, conn.target.Local)
@@ -796,7 +796,7 @@ func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {
 	}
 	bootResolveScopePathFreeForTUI = bootResolveScopeForTUI
 
-	conn, err := connectDaemonTarget(context.Background(), target)
+	conn, err := connectDaemonTarget(t.Context(), target)
 
 	require.NoError(t, err)
 	assert.Equal(t, "http://daemon.internal:7777", conn.endpoint)
@@ -892,7 +892,7 @@ func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
 	}
 	bootResolveScopePathFreeForTUI = bootResolveScopeForTUI
 
-	conn, err := connectDaemonTarget(context.Background(), target)
+	conn, err := connectDaemonTarget(t.Context(), target)
 
 	require.NoError(t, err)
 	assert.Equal(t, "secret-from-env", gotNormal.resolved.Token)
@@ -936,7 +936,7 @@ func TestConnectDaemonTargetRemoteAuthTokenEnvOverridesUnsetTokenEnv(t *testing.
 	}
 	bootResolveScopePathFreeForTUI = bootResolveScopeForTUI
 
-	conn, err := connectDaemonTarget(context.Background(), target)
+	conn, err := connectDaemonTarget(t.Context(), target)
 
 	require.NoError(t, err)
 	assert.Equal(t, "env-token", gotNormal.resolved.Token)
@@ -965,7 +965,7 @@ func TestConnectResolvedLocalTargetRetryRefreshPreservesTargetToken(t *testing.T
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
 	socket := filepath.Join(socketDir, "fresh-kata.sock")
-	ln, err := net.Listen("unix", socket)
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 	var gotAuth string
@@ -1047,7 +1047,7 @@ url = "https://daemon.example"
 token_env = "KATA_WORK_TOKEN"
 `), 0o600))
 
-	_, err := connectDaemonTarget(context.Background(),
+	_, err := connectDaemonTarget(t.Context(),
 		daemonTarget{Name: "shared", URL: "https://daemon.example", TokenEnv: "KATA_WORK_TOKEN"}) //nolint:gosec // env var name, not a credential
 
 	require.Error(t, err)
@@ -1165,7 +1165,7 @@ func TestLocalProfileAPIAndSSEUseSameSocketAndCredentialAfterReconnect(t *testin
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
 	socket := filepath.Join(socketDir, "kata.sock")
-	listener, err := net.Listen("unix", socket)
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
 	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ping" {

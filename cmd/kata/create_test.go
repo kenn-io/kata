@@ -146,7 +146,7 @@ func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	ctx, cancel := context.WithCancel(contextWithBaseURL(context.Background(), server.URL))
+	ctx, cancel := context.WithCancel(contextWithBaseURL(t.Context(), server.URL))
 	t.Cleanup(cancel)
 	go func() {
 		<-createHit
@@ -168,7 +168,7 @@ func TestCreateTimeoutClassificationAtCommandBoundary(t *testing.T) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// Start the timeout after sending, so slow command setup cannot turn
 	// this unknown-outcome scenario into a pre-transmission failure.
-	transport.ResponseHeaderTimeout = 100 * time.Millisecond
+	transport.ResponseHeaderTimeout = 100 * time.Millisecond //nolint:kennlint // deadlinetest: the handler withholds headers so the command must classify a transmitted request timeout
 	http.DefaultTransport = transport
 	t.Cleanup(func() {
 		http.DefaultTransport = previousTransport
@@ -237,7 +237,7 @@ func TestCreateResponseBodyCutClassificationAtCommandBoundary(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	ctx := contextWithBaseURL(context.Background(), server.URL)
+	ctx := contextWithBaseURL(t.Context(), server.URL)
 	_, _, err := executeRootCapture(t, ctx, "--workspace", t.TempDir(),
 		"create", "example issue")
 	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
@@ -419,12 +419,27 @@ func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
 					"fix login crash", "--body", "login crashes on startup", "--force-new")
 				refs = append(refs, "example-project#"+strings.TrimSpace(second))
 			}
-			for _, mode := range []string{"agent", "json"} {
+			for _, mode := range []string{"agent", "json", "human"} {
 				t.Run(mode, func(t *testing.T) {
-					stdout, stderr, err := executeRootCapture(t, ctx, append(args, "--"+mode)...)
+					stdout, stderr, err := executeRootCapture(t, ctx, append(args, "--format", mode)...)
 					cli := requireCLIError(t, err, ExitConflict)
 					assert.Equal(t, code, cli.Code)
 					assert.Empty(t, stdout)
+					if mode == "human" {
+						line, _, _ := strings.Cut(stderr, "\n")
+						assert.True(t, strings.HasPrefix(line, "kata: "), line)
+						if code == "idempotency_mismatch" {
+							assert.NotContains(t, line, "(")
+							assert.NotContains(t, stderr, refs[0])
+							return
+						}
+						assert.Contains(t, line, " (")
+						assert.True(t, strings.HasSuffix(line, ")"), line)
+						for _, ref := range refs {
+							assert.Contains(t, line, ref)
+						}
+						return
+					}
 					if mode == "agent" {
 						assert.True(t, strings.HasPrefix(stderr, "ERR create conflict: "), stderr)
 						lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
@@ -520,7 +535,7 @@ func TestResolveProjectID_PropagatesParseError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := resolveProjectID(context.Background(), srv.URL, dir)
+	_, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.Error(t, err)
 	assert.Zero(t, called.Load(), "client must reject parse errors before reaching the daemon")
 }
@@ -542,7 +557,7 @@ func TestResolveProjectID_FallsBackOnMissingConfig(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	id, err := resolveProjectID(context.Background(), srv.URL, dir)
+	id, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 	assert.EqualValues(t, 42, id)
 	assert.Equal(t, dir, got["start_path"])
@@ -571,7 +586,7 @@ func TestResolveProjectID_SendsNameAndAliasForWorkspaceConfig(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	id, err := resolveProjectID(context.Background(), srv.URL, dir)
+	id, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 	assert.EqualValues(t, 42, id)
 	assert.Equal(t, "project-name", got["name"], "name from .kata.toml must be sent")
@@ -601,7 +616,7 @@ func TestResolveProjectID_SendsAliasOnlyForGitWorkspaceWithoutKataToml(t *testin
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := resolveProjectID(context.Background(), srv.URL, dir)
+	_, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 	alias, ok := got["alias"].(map[string]any)
 	require.True(t, ok, "git workspace must yield an alias even without .kata.toml")
@@ -632,7 +647,7 @@ func TestResolveProjectID_ExplicitProjectFlagSendsNameOnly(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := resolveProjectID(context.Background(), srv.URL, dir)
+	_, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 	assert.Equal(t, "explicit", got["name"])
 	_, hasAlias := got["alias"]
@@ -704,7 +719,7 @@ func TestResolveProjectID_RewritesStaleKataToml(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := resolveProjectID(context.Background(), srv.URL, dir)
+	_, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 
 	cfg, _, err := config.FindProjectConfig(dir)
@@ -724,6 +739,9 @@ func TestCreateDefaultPriorityRequest(t *testing.T) {
 		{name: "default zero", config: "[create]\ndefault_priority = 0", want: new(int64(0))},
 		{name: "default three", config: "[create]\ndefault_priority = 3", want: new(int64(3))},
 		{name: "explicit zero", config: "[create]\ndefault_priority = 3", args: []string{"--priority", "0"}, want: new(int64(0))},
+		{name: "explicit none", config: "[create]\ndefault_priority = 3", args: []string{"--priority", "none"}},
+		{name: "none without default", args: []string{"--priority", "none"}},
+		{name: "none ignores invalid default", config: "[create]\ndefault_priority = 'invalid'", args: []string{"--priority", "none"}},
 		{name: "ignore invalid default", config: "[create]\ndefault_priority = 'invalid'", args: []string{"--priority", "2"}, want: new(int64(2))},
 	}
 	for _, tc := range cases {

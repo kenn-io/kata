@@ -11,7 +11,7 @@ import (
 )
 
 func TestTreeTerminateWithGraceExitedProcess(t *testing.T) {
-	cmd := exec.Command("true")
+	cmd := exec.CommandContext(t.Context(), "true")
 	tree, err := New(cmd)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tree.Close()) })
@@ -22,7 +22,7 @@ func TestTreeTerminateWithGraceExitedProcess(t *testing.T) {
 }
 
 func TestExitedProcessSignalsAreSuccessful(t *testing.T) {
-	cmd := exec.Command("true")
+	cmd := exec.CommandContext(t.Context(), "true")
 	prepare(cmd)
 	require.NoError(t, cmd.Start())
 	require.NoError(t, cmd.Wait())

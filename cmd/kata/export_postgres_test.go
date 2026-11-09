@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,7 +17,7 @@ func TestExportReadsPostgresThroughConfiguredDSN(t *testing.T) {
 		t.Skip("requires postgres testcontainer")
 	}
 	home := setupKataEnv(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	t.Setenv("KATA_DSN", dsn)

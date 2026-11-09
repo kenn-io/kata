@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -37,7 +36,7 @@ func TestClientIssueHistoryRequiresAcknowledgementOnEveryPage(t *testing.T) {
 				}
 				respondJSON(t, w, map[string]any{"events": events, "next_after_id": 1, "reset_required": false})
 			})
-			got, err := c.ListEvents(context.Background(), 7, tc.ref)
+			got, err := c.ListEvents(t.Context(), 7, tc.ref)
 			require.ErrorContains(t, err, "upgrade")
 			require.Nil(t, got)
 			require.Equal(t, tc.wantCalls, calls)
@@ -54,7 +53,7 @@ func TestClientIssueHistoryQualifiedAndLowercaseRefs(t *testing.T) {
 				w.Header().Set("X-Kata-Events-Issue-UID", uid)
 				respondJSON(t, w, map[string]any{"events": []map[string]any{{"event_id": 1, "issue_uid": uid, "issue_short_id": "abc4", "type": "issue.created", "actor": "reader"}}, "next_after_id": 0, "reset_required": false})
 			})
-			got, err := c.ListEvents(context.Background(), 7, ref)
+			got, err := c.ListEvents(t.Context(), 7, ref)
 			require.NoError(t, err)
 			require.Len(t, got, 1)
 		})
@@ -69,7 +68,7 @@ func TestClientIssueHistoryRejectsReset(t *testing.T) {
 		w.Header().Set("X-Kata-Events-Issue-UID", uid)
 		respondJSON(t, w, map[string]any{"events": []map[string]any{}, "next_after_id": 9, "reset_required": true, "reset_after_id": 9})
 	})
-	got, err := c.ListEvents(context.Background(), 7, "abc4")
+	got, err := c.ListEvents(t.Context(), 7, "abc4")
 	require.ErrorContains(t, err, "history changed")
 	require.Nil(t, got)
 	require.Equal(t, 1, calls)

@@ -171,7 +171,7 @@ describe('IssueDetail', () => {
       },
     })
 
-    const header = container.querySelector('header')!
+    const header = container.querySelector<HTMLElement>('.detail-header')!
     const status = within(header).getByText('open')
     const label = within(header).getByText('integration')
     const edit = within(header).getByRole('button', { name: 'Edit issue' })

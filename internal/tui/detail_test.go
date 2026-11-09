@@ -912,7 +912,6 @@ type fakeDetailAPI struct {
 	lastGetIssue   string
 
 	closeCalls       int
-	reopenCalls      int
 	addLabelCalls    int
 	removeLabelCalls int
 	assignCalls      int
@@ -968,16 +967,6 @@ func (f *fakeDetailAPI) Close(
 	_ context.Context, projectID int64, ref, actor string,
 ) (*MutationResp, error) {
 	f.closeCalls++
-	f.lastProjectID = projectID
-	f.lastRef = ref
-	f.lastActor = actor
-	return f.mutationResult, f.mutationErr
-}
-
-func (f *fakeDetailAPI) Reopen(
-	_ context.Context, projectID int64, ref, actor string,
-) (*MutationResp, error) {
-	f.reopenCalls++
 	f.lastProjectID = projectID
 	f.lastRef = ref
 	f.lastActor = actor

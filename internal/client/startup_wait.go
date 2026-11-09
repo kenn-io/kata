@@ -134,7 +134,9 @@ func waitForDaemonStartupWithProbe(
 				}
 				return fmt.Errorf("daemon exited before readiness and no compatible daemon became ready within %s: %w; inspect kata daemon logs", daemonChildExitGrace, exitedBeforeReadiness)
 			}
-			if migrationAllowed && sqliteMigrationPending(ctx) {
+			// Without a child exit to observe, an old schema alone cannot tell a
+			// pending cutover from a replacement that failed before taking the lock.
+			if cutoverActive || exited != nil && migrationAllowed && sqliteMigrationPending(ctx) {
 				fmt.Fprintln(os.Stderr, "kata: SQLite migration in progress; waiting for daemon readiness (cancelling stops waiting and leaves the daemon running)")
 				deadline.Reset(wait)
 				continue

@@ -33,12 +33,14 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 ```
 </section>
 
-## New in 0.20.0
+## New in 0.23.0
 
-Handle notification requests in the terminal UI's Attention inbox, ask for
-replies to specific comments, broadcast to participants, and trigger work when
-scheduled dates arrive. The [0.20.0 release notes](changelog.md#0200) also cover
-SQLite upgrades, daemon restarts, cron scheduling, and contributor credits.
+Turn on search by meaning with one command or from web Settings. Move issues,
+change repeating schedules, and edit workflows in the terminal UI, and set up
+attachments with `kata docbank setup`. Assistants that use MCP can set up without
+a shell and wake when their inbox changes. Large stores and federated projects
+search, create, and sync faster. The [0.23.0 release notes](changelog.md#0230)
+cover the schema 50 upgrade, PostgreSQL migration, and contributor credits.
 See [Updating Kata](get-started/install.md#updating-kata) for installation
 and federation upgrade guidance.
 
@@ -123,6 +125,7 @@ is a local ledger for the work itself. They coexist. See
 -   [__Model Context Protocol__](reference/mcp.md). Connect an MCP client over
     stdio or Streamable HTTP to the workspace project, a fixed allowlist, or
     the whole daemon.
+-   [__Native MCP inbox events__](operations/mcp-events.md). Deliver signed inbox wakes to a durable receiver.
 -   [__Share projects between hubs__](guide/project-relays.md). Connect a selected
     project to your hub and devices.
 -   [__Semantic search__](guide/semantic-search.md). Improve issue discovery
@@ -134,7 +137,7 @@ is a local ledger for the work itself. They coexist. See
 -   [__Twenty sync__](operations/twenty-sync.md). Mirror Twenty workspace tasks with optional two-way status.
 -   [__TickTick sync__](operations/ticktick-sync.md). Import a task project and send completion back.
 -   [__Forgejo connector__](operations/forgejo-connector.md). Bind a Forgejo issue to Kata.
--   [__Native cron__](reference/cron.md). Share job definitions and create recurring child issues.
+-   [__Cron__](reference/cron.md). Share job definitions and create recurring child issues.
 -   [__Plane sync__](operations/plane-sync.md). Mirror a Plane project into native issues.
 -   [__Linear sync__](operations/linear-sync.md). Import a selected team and synchronize completion and reopen.
 -   [__Todoist sync__](operations/todoist-sync.md). Mirror a Todoist project and sync task completion.

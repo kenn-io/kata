@@ -69,7 +69,7 @@ func TestEventExportSQLIsPinnedPerVersionBand(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := &sqlCapture{}
-			err := exportEvents(context.Background(), capture, NewEncoder(io.Discard), tc.opts, tc.version)
+			err := exportEvents(t.Context(), capture, NewEncoder(io.Discard), tc.opts, tc.version)
 			require.ErrorIs(t, err, errSQLCaptured)
 			require.Len(t, capture.queries, 1, "each band emits exactly one events query")
 			assert.Equal(t, tc.wantArgs, capture.args[0])
@@ -84,7 +84,7 @@ func TestEventExportSQLIsPinnedPerVersionBand(t *testing.T) {
 func TestEventExportV1OmitsRelatedIssueUID(t *testing.T) {
 	for _, opts := range []ExportOptions{{}, {IncludeDeleted: true}} {
 		capture := &sqlCapture{}
-		err := exportEvents(context.Background(), capture, NewEncoder(io.Discard), opts, 1)
+		err := exportEvents(t.Context(), capture, NewEncoder(io.Discard), opts, 1)
 		require.ErrorIs(t, err, errSQLCaptured)
 		assert.NotContains(t, capture.queries[0], "related_issue_uid")
 	}

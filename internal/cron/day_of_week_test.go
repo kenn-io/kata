@@ -30,21 +30,28 @@ func TestParseCronAcceptsSevenAsSunday(t *testing.T) {
 	for _, tc := range []struct {
 		expression string
 		want       []string
+		start, end string
 	}{
-		{"0 9 * * 7", []string{"2026-10-18T09:00:00Z"}},
-		{"0 9 * * 5-7", []string{"2026-10-16T09:00:00Z", "2026-10-17T09:00:00Z", "2026-10-18T09:00:00Z"}},
-		{"0 9 * * 5-7/2", []string{"2026-10-16T09:00:00Z", "2026-10-18T09:00:00Z"}},
-		{"CRON_TZ=UTC 0 9 * * 7", []string{"2026-10-18T09:00:00Z"}},
-		{"CRON_TZ=UTC 0 9 * * 5-7", []string{"2026-10-16T09:00:00Z", "2026-10-17T09:00:00Z", "2026-10-18T09:00:00Z"}},
-		{"CRON_TZ=UTC 0 9 * * 5-7/2", []string{"2026-10-16T09:00:00Z", "2026-10-18T09:00:00Z"}},
-		{"CRON_TZ=America/New_York 0 9 * * 7", []string{"2026-10-18T13:00:00Z"}},
+		{"0 9 * * 7", []string{"2026-10-18T09:00:00Z"}, "", ""},
+		{"0 9 * * 5-7", []string{"2026-10-16T09:00:00Z", "2026-10-17T09:00:00Z", "2026-10-18T09:00:00Z"}, "", ""},
+		{"0 9 * * 5-7/2", []string{"2026-10-16T09:00:00Z", "2026-10-18T09:00:00Z"}, "", ""},
+		{"CRON_TZ=UTC 0 9 * * 7", []string{"2026-10-18T09:00:00Z"}, "", ""},
+		{"CRON_TZ=UTC 0 9 * * 5-7", []string{"2026-10-16T09:00:00Z", "2026-10-17T09:00:00Z", "2026-10-18T09:00:00Z"}, "", ""},
+		{"CRON_TZ=UTC 0 9 * * 5-7/2", []string{"2026-10-16T09:00:00Z", "2026-10-18T09:00:00Z"}, "", ""},
+		{"CRON_TZ=America/New_York 0 9 * * 7", []string{"2026-10-18T13:00:00Z"}, "", ""},
+		{"0 9 * * 6-1", []string{"2026-10-17T09:00:00Z", "2026-10-18T09:00:00Z", "2026-10-19T09:00:00Z"}, "2026-10-15T00:00:00Z", "2026-10-20T00:00:00Z"},
+		{"0 9 * * 5/2", []string{"2026-10-16T09:00:00Z", "2026-10-18T09:00:00Z", "2026-10-23T09:00:00Z"}, "2026-10-12T00:00:00Z", "2026-10-24T00:00:00Z"},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
 			var want []time.Time
 			for _, s := range tc.want {
 				want = append(want, at(t, s))
 			}
-			require.Equal(t, want, cronOccurrences(t, tc.expression, start, end))
+			from, through := start, end
+			if tc.start != "" {
+				from, through = at(t, tc.start), at(t, tc.end)
+			}
+			require.Equal(t, want, cronOccurrences(t, tc.expression, from, through))
 		})
 	}
 }

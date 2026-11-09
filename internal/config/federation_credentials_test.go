@@ -1,7 +1,6 @@
 package config_test
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -297,7 +296,7 @@ func TestFederationCredentialManagedMetadataRoundTripsAndRedactsToken(t *testing
 
 func TestReserveFederationCredentialUsesOneExactHubUID(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	store := config.DefaultFederationCredentialStore()
 	managed := config.FederationCredential{
 		HubURL:           "https://daemon.example",
@@ -327,7 +326,7 @@ func TestReserveFederationCredentialUsesOneExactHubUID(t *testing.T) {
 
 func TestConcurrentManagedCredentialReservationsPreserveEveryEntry(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	store := config.DefaultFederationCredentialStore()
 	const (
 		repetitions = 12
@@ -376,7 +375,7 @@ func TestConcurrentManagedCredentialReservationsPreserveEveryEntry(t *testing.T)
 func TestReserveFederationCredentialConflictDoesNotRewriteFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
-	ctx := context.Background()
+	ctx := t.Context()
 	store := config.DefaultFederationCredentialStore()
 	const hubUID = "01HUBPROJECT00000000000000"
 	require.NoError(t, store.StoreFederationCredential(ctx, hubUID,
@@ -408,7 +407,7 @@ func TestReserveFederationCredentialConflictDoesNotRewriteFile(t *testing.T) {
 
 func TestFindManagedFederationCredentialRejectsTwoMarkedEntries(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	store := config.DefaultFederationCredentialStore()
 	managed := config.FederationCredential{
 		HubURL: "https://daemon.example", HubProjectID: 42, Token: "pending-token",
@@ -429,7 +428,7 @@ func TestFindManagedFederationCredentialRejectsTwoMarkedEntries(t *testing.T) {
 
 func TestDeleteManagedFederationCredentialRequiresExactKeyAndValue(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	store := config.DefaultFederationCredentialStore()
 	match := config.FederationManagedCredentialReservation{
 		ProjectUID: "01HUBPROJECT00000000000000",
@@ -467,7 +466,7 @@ func TestDeleteManagedFederationCredentialRequiresExactKeyAndValue(t *testing.T)
 
 func TestDeleteManagedFederationCredentialRejectsReservationMovedToAnotherKey(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	store := config.DefaultFederationCredentialStore()
 	match := config.FederationManagedCredentialReservation{
 		ProjectUID: "01HUBPROJECT00000000000000",
@@ -491,7 +490,7 @@ func TestDeleteManagedFederationCredentialRejectsReservationMovedToAnotherKey(t 
 
 func TestReplaceManagedFederationCredentialRequiresExactCurrentValue(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	store := config.DefaultFederationCredentialStore()
 	current := config.FederationManagedCredentialReservation{
 		ProjectUID: "01HUBPROJECT00000000000000",
@@ -520,7 +519,7 @@ func TestReplaceManagedFederationCredentialRequiresExactCurrentValue(t *testing.
 
 func TestRekeyFederationCredentialMovesManualLocalUIDToHubUIDOnce(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	store := config.DefaultFederationCredentialStore()
 	manual := config.FederationCredential{
 		HubURL: "https://daemon.example", HubProjectID: 42, Token: "manual-token",

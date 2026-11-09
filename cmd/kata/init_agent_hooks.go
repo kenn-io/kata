@@ -35,7 +35,7 @@ func initAgentHooksFailure(response []byte, name, workspace string, created, hoo
 	return &cliError{Message: message, Kind: kindInternal, Code: "init_agent_hooks_failed", ExitCode: ExitInternal, Data: encoded}
 }
 
-func planInitAgentHookSelection(names []string, start string, attention bool, api string) (nativeAgentHookPlan, []agentHookMutation, error) {
+func planInitAgentHookSelection(ctx context.Context, names []string, start string, attention bool, api string) (nativeAgentHookPlan, []agentHookMutation, error) {
 	var combined nativeAgentHookPlan
 	if len(names) == 0 {
 		return combined, nil, nil
@@ -67,7 +67,7 @@ func planInitAgentHookSelection(names []string, start string, attention bool, ap
 		}
 		var plan nativeAgentHookPlan
 		if opts.Agent == "codex" {
-			plan, err = planInitCodexHooks(opts)
+			plan, err = planInitCodexHooks(ctx, opts)
 		} else {
 			plan, err = planNativeAgentHooks(opts, false)
 		}
@@ -132,15 +132,15 @@ func prepareInitHookOptions(ctx context.Context, opts callInitOpts) (callInitOpt
 	return opts, nil
 }
 
-func planInitHookOptions(opts callInitOpts, start string) (nativeAgentHookPlan, []agentHookMutation, error) {
+func planInitHookOptions(ctx context.Context, opts callInitOpts, start string) (nativeAgentHookPlan, []agentHookMutation, error) {
 	if len(opts.AgentHooks) == 0 {
-		return planInitAgentHookSelection(opts.WithAgentHooks, start, true, opts.OpenCodeAPI)
+		return planInitAgentHookSelection(ctx, opts.WithAgentHooks, start, true, opts.OpenCodeAPI)
 	}
-	return planInitAgentHookSelection(opts.AgentHooks, start, !opts.ContractOnly, opts.OpenCodeAPI)
+	return planInitAgentHookSelection(ctx, opts.AgentHooks, start, !opts.ContractOnly, opts.OpenCodeAPI)
 }
 
-func applyInitHookOptions(opts callInitOpts, dir string) (bool, []agentHookMutation, error) {
-	plan, results, err := planInitHookOptions(opts, dir)
+func applyInitHookOptions(ctx context.Context, opts callInitOpts, dir string) (bool, []agentHookMutation, error) {
+	plan, results, err := planInitHookOptions(ctx, opts, dir)
 	if err != nil {
 		return false, nil, err
 	}

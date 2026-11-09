@@ -34,6 +34,7 @@ func EventRequiresProjectScopeReset(
 	event Event,
 	issueByUID func(string) (Issue, error),
 	issueByRef func(string, string) (Issue, error),
+	commentIssueByUID func(string) (Issue, error),
 ) (bool, error) {
 	if federationEventStream(ctx) {
 		return false, nil
@@ -96,28 +97,7 @@ func EventRequiresProjectScopeReset(
 		}
 		return false, nil
 	}
-
-	switch event.Type {
-	case "issue.moved":
-		var payload map[string]jsontext.Value
-		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-			return true, nil
-		}
-		for _, key := range []string{"from_project_uid", "to_project_uid"} {
-			uid, ok := StringValue(payload[key])
-			if !ok || uid == "" {
-				return true, nil
-			}
-			if _, visible := allowed[uid]; !visible {
-				return true, nil
-			}
-		}
-		return false, nil
-	case "issue.created", "issue.snapshot":
-		var payload map[string]jsontext.Value
-		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-			return true, nil
-		}
+	checkSnapshotLinks := func(payload map[string]jsontext.Value) (bool, error) {
 		rawLinks, found := payload["links"]
 		if !found {
 			return false, nil
@@ -135,6 +115,73 @@ func EventRequiresProjectScopeReset(
 			uids = append(uids, uid)
 		}
 		return checkUIDs(uids)
+	}
+	checkSnapshotReferences := func(payload map[string]jsontext.Value) (bool, error) {
+		if reset, err := checkSnapshotLinks(payload); reset || err != nil {
+			return reset, err
+		}
+		raw, found := payload["comments"]
+		if !found {
+			return false, nil
+		}
+		var comments *[]struct {
+			ReplyToUID string `json:"reply_to_uid"`
+			ReplyKind  string `json:"reply_kind"`
+		}
+		if err := json.Unmarshal(raw, &comments); err != nil || comments == nil {
+			return true, nil
+		}
+		for _, comment := range *comments {
+			if comment.ReplyToUID == "" && comment.ReplyKind == "" {
+				continue
+			}
+			if len(comment.ReplyToUID) != 26 || !ValidCommentReplyKind(comment.ReplyKind) || commentIssueByUID == nil {
+				return true, nil
+			}
+			issue, err := commentIssueByUID(comment.ReplyToUID)
+			if errors.Is(err, ErrNotFound) {
+				return true, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if _, visible := allowed[issue.ProjectUID]; !visible {
+				return true, nil
+			}
+			RecordExposedIssue(ctx, issue.ID)
+		}
+		return false, nil
+	}
+
+	switch event.Type {
+	case "issue.moved":
+		var payload map[string]jsontext.Value
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			return true, nil
+		}
+		for _, key := range []string{"from_project_uid", "to_project_uid"} {
+			uid, ok := StringValue(payload[key])
+			if !ok || uid == "" {
+				return true, nil
+			}
+			if _, visible := allowed[uid]; !visible {
+				return true, nil
+			}
+		}
+		if snapshot, found := payload["snapshot"]; found {
+			var snapshotPayload map[string]jsontext.Value
+			if err := json.Unmarshal(snapshot, &snapshotPayload); err != nil {
+				return true, nil
+			}
+			return checkSnapshotReferences(snapshotPayload)
+		}
+		return false, nil
+	case "issue.created", "issue.snapshot":
+		var payload map[string]jsontext.Value
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			return true, nil
+		}
+		return checkSnapshotReferences(payload)
 	case "issue.closed":
 		var payload struct {
 			ParentUID     *string    `json:"parent_uid"`

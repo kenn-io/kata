@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"sync/atomic"
@@ -211,7 +210,7 @@ func TestGetInstanceRejectsPartialScopedCapabilities(t *testing.T) {
 		}})
 	})
 
-	_, err := c.GetInstance(context.Background())
+	_, err := c.GetInstance(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "incomplete issue-scoped capabilities")
@@ -230,7 +229,7 @@ func TestGetInstanceRejectsExpiredScopedCapabilities(t *testing.T) {
 		}})
 	})
 
-	_, err := c.GetInstance(context.Background())
+	_, err := c.GetInstance(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "incomplete issue-scoped capabilities")
 }

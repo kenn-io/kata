@@ -341,6 +341,9 @@ func browserAccessAdministrationRequest(r *http.Request) bool {
 	if !ok || len(parts) < 3 || parts[0] != "api" || parts[1] != "v1" {
 		return false
 	}
+	if len(parts) == 4 && parts[2] == "embeddings" && parts[3] == "local" {
+		return r.Method == http.MethodPost
+	}
 	if parts[2] == "teams" {
 		return (len(parts) == 3 && r.Method == http.MethodPost) ||
 			(len(parts) == 4 && r.Method == http.MethodDelete) ||
@@ -472,6 +475,8 @@ func requireBrowserSession(manager *WebSessionManager, policy ListenerPolicy, ne
 
 func webLocalSPARequestAllowed(r *http.Request) bool {
 	switch r.URL.Path {
+	case "/api/v1/embeddings/local":
+		return r.Method == http.MethodGet || r.Method == http.MethodPost
 	case "/api/v1/ui/snapshot", "/api/v1/ui/references", "/api/v1/ui/issue-reference", "/api/v1/ui/daemons", pathEventsStreamPath:
 		return r.Method == http.MethodGet
 	case "/api/v1/ui/session":
@@ -512,6 +517,9 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 }
 
 func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
+	if len(parts) == 4 && parts[1] == "attachments" && parts[3] == "content" {
+		return r.Method == http.MethodGet
+	}
 	if len(parts) == 0 {
 		return r.Method == http.MethodPost
 	}
@@ -520,13 +528,16 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 	}
 	if len(parts) == 2 {
 		switch parts[1] {
-		case "comments", "labels", "links", "metadata", "notifications":
+		case "comments", "labels", "links", "metadata", "notifications", "attachments":
 			return r.Method == http.MethodPost
 		case "actions":
 			return false
 		}
 	}
 	if len(parts) == 3 {
+		if parts[1] == "attachments" && parts[2] == "links" {
+			return r.Method == http.MethodPost
+		}
 		if parts[1] == "labels" {
 			return r.Method == http.MethodDelete
 		}

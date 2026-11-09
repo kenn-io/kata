@@ -29,7 +29,7 @@ func (f *lifecycleTickTick) Task(context.Context, string) (tickticksync.Task, er
 }
 func TestTickTickSyncOperatorLifecycle(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.db.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	f := &lifecycleTickTick{data: tickticksync.ProjectData{Project: tickticksync.Project{ID: "project-1", Name: "Example tasks", Kind: "TASK"}, Tasks: []tickticksync.Task{{ID: "task-1", ProjectID: "project-1", Title: "Task", Status: new(0)}}}}

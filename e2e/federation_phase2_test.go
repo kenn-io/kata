@@ -3,7 +3,6 @@
 package e2e_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -19,7 +18,7 @@ import (
 )
 
 func TestSmoke_FederationPhase2BidirectionalSync(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spokeDirs := newE2EDirs(t)
 	bin := buildKataBinary(t)
@@ -29,7 +28,9 @@ func TestSmoke_FederationPhase2BidirectionalSync(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = spokeDB.Close() })
 
-	resp, err := spokeHTTP.Get(spokeURL + "/api/v1/instance") //nolint:gosec // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, spokeURL+"/api/v1/instance", nil)
+	require.NoError(t, reqErr)
+	resp, err := spokeHTTP.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -96,7 +97,7 @@ func TestSmoke_FederationPhase2BidirectionalSync(t *testing.T) {
 }
 
 func TestFederationPhase2PushWakeLatency(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spokeDirs := newE2EDirs(t)
 	bin := buildKataBinary(t)
@@ -154,10 +155,10 @@ func waitForFederatedTitle(
 	var lastErr error
 	for time.Now().Before(deadline) {
 		var uid string
-		err := store.QueryRowContext(context.Background(),
+		err := store.QueryRowContext(t.Context(),
 			`SELECT uid FROM issues WHERE title = ?`, title).Scan(&uid)
 		if err == nil {
-			issue, err := store.IssueByUID(context.Background(), uid, db.IncludeDeletedNo)
+			issue, err := store.IssueByUID(t.Context(), uid, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			return issue
 		}
@@ -207,7 +208,7 @@ func foldedProjections(
 	hubAfterID int64,
 ) (db.FoldProjection, db.FoldProjection, error) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hubEvents, err := hub.EventsAfter(ctx, db.EventsAfterParams{
 		ProjectID: hubProjectID,
 		AfterID:   hubAfterID,

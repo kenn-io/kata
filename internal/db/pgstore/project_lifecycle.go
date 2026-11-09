@@ -203,21 +203,21 @@ func (s *Store) DetachProjectAlias(ctx context.Context, params db.DetachAliasPar
 	return alias, &event, nil
 }
 
+const batchProjectStatsSQL = `
+SELECT
+  p.id,
+  (SELECT count(*) FROM issues i WHERE i.project_id = p.id AND i.status = 'open' AND i.deleted_at IS NULL),
+  (SELECT count(*) FROM issues i WHERE i.project_id = p.id AND i.status = 'closed' AND i.deleted_at IS NULL),
+  (SELECT e.created_at FROM events e WHERE e.id = (SELECT max(m.id) FROM events m WHERE m.project_id = p.id))
+FROM projects p
+WHERE p.deleted_at IS NULL AND p.name <> $1
+ORDER BY p.id`
+
 // BatchProjectStats returns active-project issue counts and event timestamps.
+// Correlated per-project subqueries cannot multiply rows (spec §6.1).
+// LastEventAt follows the newest event by id, as in readUIProjectStats.
 func (s *Store) BatchProjectStats(ctx context.Context) (map[int64]db.ProjectStats, error) {
-	rows, err := s.QueryContext(ctx, `WITH issue_counts AS (
-      SELECT project_id,
-             COUNT(*) FILTER (WHERE status = 'open') AS open_count,
-             COUNT(*) FILTER (WHERE status = 'closed') AS closed_count
-        FROM issues WHERE deleted_at IS NULL GROUP BY project_id
-    ), event_max AS (
-      SELECT project_id, MAX(created_at) AS last_event_at FROM events GROUP BY project_id
-    )
-    SELECT p.id, COALESCE(i.open_count, 0), COALESCE(i.closed_count, 0), e.last_event_at
-      FROM projects p
-      LEFT JOIN issue_counts i ON i.project_id = p.id
-      LEFT JOIN event_max e ON e.project_id = p.id
-     WHERE p.deleted_at IS NULL AND p.name <> $1 ORDER BY p.id`, db.SystemProjectName)
+	rows, err := s.QueryContext(ctx, batchProjectStatsSQL, db.SystemProjectName)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -235,6 +235,7 @@ func (s *Store) BatchProjectStats(ctx context.Context) (map[int64]db.ProjectStat
 			if err != nil {
 				return nil, err
 			}
+			value = value.UTC()
 			stats.LastEventAt = &value
 		}
 		result[id] = stats
@@ -251,6 +252,11 @@ type projectPurgeCounts struct {
 func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) (db.ProjectPurgeLog, error) {
 	var result db.ProjectPurgeLog
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		// Keep the lock order used by named enrollment creation, and prevent
+		// a concurrent rename from restoring a label for a purged enrollment.
+		if err := lockSpokeNames(ctx, tx); err != nil {
+			return err
+		}
 		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1 FOR UPDATE`, params.ProjectID))
 		if err != nil {
 			return err
@@ -268,6 +274,9 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return mapSQLError(err, nil)
+		}
+		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project); err != nil {
+			return err
 		}
 		if err := rejectActiveExternalRootProjectPurge(ctx, tx, project.ID); err != nil {
 			return err
@@ -502,7 +511,9 @@ func deleteProjectScopedTx(ctx context.Context, tx *sql.Tx, project db.Project) 
 			return mapSQLError(err, nil)
 		}
 	}
-	return nil
+	// Retain the hub-local label while another project still enrolls this peer.
+	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,$1)=$2 AND NOT EXISTS (SELECT 1 FROM federation_enrollments e WHERE meta.key=$2||e.spoke_instance_uid)`, len(db.FederationSpokeNamePrefix), db.FederationSpokeNamePrefix)
+	return mapSQLError(err, nil)
 }
 
 func scanProjectPurgeLog(row rowScanner) (db.ProjectPurgeLog, error) {

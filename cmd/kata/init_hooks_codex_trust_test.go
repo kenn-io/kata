@@ -40,7 +40,7 @@ func TestApplyCodexHooks_DedupeTrustAndPreservation(t *testing.T) {
 			data, err := json.Marshal(before)
 			require.NoError(t, err)
 			writeCodexFixture(t, path, string(data))
-			changed, notes, err := applyCodexHooks(dir)
+			changed, notes, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.True(t, changed)
 			assert.Equal(t, map[string]any{"retain": "root setting", "hooks": map[string]any{"SessionStart": tc.after, "SessionEnd": expectedCodexSessionEndGroups(), "Stop": []any{foreign}}}, readCodexHooks(t, dir))
@@ -52,7 +52,7 @@ func TestApplyCodexHooks_DedupeTrustAndPreservation(t *testing.T) {
 
 			first, err := os.ReadFile(path) //nolint:gosec // test-owned config under TempDir
 			require.NoError(t, err)
-			changed, notes, err = applyCodexHooks(dir)
+			changed, notes, err = applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.False(t, changed, "second dedupe must be a no-op")
 			assert.Empty(t, notes)
@@ -85,7 +85,7 @@ func TestApplyCodexHooks_RepairsNoncanonicalAttention(t *testing.T) {
 			data, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": groups}})
 			require.NoError(t, err)
 			writeCodexFixture(t, filepath.Join(dir, ".codex", "hooks.json"), string(data))
-			changed, _, err := applyCodexHooks(dir)
+			changed, _, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.True(t, changed)
 			assert.Equal(t, []any{map[string]any{"matcher": codexSessionStartMatcher, "hooks": []any{expectedCodexHandler()}}}, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
@@ -119,7 +119,7 @@ func TestApplyCodexHooks_PreservesWorkspaceAttentionPositions(t *testing.T) {
 				userCodexContractFixture(t)
 			}
 
-			changed, _, err := applyCodexHooks(dir)
+			changed, _, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.True(t, changed, "adding terminal hook preserves existing start identities")
 			assert.Equal(t, groups, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"],

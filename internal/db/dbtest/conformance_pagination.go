@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -14,7 +13,7 @@ import (
 
 // Creation keysets must survive ordinary edits, including timestamp ties.
 func checkListPagination(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	other, err := store.CreateProject(ctx, "other-project")
@@ -104,7 +103,7 @@ func checkListPagination(t *testing.T, store db.Storage) error {
 }
 
 func checkSearchPagination(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -190,5 +189,41 @@ func checkCreationPaginationPrecision(t *testing.T, store db.Storage) error {
 		require.Equal(t, expected.ID, got[0].Issue.ID)
 		after = &pagination.Position{CreatedAt: got[0].Issue.CreatedAt, ID: got[0].Issue.ID}
 	}
+	return nil
+}
+
+func checkListExactTitle(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	create := func(projectID int64, title string) db.Issue {
+		issue, err := createFixtureIssue(ctx, store, projectID, title, "tester", nil)
+		require.NoError(t, err)
+		return issue
+	}
+	first := create(project.ID, "Inventory crash!")
+	second := create(project.ID, "Inventory crash!")
+	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: second.ID, Body: new("apples"), Actor: "tester"})
+	require.NoError(t, err)
+	create(other.ID, "Inventory crash!")
+	for _, title := range []string{"inventory crash!", "Inventory crash?", "Inventory  crash!", "Inventory crash! suffix"} {
+		create(project.ID, title)
+	}
+	deleted := create(project.ID, "Inventory crash!")
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "tester")
+	require.NoError(t, err)
+	params := db.ListIssuesParams{ProjectID: project.ID, ExactTitle: "Inventory crash!", CreatedFirst: true, Limit: 20}
+	rows, err := store.ListIssues(ctx, params)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, second.UID, rows[0].UID)
+	require.Equal(t, first.UID, rows[1].UID)
+	params.ShortestBodyFirst = true
+	rows, err = store.ListIssues(ctx, params)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, first.UID, rows[0].UID)
 	return nil
 }

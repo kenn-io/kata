@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/processtree"
+	"go.kenn.io/kit/consolewindow"
 )
 
 // Exchange runs a trusted, configured executable with explicit arguments, not a
@@ -38,10 +39,12 @@ func Exchange(parent context.Context, command []string, request Request) (Respon
 	if err := ctx.Err(); err != nil {
 		return Response{}, errors.Join(ErrProviderFailed, err)
 	}
+	//nolint:noctx // the AfterFunc below terminates the process tree when ctx ends.
 	cmd := exec.Command(command[0], command[1:]...) // #nosec G204 -- operator-configured executable and argv, never response data.
 	cmd.Stdin = bytes.NewReader(data)
 	output := &boundedOutput{cancel: cancel}
 	cmd.Stdout = output
+	consolewindow.Hide(cmd)
 	// A nil Stderr connects to the null device, with no diagnostic pipe to retain.
 	tree, err := processtree.New(cmd)
 	if err != nil {

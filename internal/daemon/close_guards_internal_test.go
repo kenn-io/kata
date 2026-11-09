@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,7 +14,7 @@ import (
 // ambiguous across projects and is not actionable from the parent project.
 // A same-project child stays bare.
 func TestCheckParentCloseCompleteness_RendersForeignChildQualified(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, alpha, beta := auditRenderStore(t)
 
 	parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{

@@ -24,6 +24,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		filter := db.ReadyIssuesFilter{
+			PriorityFirst:   in.Sort == "priority",
 			Unowned:         in.Unowned,
 			Owner:           in.Owner,
 			Labels:          in.Labels,
@@ -35,7 +36,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		issueOuts, err := hydrateIssueOuts(ctx, cfg.DB, in.ProjectID, issues)
+		issueOuts, err := hydrateIssueOuts(ctx, cfg.DB, cfg.DefaultTimezone, in.ProjectID, issues)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
@@ -56,6 +57,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"--unowned and --owner are mutually exclusive", "", nil)
 		}
 		filter := db.ReadyIssuesFilter{
+			PriorityFirst:   in.Sort == "priority",
 			Unowned:         in.Unowned,
 			Owner:           in.Owner,
 			Labels:          in.Labels,
@@ -71,7 +73,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		for i, iss := range issues {
 			bare[i] = iss.Issue
 		}
-		issueOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, bare)
+		issueOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, cfg.DefaultTimezone, bare)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}

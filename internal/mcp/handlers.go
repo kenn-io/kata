@@ -18,6 +18,7 @@ import (
 
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -190,8 +191,13 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		results = results[:limit]
 		truncated = true
 	}
+	var hints []searchhint.Hint
+	if len(searches) > 0 {
+		hints = searchhint.EmptyLexical(query, effectiveMode, len(results), input.Cursor == "")
+	}
 	project, outputProjects := outputProjectScope(projects)
 	return successResult(), SearchOutput{
+		Hints:          hints,
 		Project:        project,
 		Projects:       outputProjects,
 		Query:          query,
@@ -351,6 +357,10 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if err != nil {
 		return nil, ShowOutput{}, err
 	}
+	project, err = h.currentIssueProject(ctx, project, issueFromShow(response.Issue))
+	if err != nil {
+		return nil, ShowOutput{}, err
+	}
 	allowedProjects := map[string]bool{}
 	if h.options.Scope.Mode() != ScopeAll {
 		projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
@@ -497,7 +507,7 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, &response.Event)
 }
 
 func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input EditInput) (*sdkmcp.CallToolResult, EditOutput, error) {
@@ -598,6 +608,10 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 			events = append(events, *event)
 		}
 	}
+	project, err = h.currentIssueProject(ctx, project, issue)
+	if err != nil {
+		return nil, EditOutput{}, err
+	}
 	return successResult(), EditOutput{
 		Project: project,
 		Issue:   h.summaryFromIssue(project, issue),
@@ -655,6 +669,10 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 	if err != nil {
 		return nil, CommentOutput{}, err
 	}
+	project, err = h.currentIssueProject(ctx, project, response.Issue)
+	if err != nil {
+		return nil, CommentOutput{}, err
+	}
 	return successResult(), CommentOutput{
 		Project: project,
 		Issue:   h.summaryFromIssue(project, response.Issue),
@@ -686,9 +704,12 @@ func (h toolHandlers) claim(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	output := h.mutation(project, response.Issue, response.Changed, nil, response.Event)
+	result, output, err := h.mutationResult(ctx, project, response.Issue, response.Changed, nil, response.Event)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
 	output.PreviousOwner = response.PreviousOwner
-	return successResult(), output, nil
+	return result, output, nil
 }
 
 func (h toolHandlers) setLabel(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetLabelInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
@@ -708,7 +729,7 @@ func (h toolHandlers) setLabel(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		if err != nil {
 			return nil, MutationOutput{}, err
 		}
-		return successResult(), h.mutation(project, response.Issue, response.Changed, nil, &response.Event), nil
+		return h.mutationResult(ctx, project, response.Issue, response.Changed, nil, &response.Event)
 	}
 	response, err := h.options.Client.RemoveLabel(ctx, &generated.RemoveLabelRequestOptions{
 		PathParams: &generated.RemoveLabelPath{ProjectID: project.ID, Ref: ref, Label: label},
@@ -717,7 +738,7 @@ func (h toolHandlers) setLabel(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, &response.Event)
 }
 
 func (h toolHandlers) setDeadline(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetDeadlineInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
@@ -789,7 +810,7 @@ func (h toolHandlers) patchMetadata(ctx context.Context, project ProjectIdentity
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, nil, response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, nil, response.Event)
 }
 
 func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, input CloseInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
@@ -852,7 +873,7 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, event)
 }
 
 // closeMutationProject keeps replayed close receipts inside the immutable MCP
@@ -919,7 +940,7 @@ func (h toolHandlers) reopen(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, &response.Event)
 }
 
 func (h toolHandlers) createLinks(ctx context.Context, project ProjectIdentity, input CreateInput) ([]generated.CreateInitialLinkBody, error) {
@@ -1197,8 +1218,8 @@ func (h toolHandlers) relationshipRef(ctx context.Context, source ProjectIdentit
 	if shown.Issue.ProjectUID != nil {
 		projectUID = *shown.Issue.ProjectUID
 	}
-	if targetProject.UID != "" && projectUID != targetProject.UID {
-		return relationshipTarget{}, fmt.Errorf("relationship reference %q resolved outside the MCP startup scope", ref)
+	if _, err := h.currentIssueProject(ctx, targetProject, issueFromShow(shown.Issue)); err != nil {
+		return relationshipTarget{}, err
 	}
 	if shown.Issue.UID == "" || projectUID == "" {
 		return relationshipTarget{}, fmt.Errorf("relationship reference %q did not resolve to immutable identity", ref)
@@ -1253,7 +1274,13 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 	if qualified == "" {
 		qualified = project.Name + "#" + issue.ShortID
 	}
+	projectUID := project.UID
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
 	return IssueSummary{
+		oversized:           issue.Oversized != nil && *issue.Oversized,
+		projectUID:          projectUID,
 		Author:              issue.Author,
 		AccountableActor:    issue.AccountableActor,
 		SourceActor:         issue.SourceActor,
@@ -1275,13 +1302,21 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 		UpdatedAt:           formatTime(issue.UpdatedAt),
 		ScheduledOn:         metadataString(issue.Metadata, "scheduled_on"),
 		Timezone:            metadataString(issue.Metadata, "timezone"),
+		ScheduledOnDate:     issue.ScheduledOnDate,
+		DeadlineOnDate:      issue.DeadlineOnDate,
 		updatedAt:           issue.UpdatedAt,
 		metadata:            issue.Metadata,
 	}
 }
 
 func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
+	projectUID := ""
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
 	return IssueSummary{
+		oversized:        issue.Oversized != nil && *issue.Oversized,
+		projectUID:       projectUID,
 		Author:           issue.Author,
 		AccountableActor: issue.AccountableActor,
 		SourceActor:      issue.SourceActor,
@@ -1295,6 +1330,7 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
+		ScheduledOnDate: issue.ScheduledOnDate, DeadlineOnDate: issue.DeadlineOnDate,
 		updatedAt: issue.UpdatedAt, metadata: issue.Metadata,
 	}
 }
@@ -1314,6 +1350,7 @@ func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSumma
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
+		ScheduledOnDate: issue.ScheduledOnDate, DeadlineOnDate: issue.DeadlineOnDate,
 		updatedAt: issue.UpdatedAt,
 	}
 }
@@ -1518,7 +1555,7 @@ func linkPeerSummary(peer *generated.LinkPeer) *LinkPeerSummary {
 func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdentity, input Evidence) (generated.Evidence, error) {
 	typeName := strings.TrimSpace(input.Type)
 	allowed := map[string]bool{
-		"commit": true, "pr": true, "test": true, "reviewed-paths": true,
+		"attachment": true, "commit": true, "pr": true, "test": true, "reviewed-paths": true,
 		"external": true, "no-change-audit": true, "duplicate-of": true, "superseded-by": true,
 	}
 	if !allowed[typeName] {
@@ -1526,6 +1563,9 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	}
 	paths := compactStrings(input.Paths)
 	result := generated.Evidence{Type: typeName, Paths: paths}
+	if strings.TrimSpace(input.AttachmentID) != "" {
+		result.AttachmentID = new(input.AttachmentID)
+	}
 	result.Sha = optionalString(input.SHA)
 	result.URL = optionalString(input.URL)
 	result.Command = optionalString(input.Command)
@@ -1539,6 +1579,11 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 		result.IssueRef = &target.IssueUID
 	}
 	switch typeName {
+	case "attachment":
+		if result.AttachmentID == nil {
+			return generated.Evidence{}, errors.New("attachment evidence requires attachment_id")
+		}
+
 	case "commit":
 		if result.Sha == nil {
 			return generated.Evidence{}, errors.New("commit evidence requires sha")

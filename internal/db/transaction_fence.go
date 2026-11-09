@@ -158,6 +158,16 @@ func WithExposedIssues(ctx context.Context) context.Context {
 	return context.WithValue(ctx, exposedIssuesKey{}, newIssueIDSet())
 }
 
+// WithoutIssueRegistries hides the request's issue-target and exposure
+// registries from work done for other principals, such as a scan that serves
+// every subscriber. Issues it reads are not the request's, so recording them
+// would make the request's own checks reject it. Cancellation, deadlines and
+// the transaction fence are unchanged.
+func WithoutIssueRegistries(ctx context.Context) context.Context {
+	ctx = context.WithValue(ctx, issueScopeTargetsKey{}, (*issueIDSet)(nil))
+	return context.WithValue(ctx, exposedIssuesKey{}, (*issueIDSet)(nil))
+}
+
 // ExposedIssues returns the issues this request has read so far.
 func ExposedIssues(ctx context.Context) []int64 {
 	if exposed := issueIDSetFrom(ctx, exposedIssuesKey{}); exposed != nil {

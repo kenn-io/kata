@@ -13,6 +13,7 @@ const UISnapshotContractVersion = "2"
 
 // UICapabilities describes the browser behavior authorized for this request.
 type UICapabilities struct {
+	Attachments           bool           `json:"attachments,omitempty,omitzero"`
 	AccessAdmin           bool           `json:"access_admin,omitempty,omitzero"`
 	Writable              bool           `json:"writable"`
 	Updates               string         `json:"updates" enum:"sse,poll"`

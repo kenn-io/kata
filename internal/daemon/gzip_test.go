@@ -3,7 +3,6 @@ package daemon_test
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -30,7 +29,7 @@ import (
 // eligible for gzip.
 func mkLargeIssue(t *testing.T, env *testenv.Env, projectID int64, title string) db.Issue {
 	t.Helper()
-	is, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	is, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID,
 		Title:     title,
 		Body:      strings.Repeat("kata compresses large JSON responses over slow links. ", 100),
@@ -102,7 +101,7 @@ func TestGzip_SSEStreamNotCompressedAndStillStreams(t *testing.T) {
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	_, sentinelEvt := mkIssueWithEvent(t, env, pid, "sentinel")
 
-	hwm, err := env.DB.MaxEventID(context.Background())
+	hwm, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 	resp := openSSE(t, env, "after_id="+strconv.FormatInt(hwm-1, 10), http.Header{
 		"Accept":          {"text/event-stream"},

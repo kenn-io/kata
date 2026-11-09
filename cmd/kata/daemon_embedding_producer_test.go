@@ -50,8 +50,13 @@ func TestStartEmbeddingReconcilerPublishesProducerSelection(t *testing.T) {
 	workers := newDaemonWorkerGroup()
 	_, idx, health, _, err := startEmbeddingReconciler(ctx, workers, nil, ec, client, filepath.Join(home, "vectors.db"), store, broadcaster, log.New(io.Discard, "", 0))
 	require.NoError(t, err)
-	t.Cleanup(func() { cancel(); require.True(t, workers.Wait(context.Background())); require.NoError(t, idx.Close()) })
-	//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+	// t.Context() is already canceled when cleanup runs.
+	t.Cleanup(func() {
+		cancel()
+		require.True(t, workers.Wait(context.WithoutCancel(t.Context())))
+		require.NoError(t, idx.Close())
+	})
+	//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 	require.Eventually(t, func() bool { return health().LastSuccessAt != nil }, 10*time.Second, 10*time.Millisecond)
 	require.EqualValues(t, 1, calls.Load())
 	current, err := store.ProjectByID(ctx, project.ID)

@@ -10,7 +10,8 @@ import (
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
-// Frozen renderer contract from 5266a7161e4d9fa354f73624be3d0032a80f016b.
+// Geometry contract from 5266a7161e4d9fa354f73624be3d0032a80f016b,
+// with search moved into the list pane.
 type legacySplitGeom struct {
 	ListOuterW, DetailOuterW, BodyH int
 	ListInnerW, ListInnerH          int
@@ -58,8 +59,6 @@ func legacySplitInfoLine(m Model) string {
 	chrome := m.chrome()
 	var body string
 	switch {
-	case chrome.input.kind.isCommandBar():
-		body = renderInfoBar(chrome.input, titleBarInnerWidth(m.width))
 	case chrome.input.kind.isPanelPrompt():
 		body = renderInfoPrompt(chrome.input, titleBarInnerWidth(m.width))
 	case m.focus == focusList && m.list.status != "":
@@ -194,7 +193,7 @@ func assertSplitConsumers(t *testing.T, m Model) {
 	if !dm.lastDetailSplit || dm.lastDetailWidth != max(g.DetailInnerW, 10) || dm.lastDetailHeight != max(g.DetailInnerH, 2) {
 		t.Fatalf("viewport=%dx%d split=%t, legacy=%+v", dm.lastDetailWidth, dm.lastDetailHeight, dm.lastDetailSplit, g)
 	}
-	wantRows := max(1, max(g.ListInnerH, 2)-1)
+	wantRows := max(1, max(g.ListInnerH, 2)-2)
 	if m.width <= 0 || m.height <= 0 {
 		wantRows = 0
 	}

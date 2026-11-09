@@ -1,7 +1,6 @@
 package federation_test
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -38,13 +37,13 @@ func TestHubClientPreservesCatalogPathPrefix(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 		Name: "primary", URL: server.URL + "/reverse-proxy", Token: testCatalogBearer,
 		AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
-	_, err = hub.ResolveProject(context.Background(), "hub-project")
+	_, err = hub.ResolveProject(t.Context(), "hub-project")
 	require.NoError(t, err)
 	assert.Equal(t, "/reverse-proxy/api/v1/projects/resolve", gotPath)
 }
@@ -107,12 +106,12 @@ func TestHubClientLiteralTokenResolvesCreatesEnablesAndEnrolls(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 		Name: "primary", URL: server.URL, Token: testCatalogBearer, AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
-	project, err := hub.EnsureProject(context.Background(), "hub-project", "user-a")
+	project, err := hub.EnsureProject(t.Context(), "hub-project", "user-a")
 	require.NoError(t, err)
 	assert.Equal(t, federation.HubProject{
 		ID: 42, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Name: "hub-project",
@@ -127,11 +126,11 @@ func TestHubClientLiteralTokenResolvesCreatesEnablesAndEnrolls(t *testing.T) {
 		Actor:                        "user-a",
 		AllowAdoptionSnapshotAuthors: true,
 	}
-	created, err := hub.EnsureEnrollment(context.Background(), enrollmentRequest)
+	created, err := hub.EnsureEnrollment(t.Context(), enrollmentRequest)
 	require.NoError(t, err)
 	assert.Equal(t, federation.Enrollment{ID: 71, Actor: "identity-user"}, created)
 
-	rotated, err := hub.RotateEnrollment(context.Background(), enrollmentRequest)
+	rotated, err := hub.RotateEnrollment(t.Context(), enrollmentRequest)
 	require.NoError(t, err)
 	assert.Equal(t, federation.Enrollment{ID: 72, Actor: "identity-user"}, rotated)
 
@@ -211,12 +210,12 @@ func TestHubClientEnsureProjectPreservesResolvedIdentity(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 
-			hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+			hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 				Name: "primary", URL: server.URL, AllowInsecure: true,
 			})
 			require.NoError(t, err)
 
-			project, err := hub.EnsureProject(context.Background(), requestedAlias, "user-a")
+			project, err := hub.EnsureProject(t.Context(), requestedAlias, "user-a")
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, federation.ErrHubValidation)
@@ -251,12 +250,12 @@ func TestHubClientResolveProjectIsReadOnly(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 		Name: "primary", URL: server.URL, AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
-	project, err := hub.ResolveProject(context.Background(), "hub-project")
+	project, err := hub.ResolveProject(t.Context(), "hub-project")
 	require.NoError(t, err)
 	assert.Equal(t, federation.HubProject{
 		ID: 42, UID: hubProjectUID, Name: "hub-project",
@@ -307,12 +306,12 @@ func TestHubClientEnsureProjectPreservesCreatedIdentity(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 
-			hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+			hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 				Name: "primary", URL: server.URL, AllowInsecure: true,
 			})
 			require.NoError(t, err)
 
-			project, err := hub.EnsureProject(context.Background(), "hub-project", "user-a")
+			project, err := hub.EnsureProject(t.Context(), "hub-project", "user-a")
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, federation.ErrHubValidation)
@@ -371,12 +370,12 @@ func TestHubClientRejectsMalformedProjectUIDBeforeEnable(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 
-			hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+			hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 				Name: "primary", URL: server.URL, Token: testCatalogBearer, AllowInsecure: true,
 			})
 			require.NoError(t, err)
 
-			project, err := hub.EnsureProject(context.Background(), "hub-project", "user-a")
+			project, err := hub.EnsureProject(t.Context(), "hub-project", "user-a")
 			require.Error(t, err)
 			assert.ErrorIs(t, err, federation.ErrHubValidation)
 			assert.Empty(t, project)
@@ -408,13 +407,13 @@ func TestHubClientRejectsInvalidEnrollmentActor(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 
-			hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+			hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 				Name: "primary", URL: server.URL, Token: testCatalogBearer, AllowInsecure: true,
 			})
 			require.NoError(t, err)
 
 			enrollment, err := hub.EnsureEnrollment(
-				context.Background(),
+				t.Context(),
 				federation.EnrollmentRequest{
 					ProjectID: 42, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 					Token: testEnrollment, Capabilities: "claim,pull,push", Actor: "user-a",
@@ -445,12 +444,12 @@ func TestHubClientTokenEnvUsesOnlySelectedCatalogCredential(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{ //nolint:gosec // TokenEnv is an environment variable name, not credential material.
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{ //nolint:gosec // TokenEnv is an environment variable name, not credential material.
 		Name: "primary", URL: server.URL, TokenEnv: "KATA_PRIMARY_HUB_TOKEN", AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
-	_, err = hub.EnsureEnrollment(context.Background(), federation.EnrollmentRequest{
+	_, err = hub.EnsureEnrollment(t.Context(), federation.EnrollmentRequest{
 		ProjectID: 42, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 		Token: testEnrollment, Capabilities: "claim,pull,push", Actor: "user-a",
 	})
@@ -473,7 +472,7 @@ func TestHubClientEmptyTokenEnvIsClassifiedBeforeHTTPWithoutGlobalFallback(t *te
 	}))
 	t.Cleanup(server.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{ //nolint:gosec // TokenEnv is an environment variable name, not credential material.
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{ //nolint:gosec // TokenEnv is an environment variable name, not credential material.
 		Name: "primary", URL: server.URL, TokenEnv: "KATA_PRIMARY_HUB_TOKEN", AllowInsecure: true,
 	})
 	assert.Nil(t, hub)
@@ -495,7 +494,7 @@ func TestHubClientUnsetTokenEnvIsClassifiedBeforeHTTP(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{ //nolint:gosec // TokenEnv is an environment variable name, not credential material.
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{ //nolint:gosec // TokenEnv is an environment variable name, not credential material.
 		Name: "primary", URL: server.URL, TokenEnv: "KATA_PRIMARY_HUB_TOKEN", AllowInsecure: true,
 	})
 	assert.Nil(t, hub)
@@ -522,12 +521,12 @@ func TestHubClientCatalogBearerNeverCrossesRedirectOrigin(t *testing.T) {
 	}))
 	t.Cleanup(source.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 		Name: "primary", URL: source.URL, Token: testCatalogBearer, AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
-	_, err = hub.EnsureEnrollment(context.Background(), federation.EnrollmentRequest{
+	_, err = hub.EnsureEnrollment(t.Context(), federation.EnrollmentRequest{
 		ProjectID: 42, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 		Token: testEnrollment, Capabilities: "claim,pull,push", Actor: "user-a",
 	})
@@ -570,12 +569,12 @@ func TestHubClientTokenlessEnrollmentNeverCrossesRedirectOrigin(t *testing.T) {
 			}))
 			t.Cleanup(source.Close)
 
-			hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+			hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 				Name: "primary", URL: source.URL, AllowInsecure: true,
 			})
 			require.NoError(t, err)
 
-			_, err = hub.EnsureEnrollment(context.Background(), federation.EnrollmentRequest{
+			_, err = hub.EnsureEnrollment(t.Context(), federation.EnrollmentRequest{
 				ProjectID: 42, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 				Token: testEnrollment, Capabilities: "claim,pull,push", Actor: "user-a",
 			})
@@ -612,13 +611,13 @@ func TestHubClientFollowsSameOriginEnrollmentRedirect(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 		Name: "primary", URL: server.URL, AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
 	enrollment, err := hub.EnsureEnrollment(
-		context.Background(),
+		t.Context(),
 		federation.EnrollmentRequest{
 			ProjectID: 42, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 			Token: testEnrollment, Capabilities: "claim,pull,push", Actor: "user-a",
@@ -637,12 +636,12 @@ func TestHubClientHTTPErrorIsTypedBoundedAndSecretSafe(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 		Name: "primary", URL: server.URL, Token: testCatalogBearer, AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
-	_, err = hub.EnsureEnrollment(context.Background(), federation.EnrollmentRequest{
+	_, err = hub.EnsureEnrollment(t.Context(), federation.EnrollmentRequest{
 		ProjectID: 42, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 		Token: testEnrollment, Capabilities: "claim,pull,push", Actor: "user-a",
 	})
@@ -678,12 +677,12 @@ func TestHubClientHTTPStatusCategories(t *testing.T) {
 				w.WriteHeader(tt.status)
 			}))
 			t.Cleanup(server.Close)
-			hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+			hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 				Name: "primary", URL: server.URL, AllowInsecure: true,
 			})
 			require.NoError(t, err)
 
-			_, err = hub.EnsureEnrollment(context.Background(), federation.EnrollmentRequest{
+			_, err = hub.EnsureEnrollment(t.Context(), federation.EnrollmentRequest{
 				ProjectID: 42, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 				Token: testEnrollment, Capabilities: "claim,pull,push", Actor: "user-a",
 			})
@@ -705,12 +704,12 @@ func TestHubClientRevokesEnrollmentByExactID(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": 47, "revoked": true})
 	}))
 	t.Cleanup(server.Close)
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+	hub, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{
 		Name: "primary", URL: server.URL, AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, hub.RevokeEnrollment(context.Background(), 47))
+	require.NoError(t, hub.RevokeEnrollment(t.Context(), 47))
 	assert.Equal(t, "/api/v1/federation/enrollments/47/revoke", gotPath)
 }
 

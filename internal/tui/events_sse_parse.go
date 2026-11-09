@@ -152,6 +152,14 @@ func decodeEventReceived(f frame) eventReceivedMsg {
 	if p.IssueShortID != nil {
 		out.issueShortID = *p.IssueShortID
 	}
+	if strings.HasPrefix(p.Type, "recurrence.") && len(p.Payload) > 0 {
+		var payload struct {
+			RecurrenceUID string `json:"recurrence_uid"`
+		}
+		if json.Unmarshal(p.Payload, &payload) == nil {
+			out.recurrenceUID = payload.RecurrenceUID
+		}
+	}
 	switch p.Type {
 	case "issue.commented", "issue.comment_edited":
 		if len(p.Payload) == 0 {
@@ -328,9 +336,10 @@ func appendPeers(refs *[]string, refUIDs *[]string, shorts, uids []string) {
 	}
 }
 
-func deref(s *string) string {
+func deref[T any](s *T) T {
 	if s == nil {
-		return ""
+		var zero T
+		return zero
 	}
 	return *s
 }

@@ -3,7 +3,6 @@ package jsonl_test
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -20,7 +19,7 @@ func TestRoundtripRichDatabaseAcrossPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture := buildRichJSONLFixture(t)
 	sourceJSONL := exportToBuffer(ctx, t, fixture.DB)
 

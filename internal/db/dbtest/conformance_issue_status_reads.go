@@ -12,7 +12,7 @@ import (
 )
 
 func checkIssueStatusMappingReads(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	reader, ok := store.(db.IssueStatusReader)
 	require.True(t, ok, "backend must offer claim-fenced private status reads")
 	project, err := store.CreateProject(ctx, "example-project")

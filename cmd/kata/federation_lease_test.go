@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -190,11 +189,11 @@ func TestClaimForceRelease_EnrollmentBearerCannotForceRelease(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
 	dir := t.TempDir()
-	project, err := env.DB.CreateProject(context.Background(), "kata")
+	project, err := env.DB.CreateProject(t.Context(), "kata")
 	require.NoError(t, err)
 	require.NoError(t, config.WriteProjectConfig(dir, project.Name))
 	enableHubClaims(t, env, project.ID)
-	issue, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "force release auth",
 		Author:    "tester",
@@ -203,7 +202,7 @@ func TestClaimForceRelease_EnrollmentBearerCannotForceRelease(t *testing.T) {
 	ref := issue.ShortID
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 
-	created, err := env.DB.CreateFederationEnrollment(context.Background(), db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+	created, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
 		Token:            "enrollment-token",
 		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4AB",
 		ProjectID:        &project.ID,
@@ -298,7 +297,7 @@ func TestClaimSteal_JSONPartialSuccessIncludesReleasedClaim(t *testing.T) {
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"--workspace", dir, "--project", "hub", "--as", "bob", "--json", "federation", "lease", "steal", "abcd", "--reason", "handoff"})
-	cmd.SetContext(contextWithBaseURL(context.Background(), server.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), server.URL))
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.True(t, forceReleaseCalled)
@@ -356,7 +355,7 @@ func TestClaimSteal_JSONPartialSuccessWhenSecondClaimDeniedWithOK(t *testing.T) 
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"--workspace", dir, "--project", "hub", "--as", "bob", "--json", "federation", "lease", "steal", "abcd", "--reason", "handoff"})
-	cmd.SetContext(contextWithBaseURL(context.Background(), server.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), server.URL))
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.True(t, forceReleaseCalled)
@@ -460,7 +459,7 @@ func setupFederatedSpokeIssue(t *testing.T, title string) (*testenv.Env, string,
 
 func enableHubClaims(t *testing.T, env *testenv.Env, pid int64) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.ProjectByID(ctx, pid)
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -479,7 +478,7 @@ func enableSpokeClaims(t *testing.T, env *testenv.Env, pid int64) {
 
 func enableSpokeClaimsTo(t *testing.T, env *testenv.Env, pid int64, hubURL string, hubProjectID int64) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.ProjectByID(ctx, pid)
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{

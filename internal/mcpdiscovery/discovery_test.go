@@ -16,7 +16,7 @@ import (
 func TestPublishedListenerStatusAndCleanup(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "mcp")
 	require.NoError(t, os.Mkdir(dir, 0o700))
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, listener.Close()) })
 	cleanup, err := Publish(dir, listener.Addr().String(), "test-listener-token", "http://127.0.0.1:4321")

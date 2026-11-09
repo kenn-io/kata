@@ -19,7 +19,7 @@ func TestPostgresBootstrapDoesNotInstallAvailablePgvector(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -49,8 +49,9 @@ func TestPostgresBootstrapDoesNotInstallAvailablePgvector(t *testing.T) {
 	`, role, database, role)) // #nosec G201 -- identifiers are sanitized above.
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = admin.ExecContext(context.Background(), "DROP OWNED BY "+role)
-		_, _ = admin.ExecContext(context.Background(), "DROP ROLE IF EXISTS "+role)
+		// t.Context() is already canceled when cleanup runs.
+		_, _ = admin.ExecContext(context.WithoutCancel(t.Context()), "DROP OWNED BY "+role)
+		_, _ = admin.ExecContext(context.WithoutCancel(t.Context()), "DROP ROLE IF EXISTS "+role)
 	})
 
 	store, err := pgstore.OpenWithConfig(
@@ -85,7 +86,7 @@ func TestPostgresBootstrapDoesNotRequirePgvector(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPlainPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -112,7 +113,7 @@ func TestPostgresBootstrapDoesNotRequireHalfvec(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires pgvector testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
 

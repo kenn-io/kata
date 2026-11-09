@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"crypto/ed25519"
 	"testing"
 
@@ -13,7 +12,7 @@ import (
 
 func checkAdoptionPreservesProjectAccessPolicy(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	access, ok := store.(db.ProjectAccessStorage)
 	require.True(t, ok)
 	project, err := store.CreateProject(ctx, "adoption-access-project")
@@ -75,7 +74,7 @@ func checkProjectScopedRelayEnrollmentExportRoundTrip(
 	backend Backend,
 ) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "relay-export-project")
 	if err != nil {
 		return err

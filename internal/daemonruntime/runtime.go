@@ -14,6 +14,15 @@ import (
 // restart after an update.
 const RuntimeRestartMetadataKey = "restart_signal"
 
+// RuntimeRestartExecutableKey marks a daemon that accepts an installed-executable restart request.
+const RuntimeRestartExecutableKey = "restart_executable"
+
+// RuntimeRestartReplyKey names the restart request a replacement daemon was started for.
+const RuntimeRestartReplyKey = "restart_reply"
+
+// RuntimeRestartFromKey names the daemon generation a replacement replaced.
+const RuntimeRestartFromKey = "restart_from"
+
 // RuntimeProcessAlive reports whether a runtime record still identifies a local
 // process that created it. For legacy records without an identity, a process
 // created after the record was published proves that the PID has been reused.
@@ -46,6 +55,21 @@ func runtimeCreationTimeMatches(record kitdaemon.RuntimeRecord) bool {
 		return true
 	}
 	return !time.UnixMilli(created).After(record.StartedAt)
+}
+
+// RuntimeRecordWorthProbing reports whether discovery should ping a record's
+// endpoint. Beyond RuntimeProcessAlive, it keeps a record whose identity this
+// process cannot judge when its PID is live and was not reused after the record
+// was written. Startup refuses beside such a record, so discovery must still
+// find the daemon instead of auto-starting one that will refuse. Discovery
+// accepts it only if the endpoint reports the record's PID. Daemon controls
+// keep using RuntimeProcessAlive and never signal such a record.
+func RuntimeRecordWorthProbing(record kitdaemon.RuntimeRecord) bool {
+	if kitdaemon.RuntimeProcessScope(record) != kitdaemon.ProcessScopeUnknown {
+		return RuntimeProcessAlive(record)
+	}
+	return record.PID > 0 && record.PID <= math.MaxInt32 && kitdaemon.ProcessAlive(record.PID) &&
+		runtimeCreationTimeMatches(record)
 }
 
 // RuntimeRecordBlocksStart keeps kit's startup rule and the legacy PID-reuse check.

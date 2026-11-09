@@ -1,8 +1,8 @@
 import { expect, test } from './fixtures'
 
-// A11: inspect the real production UI's current authority summary at desktop
-// and narrow widths, with no credential-inventory request or plaintext token.
-test('active connection stays above the workspace and wraps on narrow screens', async ({
+test.use({ colorScheme: 'dark', reducedMotion: 'reduce' })
+
+test('healthy connections leave the toolbar at the top; read-only notices remain visible', async ({
   page,
   kata,
 }, testInfo) => {
@@ -11,42 +11,50 @@ test('active connection stays above the workspace and wraps on narrow screens', 
     if (new URL(request.url()).pathname === '/api/v1/tokens') inventoryReads++
   })
   const credentials = await kata.launch(page)
-  const snapshot = await kata.snapshot(page, credentials)
-  const capabilities = snapshot.capabilities as { account?: string; auth_kind?: string }
-  expect(capabilities.auth_kind).toBe('web_local')
+  const issue = await kata.seedIssue(page, credentials, { title: 'Review example release' })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+  await expect(page.getByRole('button', { name: /Review example release/ })).toBeVisible()
   const summary = page.getByRole('status', { name: 'Active connection' })
-  await expect(summary).toBeVisible()
-  await expect(summary).toContainText('Hub:')
-  await expect(summary).toContainText(`Account: ${capabilities.account || 'Local connection'}`)
-  await expect(summary).toContainText('Connected')
-  await expect(summary).not.toContainText('example-local-token')
-  const accent = await summary.evaluate((element) => {
-    const color = getComputedStyle(element).borderInlineStartColor
-    const [red, green, blue] = color.match(/\d+/g)!.map(Number)
-    return { red: red!, green: green!, blue: blue! }
-  })
-  expect(accent.red).toBeGreaterThanOrEqual(accent.green)
-  expect(accent.green - accent.blue).toBeGreaterThan(accent.red - accent.green)
 
-  for (const width of [1280, 390]) {
-    await page.setViewportSize({ width, height: 800 })
-    const layout = await summary.evaluate((element) => {
-      const rect = element.getBoundingClientRect()
-      const header = document.querySelector('.kata-header')!.getBoundingClientRect()
-      return {
-        top: rect.top,
-        bottom: rect.bottom,
-        headerTop: header.top,
-        left: rect.left,
-        right: rect.right,
-        viewport: window.innerWidth,
-      }
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(summary).toHaveCount(0)
+    expect((await page.locator('.kata-header').boundingBox())?.y).toBe(0)
+    await expect(page.getByRole('button', { name: 'New task' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: /Switch Kata daemon:/ })).toBeVisible()
+    await page.screenshot({
+      path: testInfo.outputPath(`connected-workspace-${width}.png`),
+      clip: { x: 0, y: 0, width, height: width === 1440 ? 360 : 900 },
     })
-    expect(layout.top).toBe(0)
-    expect(layout.bottom).toBeLessThanOrEqual(layout.headerTop)
-    expect(layout.left).toBeGreaterThanOrEqual(0)
-    expect(layout.right).toBeLessThanOrEqual(layout.viewport)
-    await page.screenshot({ path: testInfo.outputPath(`active-connection-${width}.png`) })
+  }
+
+  await kata.restartReadonly()
+  try {
+    await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
+    await expect(summary).toContainText('Credential: Read-only')
+    await expect(page.getByRole('button', { name: 'New task' })).toBeDisabled()
+    await expect(summary).not.toContainText('example-local-token')
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      const layout = await summary.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const header = document.querySelector('.kata-header')!.getBoundingClientRect()
+        return {
+          top: rect.top,
+          bottom: rect.bottom,
+          headerTop: header.top,
+          left: rect.left,
+          right: rect.right,
+          viewport: window.innerWidth,
+        }
+      })
+      expect(layout.top).toBe(0)
+      expect(layout.bottom).toBeLessThanOrEqual(layout.headerTop)
+      expect(layout.left).toBeGreaterThanOrEqual(0)
+      expect(layout.right).toBeLessThanOrEqual(layout.viewport)
+    }
+  } finally {
+    await kata.restart()
   }
   expect(inventoryReads).toBe(0)
 })

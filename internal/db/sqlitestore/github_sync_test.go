@@ -16,7 +16,7 @@ import (
 func TestGitHubSyncSchemaVersion(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	got, err := d.SchemaVersion(ctx)
 	require.NoError(t, err)
@@ -598,7 +598,7 @@ func TestAdoptProjectIntoFederationRejectsIssueSyncBinding(t *testing.T) {
 func setupGitHubSyncProject(t *testing.T) (*sqlitestore.Store, context.Context, db.Project) {
 	t.Helper()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "example-project")
 	return d, ctx, p
 }
@@ -679,7 +679,7 @@ func gitHubSyncBindingIDs(bindings []db.IssueSyncBinding) []int64 {
 func TestGitHubSyncMissingBindingReturnsNotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := d.IssueSyncBindingByID(ctx, 999)
 	require.True(t, errors.Is(err, db.ErrNotFound))

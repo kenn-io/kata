@@ -98,38 +98,38 @@ func newSource() *adapterSource {
 func adapterStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	s, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 	return s
 }
 func adapterBinding(t *testing.T, s db.Storage, c Config) db.IssueSyncBinding {
 	t.Helper()
-	p, err := s.CreateProject(context.Background(), "example-project")
+	p, err := s.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	raw, err := EncodeConfig(c)
 	require.NoError(t, err)
-	b, err := s.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "linear", SourceKey: c.SourceKey(), RemoteID: c.RemoteID(), DisplayName: "Example team", Config: raw, IntervalSeconds: 300})
+	b, err := s.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "linear", SourceKey: c.SourceKey(), RemoteID: c.RemoteID(), DisplayName: "Example team", Config: raw, IntervalSeconds: 300})
 	require.NoError(t, err)
 	return b
 }
 func mappedIssue(t *testing.T, s db.Storage, b db.IssueSyncBinding, id string) db.Issue {
 	t.Helper()
-	m, err := s.ImportMappingBySource(context.Background(), b.ProjectID, b.SourceKey, "issue", "issue:"+id)
+	m, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "issue:"+id)
 	require.NoError(t, err)
-	i, err := s.IssueByID(context.Background(), *m.IssueID)
+	i, err := s.IssueByID(t.Context(), *m.IssueID)
 	require.NoError(t, err)
 	return i
 }
 func pendingCount(t *testing.T, s *sqlitestore.Store, b db.IssueSyncBinding) int {
 	t.Helper()
 	var count int
-	require.NoError(t, s.QueryRowContext(context.Background(), `SELECT count(*) FROM import_mappings WHERE source=$1 AND pending_event_uid IS NOT NULL`, b.SourceKey).Scan(&count))
+	require.NoError(t, s.QueryRowContext(t.Context(), `SELECT count(*) FROM import_mappings WHERE source=$1 AND pending_event_uid IS NOT NULL`, b.SourceKey).Scan(&count))
 	return count
 }
 
 func TestRunnerReplayLatestIntentAndContentFailure(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := adapterStore(t)
 	b := adapterBinding(t, store, statusConfig())
 	source := newSource()
@@ -169,7 +169,7 @@ func TestRunnerReplayLatestIntentAndContentFailure(t *testing.T) {
 	require.Equal(t, 2, source.writes)
 }
 func TestRunnerRestartBeyondStatusPageAndBlockedMapping(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := adapterStore(t)
 	b := adapterBinding(t, store, statusConfig())
 	source := newSource()
@@ -204,7 +204,7 @@ func TestRunnerRestartBeyondStatusPageAndBlockedMapping(t *testing.T) {
 
 // Contract: a fixture API can prove import and binary writeback without live credentials.
 func TestClientRunnerImportAndStateOnlyWriteback(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := adapterStore(t)
 	b := adapterBinding(t, store, statusConfig())
 	current := stateID
@@ -259,7 +259,7 @@ func TestClientRunnerImportAndStateOnlyWriteback(t *testing.T) {
 func TestRunnerClosureMetadataFollowsMode(t *testing.T) {
 	for _, mode := range []string{"one-way", "two-way"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := adapterStore(t)
 			c := testConfig()
 			c.StatusSync = mode
@@ -291,7 +291,7 @@ func TestRunnerClosureMetadataFollowsMode(t *testing.T) {
 // Two-way sweeps reuse the previous content read, so each mapped issue does not
 // cost its own request against the shared Linear quota.
 func TestStatusSweepReusesPreviousContentRead(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := adapterStore(t)
 	b := adapterBinding(t, store, statusConfig())
 	source := newSource()

@@ -118,6 +118,13 @@ type CronDefinitionActionRequest struct {
 	Body CronDefinitionActionBody
 }
 
+// CronJobActionRequest addresses a job lifecycle change, which a push
+// enrollment may authorize.
+type CronJobActionRequest struct {
+	Authorization string `header:"Authorization"`
+	CronDefinitionActionRequest
+}
+
 // PutCronJobBody carries a job definition and optional replacement precondition.
 type PutCronJobBody struct {
 	Actor            string            `json:"actor,omitempty"`
@@ -136,8 +143,9 @@ type PutCronWorkflowBody struct {
 
 // CreateCronJobRequest creates a definition in the selected project.
 type CreateCronJobRequest struct {
-	ProjectID int64 `path:"project_id"`
-	Body      PutCronJobBody
+	Authorization string `header:"Authorization"`
+	ProjectID     int64  `path:"project_id"`
+	Body          PutCronJobBody
 }
 
 // ReplaceCronJobRequest replaces one job at its expected definition event.

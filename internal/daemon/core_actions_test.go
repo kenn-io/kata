@@ -75,7 +75,7 @@ func TestCoreActionTelemetry(t *testing.T) {
 
 func coreActionPost(t *testing.T, s telemetryTestServer, path, body, surface, key string) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, telemetryTestOrigin+path, strings.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, telemetryTestOrigin+path, strings.NewReader(body))
 	request.RemoteAddr = "127.0.0.1:40123"
 	request.Header.Set("Origin", telemetryTestOrigin)
 	request.Header.Set("Content-Type", "application/json")
@@ -119,7 +119,7 @@ func TestCoreActionTelemetryScopedMutations(t *testing.T) {
 	t.Cleanup(func() { _ = server.Close() })
 	post := func(path, body string) api.MutationResponse {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(body))
 		request.RemoteAddr = "127.0.0.1:40123"
 		request.Header.Set("Authorization", "Bearer scoped-authorization-test-token")
 		request.Header.Set("Content-Type", "application/json")

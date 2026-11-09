@@ -2,9 +2,11 @@ package tui
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -51,7 +53,6 @@ type detailAPI interface {
 	ListEvents(ctx context.Context, projectID int64, ref string) ([]EventLogEntry, error)
 	ListLinks(ctx context.Context, projectID int64, ref string) ([]LinkEntry, error)
 	Close(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
-	Reopen(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
 	AddLabel(
 		ctx context.Context, projectID int64, ref, label, actor string,
 	) (*MutationResp, error)
@@ -104,6 +105,8 @@ type detailModel struct {
 	issue              *Issue
 	parent             *IssueRef
 	children           []Issue
+	recurrence         *recurrenceclient.View
+	recurrenceErr      error
 	detailFocus        detailFocus
 	loading            bool
 	err                error
@@ -171,7 +174,7 @@ func newDetailModel() detailModel { return detailModel{reads: &detailReadBatch{}
 // detail errors are immutable once installed.
 func cloneDetailModel(dm detailModel) detailModel {
 	cloned := dm
-	cloned.reads = &detailReadBatch{}
+	cloned.reads = &detailReadBatch{canceled: dm.reads != nil && dm.reads.canceled}
 	cloned.issue = cloneIssue(dm.issue)
 	if dm.parent != nil {
 		parent := *dm.parent
@@ -188,6 +191,17 @@ func cloneDetailModel(dm detailModel) detailModel {
 		}
 	}
 	return cloned
+}
+
+// invalidated retains navigation state while fetched relations wait for a refetch.
+func (dm detailModel) invalidated() detailModel {
+	if dm.issue == nil {
+		return dm
+	}
+	dm.cancelReads()
+	dm.parent, dm.children, dm.comments, dm.events, dm.links = nil, nil, nil, nil, nil
+	dm.loading, dm.commentsLoading, dm.eventsLoading, dm.linksLoading = true, true, true, true
+	return dm
 }
 
 func cloneIssue(issue *Issue) *Issue {
@@ -337,6 +351,8 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		dm.loading = false
 		if m.issue != nil {
 			dm.issue = m.issue
+			dm.recurrence = m.recurrence
+			dm.recurrenceErr = m.recurrenceErr
 		}
 		dm.parent = m.parent
 		dm.children = m.children
@@ -348,9 +364,30 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		}
 		dm.fetchSeq.comments = newestDetailFetchSeq(dm.fetchSeq.comments, m.requestSeq)
 		dm.commentsLoading = false
-		dm.comments = m.comments
+		selectedUID := ""
+		if dm.activeTab == tabComments && dm.tabCursor >= 0 && dm.tabCursor < len(dm.comments) {
+			selectedUID = dm.comments[dm.tabCursor].UID
+		}
+		wasVisible := false
+		if dm.issue != nil && selectedUID != "" && dm.detailFocus == focusActivity && dm.selectedCommentUID == "" {
+			if width, visible, ok := dm.viewportDims(); ok {
+				_, anchors := dm.detailDocumentLines(width, dm.scrollChrome())
+				wasVisible = anchors.tabCursor >= dm.scroll && anchors.tabCursor < dm.scroll+visible
+			}
+		}
+		dm.comments = threadOrder(m.comments)
+		selectedFound := false
+		if selectedUID != "" && m.err == nil {
+			if index := slices.IndexFunc(dm.comments, func(c CommentEntry) bool { return c.UID == selectedUID }); index >= 0 {
+				dm.tabCursor = index
+				selectedFound = true
+			}
+		}
 		dm.commentsErr = m.err
 		dm = dm.autoSelectActivityTab()
+		if wasVisible && selectedFound {
+			dm = dm.revealCursor()
+		}
 	case eventsFetchedMsg:
 		if m.gen != dm.gen || detailFetchResultIsOlder(m.requestSeq, dm.fetchSeq.events) {
 			return dm, false

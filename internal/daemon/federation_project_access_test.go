@@ -89,11 +89,11 @@ func runFederationPollRevocation(t *testing.T, afterRead bool) {
 		var revoked bool
 		raceStore := &revokeFederationProjectAccessOnRead{Storage: store}
 		revoke := func() error {
-			_, err := store.SetTeamMembership(context.Background(), team.UID, "example-actor", false, "admin")
+			_, err := store.SetTeamMembership(t.Context(), team.UID, "example-actor", false, "admin")
 			if err != nil {
 				return err
 			}
-			_, _, err = store.CreateIssue(context.Background(), db.CreateIssueParams{
+			_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{
 				ProjectID: project.ID,
 				Title:     canary,
 				Author:    "admin",
@@ -125,7 +125,7 @@ func runFederationPollRevocation(t *testing.T, afterRead bool) {
 			ingress, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
 			require.NoError(t, err)
 
-			request := httptest.NewRequest(http.MethodGet,
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 				"https://hub.example"+projectPath(project.ID)+"/federation/events?after_id=0&limit=10", nil)
 			request.Header.Set("Authorization", "Bearer "+enrollment.Token)
 			require.NoError(t, federationsigning.Sign(request, source))

@@ -35,6 +35,7 @@ import (
 
 // cliUseTelemetry is the daemon's reporter.
 type cliUseTelemetry struct {
+	fakeTelemetryReporter
 	mu       sync.Mutex
 	captured []map[string]any
 	events   []string
@@ -63,7 +64,7 @@ func (c *cliUseTelemetry) recorded() []map[string]any {
 
 func (c *cliUseTelemetry) waitForCapture(t *testing.T) {
 	t.Helper()
-	//nolint:kennlint // Real daemon delivery can finish after the command's exit wait.
+	//nolint:kennlint // sleeptest: Real daemon delivery can finish after the command's exit wait.
 	require.Eventually(t, func() bool { return len(c.recorded()) > 0 }, 5*time.Second, time.Millisecond)
 }
 
@@ -73,7 +74,7 @@ func waitCLIUseMarker(t *testing.T, prefix string) {
 	require.NotNil(t, target)
 	marker := client.TelemetryDayMarkerPath(*target, prefix)
 	day := cliUseNow().UTC().Format(time.DateOnly)
-	//nolint:kennlint // The daily marker signals that the real HTTP response was handled.
+	//nolint:kennlint // sleeptest: The daily marker signals that the real HTTP response was handled.
 	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(marker) == day }, 5*time.Second, time.Millisecond)
 }
 
@@ -114,7 +115,7 @@ func findCommand(t *testing.T, path ...string) *cobra.Command {
 
 func closedLoopbackAddr(t *testing.T) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	addr := listener.Addr().String()
 	require.NoError(t, listener.Close())
@@ -245,7 +246,7 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
 		t.Setenv("KATA_SERVER", "")
-		_, err = discoverDaemon(context.Background())
+		_, err = discoverDaemon(t.Context())
 		var ce *cliError
 		require.ErrorAs(t, err, &ce)
 		assert.Contains(t, ce.Message, "no daemon running")
@@ -262,13 +263,13 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		cmd.SetOut(&stdout)
 		cmd.SetErr(&stderr)
-		cmd.SetContext(context.Background())
+		cmd.SetContext(t.Context())
 
 		settledCLIUse(t, func(*testing.T) { reportCLIUse(cmd) })
 
 		assert.Empty(t, stdout.String())
 		assert.Empty(t, stderr.String())
-		_, err := discoverDaemon(context.Background())
+		_, err := discoverDaemon(t.Context())
 		var ce *cliError
 		require.ErrorAs(t, err, &ce)
 		assert.Contains(t, ce.Message, "no daemon running")
@@ -282,7 +283,7 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		require.Contains(t, output, "SessionStart")
 		require.Empty(t, stderr)
 		t.Setenv("KATA_SERVER", "")
-		_, err = discoverDaemon(context.Background())
+		_, err = discoverDaemon(t.Context())
 		require.ErrorContains(t, err, "no daemon running")
 	})
 }
@@ -315,7 +316,7 @@ func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
 	env := newCLIUseEnv(t, capture)
 	cmd := findCommand(t, "events")
 	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: env.URL})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	cmd.SetContext(ctx)
 
@@ -357,7 +358,7 @@ func newCLIUseDaemon(t *testing.T) *cliUseDaemon {
 
 func (d *cliUseDaemon) waitForPosts(t *testing.T, want int32) {
 	t.Helper()
-	//nolint:kennlint // Wait for real HTTP handlers before asserting counts or changing their response.
+	//nolint:kennlint // sleeptest: Wait for real HTTP handlers before asserting counts or changing their response.
 	require.Eventually(t, func() bool { return d.posts.Load() == want }, 5*time.Second, time.Millisecond)
 }
 
@@ -372,7 +373,7 @@ func setCLIUseClock(t *testing.T, now time.Time) {
 func reportCLIUseTo(t *testing.T, url string) {
 	t.Helper()
 	cmd := findCommand(t, "projects", "list")
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: url})
 	t.Cleanup(func() { cliUseTarget.Store(nil) })
 	reportCLIUse(cmd)
@@ -409,7 +410,7 @@ func TestCLIUseRetriesUntilTheDaemonAccepts(t *testing.T) {
 	reportCLIUseTo(t, target.url)
 	target.waitForPosts(t, 1)
 	attempt := client.TelemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
-	//nolint:kennlint // Observe the handled failure before invoking the next command.
+	//nolint:kennlint // sleeptest: Observe the handled failure before invoking the next command.
 	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(attempt) == "" }, 5*time.Second, time.Millisecond)
 	target.status.Store(http.StatusAccepted)
 	reportCLIUseTo(t, target.url)

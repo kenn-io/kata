@@ -1,7 +1,6 @@
 package pgstore_test
 
 import (
-	"context"
 	"testing"
 
 	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
@@ -26,7 +25,7 @@ func TestOpen_ConnectsAndReturnsStore(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -44,7 +43,7 @@ func TestPeekSchemaVersion_ReturnsZeroForFreshDB(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 

@@ -25,7 +25,7 @@ import (
 )
 
 func TestFederationClaimsTwoSpokeLifecycle(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fx := setupFederationClaimE2E(t, "phase3-claims-lifecycle")
 
 	issueA := waitForFederatedIssue(t, fx.spokeA.db, fx.hubIssue.UID, fx.spokeA.stderr)
@@ -90,7 +90,7 @@ func TestFederationClaimsTwoSpokeLifecycle(t *testing.T) {
 }
 
 func TestFederationTimedClaimExpires(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fx := setupFederationClaimE2E(t, "phase3-claims-expiry")
 
 	issueA := waitForFederatedIssue(t, fx.spokeA.db, fx.hubIssue.UID, fx.spokeA.stderr)
@@ -177,7 +177,7 @@ type federationClaimSpoke struct {
 
 func setupFederationClaimE2E(t *testing.T, name string) federationClaimFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	bin := buildKataBinary(t)
 
@@ -355,7 +355,7 @@ func claimE2ESQLiteBusy(res e2eClaimRun) bool {
 
 func runKata(t *testing.T, bin string, dirs e2eDirs, args ...string) (e2eClaimRun, int) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // test-built binary and test-controlled args

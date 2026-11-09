@@ -23,6 +23,8 @@ func TestStandaloneCopyCanPinItsNewRootAuthority(t *testing.T) {
 	source := openExportTestDB(t)
 	project, err := source.CreateProject(ctx, "pinned-source-project")
 	require.NoError(t, err)
+	unrelated, err := source.CreateProject(ctx, "unrelated-project")
+	require.NoError(t, err)
 	rootAuthorityUID := source.InstanceUID()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -62,6 +64,10 @@ func TestStandaloneCopyCanPinItsNewRootAuthority(t *testing.T) {
 		_, err = source.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,?)`, key, "source-federation-state")
 		require.NoError(t, err)
 	}
+	for _, projectUID := range []string{project.UID, unrelated.UID} {
+		_, err = source.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,?)`, db.ProjectStreamResetMetadataPrefix+projectUID, "777")
+		require.NoError(t, err)
+	}
 	var input bytes.Buffer
 	require.NoError(t, jsonl.Export(ctx, source, &input, jsonl.ExportOptions{IncludeDeleted: true}))
 	inputRecords, err := jsonl.NewDecoder(bytes.NewReader(input.Bytes())).ReadAll(ctx)
@@ -82,7 +88,7 @@ func TestStandaloneCopyCanPinItsNewRootAuthority(t *testing.T) {
 		require.True(t, inputKinds[kind], "source export should contain %s", kind)
 	}
 	require.True(t, rootTransitionFound, "source export should contain a root-key transition")
-	for _, prefix := range []string{db.RelayResetMetadataPrefix, db.AttributionUIResetMetadataPrefix, db.PendingCreationMetadataPrefix, db.RelayResetSupersededMetadataPrefix} {
+	for _, prefix := range []string{db.RelayResetMetadataPrefix, db.AttributionUIResetMetadataPrefix, db.PendingCreationMetadataPrefix, db.RelayResetSupersededMetadataPrefix, db.ProjectStreamResetMetadataPrefix} {
 		found := false
 		for key := range inputMetaKeys {
 			found = found || strings.HasPrefix(key, prefix)
@@ -109,7 +115,7 @@ func TestStandaloneCopyCanPinItsNewRootAuthority(t *testing.T) {
 			for _, prefix := range []string{
 				db.RootKeyTransitionMetadataPrefix, db.RelayResetMetadataPrefix,
 				db.AttributionUIResetMetadataPrefix, db.PendingCreationMetadataPrefix,
-				db.RelayResetSupersededMetadataPrefix,
+				db.RelayResetSupersededMetadataPrefix, db.ProjectStreamResetMetadataPrefix,
 			} {
 				assert.False(t, strings.HasPrefix(metadata.Key, prefix), "standalone copy retained source metadata %q", metadata.Key)
 			}

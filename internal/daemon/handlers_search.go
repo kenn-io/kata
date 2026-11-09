@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -108,7 +109,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				page.NextCursor = pagination.Encode(pagination.Position{CreatedAt: last.CreatedAt, ID: last.ID}, hash)
 			}
 		}
-		out := &api.SearchResponse{}
+		out := &api.SearchResponse{EmbeddingsConfigured: strconv.FormatBool(cfg.Embedder != nil)}
 		out.Body.PageMetadata = page
 		out.Body.Query = in.Query
 		out.Body.Mode = string(res.Mode)

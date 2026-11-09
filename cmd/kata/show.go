@@ -110,8 +110,18 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err != nil {
 		return err
 	}
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	if err != nil {
+		return err
+	}
+	recurrence := showRecurrenceFor(ctx, apiClient, bs)
 	mode := currentOutputMode()
 	if mode == outputJSON {
+		if recurrence != nil {
+			if bs, err = withRecurrence(bs, recurrence); err != nil {
+				return err
+			}
+		}
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
@@ -123,6 +133,18 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	if b.Issue.Status == "closed" {
+		b.CloseEvidence, err = optionalCloseEvidenceForShow(ctx, client, baseURL, pid, b.Issue.UID)
+		if err != nil {
+			return err
+		}
+	}
+	b.Issue.ShortID, err = issueRefForOutput(daemonAPI{ctx: ctx, baseURL: baseURL, client: client}, pid, ref.ProjectName,
+		issueIdentityForOutput{ProjectID: b.Issue.ProjectID, UID: b.Issue.UID, ShortID: b.Issue.ShortID})
+	if err != nil {
+		return err
+	}
+	b.Recurrence = recurrence
 	if mode == outputAgent {
 		return printShowAgent(cmd.OutOrStdout(), b, ref.ProjectName, agentOperation)
 	}
@@ -173,6 +195,11 @@ func printShowHuman(
 	}
 	if err := printShowClaimViolationLines(out, b.LeaseViolations); err != nil {
 		return err
+	}
+	if b.Recurrence != nil {
+		if _, err := fmt.Fprintln(out, recurrenceLine(b.Recurrence)); err != nil {
+			return err
+		}
 	}
 	if b.Issue.Body != "" {
 		if _, err := fmt.Fprintln(out); err != nil {
@@ -254,7 +281,7 @@ func printShowHuman(
 			}
 		}
 	}
-	return nil
+	return printShowAttachmentEvidence(out, b)
 }
 
 func writeRenderedPrefixedLines(w io.Writer, prefix string, lines []string) error {
@@ -311,13 +338,15 @@ func compactJSON(raw jsontext.Value) string {
 // response. It is shared by both the human and agent renderers; the
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
-	Issue struct {
-		ShortID string `json:"short_id"`
-		UID     string `json:"uid"`
-		Title   string `json:"title"`
-		Body    string `json:"body"`
-		Status  string `json:"status"`
-		Author  string `json:"author"`
+	CloseEvidence []db.Evidence `json:"-"`
+	Issue         struct {
+		ProjectID int64  `json:"project_id"`
+		ShortID   string `json:"short_id"`
+		UID       string `json:"uid"`
+		Title     string `json:"title"`
+		Body      string `json:"body"`
+		Status    string `json:"status"`
+		Author    string `json:"author"`
 		db.AttributionView
 		Owner               *string                   `json:"owner"`
 		AssignmentExpiresOn *time.Time                `json:"assignment_expires_on"`
@@ -339,6 +368,7 @@ type showResponseForCLI struct {
 	PendingLeases   []pendingClaimForCLI   `json:"pending_leases"`
 	LeaseHubNow     *time.Time             `json:"lease_hub_now"`
 	LeaseViolations []claimViolationForCLI `json:"lease_violations"`
+	Recurrence      *recurrenceView        `json:"-"`
 }
 
 type cliShowComment struct {
@@ -492,10 +522,10 @@ func commentAttribution(author, teammate string) string {
 }
 
 func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation string) error {
-	if _, err := fmt.Fprintf(w, "OK %s %s\n", operation, b.Issue.ShortID); err != nil {
+	if _, err := fmt.Fprintf(w, "OK %s %s\n", operation, agentValue(b.Issue.ShortID)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "Issue: %s %s\n", b.Issue.ShortID, agentValue(b.Issue.Title)); err != nil {
+	if _, err := fmt.Fprintf(w, "Issue: %s %s\n", agentValue(b.Issue.ShortID), agentValue(b.Issue.Title)); err != nil {
 		return err
 	}
 	if b.Issue.Status != "" {
@@ -528,6 +558,11 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 			return err
 		}
 	}
+	if b.Recurrence != nil {
+		if err := writeAgentField(w, "Repeat", agentValue(recurrenceLine(b.Recurrence))); err != nil {
+			return err
+		}
+	}
 	if attribution := showCreationAttribution(b.Issue.AttributionView, b.Issue.Author); attribution != "" {
 		if err := writeAgentField(w, "Creation", agentValue(attribution)); err != nil {
 			return err
@@ -548,6 +583,9 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 				return err
 			}
 		}
+	}
+	if err := printShowAttachmentEvidence(w, b); err != nil {
+		return err
 	}
 	if err := printShowAgentLeaseLines(w, b.Lease, b.PendingLeases, b.LeaseHubNow); err != nil {
 		return err

@@ -129,7 +129,7 @@ func runConcurrentFederationRotations(
 
 func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, err := store.CreateProject(ctx, "federation-control-hub")
 	if err != nil {
 		return err
@@ -722,7 +722,7 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 
 func checkFederationBindingEndpointRebind(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, err := store.CreateProject(ctx, "federation-rebind-hub")
 	if err != nil {
 		return err
@@ -845,7 +845,7 @@ func checkFederationBindingEndpointRebind(t *testing.T, store db.Storage) error 
 
 func checkFederationEnrollmentRotation(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NotNil(t, backend.InstallEnrollmentInsertFailure)
 
 	enrollmentByID := func(t *testing.T, id int64) db.FederationEnrollment {
@@ -1119,7 +1119,7 @@ func checkFederationEnrollmentRotation(t *testing.T, store db.Storage, backend B
 
 func checkFederationEventTransport(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "federation-event-transport")
 	if err != nil {
 		return err
@@ -1425,7 +1425,7 @@ func remoteEventHash(t *testing.T, event db.RemoteEvent) string {
 
 func checkFederationResetLifecycle(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "federation-reset-project")
 	if err != nil {
 		return err
@@ -1668,7 +1668,7 @@ func checkFederationResetLifecycle(t *testing.T, store db.Storage, backend Backe
 
 func checkFederationProjectionLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, err := store.CreateProject(ctx, "federation-projection-hub")
 	if err != nil {
 		return err
@@ -1941,7 +1941,7 @@ func checkFederationProjectionLifecycle(t *testing.T, store db.Storage) error {
 
 func checkFederationIngestLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, err := store.CreateProject(ctx, "federation-ingest-hub")
 	if err != nil {
 		return err
@@ -2217,7 +2217,7 @@ func checkFederationIngestLifecycle(t *testing.T, store db.Storage) error {
 
 func checkFederationTeammateRemoteValidation(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	originUID := "01HZNQ7VFPK1XGD8R5MABCD4EF"
 	for index, fixture := range []struct {
 		name   string
@@ -2357,7 +2357,7 @@ func checkFederationSnapshotLinkDates(t *testing.T, store db.Storage) error {
 
 func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "federation-adoption-ingest")
 	if err != nil {
 		return err
@@ -2549,7 +2549,7 @@ func federationEnrollmentByID(
 // project-scoped accessor must share with the global list: same order,
 // revoked rows retained, instance-scoped (NULL project_id) rows excluded.
 func checkProjectFederationEnrollmentScope(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	subject, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
 		return fmt.Errorf("create subject project: %w", err)
@@ -2631,7 +2631,7 @@ func checkProjectFederationEnrollmentScope(t *testing.T, store db.Storage) error
 
 func checkFederationProjectAdoption(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	conflictedProject, err := store.CreateProject(ctx, "federation-adoption-external-root")
 	if err != nil {
 		return err

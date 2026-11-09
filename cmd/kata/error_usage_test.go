@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -31,7 +30,7 @@ func TestErrorUsageCloseReasons(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := append([]string{"close", "abc4", "--json"}, tc.flags...)
-			stdout, stderr, err := executeRootCapture(t, context.Background(), args...)
+			stdout, stderr, err := executeRootCapture(t, t.Context(), args...)
 			require.Error(t, err)
 			assert.Equal(t, tc.exit, exitCodeForErr(err, runEEntered))
 			assert.Empty(t, stdout)
@@ -63,7 +62,7 @@ func TestErrorUsageUnknownFlags(t *testing.T) {
 		{"json", []string{"edit", "abc4", "--label", "x", "--json"}, "kata edit"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			stdout, stderr, err := executeRootCapture(t, context.Background(), tc.args...)
+			stdout, stderr, err := executeRootCapture(t, t.Context(), tc.args...)
 			require.Error(t, err)
 			assert.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered))
 			assert.Empty(t, stdout)
@@ -85,7 +84,7 @@ func TestErrorUsageUnknownFlags(t *testing.T) {
 }
 
 func TestErrorUsageNegativePositionKeepsAdvice(t *testing.T) {
-	_, stderr, err := executeRootCapture(t, context.Background(), "show", "-1", "--agent")
+	_, stderr, err := executeRootCapture(t, t.Context(), "show", "-1", "--agent")
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered))
 	assert.Contains(t, err.Error(), "negative numbers in positional args")

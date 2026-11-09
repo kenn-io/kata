@@ -216,6 +216,16 @@
       "permanent": true
     },
     {
+      "source": "/workflows/gated-workflows/",
+      "destination": "/docs/workflows/gated-workflows/",
+      "permanent": true
+    },
+    {
+      "source": "/workflows/gated-workflows.md",
+      "destination": "/docs/workflows/gated-workflows.md",
+      "permanent": true
+    },
+    {
       "source": "/workflows/sharing/",
       "destination": "/docs/workflows/sharing/",
       "permanent": true
@@ -303,6 +313,16 @@
     {
       "source": "/operations/federation-signing.md",
       "destination": "/docs/operations/federation-signing.md",
+      "permanent": true
+    },
+    {
+      "source": "/operations/mcp-events/",
+      "destination": "/docs/operations/mcp-events/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/mcp-events.md",
+      "destination": "/docs/operations/mcp-events.md",
       "permanent": true
     },
     {
@@ -538,6 +558,16 @@
     {
       "source": "/guide/project-relays.md",
       "destination": "/docs/guide/project-relays.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/attachments/",
+      "destination": "/docs/guide/attachments/",
+      "permanent": true
+    },
+    {
+      "source": "/guide/attachments.md",
+      "destination": "/docs/guide/attachments.md",
       "permanent": true
     }
   ]

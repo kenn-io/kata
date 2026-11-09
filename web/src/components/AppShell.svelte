@@ -1,12 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { DetailDrawer, IconButton, Tooltip, TopBar, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { MediaQuery } from 'svelte/reactivity'
+  import {
+    DetailDrawer,
+    EmptyState,
+    MEDIA,
+    IconButton,
+    PageHeader,
+    Tooltip,
+    TopBar,
+    type TypeaheadOption,
+  } from '@kenn-io/kit-ui'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
   import LayoutPanelTopIcon from '@lucide/svelte/icons/layout-panel-top'
   import MonitorIcon from '@lucide/svelte/icons/monitor'
   import MenuIcon from '@lucide/svelte/icons/menu'
   import MoonIcon from '@lucide/svelte/icons/moon'
   import PlusIcon from '@lucide/svelte/icons/plus'
+  import SettingsIcon from '@lucide/svelte/icons/settings'
   import SunIcon from '@lucide/svelte/icons/sun'
 
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
@@ -19,6 +30,7 @@
   } from '../lib/kata/authority'
   import { createKataLinkFilters } from '../lib/kata/linkFilters'
   import { normalizeKataUISnapshot } from '../lib/kata/projection'
+  import { localDateString } from '../lib/kata/dates'
   import type {
     KataTaskMutationResponse,
     KataCommentReplyIntent,
@@ -41,6 +53,7 @@
   import InboxProjectChooser from './InboxProjectChooser.svelte'
   import KataDaemonSwitcher from './KataDaemonSwitcher.svelte'
   import QuickCapture from './QuickCapture.svelte'
+  import SearchSettings from './SearchSettings.svelte'
   import Sidebar from './Sidebar.svelte'
   import SplitLayout from './SplitLayout.svelte'
 
@@ -68,6 +81,8 @@
     credentialTokens?: readonly TokenOut[] | undefined
     credentialLoading?: boolean | undefined
     credentialError?: string | undefined
+    searchSettingsPostFetch?: typeof fetch | undefined
+    canAdministerDaemon?: boolean | undefined
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
     onSelectDaemon?: ((id: string) => void) | undefined
     onAccessMutation?:
@@ -80,12 +95,13 @@
     onBackFromCredentials?: (() => void | Promise<void>) | undefined
     onSearchEmpty?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
-    onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
+    onCreateProject: (name: string, designateInbox?: boolean) => Promise<KataTaskMutationResponse>
     onDesignateInbox: (projectUID: string) => Promise<void>
     onCreateIssue: (title: string, parent?: ChildParent) => void | Promise<void>
     searchReferences: (query: string) => Promise<UIIssueReference[]>
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
+    onUploadAttachment?: ((uid: string, file: File) => Promise<void>) | undefined
     onAddComment: (
       uid: string,
       body: string,
@@ -136,6 +152,8 @@
     credentialTokens = [],
     credentialLoading = false,
     credentialError = undefined,
+    searchSettingsPostFetch = fetch,
+    canAdministerDaemon = false,
     onPreferencesChange = () => {},
     onSelectDaemon = () => {},
     onAccessMutation = undefined,
@@ -149,6 +167,7 @@
     searchReferences,
     onMoveIssue,
     onPatchMetadata,
+    onUploadAttachment,
     onAddComment,
     onEditIssue,
     onAssignOwner,
@@ -166,6 +185,7 @@
   }: Props = $props()
 
   let connectionNow = $state(Date.now())
+  let today = $derived(localDateString(new Date(connectionNow)))
   onMount(() => {
     const timer = setInterval(() => {
       connectionNow = Date.now()
@@ -191,11 +211,9 @@
               ? 'Connection unavailable'
               : activeConnection?.health === 'upgrade_required'
                 ? 'Upgrade required'
-                : loading
-                  ? 'Connecting'
-                  : readOnly || !snapshot.capabilities.writable
-                    ? 'Read-only'
-                    : 'Connected',
+                : readOnly || !snapshot.capabilities.writable
+                  ? 'Read-only'
+                  : 'Connected',
   )
   const actorlessConnectionLabels: Record<string, string> = {
     none: 'Local connection',
@@ -210,16 +228,26 @@
     daemonSwitching || stale || reconnecting || loading || daemonError || credentialExpired
       ? '—'
       : snapshot.capabilities.account ||
-          actorlessConnectionLabels[snapshot.capabilities.auth_kind ?? ''] ||
-          'No account',
+          (snapshot.capabilities.auth_kind === undefined
+            ? 'Not reported by hub'
+            : actorlessConnectionLabels[snapshot.capabilities.auth_kind] || 'No account'),
   )
 
   let captureOpen = $state(false)
   let inboxChooserOpen = $state(false)
   let mobileNavigationOpen = $state(false)
+  let creationIntent = $state<'project' | 'task' | null>(null)
+  const mediumScreen = new MediaQuery(MEDIA.medium)
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
   let credentialRoute = $derived(route.view === 'credentials')
+  let settingsRoute = $derived(route.view === 'settings')
+  let daemonRoute = $derived(credentialRoute || settingsRoute)
+  let settingsHost = $derived.by(() => {
+    const remote = activeConnection && !activeConnection.local ? activeConnection.url : undefined
+    const host = remote ? new URL(remote).hostname : globalThis.location?.hostname
+    return host && !loopbackHost(host) ? host : undefined
+  })
   let accessAdministrationAvailable = $derived(
     snapshot.capabilities.access_admin === true &&
       !credentialExpired &&
@@ -246,6 +274,7 @@
       filters: searchFilters,
       snapshot: projection,
       issues: projection.issues,
+      today,
     }),
   )
   let pendingQuery = $state('')
@@ -289,6 +318,7 @@
   })
   const controlID = $props.id()
   const newTaskReasonID = `${controlID}-new-task-reason`
+  const createProjectReasonID = `${controlID}-create-project-reason`
   let writeBlockedReason = $derived(
     canMutate
       ? undefined
@@ -320,8 +350,15 @@
     void onNavigate(next)
   }
 
-  function openView(name: KataTaskViewName): void {
+  // Closing the drawer drops the form it showed, as unmounting its sidebar did.
+  function closeNavigation(): void {
+    if (!mobileNavigationOpen) return
     mobileNavigationOpen = false
+    creationIntent = null
+  }
+
+  function openView(name: KataTaskViewName): void {
+    closeNavigation()
     navigate({
       kind: 'kata',
       view: systemViewName(name),
@@ -331,7 +368,7 @@
   }
 
   function openProject(projectUID: string): void {
-    mobileNavigationOpen = false
+    closeNavigation()
     navigate({
       kind: 'kata',
       projectUID,
@@ -341,13 +378,26 @@
   }
 
   function openCredentials(): void {
-    mobileNavigationOpen = false
+    closeNavigation()
     navigate({
       kind: 'kata',
       view: 'credentials',
       graph: false,
       filters: emptyShareableFilters(),
     })
+  }
+
+  function openSettings(): void {
+    navigate({
+      kind: 'kata',
+      view: 'settings',
+      graph: false,
+      filters: emptyShareableFilters(),
+    })
+  }
+
+  function loopbackHost(host: string): boolean {
+    return host === 'localhost' || host === '[::1]' || /^127\./.test(host)
   }
 
   // The landing route has no view and means Inbox, but adding a scope or issue
@@ -421,8 +471,28 @@
       captureOpen = true
       return
     }
+    if (projection.projects.length === 0) {
+      beginProjectCreation('task')
+      return
+    }
     if (hasInbox) captureOpen = true
     else inboxChooserOpen = true
+  }
+
+  function beginProjectCreation(intent: 'project' | 'task' = 'project'): void {
+    if (projectCreationBlockedReason) return
+    if (mediumScreen.current) mobileNavigationOpen = true
+    creationIntent = intent
+  }
+
+  async function createProject(name: string): Promise<KataTaskMutationResponse> {
+    const task = creationIntent === 'task'
+    const result = await onCreateProject(name, task)
+    if (task && creationIntent === 'task') {
+      mobileNavigationOpen = false
+      captureOpen = true
+    }
+    return result
   }
 
   async function chooseInbox(projectUID: string): Promise<void> {
@@ -440,7 +510,7 @@
   }
 
   function viewNameForRoute(current: AppRoute): KataTaskViewName {
-    if (current.view === 'credentials') return 'all'
+    if (current.view === 'credentials' || current.view === 'settings') return 'all'
     if (current.view) return current.view === 'all-open' ? 'all' : current.view
     return current.projectUID || current.issueUID ? 'all' : 'inbox'
   }
@@ -542,6 +612,32 @@
   </button>
 {/snippet}
 
+{#snippet createProjectButton()}
+  <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
+  <button
+    type="button"
+    class="accent-button"
+    aria-disabled={projectCreationBlockedReason ? 'true' : undefined}
+    aria-describedby={projectCreationBlockedReason ? createProjectReasonID : undefined}
+    onclick={() => beginProjectCreation()}
+  >
+    New project
+  </button>
+{/snippet}
+
+{#snippet noProjects()}
+  <EmptyState title="No projects yet" description="Create a project, or run kata init in a repo.">
+    {#if projectCreationBlockedReason}
+      <Tooltip text={projectCreationBlockedReason}>
+        {@render createProjectButton()}
+      </Tooltip>
+      <span id={createProjectReasonID} class="kit-sr-only">{projectCreationBlockedReason}</span>
+    {:else}
+      {@render createProjectButton()}
+    {/if}
+  </EmptyState>
+{/snippet}
+
 {#snippet navigationSidebar()}
   <Sidebar
     {areas}
@@ -552,27 +648,31 @@
     }}
     {searchFilters}
     {projectCreationBlockedReason}
+    bind:creationIntent
     {draftFenceGeneration}
     credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
     credentialAuditActive={credentialRoute}
     onOpenView={openView}
     onOpenProject={openProject}
-    {onCreateProject}
+    onCreateProject={createProject}
     onOpenCredentials={openCredentials}
   />
 {/snippet}
 
 <section class="kata-feature" aria-label="Kata workspace">
-  <div class="active-connection" role="status" aria-label="Active connection">
-    <span
-      >Hub: <strong>{activeDaemonID ?? (globalThis.location?.host || 'Local daemon')}</strong></span
-    >
-    <span>Account: <strong>{connectionAccount}</strong></span>
-    <span>Credential: <strong>{connectionStatus}</strong></span>
-    {#if stale}
-      <span>Snapshot may be out of date. Changes are paused.</span>
-    {/if}
-  </div>
+  {#if connectionStatus !== 'Connected'}
+    <div class="active-connection" role="status" aria-label="Active connection">
+      <span
+        >Hub: <strong>{activeDaemonID ?? (globalThis.location?.host || 'Local daemon')}</strong
+        ></span
+      >
+      <span>Account: <strong>{connectionAccount}</strong></span>
+      <span>Credential: <strong>{connectionStatus}</strong></span>
+      {#if stale}
+        <span>Snapshot may be out of date. Changes are paused.</span>
+      {/if}
+    </div>
+  {/if}
   <TopBar class="kata-header" ariaLabel="Kata workspace">
     {#snippet left()}
       <h1 class="kata-brand">Kata</h1>
@@ -618,7 +718,10 @@
             <MonitorIcon size={15} strokeWidth={1.8} aria-hidden="true" />
           {/if}
         </IconButton>
-        {#if !credentialRoute}
+        <IconButton ariaLabel="Settings" title="Settings" onclick={openSettings}>
+          <SettingsIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+        </IconButton>
+        {#if !daemonRoute}
           <IconButton
             ariaLabel={preferences.splitDirection === 'vertical'
               ? 'Switch to side-by-side layout'
@@ -646,7 +749,7 @@
       </div>
     {/snippet}
   </TopBar>
-  {#if selectedProject && !credentialRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
+  {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
     {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
       <ProjectSyncStatus projectID={selectedProject.id} projectUID={selectedProject.uid} />
     {/key}
@@ -669,8 +772,8 @@
             onBack={onBackFromCredentials}
           />
           {#if accessAdministrationAvailable}
-            <section class="access-administration" aria-labelledby="access-administration-heading">
-              <h2 id="access-administration-heading">Teams and visibility</h2>
+            <section class="access-administration" aria-label="Teams and visibility">
+              <PageHeader level={2} title="Teams and visibility" />
               {#if onAccessMutation}
                 {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}`}
                   <AccessManagement
@@ -684,6 +787,15 @@
             </section>
           {/if}
         </div>
+      {:else if settingsRoute}
+        {#key activeDaemonID ?? 'direct'}
+          <SearchSettings
+            postFetch={searchSettingsPostFetch}
+            {canAdministerDaemon}
+            onback={onBackFromCredentials}
+            remoteHost={settingsHost}
+          />
+        {/key}
       {:else}
         {#if mutationMessage}
           <p class="mutation-message" role="alert">{mutationMessage}</p>
@@ -712,9 +824,7 @@
   <DetailDrawer
     title="Kata navigation"
     width="min(320px, calc(100vw - 40px))"
-    onclose={() => {
-      mobileNavigationOpen = false
-    }}
+    onclose={closeNavigation}
   >
     {@render navigationSidebar()}
   </DetailDrawer>
@@ -747,6 +857,8 @@
         onSubmitSearch={submitSearch}
       />
       <IssueCollection
+        now={connectionNow}
+        resultsKey={JSON.stringify([route.projectUID ?? null, route.filters])}
         {navigationGeneration}
         currentView={{
           name: currentView.view,
@@ -762,6 +874,7 @@
         readyIssueUIDs={projection.member_issue_uid_set}
         onSelect={(issue) => selectIssue(issue.uid)}
         onOpenGraph={(issue) => openGraph(issue.uid)}
+        empty={!loading && projection.projects.length === 0 ? noProjects : undefined}
       />
     {/if}
   </div>
@@ -784,6 +897,8 @@
         selectedRecurrences={[...projection.selected_recurrences]}
         actionsDisabled={!canMutate || mutationPending}
         authorityBlocked={!canMutate}
+        attachmentsEnabled={snapshot.capabilities.attachments ?? false}
+        {onUploadAttachment}
         administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}
         {draftFenceGeneration}
@@ -957,18 +1072,17 @@
     min-width: 0;
     flex: 1;
     overflow: auto;
+    /* Reserve the scrollbar's width so controls do not shift when a search
+       changes whether the credential table overflows. */
+    scrollbar-gutter: stable;
   }
 
   .access-administration {
+    display: grid;
+    gap: var(--space-4);
     padding: var(--space-5);
     background: var(--bg-primary);
     border-top: 1px solid var(--border-default);
-  }
-
-  .access-administration h2 {
-    margin-bottom: var(--space-4);
-    font-size: var(--font-size-xl);
-    line-height: 1.25;
   }
 
   .list-column {

@@ -1,3 +1,25 @@
+{{ define "binaryRequestEditor" }}
+    {{- if and .Body (eq .Body.ContentType "application/octet-stream") }}
+    // Keep binary bodies out of the runtime's JSON encoder.
+    if options != nil {
+        reqParams.Options = binaryRequestOptions{RequestOptions: options}
+    }
+    reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
+        if options == nil || options.Body == nil {
+            return nil
+        }
+        body, err := options.Body.Reader()
+        if err != nil {
+            return err
+        }
+        req.Body = body
+        req.ContentLength = options.Body.FileSize()
+        req.GetBody = options.Body.Reader
+        return nil
+    }}, reqEditors...)
+    {{- end }}
+{{ end }}
+
 {{ define "client" }}
 {{ $args := . }}
 {{ $config := $args.config }}
@@ -11,7 +33,8 @@ type {{$clientName}} struct {
 }
 
 // NewPathEscapingAPIClient wraps apiClient so string path params are URL path
-// escaped before request construction. Wrapping is idempotent.
+// escaped and numeric query params use decimal notation before request
+// construction. Wrapping is idempotent.
 func NewPathEscapingAPIClient(apiClient runtime.APIClient) runtime.APIClient {
     if apiClient == nil {
         return nil
@@ -29,7 +52,7 @@ type pathEscapingAPIClient struct {
 func (c pathEscapingAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, reqEditors ...runtime.RequestEditorFn) (*http.Request, error) {
     if isNilRequestOptions(params.Options) {
         params.Options = nil
-    } else {
+    } else if _, escaped := params.Options.(pathEscapingRequestOptions); !escaped {
         params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
     }
     return c.APIClient.CreateRequest(ctx, params, reqEditors...)
@@ -50,6 +73,14 @@ func isNilRequestOptions(options runtime.RequestOptions) bool {
 
 type pathEscapingRequestOptions struct {
     runtime.RequestOptions
+}
+
+type binaryRequestOptions struct {
+    runtime.RequestOptions
+}
+
+func (o binaryRequestOptions) GetBody() any {
+    return nil
 }
 
 func (o pathEscapingRequestOptions) GetPathParams() (map[string]any, error) {
@@ -75,7 +106,29 @@ func (o pathEscapingRequestOptions) GetQuery() (map[string]any, error) {
     if o.RequestOptions == nil {
         return nil, nil
     }
-    return o.RequestOptions.GetQuery()
+    params, err := o.RequestOptions.GetQuery()
+    if err != nil {
+        return params, err
+    }
+    for key, value := range params {
+        params[key] = integerSafeParam(value)
+    }
+    return params, nil
+}
+
+func integerSafeParam(v any) any {
+    switch value := v.(type) {
+    case float64:
+        return strconv.FormatFloat(value, 'f', -1, 64)
+    case []any:
+        result := make([]any, len(value))
+        for i, item := range value {
+            result[i] = integerSafeParam(item)
+        }
+        return result
+    default:
+        return v
+    }
 }
 
 func (o pathEscapingRequestOptions) GetBody() any {
@@ -167,6 +220,7 @@ func (c *{{$clientName}}) {{$op.ID}}(ctx context.Context{{ if $op.HasRequestOpti
         {{- end }}
     }
 
+    {{ template "binaryRequestEditor" $op }}
     req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
     if err != nil {
         return nil, fmt.Errorf("error creating request: %w", err)

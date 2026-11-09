@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,12 +16,47 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata"
+	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/webui"
 )
 
+func TestServiceDocbankAttachments(t *testing.T) {
+	vault := docbanktest.New(t)
+	service, err := kata.New(t.Context(), kata.Config{
+		DSN:     filepath.Join(t.TempDir(), "service.db"),
+		Auth:    kata.AuthConfig{TrustCallerAuthentication: true},
+		Docbank: kata.DocbankConfig{URL: vault.Server.URL, APIKey: "test-key", Folder: "/embedded"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "example-project")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues", server.URL, project.Project.ID), strings.NewReader(`{"title":"Attach files","actor":"user-a"}`))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var issue struct {
+		Issue struct {
+			UID string `json:"uid"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&issue))
+	require.NoError(t, resp.Body.Close())
+	req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?name=file.txt&actor=user-a", server.URL, project.Project.ID, issue.Issue.UID), strings.NewReader("ok"))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err = http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+}
+
 func TestServiceMountRunAndClose(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "service.db")
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:  dsn,
 		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -31,7 +67,7 @@ func TestServiceMountRunAndClose(t *testing.T) {
 	assert.Equal(t, "example-project", project.Project.Name)
 	assert.True(t, project.Created)
 
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(t.Context())
 	runDone := make(chan error, 1)
 	go func() { runDone <- service.Run(runCtx) }()
 	select {
@@ -51,7 +87,7 @@ func TestServiceMountRunAndClose(t *testing.T) {
 	require.NoError(t, service.Close())
 	require.NoError(t, service.Close())
 
-	reopened, err := kata.New(context.Background(), kata.Config{
+	reopened, err := kata.New(t.Context(), kata.Config{
 		DSN:  dsn,
 		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -68,7 +104,7 @@ func TestServiceMountRunAndClose(t *testing.T) {
 func TestServiceHandlerAtMountsAPIAndBrowserApplication(t *testing.T) {
 	webHandler, err := webui.NewEmbeddedHandler()
 	require.NoError(t, err)
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:        filepath.Join(t.TempDir(), "service.db"),
 		Auth:       kata.AuthConfig{TrustCallerAuthentication: true},
 		WebHandler: webHandler,
@@ -81,7 +117,7 @@ func TestServiceHandlerAtMountsAPIAndBrowserApplication(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	request, err := http.NewRequest(
+	request, err := http.NewRequestWithContext(t.Context(),
 		http.MethodGet, server.URL+"/tools/tasks?view=today&label=ready", nil,
 	)
 	require.NoError(t, err)
@@ -98,19 +134,23 @@ func TestServiceHandlerAtMountsAPIAndBrowserApplication(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "Kata UI assets are not built")
 
-	health, err := http.Get(server.URL + "/tools/tasks/api/v1/health")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/tools/tasks/api/v1/health", nil)
+	require.NoError(t, reqErr)
+	health, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = health.Body.Close() }()
 	assert.Equal(t, http.StatusOK, health.StatusCode)
 
-	outside, err := http.Get(server.URL + "/api/v1/health")
+	req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/health", nil)
+	require.NoError(t, reqErr)
+	outside, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = outside.Body.Close() }()
 	assert.Equal(t, http.StatusNotFound, outside.StatusCode)
 }
 
 func TestServiceHandlerAtRejectsInvalidMountPaths(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -129,7 +169,7 @@ func TestServiceHandlerAtRejectsInvalidMountPaths(t *testing.T) {
 }
 
 func TestServiceHandlerAtRejectsSiblingPathBeforeCallingService(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -138,7 +178,7 @@ func TestServiceHandlerAtRejectsSiblingPathBeforeCallingService(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, service.Close())
 
-	request := httptest.NewRequest(http.MethodGet, "/tools/tasks-other", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/tools/tasks-other", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
@@ -146,14 +186,14 @@ func TestServiceHandlerAtRejectsSiblingPathBeforeCallingService(t *testing.T) {
 }
 
 func TestNewRejectsMissingDSN(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{})
+	service, err := kata.New(t.Context(), kata.Config{})
 
 	assert.Nil(t, service)
 	assert.EqualError(t, err, "kata: storage DSN is required")
 }
 
 func TestNewRejectsMissingAuthenticationPolicy(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN: filepath.Join(t.TempDir(), "service.db"),
 	})
 
@@ -162,7 +202,7 @@ func TestNewRejectsMissingAuthenticationPolicy(t *testing.T) {
 }
 
 func TestNewRejectsInvalidDefaultTimezone(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:             filepath.Join(t.TempDir(), "service.db"),
 		DefaultTimezone: "Not/AZone",
 		Auth:            kata.AuthConfig{TrustCallerAuthentication: true},
@@ -174,7 +214,7 @@ func TestNewRejectsInvalidDefaultTimezone(t *testing.T) {
 }
 
 func TestNewRejectsAmbiguousAuthenticationPolicy(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN: filepath.Join(t.TempDir(), "service.db"),
 		Auth: kata.AuthConfig{
 			Token:                     "service-token",
@@ -188,7 +228,7 @@ func TestNewRejectsAmbiguousAuthenticationPolicy(t *testing.T) {
 }
 
 func TestServiceBearerAuthentication(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: kata.AuthConfig{Token: "service-token"},
 	})
@@ -198,14 +238,14 @@ func TestServiceBearerAuthentication(t *testing.T) {
 	server := httptest.NewServer(service.Handler())
 	t.Cleanup(server.Close)
 
-	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/projects", nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusUnauthorized, response.StatusCode)
 
-	authorized, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/projects", nil)
+	authorized, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	authorized.Header.Set("Authorization", "Bearer service-token")
 	authorizedResponse, err := http.DefaultClient.Do(authorized)
@@ -227,7 +267,10 @@ func createProject(t *testing.T, baseURL, name string) projectResponse {
 	t.Helper()
 	body, err := json.Marshal(map[string]string{"name": name, "actor": "user-a"})
 	require.NoError(t, err)
-	resp, err := http.Post(baseURL+"/api/v1/projects", "application/json", bytes.NewReader(body))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+"/api/v1/projects", bytes.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -244,7 +287,9 @@ type projectsResponse struct {
 
 func listProjects(t *testing.T, baseURL string) projectsResponse {
 	t.Helper()
-	resp, err := http.Get(baseURL + "/api/v1/projects")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/projects", nil)
+	require.NoError(t, reqErr)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)

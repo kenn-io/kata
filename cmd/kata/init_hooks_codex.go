@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json/v2"
 	"fmt"
 	"os"
@@ -14,14 +15,14 @@ import (
 
 // Keep init's user-contract and tracked-workspace policy while publishing the
 // complete native bundle together with the other selected integrations.
-func planInitCodexHooks(opts nativeAgentHookOptions) (nativeAgentHookPlan, error) {
+func planInitCodexHooks(ctx context.Context, opts nativeAgentHookOptions) (nativeAgentHookPlan, error) {
 	userPath, err := codexUserContractPath(opts.ConfigPath)
 	if err != nil {
 		return nativeAgentHookPlan{}, err
 	}
 	tracked := false
 	if userPath != "" {
-		tracked, err = codexHookFileTracked(opts.Dir)
+		tracked, err = codexHookFileTracked(ctx, opts.Dir)
 		if err != nil {
 			return nativeAgentHookPlan{}, err
 		}
@@ -80,7 +81,7 @@ const (
 	codexDefaultContractTimeoutSecs  = 10
 )
 
-func applyCodexHooks(dir string) (bool, []string, error) {
+func applyCodexHooks(ctx context.Context, dir string) (bool, []string, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return false, nil, err
@@ -97,13 +98,13 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	}
 	warnings := codexConfigHooksWarnings(root)
 	if userPath != "" {
-		return applyCodexUserContract(dir, configPath, userPath, warnings)
+		return applyCodexUserContract(ctx, dir, configPath, userPath, warnings)
 	}
 	return installCodexWorkspaceHooks(configPath, warnings)
 }
 
-func applyCodexUserContract(dir, configPath, userPath string, warnings []string) (bool, []string, error) {
-	tracked, err := codexHookFileTracked(dir)
+func applyCodexUserContract(ctx context.Context, dir, configPath, userPath string, warnings []string) (bool, []string, error) {
+	tracked, err := codexHookFileTracked(ctx, dir)
 	if err != nil {
 		return false, nil, err
 	}

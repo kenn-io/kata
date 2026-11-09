@@ -92,7 +92,7 @@ func serveSpilledProjectRead(t *testing.T, store *changingProjectAccessRevisionS
 		_, _ = w.Write([]byte(payload))
 	}))
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
+	handler.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil))
 	return response, payload, tempDir
 }
 

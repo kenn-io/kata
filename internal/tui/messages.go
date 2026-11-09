@@ -1,6 +1,10 @@
 package tui
 
-import "time"
+import (
+	"time"
+
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
+)
 
 // initialFetchMsg is delivered after the first ListIssues call returns.
 // dispatchKey captures the scope/filter at dispatch time so
@@ -41,7 +45,11 @@ type detailFetchedMsg struct {
 	issue      *Issue
 	parent     *IssueRef
 	children   []Issue
-	err        error
+	// recurrence is the live recurrence of the issue; nil when it has none or
+	// the read failed, so a stale one never outlives its read.
+	recurrence    *recurrenceclient.View
+	recurrenceErr error
+	err           error
 }
 
 // commentsFetchedMsg, eventsFetchedMsg, and linksFetchedMsg carry the
@@ -201,6 +209,7 @@ type eventReceivedMsg struct {
 	projectUID      string
 	issueShortID    string
 	issueUID        string
+	recurrenceUID   string
 	relatedIssueUID string
 	commentUID      string
 	commentUIDs     []string
@@ -352,9 +361,11 @@ const (
 	sseDisconnected
 )
 
-// refetchTickMsg fires after the 150ms debounce window so a single
-// fetch covers a burst of events.
+// refetchTickMsg fires after the event debounce window.
 type refetchTickMsg struct{}
+
+// dayTickMsg checks whether relative date filters need a new local day.
+type dayTickMsg struct{}
 
 // detailFollowTickMsg fires after the 75ms M6 split-mode debounce
 // window so a burst of cursor moves coalesces into one detail fetch.

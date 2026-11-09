@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +10,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestClaim_HelpOmitsWorkAttention(t *testing.T) {
+	help := string(executeRoot(t, newRootCmd(), "claim", "--help"))
+	assert.NotContains(t, help, "work.attention")
+}
 
 func TestClaim_Success(t *testing.T) {
 	env, dir := setupCLIEnv(t)
@@ -61,7 +65,7 @@ func TestClaim_TTLValidation(t *testing.T) {
 		{value: "120", want: "missing unit"},
 	} {
 		t.Run(tc.value, func(t *testing.T) {
-			_, _, err := executeRootCapture(t, context.Background(),
+			_, _, err := executeRootCapture(t, t.Context(),
 				"claim", "abcd", "--ttl", tc.value)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
@@ -106,7 +110,7 @@ func TestClaim_IfUnownedRejectsSameActor(t *testing.T) {
 }
 
 func TestClaim_ForceAndIfUnownedAreMutuallyExclusive(t *testing.T) {
-	_, _, err := executeRootCapture(t, context.Background(),
+	_, _, err := executeRootCapture(t, t.Context(),
 		"claim", "abcd", "--force", "--if-unowned")
 
 	require.Error(t, err)
@@ -202,7 +206,7 @@ func TestPrintClaimMutationIncludesAssignmentExpiry(t *testing.T) {
 		cmd := &cobra.Command{}
 		cmd.SetOut(&out)
 
-		require.NoError(t, printClaimMutation(cmd, []byte(response)))
+		require.NoError(t, printClaimMutation(cmd, []byte(response), ""))
 		assert.Equal(t, "abcd assigned to agent1 until 2026-09-17T21:30:00Z\n", out.String())
 	})
 
@@ -213,7 +217,7 @@ func TestPrintClaimMutationIncludesAssignmentExpiry(t *testing.T) {
 		cmd := &cobra.Command{}
 		cmd.SetOut(&out)
 
-		require.NoError(t, printClaimMutation(cmd, []byte(response)))
+		require.NoError(t, printClaimMutation(cmd, []byte(response), ""))
 		assert.Contains(t, out.String(), "Owner: agent1\n")
 		assert.Contains(t, out.String(), "Assignment-Expires-On: 2026-09-17T21:30:00Z\n")
 	})
@@ -226,7 +230,7 @@ func TestPrintClaimMutationTimedNoOpIncludesAssignmentExpiry(t *testing.T) {
 	cmd.SetOut(&out)
 	const response = `{"issue":{"short_id":"abcd","owner":"agent1","assignment_expires_on":"2026-09-17T21:30:00Z"},"changed":false}`
 
-	require.NoError(t, printClaimMutation(cmd, []byte(response)))
+	require.NoError(t, printClaimMutation(cmd, []byte(response), ""))
 	assert.Equal(t, "abcd already assigned to agent1 until 2026-09-17T21:30:00Z (no-op)\n", out.String())
 }
 

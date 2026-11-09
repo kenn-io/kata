@@ -47,6 +47,7 @@ the user asked for this exact issue.`,
 			// Resolve the issue's display short_id so the X-Kata-Confirm
 			// header carries the daemon-expected "<project>#<short_id>"
 			// form even when the user passed a ULID.
+			requestedProject := issue.ProjectName
 			issue, err = hydrateRefWithQualified(ctx, baseURL, pid, issue, false)
 			if err != nil {
 				return err
@@ -57,7 +58,7 @@ the user asked for this exact issue.`,
 			if err != nil {
 				return err
 			}
-			return runDestructive(ctx, cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, "delete", confirm, nil)
+			return runDestructive(ctx, cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, requestedProject, "delete", confirm, nil)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "required to perform the soft delete")
@@ -110,7 +111,7 @@ func resolveConfirm(cmd *cobra.Command, flagVal, expected, prompt string) (strin
 // a qualified ref (`other#abc4` from a workspace bound to a different
 // project) targets the project the ref names rather than the workspace's
 // project.
-func runDestructive(ctx context.Context, cmd *cobra.Command, baseURL string, pid int64, pathRef, displayRef, verb, confirm string,
+func runDestructive(ctx context.Context, cmd *cobra.Command, baseURL string, pid int64, pathRef, displayRef, requestedProject, verb, confirm string,
 	extraBody map[string]any) error {
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	body := &generated.DestructiveActionRequestBody{Actor: actor}
@@ -154,12 +155,12 @@ func runDestructive(ctx context.Context, cmd *cobra.Command, baseURL string, pid
 	default:
 		return fmt.Errorf("unknown destructive action %q", verb)
 	}
-	return printDestructive(cmd, displayRef, verb, bs)
+	return printDestructive(cmd, displayRef, requestedProject, verb, bs)
 }
 
 // printDestructive renders the destructive-action response in the active
 // output mode (JSON envelope, quiet, or one-line human).
-func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
+func printDestructive(cmd *cobra.Command, ref, requestedProject, verb string, bs []byte) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
@@ -170,14 +171,19 @@ func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
 		return err
 	}
 	if mode == outputAgent {
+		displayRef := ref
+		if project, shortID, qualified := strings.Cut(ref, "#"); qualified && project == requestedProject {
+			displayRef = shortID
+		}
 		if verb == "delete" {
 			var m agentIssueMutation
 			if err := json.Unmarshal(bs, &m); err != nil {
 				return err
 			}
+			m.Issue.ShortID = displayRef
 			out := cmd.OutOrStdout()
 			if !flags.Quiet {
-				if _, err := fmt.Fprintf(out, "OK delete %s", m.Issue.ShortID); err != nil {
+				if _, err := fmt.Fprintf(out, "OK delete %s", agentValue(m.Issue.ShortID)); err != nil {
 					return err
 				}
 				if !m.Changed {
@@ -190,7 +196,7 @@ func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
 				}
 			}
 			if m.Issue.ShortID != "" && m.Issue.Title != "" {
-				if _, err := fmt.Fprintf(out, "Issue: %s %s\n", m.Issue.ShortID, agentValue(m.Issue.Title)); err != nil {
+				if _, err := fmt.Fprintf(out, "Issue: %s %s\n", agentValue(m.Issue.ShortID), agentValue(m.Issue.Title)); err != nil {
 					return err
 				}
 			}
@@ -205,24 +211,20 @@ func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
 		if verb == "purge" {
 			var b struct {
 				PurgeLog struct {
-					ShortID    *string `json:"short_id"`
-					IssueTitle string  `json:"issue_title"`
+					IssueTitle string `json:"issue_title"`
 				} `json:"purge_log"`
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
 			}
-			shortID := ref
-			if b.PurgeLog.ShortID != nil && *b.PurgeLog.ShortID != "" {
-				shortID = *b.PurgeLog.ShortID
-			}
+			shortID := displayRef
 			if !flags.Quiet {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK purge %s\n", shortID); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK purge %s\n", agentValue(shortID)); err != nil {
 					return err
 				}
 			}
 			if b.PurgeLog.IssueTitle != "" {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Issue: %s %s\n", shortID, agentValue(b.PurgeLog.IssueTitle)); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Issue: %s %s\n", agentValue(shortID), agentValue(b.PurgeLog.IssueTitle)); err != nil {
 					return err
 				}
 			}

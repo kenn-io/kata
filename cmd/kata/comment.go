@@ -126,7 +126,7 @@ KATA_TEAMMATE (or --teammate) records which teammate wrote it.`,
 			_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 			return err
 		case outputAgent:
-			return printAgentMutation(cmd, "comment", bs, func(w io.Writer, _ agentIssueMutation) error {
+			return printAgentMutation(cmd, "comment", bs, project.name, func(w io.Writer, _ agentIssueMutation) error {
 				return writeAgentField(w, "Comment", "appended")
 			})
 		}
@@ -192,7 +192,7 @@ func newCommentEditCmd() *cobra.Command {
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
 			case outputAgent:
-				return printAgentMutation(cmd, "comment", bs, func(w io.Writer, _ agentIssueMutation) error {
+				return printAgentMutation(cmd, "comment", bs, issue.ProjectName, func(w io.Writer, _ agentIssueMutation) error {
 					return writeAgentField(w, "Comment", "edited")
 				})
 			}

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"errors"
 	"io"
 	"os"
@@ -235,7 +234,7 @@ func TestReplaceFederationCredentialWriteFailuresLeaveSourceUnchanged(t *testing
 
 func TestDefaultFederationCredentialStoreSupportsExactReplacement(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	const projectUID = "01HZNQ7VFPK1XGD8R5MABCD4EX"
 	current := FederationCredential{
 		HubURL: "http://192.0.2.10:7777", HubProjectID: 42,

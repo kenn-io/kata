@@ -8,21 +8,14 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/pkg/client/generated"
-	"golang.org/x/mod/semver"
 )
 
-// Recheck each call: a long-lived MCP client can outlive a daemon replacement.
-// A cached version could let an older daemon silently ignore new query fields.
 func (h toolHandlers) requireDiscoveryAPI(ctx context.Context) error {
-	health, err := h.options.Client.Health(ctx)
+	supported, err := h.daemonSupportsAPIVersion(ctx, "0.27.0")
 	if err != nil {
 		return err
 	}
-	version := ""
-	if health.APISchemaVersion != nil {
-		version = strings.TrimSpace(*health.APISchemaVersion)
-	}
-	if !semver.IsValid("v"+version) || semver.Compare("v"+version, "v0.27.0") < 0 {
+	if !supported {
 		return errors.New("paginated discovery requires daemon API 0.27.0 or newer")
 	}
 	return nil
@@ -83,7 +76,7 @@ func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		}
 		return successResult(), out, nil
 	}
-	query := &generated.ListIssuesQuery{Status: status, Priority: priority, MaxPriority: maxPriority, Limit: new(int64(limit)), Sort: new(generated.ListIssuesQuerySort(sortOrder)), Cursor: optionalString(input.Cursor), IncludeTotal: optionalTrue(input.IncludeTotal), Unowned: optionalTrue(input.Unowned), Owner: optionalString(input.Owner), Label: compactStrings(input.Labels), ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata)}
+	query := &generated.ListIssuesQuery{Status: status, Priority: priority, MaxPriority: maxPriority, Limit: new(int64(limit)), Sort: new(generated.ListIssuesQuerySort(sortOrder)), Cursor: optionalString(input.Cursor), IncludeTotal: optionalTrue(input.IncludeTotal), Unowned: optionalTrue(input.Unowned), Owner: optionalString(input.Owner), Label: compactStrings(input.Labels), ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata), Compact: optionalTrue(input.compact)}
 	if len(projects) == 1 && (h.options.Scope.Mode() == ScopeBound || strings.TrimSpace(input.Project) != "") {
 		response, err := h.options.Client.ListIssues(ctx, &generated.ListIssuesRequestOptions{PathParams: &generated.ListIssuesPath{ProjectID: projects[0].ID}, Query: query})
 		if err != nil {
@@ -107,7 +100,7 @@ func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		if status != nil {
 			globalStatus = new(generated.ListAllIssuesQueryStatus(*status))
 		}
-		response, err := h.options.Client.ListAllIssues(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{Status: globalStatus, Priority: priority, MaxPriority: maxPriority, Limit: query.Limit, Sort: new(generated.ListAllIssuesQuerySort(sortOrder)), Cursor: query.Cursor, IncludeTotal: query.IncludeTotal, ProjectIds: projectIDs, Unowned: query.Unowned, Owner: query.Owner, Label: query.Label, ExcludeLabel: query.ExcludeLabel, Meta: query.Meta}})
+		response, err := h.options.Client.ListAllIssues(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{Status: globalStatus, Priority: priority, MaxPriority: maxPriority, Limit: query.Limit, Sort: new(generated.ListAllIssuesQuerySort(sortOrder)), Cursor: query.Cursor, IncludeTotal: query.IncludeTotal, ProjectIds: projectIDs, Unowned: query.Unowned, Owner: query.Owner, Label: query.Label, ExcludeLabel: query.ExcludeLabel, Meta: query.Meta, Compact: query.Compact}})
 		if err != nil {
 			return nil, IssueListOutput{}, err
 		}

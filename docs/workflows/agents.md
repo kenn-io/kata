@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-23
+last_edited: 2026-11-05
 ---
 
 # Agent workflows
@@ -108,7 +108,8 @@ does not enroll an agent, initialize a project, or configure embeddings.
 
 ## Contract in every session
 
-Load Kata's contract in every coding-agent session on this machine:
+Load Kata's contract in every coding-agent session that starts inside a kata
+workspace on this machine:
 
 ```sh
 kata agent-hook install
@@ -144,16 +145,23 @@ another hook selector with `--agent-hooks`.
 
 Project hooks use `kata` from each teammate's PATH. Use `--executable` on
 `agent-hook install` to choose another executable explicitly; user setup
-defaults to an absolute path. If init reports a hook error after creating or
-binding the project, the binding remains. Fix the error and rerun init. Its
+defaults to an absolute path. For portable user hooks, pass `--executable kata`
+(or `kata.exe`): it is checked on PATH and recorded as given. Reinstalls must
+also pass `--executable kata` to keep the hook portable; a flagless user
+install records an absolute path. Kata must also be on the harness's runtime
+PATH. If init reports a hook error after creating or binding the project, the
+binding remains. Fix the error and rerun init. Its
 [structured error](../reference/cli.md#workspace-initialization) records the
 completed project result separately from the hook failure.
 
 Most contract hooks use SessionStart; Hermes uses first-turn
 `pre_llm_call`, Kimi Code uses UserPromptSubmit, and Antigravity uses its first
 PreInvocation. Pi, Amp, OpenCode and OpenClaw use native code extensions.
-The contract also loads outside Kata workspaces. Attention requires a tracked
-issue in `KATA_REF` and uses the native workspace for routing.
+The contract loads only when the session starts inside a kata workspace, a
+directory under a `.kata.toml` written by `kata init`. Sessions in other
+directories receive no kata context, so agents are not told to track work in a
+repository that does not use kata. Attention requires a tracked issue in
+`KATA_REF` and uses the native workspace for routing.
 
 ### Hook target coverage
 
@@ -206,6 +214,20 @@ kata agent-hook install opencode
 kata agent-hook install muse --managed-attention
 kata agent-hook status pi --json
 ```
+
+A pi child leaves attention to its lead when both sessions run in the same
+working directory, use the same `KATA_REF`, and reach the same daemon, as
+reported by `kata daemon locate`. The child then does not mark the lead's issue
+as needing a human. The refs must match exactly: `abc4` and
+`spoke-project#abc4` count as different issues. Otherwise the child tracks its
+own attention, because a different directory can select a different project
+for a bare ref. Rerun
+`kata agent-hook install pi` and restart pi to pick up the fix.
+
+Protection requires inheriting the lead's `KATA_ATTENTION_HOST` marker after
+its attention start succeeds; children launched earlier may still track the
+lead's issue. The PID check confirms liveness but cannot distinguish a reused
+PID from the original host.
 
 Pi uses its structured extension API; reload extensions or restart Pi and
 complete project trust. Amp hidden context requires plugin SDK
@@ -281,8 +303,10 @@ An unreadable or malformed selected config makes status exit nonzero after
 collecting the other targets. JSON puts that partial report in `error.data`;
 each failed row identifies the config path in `inspection_error`.
 `--config` requires one target and a supported native config-file override;
-Pi and Amp auto-discovered extensions reject it. An executable override can pin
-stable Kata commands. Installer `--source` is data for owned code extensions;
+Pi and Amp auto-discovered extensions reject it. Use an explicit
+`--executable <path>` to pin a stable Kata command; paths are made absolute.
+Other bare command names are resolved on PATH and saved as absolute paths.
+Installer `--source` is data for owned code extensions;
 command-hook installers reject it and preserve authored custom-source commands.
 Relative user-scope source paths are saved as absolute paths from the install
 command's working directory. Project-scope source paths stay relative to the
@@ -358,19 +382,21 @@ session-injected guidance stay aligned.
 
 To make a workspace self-documenting for agents, run `kata init --with-agents`
 once. It writes a marker-delimited kata briefing into existing real `AGENTS.md`
-and `CLAUDE.md` files, or creates `AGENTS.md` when neither exists. The block
-points back at `kata quickstart` and carries short planning-date and `work.*`
-conventions (see
-[agent orchestration](../operations/agent-orchestration.md)); re-running
-refreshes only kata's block, so a repo initialized before that section shipped
-gains it on the next run. If a target file still carries a Beads integration
+and `CLAUDE.md` files, or creates `AGENTS.md` when neither exists. The block is
+the same single-agent contract that hooks inject: search, reuse or create one
+issue, claim it, and close it with evidence. It sends agents to
+`kata quickstart` for subagents, inboxes, `work.*` attention signals (see
+[agent orchestration](../operations/agent-orchestration.md)), and planning
+dates. Re-running refreshes only kata's block, so a repository initialized with
+an older kata gets the current contract on the next run. If a target file still
+carries a Beads integration
 block, kata leaves it untouched
 and writes a `<file>.kata-proposed` sidecar to adopt or discard; see
 [`--with-agents`](../get-started/quickstart.md#initialize-a-workspace). If
 `AGENTS.md` is a symlink, kata refuses to manage it before reading the target;
 replace it with a regular file before using `--with-agents`.
 
-The generated block gives agents exact commands for native planning state:
+`kata quickstart` gives agents exact commands for native planning state:
 
 ```sh
 # A future schedule parks work until its gate opens.
@@ -601,6 +627,14 @@ to it and return focus to the original. The TUI uses a keyboard picker through
 the existing comment navigation pattern; the Web UI uses keyboard-accessible,
 labelled controls with names such as “Show 2 confirmation replies”. Text carries
 the meaning. Symbols and theme colors may supplement the text.
+
+The TUI nests local replies beneath their targets and shows `confirm` and
+`refute` tags for visible direct assertions. Both tags remain visible when the
+assertions conflict; neither chooses a winner. A tag says `(before edit)` when
+all of its corresponding assertions predate the target's edit.
+Replies from other issues appear as header-only leaves directly beneath their
+local target, before its local replies, each group in time order. Indentation
+stops at four levels; reply labels still name the target.
 
 Kata filters links by authorization before counting or rendering. Counts
 include only directly linked comments the reader may access. If the authorized
@@ -859,6 +893,9 @@ This is especially important before a long pause, context compaction, or
 handoff to another agent.
 
 ## Use relationships deliberately
+
+For ordered stages with a human approval step, follow
+[Gated workflows](gated-workflows.md).
 
 Create child work under a parent issue:
 

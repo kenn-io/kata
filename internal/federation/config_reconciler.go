@@ -77,6 +77,7 @@ type ReconcilerConfig struct {
 	Clock            Clock
 	Wake             func()
 	ProjectEventSink func(db.Event)
+	ProjectResetSink func(projectID, cursor int64)
 	// ProjectEventSinkFrom takes precedence over ProjectEventSink when set.
 	// Its fork source is nil when the attempt has no parent activity lease.
 	ProjectEventSinkFrom func(db.Event, activity.Admission)
@@ -117,6 +118,7 @@ type Reconciler struct {
 	clock                Clock
 	wake                 func()
 	projectEventSink     func(db.Event)
+	projectResetSink     func(projectID, cursor int64)
 	projectEventSinkFrom func(db.Event, activity.Admission)
 	drainAdmission       activity.WaitableAdmission
 	logger               *log.Logger
@@ -142,6 +144,7 @@ func NewReconciler(cfg ReconcilerConfig) *Reconciler {
 		clock:                clock,
 		wake:                 cfg.Wake,
 		projectEventSink:     cfg.ProjectEventSink,
+		projectResetSink:     cfg.ProjectResetSink,
 		projectEventSinkFrom: cfg.ProjectEventSinkFrom,
 		drainAdmission:       cfg.DrainAdmission,
 		logger:               cfg.Logger,
@@ -292,7 +295,7 @@ func (r *Reconciler) reconcile(ctx context.Context, target Target, drain *activi
 	}
 	return reconcileMapping(
 		ctx, r.store, r.credentials, hub, target.Catalog, target.Mapping, r.wake,
-		projectEventSink,
+		projectEventSink, r.projectResetSink,
 	)
 }
 
@@ -458,7 +461,7 @@ func ReconcileMapping(
 	mapping config.FederationProjectConfig,
 	wake func(),
 ) error {
-	return reconcileMapping(ctx, store, credentials, hub, catalog, mapping, wake, nil)
+	return reconcileMapping(ctx, store, credentials, hub, catalog, mapping, wake, nil, nil)
 }
 
 func reconcileMapping(
@@ -470,9 +473,10 @@ func reconcileMapping(
 	mapping config.FederationProjectConfig,
 	wake func(),
 	projectEventSink func(db.Event),
+	projectResetSink func(projectID, cursor int64),
 ) error {
 	if mapping.CredentialProvider != nil {
-		return reconcileProviderMapping(ctx, store, credentials, catalog, mapping, wake, projectEventSink)
+		return reconcileProviderMapping(ctx, store, credentials, catalog, mapping, wake, projectEventSink, projectResetSink)
 	}
 	if store == nil || credentials == nil || hub == nil ||
 		mapping.Hub != catalog.Name ||
@@ -550,7 +554,7 @@ func reconcileMapping(
 	}
 	reservationChanged, err := convergeLocalMapping(
 		ctx, store, credentials, wake, mapping, preflight, enrollment.credential,
-		projectEventSink,
+		projectEventSink, projectResetSink,
 	)
 	if !reservationChanged || err == nil {
 		return err
@@ -1134,6 +1138,7 @@ func convergeLocalMapping(
 	preflight mappingPreflight,
 	credential config.FederationCredential,
 	projectEventSink func(db.Event),
+	projectResetSink func(projectID, cursor int64),
 ) (bool, error) {
 	if preflight.hasBinding &&
 		preflight.credential.credential.ManagedByConfig &&
@@ -1151,6 +1156,7 @@ func convergeLocalMapping(
 		PushEnabled:          true,
 		AdoptExisting:        true,
 		ProjectEventSink:     projectEventSink,
+		ProjectResetSink:     projectResetSink,
 	}
 	if preflight.credential.key != "" &&
 		preflight.credential.key != preflight.hubProject.UID {

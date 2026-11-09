@@ -3,7 +3,6 @@ package jsonl_test
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"encoding/json/jsontext"
@@ -21,7 +20,7 @@ import (
 )
 
 func TestRoundtripRichDatabaseIsByteEquivalent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture := buildRichJSONLFixture(t)
 	src := fixture.DB
 
@@ -346,7 +345,7 @@ func assertExternalRootRecordsExcludeRuntimeSecrets(t *testing.T, exported []byt
 }
 
 func TestRoundtrip_ReplaysAPITokensFromTokenEvents(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	name := "laptop"
 	active, _, err := src.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -394,7 +393,7 @@ func TestRoundtrip_ReplaysAPITokensFromTokenEvents(t *testing.T) {
 }
 
 func TestRoundtrip_ReplaysIssueScopedAPITokenGrant(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	project, err := src.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -432,7 +431,7 @@ func TestRoundtrip_ReplaysIssueScopedAPITokenGrant(t *testing.T) {
 }
 
 func TestRoundtrip_DuplicateTokenRevokedEventsKeepFirstRevokedAt(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	tok, _, err := src.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "revoked-token",
@@ -499,7 +498,7 @@ func assertRoundtripTableCounts(t *testing.T, src, dst *sqlitestore.Store) {
 }
 
 func TestFederationSyncStatusRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	srcDB := openExportTestDB(t)
 	p, err := srcDB.CreateProject(ctx, "sync-status")
 	require.NoError(t, err)
@@ -540,7 +539,7 @@ func TestFederationSyncStatusRoundTrip(t *testing.T) {
 }
 
 func TestGitHubSyncRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	srcDB := openExportTestDB(t)
 	p, err := srcDB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -609,7 +608,7 @@ func TestGitHubSyncRoundTrip(t *testing.T) {
 }
 
 func TestFederationQuarantineRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	srcDB := openExportTestDB(t)
 	p, err := srcDB.CreateProject(ctx, "quarantine")
 	require.NoError(t, err)
@@ -649,7 +648,7 @@ func TestFederationQuarantineRoundTrip(t *testing.T) {
 }
 
 func TestClaimRoundTripRows(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	srcDB := openExportTestDB(t)
 	p, err := srcDB.CreateProject(ctx, "claims")
 	require.NoError(t, err)
@@ -729,7 +728,7 @@ func assertSQLiteSequenceRows(t *testing.T, src, dst *sqlitestore.Store) {
 
 func sqliteSequenceSnapshot(t *testing.T, d *sqlitestore.Store) []map[string]any {
 	t.Helper()
-	rows, err := d.Query(`SELECT name, seq FROM sqlite_sequence ORDER BY name ASC`)
+	rows, err := d.QueryContext(t.Context(), `SELECT name, seq FROM sqlite_sequence ORDER BY name ASC`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var out []map[string]any
@@ -746,9 +745,9 @@ func sqliteSequenceSnapshot(t *testing.T, d *sqlitestore.Store) []map[string]any
 func assertSearchResultsMatch(t *testing.T, src, dst *sqlitestore.Store, projectID int64, query string) {
 	t.Helper()
 	params := db.SearchFTSParams{ProjectID: projectID, Query: query, Limit: 20, IncludeDeleted: true}
-	srcHits, err := src.SearchFTS(context.Background(), params)
+	srcHits, err := src.SearchFTS(t.Context(), params)
 	require.NoError(t, err)
-	dstHits, err := dst.SearchFTS(context.Background(), params)
+	dstHits, err := dst.SearchFTS(t.Context(), params)
 	require.NoError(t, err)
 	assert.Equal(t, normalizeSearchHits(srcHits), normalizeSearchHits(dstHits), query)
 }
@@ -772,7 +771,7 @@ func normalizeSearchHits(hits []db.SearchCandidate) []map[string]any {
 // land on the destination so the tombstone keeps gating reuse after a
 // cutover or backup restore.
 func TestRoundtrip_PurgeLogEnvelopeCarriesShortID(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openExportTestDB(t)
 	p, err := d.CreateProject(ctx, "demo")
 	require.NoError(t, err)
@@ -815,7 +814,7 @@ func TestRoundtrip_PurgeLogEnvelopeCarriesShortID(t *testing.T) {
 }
 
 func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	srcDB := openExportTestDB(t)
 	p, err := srcDB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -868,7 +867,7 @@ func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
 }
 
 func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	srcDB := openExportTestDB(t)
 	p, err := srcDB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -922,7 +921,7 @@ func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
 // envelope carries a short_id field at the current schema version and drops
 // the legacy number field. The cutover (Task 9) handles older inputs.
 func TestRoundtrip_IssueEnvelopeCarriesShortID(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openExportTestDB(t)
 	p, err := d.CreateProject(ctx, "demo")
 	require.NoError(t, err)
@@ -955,7 +954,7 @@ func TestRoundtrip_IssueEnvelopeCarriesShortID(t *testing.T) {
 
 func TestRoundtrip_IssuePreservesMetadataAndRevision(t *testing.T) {
 	srcDB := openExportTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := srcDB.CreateProject(ctx, "p")
 	require.NoError(t, err)
 	iss, _, err := srcDB.CreateIssue(ctx, db.CreateIssueParams{
@@ -1104,7 +1103,7 @@ func TestImportRejectsAssignmentExpiryWithoutOwner(t *testing.T) {
 
 func TestRoundtrip_ProjectPreservesMetadataAndRevision(t *testing.T) {
 	srcDB := openExportTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := srcDB.CreateProject(ctx, "Personal")
 	require.NoError(t, err)
 	_, err = srcDB.ExecContext(ctx,
@@ -1128,7 +1127,7 @@ func TestRoundtrip_ProjectPreservesMetadataAndRevision(t *testing.T) {
 
 func TestRoundtrip_RecurrenceFullFields(t *testing.T) {
 	srcDB := openExportTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := srcDB.CreateProject(ctx, "p")
 	require.NoError(t, err)
 	_, err = srcDB.ExecContext(ctx, `
@@ -1160,7 +1159,7 @@ func TestRoundtrip_RecurrenceFullFields(t *testing.T) {
 
 func TestRoundtrip_IssueRecurrenceLinkagePreserved(t *testing.T) {
 	srcDB := openExportTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := srcDB.CreateProject(ctx, "p")
 	require.NoError(t, err)
 
@@ -1214,7 +1213,7 @@ func TestImport_RecurrenceUIDAndIDDisagree_Errors(t *testing.T) {
 	// Issue claims recurrence_uid=RECA but recurrence_id=2 (which is RECB).
 	body.WriteString(`{"kind":"issue","data":{"id":1,"uid":"ISS00000000000000000000A00","project_id":1,"short_id":"0a00","title":"t","body":"","status":"open","author":"t","metadata":{},"revision":1,"recurrence_id":2,"recurrence_uid":"RECA000000000000000000000A","occurrence_key":"2026-05-15","created_at":"2026-05-15T00:00:00.000Z","updated_at":"2026-05-15T00:00:00.000Z"}}` + "\n")
 
-	err := jsonl.Import(context.Background(), body, dstDB)
+	err := jsonl.Import(t.Context(), body, dstDB)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "recurrence_uid")
 }
@@ -1227,14 +1226,14 @@ func TestImport_OccurrenceKeyWithoutRecurrence_Errors(t *testing.T) {
 	body.WriteString(`{"kind":"project","data":{"id":1,"uid":"PROJ000000000000000000000A","name":"p","metadata":{},"revision":1,"created_at":"2026-05-15T00:00:00.000Z"}}` + "\n")
 	body.WriteString(`{"kind":"issue","data":{"id":1,"uid":"ISS00000000000000000000A00","project_id":1,"short_id":"0a00","title":"t","body":"","status":"open","author":"t","metadata":{},"revision":1,"occurrence_key":"2026-05-15","created_at":"2026-05-15T00:00:00.000Z","updated_at":"2026-05-15T00:00:00.000Z"}}` + "\n")
 
-	err := jsonl.Import(context.Background(), body, dstDB)
+	err := jsonl.Import(t.Context(), body, dstDB)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "occurrence_key")
 }
 
 func TestExport_RecurrencesAppearBeforeIssuesInStream(t *testing.T) {
 	srcDB := openExportTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := srcDB.CreateProject(ctx, "p")
 	require.NoError(t, err)
 	_, _, err = srcDB.CreateIssue(ctx, db.CreateIssueParams{
@@ -1270,7 +1269,7 @@ func TestExport_RecurrencesAppearBeforeIssuesInStream(t *testing.T) {
 
 func TestExport_SoftDeletedRecurrenceReferencedByIssueIsIncluded(t *testing.T) {
 	srcDB := openExportTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, _ := srcDB.CreateProject(ctx, "p")
 
 	recUID := "REC00000000000000000000005"
@@ -1316,7 +1315,7 @@ func TestExport_SoftDeletedRecurrenceReferencedByIssueIsIncluded(t *testing.T) {
 
 func TestExport_SoftDeletedRecurrenceWithNoLiveIssues_Excluded(t *testing.T) {
 	srcDB := openExportTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, _ := srcDB.CreateProject(ctx, "p")
 
 	recUID := "REC00000000000000000000006"
@@ -1355,7 +1354,7 @@ func TestExport_SoftDeletedRecurrenceWithNoLiveIssues_Excluded(t *testing.T) {
 // FK and occurrence_key after a JSONL roundtrip.
 func TestRoundtrip_MultipleRecurrencesAndInstances(t *testing.T) {
 	srcDB := openExportTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := srcDB.CreateProject(ctx, "p")
 	require.NoError(t, err)
 
@@ -1459,7 +1458,7 @@ func TestRoundtrip_MultipleRecurrencesAndInstances(t *testing.T) {
 
 func TestRoundtrip_NewEventPayloadBytesAreExact(t *testing.T) {
 	srcDB := openExportTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := srcDB.CreateProject(ctx, "p")
 	require.NoError(t, err)
 	iss, _, err := srcDB.CreateIssue(ctx, db.CreateIssueParams{

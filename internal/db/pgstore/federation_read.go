@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kit/search/sqlquery"
 )
 
 // ReadFederation reads a consistent federation projection and cursor.
@@ -30,21 +31,15 @@ func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 			}
 			return scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, project.ID))
 		}
+		readPage := func(afterID int64, limit int) ([]db.Event, error) {
+			return db.ReadFederationEventPage(ctx, tx, project, in.IssueUID, afterID, limit, true, func(where string, args ...any) ([]db.Event, error) {
+				return (sqlquery.Query{SQL: eventSelect + where, Args: args}).All(ctx, tx, func(rows *sql.Rows) (db.Event, error) {
+					return scanEvent(rows)
+				})
+			})
+		}
 		readEvents := func() ([]db.Event, error) {
-			rows, err := tx.QueryContext(ctx, eventSelect+` WHERE e.project_id=$1 AND e.id>$2 ORDER BY e.id LIMIT $3`, project.ID, in.AfterID, in.Limit)
-			if err != nil {
-				return nil, err
-			}
-			defer func() { _ = rows.Close() }()
-			events := []db.Event{}
-			for rows.Next() {
-				event, err := scanEvent(rows)
-				if err != nil {
-					return nil, err
-				}
-				events = append(events, event)
-			}
-			return events, rows.Err()
+			return db.ReadFederationMoveHistory(ctx, tx, in.AfterID, in.Limit, readPage)
 		}
 		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, refresh, readEvents)
 		return err

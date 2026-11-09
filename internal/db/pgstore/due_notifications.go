@@ -13,10 +13,10 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
-// ListDueNotificationIssueIDs returns live open issues that have a planning
-// date or inbox metadata that may need automatic cleanup. Enabled spokes are
+// ListDueNotificationIssueIDs returns live open issues that may be due at now
+// or hold an automatic inbox entry that may need cleanup. Enabled spokes are
 // projections of their hub and never originate these writes.
-func (s *Store) ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error) {
+func (s *Store) ListDueNotificationIssueIDs(ctx context.Context, now time.Time) ([]int64, error) {
 	rows, err := s.QueryContext(ctx, `
 		SELECT i.id
 		  FROM issues i
@@ -27,14 +27,17 @@ func (s *Store) ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error
 		   AND i.status = 'open'
 		   AND NOT (COALESCE(fb.enabled, 0) = 1 AND fb.role = 'spoke')
 		   AND (
-			 (i.metadata)::jsonb ? 'scheduled_on'
-			 OR (i.metadata)::jsonb ? 'deadline_on'
+			 (jsonb_typeof((i.metadata)::jsonb -> 'scheduled_on') = 'string'
+			  AND ((i.metadata)::jsonb ->> 'scheduled_on') COLLATE "C" <= $1)
+			 OR (jsonb_typeof((i.metadata)::jsonb -> 'deadline_on') = 'string'
+			  AND ((i.metadata)::jsonb ->> 'deadline_on') COLLATE "C" <= $1)
 			 OR EXISTS (
-				 SELECT 1 FROM jsonb_object_keys((i.metadata)::jsonb) AS entry(key)
+				 SELECT 1 FROM jsonb_each((i.metadata)::jsonb) AS entry(key, value)
 				  WHERE entry.key LIKE 'notify.%'
+				    AND entry.value ->> 'from' = 'system'
 			 )
 		   )
-		 ORDER BY i.id`)
+		 ORDER BY i.id`, metadata.ScheduleDueCutoff(now))
 	if err != nil {
 		return nil, fmt.Errorf("list due notification issues: %w", mapSQLError(err, nil))
 	}

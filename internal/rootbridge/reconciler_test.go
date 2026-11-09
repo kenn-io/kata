@@ -88,7 +88,7 @@ func TestReconcileRenewsClaimDuringLongConnectorCall(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, runErr := h.reconciler.Run(context.Background(), h.binding.ID, RunOptions{})
+		result, runErr := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
 		done <- outcome{result: result, err: runErr}
 	}()
 
@@ -221,7 +221,7 @@ func TestCompleteExternalFencesReopenBeforeConnectorCall(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, runErr := h.reconciler.Run(context.Background(), h.binding.ID, RunOptions{})
+		result, runErr := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
 		done <- outcome{result: result, err: runErr}
 	}()
 
@@ -264,7 +264,7 @@ func TestCompleteExternalRevalidatesClaimBeforeConnectorCall(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, runErr := h.reconciler.Run(context.Background(), h.binding.ID, RunOptions{})
+		result, runErr := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
 		done <- outcome{result: result, err: runErr}
 	}()
 

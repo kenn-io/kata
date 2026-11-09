@@ -150,9 +150,9 @@ func TestExtraAgentEmittedCommandsConsumeNativeFixtures(t *testing.T) {
 					for i, arg := range raw {
 						args[i] = arg.(string)
 					}
-					process = exec.Command(call.handler["command"].(string), args...) //nolint:gosec // G204: execute only the trusted provider-generated fixture command and argv.
+					process = exec.CommandContext(t.Context(), call.handler["command"].(string), args...) //nolint:gosec // G204: execute only the trusted provider-generated fixture command and argv.
 				} else {
-					process = exec.Command("sh", "-c", call.handler["command"].(string)) //nolint:gosec // G204: probe the exact trusted provider-generated shell command for this fixture.
+					process = exec.CommandContext(t.Context(), "sh", "-c", call.handler["command"].(string)) //nolint:gosec // G204: probe the exact trusted provider-generated shell command for this fixture.
 				}
 				process.Stdin = strings.NewReader(payload)
 				output, err := process.CombinedOutput()

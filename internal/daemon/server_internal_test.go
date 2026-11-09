@@ -108,7 +108,7 @@ func TestServerServesOpenAPIYAML(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Close() })
 
 	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil))
+	srv.Handler().ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/openapi.yaml", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /openapi.yaml status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -131,7 +131,7 @@ func TestServerDoesNotServeDefaultOpenAPIJSON(t *testing.T) {
 
 	for _, path := range []string{"/openapi", "/openapi.json", "/docs"} {
 		rr := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		srv.Handler().ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
 
 		if rr.Code != http.StatusNotFound {
 			t.Fatalf("GET %s status = %d, want %d", path, rr.Code, http.StatusNotFound)

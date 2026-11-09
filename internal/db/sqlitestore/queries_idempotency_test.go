@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -238,7 +237,7 @@ func TestLookupIdempotency_DifferentKeyIsNil(t *testing.T) {
 func TestLookupIdempotency_DifferentProjectIsNil(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p1 := createProject(ctx, t, d, "p1")
 	p2 := createProject(ctx, t, d, "p2")
 	issue, _ := createTesterIssue(ctx, t, d, p1.ID, "x")

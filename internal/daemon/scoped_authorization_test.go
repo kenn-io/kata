@@ -38,7 +38,7 @@ func TestScopedPrincipalTransactionFenceRejectsRevocationBeforeFirstWrite(t *tes
 		}))
 	done := make(chan struct{})
 	go func() {
-		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil).WithContext(ctx))
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil).WithContext(ctx))
 		close(done)
 	}()
 	<-gated.entered
@@ -83,7 +83,7 @@ func TestScopedMutationRechecksTargetMembershipInsideTransaction(t *testing.T) {
 		})
 		require.Error(t, err)
 	}))
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil).WithContext(ctx))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil).WithContext(ctx))
 	comments, err := store.CommentsByIssue(t.Context(), child.ID)
 	require.NoError(t, err)
 	require.Empty(t, comments)
@@ -187,7 +187,7 @@ func withScopedAuthorizationTestPrincipal(
 		ExpiresAt: &expiresAt,
 	})
 	require.NoError(t, err)
-	return WithPrincipal(context.Background(), Principal{
+	return WithPrincipal(t.Context(), Principal{
 		Kind: PrincipalDBToken, Actor: token.Actor, TokenID: token.ID,
 		Scope: token.Scope, ExpiresAt: token.ExpiresAt,
 	})

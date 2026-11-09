@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/stacktest"
 )
 
 func TestDaemonWorkerGroupJoinsCancelledWorkers(t *testing.T) {
 	group := newDaemonWorkerGroup()
-	workerCtx, cancel := context.WithCancel(context.Background())
+	workerCtx, cancel := context.WithCancel(t.Context())
 	exited := make(chan struct{})
 	group.Go(func() {
 		<-workerCtx.Done()
@@ -20,9 +21,12 @@ func TestDaemonWorkerGroupJoinsCancelledWorkers(t *testing.T) {
 	})
 
 	cancel()
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), time.Second)
 	defer waitCancel()
-	require.True(t, group.Wait(waitCtx))
+	if !group.Wait(waitCtx) {
+		stacktest.Dump(t)
+		t.Fatal("worker group did not join cancelled workers")
+	}
 	select {
 	case <-exited:
 	default:
@@ -35,7 +39,7 @@ func TestDaemonWorkerGroupReportsUnjoinedWorker(t *testing.T) {
 	release := make(chan struct{})
 	group.Go(func() { <-release })
 
-	waitCtx, cancel := context.WithCancel(context.Background())
+	waitCtx, cancel := context.WithCancel(t.Context())
 	cancel()
 	require.False(t, group.Wait(waitCtx))
 	close(release)
@@ -60,7 +64,7 @@ func (s *testHookShutdown) Shutdown(ctx context.Context) error {
 }
 
 func TestDaemonShutdownCoordinatorDrainsHookProducersBeforeStoppingHooks(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	workers := newDaemonWorkerGroup()
 	workerCanceled := make(chan struct{})
 	releaseWorker := make(chan struct{})
@@ -87,18 +91,20 @@ func TestDaemonShutdownCoordinatorDrainsHookProducersBeforeStoppingHooks(t *test
 	select {
 	case <-workerCanceled:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("worker did not observe root cancellation")
 	}
 	shutdown.HTTPHandlersDone(true)
 	select {
 	case <-hooks.started:
 		t.Fatal("hook shutdown started before background producers drained")
-	case <-time.After(20 * time.Millisecond): //nolint:kennlint // absence window; releaseWorker holds a background producer, so hook shutdown must not start
+	case <-time.After(20 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; releaseWorker holds a background producer, so hook shutdown must not start
 	}
 	close(releaseWorker)
 	select {
 	case <-hooks.started:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("hook shutdown did not start after all producers drained")
 	}
 	close(hooks.release)
@@ -112,7 +118,7 @@ func TestDaemonShutdownCoordinatorDrainsHookProducersBeforeStoppingHooks(t *test
 }
 
 func TestDaemonShutdownCoordinatorWaitsForHTTPHandlersBeforeStoppingHooks(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	hooks := &testHookShutdown{started: make(chan struct{}), release: make(chan struct{})}
 	shutdown := startDaemonShutdownCoordinator(
 		ctx, cancel, newDaemonWorkerGroup(), hooks, nil, time.Second,
@@ -122,12 +128,13 @@ func TestDaemonShutdownCoordinatorWaitsForHTTPHandlersBeforeStoppingHooks(t *tes
 	select {
 	case <-hooks.started:
 		t.Fatal("hook shutdown started before HTTP handlers drained")
-	case <-time.After(20 * time.Millisecond): //nolint:kennlint // absence window; HTTP handlers have not drained, so hook shutdown must not start
+	case <-time.After(20 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; HTTP handlers have not drained, so hook shutdown must not start
 	}
 	shutdown.HTTPHandlersDone(true)
 	select {
 	case <-hooks.started:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("hook shutdown did not start after HTTP handlers drained")
 	}
 	close(hooks.release)
@@ -135,7 +142,7 @@ func TestDaemonShutdownCoordinatorWaitsForHTTPHandlersBeforeStoppingHooks(t *tes
 }
 
 func TestDaemonShutdownCoordinatorRejectsReadinessAfterShutdownStarts(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	shutdown := startDaemonShutdownCoordinator(
 		ctx,
 		cancel,
@@ -159,7 +166,7 @@ func TestDaemonShutdownCoordinatorRejectsReadinessAfterShutdownStarts(t *testing
 }
 
 func TestDaemonShutdownCoordinatorLetsInFlightReadinessWinBeforeShutdown(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	shutdown := startDaemonShutdownCoordinator(
 		ctx,
 		cancel,
@@ -182,6 +189,7 @@ func TestDaemonShutdownCoordinatorLetsInFlightReadinessWinBeforeShutdown(t *test
 	select {
 	case <-publishStarted:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("readiness publication did not start")
 	}
 
@@ -193,7 +201,7 @@ func TestDaemonShutdownCoordinatorLetsInFlightReadinessWinBeforeShutdown(t *test
 	select {
 	case <-ctx.Done():
 		t.Fatal("shutdown overtook readiness publication inside the lifecycle gate")
-	case <-time.After(20 * time.Millisecond): //nolint:kennlint // absence window; releasePublish holds readiness publication inside the lifecycle gate
+	case <-time.After(20 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; releasePublish holds readiness publication inside the lifecycle gate
 	}
 
 	close(releasePublish)
@@ -201,6 +209,7 @@ func TestDaemonShutdownCoordinatorLetsInFlightReadinessWinBeforeShutdown(t *test
 	select {
 	case <-triggerDone:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("shutdown did not continue after readiness publication")
 	}
 	shutdown.HTTPHandlersDone(true)
@@ -208,7 +217,7 @@ func TestDaemonShutdownCoordinatorLetsInFlightReadinessWinBeforeShutdown(t *test
 }
 
 func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenWorkerRemainsUnjoined(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	workers := newDaemonWorkerGroup()
 	workerRelease := make(chan struct{})
 	require.True(t, workers.Go(func() { <-workerRelease }))
@@ -220,7 +229,7 @@ func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenWorkerRemainsUnjoined(t *
 		workers,
 		hooks,
 		nil,
-		20*time.Millisecond,
+		20*time.Millisecond, //nolint:kennlint // deadlinetest: held producers exhaust the shared shutdown deadline; unsafe cleanup is the asserted result
 		func(cleanupCtx context.Context) bool {
 			close(cleanupStarted)
 			<-cleanupCtx.Done()
@@ -249,7 +258,7 @@ func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenWorkerRemainsUnjoined(t *
 }
 
 func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenHTTPRemainsUnjoined(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	hooks := &testHookShutdown{started: make(chan struct{}), release: make(chan struct{})}
 	shutdown := startDaemonShutdownCoordinator(
 		ctx,
@@ -257,7 +266,7 @@ func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenHTTPRemainsUnjoined(t *te
 		newDaemonWorkerGroup(),
 		hooks,
 		nil,
-		20*time.Millisecond,
+		20*time.Millisecond, //nolint:kennlint // deadlinetest: held producers exhaust the shared shutdown deadline; unsafe cleanup is the asserted result
 	)
 
 	shutdown.Trigger()

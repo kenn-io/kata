@@ -21,9 +21,11 @@ Choose authentication explicitly; create the scheduled task through Muse itself.
 var agentQuickstartText = agentguide.Quickstart
 
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
+Find commands with kata cli search "<task>" --agent; kata search finds issues.
 Do not create practice, tutorial, example, or scratchpad issues.
 Search before creating or updating work.
 If create refuses a look-alike, reuse it; --force-new only if the work truly differs.
+Related but different work: create it and link each hit with --parent <ref> or --related <ref>.
 No bound workspace: use <project>#<id> refs or --project <project>.
 Choose one unclaimed issue with kata next --unowned --agent.
 Inspect a filtered queue with kata ready --unowned --label bug --no-label blocked --agent.
@@ -33,6 +35,7 @@ Use --json only when your script needs complete structured data.
 Launch each child with KATA_TEAMMATE=teammate-1 and KATA_INBOX_USER=coordinator/teammate-1.
 Comments store teammate; new issues store metadata.teammate while author remains accountable.
 Record progress: kata comment <ref> -m "<what changed>".
+Respond to a comment: kata comment <ref> --reply|--confirm|--refute|--supersede c:<id> -m "<evidence>".
 When a comment-sized task needs ownership or tracked completion, make it a child issue: kata create "fix retry handling" --parent <ref>, then kata claim <child>.
 KATA_INBOX_USER selects an inbox and does not set attribution; --teammate overrides the attribution default.
 Request actor or teammate attention: kata notify <ref> --to <actor>[/<teammate>] --message "<reason>".
@@ -73,7 +76,7 @@ Default: full instructions for agents using kata.
 --json: instructions in a JSON response.
 --format contract: the canonical managed contract, exactly what kata agent-hook contract injects.
 
-Run kata agent-hook install --all to load the contract in every session on this machine.
+Run kata agent-hook install --all to load the contract in every session that starts in a kata workspace.
 Without hooks, run kata quickstart at session start.
 Setup guides cover federation enrollment and optional embeddings.
 The managed contract format stays static.

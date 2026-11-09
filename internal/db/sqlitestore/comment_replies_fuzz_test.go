@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -25,7 +24,7 @@ func FuzzCreateCommentReplyValidation(f *testing.F) {
 		if !utf8.ValidString(target) || !utf8.ValidString(kind) {
 			t.Skip()
 		}
-		ctx := context.Background()
+		ctx := t.Context()
 		s, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = s.Close() })

@@ -49,20 +49,20 @@ func (f *runtimeTickTickFetcher) Task(ctx context.Context, id string) (tickticks
 func readRuntimeTickTickStatus(t *testing.T, h http.Handler, id int64) runtimeNotionStatus {
 	t.Helper()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/ticktick/status", id), nil))
+	h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/ticktick/status", id), nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	var s runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &s))
 	return s
 }
-func ticktickRuntimePost(id int64, action string, body io.Reader) *http.Request {
-	r := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/ticktick/%s", id, action), body)
+func ticktickRuntimePost(ctx context.Context, id int64, action string, body io.Reader) *http.Request {
+	r := httptest.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/ticktick/%s", id, action), body)
 	r.Header.Set("Content-Type", "application/json")
 	return r
 }
 
 func TestServiceTickTickScheduledProgress(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newRuntimeTickTickFetcher()
 	var resolved config.TickTickSyncConfig
 	s, err := newService(ctx, Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TickTickSync: TickTickSyncConfig{TokenEnv: " EXAMPLE_TICKTICK_TOKEN "}}, serviceDeps{tickTickSyncFetcherFactory: func(c config.TickTickSyncConfig) tickticksync.Fetcher { resolved = c; return f }}) //nolint:gosec // G101: TokenEnv selects an environment-variable name.
@@ -72,7 +72,7 @@ func TestServiceTickTickScheduledProgress(t *testing.T) {
 	p, err := s.store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, ticktickRuntimePost(p.ID, "enable", strings.NewReader(`{"config":{"project_id":"project-1"}}`)))
+	s.Handler().ServeHTTP(w, ticktickRuntimePost(t.Context(), p.ID, "enable", strings.NewReader(`{"config":{"project_id":"project-1"}}`)))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	sub := s.broadcaster.Subscribe(daemon.SubFilter{ProjectID: p.ID})
 	defer sub.Unsub()
@@ -87,7 +87,7 @@ func TestServiceTickTickScheduledProgress(t *testing.T) {
 	require.NotNil(t, status.Status.Progress)
 	require.Equal(t, "tasks", status.Status.Progress.Phase)
 	w = httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, ticktickRuntimePost(p.ID, "once", strings.NewReader(`{}`)))
+	s.Handler().ServeHTTP(w, ticktickRuntimePost(t.Context(), p.ID, "once", strings.NewReader(`{}`)))
 	require.Equal(t, 409, w.Code, w.Body.String())
 	close(f.release)
 	finished := waitRuntimeNotionRecord(t, record.recorded)
@@ -101,17 +101,17 @@ func TestServiceTickTickScheduledProgress(t *testing.T) {
 	}
 }
 func TestServiceTickTickConfigAndExplicitCredentials(t *testing.T) {
-	_, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "bad.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TickTickSync: TickTickSyncConfig{TokenEnv: "bad-name"}})
+	_, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "bad.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TickTickSync: TickTickSyncConfig{TokenEnv: "bad-name"}})
 	require.ErrorContains(t, err, "ticktick_sync.token_env")
 	t.Setenv("KATA_TICKTICK_TOKEN", "unrelated-example-secret")
 	t.Setenv("EXAMPLE_TICKTICK_TOKEN", "")
-	s, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TickTickSync: TickTickSyncConfig{TokenEnv: "EXAMPLE_TICKTICK_TOKEN"}})
+	s, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TickTickSync: TickTickSyncConfig{TokenEnv: "EXAMPLE_TICKTICK_TOKEN"}})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, s.Close()) }()
-	p, err := s.store.CreateProject(context.Background(), "example-project")
+	p, err := s.store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, ticktickRuntimePost(p.ID, "enable", strings.NewReader(`{"config":{"project_id":"project-1"}}`)))
+	s.Handler().ServeHTTP(w, ticktickRuntimePost(t.Context(), p.ID, "enable", strings.NewReader(`{"config":{"project_id":"project-1"}}`)))
 	require.Equal(t, 400, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "credentials")
 	require.NotContains(t, w.Body.String(), "unrelated-example-secret")

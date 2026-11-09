@@ -68,7 +68,7 @@ func testClient(t *testing.T, transport notionTransport) (*Client, *clientClock)
 }
 func session(t *testing.T, c *Client) Session {
 	t.Helper()
-	s, e := c.ForRun(context.Background())
+	s, e := c.ForRun(t.Context())
 	require.NoError(t, e)
 	return s
 }

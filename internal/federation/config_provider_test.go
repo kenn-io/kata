@@ -244,7 +244,7 @@ func TestReconcilerRemovesProviderMappingAndRetriesExactCleanup(t *testing.T) {
 	})
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
-	//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+	//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 	require.Eventually(t, func() bool { return r.Health().LastErrorCategory != "" }, federationprovider.AttemptTimeout+time.Second, 10*time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
@@ -434,7 +434,7 @@ func TestProviderInputErrorIsVisibleAndRetainsExactRequest(t *testing.T) {
 	})
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
-	//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+	//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 	require.Eventually(t, func() bool { return r.Health().LastErrorCategory != "" }, federationprovider.AttemptTimeout+time.Second, 10*time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
@@ -478,7 +478,7 @@ func TestReconcilerStopsTerminalProviderDecisionsWithoutDroppingCleanup(t *testi
 						cancel()
 						require.ErrorIs(t, <-done, context.Canceled)
 					}()
-					//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+					//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 					require.Eventually(t, func() bool { return r.Health().LastErrorCategory == status }, federationprovider.AttemptTimeout+time.Second, time.Millisecond)
 					assert.Equal(t, 1, r.Health().Conflicted)
 					assert.Zero(t, r.Health().Pending)

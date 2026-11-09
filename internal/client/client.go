@@ -129,7 +129,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			return
 		}
 		for _, r := range recs {
-			if !daemonruntime.RuntimeProcessAlive(r) {
+			if !daemonruntime.RuntimeRecordWorthProbing(r) {
 				continue
 			}
 			ep := r.Endpoint()
@@ -153,7 +153,9 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			// takes over its endpoint. The responding daemon is not this record's
 			// process; keep scanning for its matching record. Do not delete the
 			// PID-named file: startup may have replaced it during the probe.
-			if info.PID != 0 && info.PID != r.PID {
+			// A PID-less ping is accepted only for a record whose identity was
+			// verified; an unverifiable record must report its own PID.
+			if info.PID != r.PID && (info.PID != 0 || !daemonruntime.RuntimeProcessAlive(r)) {
 				continue
 			}
 			candidate := liveDaemon{Record: r, BaseURL: url, Info: info}
@@ -335,7 +337,7 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 		auth := resolveAuthConfig()
 		return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
 	}
-	if auth, ok, err := activeRemoteTargetAuthForBaseURL(baseURL, opts.WorkspaceStart); err != nil {
+	if auth, ok, err := activeRemoteTargetAuthForBaseURL(ctx, baseURL, opts.WorkspaceStart); err != nil {
 		return nil, err
 	} else if ok {
 		return NewHTTPClientForTarget(ctx, baseURL, auth, opts)
@@ -393,7 +395,7 @@ func NewHTTPClientForResolved(ctx context.Context, d ResolvedDaemon, opts Opts) 
 		}
 		return c, err
 	}
-	if d.LocalProfile != nil {
+	if d.LocalProfile != nil || d.Direct {
 		base, ok := http.DefaultTransport.(*http.Transport)
 		if !ok {
 			return nil, errors.New("http.DefaultTransport is not *http.Transport")
@@ -422,7 +424,7 @@ func newHTTPClientWithAuth(ctx context.Context, baseURL string, auth config.Auth
 	if err != nil {
 		return nil, err
 	}
-	allowInsecure := opts.AllowInsecure || remoteAllowInsecureForBaseURL(baseURL, opts.WorkspaceStart)
+	allowInsecure := opts.AllowInsecure || remoteAllowInsecureForBaseURL(ctx, baseURL, opts.WorkspaceStart)
 	rt, err := authBearerTransport(c.Transport, auth.Token, baseURL,
 		auth.TrustPrivateNetwork, allowInsecure)
 	if err != nil {

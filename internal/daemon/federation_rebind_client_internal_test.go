@@ -47,7 +47,7 @@ func TestFederationRebindPreflightUsesEnrollmentTokenAndPreservesPath(t *testing
 	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
 
 	metadata, err := fetchFederationRebindMetadata(
-		context.Background(), server.URL+"/reverse-proxy", enrollmentToken, 41, nil,
+		t.Context(), server.URL+"/reverse-proxy", enrollmentToken, 41, nil,
 	)
 
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestFederationRebindPreflightDoesNotCleanConfiguredPathPrefix(t *testing.T)
 	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
 
 	_, err := fetchFederationRebindMetadata(
-		context.Background(), server.URL+"/proxy//segment/../mount", "enrollment-secret", 41, nil,
+		t.Context(), server.URL+"/proxy//segment/../mount", "enrollment-secret", 41, nil,
 	)
 
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestFederationRebindPreflightPinsRedirectOrigin(t *testing.T) {
 	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
 
 	_, err := fetchFederationRebindMetadata(
-		context.Background(), source.URL, "enrollment-secret", 41, nil,
+		t.Context(), source.URL, "enrollment-secret", 41, nil,
 	)
 
 	require.Error(t, err)
@@ -127,7 +127,7 @@ func TestFederationRebindPreflightBoundsRemoteErrors(t *testing.T) {
 	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
 
 	_, err := fetchFederationRebindMetadata(
-		context.Background(), server.URL, "enrollment-secret", 41, nil,
+		t.Context(), server.URL, "enrollment-secret", 41, nil,
 	)
 
 	require.ErrorIs(t, err, ErrFederationReplicaHubUnavailable)
@@ -150,7 +150,7 @@ func TestFederationRebindPreflightClassifiesEnrollmentRejection(t *testing.T) {
 	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
 
 	_, err := fetchFederationRebindMetadata(
-		context.Background(), server.URL, "enrollment-secret", 41, nil,
+		t.Context(), server.URL, "enrollment-secret", 41, nil,
 	)
 
 	require.ErrorIs(t, err, ErrFederationReplicaCredentialConflict)
@@ -178,7 +178,7 @@ func TestFederationRebindPreflightClassifiesPinnedSigningBaseMismatch(t *testing
 		HubURL: "https://hub.example/old-prefix",
 	}
 	_, err := fetchFederationRebindMetadata(
-		context.Background(), server.URL+"/new-prefix", "enrollment-token", 41, source,
+		t.Context(), server.URL+"/new-prefix", "enrollment-token", 41, source,
 	)
 	require.ErrorIs(t, err, ErrFederationReplicaInvalidInput)
 

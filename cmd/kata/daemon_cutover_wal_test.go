@@ -53,7 +53,7 @@ func TestForegroundRefusesStartupBeforeCutover(t *testing.T) {
 
 			switch {
 			case tc.occupiedEndpoint:
-				occupied, listenErr := net.Listen("tcp", "127.0.0.1:0")
+				occupied, listenErr := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 				require.NoError(t, listenErr)
 				t.Cleanup(func() { require.NoError(t, occupied.Close()) })
 				err = runDaemonWithListen(ctx, occupied.Addr().String(), false, false)
@@ -93,7 +93,8 @@ func TestForegroundRefusesStartupBeforeCutover(t *testing.T) {
 // home and dbPath, as a daemon in another PID namespace or mount would.
 func holdStoreOwnerLock(t *testing.T, home, dbPath string) {
 	t.Helper()
-	child := exec.Command(os.Args[0], "-test.run=^TestStoreOwnerLockHelperProcess$") //nolint:gosec // test helper starts this test binary
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	child := exec.CommandContext(context.WithoutCancel(t.Context()), os.Args[0], "-test.run=^TestStoreOwnerLockHelperProcess$") //nolint:gosec // test helper starts this test binary
 	child.Env = append(os.Environ(), "KATA_OWNER_LOCK_HELPER=1", "KATA_HOME="+home, "KATA_DB="+dbPath)
 	stdin, err := child.StdinPipe()
 	require.NoError(t, err)
@@ -126,9 +127,8 @@ func TestStoreOwnerLockHelperProcess(t *testing.T) {
 	_, _ = io.Copy(io.Discard, os.Stdin)
 }
 
-// Cutover renames the upgraded database onto the configured path, which turns
-// a symlink there into a regular file. The daemon that ran that cutover must
-// still own the path a competing daemon now resolves.
+// A daemon that upgraded its store through a symlink keeps owning it, so a
+// competing daemon configured with the same link is refused.
 func TestStoreStaysOwnedAfterCutoverThroughSymlink(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
@@ -175,10 +175,6 @@ func TestStoreStaysOwnedAfterCutoverThroughSymlink(t *testing.T) {
 	case err := <-done:
 		t.Fatalf("daemon exited before serving: %v", err)
 	}
-	info, err := os.Lstat(link)
-	require.NoError(t, err)
-	require.True(t, info.Mode().IsRegular(), "cutover must have replaced the symlink for this case to matter")
-
 	original := daemonOwnerLockWait
 	t.Cleanup(func() { daemonOwnerLockWait = original })
 	daemonOwnerLockWait = 200 * time.Millisecond

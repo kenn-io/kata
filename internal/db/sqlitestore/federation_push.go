@@ -46,17 +46,16 @@ func (d *Store) PendingFederationPushEvents(
 			  AND e.origin_instance_uid = ?
 			  AND e.id > ?
 			  AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
-			  AND NOT EXISTS (
-			    SELECT 1
+			  AND e.id <= COALESCE((
+			    SELECT MIN(barrier.id)
 			      FROM events barrier
-			     WHERE barrier.project_id = e.project_id
-			       AND barrier.origin_instance_uid = e.origin_instance_uid
+			     WHERE barrier.project_id = ?
+			       AND barrier.origin_instance_uid = ?
 			       AND barrier.id > ?
-			       AND barrier.id < e.id
 			       AND `+federationPushEventTypeCondition("barrier.type")+`
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
-			  )
-			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, runStartAfterID)
+			  ), 9223372036854775807)
+			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
 		if err != nil {
 			return nil, err
 		}
@@ -296,7 +295,10 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		}
 		return db.ErrFederationResetBlockedByPendingPush
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, projectID); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
+		return err
+	}
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, false); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {

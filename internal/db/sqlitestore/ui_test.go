@@ -15,6 +15,13 @@ import (
 	"go.kenn.io/kata/internal/db/dbtest"
 )
 
+func TestUISnapshotGraphReachContract(t *testing.T) {
+	t.Parallel()
+	dbtest.RunUISnapshotGraphReachContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotMutationCursorContract(t *testing.T) {
 	t.Parallel()
 	dbtest.RunUISnapshotMutationCursorContract(t, func(t *testing.T) db.Storage {
@@ -52,7 +59,7 @@ func TestUISnapshotProjectAuthorityRelationshipsContract(t *testing.T) {
 
 func TestUISnapshotAuthorityReuseSkipsProjectStats(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -74,7 +81,7 @@ func TestUISnapshotAuthorityReuseSkipsProjectStats(t *testing.T) {
 
 func TestUISnapshotReadsProjectStatsInOneBatch(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	for _, name := range []string{"example-project", "example-workspace", "spoke-project"} {
 		project := createUIProject(t, store, name)
@@ -99,7 +106,7 @@ func TestUISnapshotReadsProjectStatsInOneBatch(t *testing.T) {
 
 func TestUISnapshotReadsCollectionLinkDetailsInOneBatch(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
 	issues := make([]db.Issue, 4)
@@ -162,7 +169,7 @@ func TestUISnapshotViewScopeContract(t *testing.T) {
 
 func TestReadUILabelsForIssues(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
 	first, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -191,7 +198,7 @@ func TestReadUILabelsForIssues(t *testing.T) {
 
 func TestReadUISnapshotConsistent(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	first := createUIProject(t, store, "example-project")
 	second := createUIProject(t, store, "example-workspace")
@@ -283,7 +290,7 @@ func TestReadUISnapshotConsistent(t *testing.T) {
 
 func TestReadUISnapshotPreservesUnresolvedGraphEndpoints(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
 	source, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -313,7 +320,7 @@ func TestReadUISnapshotPreservesUnresolvedGraphEndpoints(t *testing.T) {
 
 func TestReadUIReferences(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	first := createUIProject(t, store, "example-project")
 	createUIProject(t, store, "example-workspace")
@@ -327,19 +334,75 @@ func TestReadUIReferences(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	references, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Query: "example", Limit: 20})
+	statsReads := 0
+	store.uiProjectStatsRead = func() { statsReads++ }
+	references, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Limit: 20})
 	require.NoError(t, err)
+	assert.Zero(t, statsReads)
 	require.Len(t, references.Projects, 2)
 	require.Len(t, references.Issues, 1)
 	assert.Equal(t, "example-project#"+issue.ShortID, references.Issues[0].QualifiedID)
 	assert.Equal(t, []string{"user-a"}, references.Owners)
 	assert.Equal(t, []string{"ready"}, references.Labels)
 	assert.Greater(t, references.Cursor, int64(0))
+
+	references, err = store.ReadUIReferences(ctx, db.UIReferencesQuery{Query: "example", Limit: 20})
+	require.NoError(t, err)
+	assert.Zero(t, statsReads)
+	assert.Equal(t, []db.Project{}, references.Projects)
+	assert.Equal(t, []string{}, references.Owners)
+	assert.Equal(t, []string{}, references.Labels)
+	require.Len(t, references.Issues, 1)
+	assert.Equal(t, issue.UID, references.Issues[0].UID)
+	assert.Greater(t, references.Cursor, int64(0))
+}
+
+func TestReadUIReferencesVisibleRepresentatives(t *testing.T) {
+	ctx := t.Context()
+	store := openUIStore(t)
+	visible := createUIProject(t, store, "example-project")
+	deleted := createUIProject(t, store, "deleted-project")
+	var system db.Project
+	require.NoError(t, store.QueryRowContext(ctx, `SELECT id,uid FROM projects WHERE name=?`, db.SystemProjectName).Scan(&system.ID, &system.UID))
+	// Hidden rows sort between visible choices to exercise recursive-step filters.
+	for _, row := range []struct {
+		id, project  int64
+		owner, label string
+		deleted      bool
+	}{
+		{90, visible.ID, "beta", "beta", false},
+		{80, visible.ID, "alpha", "alpha", false},
+		{10, visible.ID, "alpha", "alpha", false},
+		{20, visible.ID, "beta", "beta", false},
+		{30, visible.ID, "gamma", "gamma", false},
+		{1, visible.ID, "b-deleted", "b-deleted", true},
+		{2, deleted.ID, "b-hidden", "b-hidden", false},
+		{3, system.ID, "b-system", "b-system", false},
+		{4, visible.ID, "", "gamma", false},
+	} {
+		_, err := store.ExecContext(ctx, `INSERT INTO issues(id,uid,project_id,short_id,title,author,owner,deleted_at)
+ VALUES(?,?,?,?, 'ordinary task','tester',?, CASE WHEN ? THEN CURRENT_TIMESTAMP END)`, row.id, fmt.Sprintf("%026d", row.id), row.project, fmt.Sprintf("%08d", row.id), row.owner, row.deleted)
+		require.NoError(t, err)
+		_, err = store.ExecContext(ctx, `INSERT INTO issue_labels(issue_id,label,author) VALUES(?,?,'tester')`, row.id, row.label)
+		require.NoError(t, err)
+	}
+	_, err := store.ExecContext(ctx, `UPDATE projects SET deleted_at=CURRENT_TIMESTAMP WHERE id=?`, deleted.ID)
+	require.NoError(t, err)
+	for _, limit := range []int{2, 20} {
+		query := db.UIReferencesQuery{Limit: limit}
+		unrestricted, err := store.ReadUIReferences(ctx, query)
+		require.NoError(t, err)
+		restricted, err := store.ReadUIReferences(db.WithAuthorizedProjects(ctx, []string{visible.UID, deleted.UID, system.UID}), query)
+		require.NoError(t, err)
+		require.Equal(t, restricted, unrestricted)
+		require.Equal(t, []string{"alpha", "beta", "gamma"}[:min(limit, 3)], unrestricted.Owners)
+		require.Equal(t, unrestricted.Owners, unrestricted.Labels)
+	}
 }
 
 func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	firstProject := createUIProject(t, store, "alpha-project")
 	secondProject := createUIProject(t, store, "beta-project")
@@ -417,7 +480,7 @@ func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
 
 func openUIStore(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+	store, err := Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store
@@ -425,7 +488,7 @@ func openUIStore(t *testing.T) *Store {
 
 func createUIProject(t *testing.T, store *Store, name string) db.Project {
 	t.Helper()
-	project, err := store.CreateProject(context.Background(), name)
+	project, err := store.CreateProject(t.Context(), name)
 	require.NoError(t, err)
 	return project
 }
@@ -438,7 +501,7 @@ func createUIProject(t *testing.T, store *Store, name string) db.Project {
 // normalizing only fixed-width canonical layouts in SQL.
 func TestReadUISnapshotOrdersLegacyCommentTimestamps(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "ui-legacy-comment-order")
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{

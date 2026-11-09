@@ -1,7 +1,6 @@
 package db_test
 
 import (
-	"context"
 	"sync"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 // Hybrid search hydrates vector hits while a text search runs on another
 // goroutine with the same request context, so both record into one registry.
 func TestExposedIssuesRecordConcurrently(t *testing.T) {
-	ctx := db.WithExposedIssues(context.Background())
+	ctx := db.WithExposedIssues(t.Context())
 	var wg sync.WaitGroup
 	for worker := range 8 {
 		wg.Go(func() {
@@ -27,7 +26,7 @@ func TestExposedIssuesRecordConcurrently(t *testing.T) {
 }
 
 func TestIssueScopeTargetsRecordConcurrently(t *testing.T) {
-	ctx := db.WithIssueScopeTargets(context.Background())
+	ctx := db.WithIssueScopeTargets(t.Context())
 	var wg sync.WaitGroup
 	for worker := range 8 {
 		wg.Go(func() {

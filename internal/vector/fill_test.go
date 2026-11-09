@@ -20,7 +20,7 @@ func testGen(model string) kitvec.Generation {
 
 func seedMirror(t *testing.T, ix *Index, uid string, rev int64) {
 	t.Helper()
-	if _, err := ix.db.ExecContext(context.Background(), `
+	if _, err := ix.db.ExecContext(t.Context(), `
 		INSERT INTO issue_mirror (issue_uid, project_uid, content, content_revision)
 		VALUES (?, 'p1', 'text', ?)
 		ON CONFLICT(issue_uid) DO UPDATE SET content_revision = excluded.content_revision`,
@@ -30,7 +30,7 @@ func seedMirror(t *testing.T, ix *Index, uid string, rev int64) {
 }
 
 func TestFillEmbedsChunksAndQueryFindsThem(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	seedMirror(t, ix, "u1", 1)
 	// Long content must produce multiple chunks (> splitMaxRunes runes).
@@ -71,7 +71,7 @@ func TestFillEmbedsChunksAndQueryFindsThem(t *testing.T) {
 }
 
 func TestFillCapsConfiguredBatchesByTokenBudget(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	for i := range 4 {
 		seedMirror(t, ix, fmt.Sprintf("u%d", i), 1)
@@ -108,7 +108,7 @@ func TestFillCapsConfiguredBatchesByTokenBudget(t *testing.T) {
 // document-specific, so the fill must abort with the error instead of
 // stamping the whole corpus as skipped with backlog zero and no retry.
 func TestFillAbortsOnRequestLevel400(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	seedMirror(t, ix, "u1", 1)
 	seedMirror(t, ix, "u2", 1)
@@ -143,7 +143,7 @@ func TestFillAbortsOnRequestLevel400(t *testing.T) {
 // cannot attribute that 400 to the input, so the fill must abort rather than
 // poison-skip.
 func TestFillAbortsOnBatchShape400(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	seedMirror(t, ix, "u1", 1)
 	// Long content: multiple chunks, all sent in one encode call (batch 0).
@@ -179,7 +179,7 @@ func TestFillAbortsOnBatchShape400(t *testing.T) {
 // so a check that replays the document's shape could never confirm it, and
 // the document would block every later fill.
 func TestFillSkipsInputTooLongDocument(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	seedMirror(t, ix, "long", 1)
 	seedMirror(t, ix, "short", 1)
@@ -222,7 +222,7 @@ func TestFillSkipsInputTooLongDocument(t *testing.T) {
 }
 
 func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	seedMirror(t, ix, "bad", 1)
 	seedMirror(t, ix, "good", 1)

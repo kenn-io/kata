@@ -56,6 +56,9 @@ func (d *Store) purgeProject(ctx context.Context, p db.PurgeProjectParams) (db.P
 	if role != "" {
 		return db.ProjectPurgeLog{}, &db.ProjectFederatedError{Role: db.FederationRole(role)}
 	}
+	if err := db.CheckFederationProjectIdentityRetirement(ctx, conn, project); err != nil {
+		return db.ProjectPurgeLog{}, err
+	}
 	if err := rejectActiveExternalRootProjectPurge(ctx, conn, project.ID); err != nil {
 		return db.ProjectPurgeLog{}, err
 	}
@@ -169,7 +172,10 @@ func deleteProjectScoped(ctx context.Context, c connExec, projectID int64) error
 			return fmt.Errorf("project purge delete (%s): %w", s.q, err)
 		}
 	}
-	return nil
+	// Names are shared across projects; release one only after its last
+	// enrollment has been removed in this transaction.
+	_, err := c.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,?)=? AND NOT EXISTS (SELECT 1 FROM federation_enrollments e WHERE meta.key=?||e.spoke_instance_uid)`, len(db.FederationSpokeNamePrefix), db.FederationSpokeNamePrefix, db.FederationSpokeNamePrefix)
+	return err
 }
 
 func purgeProjectCascade(ctx context.Context, c projectPurgeQueryer, project db.Project,

@@ -373,6 +373,9 @@
     display: grid;
     max-height: 280px;
     overflow-y: auto;
+    /* Reserve the scrollbar's width so counts do not shift when a search
+       changes whether the options overflow. */
+    scrollbar-gutter: stable;
   }
 
   .move-options button {

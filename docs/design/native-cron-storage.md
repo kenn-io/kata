@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-09
+last_edited: 2026-10-30
 ---
 
 # Dormant native cron storage
@@ -59,7 +59,7 @@ dates use issue timezone, recurrence fallback, then daemon default and UTC;
 deadlines omit recurrence fallback. Native civil-time and DST handling and the
 existing readiness/sweeper behavior stay unchanged.
 
-See [Native cron](../reference/cron.md) for API/CLI documents,
+See [Cron](../reference/cron.md) for API/CLI documents,
 [Backup and restore](../operations/backup-restore.md) for replacement protections,
 and [PostgreSQL migrations](../development/postgres-migrations.md) for schema
 history and startup validation.

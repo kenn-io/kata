@@ -11,7 +11,7 @@ import (
 // A link is visible only when both of its endpoints are in an authorized
 // project, whichever alias the query gives the links table.
 func TestAuthorizedLinkPredicateBoundsBothEndpoints(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	visible := createUIProject(t, store, "spoke-project")
 	hidden := createUIProject(t, store, "hub-project")

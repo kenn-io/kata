@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,11 +29,13 @@ func TestNativeLeaseAndRebindClientsSignEveryAttempt(t *testing.T) {
 	c, err := newClaimHubClient(t.Context(), hub.URL, "enrollment", false, &s)
 	require.NoError(t, err)
 	for range 2 {
-		r, err := c.client.Get(hub.URL)
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, hub.URL, nil)
+		require.NoError(t, reqErr)
+		r, err := c.client.Do(req)
 		require.NoError(t, err)
 		_ = r.Body.Close()
 	}
-	_, err = fetchFederationRebindMetadata(context.Background(), hub.URL, "enrollment", 1, &s)
+	_, err = fetchFederationRebindMetadata(t.Context(), hub.URL, "enrollment", 1, &s)
 	require.NoError(t, err)
 	require.Len(t, inputs, 3)
 }

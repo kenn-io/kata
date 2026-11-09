@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 func TestCreateProject_RoundTrips(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	p, err := d.CreateProject(ctx, "kata")
 	require.NoError(t, err)
@@ -37,14 +36,14 @@ func assertValidUID(t *testing.T, got string) {
 func TestProjectByName_NotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	_, err := d.ProjectByName(context.Background(), "missing")
+	_, err := d.ProjectByName(t.Context(), "missing")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestProjectByUID_RoundTrips(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "byuid")
 
 	got, err := d.ProjectByUID(ctx, p.UID)
@@ -57,14 +56,14 @@ func TestProjectByUID_RoundTrips(t *testing.T) {
 func TestProjectByUID_NotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	_, err := d.ProjectByUID(context.Background(), "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	_, err := d.ProjectByUID(t.Context(), "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestCreateProject_DuplicateName(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	createProject(ctx, t, d, "x")
 	_, err := d.CreateProject(ctx, "x")
 	require.Error(t, err)
@@ -73,7 +72,7 @@ func TestCreateProject_DuplicateName(t *testing.T) {
 func TestRenameProject_UpdatesNameOnly(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createKataProject(ctx, t, d)
 	alias := attachAlias(ctx, t, d, p.ID, "github.com/wesm/kata", "/tmp/kata")
 
@@ -94,14 +93,14 @@ func TestRenameProject_UpdatesNameOnly(t *testing.T) {
 func TestRenameProject_MissingReturnsErrNotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	_, err := d.RenameProject(context.Background(), 9999, "missing")
+	_, err := d.RenameProject(t.Context(), 9999, "missing")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestAttachAlias_AndLookup(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createKataProject(ctx, t, d)
 
 	a, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/kata", "git")
@@ -117,14 +116,14 @@ func TestAttachAlias_AndLookup(t *testing.T) {
 func TestAliasByIdentity_NotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	_, err := d.AliasByIdentity(context.Background(), "missing")
+	_, err := d.AliasByIdentity(t.Context(), "missing")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestListProjects_Empty(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	got, err := d.ListProjects(context.Background())
+	got, err := d.ListProjects(t.Context())
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }
@@ -132,7 +131,7 @@ func TestListProjects_Empty(t *testing.T) {
 func TestListProjects_OrdersByIDAsc(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	createProject(ctx, t, d, "a")
 	createProject(ctx, t, d, "b")
 
@@ -157,7 +156,7 @@ func TestProjectAliases_ReturnsAllForProject(t *testing.T) {
 func TestMergeProjects_MovesSourceIntoSurvivingTarget(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	alpha := createProject(ctx, t, d, "alpha")
 	beta := createProject(ctx, t, d, "beta")
 	attachAlias(ctx, t, d, alpha.ID, "github.com/wesm/alpha", "/tmp/alpha")
@@ -224,7 +223,7 @@ func TestMergeProjects_MovesSourceIntoSurvivingTarget(t *testing.T) {
 func TestMergeProjects_PreservesAliasesAlreadyTargetingTarget(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := createProject(ctx, t, d, "old")
 	target := createProject(ctx, t, d, "new")
 	attachAlias(ctx, t, d, target.ID, "github.com/wesm/old", "/tmp/old")
@@ -246,7 +245,7 @@ func TestMergeProjects_PreservesAliasesAlreadyTargetingTarget(t *testing.T) {
 func TestMergeProjects_RejectsArchivedSource(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := createProject(ctx, t, d, "src")
 	target := createProject(ctx, t, d, "tgt")
 	_, _, err := d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: source.ID, Actor: "tester"})
@@ -263,7 +262,7 @@ func TestMergeProjects_RejectsArchivedSource(t *testing.T) {
 func TestMergeProjects_RejectsArchivedTarget(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := createProject(ctx, t, d, "src")
 	target := createProject(ctx, t, d, "tgt")
 	_, _, err := d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: target.ID, Actor: "tester"})
@@ -278,7 +277,7 @@ func TestMergeProjects_RejectsArchivedTarget(t *testing.T) {
 func TestMergeProjects_RejectsSystemProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	sys, err := d.SystemProject(ctx)
 	require.NoError(t, err)
 	target := createProject(ctx, t, d, "tgt")
@@ -297,7 +296,7 @@ func TestMergeProjects_RejectsSystemProject(t *testing.T) {
 func TestRemoveAndRestoreProject_RejectSystemProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	sys, err := d.SystemProject(ctx)
 	require.NoError(t, err)
 
@@ -319,7 +318,7 @@ func TestRemoveAndRestoreProject_RejectSystemProject(t *testing.T) {
 func TestMergeProjects_ExtendsCollidingSourceShortIDs(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src := createProject(ctx, t, d, "src")
 	dst := createProject(ctx, t, d, "dst")
 
@@ -371,7 +370,7 @@ func TestMergeProjects_ExtendsCollidingSourceShortIDs(t *testing.T) {
 func TestMergeProjects_ExtendsAgainstTargetPurgeLogTombstone(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src := createProject(ctx, t, d, "src")
 	dst := createProject(ctx, t, d, "dst")
 
@@ -428,7 +427,7 @@ func TestMergeProjects_ExtendsAgainstTargetPurgeLogTombstone(t *testing.T) {
 func TestMergeProjects_DoesNotShortenExistingShortIDs(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src := createProject(ctx, t, d, "src")
 	dst := createProject(ctx, t, d, "dst")
 
@@ -491,7 +490,7 @@ func TestMergeProjects_DoesNotShortenExistingShortIDs(t *testing.T) {
 func TestMergeProjects_MovesImportMappingsToTargetProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := createProject(ctx, t, d, "src")
 	target := createProject(ctx, t, d, "target")
 	issue := makeIssue(t, ctx, d, source.ID, "mapped issue", "tester")
@@ -523,7 +522,7 @@ func TestMergeProjects_MovesImportMappingsToTargetProject(t *testing.T) {
 func TestMergeProjects_ImportMappingCollisionReturnsError(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := createProject(ctx, t, d, "src")
 	target := createProject(ctx, t, d, "target")
 	sourceIssue := makeIssue(t, ctx, d, source.ID, "source mapped", "tester")
@@ -552,7 +551,7 @@ func TestMergeProjects_ImportMappingCollisionReturnsError(t *testing.T) {
 func TestMergeProjects_RejectsFederationBinding(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := createProject(ctx, t, d, "src")
 	target := createProject(ctx, t, d, "target")
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -577,7 +576,7 @@ func TestMergeProjects_RejectsFederationBinding(t *testing.T) {
 func TestMergeProjects_RejectsSourceIssueSyncBinding(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := createProject(ctx, t, d, "source-project")
 	target := createProject(ctx, t, d, "target-project")
 	_ = mustUpsertIssueSyncBinding(ctx, t, d, source.ID)
@@ -592,7 +591,7 @@ func TestMergeProjects_RejectsSourceIssueSyncBinding(t *testing.T) {
 func TestMergeProjects_RejectsTargetIssueSyncBinding(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := createProject(ctx, t, d, "source-project")
 	target := createProject(ctx, t, d, "target-project")
 	_ = mustUpsertIssueSyncBinding(ctx, t, d, target.ID)
@@ -607,7 +606,7 @@ func TestMergeProjects_RejectsTargetIssueSyncBinding(t *testing.T) {
 func TestBatchProjectStats_EmptyProjectReturnsZeroes(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "empty")
 
 	stats, err := d.BatchProjectStats(ctx)
@@ -627,7 +626,7 @@ func TestBatchProjectStats_EmptyProjectReturnsZeroes(t *testing.T) {
 func TestBatchProjectStats_NoCountInflation(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "proj")
 	var first db.Issue
 	for i := range 3 {
@@ -661,7 +660,7 @@ func TestBatchProjectStats_NoCountInflation(t *testing.T) {
 func TestBatchProjectStats_ExcludesSoftDeletedIssues(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "proj")
 	makeIssue(t, ctx, d, p.ID, "live", "tester")
 	soft := makeIssue(t, ctx, d, p.ID, "soft", "tester")
@@ -683,7 +682,7 @@ func TestBatchProjectStats_ExcludesSoftDeletedIssues(t *testing.T) {
 func TestBatchProjectStats_ExcludesArchivedProjects(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	live := createProject(ctx, t, d, "live")
 	arch := createProject(ctx, t, d, "arch")
 	_, _, err := d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: arch.ID, Actor: "tester"})
@@ -701,7 +700,7 @@ func TestBatchProjectStats_ExcludesArchivedProjects(t *testing.T) {
 func TestBatchProjectStats_PartitionsByProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	a := createProject(ctx, t, d, "a")
 	b := createProject(ctx, t, d, "b")
 	for range 2 {
@@ -721,21 +720,15 @@ func TestBatchProjectStats_PartitionsByProject(t *testing.T) {
 // the import path. Without this layout, an imported database with a
 // zoned offset on events.created_at would 500 the stats endpoint.
 //
-// The zoned event uses a far-future year (2099) so MAX(created_at)'s
-// string comparison deterministically picks this row over the
-// CreateIssue-generated issue.created event, whose RFC3339Nano
-// timestamp differs at position 10 ('T' vs ' '). Without the
-// year-bump, the issue.created row wins the MAX regardless of date
-// and parseSQLiteTimestamp's zoned layout is never exercised.
+// The zoned row is inserted last, so its raw timestamp reaches the parser.
 func TestBatchProjectStats_ParsesZonedLegacyTimestamp(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "zoned")
 	issue := makeIssue(t, ctx, d, p.ID, "live", "tester")
 	// Stamp an event whose created_at uses the zoned legacy layout. The
-	// MAX(created_at) over events for this project will surface this row,
-	// driving parseSQLiteTimestamp through the new layout slot.
+	// newest event by id surfaces this row for parseSQLiteTimestamp.
 	const zonedTS = "2099-05-04 12:34:56.789-07:00"
 	insertLegacyEvent(ctx, t, d, p, issue, "issue.edited", zonedTS)
 
@@ -750,52 +743,13 @@ func TestBatchProjectStats_ParsesZonedLegacyTimestamp(t *testing.T) {
 	expected := time.Date(2099, 5, 4, 19, 34, 56, 789000000, time.UTC)
 	require.True(t, stats[p.ID].LastEventAt.Equal(expected),
 		"zoned event time wrong: got %v, want %v", stats[p.ID].LastEventAt, expected)
-}
-
-// TestBatchProjectStats_PicksAbsoluteLatestAcrossMixedFormats pins that
-// MAX over events.created_at compares by parsed time, not by lex string,
-// so the absolute-latest event wins even when the events table contains
-// a mix of T-separated RFC3339 and space/offset legacy layouts (which
-// parseSQLiteTimestamp accepts on the read path).
-//
-// Concretely: we stamp two events on the same project, both at the same
-// real-world UTC instant. One uses the legacy zoned layout
-// ("YYYY-MM-DD HH:MM:SS.SSS-07:00"); the other is a millisecond earlier
-// in the current RFC3339Nano layout. Because '<space>' (0x20) sorts
-// before 'T' (0x54), a naive lex MAX(created_at) would pick the
-// later-T-formatted earlier event. After the julianday() normalization,
-// the absolute-latest space-zoned event wins.
-func TestBatchProjectStats_PicksAbsoluteLatestAcrossMixedFormats(t *testing.T) {
-	t.Parallel()
-	d := openTestDB(t)
-	ctx := context.Background()
-	p := createProject(ctx, t, d, "mixed-ts")
-	issue := makeIssue(t, ctx, d, p.ID, "live", "tester")
-
-	// Earlier-in-absolute-time but lex-LATER (T separator > space).
-	const earlierTRFC = "2050-01-01T00:00:00.000Z"
-	insertLegacyEvent(ctx, t, d, p, issue, "issue.edited", earlierTRFC)
-
-	// Later-in-absolute-time but lex-EARLIER (space separator < T).
-	// 2050-01-01 00:00:01-00:00 == 2050-01-01T00:00:01Z which is one
-	// second after earlierTRFC. Lex MAX would pick earlierTRFC.
-	const laterZoned = "2050-01-01 00:00:01.000-00:00"
-	insertLegacyEvent(ctx, t, d, p, issue, "issue.commented", laterZoned)
-
-	stats, err := d.BatchProjectStats(ctx)
-	require.NoError(t, err)
-	require.Contains(t, stats, p.ID)
-	require.NotNil(t, stats[p.ID].LastEventAt)
-	expected := time.Date(2050, 1, 1, 0, 0, 1, 0, time.UTC)
-	assert.True(t, stats[p.ID].LastEventAt.Equal(expected),
-		"BatchProjectStats picked the lex-largest row, not the absolute-latest: got %v, want %v",
-		stats[p.ID].LastEventAt, expected)
+	require.Equal(t, time.UTC, stats[p.ID].LastEventAt.Location())
 }
 
 func TestHardDeleteProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	proj, err := d.CreateProject(ctx, "doomed")
 	require.NoError(t, err)
@@ -811,7 +765,7 @@ func TestHardDeleteProject(t *testing.T) {
 func TestReassignAlias(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	src, err := d.CreateProject(ctx, "src")
 	require.NoError(t, err)

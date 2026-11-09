@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -100,7 +99,7 @@ func TestTeammateFollowupRejectsBeforePrimaryMutation(t *testing.T) {
 			} {
 				args := append([]string{"--project", "example-project"}, action...)
 				args = append(args, "--comment", "claiming")
-				_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), server.URL), args...)
+				_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
 				require.Error(t, err, "%v", action)
 				require.Contains(t, err.Error(), "teammate", "%v", action)
 				require.Zero(t, writes.Load(), "%v", action)

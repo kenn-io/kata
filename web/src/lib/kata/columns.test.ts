@@ -6,15 +6,17 @@ import {
   defaultKataTaskColumnVisibility,
   loadKataTaskColumnVisibility,
   persistKataTaskColumnVisibility,
+  summarizeBlockedBy,
 } from './columns'
 
 describe('Kata task column visibility', () => {
-  it('defaults every optional column to visible', () => {
+  it('defaults every optional column to visible except Blocked by', () => {
     expect(defaultKataTaskColumnVisibility()).toEqual({
       updated: true,
       priority: true,
       due: true,
       owner: true,
+      blockedBy: false,
       tags: true,
     })
   })
@@ -30,6 +32,7 @@ describe('Kata task column visibility', () => {
       priority: false,
       due: false,
       owner: false,
+      blockedBy: false,
       tags: true,
     })
   })
@@ -56,7 +59,7 @@ describe('Kata task column visibility', () => {
   it('persists visible keys and tolerates write failures', () => {
     const setItem = vi.fn()
     persistKataTaskColumnVisibility(
-      { updated: true, priority: false, due: true, owner: false, tags: false },
+      { updated: true, priority: false, due: true, owner: false, blockedBy: false, tags: false },
       { getItem: vi.fn(), setItem },
     )
     expect(setItem).toHaveBeenCalledWith(
@@ -77,7 +80,42 @@ describe('Kata task column visibility', () => {
       'priority',
       'due',
       'owner',
+      'blockedBy',
       'tags',
     ])
+  })
+})
+
+describe('summarizeBlockedBy', () => {
+  const peers = ['a1', 'b2', 'c3', 'd4', 'e5'].map((short_id) => ({
+    uid: `uid-${short_id}`,
+    short_id,
+    qualified_id: `example-project#${short_id}`,
+  }))
+  const row = 'example-project#row'
+
+  it('returns empty parts without blockers', () => {
+    expect(summarizeBlockedBy(undefined, row)).toEqual({ ids: '', more: '', title: '' })
+    expect(summarizeBlockedBy([], row)).toEqual({ ids: '', more: '', title: '' })
+  })
+
+  it('lists up to three ids without a remainder', () => {
+    expect(summarizeBlockedBy(peers.slice(0, 3), row)).toEqual({
+      ids: 'a1, b2, c3',
+      more: '',
+      title: 'example-project#a1, example-project#b2, example-project#c3',
+    })
+  })
+
+  it('cuts after three ids, reports +N separately, and titles every blocker', () => {
+    const summary = summarizeBlockedBy(peers, row)
+    expect(summary.ids).toBe('a1, b2, c3')
+    expect(summary.more).toBe('+2')
+    expect(summary.title).toBe(peers.map((peer) => peer.qualified_id).join(', '))
+  })
+
+  it('qualifies only blockers from another project', () => {
+    const mixed = [peers[0]!, { uid: 'uid-z9', short_id: 'z9', qualified_id: 'other-project#z9' }]
+    expect(summarizeBlockedBy(mixed, row).ids).toBe('a1, other-project#z9')
   })
 })

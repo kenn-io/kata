@@ -257,7 +257,15 @@ func (s *Store) IssueByShortID(ctx context.Context, projectID int64, value strin
 	}
 	args := []any{projectID, value}
 	query += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
-	return scanIssue(ctx, s.QueryRowContext(ctx, query, args...))
+	issue, err := scanIssue(ctx, s.QueryRowContext(ctx, query, args...))
+	if !errors.Is(err, db.ErrNotFound) {
+		return issue, err
+	}
+	uid, err := db.MovedIssueUID(ctx, s, projectID, value, true)
+	if err != nil {
+		return db.Issue{}, err
+	}
+	return s.IssueByUID(ctx, uid, include)
 }
 
 // IssueByUID resolves a stable issue identifier.
@@ -298,7 +306,7 @@ func (s *Store) IssuesByUIDs(ctx context.Context, uids []string, include db.Incl
 	return issues, mapSQLError(rows.Err(), nil)
 }
 
-// IssueUIDPrefixMatch returns deterministic UID-prefix matches.
+// IssueUIDPrefixMatch returns case-sensitive UID-prefix matches in byte order.
 func (s *Store) IssueUIDPrefixMatch(
 	ctx context.Context,
 	prefix string,
@@ -308,14 +316,24 @@ func (s *Store) IssueUIDPrefixMatch(
 	if limit <= 0 {
 		limit = 20
 	}
-	query := issueSelect + ` WHERE i.uid LIKE $1 || '%'`
-	if include == db.IncludeDeletedNo {
+	query := issueSelect + ` WHERE i.uid LIKE $1`
+	args := []any{prefix + "%"}
+	if _, restricted := db.AuthorizedProjects(ctx); restricted {
+		// Bound each project's candidates before combining the authorized projects.
+		query = `SELECT ` + issueColumns + ` FROM projects p JOIN LATERAL (
+SELECT candidate.id FROM issues candidate WHERE candidate.project_id = p.id AND candidate.uid LIKE $1`
+		if include == db.IncludeDeletedNo {
+			query += ` AND candidate.deleted_at IS NULL`
+		}
+		query += ` ORDER BY candidate.uid USING ~<~ LIMIT $2) matches ON true
+JOIN issues i ON i.id = matches.id WHERE `
+		args = append(args, limit)
+		query += authorizedProjectPredicate(ctx, "p.uid", &args)
+	} else if include == db.IncludeDeletedNo {
 		query += ` AND i.deleted_at IS NULL`
 	}
-	args := []any{prefix}
-	query += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
 	args = append(args, limit)
-	query += fmt.Sprintf(` ORDER BY i.uid ASC LIMIT $%d`, len(args))
+	query += fmt.Sprintf(` ORDER BY i.uid USING ~<~ LIMIT $%d`, len(args))
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -345,6 +363,9 @@ func buildListIssuesQuery(ctx context.Context, params db.ListIssuesParams, count
 	appendIssueScopePostgres(&scopeFilter, &args, params.IssueScope)
 	if scopeFilter.Len() > 0 {
 		conditions = append(conditions, strings.TrimPrefix(scopeFilter.String(), " AND "))
+	}
+	if params.ExactTitle != "" {
+		add(`i.title COLLATE "C" = $%d`, params.ExactTitle)
 	}
 	if params.Status != "" {
 		add("i.status = $%d", params.Status)
@@ -401,6 +422,9 @@ func buildListIssuesQuery(ctx context.Context, params db.ListIssuesParams, count
 	}
 	if params.OldestFirst {
 		order = `i.created_at ASC, i.id ASC`
+	}
+	if params.ShortestBodyFirst {
+		order = `length(i.body), i.id`
 	}
 	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY ` + order
 	if params.Limit > 0 {
@@ -583,7 +607,13 @@ func (s *Store) resolveShortIDTx(ctx context.Context, tx *sql.Tx, projectID int6
 			return "", mapSQLError(err, nil)
 		}
 		if !exists {
-			return candidate, nil
+			movedUID, err := db.MovedIssueUID(ctx, tx, projectID, candidate, true)
+			if err != nil && !errors.Is(err, db.ErrNotFound) {
+				return "", err
+			}
+			if err != nil || movedUID == uid {
+				return candidate, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("short_id auto-extend exhausted for uid %s", uid)

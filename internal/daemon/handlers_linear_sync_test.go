@@ -54,7 +54,7 @@ func linearEnableBody() map[string]any {
 }
 func TestLinearSyncLifecycle(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.db.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	f := newLifecycleLinearFetcher()
@@ -115,7 +115,7 @@ func TestLinearEnableRejectsBeforeCredentials(t *testing.T) {
 	for _, kind := range []string{"federation", "foreign provider", "bad origin", "unknown config"} {
 		t.Run(kind, func(t *testing.T) {
 			d := openTestDB(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			p, err := d.db.CreateProject(ctx, "example-project")
 			require.NoError(t, err)
 			f := newLifecycleLinearFetcher()
@@ -151,7 +151,7 @@ func TestLinearEnableRemoteFailureAndIdentity(t *testing.T) {
 	for _, kind := range []string{"credentials", "timeout", "project", "states"} {
 		t.Run(kind, func(t *testing.T) {
 			d := openTestDB(t)
-			p, err := d.db.CreateProject(context.Background(), "example-project")
+			p, err := d.db.CreateProject(t.Context(), "example-project")
 			require.NoError(t, err)
 			f := newLifecycleLinearFetcher()
 			want := 400
@@ -170,14 +170,14 @@ func TestLinearEnableRemoteFailureAndIdentity(t *testing.T) {
 			resp, raw := postJSON(t, server, issueSyncEndpoint(p.ID, "linear", "enable"), linearEnableBody())
 			require.Equal(t, want, resp.StatusCode, string(raw))
 			require.NotContains(t, string(raw), "example-secret")
-			_, err = d.db.IssueSyncBindingByProject(context.Background(), p.ID)
+			_, err = d.db.IssueSyncBindingByProject(t.Context(), p.ID)
 			require.ErrorIs(t, err, db.ErrNotFound)
 		})
 	}
 }
 func TestLinearEnableConcurrentChangeAndOnceProgress(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.db.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	f := newLifecycleLinearFetcher()
@@ -233,7 +233,7 @@ func TestLinearEnableConcurrentChangeAndOnceProgress(t *testing.T) {
 // Re-enable must retain the provider-neutral private cursor while public APIs hide it.
 func TestLinearReenablePreservesPrivateStatusCheckpoint(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.db.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	f := newLifecycleLinearFetcher()
@@ -269,7 +269,7 @@ func (f *lifecycleLinearFetcher) WriteStatus(context.Context, linearsync.Config,
 
 func TestLinearEnableValidatesTargetsAndCanReturnToOneWay(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.db.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	f := newLifecycleLinearFetcher()

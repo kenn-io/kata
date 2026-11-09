@@ -1,7 +1,7 @@
 ---
 title: Diagnosing setup
 description: Read-only setup diagnostics with kata doctor.
-last_edited: 2026-10-04
+last_edited: 2026-11-08
 ---
 
 # Diagnosing setup
@@ -60,6 +60,7 @@ files; remote process findings come from the selected daemon.
 | `daemon.hook_queue` | Current queue and process-lifetime dropped count | Inspect hook capacity and slow or failing commands. |
 | `daemon.hook_runs` | Failures among scanned runs ended in the last seven days | Inspect `kata daemon logs --hooks` and the hook output on its host. |
 | `daemon.embeddings` | Existing reconciler error and backlog aggregate | Check model/provider credentials and daemon logs. |
+| `daemon.docbank` | The daemon can resolve its `[docbank]` API key; Docbank itself is not contacted, and `local = true` has no key source to check | Fix the key source the check names on the daemon host; see the [key file rules](../reference/configuration.md#credentials-and-batching). |
 | `daemon.federation` | Declarative mapping convergence | Resolve pending/conflicting mappings and credential origin problems. |
 
 Doctor checks the same project name as ordinary commands: `--project`, then

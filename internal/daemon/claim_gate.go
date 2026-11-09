@@ -19,9 +19,20 @@ const mutationClaimStatusRefreshTimeout = 500 * time.Millisecond
 func requireFederatedIssueClaim(
 	ctx context.Context,
 	cfg ServerConfig,
-	projectID int64,
+	_ int64,
 	issue db.Issue,
 	actor string,
+) error {
+	return requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, true)
+}
+
+// Move previews check cached authority without remote refresh or cache writes.
+func requireFederatedIssueClaimWithRefresh(
+	ctx context.Context,
+	cfg ServerConfig,
+	issue db.Issue,
+	actor string,
+	refresh bool,
 ) error {
 	principal := db.ClaimPrincipal{
 		HolderInstanceUID: cfg.DB.InstanceUID(),
@@ -35,16 +46,29 @@ func requireFederatedIssueClaim(
 		}
 		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, requestPrincipal.Subject).ClaimPrincipal
 	}
-	return requireFederatedIssueClaimForPrincipal(ctx, cfg, projectID, issue, principal)
+	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, refresh)
 }
 
 func requireFederatedIssueClaimForPrincipal(
 	ctx context.Context,
 	cfg ServerConfig,
-	projectID int64,
+	_ int64,
 	issue db.Issue,
 	principal db.ClaimPrincipal,
 ) error {
+	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, true)
+}
+
+func requireFederatedIssueClaimForPrincipalWithRefresh(
+	ctx context.Context,
+	cfg ServerConfig,
+	issue db.Issue,
+	principal db.ClaimPrincipal,
+	refresh bool,
+) error {
+	// Claims belong to the resolved issue in its current project.
+	projectID := issue.ProjectID
+
 	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
 	if err != nil {
 		return err
@@ -67,7 +91,7 @@ func requireFederatedIssueClaimForPrincipal(
 
 	principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
 
-	if binding.Role == db.FederationRoleSpoke {
+	if refresh && binding.Role == db.FederationRoleSpoke {
 		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue); err != nil {
 			return err
 		}
@@ -88,10 +112,12 @@ func requireFederatedIssueClaimForPrincipal(
 func requireFederatedHubIssueClaim(
 	ctx context.Context,
 	cfg ServerConfig,
-	projectID int64,
+	_ int64,
 	issue db.Issue,
 	actor string,
 ) error {
+	projectID := issue.ProjectID
+
 	binding, err := cfg.DB.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil
@@ -120,7 +146,7 @@ func refreshSpokeClaimStatusForGate(
 		}
 		return err
 	}
-	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.ShortID)
+	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.UID)
 	if err != nil {
 		if isTransportClaimError(err) || isOfflineClaimHubStatusError(err) {
 			return nil
@@ -208,7 +234,7 @@ func pendingPushMayMaterializeIssue(
 }
 
 func pushEventMaterializesIssue(ev db.Event, issueUID string) bool {
-	if ev.Type != "issue.created" && ev.Type != "issue.snapshot" {
+	if ev.Type != "issue.created" && ev.Type != "issue.snapshot" && ev.Type != "issue.moved" {
 		return false
 	}
 	return ev.IssueUID != nil && *ev.IssueUID == issueUID

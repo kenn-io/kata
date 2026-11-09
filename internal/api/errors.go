@@ -107,6 +107,9 @@ type errorContext struct {
 	embeddedContext
 }
 
+// Unwrap preserves adapter access through Kata's status-normalizing context.
+func (c *errorContext) Unwrap() huma.Context { return c.embeddedContext }
+
 func (c *errorContext) SetStatus(status int) {
 	c.embeddedContext.SetStatus(normalizeHumaStatus(status))
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -45,14 +46,14 @@ ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 		}
 		extra, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
 WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
-  AND NOT EXISTS (
-    SELECT 1 FROM events barrier
-     WHERE barrier.project_id=e.project_id
-       AND barrier.origin_instance_uid=e.origin_instance_uid
-       AND barrier.id>$4 AND barrier.id<e.id
+  AND e.id <= COALESCE((
+    SELECT MIN(barrier.id) FROM events barrier
+     WHERE barrier.project_id=$1
+       AND barrier.origin_instance_uid=$2
+       AND barrier.id>$4
        AND `+pgFederationPushEventTypeCondition("barrier.type")+`
        AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
-  )
+  ), 9223372036854775807)
 ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, runStartAfterID)
 		if err != nil {
 			return nil, err
@@ -169,12 +170,18 @@ func (s *Store) insertRemoteEventTx(
 	createdAt string,
 	validator *db.CronReplayValidator,
 ) (bool, error) {
-	if db.EventRequiredFeatures(remote.Type) != "" {
+	var err error
+	projectID, err = db.RemoteIssueEventProject(ctx, tx, projectID, remote)
+	if err != nil {
+		return false, err
+	}
+
+	if strings.HasPrefix(remote.Type, "cron.") {
 		if err := db.ValidateAcceptedCronEvent(remote); err != nil {
 			return false, err
 		}
 		var targetUID string
-		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&targetUID); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&targetUID); err != nil {
 			return false, err
 		}
 		if targetUID != remote.ProjectUID {
@@ -185,7 +192,7 @@ func (s *Store) insertRemoteEventTx(
 		}
 	}
 	var existingHash string
-	err := tx.QueryRowContext(ctx, `SELECT content_hash FROM events WHERE uid=$1 FOR UPDATE`,
+	err = tx.QueryRowContext(ctx, `SELECT content_hash FROM events WHERE uid=$1 FOR UPDATE`,
 		remote.EventUID).Scan(&existingHash)
 	if err == nil {
 		if existingHash == remote.ContentHash {

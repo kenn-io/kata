@@ -13,7 +13,7 @@ import (
 )
 
 func checkIssueStatusFederationIntent(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture, err := createIssueFixture(ctx, store, "example-hub", "Mapped task", "worker", nil)
 	require.NoError(t, err)
 	_, err = store.EnableProjectFederation(ctx, fixture.Project.ID, "worker")

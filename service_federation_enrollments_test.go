@@ -1,7 +1,6 @@
 package kata_test
 
 import (
-	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
@@ -145,7 +144,7 @@ func TestServiceEnsureFederationEnrollmentRejectsInvalidToken(t *testing.T) {
 	history, err := service.ListFederationEnrollments(t.Context(), project.UID)
 	require.NoError(t, err)
 	assert.Empty(t, history)
-	request := httptest.NewRequest(http.MethodGet,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"/api/v1/projects/"+strconv.FormatInt(project.ID, 10)+"/federation", nil)
 	response := httptest.NewRecorder()
 	service.Handler().ServeHTTP(response, request)
@@ -153,7 +152,7 @@ func TestServiceEnsureFederationEnrollmentRejectsInvalidToken(t *testing.T) {
 }
 
 func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:     filepath.Join(t.TempDir(), "service.db"),
 		Auth:    kata.AuthConfig{TrustCallerAuthentication: true},
 		Profile: kata.EmbeddingProfileRestricted,
@@ -168,7 +167,7 @@ func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 		t, service, "01HZNQ7VFPK1XGD8R5MABCD4EY", "second-project",
 	)
 
-	created, err := service.CreateFederationEnrollment(context.Background(), kata.FederationEnrollmentSpec{
+	created, err := service.CreateFederationEnrollment(t.Context(), kata.FederationEnrollmentSpec{
 		ProjectUID:                   firstProject.UID,
 		SpokeInstanceUID:             "01HZNQ7VFPK1XGD8R5MABCD4EA",
 		Capabilities:                 "push, pull,claim,pull",
@@ -185,7 +184,7 @@ func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 	assert.Nil(t, created.Enrollment.RevokedAt)
 
 	foundEnrollment, found, err := service.FindActiveFederationEnrollment(
-		context.Background(),
+		t.Context(),
 		kata.FederationEnrollmentSpec{
 			ProjectUID:                   firstProject.UID,
 			SpokeInstanceUID:             created.Enrollment.SpokeInstanceUID,
@@ -199,7 +198,7 @@ func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 	assert.Equal(t, created.Enrollment, foundEnrollment)
 
 	_, found, err = service.FindActiveFederationEnrollment(
-		context.Background(),
+		t.Context(),
 		kata.FederationEnrollmentSpec{
 			ProjectUID:       firstProject.UID,
 			SpokeInstanceUID: created.Enrollment.SpokeInstanceUID,
@@ -210,32 +209,32 @@ func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, found)
 
-	firstHistory, err := service.ListFederationEnrollments(context.Background(), firstProject.UID)
+	firstHistory, err := service.ListFederationEnrollments(t.Context(), firstProject.UID)
 	require.NoError(t, err)
 	require.Len(t, firstHistory, 1)
 	assert.Equal(t, created.Enrollment, firstHistory[0])
 
-	secondHistory, err := service.ListFederationEnrollments(context.Background(), secondProject.UID)
+	secondHistory, err := service.ListFederationEnrollments(t.Context(), secondProject.UID)
 	require.NoError(t, err)
 	assert.Empty(t, secondHistory)
 
 	assertFederationTokenStatus(t, service, firstProject.ID, created.Token, http.StatusOK)
 
 	err = service.RevokeFederationEnrollment(
-		context.Background(), secondProject.UID, created.Enrollment.ID,
+		t.Context(), secondProject.UID, created.Enrollment.ID,
 	)
 	require.ErrorIs(t, err, kata.ErrFederationEnrollmentNotFound)
 	assertFederationTokenStatus(t, service, firstProject.ID, created.Token, http.StatusOK)
 
 	require.NoError(t, service.RevokeFederationEnrollment(
-		context.Background(), firstProject.UID, created.Enrollment.ID,
+		t.Context(), firstProject.UID, created.Enrollment.ID,
 	))
 	require.NoError(t, service.RevokeFederationEnrollment(
-		context.Background(), firstProject.UID, created.Enrollment.ID,
+		t.Context(), firstProject.UID, created.Enrollment.ID,
 	), "exact revocation retries must be harmless")
 	assertFederationTokenStatus(t, service, firstProject.ID, created.Token, http.StatusForbidden)
 	_, found, err = service.FindActiveFederationEnrollment(
-		context.Background(),
+		t.Context(),
 		kata.FederationEnrollmentSpec{
 			ProjectUID:                   firstProject.UID,
 			SpokeInstanceUID:             created.Enrollment.SpokeInstanceUID,
@@ -247,7 +246,7 @@ func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, found)
 
-	firstHistory, err = service.ListFederationEnrollments(context.Background(), firstProject.UID)
+	firstHistory, err = service.ListFederationEnrollments(t.Context(), firstProject.UID)
 	require.NoError(t, err)
 	require.Len(t, firstHistory, 1)
 	assert.NotNil(t, firstHistory[0].RevokedAt)
@@ -257,7 +256,7 @@ func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 // proves rejection leaves the enrollment active and exposes no enrollment
 // history to the bystander project.
 func TestServiceRevokeFederationEnrollmentRejectsCrossProjectID(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -271,7 +270,7 @@ func TestServiceRevokeFederationEnrollmentRejectsCrossProjectID(t *testing.T) {
 		t, service, "01HZNQ7VFPK1XGD8R5MABCD4E2", "hub-project",
 	)
 	created, err := service.CreateFederationEnrollment(
-		context.Background(),
+		t.Context(),
 		kata.FederationEnrollmentSpec{
 			ProjectUID:       owner.UID,
 			SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
@@ -282,25 +281,25 @@ func TestServiceRevokeFederationEnrollmentRejectsCrossProjectID(t *testing.T) {
 	require.NoError(t, err)
 
 	err = service.RevokeFederationEnrollment(
-		context.Background(), bystander.UID, created.Enrollment.ID,
+		t.Context(), bystander.UID, created.Enrollment.ID,
 	)
 	require.ErrorIs(t, err, kata.ErrFederationEnrollmentNotFound,
 		"an enrollment belonging to another project must not be revocable")
 
-	history, err := service.ListFederationEnrollments(context.Background(), owner.UID)
+	history, err := service.ListFederationEnrollments(t.Context(), owner.UID)
 	require.NoError(t, err)
 	require.Len(t, history, 1)
 	assert.Nil(t, history[0].RevokedAt,
 		"the rejected cross-project revoke must not have taken effect")
 
-	empty, err := service.ListFederationEnrollments(context.Background(), bystander.UID)
+	empty, err := service.ListFederationEnrollments(t.Context(), bystander.UID)
 	require.NoError(t, err)
 	assert.Empty(t, empty,
 		"a project with no enrollments must not see another project's history")
 }
 
 func TestServiceFederationEnrollmentRejectsInvalidOrArchivedProjects(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -310,12 +309,12 @@ func TestServiceFederationEnrollmentRejectsInvalidOrArchivedProjects(t *testing.
 	project := ensureEnrollmentTestProject(
 		t, service, "01HZNQ7VFPK1XGD8R5MABCD4EX", "archived-project",
 	)
-	_, err = service.ArchiveProject(context.Background(), project.UID, "Example Operator")
+	_, err = service.ArchiveProject(t.Context(), project.UID, "Example Operator")
 	require.NoError(t, err)
 
 	for _, projectUID := range []string{"not-a-uid", "01HZNQ7VFPK1XGD8R5MABCD4EY", project.UID} {
 		_, createErr := service.CreateFederationEnrollment(
-			context.Background(),
+			t.Context(),
 			kata.FederationEnrollmentSpec{
 				ProjectUID:       projectUID,
 				SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
@@ -328,7 +327,7 @@ func TestServiceFederationEnrollmentRejectsInvalidOrArchivedProjects(t *testing.
 }
 
 func TestServiceInvalidEnrollmentDoesNotEnableFederation(t *testing.T) {
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
@@ -338,7 +337,7 @@ func TestServiceInvalidEnrollmentDoesNotEnableFederation(t *testing.T) {
 	project := ensureEnrollmentTestProject(
 		t, service, "01HZNQ7VFPK1XGD8R5MABCD4EX", "inactive-project",
 	)
-	_, err = service.CreateFederationEnrollment(context.Background(), kata.FederationEnrollmentSpec{
+	_, err = service.CreateFederationEnrollment(t.Context(), kata.FederationEnrollmentSpec{
 		ProjectUID:       project.UID,
 		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 		Capabilities:     "pull,unknown",
@@ -346,7 +345,7 @@ func TestServiceInvalidEnrollmentDoesNotEnableFederation(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "unknown federation capability")
 
-	request := httptest.NewRequest(
+	request := httptest.NewRequestWithContext(t.Context(),
 		http.MethodGet,
 		"/api/v1/projects/"+strconv.FormatInt(project.ID, 10)+"/federation",
 		nil,
@@ -363,7 +362,7 @@ func ensureEnrollmentTestProject(
 	name string,
 ) kata.Project {
 	t.Helper()
-	result, err := service.EnsureProject(context.Background(), kata.ProjectSpec{UID: uid, Name: name})
+	result, err := service.EnsureProject(t.Context(), kata.ProjectSpec{UID: uid, Name: name})
 	require.NoError(t, err)
 	return result.Project
 }
@@ -376,7 +375,7 @@ func assertFederationTokenStatus(
 	want int,
 ) {
 	t.Helper()
-	request := httptest.NewRequest(
+	request := httptest.NewRequestWithContext(t.Context(),
 		http.MethodGet,
 		"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/federation/metadata",
 		nil,

@@ -48,7 +48,7 @@ func TestOwnerClaimAuthorizationSkipsActorProjectFence(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		}))
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease/actions/acquire", project.ID, issue.ShortID), nil)
 	request = request.WithContext(WithPrincipal(request.Context(), Principal{Kind: PrincipalStaticToken}))
 	response := httptest.NewRecorder()
@@ -102,7 +102,7 @@ func TestProjectAuthorizationSkipsProjectQueriesForHealthProbes(t *testing.T) {
 				w.WriteHeader(http.StatusNoContent)
 			}))
 			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+			handler.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
 
 			if response.Code != http.StatusNoContent {
 				t.Fatalf("probe status = %d, want %d", response.Code, http.StatusNoContent)
@@ -122,7 +122,7 @@ func TestProjectAuthorizationStillScopesOrdinaryAnonymousAPIRoutes(t *testing.T)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
+	handler.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil))
 
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("route status = %d, want %d", response.Code, http.StatusNoContent)
@@ -145,7 +145,7 @@ func TestProjectAuthorizationDefersSelfAuthenticatedFederationRoutes(t *testing.
 	probe := &projectAuthorizationProbeStore{Storage: store}
 	srv := NewServer(ServerConfig{DB: probe})
 	t.Cleanup(func() { _ = srv.Close() })
-	request := httptest.NewRequest(http.MethodGet,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"/api/v1/projects/"+strconv.FormatInt(project.ID, 10)+"/federation/metadata", nil)
 	request.Header.Set("Authorization", "Bearer invalid-federation-token")
 	response := httptest.NewRecorder()
@@ -194,7 +194,7 @@ func TestProjectAuthorizationOwnerSelectsTeamsRestrictedProjectForTransportRoute
 		}),
 	)
 	path := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/abc4/lease/actions/acquire"
-	request := httptest.NewRequest(http.MethodPost, path, nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, nil)
 	request = request.WithContext(WithPrincipal(request.Context(), Principal{Kind: PrincipalStaticToken}))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

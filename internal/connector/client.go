@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/processtree"
 	protocol "go.kenn.io/kata/pkg/connector"
+	"go.kenn.io/kit/consolewindow"
 )
 
 const (
@@ -379,6 +380,7 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	}
 	commandCtx, cancel := context.WithTimeoutCause(ctx, p.config.Timeout(), errConnectorChildTimeout)
 	defer cancel()
+	//nolint:noctx // processtree below terminates the whole tree when commandCtx ends.
 	command := exec.Command(p.config.Command, p.config.Args...) // #nosec G204 -- executable and args are operator-controlled validated configuration.
 	command.Env = childEnv
 	command.Stdin = bytes.NewReader(input)
@@ -386,6 +388,7 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	stdout := &cappedBuffer{limit: maxResponseBytes}
 	command.Stdout = stdout
 	command.WaitDelay = connectorProcessCleanupGrace
+	consolewindow.Hide(command)
 	if commandCtx.Err() != nil {
 		return connectorContextError(ctx, context.Cause(commandCtx))
 	}

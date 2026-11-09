@@ -23,7 +23,7 @@ func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProje
 		t.Skip("requires postgres testcontainer")
 	}
 	home := setupKataEnv(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := openKataTestDB(t, filepath.Join(home, "source-merge.db"))
 	importedProject, err := source.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -136,7 +136,7 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 	}
 	home := setupKataEnv(t)
 	input := writeExportFixture(t, home)
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	admin, err := sql.Open("pgx", dsn)
@@ -150,7 +150,8 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 	)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+		// t.Context() is already canceled when cleanup runs.
+		_, err := admin.ExecContext(context.WithoutCancel(t.Context()), fmt.Sprintf(
 			`DROP OWNED BY %s; DROP ROLE %s`, runtimeRole, runtimeRole,
 		)) // #nosec G201 -- role is a fixed prefix plus process ID.
 		require.NoError(t, err, "roles are cluster-wide and outlive the test database")
@@ -211,7 +212,7 @@ func TestImportPostgresFailureRemovesFreshTargetSchema(t *testing.T) {
 	home := setupKataEnv(t)
 	input := filepath.Join(home, "invalid.jsonl")
 	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	t.Setenv("KATA_POSTGRES_SCHEMA", "restore_store")
@@ -237,7 +238,7 @@ func TestImportPostgresFailurePreservesPreexistingEmptySchema(t *testing.T) {
 	home := setupKataEnv(t)
 	input := filepath.Join(home, "invalid.jsonl")
 	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	t.Setenv("KATA_POSTGRES_SCHEMA", "preexisting_store")
@@ -261,7 +262,7 @@ func TestFreshPostgresCleanupSurvivesCanceledImportContext(t *testing.T) {
 		t.Skip("requires postgres testcontainer")
 	}
 	setupKataEnv(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	t.Setenv("KATA_POSTGRES_SCHEMA", "canceled_restore")

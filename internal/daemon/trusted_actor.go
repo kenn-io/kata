@@ -19,10 +19,15 @@ import (
 // wildcard entry never matches. Operators should list literal bind
 // addresses (a Unix socket or a specific private IP).
 func listenerTrusted(localAddr net.Addr, allowlist []string) bool {
-	if localAddr == nil || len(allowlist) == 0 {
+	if localAddr == nil {
 		return false
 	}
-	local := localAddr.String()
+	return TrustedProxyListener(localAddr.String(), allowlist)
+}
+
+// TrustedProxyListener matches a concrete local listener address against the
+// configured trusted-proxy listeners using the request middleware's rules.
+func TrustedProxyListener(local string, allowlist []string) bool {
 	for _, entry := range allowlist {
 		if normalizeListenerEntry(entry) == local {
 			return true

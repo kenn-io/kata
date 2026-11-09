@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +13,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/httpurl"
 )
 
 func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
@@ -44,7 +47,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
 		if err != nil {
@@ -100,7 +103,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
 		if err != nil {
@@ -123,6 +126,25 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		issue, err := locateClaimIssue(ctx, cfg.DB, in.ProjectID, in.Ref)
+		if err != nil {
+			return nil, err
+		}
+		if issue.ProjectID != in.ProjectID {
+			ctx, principal, err = resolveClaimPrincipal(ctx, cfg, issue.ProjectID, in.Authorization,
+				api.ClaimActionBody{Holder: in.Body.Actor}, federationTransportOperation("claimIssue"), true)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
 		actor := strings.TrimSpace(principal.Holder)
 		if principal.AuthenticatedHost {
 			actor, err = attributedActor(ctx, in.Body.Actor)
@@ -142,17 +164,13 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"federation claim credentials require ttl_seconds",
 				"pass ttl_seconds to bound the assignment; enrollment claims cannot be permanent", nil)
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-		if err != nil {
-			return nil, err
-		}
 		if in.Body.TTLSeconds != nil {
 			forwarded, handled, forwardErr := forwardTimedAssignmentClaim(ctx, cfg, in, issue, actor)
 			if handled {
 				return forwarded, forwardErr
 			}
 		}
-		if err := requireFederatedIssueClaimForPrincipal(ctx, cfg, in.ProjectID, issue, principal.ClaimPrincipal); err != nil {
+		if err := requireFederatedIssueClaimForPrincipal(ctx, cfg, issue.ProjectID, issue, principal.ClaimPrincipal); err != nil {
 			return nil, err
 		}
 
@@ -192,7 +210,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 
 		if result.Changed {
-			cfg.Publish().Events(in.ProjectID, result.Events)
+			cfg.Publish().EventsByProject(result.Events)
 		}
 		var replayEvents []db.Event
 		if principal.Enrollment && result.Event != nil && result.Event.Type == "issue.assignment_renewed" {
@@ -345,13 +363,13 @@ func forwardTimedAssignmentClaim(
 	issue db.Issue,
 	actor string,
 ) (*api.ClaimResponse, bool, error) {
-	finishTransport, err := beginClaimFederationTransport(ctx, cfg, in.ProjectID)
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, issue.ProjectID)
 	if err != nil {
 		return nil, true, err
 	}
 	defer finishTransport()
 
-	binding, err := cfg.DB.FederationBindingByProject(ctx, in.ProjectID)
+	binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, false, nil
 	}
@@ -377,11 +395,117 @@ func forwardTimedAssignmentClaim(
 	if err != nil {
 		return nil, true, assignmentClaimForwardError(err)
 	}
-	response, err := applyForwardedAssignmentClaim(ctx, cfg, in.ProjectID, issue.UID, forwarded)
+	if forwarded.Issue.ProjectUID != "" && forwarded.Issue.ProjectUID != binding.HubProjectUID {
+		if err := syncForwardedAssignmentDestination(ctx, cfg, binding, issue.UID, forwarded.Issue.ProjectUID); err != nil {
+			return nil, true, err
+		}
+	}
+	response, err := applyForwardedAssignmentClaim(ctx, cfg, issue.ProjectID, issue.UID, forwarded)
 	if err != nil {
 		return nil, true, claimAPIError(err)
 	}
 	return response, true, nil
+}
+
+func syncForwardedAssignmentDestination(
+	ctx context.Context,
+	cfg ServerConfig,
+	sourceBinding db.FederationBinding,
+	issueUID string,
+	destinationUID string,
+) error {
+	ctx, err := authorizeHostProjectScope(ctx, nil, []string{destinationUID}, false)
+	if err != nil {
+		return err
+	}
+	destination, err := activeProjectByUID(ctx, cfg.DB, destinationUID)
+	if err != nil {
+		return err
+	}
+	binding, err := cfg.DB.FederationBindingByProject(ctx, destination.ID)
+	if errors.Is(err, db.ErrNotFound) {
+		return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+	}
+	if err != nil {
+		return internalAPIError(err)
+	}
+	if binding.Role != db.FederationRoleSpoke || !binding.Enabled || binding.HubProjectUID != destinationUID {
+		return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+	}
+	sourceBase, err := httpurl.CanonicalHTTPBaseURL(sourceBinding.HubURL)
+	if err != nil {
+		return api.NewError(http.StatusConflict, "federation_project_moved",
+			"the moved issue is not available through this federation connection", "", nil)
+	}
+	destinationBase, err := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
+	if err != nil || sourceBase != destinationBase {
+		return api.NewError(http.StatusConflict, "federation_project_moved",
+			"the moved issue is not available through this federation connection", "", nil)
+	}
+	credentials := cfg.federationCredentialStore()
+	credential, found, err := credentials.FederationCredential(ctx, destination.UID)
+	if err != nil {
+		return internalAPIError(err)
+	}
+	if !found || strings.TrimSpace(credential.Token) == "" {
+		return api.NewError(http.StatusServiceUnavailable, "federation_offline",
+			"destination federation pull credentials are unavailable", "", nil)
+	}
+	credentialBase, err := httpurl.CanonicalHTTPBaseURL(credential.HubURL)
+	if err != nil || credentialBase != destinationBase || credential.HubProjectID != binding.HubProjectID {
+		return api.NewError(http.StatusServiceUnavailable, "federation_offline",
+			"destination federation credentials do not match the joined project", "", nil)
+	}
+	if cfg.FederationPullOnce == nil {
+		return api.NewError(http.StatusServiceUnavailable, "federation_offline",
+			"synchronous federation pull is unavailable", "", nil)
+	}
+	credential = config.FederationTransportCredential(
+		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential,
+	)
+	for {
+		current, err := cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+		if err == nil {
+			if current.ProjectID == destination.ID {
+				return nil
+			}
+			if current.ProjectID != sourceBinding.ProjectID {
+				return api.NewError(http.StatusConflict, "federation_project_moved",
+					"the issue moved again while claim recovery was running", "retry the claim against its current project", nil)
+			}
+		} else if !errors.Is(err, db.ErrNotFound) {
+			return internalAPIError(err)
+		}
+
+		currentBinding, err := cfg.DB.FederationBindingByProject(ctx, destination.ID)
+		if err != nil {
+			return internalAPIError(err)
+		}
+		previousCursor := currentBinding.PullCursorEventID
+		if err := cfg.FederationPullOnce(ctx, currentBinding, credential); err != nil {
+			return api.NewError(http.StatusBadGateway, "federation_pull_failed",
+				"could not synchronize the moved issue's destination project", "retry the claim after federation sync succeeds", nil)
+		}
+		current, err = cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+		if err == nil && current.ProjectID == destination.ID {
+			return nil
+		}
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return internalAPIError(err)
+		}
+		if err == nil && current.ProjectID != sourceBinding.ProjectID {
+			return api.NewError(http.StatusConflict, "federation_project_moved",
+				"the issue moved again while claim recovery was running", "retry the claim against its current project", nil)
+		}
+		afterBinding, err := cfg.DB.FederationBindingByProject(ctx, destination.ID)
+		if err != nil {
+			return internalAPIError(err)
+		}
+		if afterBinding.PullCursorEventID <= previousCursor {
+			return api.NewError(http.StatusBadGateway, "federation_pull_failed",
+				"destination federation sync made no progress before materializing the moved issue", "retry the claim after federation sync succeeds", nil)
+		}
+	}
 }
 
 func assignmentClaimForwardError(err error) error {

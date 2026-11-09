@@ -64,7 +64,7 @@ func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
 	legacy := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10},{"type":"command","command":"kata attention-hook start","commandWindows":"kata attention-hook start","timeout":10}]}]}}`
 	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(legacy), 0o644)) //nolint:gosec // test fixture under TempDir
 
-	changed, warnings, err := applyCodexHooks(dir)
+	changed, warnings, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Empty(t, warnings)
@@ -83,13 +83,13 @@ func TestApplyCodexHooks_UpgradesManagedCommands(t *testing.T) {
 	current := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"kata attention-hook start --source kata-agent-hook-start","commandWindows":"kata attention-hook start --source kata-agent-hook-start","timeout":10}]},{"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":"kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook","timeout":10}]}]}}`
 	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(current), 0o644)) //nolint:gosec // test fixture under TempDir
 
-	changed, warnings, err := applyCodexHooks(dir)
+	changed, warnings, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Empty(t, warnings)
 	assert.Equal(t, expectedCodexSessionStartGroups(),
 		readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
-	_, _, err = applyCodexHooks(dir)
+	_, _, err = applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	assert.Equal(t, expectedCodexSessionStartGroups(),
 		readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
@@ -123,7 +123,7 @@ func TestApplyCodexHooks_NormalizesDefaultWithNonScopedMatcher(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), encoded, 0o644)) //nolint:gosec // test fixture under TempDir
 
-			_, _, err = applyCodexHooks(dir)
+			_, _, err = applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			hooks := readCodexHooks(t, dir)["hooks"].(map[string]any)
 			groups := hooks["SessionStart"].([]any)
@@ -140,7 +140,7 @@ func TestApplyCodexHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
 	settings := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"` + userCommand + `"},{"type":"command","command":"kata attention-hook start --source custom.txt","timeout":11}]}]}}`
 	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(settings), 0o644)) //nolint:gosec // test fixture under TempDir
 
-	_, _, err := applyCodexHooks(dir)
+	_, _, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	hooks := readCodexHooks(t, dir)["hooks"].(map[string]any)
 	groups := hooks["SessionStart"].([]any)
@@ -156,7 +156,7 @@ func TestApplyCodexHooks_RefusesSymlinks(t *testing.T) {
 		outside := t.TempDir()
 		require.NoError(t, os.Symlink(outside, filepath.Join(dir, ".codex")))
 
-		_, _, err := applyCodexHooks(dir)
+		_, _, err := applyCodexHooks(t.Context(), dir)
 		require.Error(t, err)
 
 		entries, err := os.ReadDir(outside)
@@ -172,7 +172,7 @@ func TestApplyCodexHooks_RefusesSymlinks(t *testing.T) {
 		require.NoError(t, os.WriteFile(victim, []byte("{}"), 0o644)) //nolint:gosec // test fixture under TempDir
 		require.NoError(t, os.Symlink(victim, filepath.Join(codexDir, "hooks.json")))
 
-		_, _, err := applyCodexHooks(dir)
+		_, _, err := applyCodexHooks(t.Context(), dir)
 		require.Error(t, err)
 
 		got, err := os.ReadFile(victim) //nolint:gosec // test fixture under TempDir
@@ -187,7 +187,7 @@ func TestApplyCodexHooks_WarnsOnConfigTomlHooks(t *testing.T) {
 	require.NoError(t, os.MkdirAll(codexDir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte("[hooks]\nSessionStart = []\n"), 0o644)) //nolint:gosec // test fixture under TempDir
 
-	changed, warnings, err := applyCodexHooks(dir)
+	changed, warnings, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	assert.True(t, changed)
 	require.Len(t, warnings, 1)
@@ -196,7 +196,7 @@ func TestApplyCodexHooks_WarnsOnConfigTomlHooks(t *testing.T) {
 
 func TestApplyCodexHooksTerminalLifecyclePreservesStartIdentity(t *testing.T) {
 	dir := t.TempDir()
-	_, _, err := applyCodexHooks(dir)
+	_, _, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	hooks := readCodexHooks(t, dir)["hooks"].(map[string]any)
 	groups, ok := hooks["SessionEnd"].([]any)
@@ -207,7 +207,7 @@ func TestApplyCodexHooksTerminalLifecyclePreservesStartIdentity(t *testing.T) {
 	require.Equal(t, expectedCodexSessionStartGroups(), hooks["SessionStart"])
 	before, err := os.ReadFile(filepath.Join(dir, ".codex", "hooks.json")) //nolint:gosec // G304: fixture file is created by the test under its temporary home or SDK setup.
 	require.NoError(t, err)
-	changed, _, err := applyCodexHooks(dir)
+	changed, _, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	require.False(t, changed)
 	after, err := os.ReadFile(filepath.Join(dir, ".codex", "hooks.json")) //nolint:gosec // G304: fixture file is created by the test under its temporary home or SDK setup.

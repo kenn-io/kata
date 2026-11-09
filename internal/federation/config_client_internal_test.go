@@ -59,7 +59,7 @@ func TestNewHubClientReportsSanitizedConstructionStage(t *testing.T) {
 			})
 
 			tt.inject(errors.New(tt.marker))
-			_, err := NewHubClient(context.Background(), config.CatalogDaemonConfig{
+			_, err := NewHubClient(t.Context(), config.CatalogDaemonConfig{
 				Name: "primary", URL: "https://url-marker.example/private", Token: "token-marker",
 			})
 			require.Error(t, err)

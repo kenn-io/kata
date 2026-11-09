@@ -133,7 +133,7 @@ func TestWithTrustedProxyActor_Matrix(t *testing.T) {
 			})
 			h := withTrustedProxyActor(ServerConfig{Auth: tc.auth})(next)
 
-			req := httptest.NewRequest("POST", "/x", nil)
+			req := httptest.NewRequestWithContext(t.Context(), "POST", "/x", nil)
 			if tc.header != "" {
 				req.Header.Set("X-Kata-Actor", tc.header)
 			}

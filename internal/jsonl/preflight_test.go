@@ -1,7 +1,6 @@
 package jsonl_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -16,7 +15,7 @@ import (
 // row with both issue_id and related_issue_id missing counts as
 // one drop with no scrub (drop precedence).
 func TestPreflightSourceFKs_DeduplicatesPerRow(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("links both endpoints orphan + events both columns orphan", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kata.db")

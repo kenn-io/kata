@@ -1,7 +1,6 @@
 package planesync
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,7 +11,7 @@ import (
 )
 
 func TestPlaneRunnerStatusSurvivesContentFailureAndAcknowledgesExactEvent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := adapterStore(t)
 	state := testStateID
 	updated := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)

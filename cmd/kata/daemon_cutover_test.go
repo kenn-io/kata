@@ -20,7 +20,7 @@ import (
 // sqlitestore.Open against the path.
 func TestDaemonStartUpgradesLegacyDBThroughStoreopen(t *testing.T) {
 	dbPath := filepath.Join(setupKataEnv(t), "kata.db")
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := sqlitestore.Open(ctx, dbPath)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx,
@@ -28,7 +28,7 @@ func TestDaemonStartUpgradesLegacyDBThroughStoreopen(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	err = runDaemon(ctx)
 
@@ -40,7 +40,7 @@ func TestDaemonStartUpgradesLegacyDBThroughStoreopen(t *testing.T) {
 	// schema_version — any failure before sqlitestore.Open sees the DB
 	// is enough to prove the cutover gate ran first.
 	assert.Contains(t, err.Error(), "export projects")
-	ver, peekErr := sqlitestore.PeekSchemaVersion(context.Background(), dbPath)
+	ver, peekErr := sqlitestore.PeekSchemaVersion(t.Context(), dbPath)
 	require.NoError(t, peekErr)
 	assert.Equal(t, 1, ver)
 }

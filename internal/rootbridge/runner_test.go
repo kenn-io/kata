@@ -140,7 +140,7 @@ func TestRunnerDeliversRetainedEventsExactlyOnceWhenReconcileReturnsError(t *tes
 	select {
 	case duplicate := <-delivered:
 		t.Fatalf("runner delivered event twice: %#v", duplicate)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; the event was already delivered once, so any second delivery is a duplicate
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; the event was already delivered once, so any second delivery is a duplicate
 	}
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)

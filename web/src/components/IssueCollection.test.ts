@@ -7,6 +7,8 @@ import {
   within,
 } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
+import { tick } from 'svelte'
+import { fromStore, writable } from 'svelte/store'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { KataTaskSummary } from '../lib/kata/types'
@@ -26,7 +28,9 @@ function render(_component: typeof IssueCollection, options: IssueListRenderOpti
   const issueCatalog =
     options.props.issueCatalog ?? options.props.currentView.groups.flatMap((group) => group.issues)
   return renderComponent(IssueCollection, {
-    props: { ...options.props, issueCatalog } as ComponentProps<typeof IssueCollection>,
+    props: { now: Date.now(), ...options.props, issueCatalog } as ComponentProps<
+      typeof IssueCollection
+    >,
   })
 }
 
@@ -84,6 +88,370 @@ describe('IssueCollection', () => {
     window.localStorage.clear()
     vi.restoreAllMocks()
     vi.useRealTimers()
+  })
+
+  describe('capped render', () => {
+    function manyTasks(count: number): KataTaskSummary[] {
+      return Array.from({ length: count }, (_, index) =>
+        task({
+          id: 1000 + index,
+          uid: `bulk-${String(index).padStart(5, '0')}`,
+          short_id: `b${index}`,
+          qualified_id: `example-project#b${index}`,
+          title: `Bulk ${String(index).padStart(5, '0')}`,
+        }),
+      )
+    }
+    function renderMany(count: number, extra: Record<string, unknown> = {}) {
+      const issues = manyTasks(count)
+      return render(IssueCollection, {
+        props: {
+          currentView: {
+            name: 'today',
+            fetched_at: '2026-05-16T10:00:00Z',
+            groups: [{ id: 'all', title: 'All', issues }],
+          },
+          scopedProjectName: 'example-project',
+          onSelect: vi.fn(),
+          ...extra,
+        },
+      })
+    }
+
+    it('renders a prefix of a long list and still reports the full count', () => {
+      renderMany(1000, { scopedProjectName: null })
+      expect(visibleRows()).toHaveLength(150)
+      expect(screen.getByText('1000 tasks')).toBeTruthy()
+    })
+
+    it.each(['ArrowDown', 'j'])(
+      'renders the next chunk when %s runs past the last rendered row',
+      async (key) => {
+        const issues = manyTasks(1000)
+        const props = {
+          currentView: viewWithIssues(issues),
+          issueCatalog: issues,
+          onSelect: vi.fn(),
+        }
+        const { rerender } = render(IssueCollection, { props })
+        const last = visibleRows()[149]!
+        last.focus()
+        await fireEvent.keyDown(last, { key })
+        await waitFor(() => expect(visibleRows()).toHaveLength(300))
+        await waitFor(() => expect(document.activeElement).toBe(visibleRows()[150]))
+
+        await rerender({ ...props, resultsKey: 'pinned', selectedIssueUID: 'bulk-00160' })
+        expect(visibleRows()).toHaveLength(161)
+        const pinned = visibleRows()[160]!
+        pinned.focus()
+        await fireEvent.keyDown(pinned, { key })
+        await waitFor(() => expect(visibleRows()).toHaveLength(311))
+        await waitFor(() =>
+          expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00161'),
+        )
+      },
+    )
+
+    it('renders every row when End is pressed and focuses the last one', async () => {
+      const { container } = renderMany(1000)
+      const first = container.querySelector<HTMLElement>('button.row')!
+      first.focus()
+      await fireEvent.keyDown(first, { key: 'End' })
+      await waitFor(() => expect(visibleRows()).toHaveLength(1000))
+      await waitFor(() =>
+        expect((document.activeElement as HTMLElement | null)?.dataset.uid).toBe('bulk-00999'),
+      )
+    })
+
+    it('keeps full group counts and reveals later headings as the prefix grows', async () => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: 'title', direction: 'asc' }),
+      )
+      const issues = manyTasks(1000)
+      const { container } = render(IssueCollection, {
+        props: {
+          currentView: {
+            ...viewWithIssues(issues),
+            groups: [
+              { id: 'first', title: 'First group', issues: issues.slice(0, 200) },
+              { id: 'second', title: 'Second group', issues: issues.slice(200) },
+            ],
+          },
+          onSelect: vi.fn(),
+        },
+      })
+      expect(visibleRows()).toHaveLength(150)
+      expect(container.querySelector('.group-count')?.textContent).toBe('200')
+      expect(screen.queryByText('Second group')).toBeNull()
+      await fireEvent.keyDown(visibleRows()[149]!, { key: 'ArrowDown' })
+      expect(visibleRows()).toHaveLength(300)
+      expect(screen.getByText('Second group')).toBeTruthy()
+      expect(
+        Array.from(container.querySelectorAll('.group-count'), (node) => node.textContent),
+      ).toEqual(['200', '800'])
+      expect(visibleRows()[299]?.dataset.uid).toBe('bulk-00299')
+    })
+
+    it('grows once when the sentinel intersects and re-arms the observer', async () => {
+      let observations = 0
+      const disconnect = vi.fn()
+      vi.stubGlobal(
+        'IntersectionObserver',
+        class {
+          constructor(
+            private callback: IntersectionObserverCallback,
+            options: IntersectionObserverInit,
+          ) {
+            expect(options.root).toBeInstanceOf(HTMLDivElement)
+            expect(options.rootMargin).toBe('1500px 0px')
+          }
+          observe(target: Element) {
+            expect(target.classList.contains('row-sentinel')).toBe(true)
+            if (observations++ === 0)
+              this.callback(
+                [{ isIntersecting: true } as IntersectionObserverEntry],
+                this as unknown as IntersectionObserver,
+              )
+          }
+          disconnect = disconnect
+        },
+      )
+      try {
+        renderMany(1000)
+        await waitFor(() => expect(visibleRows()).toHaveLength(300))
+        expect(observations).toBe(2)
+        expect(disconnect).toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it('keeps growth on selection and resets changed results in the first render', async () => {
+      const issues = manyTasks(400)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        onSelect: vi.fn(),
+        navigationGeneration: 0,
+        resultsKey: 'all',
+      }
+      const { container, rerender } = render(IssueCollection, { props })
+      await fireEvent.keyDown(container.querySelectorAll('button.row')[149]!, { key: 'ArrowDown' })
+      await waitFor(() => expect(visibleRows()).toHaveLength(300))
+      await rerender({ ...props, navigationGeneration: 1, selectedIssueUID: 'bulk-00150' })
+      expect(visibleRows()).toHaveLength(300)
+      expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
+        'bulk-00150',
+      )
+
+      const addedRows: string[] = []
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (!(node instanceof HTMLElement)) continue
+            const rows = node.matches('button.row')
+              ? [node]
+              : node.querySelectorAll<HTMLElement>('button.row')
+            for (const row of rows) addedRows.push(row.dataset.uid!)
+          }
+        }
+      })
+      observer.observe(container, { childList: true, subtree: true })
+      try {
+        await rerender({
+          ...props,
+          resultsKey: 'search',
+          currentView: viewWithIssues(issues.slice(200)),
+        })
+        expect(visibleRows()).toHaveLength(150)
+        expect(visibleRows()[149]?.dataset.uid).toBe('bulk-00349')
+        expect(addedRows).toContain('bulk-00349')
+        expect(addedRows.every((uid) => Number(uid.slice(5)) < 350)).toBe(true)
+      } finally {
+        observer.disconnect()
+      }
+
+      await fireEvent.keyDown(visibleRows()[0]!, { key: 'End' })
+      expect(visibleRows()).toHaveLength(200)
+      expect(document.activeElement).toBe(visibleRows()[199])
+      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00399')
+
+      await rerender({
+        ...props,
+        currentView: viewWithIssues(issues.slice(200)),
+        resultsKey: 'same-results-new-key',
+      })
+      expect(visibleRows()).toHaveLength(150)
+    })
+
+    it.each([
+      { target: 'row', index: 80, leadingCount: 80 },
+      { target: 'graph button', index: 5, leadingCount: 160 },
+    ])(
+      'retains $target focus when a refresh adds $leadingCount earlier roots',
+      async ({ target, index, leadingCount }) => {
+        window.localStorage.setItem(
+          'kata:issue-sort/v1',
+          JSON.stringify({ key: 'title', direction: 'asc' }),
+        )
+        const issues = manyTasks(400)
+        const props = {
+          currentView: viewWithIssues(issues),
+          issueCatalog: issues,
+          selectedIssueUID: issues[0]!.uid,
+          onSelect: vi.fn(),
+          onOpenGraph: vi.fn(),
+        }
+        const { container, rerender } = render(IssueCollection, { props })
+        const focused = container.querySelectorAll<HTMLButtonElement>(
+          target === 'row' ? 'button.row' : '.graph-action',
+        )[index]!
+        focused.focus()
+        expect(document.activeElement).toBe(focused)
+        const leading = manyTasks(leadingCount).map((issue, leadingIndex) => ({
+          ...issue,
+          uid: `leading-${leadingIndex}`,
+          short_id: `leading-${leadingIndex}`,
+          title: `Ahead ${leadingIndex}`,
+        }))
+        const refreshed = [...leading, ...issues]
+        await rerender({
+          ...props,
+          currentView: viewWithIssues(refreshed),
+          issueCatalog: refreshed,
+        })
+
+        expect(document.activeElement).toBe(focused)
+        if (target === 'row') {
+          expect(container.querySelector('button.row[data-uid="bulk-00080"]')).toBe(focused)
+          await fireEvent.keyDown(focused, { key: 'ArrowDown' })
+          expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00081')
+        }
+      },
+    )
+
+    it('retains row focus without a selection when a refresh moves it past the cap', async () => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: 'title', direction: 'asc' }),
+      )
+      const issues = manyTasks(400)
+      const snapshots = writable(issues)
+      const snapshot = fromStore(snapshots)
+      // Update snapshot props alone; rerender also invalidates the unchanged selection prop.
+      const { container } = renderComponent(IssueCollection, {
+        props: {
+          now: Date.now(),
+          get currentView() {
+            return viewWithIssues(snapshot.current)
+          },
+          get issueCatalog() {
+            return snapshot.current
+          },
+          selectedIssueUID: null,
+          onSelect: vi.fn(),
+        },
+      })
+      const focused = visibleRows()[80]!
+      focused.focus()
+      expect(document.activeElement).toBe(focused)
+      const leading = manyTasks(80).map((issue, index) => ({
+        ...issue,
+        uid: `leading-${index}`,
+        short_id: `leading-${index}`,
+        title: `Ahead ${index}`,
+      }))
+      snapshots.set([...leading, ...issues])
+      await tick()
+
+      expect(container.querySelector('button.row[data-uid="bulk-00080"]')).toBe(focused)
+      expect(document.activeElement).toBe(focused)
+      await fireEvent.keyDown(focused, { key: 'ArrowDown' })
+      expect((document.activeElement as HTMLElement).dataset.uid).toBe('bulk-00081')
+    })
+
+    it('keeps a selected child and its scroll anchor when its root moves past the cap', async () => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: 'title', direction: 'asc' }),
+      )
+      const issues = manyTasks(400)
+      const root = issues[80]!
+      const child = task({
+        uid: 'selected-child',
+        short_id: 'child',
+        title: 'Selected child',
+        parent: {
+          uid: root.uid,
+          short_id: root.short_id,
+        },
+        parent_short_id: root.short_id,
+      })
+      const catalog = [...issues, child]
+      const props = {
+        currentView: viewWithIssues(catalog),
+        issueCatalog: catalog,
+        selectedIssueUID: child.uid,
+        onSelect: vi.fn(),
+      }
+      const { container, rerender } = render(IssueCollection, { props })
+      await fireEvent.click(visibleRows()[80]!.querySelector('.chevron')!)
+      const childRow = container.querySelector<HTMLElement>('button.row.selected')!
+      expect(childRow.dataset.uid).toBe(child.uid)
+      const body = container.querySelector<HTMLDivElement>('.table-body')!
+      body.scrollTop = 2400
+      vi.spyOn(body, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 600 } as DOMRect)
+      const rootRow = visibleRows()[80]!
+      vi.spyOn(childRow, 'getBoundingClientRect').mockImplementation(() => {
+        const top = rootRow.textContent?.includes('ZZ last root') ? 9700 : 100
+        return { top, bottom: top + 30 } as DOMRect
+      })
+      const moved = catalog.map((issue) =>
+        issue.uid === root.uid ? { ...issue, title: 'ZZ last root' } : issue,
+      )
+      await rerender({ ...props, currentView: viewWithIssues(moved), issueCatalog: moved })
+
+      expect(container.querySelector('button.row.selected')).toBe(childRow)
+      await waitFor(() => expect(body.scrollTop).toBe(12000))
+    })
+
+    it.each([
+      { action: 'clearing the selection', selectedIssueUID: null },
+      { action: 'selecting an earlier row', selectedIssueUID: 'bulk-00005' },
+    ])('keeps the deep-linked prefix after $action', async ({ selectedIssueUID }) => {
+      window.localStorage.setItem(
+        'kata:issue-sort/v1',
+        JSON.stringify({ key: 'title', direction: 'asc' }),
+      )
+      const issues = manyTasks(400)
+      const props = {
+        currentView: viewWithIssues(issues),
+        issueCatalog: issues,
+        selectedIssueUID: 'bulk-00300',
+        onSelect: vi.fn(),
+      }
+      const { container, rerender } = render(IssueCollection, { props })
+      expect(visibleRows()).toHaveLength(301)
+      const lastRow = visibleRows()[300]!
+      expect(lastRow.dataset.uid).toBe('bulk-00300')
+      expect(container.contains(document.activeElement)).toBe(false)
+
+      await rerender({ ...props, selectedIssueUID })
+
+      expect(visibleRows()).toHaveLength(301)
+      expect(visibleRows()[300]).toBe(lastRow)
+    })
+
+    it('renders the prefix that holds a selected issue beyond the cap', async () => {
+      const { container } = renderMany(1000, { selectedIssueUID: 'bulk-00500' })
+      await waitFor(() =>
+        expect(container.querySelector('button.row.selected')?.getAttribute('data-uid')).toBe(
+          'bulk-00500',
+        ),
+      )
+      expect(visibleRows().length).toBeLessThan(1000)
+    })
   })
 
   it('expands snapshot-bounded descendants without loading task detail', async () => {
@@ -299,6 +667,80 @@ describe('IssueCollection', () => {
     ])
   })
 
+  describe('Blocked by column', () => {
+    const peer = (short_id: string) => ({
+      uid: `uid-${short_id}`,
+      short_id,
+      qualified_id: `example-project#${short_id}`,
+    })
+    const blocked = task({
+      ...baseIssues[0]!,
+      uid: 'issue-blocked-row',
+      short_id: 'blocked-row',
+      qualified_id: 'example-project#blocked-row',
+      title: 'Blocked row',
+      blocked_by: [peer('x1'), peer('y2'), peer('z3'), peer('q4'), peer('r5')],
+      open_blocked_by: [peer('a1'), peer('b2'), peer('c3'), peer('d4'), peer('e5')],
+    })
+    const view: KataCurrentView = {
+      ...currentView,
+      name: 'inbox',
+      groups: [{ id: 'inbox', title: 'Inbox', issues: [blocked] }],
+    }
+
+    function enableColumn() {
+      localStorage.setItem(
+        KATA_TASK_COLUMNS_STORAGE_KEY,
+        JSON.stringify(['updated', 'priority', 'due', 'owner', 'blockedBy', 'tags']),
+      )
+    }
+
+    it('is hidden until turned on', () => {
+      const { container } = render(IssueCollection, {
+        props: { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} },
+      })
+      expect(container.querySelector('.cell-blocked-by')).toBeNull()
+    })
+
+    it('shows short ids for same-project blockers in any view, with +N in its own element', () => {
+      enableColumn()
+      const { container } = render(IssueCollection, {
+        props: { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} },
+      })
+
+      const header = container.querySelector<HTMLElement>('.table-header')!
+      expect(within(header).getByText('Blocked by')).toBeTruthy()
+      const cell = container.querySelector<HTMLElement>('.cell-blocked-by')!
+      expect(cell.querySelector('.blocked-ids')?.textContent?.trim()).toBe('a1, b2, c3')
+      expect(cell.querySelector('.blocked-more')?.textContent?.trim()).toBe('+2')
+      expect(cell.title).toBe(
+        'example-project#a1, example-project#b2, example-project#c3, example-project#d4, example-project#e5',
+      )
+    })
+
+    it('qualifies a blocker from another project', () => {
+      enableColumn()
+      const mixed = task({
+        ...blocked,
+        open_blocked_by: [
+          peer('a1'),
+          { uid: 'uid-z9', short_id: 'z9', qualified_id: 'other-project#z9' },
+        ],
+      })
+      const { container } = render(IssueCollection, {
+        props: {
+          currentView: { ...view, groups: [{ id: 'inbox', title: 'Inbox', issues: [mixed] }] },
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
+      const cell = container.querySelector<HTMLElement>('.cell-blocked-by')!
+      expect(cell.querySelector('.blocked-ids')?.textContent?.trim()).toBe('a1, other-project#z9')
+      expect(cell.querySelector('.blocked-more')).toBeNull()
+    })
+  })
+
   it('restores hidden columns after remount and Show all resets the preference', async () => {
     const first = render(IssueCollection, {
       props: {
@@ -338,11 +780,13 @@ describe('IssueCollection', () => {
     expect(within(header).getByText('Due')).toBeTruthy()
     expect(within(header).getByText('Owner')).toBeTruthy()
     expect(within(header).getByText('Tags')).toBeTruthy()
+    expect(within(header).getByText('Blocked by')).toBeTruthy()
     expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)!)).toEqual([
       'updated',
       'priority',
       'due',
       'owner',
+      'blockedBy',
       'tags',
     ])
   })
@@ -411,6 +855,7 @@ describe('IssueCollection', () => {
     for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Tags']) {
       expect(within(header).getByText(name)).toBeTruthy()
     }
+    expect(within(header).queryByText('Blocked by')).toBeNull()
   })
 
   it('resets an invisible active sort to Title ascending', async () => {
@@ -585,27 +1030,88 @@ describe('IssueCollection', () => {
       title: 'Child task',
       parent_short_id: parent.short_id,
     })
-    render(IssueCollection, {
-      props: {
-        currentView: viewWithIssues([parent, child]),
-        issueCatalog: [parent, child],
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
+    for (const view of [
+      viewWithIssues([parent, child]),
+      {
+        name: 'logbook',
+        fetched_at: currentView.fetched_at,
+        groups: [
+          { id: '2026-05-16', title: 'May 16', issues: [parent] },
+          { id: '2026-05-15', title: 'May 15', issues: [child] },
+        ],
+      } satisfies KataCurrentView,
+    ]) {
+      const { unmount } = render(IssueCollection, {
+        props: {
+          currentView: view,
+          issueCatalog: [parent, child],
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
 
-    expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
+      expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
 
-    const parentRow = screen.getByRole('button', { name: /Parent task/ })
-    await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
+      const parentRow = screen.getByRole('button', { name: /Parent task/ })
+      await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
 
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
-    })
-    expect(
-      screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
-    ).toBe(true)
+      await waitFor(() => {
+        expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
+      })
+      expect(
+        screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
+      ).toBe(true)
+      unmount()
+    }
+  })
+
+  it('bounds identity reads as Logbook date groups increase', () => {
+    const issueCount = 128
+    const readsByGroupCount: number[] = []
+
+    // Keep the issue count fixed so extra groups cannot justify rescanning every issue.
+    for (const groupCount of [4, 64]) {
+      let identityReads = 0
+      const groups = Array.from({ length: groupCount }, (_, groupIndex) => {
+        const date = new Date(Date.UTC(2026, 0, groupIndex + 1)).toISOString().slice(0, 10)
+        const issues = Array.from({ length: issueCount / groupCount }, (_, issueIndex) => {
+          const shortID = `task-${groupIndex}-${issueIndex}`
+          const issue = task({
+            uid: `issue-${shortID}`,
+            short_id: shortID,
+            qualified_id: `example-project#${shortID}`,
+            title: shortID,
+            status: 'closed',
+            closed_at: `${date}T08:00:00Z`,
+          })
+          Object.defineProperty(issue, 'short_id', {
+            enumerable: true,
+            get() {
+              identityReads += 1
+              return shortID
+            },
+          })
+          return issue
+        })
+        return { id: date, title: date, issues }
+      })
+      const { unmount } = render(IssueCollection, {
+        props: {
+          currentView: { name: 'logbook', fetched_at: currentView.fetched_at, groups },
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
+
+      expect(visibleRows()).toHaveLength(issueCount)
+      readsByGroupCount.push(identityReads)
+      unmount()
+    }
+
+    // Sixteen times as many groups should stay within a generous constant factor.
+    expect(readsByGroupCount[1]).toBeLessThan(readsByGroupCount[0]! * 3)
   })
 
   it('uses the actual parent identity for cross-project hierarchy', async () => {

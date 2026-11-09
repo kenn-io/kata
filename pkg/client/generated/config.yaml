@@ -14,3 +14,7 @@ generate:
   client: true
   client-with-response: true
   models: true
+overlay:
+  sources:
+    - native_uuid_overlay.yaml
+    - agent_overlay.yaml

@@ -52,20 +52,20 @@ func (f *runtimeLinearFetcher) Issues(ctx context.Context, c linearsync.Config) 
 func readRuntimeLinearStatus(t *testing.T, h http.Handler, id int64) runtimeNotionStatus {
 	t.Helper()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/linear/status", id), nil))
+	h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/linear/status", id), nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	var s runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &s))
 	return s
 }
-func linearRuntimePost(id int64, action string, body io.Reader) *http.Request {
-	r := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/linear/%s", id, action), body)
+func linearRuntimePost(ctx context.Context, id int64, action string, body io.Reader) *http.Request {
+	r := httptest.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/linear/%s", id, action), body)
 	r.Header.Set("Content-Type", "application/json")
 	return r
 }
 
 func TestServiceLinearScheduledProgress(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newRuntimeLinearFetcher()
 	var resolved config.LinearSyncConfig
 	s, err := newService(ctx, Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, LinearSync: LinearSyncConfig{AuthType: "oauth", TokenEnv: " EXAMPLE_LINEAR_TOKEN "}}, serviceDeps{linearSyncFetcherFactory: func(c config.LinearSyncConfig) linearsync.Fetcher { resolved = c; return f }})
@@ -76,7 +76,7 @@ func TestServiceLinearScheduledProgress(t *testing.T) {
 	p, err := s.store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, linearRuntimePost(p.ID, "enable", strings.NewReader(`{"config":{"workspace_id":"44444444-4444-4444-8444-444444444444","team_id":"11111111-1111-4111-8111-111111111111"}}`)))
+	s.Handler().ServeHTTP(w, linearRuntimePost(t.Context(), p.ID, "enable", strings.NewReader(`{"config":{"workspace_id":"44444444-4444-4444-8444-444444444444","team_id":"11111111-1111-4111-8111-111111111111"}}`)))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	sub := s.broadcaster.Subscribe(daemon.SubFilter{ProjectID: p.ID})
 	defer sub.Unsub()
@@ -91,7 +91,7 @@ func TestServiceLinearScheduledProgress(t *testing.T) {
 	require.NotNil(t, status.Status.Progress)
 	require.Equal(t, "issues", status.Status.Progress.Phase)
 	w = httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, linearRuntimePost(p.ID, "once", strings.NewReader(`{}`)))
+	s.Handler().ServeHTTP(w, linearRuntimePost(t.Context(), p.ID, "once", strings.NewReader(`{}`)))
 	require.Equal(t, 409, w.Code, w.Body.String())
 	close(f.release)
 	finished := waitRuntimeNotionRecord(t, record.recorded)
@@ -105,17 +105,17 @@ func TestServiceLinearScheduledProgress(t *testing.T) {
 	}
 }
 func TestServiceLinearConfigAndExplicitCredentials(t *testing.T) {
-	_, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "bad.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, LinearSync: LinearSyncConfig{AuthType: "unsupported"}})
+	_, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "bad.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, LinearSync: LinearSyncConfig{AuthType: "unsupported"}})
 	require.ErrorContains(t, err, "linear_sync.auth_type")
 	t.Setenv("KATA_LINEAR_TOKEN", "unrelated-example-secret")
 	t.Setenv("EXAMPLE_LINEAR_TOKEN", "")
-	s, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, LinearSync: LinearSyncConfig{TokenEnv: "EXAMPLE_LINEAR_TOKEN"}})
+	s, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, LinearSync: LinearSyncConfig{TokenEnv: "EXAMPLE_LINEAR_TOKEN"}})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, s.Close()) }()
-	p, err := s.store.CreateProject(context.Background(), "example-project")
+	p, err := s.store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, linearRuntimePost(p.ID, "enable", strings.NewReader(`{"config":{"workspace_id":"44444444-4444-4444-8444-444444444444","team_id":"11111111-1111-4111-8111-111111111111"}}`)))
+	s.Handler().ServeHTTP(w, linearRuntimePost(t.Context(), p.ID, "enable", strings.NewReader(`{"config":{"workspace_id":"44444444-4444-4444-8444-444444444444","team_id":"11111111-1111-4111-8111-111111111111"}}`)))
 	require.Equal(t, 400, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "credentials")
 	require.NotContains(t, w.Body.String(), "unrelated-example-secret")

@@ -1,7 +1,6 @@
 package pgstore
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json/jsontext"
 	"testing"
@@ -27,7 +26,7 @@ func newFederationGroupFixture(t *testing.T, schema string) *federationGroupFixt
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := OpenWithConfig(ctx, dsn, Config{Schema: schema, SchemaMode: SchemaModeBootstrap})
@@ -44,7 +43,7 @@ func newFederationGroupFixture(t *testing.T, schema string) *federationGroupFixt
 
 func (f *federationGroupFixture) bindSpoke(t *testing.T, name string) db.Project {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := f.store.CreateProject(ctx, name)
 	require.NoError(t, err)
 	_, err = f.store.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -63,7 +62,7 @@ func (f *federationGroupFixture) seedIssue(t *testing.T, project db.Project, cou
 	payload := jsontext.Value(`{"uid":"` + issueUID + `","title":"seeded","body":"",` +
 		`"author":"remote","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 	event := projectionSnapshotEvent(t, project, issueUID, f.origin, counter, payload)
-	inserted, err := f.store.InsertRemoteEvent(context.Background(), project.ID, event)
+	inserted, err := f.store.InsertRemoteEvent(t.Context(), project.ID, event)
 	require.NoError(t, err)
 	require.True(t, inserted)
 	return issueUID
@@ -75,7 +74,7 @@ func (f *federationGroupFixture) seedIssue(t *testing.T, project db.Project, cou
 // a per-project reconciler.
 func TestMaterializeFederatedProjectLeavesSiblingUntouched(t *testing.T) {
 	fixture := newFederationGroupFixture(t, "materialize_sibling")
-	ctx := context.Background()
+	ctx := t.Context()
 	firstUID := fixture.seedIssue(t, fixture.first, 1)
 	secondUID := fixture.seedIssue(t, fixture.second, 2)
 
@@ -110,7 +109,7 @@ func TestMaterializeFederatedProjectLeavesSiblingUntouched(t *testing.T) {
 // any reconcile decision, a revision would move.
 func TestMaterializeFederatedProjectTwiceBumpsNoRevisions(t *testing.T) {
 	fixture := newFederationGroupFixture(t, "materialize_idempotent")
-	ctx := context.Background()
+	ctx := t.Context()
 	issueUID := fixture.seedIssue(t, fixture.first, 1)
 
 	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
@@ -139,7 +138,7 @@ func TestMaterializeFederatedProjectTwiceBumpsNoRevisions(t *testing.T) {
 // so the group fold used to re-read and re-fold it. Count the reads.
 func TestMaterializeFederatedProjectReadsEachEventLogOnce(t *testing.T) {
 	fixture := newFederationGroupFixture(t, "materialize_fold_count")
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture.seedIssue(t, fixture.first, 1)
 	fixture.seedIssue(t, fixture.second, 2)
 
@@ -163,7 +162,7 @@ func TestMaterializeFederatedProjectReadsEachEventLogOnce(t *testing.T) {
 // argument for that substitution.
 func TestMaterializeFederatedProjectDoesNotPruneJustInsertedIssues(t *testing.T) {
 	fixture := newFederationGroupFixture(t, "materialize_prune_fresh")
-	ctx := context.Background()
+	ctx := t.Context()
 	firstUID := fixture.seedIssue(t, fixture.first, 1)
 
 	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
@@ -189,7 +188,7 @@ func TestMaterializeFederatedProjectDoesNotPruneJustInsertedIssues(t *testing.T)
 // candidates where one is still referenced by an event.
 func TestMaterializeFederatedProjectPrunesOnlyUnreferencedOrphans(t *testing.T) {
 	fixture := newFederationGroupFixture(t, "materialize_prune_split")
-	ctx := context.Background()
+	ctx := t.Context()
 	keptUID := fixture.seedIssue(t, fixture.first, 1)
 	droppedUID := fixture.seedIssue(t, fixture.first, 2)
 	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
@@ -235,7 +234,7 @@ func TestMaterializeFederatedProjectPrunesOnlyUnreferencedOrphans(t *testing.T) 
 // persisted bytes; this pins the raw TEXT for both write paths.
 func TestMaterializeFederatedProjectPersistsCanonicalAssignmentExpiryText(t *testing.T) {
 	fixture := newFederationGroupFixture(t, "materialize_expiry_text")
-	ctx := context.Background()
+	ctx := t.Context()
 	issueUID, err := uid.New()
 	require.NoError(t, err)
 

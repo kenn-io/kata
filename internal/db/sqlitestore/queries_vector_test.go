@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -15,7 +14,7 @@ import (
 // whose project is deleted. A restored issue rejoins the feed.
 func TestListIssueContentPaginatesLiveIssues(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	proj := createProject(ctx, t, d, "spoke-project")
 

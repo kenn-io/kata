@@ -92,7 +92,7 @@ func (s *artifactCaptureStore) ineligiblePendingCount(ctx context.Context, key s
 	if int64(limit) < backlog {
 		limit = int(^uint(0) >> 1)
 	}
-	pending, err := s.Store.PendingForGeneration(ctx, key, limit)
+	pending, err := s.Store.PendingForGeneration(ctx, key, nil, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -185,12 +185,13 @@ func (s *artifactCaptureStore) deferEncodedDocument(doc string, err error) bool 
 // Recheck portable bytes after the pending read, immediately before handing
 // unresolved documents to the existing fill flow. Imported documents disappear
 // from the native pending scan; continue scanning when a whole page was reused.
-func (s *artifactCaptureStore) PendingForGeneration(ctx context.Context, key string, limit int) ([]kitvec.Pending[string], error) {
+func (s *artifactCaptureStore) PendingForGeneration(ctx context.Context, key string, after *string, limit int) ([]kitvec.Pending[string], error) {
 	for {
-		pending, err := s.scanPending(ctx, key, limit)
+		pending, err := s.scanPending(ctx, key, after, limit)
 		if err != nil || len(pending) == 0 || s.exporter == nil {
 			return pending, err
 		}
+		after = new(pending[len(pending)-1].Doc)
 		issueUIDs := make([]string, 0, len(pending))
 		for _, doc := range pending {
 			issueUIDs = append(issueUIDs, doc.Doc)
@@ -247,8 +248,8 @@ func (s *artifactCaptureStore) reuseArtifacts(ctx context.Context, key string, i
 	return nil
 }
 
-func (s *artifactCaptureStore) scanPending(ctx context.Context, key string, limit int) ([]kitvec.Pending[string], error) {
-	pending, err := s.Store.PendingForGeneration(ctx, key, limit)
+func (s *artifactCaptureStore) scanPending(ctx context.Context, key string, after *string, limit int) ([]kitvec.Pending[string], error) {
+	pending, err := s.Store.PendingForGeneration(ctx, key, after, limit)
 	if err != nil {
 		return nil, err
 	}

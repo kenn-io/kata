@@ -1,7 +1,6 @@
 package storageadmin
 
 import (
-	"context"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -49,7 +48,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "sqlite", imported.Backend)
 
-	restored, err := storeopen.OpenReadOnly(context.Background(), filepath.Join(root, "restore.db"))
+	restored, err := storeopen.OpenReadOnly(t.Context(), filepath.Join(root, "restore.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = restored.Close() })
 	restoredProject, err := restored.ProjectByName(t.Context(), "example-project")

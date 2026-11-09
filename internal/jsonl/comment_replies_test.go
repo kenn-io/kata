@@ -2,7 +2,6 @@ package jsonl_test
 
 import (
 	"bytes"
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -45,7 +44,7 @@ func TestCommentReplyJSONLRoundTrip(t *testing.T) {
 
 func roundTripReply(t *testing.T, source, target db.Storage) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := source.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Task", Author: "worker"})

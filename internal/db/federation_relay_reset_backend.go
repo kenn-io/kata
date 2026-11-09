@@ -157,8 +157,8 @@ type RelayResetBackend interface {
 
 	// Project loads one project row.
 	Project(ctx context.Context, projectID int64) (Project, error)
-	// RelayCheckpointNeedsRefresh reports whether a later root purge or an
-	// installed upstream checkpoint made the retained checkpoint obsolete.
+	// RelayCheckpointNeedsRefresh reports whether a later root purge, history
+	// boundary or installed upstream checkpoint made the retained checkpoint obsolete.
 	RelayCheckpointNeedsRefresh(ctx context.Context, projectUID string, checkpoint RelayResetCheckpoint) (bool, error)
 	// LatestEventID returns the project's greatest event row ID, or zero.
 	LatestEventID(ctx context.Context, projectID int64) (int64, error)

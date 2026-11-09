@@ -66,6 +66,8 @@ make lint
 make nilaway
 ```
 
+Pull requests select checks based on the changed files. See the filters and job conditions in [test.yml](https://github.com/kenn-io/kata/blob/main/.github/workflows/test.yml) for the selection rules. Pushes to `main` run every check.
+
 ### Native agent plugins
 
 The `native-agent-plugins` job in
@@ -143,11 +145,15 @@ The pre-commit hook protects released PostgreSQL migration history. Install
 the configured hooks with `prek install`; see [PostgreSQL
 migrations](postgres-migrations.md) before proposing a schema change.
 
-`make test-stress` runs randomized and failpoint tests. If Rapid prints a
-failing seed, reproduce it with the seed from the failure output:
+`make test-stress` runs randomized and failpoint tests through gotestsum. It
+reruns a failed test up to twice, lists those reruns in its summary, and writes
+the test events to `gotestsum/`. The target sets
+`RAPID_CHECKS=5`; a direct test run defaults to 100 generated cases. Rapid
+shrinks failing inputs, saves them for replay, and prints a failing seed.
+Reproduce a failure with that seed and the same case count:
 
 ```sh
-RAPID_SEED=<seed> go test -tags federation_stress ./e2e \
+RAPID_CHECKS=5 RAPID_SEED=<seed> go test -tags federation_stress ./e2e \
   -run TestFederationStressRandomizedWorkload \
   -count=1 \
   -timeout 2m

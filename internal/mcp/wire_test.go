@@ -37,8 +37,7 @@ func TestWireDiscoveryPublishesNegotiatedToolsCapability(t *testing.T) {
 	require.Equal(t, map[string]any{"tools": map[string]any{"listChanged": true}}, capabilities)
 	meta := result["_meta"].(map[string]any)
 	serverInfo := meta["io.modelcontextprotocol/serverInfo"].(map[string]any)
-	require.Equal(t, "kata", serverInfo["name"])
-	require.Equal(t, "test-version", serverInfo["version"])
+	assertServerIcon(t, serverInfo)
 }
 
 func TestWireNegotiatesLegacyInitialization(t *testing.T) {
@@ -56,8 +55,7 @@ func TestWireNegotiatesLegacyInitialization(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, legacyProtocolVersion, result["protocolVersion"])
 	serverInfo := result["serverInfo"].(map[string]any)
-	require.Equal(t, "kata", serverInfo["name"])
-	require.Equal(t, "test-version", serverInfo["version"])
+	assertServerIcon(t, serverInfo)
 
 	writeWireNotification(t, connection, "notifications/initialized", map[string]any{})
 	writeWireRequest(t, connection, 2, "tools/list", map[string]any{})
@@ -141,7 +139,7 @@ func TestWireCancellationSuppressesLateToolResponse(t *testing.T) {
 	response := readWireResponse(t, reader)
 	require.Nil(t, response.Error)
 	require.EqualValues(t, 2, response.ID)
-	require.NoError(t, connection.SetReadDeadline(time.Now().Add(100*time.Millisecond)))
+	require.NoError(t, connection.SetReadDeadline(time.Now().Add(100*time.Millisecond))) //nolint:kennlint // deadlinetest: bounded absence checks that a cancelled request sends no late wire response
 	_, err = reader.ReadBytes('\n')
 	var netError net.Error
 	require.True(t, errors.As(err, &netError) && netError.Timeout(), err)
@@ -181,7 +179,7 @@ func TestWireDropsForbiddenClientResponse(t *testing.T) {
 
 func rawServerConnection(t *testing.T) (net.Conn, *bufio.Reader) {
 	t.Helper()
-	return rawServerConnectionWithClient(t, &kataclient.Client{})
+	return rawServerConnectionWithClient(t, inertTestClient(t))
 }
 
 func rawServerConnectionWithClient(t *testing.T, client *kataclient.Client) (net.Conn, *bufio.Reader) {

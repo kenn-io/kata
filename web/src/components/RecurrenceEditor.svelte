@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Checkbox, SelectDropdown } from '@kenn-io/kit-ui'
+  import { Checkbox, NumberInput, RadioGroup, SelectDropdown } from '@kenn-io/kit-ui'
   import type {
     KataCreateRecurrenceInput,
     KataPatchRecurrenceInput,
@@ -43,10 +43,10 @@
   let dtstart: string = $state(INITIAL_DTSTART)
   let timezone: string = $state('System default')
   let freq = $state<CommonRule['freq']>('WEEKLY')
-  let interval: number = $state(1)
+  let interval = $state<number | null>(1)
   let byDay = $state<Weekday[]>([weekdayFor(INITIAL_DTSTART)])
   let dayInMonthMode = $state<'dayOfMonth' | 'nthWeekday'>('dayOfMonth')
-  let dayInMonthDay: number = $state(1)
+  let dayInMonthDay = $state<number | null>(1)
   let dayInMonthLastDay: boolean = $state(false)
   let dayInMonthOrdinal = $state<Ordinal>(1)
   let dayInMonthWeekday = $state<Weekday>(weekdayFor(INITIAL_DTSTART))
@@ -54,7 +54,7 @@
   let yearlyDayMode = $state<'none' | 'dayOfMonth' | 'nthWeekday'>('none')
   let endMode = $state<'never' | 'until' | 'count'>('never')
   let endDate: string = $state(INITIAL_DTSTART)
-  let endCount: number = $state(10)
+  let endCount = $state<number | null>(10)
 
   const frequencyOptions = [
     { value: 'DAILY', label: 'Daily' },
@@ -245,11 +245,14 @@
   )
 
   function buildCommonRuleFromForm(): CommonRule {
-    const out: CommonRule = { freq, interval }
+    const out: CommonRule = { freq, interval: interval ?? 0 }
     if (freq === 'WEEKLY' && byDay.length > 0) out.byDay = byDay
     if (freq === 'MONTHLY') {
       if (dayInMonthMode === 'dayOfMonth') {
-        out.dayInMonth = { kind: 'dayOfMonth', day: dayInMonthLastDay ? -1 : dayInMonthDay }
+        out.dayInMonth = {
+          kind: 'dayOfMonth',
+          day: dayInMonthLastDay ? -1 : (dayInMonthDay ?? 0),
+        }
       } else {
         out.dayInMonth = {
           kind: 'nthWeekday',
@@ -266,7 +269,7 @@
         // models the "last day" case implicitly via dayInMonthDay; if
         // we ever add an explicit Yearly last-day toggle, plumb it as
         // its own state var, not by reusing the Monthly one.
-        out.dayInMonth = { kind: 'dayOfMonth', day: dayInMonthDay }
+        out.dayInMonth = { kind: 'dayOfMonth', day: dayInMonthDay ?? 0 }
       } else if (yearlyDayMode === 'nthWeekday') {
         out.dayInMonth = {
           kind: 'nthWeekday',
@@ -276,7 +279,7 @@
       }
     }
     if (endMode === 'until') out.end = { kind: 'until', date: endDate }
-    else if (endMode === 'count') out.end = { kind: 'count', count: endCount }
+    else if (endMode === 'count') out.end = { kind: 'count', count: endCount ?? 0 }
     else out.end = { kind: 'never' }
     return out
   }
@@ -593,11 +596,10 @@
 
       <label class="row">
         <span>Every</span>
-        <input
-          type="number"
-          min="1"
+        <NumberInput
+          min={1}
           bind:value={interval}
-          aria-label={`Every ${interval} ${intervalLabel}`}
+          ariaLabel={`Every ${interval ?? ''} ${intervalLabel}`}
         />
         <span class="suffix">{intervalLabel}</span>
       </label>
@@ -617,39 +619,35 @@
 
       {#if freq === 'MONTHLY'}
         <div class="row monthly">
-          <label>
-            <input
-              type="radio"
-              name="monthlyMode"
-              value="dayOfMonth"
-              checked={dayInMonthMode === 'dayOfMonth'}
-              onchange={() => (dayInMonthMode = 'dayOfMonth')}
-            />
-            On day
-            <input
-              type="number"
-              min="1"
-              max="31"
+          <RadioGroup
+            legend="Day in month"
+            name="monthlyMode"
+            value={dayInMonthMode}
+            onchange={(value) => {
+              if (value === 'dayOfMonth' || value === 'nthWeekday') dayInMonthMode = value
+            }}
+            options={[
+              { value: 'dayOfMonth', label: 'On day' },
+              { value: 'nthWeekday', label: 'On the' },
+            ]}
+          />
+          <div class="row">
+            <NumberInput
+              ariaLabel="Day of month"
+              min={1}
+              max={31}
               bind:value={dayInMonthDay}
               disabled={dayInMonthMode !== 'dayOfMonth' || dayInMonthLastDay}
             />
-            of the month
-          </label>
+            <span>of the month</span>
+          </div>
           <Checkbox
             class="last-day"
             bind:checked={dayInMonthLastDay}
             disabled={dayInMonthMode !== 'dayOfMonth'}
             label="Last day of month"
           />
-          <label>
-            <input
-              type="radio"
-              name="monthlyMode"
-              value="nthWeekday"
-              checked={dayInMonthMode === 'nthWeekday'}
-              onchange={() => (dayInMonthMode = 'nthWeekday')}
-            />
-            On the
+          <div class="row">
             <SelectDropdown
               title="Monthly ordinal"
               value={String(dayInMonthOrdinal)}
@@ -668,7 +666,7 @@
                 dayInMonthWeekday = value as Weekday
               }}
             />
-          </label>
+          </div>
         </div>
       {/if}
 
@@ -685,42 +683,29 @@
           />
         </label>
         <div class="row yearly-day">
-          <label>
-            <input
-              type="radio"
-              name="yearlyDayMode"
-              value="none"
-              checked={yearlyDayMode === 'none'}
-              onchange={() => (yearlyDayMode = 'none')}
-            />
-            Anniversary of start date
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="yearlyDayMode"
-              value="dayOfMonth"
-              checked={yearlyDayMode === 'dayOfMonth'}
-              onchange={() => (yearlyDayMode = 'dayOfMonth')}
-            />
-            On day
-            <input
-              type="number"
-              min="1"
-              max="31"
-              bind:value={dayInMonthDay}
-              disabled={yearlyDayMode !== 'dayOfMonth'}
-            />
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="yearlyDayMode"
-              value="nthWeekday"
-              checked={yearlyDayMode === 'nthWeekday'}
-              onchange={() => (yearlyDayMode = 'nthWeekday')}
-            />
-            On the
+          <RadioGroup
+            legend="Yearly day"
+            name="yearlyDayMode"
+            value={yearlyDayMode}
+            onchange={(value) => {
+              if (value === 'none' || value === 'dayOfMonth' || value === 'nthWeekday') {
+                yearlyDayMode = value
+              }
+            }}
+            options={[
+              { value: 'none', label: 'Anniversary of start date' },
+              { value: 'dayOfMonth', label: 'On day' },
+              { value: 'nthWeekday', label: 'On the' },
+            ]}
+          />
+          <NumberInput
+            ariaLabel="Day of month"
+            min={1}
+            max={31}
+            bind:value={dayInMonthDay}
+            disabled={yearlyDayMode !== 'dayOfMonth'}
+          />
+          <div class="row">
             <SelectDropdown
               title="Yearly ordinal"
               value={String(dayInMonthOrdinal)}
@@ -739,51 +724,41 @@
                 dayInMonthWeekday = value as Weekday
               }}
             />
-          </label>
+          </div>
         </div>
       {/if}
 
-      <div class="row end" role="group" aria-label="End condition">
-        <label>
-          <input
-            type="radio"
-            name="end"
-            value="never"
-            checked={endMode === 'never'}
-            onchange={() => (endMode = 'never')}
+      <div class="row end">
+        <RadioGroup
+          legend="End condition"
+          name="end"
+          value={endMode}
+          onchange={(value) => {
+            if (value === 'never' || value === 'until' || value === 'count') endMode = value
+          }}
+          options={[
+            { value: 'never', label: 'Never' },
+            { value: 'until', label: 'On date' },
+            { value: 'count', label: 'After' },
+          ]}
+        />
+        <DatePicker
+          ariaLabel="End date"
+          value={endDate}
+          disabled={endMode !== 'until'}
+          onchange={(value) => {
+            endDate = value
+          }}
+        />
+        <div class="row">
+          <NumberInput
+            ariaLabel="occurrences"
+            min={1}
+            bind:value={endCount}
+            disabled={endMode !== 'count'}
           />
-          Never
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="end"
-            value="until"
-            checked={endMode === 'until'}
-            onchange={() => (endMode = 'until')}
-          />
-          On date
-          <DatePicker
-            ariaLabel="End date"
-            value={endDate}
-            disabled={endMode !== 'until'}
-            onchange={(value) => {
-              endDate = value
-            }}
-          />
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="end"
-            value="count"
-            checked={endMode === 'count'}
-            onchange={() => (endMode = 'count')}
-          />
-          After
-          <input type="number" min="1" bind:value={endCount} disabled={endMode !== 'count'} />
-          occurrences
-        </label>
+          <span>occurrences</span>
+        </div>
       </div>
     {/if}
 

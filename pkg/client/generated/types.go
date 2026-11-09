@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"uuid"
+
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
 
@@ -93,6 +95,27 @@ func (a ActionResponse) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
+type AddAttachmentResponseBody struct {
+	Attachment   Attachment `json:"attachment"`
+	AttachmentID string     `json:"attachment_id" validate:"required"`
+}
+
+func (a AddAttachmentResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(a.Attachment).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Attachment", err)
+		}
+	}
+	if err := typesValidator.Var(a.AttachmentID, "required"); err != nil {
+		errors = errors.Append("AttachmentID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type AddLabelRequestBody struct {
 	Actor *string `json:"actor,omitempty"`
 	Label string  `json:"label" validate:"required"`
@@ -176,6 +199,32 @@ func (a AssignRequestBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
+type Attachment struct {
+	DocbankVersion uuid.UUID `json:"docbank_version" validate:"required"`
+	MediaType      string    `json:"media_type" validate:"required"`
+	Name           string    `json:"name" validate:"required"`
+	Size           int64     `json:"size"`
+}
+
+func (a Attachment) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(a.DocbankVersion).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("DocbankVersion", err)
+		}
+	}
+	if err := typesValidator.Var(a.MediaType, "required"); err != nil {
+		errors = errors.Append("MediaType", err)
+	}
+	if err := typesValidator.Var(a.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type AuditCloseRow struct {
 	Actor         string   `json:"actor" validate:"required"`
 	EventID       int64    `json:"event_id"`
@@ -199,6 +248,9 @@ type AuditClosesResponseBody struct {
 
 func (a AuditClosesResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(a.Rows, "required"); err != nil {
+		errors = errors.Append("Rows", err)
+	}
 	for i, item := range a.Rows {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -532,6 +584,9 @@ func (c ClaimResponseBody) Validate() error {
 				errors = errors.Append("Event", err)
 			}
 		}
+	}
+	if err := typesValidator.Var(c.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
 	}
 	for i, item := range c.Events {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -895,6 +950,9 @@ type ConnectorFieldsResponseBody struct {
 
 func (c ConnectorFieldsResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Fields, "required"); err != nil {
+		errors = errors.Append("Fields", err)
+	}
 	for i, item := range c.Fields {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -914,6 +972,9 @@ type ConnectorListResponseBody struct {
 
 func (c ConnectorListResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Connectors, "required"); err != nil {
+		errors = errors.Append("Connectors", err)
+	}
 	for i, item := range c.Connectors {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -951,6 +1012,7 @@ type CreateFederationEnrollmentRequestBody struct {
 	ProjectID                    int64                   `json:"project_id"`
 	Relay                        *RelayEnrollmentOptions `json:"relay,omitempty"`
 	SpokeInstanceUID             string                  `json:"spoke_instance_uid" validate:"required"`
+	SpokeName                    *string                 `json:"spoke_name,omitempty"`
 	Token                        *string                 `json:"token,omitempty"`
 }
 
@@ -1134,7 +1196,9 @@ type CreateRecurrenceRequestBody struct {
 	InitialIssueRef *string                 `json:"initial_issue_ref,omitempty"`
 	Rrule           string                  `json:"rrule" validate:"required"`
 	Template        RecurrenceTemplateInput `json:"template"`
-	Timezone        string                  `json:"timezone" validate:"required"`
+
+	// Timezone IANA time zone such as America/New_York or UTC. Local is rejected because it depends on the daemon host.
+	Timezone string `json:"timezone" validate:"required"`
 }
 
 func (c CreateRecurrenceRequestBody) Validate() error {
@@ -1203,6 +1267,9 @@ func (c CreateTokenRequestBody) Validate() error {
 				errors = errors.Append("Scope", err)
 			}
 		}
+	}
+	if len(c.TeamUids) > 256 {
+		errors = errors.Add("TeamUids", fmt.Sprintf("must have at most 256 items, got %d", len(c.TeamUids)))
 	}
 	if len(errors) == 0 {
 		return nil
@@ -1513,6 +1580,9 @@ type CronRunsResponseBody struct {
 
 func (c CronRunsResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Runs, "required"); err != nil {
+		errors = errors.Append("Runs", err)
+	}
 	for i, item := range c.Runs {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -1594,6 +1664,9 @@ func (value *CronWorkflowDefinition) UnmarshalJSON(data []byte) error {
 
 func (c CronWorkflowDefinition) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Steps, "required"); err != nil {
+		errors = errors.Append("Steps", err)
+	}
 	for i, item := range c.Steps {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -1624,6 +1697,9 @@ func (value *CronWorkflowDefinitionResponse) UnmarshalJSON(data []byte) error {
 
 func (c CronWorkflowDefinitionResponse) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Steps, "required"); err != nil {
+		errors = errors.Append("Steps", err)
+	}
 	for i, item := range c.Steps {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -1747,6 +1823,9 @@ func (d DigestActorEntry) Validate() error {
 	if err := typesValidator.Var(d.Actor, "required"); err != nil {
 		errors = errors.Append("Actor", err)
 	}
+	if err := typesValidator.Var(d.Issues, "required"); err != nil {
+		errors = errors.Append("Issues", err)
+	}
 	for i, item := range d.Issues {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -1788,6 +1867,9 @@ type DigestResponseBody struct {
 
 func (d DigestResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(d.Actors, "required"); err != nil {
+		errors = errors.Append("Actors", err)
+	}
 	for i, item := range d.Actors {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -1849,6 +1931,21 @@ func (d DisconnectRelayRequestBody) Validate() error {
 
 type DisconnectRelayResponseBody struct {
 	Revoked bool `json:"revoked"`
+}
+
+type DocbankHealth struct {
+	// Credential Docbank API key state, ok or missing; an advisory warning that does not change health.ok.
+	Credential string `json:"credential" validate:"required"`
+
+	// CredentialReason Why the key source cannot supply a key.
+	CredentialReason *string `json:"credential_reason,omitempty"`
+
+	// CredentialSource Key source that failed: file:<path> or env:<NAME>; never the key value.
+	CredentialSource *string `json:"credential_source,omitempty"`
+}
+
+func (d DocbankHealth) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
 type DoctorResponseBody struct {
@@ -1965,6 +2062,9 @@ type EmbeddingArtifact struct {
 
 func (e EmbeddingArtifact) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(e.Chunks, "required"); err != nil {
+		errors = errors.Append("Chunks", err)
+	}
 	for i, item := range e.Chunks {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -2025,6 +2125,9 @@ type EmbeddingArtifactResponse struct {
 
 func (e EmbeddingArtifactResponse) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(e.Chunks, "required"); err != nil {
+		errors = errors.Append("Chunks", err)
+	}
 	for i, item := range e.Chunks {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -2078,10 +2181,10 @@ type EmbeddingsHealth struct {
 	ErrorPresent     *bool   `json:"error_present,omitempty"`
 	EtaSeconds       *int64  `json:"eta_seconds,omitempty"`
 
-	// LastError Sanitized credential rejection; cleared after the next successful embedding call.
+	// LastError Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call.
 	LastError *string `json:"last_error,omitempty"`
 
-	// LastErrorAt Time of the credential rejection; cleared after the next successful embedding call.
+	// LastErrorAt Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call.
 	LastErrorAt     *time.Time `json:"last_error_at,omitempty"`
 	LastErrorStatus *int64     `json:"last_error_status,omitempty"`
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
@@ -2205,6 +2308,7 @@ type EventEnvelope struct {
 	IssueShortID        *string         `json:"issue_short_id,omitempty"`
 	IssueUID            *string         `json:"issue_uid,omitempty"`
 	OriginInstanceUID   string          `json:"origin_instance_uid" validate:"required"`
+	OriginSpokeName     *string         `json:"origin_spoke_name,omitempty"`
 	Payload             json.RawMessage `json:"payload,omitempty"`
 	ProjectID           int64           `json:"project_id"`
 	ProjectName         string          `json:"project_name" validate:"required"`
@@ -2220,14 +2324,15 @@ func (e EventEnvelope) Validate() error {
 }
 
 type Evidence struct {
-	Account   *string  `json:"account,omitempty"`
-	Command   *string  `json:"command,omitempty"`
-	IssueRef  *string  `json:"issue_ref,omitempty"`
-	Paths     []string `json:"paths,omitempty"`
-	Rationale *string  `json:"rationale,omitempty"`
-	Sha       *string  `json:"sha,omitempty"`
-	Type      string   `json:"type" validate:"required"`
-	URL       *string  `json:"url,omitempty"`
+	Account      *string  `json:"account,omitempty"`
+	AttachmentID *string  `json:"attachment_id,omitempty"`
+	Command      *string  `json:"command,omitempty"`
+	IssueRef     *string  `json:"issue_ref,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+	Rationale    *string  `json:"rationale,omitempty"`
+	Sha          *string  `json:"sha,omitempty"`
+	Type         string   `json:"type" validate:"required"`
+	URL          *string  `json:"url,omitempty"`
 }
 
 func (e Evidence) Validate() error {
@@ -2568,6 +2673,9 @@ type FederationEmbeddingStatus struct {
 
 func (f FederationEmbeddingStatus) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.Artifacts, "required"); err != nil {
+		errors = errors.Append("Artifacts", err)
+	}
 	for i, item := range f.Artifacts {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -2601,6 +2709,7 @@ type FederationEnrollmentOut struct {
 	Relay            *RelayHandshake             `json:"relay,omitempty"`
 	RevokedAt        *time.Time                  `json:"revoked_at,omitempty"`
 	SpokeInstanceUID string                      `json:"spoke_instance_uid" validate:"required"`
+	SpokeName        *string                     `json:"spoke_name,omitempty"`
 	Token            *string                     `json:"token,omitempty"`
 	UpdatedAt        time.Time                   `json:"updated_at" validate:"required"`
 }
@@ -2673,7 +2782,10 @@ type FederationIngestEventsRequestBody struct {
 	AdoptionBaseline           *string                         `json:"adoption_baseline,omitempty"`
 	AdoptionBaselineEndEventID *int64                          `json:"adoption_baseline_end_event_id,omitempty"`
 	Events                     []FederationIngestEventEnvelope `json:"events,omitempty"`
-	SchemaVersion              int64                           `json:"schema_version"`
+
+	// MoveSourceTokens Supplemental project credentials proving move-source or current-project authority for fresh delayed events; transport-only, never persisted in event history.
+	MoveSourceTokens map[string]string `json:"move_source_tokens,omitempty"`
+	SchemaVersion    int64             `json:"schema_version"`
 }
 
 func (f FederationIngestEventsRequestBody) Validate() error {
@@ -2764,6 +2876,9 @@ type FederationProjectStatus struct {
 
 func (f FederationProjectStatus) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.ActiveQuarantines, "required"); err != nil {
+		errors = errors.Append("ActiveQuarantines", err)
+	}
 	for i, item := range f.ActiveQuarantines {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -2783,6 +2898,9 @@ func (f FederationProjectStatus) Validate() error {
 	}
 	if err := typesValidator.Var(f.ProjectUID, "required"); err != nil {
 		errors = errors.Append("ProjectUID", err)
+	}
+	if err := typesValidator.Var(f.RecentViolations, "required"); err != nil {
+		errors = errors.Append("RecentViolations", err)
 	}
 	for i, item := range f.RecentViolations {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -2868,12 +2986,24 @@ func (f FederationRootKeyRepinResult) Validate() error {
 	return errors
 }
 
+type FederationSpokeNameOut struct {
+	SpokeInstanceUID string  `json:"spoke_instance_uid" validate:"required"`
+	SpokeName        *string `json:"spoke_name,omitempty"`
+}
+
+func (f FederationSpokeNameOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
 type FederationStatusBody struct {
 	Statuses []FederationProjectStatus `json:"statuses" validate:"required"`
 }
 
 func (f FederationStatusBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.Statuses, "required"); err != nil {
+		errors = errors.Append("Statuses", err)
+	}
 	for i, item := range f.Statuses {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -2948,6 +3078,7 @@ func (h HLC) Validate() error {
 type HealthResponseBody struct {
 	APISchemaVersion *string                 `json:"api_schema_version,omitempty"`
 	DBPath           *string                 `json:"db_path,omitempty"`
+	Docbank          *DocbankHealth          `json:"docbank,omitempty"`
 	Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 	FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 	IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
@@ -2961,6 +3092,13 @@ type HealthResponseBody struct {
 
 func (h HealthResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if h.Docbank != nil {
+		if v, ok := any(h.Docbank).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Docbank", err)
+			}
+		}
+	}
 	if h.Embeddings != nil {
 		if v, ok := any(h.Embeddings).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -3030,6 +3168,9 @@ type Hooks struct {
 
 func (h Hooks) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(h.Hooks, "required"); err != nil {
+		errors = errors.Append("Hooks", err)
+	}
 	for i, item := range h.Hooks {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -3080,6 +3221,9 @@ func (i ImportBatchResult) Validate() error {
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(i.Errors, "required"); err != nil {
 		errors = errors.Append("Errors", err)
+	}
+	if err := typesValidator.Var(i.Items, "required"); err != nil {
+		errors = errors.Append("Items", err)
 	}
 	for i, item := range i.Items {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -3216,6 +3360,9 @@ func (i ImportRequestBody) Validate() error {
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(i.Actor, "required"); err != nil {
 		errors = errors.Append("Actor", err)
+	}
+	if err := typesValidator.Var(i.Items, "required"); err != nil {
+		errors = errors.Append("Items", err)
 	}
 	for i, item := range i.Items {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -3438,40 +3585,49 @@ func (i IssueMetadataOut) Validate() error {
 }
 
 type IssueOut struct {
-	AccountableActor    *string               `json:"accountable_actor,omitempty"`
-	AssignmentExpiresOn *time.Time            `json:"assignment_expires_on,omitempty"`
-	Author              string                `json:"author" validate:"required"`
-	AuthorityUID        *string               `json:"authority_uid,omitempty"`
-	Blocked             *bool                 `json:"blocked,omitempty"`
-	BlockedBy           []LinkPeer            `json:"blocked_by,omitempty"`
-	Blocks              []LinkPeer            `json:"blocks,omitempty"`
-	Body                string                `json:"body" validate:"required"`
-	ChildCounts         *ChildCounts          `json:"child_counts,omitempty"`
-	ClosedAt            *time.Time            `json:"closed_at,omitempty"`
-	ClosedReason        *string               `json:"closed_reason,omitempty"`
-	CreatedAt           time.Time             `json:"created_at" validate:"required"`
-	DeletedAt           *time.Time            `json:"deleted_at,omitempty"`
-	ID                  int64                 `json:"id"`
-	Labels              []string              `json:"labels,omitempty"`
-	Metadata            map[string]any        `json:"metadata"`
-	OccurrenceKey       *string               `json:"occurrence_key,omitempty"`
-	Owner               *string               `json:"owner,omitempty"`
-	Parent              *LinkPeer             `json:"parent,omitempty"`
-	Priority            *int64                `json:"priority,omitempty"`
-	ProjectID           int64                 `json:"project_id"`
-	ProjectUID          *string               `json:"project_uid,omitempty"`
-	QualifiedID         string                `json:"qualified_id" validate:"required"`
-	RecurrenceID        *int64                `json:"recurrence_id,omitempty"`
-	Related             []LinkPeer            `json:"related,omitempty"`
-	Revision            int64                 `json:"revision"`
-	ShortID             string                `json:"short_id" validate:"required"`
-	SourceActor         *string               `json:"source_actor,omitempty"`
-	Status              string                `json:"status" validate:"required"`
-	Teammate            *string               `json:"teammate,omitempty"`
-	Title               string                `json:"title" validate:"required"`
-	UID                 string                `json:"uid" validate:"required"`
-	UpdatedAt           time.Time             `json:"updated_at" validate:"required"`
-	Verification        *IssueOutVerification `json:"verification,omitempty"`
+	AccountableActor    *string      `json:"accountable_actor,omitempty"`
+	AssignmentExpiresOn *time.Time   `json:"assignment_expires_on,omitempty"`
+	Author              string       `json:"author" validate:"required"`
+	AuthorityUID        *string      `json:"authority_uid,omitempty"`
+	Blocked             *bool        `json:"blocked,omitempty"`
+	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
+	Blocks              []LinkPeer   `json:"blocks,omitempty"`
+	Body                string       `json:"body" validate:"required"`
+	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
+	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
+	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time    `json:"created_at" validate:"required"`
+
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
+	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+	ID             int64          `json:"id"`
+	Labels         []string       `json:"labels,omitempty"`
+	Metadata       map[string]any `json:"metadata"`
+	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+
+	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+	Oversized    *bool      `json:"oversized,omitempty"`
+	Owner        *string    `json:"owner,omitempty"`
+	Parent       *LinkPeer  `json:"parent,omitempty"`
+	Priority     *int64     `json:"priority,omitempty"`
+	ProjectID    int64      `json:"project_id"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	QualifiedID  string     `json:"qualified_id" validate:"required"`
+	RecurrenceID *int64     `json:"recurrence_id,omitempty"`
+	Related      []LinkPeer `json:"related,omitempty"`
+	Revision     int64      `json:"revision"`
+
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	ScheduledOnDate *string               `json:"scheduled_on_date,omitempty"`
+	ShortID         string                `json:"short_id" validate:"required"`
+	SourceActor     *string               `json:"source_actor,omitempty"`
+	Status          string                `json:"status" validate:"required"`
+	Teammate        *string               `json:"teammate,omitempty"`
+	Title           string                `json:"title" validate:"required"`
+	UID             string                `json:"uid" validate:"required"`
+	UpdatedAt       time.Time             `json:"updated_at" validate:"required"`
+	Verification    *IssueOutVerification `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -3552,17 +3708,6 @@ func (i IssueOut) Validate() error {
 		return nil
 	}
 	return errors
-}
-
-type IssuePlanningDate struct {
-	Field    string    `json:"field" validate:"required"`
-	Instant  time.Time `json:"instant" validate:"required"`
-	Timezone string    `json:"timezone" validate:"required"`
-	Value    string    `json:"value" validate:"required"`
-}
-
-func (i IssuePlanningDate) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(i))
 }
 
 type IssuePlanningDates struct {
@@ -3784,6 +3929,9 @@ type LabelsListResponseBody struct {
 
 func (l LabelsListResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Labels, "required"); err != nil {
+		errors = errors.Append("Labels", err)
+	}
 	for i, item := range l.Labels {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -3835,6 +3983,31 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 	if v, ok := any(l.Project).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Project", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type LinkAttachmentInput struct {
+	Actor  *string `json:"actor,omitempty"`
+	NodeID *int64  `json:"node_id,omitempty"`
+	Path   *string `json:"path,omitempty"`
+
+	// ReuseExisting When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
+	ReuseExisting *bool      `json:"reuse_existing,omitempty"`
+	VersionID     *uuid.UUID `json:"version_id,omitempty"`
+}
+
+func (l LinkAttachmentInput) Validate() error {
+	var errors runtime.ValidationErrors
+	if l.VersionID != nil {
+		if v, ok := any(l.VersionID).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("VersionID", err)
+			}
 		}
 	}
 	if len(errors) == 0 {
@@ -3988,6 +4161,9 @@ type ListAllIssuesResponseBody struct {
 
 func (l ListAllIssuesResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Issues, "required"); err != nil {
+		errors = errors.Append("Issues", err)
+	}
 	for i, item := range l.Issues {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4007,6 +4183,9 @@ type ListCronJobsResponseBody struct {
 
 func (l ListCronJobsResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Jobs, "required"); err != nil {
+		errors = errors.Append("Jobs", err)
+	}
 	for i, item := range l.Jobs {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4026,6 +4205,9 @@ type ListCronWorkflowsResponseBody struct {
 
 func (l ListCronWorkflowsResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Workflows, "required"); err != nil {
+		errors = errors.Append("Workflows", err)
+	}
 	for i, item := range l.Workflows {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4045,6 +4227,9 @@ type ListFederationEnrollmentsBody struct {
 
 func (l ListFederationEnrollmentsBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Enrollments, "required"); err != nil {
+		errors = errors.Append("Enrollments", err)
+	}
 	for i, item := range l.Enrollments {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4059,41 +4244,50 @@ func (l ListFederationEnrollmentsBody) Validate() error {
 }
 
 type ListGlobalIssueOut struct {
-	AccountableActor    *string                         `json:"accountable_actor,omitempty"`
-	AssignmentExpiresOn *time.Time                      `json:"assignment_expires_on,omitempty"`
-	Author              string                          `json:"author" validate:"required"`
-	AuthorityUID        *string                         `json:"authority_uid,omitempty"`
-	Blocked             *bool                           `json:"blocked,omitempty"`
-	BlockedBy           []LinkPeer                      `json:"blocked_by,omitempty"`
-	Blocks              []LinkPeer                      `json:"blocks,omitempty"`
-	Body                string                          `json:"body" validate:"required"`
-	ChildCounts         *ChildCounts                    `json:"child_counts,omitempty"`
-	ClosedAt            *time.Time                      `json:"closed_at,omitempty"`
-	ClosedReason        *string                         `json:"closed_reason,omitempty"`
-	CreatedAt           time.Time                       `json:"created_at" validate:"required"`
-	DeletedAt           *time.Time                      `json:"deleted_at,omitempty"`
-	ID                  int64                           `json:"id"`
-	Labels              []string                        `json:"labels,omitempty"`
-	Metadata            map[string]any                  `json:"metadata"`
-	OccurrenceKey       *string                         `json:"occurrence_key,omitempty"`
-	Owner               *string                         `json:"owner,omitempty"`
-	Parent              *LinkPeer                       `json:"parent,omitempty"`
-	Priority            *int64                          `json:"priority,omitempty"`
-	ProjectID           int64                           `json:"project_id"`
-	ProjectName         string                          `json:"project_name" validate:"required"`
-	ProjectUID          *string                         `json:"project_uid,omitempty"`
-	QualifiedID         string                          `json:"qualified_id" validate:"required"`
-	RecurrenceID        *int64                          `json:"recurrence_id,omitempty"`
-	Related             []LinkPeer                      `json:"related,omitempty"`
-	Revision            int64                           `json:"revision"`
-	ShortID             string                          `json:"short_id" validate:"required"`
-	SourceActor         *string                         `json:"source_actor,omitempty"`
-	Status              string                          `json:"status" validate:"required"`
-	Teammate            *string                         `json:"teammate,omitempty"`
-	Title               string                          `json:"title" validate:"required"`
-	UID                 string                          `json:"uid" validate:"required"`
-	UpdatedAt           time.Time                       `json:"updated_at" validate:"required"`
-	Verification        *ListGlobalIssueOutVerification `json:"verification,omitempty"`
+	AccountableActor    *string      `json:"accountable_actor,omitempty"`
+	AssignmentExpiresOn *time.Time   `json:"assignment_expires_on,omitempty"`
+	Author              string       `json:"author" validate:"required"`
+	AuthorityUID        *string      `json:"authority_uid,omitempty"`
+	Blocked             *bool        `json:"blocked,omitempty"`
+	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
+	Blocks              []LinkPeer   `json:"blocks,omitempty"`
+	Body                string       `json:"body" validate:"required"`
+	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
+	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
+	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time    `json:"created_at" validate:"required"`
+
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
+	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+	ID             int64          `json:"id"`
+	Labels         []string       `json:"labels,omitempty"`
+	Metadata       map[string]any `json:"metadata"`
+	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+
+	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+	Oversized    *bool      `json:"oversized,omitempty"`
+	Owner        *string    `json:"owner,omitempty"`
+	Parent       *LinkPeer  `json:"parent,omitempty"`
+	Priority     *int64     `json:"priority,omitempty"`
+	ProjectID    int64      `json:"project_id"`
+	ProjectName  string     `json:"project_name" validate:"required"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	QualifiedID  string     `json:"qualified_id" validate:"required"`
+	RecurrenceID *int64     `json:"recurrence_id,omitempty"`
+	Related      []LinkPeer `json:"related,omitempty"`
+	Revision     int64      `json:"revision"`
+
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	ScheduledOnDate *string                         `json:"scheduled_on_date,omitempty"`
+	ShortID         string                          `json:"short_id" validate:"required"`
+	SourceActor     *string                         `json:"source_actor,omitempty"`
+	Status          string                          `json:"status" validate:"required"`
+	Teammate        *string                         `json:"teammate,omitempty"`
+	Title           string                          `json:"title" validate:"required"`
+	UID             string                          `json:"uid" validate:"required"`
+	UpdatedAt       time.Time                       `json:"updated_at" validate:"required"`
+	Verification    *ListGlobalIssueOutVerification `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -4189,6 +4383,9 @@ type ListIssuesResponseBody struct {
 
 func (l ListIssuesResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Issues, "required"); err != nil {
+		errors = errors.Append("Issues", err)
+	}
 	for i, item := range l.Issues {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4208,6 +4405,9 @@ type ListProjectsResponseBody struct {
 
 func (l ListProjectsResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Projects, "required"); err != nil {
+		errors = errors.Append("Projects", err)
+	}
 	for i, item := range l.Projects {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4227,6 +4427,9 @@ type ListRecurrencesResponseBody struct {
 
 func (l ListRecurrencesResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Recurrences, "required"); err != nil {
+		errors = errors.Append("Recurrences", err)
+	}
 	for i, item := range l.Recurrences {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4246,6 +4449,9 @@ type ListTeamsResponseBody struct {
 
 func (l ListTeamsResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Teams, "required"); err != nil {
+		errors = errors.Append("Teams", err)
+	}
 	for i, item := range l.Teams {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4269,6 +4475,9 @@ func (l ListTokensResponseBody) Validate() error {
 	if err := typesValidator.Var(l.ObservedAt, "required"); err != nil {
 		errors = errors.Append("ObservedAt", err)
 	}
+	if err := typesValidator.Var(l.Tokens, "required"); err != nil {
+		errors = errors.Append("Tokens", err)
+	}
 	for i, item := range l.Tokens {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4280,6 +4489,291 @@ func (l ListTokensResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type LocalEmbeddingsIndexing struct {
+	Done       int64  `json:"done"`
+	EtaSeconds *int64 `json:"eta_seconds,omitempty"`
+	Failed     bool   `json:"failed"`
+	Total      int64  `json:"total"`
+}
+
+type LocalEmbeddingsJob struct {
+	Downloaded int64   `json:"downloaded"`
+	ErrorData  *string `json:"error,omitempty"`
+	State      string  `json:"state" validate:"required"`
+	Total      int64   `json:"total"`
+}
+
+func (l LocalEmbeddingsJob) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type LocalEmbeddingsStatus struct {
+	CanChange       bool                          `json:"can_change"`
+	DownloadBytes   int64                         `json:"download_bytes"`
+	Indexing        *LocalEmbeddingsIndexing      `json:"indexing,omitempty"`
+	Job             *LocalEmbeddingsJob           `json:"job,omitempty"`
+	OllamaAvailable bool                          `json:"ollama_available"`
+	Provider        LocalEmbeddingsStatusProvider `json:"provider" validate:"required"`
+}
+
+func (l LocalEmbeddingsStatus) Validate() error {
+	var errors runtime.ValidationErrors
+	if l.Indexing != nil {
+		if v, ok := any(l.Indexing).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Indexing", err)
+			}
+		}
+	}
+	if l.Job != nil {
+		if v, ok := any(l.Job).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Job", err)
+			}
+		}
+	}
+	if v, ok := any(l.Provider).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Provider", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsArguments struct {
+	AllProjects *bool    `json:"all_projects,omitempty"`
+	For         string   `json:"for" validate:"required"`
+	IssueUID    *string  `json:"issue_uid,omitempty"`
+	ProjectUids []string `json:"project_uids,omitempty"`
+}
+
+func (m MCPEventsArguments) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
+}
+
+type MCPEventsDelivery struct {
+	Mode   string  `json:"mode" validate:"required"`
+	Secret *string `json:"secret,omitempty"`
+	URL    string  `json:"url" validate:"required"`
+}
+
+func (m MCPEventsDelivery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
+}
+
+type MCPEventsDeliveryStatus struct {
+	Active         bool       `json:"active"`
+	FailedSince    *time.Time `json:"failed_since,omitempty"`
+	LastDeliveryAt *time.Time `json:"last_delivery_at,omitempty"`
+	LastError      *string    `json:"last_error,omitempty"`
+}
+
+type MCPEventsEventDefinition struct {
+	Delivery      []string       `json:"delivery" validate:"required"`
+	Description   string         `json:"description" validate:"required"`
+	InputSchema   map[string]any `json:"input_schema"`
+	Name          string         `json:"name" validate:"required"`
+	PayloadSchema map[string]any `json:"payload_schema"`
+}
+
+func (m MCPEventsEventDefinition) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
+}
+
+type MCPEventsForwarderScope struct {
+	All      *bool    `json:"all,omitempty"`
+	Projects []string `json:"projects,omitempty"`
+}
+
+type MCPEventsListResponseBody struct {
+	Events []MCPEventsEventDefinition `json:"events" validate:"required"`
+}
+
+func (m MCPEventsListResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(m.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
+	}
+	for i, item := range m.Events {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Events[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsSubscribeBody struct {
+	Arguments      MCPEventsArguments       `json:"arguments"`
+	Delivery       MCPEventsDelivery        `json:"delivery"`
+	ForwarderScope *MCPEventsForwarderScope `json:"forwarder_scope,omitempty"`
+	Name           string                   `json:"name" validate:"required"`
+	NoExpiry       *bool                    `json:"no_expiry,omitempty"`
+	TTLMs          *int64                   `json:"ttl_ms,omitempty"`
+}
+
+func (m MCPEventsSubscribeBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(m.Arguments).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Arguments", err)
+		}
+	}
+	if v, ok := any(m.Delivery).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Delivery", err)
+		}
+	}
+	if m.ForwarderScope != nil {
+		if v, ok := any(m.ForwarderScope).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ForwarderScope", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(m.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsSubscribeResponseBody struct {
+	DeliveryStatus MCPEventsDeliveryStatus `json:"delivery_status"`
+	ID             string                  `json:"id" validate:"required"`
+	RefreshBefore  *time.Time              `json:"refresh_before" validate:"required"`
+}
+
+func (m MCPEventsSubscribeResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(m.DeliveryStatus).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("DeliveryStatus", err)
+		}
+	}
+	if err := typesValidator.Var(m.ID, "required"); err != nil {
+		errors = errors.Append("ID", err)
+	}
+	if m.RefreshBefore != nil {
+		if err := typesValidator.Var(m.RefreshBefore, "required"); err != nil {
+			errors = errors.Append("RefreshBefore", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsSubscriptionStatus struct {
+	DeadLetterCount int64                   `json:"dead_letter_count"`
+	Delivery        MCPEventsDeliveryStatus `json:"delivery"`
+	EndReason       *string                 `json:"end_reason,omitempty"`
+	FailedAttempts  int64                   `json:"failed_attempts"`
+	ID              string                  `json:"id" validate:"required"`
+	IssueUID        *string                 `json:"issue_uid,omitempty"`
+	Name            string                  `json:"name" validate:"required"`
+	PendingControl  *string                 `json:"pending_control,omitempty"`
+	ProjectUids     []string                `json:"project_uids,omitempty"`
+	Recipient       string                  `json:"recipient" validate:"required"`
+	RefreshBefore   *time.Time              `json:"refresh_before" validate:"required"`
+	State           string                  `json:"state" validate:"required"`
+}
+
+func (m MCPEventsSubscriptionStatus) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(m.Delivery).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Delivery", err)
+		}
+	}
+	if err := typesValidator.Var(m.ID, "required"); err != nil {
+		errors = errors.Append("ID", err)
+	}
+	if err := typesValidator.Var(m.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if err := typesValidator.Var(m.Recipient, "required"); err != nil {
+		errors = errors.Append("Recipient", err)
+	}
+	if m.RefreshBefore != nil {
+		if err := typesValidator.Var(m.RefreshBefore, "required"); err != nil {
+			errors = errors.Append("RefreshBefore", err)
+		}
+	}
+	if err := typesValidator.Var(m.State, "required"); err != nil {
+		errors = errors.Append("State", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsSubscriptionsResponseBody struct {
+	Enabled       bool                          `json:"enabled"`
+	Reason        *string                       `json:"reason,omitempty"`
+	Subscriptions []MCPEventsSubscriptionStatus `json:"subscriptions" validate:"required"`
+}
+
+func (m MCPEventsSubscriptionsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(m.Subscriptions, "required"); err != nil {
+		errors = errors.Append("Subscriptions", err)
+	}
+	for i, item := range m.Subscriptions {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Subscriptions[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsUnsubscribeBody struct {
+	Arguments MCPEventsArguments `json:"arguments"`
+	Delivery  MCPEventsDelivery  `json:"delivery"`
+	Name      string             `json:"name" validate:"required"`
+}
+
+func (m MCPEventsUnsubscribeBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(m.Arguments).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Arguments", err)
+		}
+	}
+	if v, ok := any(m.Delivery).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Delivery", err)
+		}
+	}
+	if err := typesValidator.Var(m.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsUnsubscribeResponseBody struct {
+	Unsubscribed bool `json:"unsubscribed"`
 }
 
 type MapConnectorFieldRequestBody struct {
@@ -4375,7 +4869,10 @@ type MoveIssueRequestBody struct {
 	Actor *string `json:"actor,omitempty"`
 
 	// DryRun Validate without moving; If-Match may be omitted for a preview.
-	DryRun       *bool  `json:"dry_run,omitempty"`
+	DryRun *bool `json:"dry_run,omitempty"`
+
+	// Single Move only this issue instead of its subtree.
+	Single       *bool  `json:"single,omitempty"`
 	ToProjectUID string `json:"to_project_uid" validate:"required"`
 }
 
@@ -4387,6 +4884,7 @@ type MoveIssueResponseBody struct {
 	Changed    bool    `json:"changed"`
 	EventID    int64   `json:"event_id"`
 	Issue      Issue   `json:"issue"`
+	Issues     []Issue `json:"issues,omitempty"`
 	NewShortID *string `json:"new_short_id,omitempty"`
 }
 
@@ -4395,6 +4893,13 @@ func (m MoveIssueResponseBody) Validate() error {
 	if v, ok := any(m.Issue).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Issue", err)
+		}
+	}
+	for i, item := range m.Issues {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Issues[%d]", i), err)
+			}
 		}
 	}
 	if len(errors) == 0 {
@@ -4526,6 +5031,9 @@ type ObserveCronRunResponseBody struct {
 
 func (o ObserveCronRunResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(o.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
+	}
 	for i, item := range o.Events {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4631,7 +5139,9 @@ type PatchRecurrenceRequestBody struct {
 	Dtstart  *string                        `json:"dtstart,omitempty"`
 	Rrule    *string                        `json:"rrule,omitempty"`
 	Template *RecurrenceTemplateUpdateInput `json:"template,omitempty"`
-	Timezone *string                        `json:"timezone,omitempty"`
+
+	// Timezone IANA time zone such as America/New_York or UTC. Changes to Local are rejected; an existing Local value may be retained by omitting timezone or echoing Local.
+	Timezone *string `json:"timezone,omitempty"`
 }
 
 func (p PatchRecurrenceRequestBody) Validate() error {
@@ -4708,14 +5218,18 @@ func (p PingResponseBody) Validate() error {
 }
 
 type PollEventsBody struct {
-	Events        []EventEnvelope `json:"events" validate:"required"`
-	NextAfterID   int64           `json:"next_after_id"`
-	ResetAfterID  *int64          `json:"reset_after_id,omitempty"`
-	ResetRequired bool            `json:"reset_required"`
+	EffectiveCloseEventUID *string         `json:"effective_close_event_uid,omitempty"`
+	Events                 []EventEnvelope `json:"events" validate:"required"`
+	NextAfterID            int64           `json:"next_after_id"`
+	ResetAfterID           *int64          `json:"reset_after_id,omitempty"`
+	ResetRequired          bool            `json:"reset_required"`
 }
 
 func (p PollEventsBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(p.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
+	}
 	for i, item := range p.Events {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4818,11 +5332,14 @@ func (p ProjectEmbeddingProducer) Validate() error {
 }
 
 type ProjectFederationBody struct {
-	BaselineThroughEventID int64           `json:"baseline_through_event_id"`
-	ProjectID              int64           `json:"project_id"`
-	ProjectName            string          `json:"project_name" validate:"required"`
-	ProjectUID             string          `json:"project_uid" validate:"required"`
-	Relay                  *RelayHandshake `json:"relay,omitempty"`
+	BaselineThroughEventID int64 `json:"baseline_through_event_id"`
+
+	// NativeCronWrites Supports native recurring job writes using direct project-scoped push enrollments.
+	NativeCronWrites *bool           `json:"native_cron_writes,omitempty"`
+	ProjectID        int64           `json:"project_id"`
+	ProjectName      string          `json:"project_name" validate:"required"`
+	ProjectUID       string          `json:"project_uid" validate:"required"`
+	Relay            *RelayHandshake `json:"relay,omitempty"`
 
 	// RelayLinksChecked True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it.
 	RelayLinksChecked    *bool `json:"relay_links_checked,omitempty"`
@@ -4965,7 +5482,7 @@ func (p ProjectResolveBody) Validate() error {
 
 type ProjectStats struct {
 	Closed      int64      `json:"Closed"`
-	LastEventAt *time.Time `json:"LastEventAt,omitempty" validate:"required"`
+	LastEventAt *time.Time `json:"LastEventAt" validate:"required"`
 	Open        int64      `json:"Open"`
 }
 
@@ -4975,7 +5492,7 @@ func (p ProjectStats) Validate() error {
 
 type ProjectStatsOut struct {
 	Closed      int64      `json:"closed"`
-	LastEventAt *time.Time `json:"last_event_at,omitempty" validate:"required"`
+	LastEventAt *time.Time `json:"last_event_at" validate:"required"`
 	Open        int64      `json:"open"`
 }
 
@@ -5186,12 +5703,18 @@ func (r ReachableGraphResponseBody) Validate() error {
 	if err := typesValidator.Var(r.Depth, "required"); err != nil {
 		errors = errors.Append("Depth", err)
 	}
+	if err := typesValidator.Var(r.Edges, "required"); err != nil {
+		errors = errors.Append("Edges", err)
+	}
 	for i, item := range r.Edges {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Edges[%d]", i), err)
 			}
 		}
+	}
+	if err := typesValidator.Var(r.Nodes, "required"); err != nil {
+		errors = errors.Append("Nodes", err)
 	}
 	for i, item := range r.Nodes {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -5202,6 +5725,9 @@ func (r ReachableGraphResponseBody) Validate() error {
 	}
 	if err := typesValidator.Var(r.SourceUID, "required"); err != nil {
 		errors = errors.Append("SourceUID", err)
+	}
+	if err := typesValidator.Var(r.UnresolvedRefs, "required"); err != nil {
+		errors = errors.Append("UnresolvedRefs", err)
 	}
 	for i, item := range r.UnresolvedRefs {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -5248,41 +5774,50 @@ func (r ReachableGraphUnresolvedRef) Validate() error {
 }
 
 type ReadyGlobalIssueOut struct {
-	AccountableActor    *string                          `json:"accountable_actor,omitempty"`
-	AssignmentExpiresOn *time.Time                       `json:"assignment_expires_on,omitempty"`
-	Author              string                           `json:"author" validate:"required"`
-	AuthorityUID        *string                          `json:"authority_uid,omitempty"`
-	Blocked             *bool                            `json:"blocked,omitempty"`
-	BlockedBy           []LinkPeer                       `json:"blocked_by,omitempty"`
-	Blocks              []LinkPeer                       `json:"blocks,omitempty"`
-	Body                string                           `json:"body" validate:"required"`
-	ChildCounts         *ChildCounts                     `json:"child_counts,omitempty"`
-	ClosedAt            *time.Time                       `json:"closed_at,omitempty"`
-	ClosedReason        *string                          `json:"closed_reason,omitempty"`
-	CreatedAt           time.Time                        `json:"created_at" validate:"required"`
-	DeletedAt           *time.Time                       `json:"deleted_at,omitempty"`
-	ID                  int64                            `json:"id"`
-	Labels              []string                         `json:"labels,omitempty"`
-	Metadata            map[string]any                   `json:"metadata"`
-	OccurrenceKey       *string                          `json:"occurrence_key,omitempty"`
-	Owner               *string                          `json:"owner,omitempty"`
-	Parent              *LinkPeer                        `json:"parent,omitempty"`
-	Priority            *int64                           `json:"priority,omitempty"`
-	ProjectID           int64                            `json:"project_id"`
-	ProjectName         string                           `json:"project_name" validate:"required"`
-	ProjectUID          *string                          `json:"project_uid,omitempty"`
-	QualifiedID         string                           `json:"qualified_id" validate:"required"`
-	RecurrenceID        *int64                           `json:"recurrence_id,omitempty"`
-	Related             []LinkPeer                       `json:"related,omitempty"`
-	Revision            int64                            `json:"revision"`
-	ShortID             string                           `json:"short_id" validate:"required"`
-	SourceActor         *string                          `json:"source_actor,omitempty"`
-	Status              string                           `json:"status" validate:"required"`
-	Teammate            *string                          `json:"teammate,omitempty"`
-	Title               string                           `json:"title" validate:"required"`
-	UID                 string                           `json:"uid" validate:"required"`
-	UpdatedAt           time.Time                        `json:"updated_at" validate:"required"`
-	Verification        *ReadyGlobalIssueOutVerification `json:"verification,omitempty"`
+	AccountableActor    *string      `json:"accountable_actor,omitempty"`
+	AssignmentExpiresOn *time.Time   `json:"assignment_expires_on,omitempty"`
+	Author              string       `json:"author" validate:"required"`
+	AuthorityUID        *string      `json:"authority_uid,omitempty"`
+	Blocked             *bool        `json:"blocked,omitempty"`
+	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
+	Blocks              []LinkPeer   `json:"blocks,omitempty"`
+	Body                string       `json:"body" validate:"required"`
+	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
+	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
+	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time    `json:"created_at" validate:"required"`
+
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
+	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+	ID             int64          `json:"id"`
+	Labels         []string       `json:"labels,omitempty"`
+	Metadata       map[string]any `json:"metadata"`
+	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+
+	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+	Oversized    *bool      `json:"oversized,omitempty"`
+	Owner        *string    `json:"owner,omitempty"`
+	Parent       *LinkPeer  `json:"parent,omitempty"`
+	Priority     *int64     `json:"priority,omitempty"`
+	ProjectID    int64      `json:"project_id"`
+	ProjectName  string     `json:"project_name" validate:"required"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	QualifiedID  string     `json:"qualified_id" validate:"required"`
+	RecurrenceID *int64     `json:"recurrence_id,omitempty"`
+	Related      []LinkPeer `json:"related,omitempty"`
+	Revision     int64      `json:"revision"`
+
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	ScheduledOnDate *string                          `json:"scheduled_on_date,omitempty"`
+	ShortID         string                           `json:"short_id" validate:"required"`
+	SourceActor     *string                          `json:"source_actor,omitempty"`
+	Status          string                           `json:"status" validate:"required"`
+	Teammate        *string                          `json:"teammate,omitempty"`
+	Title           string                           `json:"title" validate:"required"`
+	UID             string                           `json:"uid" validate:"required"`
+	UpdatedAt       time.Time                        `json:"updated_at" validate:"required"`
+	Verification    *ReadyGlobalIssueOutVerification `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -5374,6 +5909,9 @@ type ReadyGlobalResponseBody struct {
 
 func (r ReadyGlobalResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.Issues, "required"); err != nil {
+		errors = errors.Append("Issues", err)
+	}
 	for i, item := range r.Issues {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -5393,6 +5931,9 @@ type ReadyResponseBody struct {
 
 func (r ReadyResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.Issues, "required"); err != nil {
+		errors = errors.Append("Issues", err)
+	}
 	for i, item := range r.Issues {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -5560,6 +6101,9 @@ func (r RelayBatch) Validate() error {
 			}
 		}
 	}
+	if err := typesValidator.Var(r.Envelopes, "required"); err != nil {
+		errors = errors.Append("Envelopes", err)
+	}
 	for i, item := range r.Envelopes {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -5591,6 +6135,9 @@ func (r RelayBatchResponse) Validate() error {
 				errors = errors.Append(fmt.Sprintf("Artifacts[%d]", i), err)
 			}
 		}
+	}
+	if err := typesValidator.Var(r.Envelopes, "required"); err != nil {
+		errors = errors.Append("Envelopes", err)
 	}
 	for i, item := range r.Envelopes {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -6187,6 +6734,9 @@ func (s SearchResponseBody) Validate() error {
 	if err := typesValidator.Var(s.Query, "required"); err != nil {
 		errors = errors.Append("Query", err)
 	}
+	if err := typesValidator.Var(s.Results, "required"); err != nil {
+		errors = errors.Append("Results", err)
+	}
 	for i, item := range s.Results {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -6198,6 +6748,15 @@ func (s SearchResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type SetFederationSpokeNameRequestBody struct {
+	// Name Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens.
+	Name string `json:"name" validate:"required,min=1"`
+}
+
+func (s SetFederationSpokeNameRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
 }
 
 type SetProjectAccessRequestBody struct {
@@ -6216,6 +6775,9 @@ func (s SetProjectAccessRequestBody) Validate() error {
 	if err := typesValidator.Var(s.TeamUids, "required"); err != nil {
 		errors = errors.Append("TeamUids", err)
 	}
+	if len(s.TeamUids) > 256 {
+		errors = errors.Add("TeamUids", fmt.Sprintf("must have at most 256 items, got %d", len(s.TeamUids)))
+	}
 	if v, ok := any(s.Visibility).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Visibility", err)
@@ -6228,33 +6790,39 @@ func (s SetProjectAccessRequestBody) Validate() error {
 }
 
 type ShowIssueOut struct {
-	AccountableActor    *string                   `json:"accountable_actor,omitempty"`
-	AssignmentExpiresOn *time.Time                `json:"assignment_expires_on,omitempty"`
-	Author              string                    `json:"author" validate:"required"`
-	AuthorityUID        *string                   `json:"authority_uid,omitempty"`
-	Body                string                    `json:"body" validate:"required"`
-	ClosedAt            *time.Time                `json:"closed_at,omitempty"`
-	ClosedReason        *string                   `json:"closed_reason,omitempty"`
-	CreatedAt           time.Time                 `json:"created_at" validate:"required"`
-	DeletedAt           *time.Time                `json:"deleted_at,omitempty"`
-	ID                  int64                     `json:"id"`
-	Labels              []string                  `json:"labels" validate:"required"`
-	Metadata            map[string]any            `json:"metadata"`
-	OccurrenceKey       *string                   `json:"occurrence_key,omitempty"`
-	Owner               *string                   `json:"owner,omitempty"`
-	Priority            *int64                    `json:"priority,omitempty"`
-	ProjectID           int64                     `json:"project_id"`
-	ProjectUID          *string                   `json:"project_uid,omitempty"`
-	RecurrenceID        *int64                    `json:"recurrence_id,omitempty"`
-	Revision            int64                     `json:"revision"`
-	ShortID             string                    `json:"short_id" validate:"required"`
-	SourceActor         *string                   `json:"source_actor,omitempty"`
-	Status              string                    `json:"status" validate:"required"`
-	Teammate            *string                   `json:"teammate,omitempty"`
-	Title               string                    `json:"title" validate:"required"`
-	UID                 string                    `json:"uid" validate:"required"`
-	UpdatedAt           time.Time                 `json:"updated_at" validate:"required"`
-	Verification        *ShowIssueOutVerification `json:"verification,omitempty"`
+	AccountableActor    *string    `json:"accountable_actor,omitempty"`
+	AssignmentExpiresOn *time.Time `json:"assignment_expires_on,omitempty"`
+	Author              string     `json:"author" validate:"required"`
+	AuthorityUID        *string    `json:"authority_uid,omitempty"`
+	Body                string     `json:"body" validate:"required"`
+	ClosedAt            *time.Time `json:"closed_at,omitempty"`
+	ClosedReason        *string    `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time  `json:"created_at" validate:"required"`
+
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
+	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+	ID             int64          `json:"id"`
+	Labels         []string       `json:"labels" validate:"required"`
+	Metadata       map[string]any `json:"metadata"`
+	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+	Owner          *string        `json:"owner,omitempty"`
+	Priority       *int64         `json:"priority,omitempty"`
+	ProjectID      int64          `json:"project_id"`
+	ProjectUID     *string        `json:"project_uid,omitempty"`
+	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
+	Revision       int64          `json:"revision"`
+
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	ScheduledOnDate *string                   `json:"scheduled_on_date,omitempty"`
+	ShortID         string                    `json:"short_id" validate:"required"`
+	SourceActor     *string                   `json:"source_actor,omitempty"`
+	Status          string                    `json:"status" validate:"required"`
+	Teammate        *string                   `json:"teammate,omitempty"`
+	Title           string                    `json:"title" validate:"required"`
+	UID             string                    `json:"uid" validate:"required"`
+	UpdatedAt       time.Time                 `json:"updated_at" validate:"required"`
+	Verification    *ShowIssueOutVerification `json:"verification,omitempty"`
 }
 
 func (s ShowIssueOut) Validate() error {
@@ -6345,6 +6913,9 @@ func (s ShowIssueResponseBody) Validate() error {
 			}
 		}
 	}
+	if err := typesValidator.Var(s.Comments, "required"); err != nil {
+		errors = errors.Append("Comments", err)
+	}
 	for i, item := range s.Comments {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -6356,6 +6927,9 @@ func (s ShowIssueResponseBody) Validate() error {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Issue", err)
 		}
+	}
+	if err := typesValidator.Var(s.Labels, "required"); err != nil {
+		errors = errors.Append("Labels", err)
 	}
 	for i, item := range s.Labels {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -6377,6 +6951,9 @@ func (s ShowIssueResponseBody) Validate() error {
 				errors = errors.Append(fmt.Sprintf("LeaseViolations[%d]", i), err)
 			}
 		}
+	}
+	if err := typesValidator.Var(s.Links, "required"); err != nil {
+		errors = errors.Append("Links", err)
 	}
 	for i, item := range s.Links {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -6419,6 +6996,9 @@ type ShowProjectResponseBody struct {
 
 func (s ShowProjectResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(s.Aliases, "required"); err != nil {
+		errors = errors.Append("Aliases", err)
+	}
 	for i, item := range s.Aliases {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -6538,9 +7118,9 @@ type TokenOut struct {
 	CreatedAt  time.Time      `json:"created_at" validate:"required"`
 	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
 	ID         int64          `json:"id"`
-	LastUsedAt *time.Time     `json:"last_used_at,omitempty" validate:"required"`
-	Name       *string        `json:"name,omitempty" validate:"required"`
-	RevokedAt  *time.Time     `json:"revoked_at,omitempty" validate:"required"`
+	LastUsedAt *time.Time     `json:"last_used_at" validate:"required"`
+	Name       *string        `json:"name" validate:"required"`
+	RevokedAt  *time.Time     `json:"revoked_at" validate:"required"`
 	Scope      *TokenScopeOut `json:"scope,omitempty"`
 	State      TokenOutState  `json:"state" validate:"required"`
 }
@@ -6637,8 +7217,8 @@ func (t TokenScopeOut) Validate() error {
 }
 
 type Transcript struct {
-	Agent     TranscriptAgent `json:"agent" validate:"required"`
-	SessionID string          `json:"session_id" validate:"required"`
+	Agent     TranscriptAgent `json:"agent" validate:"required,max=32"`
+	SessionID string          `json:"session_id" validate:"required,max=128"`
 	URL       *string         `json:"url,omitempty"`
 }
 
@@ -6649,7 +7229,10 @@ func (t Transcript) Validate() error {
 			errors = errors.Append("Agent", err)
 		}
 	}
-	if err := typesValidator.Var(t.SessionID, "required"); err != nil {
+	if err := typesValidator.Var(t.SessionID, "required,max=128"); err != nil {
+		errors = errors.Append("SessionID", err)
+	}
+	if err := runtime.ValidatePattern(t.SessionID, `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`); err != nil {
 		errors = errors.Append("SessionID", err)
 	}
 	if len(errors) == 0 {
@@ -6691,6 +7274,7 @@ type UICapabilities struct {
 	Account        *string  `json:"account,omitempty"`
 	ActorPolicy    string   `json:"actor_policy" validate:"required"`
 	AllowedActions []string `json:"allowed_actions,omitempty"`
+	Attachments    *bool    `json:"attachments,omitempty"`
 
 	// AuthKind How this request authenticated; matches the instance auth kind. Never contains credentials.
 	AuthKind              *string               `json:"auth_kind,omitempty"`
@@ -6734,12 +7318,18 @@ type UIGraph struct {
 
 func (u UIGraph) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(u.Edges, "required"); err != nil {
+		errors = errors.Append("Edges", err)
+	}
 	for i, item := range u.Edges {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Edges[%d]", i), err)
 			}
 		}
+	}
+	if err := typesValidator.Var(u.Issues, "required"); err != nil {
+		errors = errors.Append("Issues", err)
 	}
 	for i, item := range u.Issues {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -6748,12 +7338,18 @@ func (u UIGraph) Validate() error {
 			}
 		}
 	}
+	if err := typesValidator.Var(u.Links, "required"); err != nil {
+		errors = errors.Append("Links", err)
+	}
 	for i, item := range u.Links {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Links[%d]", i), err)
 			}
 		}
+	}
+	if err := typesValidator.Var(u.UnresolvedRefs, "required"); err != nil {
+		errors = errors.Append("UnresolvedRefs", err)
 	}
 	for i, item := range u.UnresolvedRefs {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -6994,6 +7590,9 @@ func (u UIReferencesResponseBody) Validate() error {
 	if err := typesValidator.Var(u.ContractVersion, "required"); err != nil {
 		errors = errors.Append("ContractVersion", err)
 	}
+	if err := typesValidator.Var(u.Issues, "required"); err != nil {
+		errors = errors.Append("Issues", err)
+	}
 	for i, item := range u.Issues {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -7009,6 +7608,9 @@ func (u UIReferencesResponseBody) Validate() error {
 	}
 	if err := typesValidator.Var(u.Owners, "required"); err != nil {
 		errors = errors.Append("Owners", err)
+	}
+	if err := typesValidator.Var(u.Projects, "required"); err != nil {
+		errors = errors.Append("Projects", err)
 	}
 	for i, item := range u.Projects {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -7035,12 +7637,18 @@ type UISelectedAuthority struct {
 
 func (u UISelectedAuthority) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(u.Comments, "required"); err != nil {
+		errors = errors.Append("Comments", err)
+	}
 	for i, item := range u.Comments {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Comments[%d]", i), err)
 			}
 		}
+	}
+	if err := typesValidator.Var(u.History, "required"); err != nil {
+		errors = errors.Append("History", err)
 	}
 	for i, item := range u.History {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -7056,6 +7664,9 @@ func (u UISelectedAuthority) Validate() error {
 			}
 		}
 	}
+	if err := typesValidator.Var(u.Labels, "required"); err != nil {
+		errors = errors.Append("Labels", err)
+	}
 	for i, item := range u.Labels {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -7063,12 +7674,18 @@ func (u UISelectedAuthority) Validate() error {
 			}
 		}
 	}
+	if err := typesValidator.Var(u.Links, "required"); err != nil {
+		errors = errors.Append("Links", err)
+	}
 	for i, item := range u.Links {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Links[%d]", i), err)
 			}
 		}
+	}
+	if err := typesValidator.Var(u.Recurrences, "required"); err != nil {
+		errors = errors.Append("Recurrences", err)
 	}
 	for i, item := range u.Recurrences {
 		if v, ok := any(item).(runtime.Validator); ok {
@@ -7108,6 +7725,9 @@ func (u UISnapshotResponseBody) Validate() error {
 			errors = errors.Append("Capabilities", err)
 		}
 	}
+	if err := typesValidator.Var(u.Catalog, "required"); err != nil {
+		errors = errors.Append("Catalog", err)
+	}
 	for i, item := range u.Catalog {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -7115,12 +7735,18 @@ func (u UISnapshotResponseBody) Validate() error {
 			}
 		}
 	}
+	if err := typesValidator.Var(u.Collection, "required"); err != nil {
+		errors = errors.Append("Collection", err)
+	}
 	for i, item := range u.Collection {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Collection[%d]", i), err)
 			}
 		}
+	}
+	if err := typesValidator.Var(u.CollectionLinks, "required"); err != nil {
+		errors = errors.Append("CollectionLinks", err)
 	}
 	for i, item := range u.CollectionLinks {
 		if v, ok := any(item).(runtime.Validator); ok {

@@ -153,11 +153,12 @@ func localProfileSigningReferences(profile LocalProfileConfig) ([]string, error)
 }
 
 // LocalProfileEnvironment constructs child state from an OS/toolchain allowlist
-// and credential references in the selected configuration, never parent daemon
-// overrides. The returned slice does not mutate the process environment.
+// and credential references in the selected configuration. Operator timeout and
+// telemetry settings pass through; parent daemon routing overrides do not.
+// The returned slice does not mutate the process environment.
 func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]string, error) {
 	values := map[string]string{}
-	for _, key := range []string{"PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMP", "TEMP", "TMPDIR", "XDG_RUNTIME_DIR", "LANG", "LC_ALL", "TZ", "GOCACHE", "GOMODCACHE", "GOPATH", "KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
+	for _, key := range []string{"PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMP", "TEMP", "TMPDIR", "XDG_RUNTIME_DIR", "LANG", "LC_ALL", "TZ", "GOCACHE", "GOMODCACHE", "GOPATH", "KATA_HTTP_TIMEOUT", "KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI", "SSL_CERT_FILE", "SSL_CERT_DIR", "DOCBANK_HOME"} {
 		if value, ok := os.LookupEnv(key); ok {
 			values[key] = value
 		}
@@ -166,6 +167,8 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 	if profile.Config != nil {
 		references = append(references,
 			profile.Config.Auth.TokenEnv,
+			profile.Config.Docbank.APIKeyEnv,
+			profile.Config.MCP.TokenEnv,
 			profile.Config.Search.Embeddings.APIKeyEnv,
 			profile.Config.GitHubSync.TokenEnvName(),
 			profile.Config.NotionSync.TokenEnv,
@@ -191,6 +194,8 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 	references = append(references, signingReferences...)
 	reserved := []string{
 		"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE",
+		"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER",
+		"KATA_MCP_ENABLED", "KATA_MCP_ACTOR", "KATA_MCP_PROJECTS", "KATA_MCP_ALL_PROJECTS", "KATA_MCP_STARTUP_SECTIONS", "KATA_MCP_TOKEN_FILE",
 		"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE",
 		"KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX",
 		"KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX",

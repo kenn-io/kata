@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +25,7 @@ func TestMissingCredentialDoesNotCallProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.SetCredential(config.EmbeddingCredential{Source: "env:EXAMPLE_KEY", Reason: "no embedding API key (env EXAMPLE_KEY is unset)"})
-	_, err = c.Embed(context.Background(), []string{"query"})
+	_, err = c.Embed(t.Context(), []string{"query"})
 	if err == nil || !strings.Contains(err.Error(), "no embedding API key") || calls.Load() != 0 {
 		t.Fatalf("error=%v provider requests=%d", err, calls.Load())
 	}
@@ -55,7 +54,7 @@ func TestKeylessProviderRequestsAndRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			vectors, err := c.Embed(context.Background(), []string{"query"})
+			vectors, err := c.Embed(t.Context(), []string{"query"})
 			if calls.Load() != 1 {
 				t.Fatalf("keyless provider received %d requests: %v", calls.Load(), err)
 			}
@@ -81,7 +80,7 @@ func TestKeylessProviderRequestsAndRecovery(t *testing.T) {
 				if c.CredentialHealth().Credential != wantState {
 					t.Fatal("unchanged reload erased provider rejection")
 				}
-				if _, err := c.Embed(context.Background(), []string{"retry"}); err != nil {
+				if _, err := c.Embed(t.Context(), []string{"retry"}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -110,7 +109,7 @@ func TestCredentialRejectionAndRecovery(t *testing.T) {
 			defer srv.Close()
 			c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-secret", Source: "inline"}})
 			c.SetCredential(config.EmbeddingCredential{Key: "example-secret", Source: "file:example.key"})
-			_, err := c.Embed(context.Background(), []string{"query"})
+			_, err := c.Embed(t.Context(), []string{"query"})
 			var ce *CredentialError
 			var ae *embedclient.APIError
 			wantReason := "rejected the API key"
@@ -128,7 +127,7 @@ func TestCredentialRejectionAndRecovery(t *testing.T) {
 			if c.CredentialHealth().Credential != "rejected" {
 				t.Fatal("unchanged reload cleared rejection")
 			}
-			if _, err := c.Embed(context.Background(), []string{"query"}); err != nil {
+			if _, err := c.Embed(t.Context(), []string{"query"}); err != nil {
 				t.Fatal(err)
 			}
 			h = c.CredentialHealth()
@@ -153,7 +152,7 @@ func TestCredentialReloadFencesOldResponse(t *testing.T) {
 			defer srv.Close()
 			c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2, Credential: config.EmbeddingCredential{Key: "old-secret", Source: "inline"}})
 			done := make(chan error, 1)
-			go func() { _, err := c.Embed(context.Background(), []string{"query"}); done <- err }()
+			go func() { _, err := c.Embed(t.Context(), []string{"query"}); done <- err }()
 			<-entered
 			c.SetCredential(config.EmbeddingCredential{Source: "env:EXAMPLE_KEY", Reason: "no embedding API key"})
 			close(release)
@@ -168,7 +167,7 @@ func TestCredentialReloadFencesOldResponse(t *testing.T) {
 
 func TestEmptyEmbedDoesNotReportSuccess(t *testing.T) {
 	c, _ := New(Config{BaseURL: "https://embedding.example", Model: "m", Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
-	if _, err := c.Embed(context.Background(), nil); err != nil {
+	if _, err := c.Embed(t.Context(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if c.CredentialHealth().LastSuccessAt != nil {

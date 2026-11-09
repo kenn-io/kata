@@ -22,7 +22,7 @@ import (
 )
 
 func TestServiceNotionScheduledProgress(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fetcher := newRuntimeNotionFetcher()
 	var resolved config.NotionSyncConfig
 	service, err := newService(ctx, Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, NotionSync: NotionSyncConfig{TokenEnv: " EXAMPLE_NOTION_TOKEN "}}, serviceDeps{notionSyncFetcherFactory: func(cfg config.NotionSyncConfig) notionsync.Fetcher { resolved = cfg; return fetcher }})
@@ -34,7 +34,7 @@ func TestServiceNotionScheduledProgress(t *testing.T) {
 	project, err := service.store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	enable := httptest.NewRecorder()
-	service.Handler().ServeHTTP(enable, newRuntimeNotionPost(fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/enable", project.ID), strings.NewReader(`{"config":{"data_source_id":"11111111-1111-1111-1111-111111111111","done_statuses":["Delivered"]}}`)))
+	service.Handler().ServeHTTP(enable, newRuntimeNotionPost(t.Context(), fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/enable", project.ID), strings.NewReader(`{"config":{"data_source_id":"11111111-1111-1111-1111-111111111111","done_statuses":["Delivered"]}}`)))
 	require.Equal(t, http.StatusOK, enable.Code, enable.Body.String())
 	binding, err := service.store.IssueSyncBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
@@ -67,7 +67,7 @@ func TestServiceNotionScheduledProgress(t *testing.T) {
 	require.Equal(t, *durable.SyncStartedAt, status.Status.Progress.StartedAt)
 	require.Equal(t, "content", service.notionSyncProgress.Snapshot(binding.ID, *durable.SyncStartedAt).Phase)
 	once := httptest.NewRecorder()
-	service.Handler().ServeHTTP(once, newRuntimeNotionPost(fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/once", project.ID), strings.NewReader(`{}`)))
+	service.Handler().ServeHTTP(once, newRuntimeNotionPost(t.Context(), fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/once", project.ID), strings.NewReader(`{}`)))
 	require.Equal(t, http.StatusConflict, once.Code, once.Body.String())
 	require.Equal(t, status.Status.Progress, readRuntimeNotionStatus(t, service.Handler(), project.ID).Status.Progress)
 	close(fetcher.releaseContent)
@@ -85,7 +85,7 @@ func TestServiceNotionScheduledProgress(t *testing.T) {
 	}
 }
 func TestServiceNotionInitialSourceAndGitHubRepositoryProgress(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fetcher := newRuntimeNotionFetcher()
 	github := &runtimeGitHubSourceFetcher{started: make(chan struct{})}
 	service, err := newService(ctx, Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}}, serviceDeps{notionSyncFetcher: fetcher, gitHubSyncFetcher: github})
@@ -113,7 +113,7 @@ func TestServiceNotionInitialSourceAndGitHubRepositoryProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "source", service.notionSyncProgress.Snapshot(binding.ID, *durable.SyncStartedAt).Phase)
 	response := httptest.NewRecorder()
-	service.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/github/status", g.ID), nil))
+	service.Handler().ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/github/status", g.ID), nil))
 	require.Equal(t, 200, response.Code)
 	var out runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &out))
@@ -132,7 +132,7 @@ func (f *runtimeGitHubSourceFetcher) Repository(ctx context.Context, _, _, _ str
 	return githubsync.Repository{}, ctx.Err()
 }
 func TestServiceNotionConfigRejectsInvalidSelector(t *testing.T) {
-	_, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, NotionSync: NotionSyncConfig{TokenEnv: "INVALID=NAME"}})
+	_, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, NotionSync: NotionSyncConfig{TokenEnv: "INVALID=NAME"}})
 	require.ErrorContains(t, err, "notion_sync.token_env")
 }
 
@@ -178,7 +178,7 @@ func runtimeNotionBinding(t *testing.T, store db.Storage, projectID int64) db.Is
 	t.Helper()
 	raw, err := notionsync.EncodeConfig(notionsync.Config{DataSourceID: runtimeNotionSourceID, DatabaseID: runtimeNotionDatabaseID, TitlePropertyID: "title", StatusPropertyID: "status", AssigneePropertyID: "people", DoneStatusIDs: []string{"done"}})
 	require.NoError(t, err)
-	binding, err := store.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: projectID, Provider: "notion", SourceKey: "notion:" + runtimeNotionSourceID, RemoteID: runtimeNotionSourceID, DisplayName: "Tasks", Config: raw, IntervalSeconds: 300})
+	binding, err := store.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: projectID, Provider: "notion", SourceKey: "notion:" + runtimeNotionSourceID, RemoteID: runtimeNotionSourceID, DisplayName: "Tasks", Config: raw, IntervalSeconds: 300})
 	require.NoError(t, err)
 	return binding
 }
@@ -198,7 +198,7 @@ type runtimeNotionStatus struct {
 func readRuntimeNotionStatus(t *testing.T, handler http.Handler, projectID int64) runtimeNotionStatus {
 	t.Helper()
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/status", projectID), nil))
+	handler.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/status", projectID), nil))
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var status runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &status))
@@ -213,8 +213,8 @@ func waitRuntimeNotion(t *testing.T, started <-chan struct{}) {
 	}
 }
 
-func newRuntimeNotionPost(path string, body io.Reader) *http.Request {
-	request := httptest.NewRequest(http.MethodPost, path, body)
+func newRuntimeNotionPost(ctx context.Context, path string, body io.Reader) *http.Request {
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, path, body)
 	request.Header.Set("Content-Type", "application/json")
 	return request
 }
@@ -222,19 +222,19 @@ func newRuntimeNotionPost(path string, body io.Reader) *http.Request {
 func TestServiceNotionExplicitCredentialDoesNotFallBack(t *testing.T) {
 	t.Setenv("KATA_NOTION_TOKEN", "default-example-token")
 	t.Setenv("EXAMPLE_NOTION_TOKEN", "")
-	service, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, NotionSync: NotionSyncConfig{TokenEnv: " EXAMPLE_NOTION_TOKEN "}})
+	service, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, NotionSync: NotionSyncConfig{TokenEnv: " EXAMPLE_NOTION_TOKEN "}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
-	project, err := service.store.CreateProject(context.Background(), "example-project")
+	project, err := service.store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	enable := httptest.NewRecorder()
-	service.Handler().ServeHTTP(enable, newRuntimeNotionPost(fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/enable", project.ID), strings.NewReader(`{"config":{"data_source_id":"11111111-1111-1111-1111-111111111111","done_statuses":["Delivered"]}}`)))
+	service.Handler().ServeHTTP(enable, newRuntimeNotionPost(t.Context(), fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/enable", project.ID), strings.NewReader(`{"config":{"data_source_id":"11111111-1111-1111-1111-111111111111","done_statuses":["Delivered"]}}`)))
 	require.Equal(t, http.StatusBadRequest, enable.Code, enable.Body.String())
 	require.Contains(t, enable.Body.String(), "credentials")
 	runtimeNotionBinding(t, service.store, project.ID)
 	recording := &runtimeNotionRecordingStore{Storage: service.store, recorded: make(chan db.IssueSyncStatus, 1)}
 	service.store = recording
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- service.Run(ctx) }()
 	defer func() { cancel(); require.NoError(t, <-done) }()

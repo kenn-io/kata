@@ -42,7 +42,7 @@ func statusConfig(t *testing.T, origin string) Config {
 }
 func statusSession(t *testing.T, c Config) testStatusSession {
 	t.Helper()
-	session, err := planeTestClient(c.APIOrigin).ForRun(context.Background(), c)
+	session, err := planeTestClient(c.APIOrigin).ForRun(t.Context(), c)
 	require.NoError(t, err)
 	status, ok := session.(testStatusSession)
 	require.True(t, ok, "Plane session must support status-only operations")
@@ -52,7 +52,7 @@ func workflowRows() []map[string]any {
 	return []map[string]any{{"id": testStateID, "group": "started", "sequence": 2}, {"id": completedStateID, "group": "completed", "sequence": 4}, {"id": cancelledStateID, "group": "cancelled", "sequence": 5}, {"id": unstartedStateID, "group": "unstarted", "sequence": 1}}
 }
 func TestPlaneStatusOnlyWriteReadbackAndPreservesSubstates(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	state := testStateID
 	patches := 0
 	admissions := 0
@@ -130,7 +130,7 @@ func TestPlaneStatusWriteRejectsStaleAdmissionAndNeverRetriesAmbiguousPatch(t *t
 			c := statusConfig(t, server.URL)
 			session := statusSession(t, c)
 			fence := errors.New("intent changed")
-			_, err := session.WriteStatus(context.Background(), c, testItemID, "closed", func() error {
+			_, err := session.WriteStatus(t.Context(), c, testItemID, "closed", func() error {
 				if reject {
 					return fence
 				}
@@ -184,7 +184,7 @@ func TestPlaneStatusRejectsUnavailableAndWrongIdentity(t *testing.T) {
 			}))
 			defer server.Close()
 			c := statusConfig(t, server.URL)
-			_, err := statusSession(t, c).ReadStatus(context.Background(), c, testItemID)
+			_, err := statusSession(t, c).ReadStatus(t.Context(), c, testItemID)
 			require.Error(t, err)
 			var statusErr *issuesync.StatusError
 			require.ErrorAs(t, err, &statusErr)
@@ -228,9 +228,9 @@ func TestPlaneStatusWriteThatNeverConnectsIsNotAmbiguous(t *testing.T) {
 	defer server.Close()
 	c := statusConfig(t, server.URL)
 	client := NewClient(ClientConfig{Daemon: config.PlaneSyncConfig{APIOrigin: server.URL}, LookupEnv: func(string) (string, bool) { return "example-api-key", true }, Wait: func(ctx context.Context, _ time.Duration) error { return ctx.Err() }, Transport: patchDialFailure{reads: server.Client().Transport}})
-	raw, err := client.ForRun(context.Background(), c)
+	raw, err := client.ForRun(t.Context(), c)
 	require.NoError(t, err)
-	_, err = raw.(testStatusSession).WriteStatus(context.Background(), c, testItemID, "closed", func() error { return nil })
+	_, err = raw.(testStatusSession).WriteStatus(t.Context(), c, testItemID, "closed", func() error { return nil })
 	var statusErr *issuesync.StatusError
 	require.ErrorAs(t, err, &statusErr)
 	require.False(t, statusErr.Ambiguous, "a write that never connected was not sent")
@@ -273,9 +273,9 @@ func TestPlaneRateLimitReportsRetryDelay(t *testing.T) {
 			session := statusSession(t, c)
 			var err error
 			if write {
-				_, err = session.WriteStatus(context.Background(), c, testItemID, "closed", func() error { return nil })
+				_, err = session.WriteStatus(t.Context(), c, testItemID, "closed", func() error { return nil })
 			} else {
-				_, err = session.ReadStatus(context.Background(), c, testItemID)
+				_, err = session.ReadStatus(t.Context(), c, testItemID)
 			}
 			var statusErr *issuesync.StatusError
 			require.ErrorAs(t, err, &statusErr)

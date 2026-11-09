@@ -93,9 +93,19 @@ func runIssueStatus(cmd *cobra.Command, issueRef string) error {
 	if show.LeaseHubNow != nil && !show.LeaseHubNow.IsZero() {
 		now = show.LeaseHubNow.UTC()
 	}
+	displayRef, displayProject, err := issueRefAndProjectForOutput(daemonAPI{ctx: ctx, baseURL: baseURL, client: client}, pid, ref.ProjectName,
+		issueIdentityForOutput{ProjectID: show.Issue.ProjectID, UID: show.Issue.UID, ShortID: show.Issue.ShortID})
+	if err != nil {
+		return err
+	}
+	if currentOutputMode() == outputJSON && displayProject != "" {
+		// JSON callers combine the current project and bare short ID. When
+		// the project lookup fails, displayRef instead retains the stable UID.
+		displayRef = show.Issue.ShortID
+	}
 	projection := issueStatusProjection{
-		Issue:               show.Issue.ShortID,
-		Project:             ref.ProjectName,
+		Issue:               displayRef,
+		Project:             displayProject,
 		IssueStatus:         show.Issue.Status,
 		Revision:            show.Issue.Revision,
 		Actor:               actor,

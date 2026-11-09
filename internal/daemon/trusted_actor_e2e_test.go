@@ -2,7 +2,6 @@ package daemon_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net"
@@ -29,7 +28,7 @@ import (
 // allowlist entry would never match.
 func startTrustedProxyTestServer(t *testing.T, headerName string) *httptest.Server {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
 	d := openTestDB(t)
@@ -96,7 +95,7 @@ func (b *syncBuffer) String() string {
 // trusted-proxy header overwrites an upstream bearer-derived principal.
 func startBearerProxyTestServer(t *testing.T, headerName string, auth bearerProxyOpts) (*httptest.Server, *sqlitestore.Store, *syncBuffer) {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
 	d := openTestDB(t)
@@ -492,7 +491,7 @@ func TestTrustedProxyHeader_DBTokenIdentityHeaderOverwrites(t *testing.T) {
 	// Mint a DB-registered token for "bob" so requireIdentityBearer sets
 	// PrincipalDBToken on his requests.
 	bobPlain := "bob-db-token"
-	_, _, err := store.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: bobPlain,
 		Actor:          "bob",
 		AdminActor:     db.BootstrapActor,

@@ -7,11 +7,24 @@ name: Sibling pins on main
 # Run on pull_request so checkout can read fork candidates. The action reads
 # only the candidate's dependency files. A repository ruleset requires this
 # job, including in merge groups.
+#
+# Only a code change reruns this check: a new commit, or the pull request
+# opening or reopening. Leave out `edited`. GitHub sends it for title,
+# description, and base branch changes. Each edit started another run on the
+# same commit, and GitHub reports the newest run's result, so a cancelled edit
+# run blocked the merge. Do not skip edits with `if:` either. A skipped
+# required job counts as passing and would hide a real failure.
+# The merge queue reruns the check on the merge group commit, so a
+# retargeted base cannot merge an unchecked pin.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
   merge_group:
     types: [checks_requested]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -19,8 +32,8 @@ permissions:
 jobs:
   sibling-pins:
     name: Sibling pins on main
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-linux-1cpu
     timeout-minutes: 10
     steps:
       - name: Check sibling pins
-        uses: kenn-io/actions/sibling-pins@68ba2c6390aff0de4aced81a8c2af669514c7ac0
+        uses: kenn-io/actions/sibling-pins@main

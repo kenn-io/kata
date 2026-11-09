@@ -3,6 +3,7 @@
 package processtree
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -26,7 +27,8 @@ func TestKillResultAccessDenied(t *testing.T) {
 }
 
 func TestKillExitedProcessBeforeWait(t *testing.T) {
-	cmd := exec.Command("cmd", "/c", "exit", "0")
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), "cmd", "/c", "exit", "0")
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
@@ -46,7 +48,8 @@ func TestKillExitedProcessBeforeWait(t *testing.T) {
 }
 
 func TestKillProcessExitedWithStillActiveCode(t *testing.T) {
-	cmd := exec.Command("cmd", "/c", "exit", "259")
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), "cmd", "/c", "exit", "259")
 	require.NoError(t, cmd.Start())
 	waited := false
 	t.Cleanup(func() {
@@ -73,7 +76,7 @@ func TestKillProcessExitedWithStillActiveCode(t *testing.T) {
 }
 
 func TestTreeAttachFailureKillsAndReapsSuspendedProcess(t *testing.T) {
-	cmd := exec.Command("cmd", "/c", "exit", "0")
+	cmd := exec.CommandContext(t.Context(), "cmd", "/c", "exit", "0")
 	tree, err := New(cmd)
 	require.NoError(t, err)
 	require.NoError(t, tree.Close())
@@ -85,7 +88,7 @@ func TestTreeAttachFailureKillsAndReapsSuspendedProcess(t *testing.T) {
 }
 
 func TestTreeResumeFailureKillsAndReapsAssignedProcess(t *testing.T) {
-	cmd := exec.Command("cmd", "/c", "exit", "0")
+	cmd := exec.CommandContext(t.Context(), "cmd", "/c", "exit", "0")
 	tree, err := New(cmd)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tree.Close()) })

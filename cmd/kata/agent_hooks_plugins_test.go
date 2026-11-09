@@ -234,7 +234,7 @@ else if(a.includes('inbox')){let s=fs.readFileSync(process.env.KATA_PLUGIN_STATE
 				if err = os.WriteFile(contractAttempts, []byte("0"), 0600); err != nil {
 					t.Fatal(err)
 				}
-				cmd := exec.Command(node, "testdata/agent-hooks/plugins-native.mjs", api, plan.Path, project.Path, workspace, otherWorkspace, mode) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
+				cmd := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/plugins-native.mjs", api, plan.Path, project.Path, workspace, otherWorkspace, mode) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
 				cmd.Env = append(os.Environ(), "KATA_PLUGIN_LOG="+log, "KATA_PLUGIN_STATE="+state, "KATA_REF=spoke-project#abc4", "KATA_INBOX_USER=actor/worker", "KATA_SERVER=http://127.0.0.1:7777")
 				cmd.Env = append(cmd.Env, "KATA_PLUGIN_CONTRACT_ATTEMPTS="+contractAttempts)
 				switch mode {
@@ -406,7 +406,7 @@ func TestOpenCodeV2NativeProjectSourceUsesWorkspaceFromNestedCWD(t *testing.T) {
 	if _, err = publishNativeAgentHookPlan(plan); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, "testdata/agent-hooks/plugins-project-source.mjs", plan.Path, workspace, nested) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
+	command := exec.CommandContext(t.Context(), node, "testdata/agent-hooks/plugins-project-source.mjs", plan.Path, workspace, nested) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
 	command.Env = append(os.Environ(), "KATA_INBOX_USER=")
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -638,7 +638,7 @@ func TestNativePluginsPublishedDeclarations(t *testing.T) {
 		files = append(files, file)
 	}
 	args := append([]string{"--allowJs", "--checkJs", "--noEmit", "--skipLibCheck", "--module", "nodenext", "--target", "es2022", "--types", "node", "--noImplicitAny", "false", "--strictNullChecks", "true"}, files...)
-	cmd := exec.Command(filepath.Join(sdkRoot, "node_modules", ".bin", "tsc"), args...) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
+	cmd := exec.CommandContext(t.Context(), filepath.Join(sdkRoot, "node_modules", ".bin", "tsc"), args...) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
 	cmd.Dir = root
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("published declarations rejected generated callbacks: %v\n%s", err, output)
@@ -714,7 +714,7 @@ func TestNativePluginsFileURLNativeParser(t *testing.T) {
 			if tc.windows {
 				windows = "true"
 			}
-			cmd := exec.Command(node, "--input-type=module", "-e", `import {fileURLToPath} from 'node:url'; process.stdout.write(fileURLToPath(process.argv[1], {windows:process.argv[2]==='true'}));`, registration, windows) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
+			cmd := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", `import {fileURLToPath} from 'node:url'; process.stdout.write(fileURLToPath(process.argv[1], {windows:process.argv[2]==='true'}));`, registration, windows) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("native file URL parser rejected %q: %v\n%s", registration, err, out)

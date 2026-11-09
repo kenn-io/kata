@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"strconv"
 	"sync"
 	"testing"
@@ -56,7 +55,7 @@ func TestSSE_LivePhaseChecksPurgeResetBeforeReplay(t *testing.T) {
 	// the race). The handler must still emit a reset because
 	// PurgeResetCheck sees the purge committed.
 	_, evt2 := mkIssueWithEvent(t, env, pid, "post-purge")
-	_, err := env.DB.PurgeIssue(context.Background(), sentinelIssue.ID, "tester", nil)
+	_, err := env.DB.PurgeIssue(t.Context(), sentinelIssue.ID, "tester", nil)
 	require.NoError(t, err)
 
 	env.Broadcaster.Broadcast(daemon.NewEventMsg(pid, evt2))

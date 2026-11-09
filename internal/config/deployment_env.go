@@ -11,9 +11,14 @@ import (
 // Empty values leave TOML settings intact, including empty Compose substitutions.
 func applyDeploymentEnv(cfg *DaemonConfig) error {
 	for name, field := range map[string]*string{
+		"KATA_DOCBANK_URL":                    &cfg.Docbank.URL,
+		"KATA_DOCBANK_API_KEY_FILE":           &cfg.Docbank.APIKeyFile,
+		"KATA_DOCBANK_FOLDER":                 &cfg.Docbank.Folder,
 		"KATA_LISTEN":                         &cfg.Listen,
 		"KATA_WEB_LISTEN":                     &cfg.Web.Listen,
 		"KATA_WEB_PUBLIC_ORIGIN":              &cfg.Web.PublicOrigin,
+		"KATA_MCP_ACTOR":                      &cfg.MCP.Actor,
+		"KATA_MCP_TOKEN_FILE":                 &cfg.MCP.TokenFile,
 		"KATA_BACKUP_DIR":                     &cfg.Backup.Dir,
 		"KATA_BACKUP_INTERVAL":                &cfg.Backup.Interval,
 		"KATA_BACKUP_RETAIN":                  &cfg.Backup.Retain,
@@ -23,6 +28,33 @@ func applyDeploymentEnv(cfg *DaemonConfig) error {
 	} {
 		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 			*field = value
+			cfg.Sources[deploymentSourceKey(name)] = name
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("KATA_MCP_PROJECTS")); value != "" {
+		cfg.MCP.Projects = strings.Split(value, ",")
+		for i, name := range cfg.MCP.Projects {
+			cfg.MCP.Projects[i] = strings.TrimSpace(name)
+		}
+		cfg.Sources["mcp_projects"] = "KATA_MCP_PROJECTS"
+	}
+	if value := strings.TrimSpace(os.Getenv("KATA_MCP_STARTUP_SECTIONS")); value != "" {
+		cfg.MCP.StartupSections = strings.Split(value, ",")
+		for i, section := range cfg.MCP.StartupSections {
+			cfg.MCP.StartupSections[i] = strings.TrimSpace(section)
+		}
+		cfg.Sources["mcp_startup_sections"] = "KATA_MCP_STARTUP_SECTIONS"
+	}
+	for name, field := range map[string]*bool{
+		"KATA_MCP_ENABLED":      &cfg.MCP.Enabled,
+		"KATA_MCP_ALL_PROJECTS": &cfg.MCP.AllProjects,
+	} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("%s must be true or false", name)
+			}
+			*field = parsed
 			cfg.Sources[deploymentSourceKey(name)] = name
 		}
 	}

@@ -14,6 +14,7 @@ import (
 
 func dropCommentReplySchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	dropEventMoveHistoryIndex(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s.comments DROP COLUMN reply_to_uid, DROP COLUMN reply_kind, DROP COLUMN edited_at`, schema)) // #nosec G201 -- fixed test schema.
 	require.NoError(t, err)
 }
@@ -22,7 +23,7 @@ func TestCommentReplyMigrationUpgradesVersion31(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires PostgreSQL")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	const schema = "reply_upgrade"
@@ -38,6 +39,8 @@ func TestCommentReplyMigrationUpgradesVersion31(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	dropLaterMigrationIndexes(ctx, t, admin, schema)
+	dropMCPEventSubscriptionsSchema(ctx, t, admin, schema)
 	dropProjectAccessSchema(ctx, t, admin, schema)
 	dropCommentReplySchema(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE reply_upgrade.meta SET value='31' WHERE key='schema_version'`)
@@ -93,6 +96,8 @@ func TestCommentReplyIndexMigrationUpgradesVersion33(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	dropEventMoveHistoryIndex(ctx, t, admin, schema)
+	dropLaterMigrationIndexes(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `DROP INDEX reply_index_upgrade.idx_comments_reply_to;
 		UPDATE reply_index_upgrade.meta SET value='33' WHERE key='schema_version'`)
 	require.NoError(t, err)

@@ -41,3 +41,7 @@ func InstallRelayHistoryFullScanObserverForTest(store *Store, observe func()) fu
 func MaterializeFederatedProjectOnceForTest(ctx context.Context, store *Store, projectID int64) error {
 	return store.materializeFederatedProject(ctx, projectID)
 }
+
+const EventSelectForTest = eventSelect
+
+var ScanEventForTest = scanEvent

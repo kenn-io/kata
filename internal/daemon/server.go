@@ -22,12 +22,15 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/linearsync"
+	"go.kenn.io/kata/internal/mcpevents"
+	"go.kenn.io/kata/internal/mcpicon"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
@@ -63,7 +66,23 @@ type ServerConfig struct {
 	StartedAt       time.Time
 	Endpoint        *kitdaemon.Endpoint
 	Broadcaster     *EventBroadcaster
-	FederationWake  func()
+	// MCPEvents serves the /api/v1/mcp-events routes. Nil means Events is not
+	// running in this process; MCPEventsDisabledReason then says why, and the
+	// routes report it. Ordinary daemon operation is unaffected either way.
+	MCPEvents *mcpevents.Service
+	// MCPEventsDisabledReason is the status reason when MCPEvents is nil.
+	// Empty reports mcpevents.ReasonNotConfigured.
+	MCPEventsDisabledReason string
+	FederationWake          func()
+	// FederationPushPending drains existing direct push replication under caller-held coordination.
+	FederationPushPending func(context.Context, db.FederationBinding, config.FederationCredential) error
+	// FederationHubClient builds the bearer-pinned hub client for a stored
+	// credential. It is injected so the daemon does not import the client package.
+	FederationHubClient func(context.Context, config.FederationCredential) (*http.Client, error)
+	// FederationPullOnce performs one synchronous pull-only turn for the
+	// supplied binding and credential. It is used when a forwarded claim
+	// discovers that the issue has moved into another joined hub project.
+	FederationPullOnce func(context.Context, db.FederationBinding, config.FederationCredential) error
 	// EmbeddingWake notifies the existing local worker after artifact commit.
 	EmbeddingWake                 func()
 	FederationCredentials         config.FederationCredentialStore
@@ -119,6 +138,8 @@ type ServerConfig struct {
 	// WebHandler serves optional public browser assets. Non-API paths bypass
 	// the bearer check. Nil keeps the server API-only without bundled assets.
 	WebHandler http.Handler
+	// MCPHandler owns its bearer authentication; the daemon token doesn't apply.
+	MCPHandler http.Handler
 
 	// WebSessions owns browser cookie+header session state. Nil keeps
 	// the browser-only routes and middleware disabled for embedded/API-only use.
@@ -146,7 +167,9 @@ type ServerConfig struct {
 
 	// Embedder is the semantic-search embedding client. Nil means semantic
 	// search is disabled and the search handler falls back to lexical-only.
-	Embedder *embedding.Client
+	Embedder      *embedding.Client
+	Docbank       *docbank.Client
+	DocbankFolder string
 
 	// VectorIndex is the semantic-search sidecar index. Nil means semantic and
 	// hybrid search are unavailable, exactly like a nil Embedder.
@@ -156,6 +179,7 @@ type ServerConfig struct {
 	// state for /health. Nil means semantic search is disabled, in which case
 	// the health response omits the embeddings block entirely.
 	ReconcilerHealth func() ReconcilerHealth
+	LocalEmbeddings  LocalEmbeddings
 
 	// FederationConfigHealth snapshots declarative federation convergence for
 	// /health. Nil means no mappings are configured, so the block is omitted.
@@ -373,6 +397,10 @@ func NewServer(cfg ServerConfig) *Server {
 	registerWebDaemonHandlers(mux, cfg)
 	registerOpenAPIYAML(mux, cfg.HostAccess)
 	registerPprofHandlers(mux)
+	if cfg.MCPHandler != nil {
+		mcpicon.RegisterRoutes(mux)
+		mux.Handle(mcpPath, cfg.MCPHandler)
+	}
 	if cfg.WebHandler != nil {
 		mux.Handle("/", cfg.WebHandler)
 	}
@@ -442,6 +470,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 		}
 		base = requireBrowserSession(s.cfg.WebSessions, policy, base)
 	}
+	policy.MCP = s.cfg.MCPHandler != nil
 	handler, err := ApplyListenerPolicy(base, policy)
 	if err != nil {
 		return nil, err
@@ -662,22 +691,22 @@ func (s *Server) ServeListenersWithLifecycle(
 // Origin so this is transparent for our own clients. Errors are emitted as
 // JSON envelopes matching api.ErrorEnvelope so the wire contract holds for
 // every non-2xx response, not just handler-returned ones.
-func withCSRFGuards(next http.Handler) http.Handler {
+func withCSRFGuards(next http.Handler, mcpMounted bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if origin := r.Header.Get("Origin"); origin != "" {
 			api.WriteEnvelope(w, http.StatusForbidden, "origin_forbidden",
 				"Origin header forbidden")
 			return
 		}
-		requireJSONMutation(next).ServeHTTP(w, r)
+		requireJSONMutation(next, mcpMounted).ServeHTTP(w, r)
 	})
 }
 
-func requireJSONMutation(next http.Handler) http.Handler {
+func requireJSONMutation(next http.Handler, mcpMounted bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isMutation(r.Method) && r.ContentLength != 0 {
+		if (!mcpMounted || r.URL.Path != mcpPath) && isMutation(r.Method) && r.ContentLength != 0 {
 			ct := r.Header.Get("Content-Type")
-			if !strings.HasPrefix(ct, "application/json") {
+			if !strings.HasPrefix(ct, "application/json") && !isAttachmentUpload(r) {
 				api.WriteEnvelope(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
 					"Content-Type must be application/json")
 				return
@@ -704,6 +733,7 @@ func isMutation(method string) bool {
 // contract around the Huma streaming route.
 func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerHealth(humaAPI, cfg)
+	registerLocalEmbeddingsHandlers(humaAPI, cfg)
 	registerDoctorHandlers(humaAPI, cfg)
 	registerInstanceHandlers(humaAPI, cfg)
 	registerTokenHandlers(humaAPI, cfg)
@@ -722,8 +752,10 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerDestructive(humaAPI, cfg)
 	registerRecurrences(humaAPI, cfg)
 	registerMetadata(humaAPI, cfg)
+	registerAttachmentHandlers(humaAPI, cfg)
 	registerMove(humaAPI, cfg)
 	registerEventsHandlers(humaAPI, mux, cfg)
+	registerMCPEventsHandlers(humaAPI, cfg)
 	registerFederationHandlers(humaAPI, cfg)
 	registerIssueSyncHandlers(humaAPI, cfg)
 	registerExternalRootHandlers(humaAPI, cfg)

@@ -1,6 +1,7 @@
 .PHONY: build install homebrew test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
 
 GOFLAGS_TEST := -shuffle=on
+FEDERATION_STRESS_TIMEOUT ?= 2m
 GOBIN ?= $(HOME)/.local/bin
 VERSION := $(shell v=$$(git describe --tags --always --dirty 2>/dev/null || printf dev); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
 COMMIT := $(shell v=$$(git rev-parse --short=7 HEAD 2>/dev/null || printf unknown); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
@@ -49,7 +50,7 @@ test:
 api-generate:
 	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; go run ./cmd/kata openapi > "$$tmp"; if [ -f api/openapi.yaml ] && cmp -s "$$tmp" api/openapi.yaml; then rm "$$tmp"; else mv "$$tmp" api/openapi.yaml; fi; trap - EXIT
 	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; go run ./cmd/kata openapi --version 3.0 --format yaml > "$$tmp"; if [ -f pkg/client/openapi.yaml ] && cmp -s "$$tmp" pkg/client/openapi.yaml; then rm "$$tmp"; else mv "$$tmp" pkg/client/openapi.yaml; fi; trap - EXIT
-	cd pkg/client/generated && find . -maxdepth 1 -type f -name '*.go' ! -name 'generate.go' -delete && go run github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.75.5 -config config.yaml ../openapi.yaml
+	cd pkg/client/generated && find . -maxdepth 1 -type f -name '*.go' ! -name 'generate.go' -delete && go run github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.76.5 -config config.yaml ../openapi.yaml
 
 api-check:
 	env -u KATA_SKIP_OPENAPI_CLIENT_CHECK go test ./internal/daemon -run 'TestOpenAPI(ArtifactUpToDate|ClientSpecArtifactUpToDate|ClientArtifactUpToDate)$$'
@@ -72,18 +73,13 @@ kata-ui-test:
 	bun run --cwd packages/kata-ui test
 
 kata-ui-pack-check:
-	cd packages/kata-ui && bun x vp test pack.test.ts
+	cd packages/kata-ui && bun x vp test pack.test.ts --outputFile.json=test-results/vitest/kata-ui-pack.json
 
 web-check: kata-ui-check
 	cd web && bun run check
 
 web-audit:
-	@cd web && for attempt in 1 2 3; do \
-		bun run audit && exit 0; \
-		if [ "$$attempt" -eq 3 ]; then exit 1; fi; \
-		echo "Web dependency audit failed (attempt $$attempt/3); retrying in 10 seconds..." >&2; \
-		sleep 10; \
-	done
+	cd web && bun run audit
 
 web-test: kata-ui-test kata-ui-pack-check
 	cd web && bun run test
@@ -117,8 +113,12 @@ openapi: api-generate
 test-short:
 	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test -short $(GOFLAGS_TEST) ./...
 
+# gotestsum places packages after Go flags, so use Rapid's environment setting.
 test-stress:
-	go test -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout 2m
+	RAPID_CHECKS=5 go tool gotestsum --format pkgname-and-test-fails --format-icons text \
+		--jsonfile gotestsum/federation-stress.json --rerun-fails=2 \
+		--rerun-fails-report gotestsum/federation-stress-reruns.txt --packages ./e2e -- \
+		-tags federation_stress -run 'TestFederationStress|TestFederationFailpoint' -count=1 -timeout $(FEDERATION_STRESS_TIMEOUT)
 
 test-federation-docker:
 	./scripts/test-federation-docker.sh
@@ -159,7 +159,7 @@ endif
 $(CURDIR)/.cache/golangci-lint/custom-gcl: .custom-gcl.yml go.mod
 	golangci-lint custom --destination "$(CURDIR)/.cache/golangci-lint" --name custom-gcl --version v2.14.0
 
-lint: $(CURDIR)/.cache/golangci-lint/custom-gcl
+lint: $(CURDIR)/.cache/golangci-lint/custom-gcl lint-workflow-retries
 	@if [ "$${GITHUB_ACTIONS:-}" = true ] && [ "$$(git rev-parse --is-shallow-repository)" = true ]; then \
 		git fetch --no-tags --unshallow origin main:refs/remotes/origin/main; \
 	fi
@@ -199,3 +199,36 @@ clean:
 	rm -f kata kata.exe coverage.out
 	rm -rf dist site docs/site web/dist
 	cd web && bun run scripts/embed-assets.ts --restore-stub
+
+# Workflow actions run at the commits in .github/workflows/actions.lock,
+# including actions that other actions call. The organization requires
+# SHA-pinned actions, and the lockfile is what satisfies that for nested refs.
+# The version comes from constraints.ghActionsLock in renovate.json.
+# Renovate uses the same version when it regenerates the lockfile after
+# bumping an action.
+GH_ACTIONS_LOCK_VERSION ?= $(shell sed -nE "s/^[[:space:]]*\"?ghActionsLock\"?:[[:space:]]*[\"']([^\"']*)[\"'].*/\1/p" renovate.json)
+
+.PHONY: gh-actions-lock-install actions-lock actions-lock-check-local actions-lock-check
+
+gh-actions-lock-install:
+	@test -n "$(GH_ACTIONS_LOCK_VERSION)" || { echo "constraints.ghActionsLock is missing from renovate.json" >&2; exit 1; }
+	@if [ "$$(gh actions-lock --version 2>/dev/null)" != "actions-lock version $(GH_ACTIONS_LOCK_VERSION)" ]; then \
+		gh extension remove actions-lock >/dev/null 2>&1 || true; \
+		gh extension install github/gh-actions-lock --pin $(GH_ACTIONS_LOCK_VERSION); \
+	fi
+
+# Lock every workflow action after adding or bumping a `uses:` line
+actions-lock: gh-actions-lock-install
+	gh actions-lock --no-interactive
+
+# Offline check that every workflow action has a lockfile entry
+actions-lock-check-local: gh-actions-lock-install
+	gh actions-lock --verify-local
+
+# Network check that the lockfile is complete and every locked commit is still valid
+actions-lock-check: gh-actions-lock-install
+	gh actions-lock --verify
+
+.PHONY: lint-workflow-retries
+lint-workflow-retries:
+	GOOS= GOARCH= go run go.kenn.io/kit/cmd/kennlint@v0.47.3 workflow-retries

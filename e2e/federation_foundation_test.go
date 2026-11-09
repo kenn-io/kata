@@ -2,7 +2,6 @@ package e2e_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -29,7 +28,9 @@ func TestSmoke_FederationFoundationV3(t *testing.T) {
 	dir := initRepo(t, "https://github.com/wesm/federation-smoke.git")
 
 	// 1. /api/v1/instance returns the daemon's stable identity.
-	resp, err := env.HTTP.Get(env.URL + "/api/v1/instance") //nolint:gosec // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+"/api/v1/instance", nil)
+	require.NoError(t, reqErr)
+	resp, err := env.HTTP.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -88,7 +89,7 @@ func TestSmoke_FederationFoundationV3(t *testing.T) {
 
 	// 7. Purge the issue and capture the purge_log row from the response.
 	purgeURL := env.URL + "/api/v1/projects/" + pidStr + "/issues/" + target.ShortID + "/actions/purge"
-	pReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, purgeURL,
+	pReq, err := http.NewRequestWithContext(t.Context(), http.MethodPost, purgeURL,
 		strings.NewReader(`{"actor":"agent"}`))
 	require.NoError(t, err)
 	pReq.Header.Set("Content-Type", "application/json")
@@ -112,7 +113,7 @@ func TestSmoke_FederationFoundationV3(t *testing.T) {
 	//    contain the meta.instance_uid record matching the daemon's identity,
 	//    and every event/purge_log envelope must carry uid + origin.
 	var buf bytes.Buffer
-	require.NoError(t, jsonl.Export(context.Background(), env.DB, &buf,
+	require.NoError(t, jsonl.Export(t.Context(), env.DB, &buf,
 		jsonl.ExportOptions{IncludeDeleted: true}))
 
 	var sawInstanceMeta, sawEvent, sawPurgeLog bool

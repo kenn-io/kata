@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +14,7 @@ import (
 func TestSearchStatusValidation(t *testing.T) {
 	for _, status := range []string{"", " ", "OPEN", "all", "pending"} {
 		t.Run(fmt.Sprintf("status=%q", status), func(t *testing.T) {
-			_, _, err := executeRootCapture(t, context.Background(), "search", "work", "--status", status)
+			_, _, err := executeRootCapture(t, t.Context(), "search", "work", "--status", status)
 			var cliErr *cliError
 			require.ErrorAs(t, err, &cliErr)
 			assert.Equal(t, ExitValidation, cliErr.ExitCode)
@@ -43,7 +42,7 @@ func TestSearchStatusDaemonCompatibility(t *testing.T) {
 				}
 			}))
 			t.Cleanup(server.Close)
-			_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), server.URL), "--project", "spoke-project", "search", "work", "--status", "open")
+			_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--project", "spoke-project", "search", "work", "--status", "open")
 			if version == "0.20.0" {
 				require.NoError(t, err)
 				assert.EqualValues(t, 1, calls.Load())

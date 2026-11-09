@@ -38,6 +38,45 @@ var projectHubRelayMigrationSQL string
 //go:embed migrations/000034_comment_reply_index.up.sql
 var commentReplyIndexMigrationSQL string
 
+//go:embed migrations/000035_event_move_history_index.up.sql
+var eventMoveHistoryIndexMigrationSQL string
+
+//go:embed migrations/000038_event_reply_target_index.up.sql
+var eventReplyTargetIndexMigrationSQL string
+
+//go:embed migrations/000039_comment_uid_handle_index.up.sql
+var commentUIDHandleIndexMigrationSQL string
+
+//go:embed migrations/000041_comment_search.up.sql
+var commentSearchMigrationSQL string
+
+//go:embed migrations/000042_issue_created_order_index.up.sql
+var issueCreatedOrderIndexMigrationSQL string
+
+//go:embed migrations/000043_event_resolved_issue_index.up.sql
+var eventResolvedIssueIndexMigrationSQL string
+
+//go:embed migrations/000044_event_reset_from_index.up.sql
+var eventResetFromIndexMigrationSQL string
+
+//go:embed migrations/000045_issue_uid_prefix_index.up.sql
+var issueUIDPrefixIndexMigrationSQL string
+
+//go:embed migrations/000046_ready_priority_index.up.sql
+var readyPriorityIndexMigrationSQL string
+
+//go:embed migrations/000047_ready_updated_index.up.sql
+var readyUpdatedIndexMigrationSQL string
+
+//go:embed migrations/000048_event_moved_from_id_index.up.sql
+var eventMovedFromIDIndexMigrationSQL string
+
+//go:embed migrations/000049_cron_run_uid_index.up.sql
+var cronRunUIDIndexMigrationSQL string
+
+//go:embed migrations/000050_mcp_event_subscriptions.up.sql
+var mcpEventSubscriptionsMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -86,6 +125,19 @@ var migrationAssets = []Migration{
 	{FromVersion: 31, ToVersion: 32, Name: "000032_comment_reply.up.sql", SQL: commentReplyMigrationSQL},
 	{FromVersion: 32, ToVersion: 33, Name: "000033_project_hub_relay.up.sql", SQL: projectHubRelayMigrationSQL},
 	{FromVersion: 33, ToVersion: 34, Name: "000034_comment_reply_index.up.sql", SQL: commentReplyIndexMigrationSQL},
+	{FromVersion: 34, ToVersion: 35, Name: "000035_event_move_history_index.up.sql", SQL: eventMoveHistoryIndexMigrationSQL},
+	{FromVersion: 35, ToVersion: 38, Name: "000038_event_reply_target_index.up.sql", SQL: eventReplyTargetIndexMigrationSQL},
+	{FromVersion: 38, ToVersion: 39, Name: "000039_comment_uid_handle_index.up.sql", SQL: commentUIDHandleIndexMigrationSQL},
+	{FromVersion: 39, ToVersion: 41, Name: "000041_comment_search.up.sql", SQL: commentSearchMigrationSQL},
+	{FromVersion: 41, ToVersion: 42, Name: "000042_issue_created_order_index.up.sql", SQL: issueCreatedOrderIndexMigrationSQL},
+	{FromVersion: 42, ToVersion: 43, Name: "000043_event_resolved_issue_index.up.sql", SQL: eventResolvedIssueIndexMigrationSQL},
+	{FromVersion: 43, ToVersion: 44, Name: "000044_event_reset_from_index.up.sql", SQL: eventResetFromIndexMigrationSQL},
+	{FromVersion: 44, ToVersion: 45, Name: "000045_issue_uid_prefix_index.up.sql", SQL: issueUIDPrefixIndexMigrationSQL},
+	{FromVersion: 45, ToVersion: 46, Name: "000046_ready_priority_index.up.sql", SQL: readyPriorityIndexMigrationSQL},
+	{FromVersion: 46, ToVersion: 47, Name: "000047_ready_updated_index.up.sql", SQL: readyUpdatedIndexMigrationSQL},
+	{FromVersion: 47, ToVersion: 48, Name: "000048_event_moved_from_id_index.up.sql", SQL: eventMovedFromIDIndexMigrationSQL},
+	{FromVersion: 48, ToVersion: 49, Name: "000049_cron_run_uid_index.up.sql", SQL: cronRunUIDIndexMigrationSQL},
+	{FromVersion: 49, ToVersion: 50, Name: "000050_mcp_event_subscriptions.up.sql", SQL: mcpEventSubscriptionsMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

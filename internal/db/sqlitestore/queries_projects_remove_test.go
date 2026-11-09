@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -17,7 +16,7 @@ import (
 func TestRemoveProject_ArchivesAndDropsAliases(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "archive-me")
 	require.NoError(t, err)
 	_, err = d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-archive", "git")
@@ -43,7 +42,7 @@ func TestRemoveProject_ArchivesAndDropsAliases(t *testing.T) {
 func TestRemoveProject_RefusesWhenOpenIssues(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "busy")
 	require.NoError(t, err)
 	_, _, err = d.CreateIssue(ctx, db.CreateIssueParams{
@@ -66,7 +65,7 @@ func TestRemoveProject_RefusesWhenOpenIssues(t *testing.T) {
 func TestRemoveProject_ForceOverridesOpenIssues(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "force")
 	require.NoError(t, err)
 	_, _, err = d.CreateIssue(ctx, db.CreateIssueParams{
@@ -88,7 +87,7 @@ func TestRemoveProject_ForceOverridesOpenIssues(t *testing.T) {
 func TestRemoveProject_DisablesIssueSyncBinding(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "archive-sync")
 	require.NoError(t, err)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
@@ -105,7 +104,7 @@ func TestRemoveProject_DisablesIssueSyncBinding(t *testing.T) {
 func TestRemoveProject_RefusedArchiveLeavesGitHubSyncEnabled(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "refuse-sync-archive")
 	require.NoError(t, err)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
@@ -126,7 +125,7 @@ func TestRemoveProject_RefusedArchiveLeavesGitHubSyncEnabled(t *testing.T) {
 func TestRestoreProject_LeavesGitHubSyncDisabled(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "restore-sync-disabled")
 	require.NoError(t, err)
 	_ = mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
@@ -148,7 +147,7 @@ func TestRestoreProject_LeavesGitHubSyncDisabled(t *testing.T) {
 func TestCountOpenIssues(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "counted")
 	require.NoError(t, err)
 
@@ -183,7 +182,7 @@ func TestCountOpenIssues(t *testing.T) {
 func TestRemoveProject_AlreadyArchived(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "twice")
 	require.NoError(t, err)
 	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
@@ -200,7 +199,7 @@ func TestRemoveProject_AlreadyArchived(t *testing.T) {
 func TestRemoveProject_ExcludedFromListAndResolve(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	keep, err := d.CreateProject(ctx, "keep")
 	require.NoError(t, err)
 	gone, err := d.CreateProject(ctx, "gone")
@@ -225,7 +224,7 @@ func TestRemoveProject_ExcludedFromListAndResolve(t *testing.T) {
 func TestRestoreProject_ReactivatesArchivedProjectAndEmitsEvent(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "restore-me")
 	require.NoError(t, err)
 	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
@@ -248,7 +247,7 @@ func TestRestoreProject_ReactivatesArchivedProjectAndEmitsEvent(t *testing.T) {
 func TestRestoreProject_ActiveProjectIsNoop(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "already-active")
 	require.NoError(t, err)
 
@@ -265,7 +264,7 @@ func TestRestoreProject_ActiveProjectIsNoop(t *testing.T) {
 func TestDetachProjectAlias_RemovesOneAndEmitsEvent(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "detach")
 	require.NoError(t, err)
 	a1, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-detach", "git")
@@ -298,7 +297,7 @@ func TestDetachProjectAlias_RemovesOneAndEmitsEvent(t *testing.T) {
 func TestDetachProjectAlias_RefusesWhenLast(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "only")
 	require.NoError(t, err)
 	a, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-only", "git")
@@ -317,7 +316,7 @@ func TestDetachProjectAlias_RefusesWhenLast(t *testing.T) {
 func TestDetachProjectAlias_ForceDropsLast(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "force-last")
 	require.NoError(t, err)
 	a, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-force-last", "git")
@@ -342,7 +341,7 @@ func TestDetachProjectAlias_ForceDropsLast(t *testing.T) {
 func TestDetachProjectAlias_RejectsCrossProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	pA, err := d.CreateProject(ctx, "a")
 	require.NoError(t, err)
 	pB, err := d.CreateProject(ctx, "b")

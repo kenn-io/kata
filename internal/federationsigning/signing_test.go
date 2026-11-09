@@ -44,7 +44,7 @@ func testVerifier(t *testing.T, base string, source signingpolicy.Source) *Verif
 
 func signed(t *testing.T, source signingpolicy.Source) *http.Request {
 	t.Helper()
-	r, err := http.NewRequest(http.MethodPost, "https://hub.example/federation/api/v1/projects/1/federation/events:ingest?limit=2", strings.NewReader(`{"events":[]}`))
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example/federation/api/v1/projects/1/federation/events:ingest?limit=2", strings.NewReader(`{"events":[]}`))
 	require.NoError(t, err)
 	r.Header.Set("Authorization", "Bearer enrollment")
 	r.Header.Set("Content-Type", "application/json")
@@ -227,7 +227,7 @@ func TestVerifierRejectsDuplicateAvailableSecrets(t *testing.T) {
 
 func signedWithoutKey(t *testing.T) *http.Request {
 	t.Helper()
-	r, err := http.NewRequest(http.MethodGet, "https://hub.example/api/v1/projects/1/federation/metadata", nil)
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://hub.example/api/v1/projects/1/federation/metadata", nil)
 	require.NoError(t, err)
 	r.Header.Set("Authorization", "Bearer enrollment")
 	r.Header.Set("Content-Type", "application/json")
@@ -247,11 +247,15 @@ func TestClientRedirectAndOriginPin(t *testing.T) {
 	defer hub.Close()
 	c := hub.Client()
 	require.NoError(t, ConfigureClient(c, hub.URL, "enrollment", s))
-	r, err := c.Get(hub.URL)
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, hub.URL, nil)
+	require.NoError(t, reqErr)
+	r, err := c.Do(req)
 	require.NoError(t, err)
 	_ = r.Body.Close()
 	require.Equal(t, http.StatusTemporaryRedirect, r.StatusCode)
-	_, err = c.Get(target.URL)
+	req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, target.URL, nil)
+	require.NoError(t, reqErr)
+	_, err = c.Do(req)
 	require.Error(t, err)
 	require.Zero(t, calls)
 }
@@ -459,7 +463,7 @@ func TestClientClosesBodyOnSigningTransportRejection(t *testing.T) {
 			client := hub.Client()
 			require.NoError(t, ConfigureClient(client, hub.URL, "enrollment", source))
 			body := &closeRecordingBody{Reader: strings.NewReader(`{}`)}
-			req, err := http.NewRequest(http.MethodPost, hub.URL, body)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, hub.URL, body)
 			require.NoError(t, err)
 			want := signingpolicy.ErrInvalid
 			switch mode {
@@ -520,10 +524,14 @@ func TestTransportCannotReplaySignatureAfterLostResponse(t *testing.T) {
 	defer hub.Close()
 	client := hub.Client()
 	require.NoError(t, ConfigureClient(client, hub.URL, "enrollment", source))
-	resp, err := client.Get(hub.URL + "/warm")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, hub.URL+"/warm", nil)
+	require.NoError(t, reqErr)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
-	resp, err = client.Get(hub.URL + "/retry")
+	req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, hub.URL+"/retry", nil)
+	require.NoError(t, reqErr)
+	resp, err = client.Do(req)
 	if err == nil {
 		_ = resp.Body.Close()
 	}
@@ -531,7 +539,9 @@ func TestTransportCannotReplaySignatureAfterLostResponse(t *testing.T) {
 	mu.Lock()
 	require.Len(t, retryInputs, 1)
 	mu.Unlock()
-	resp, err = client.Get(hub.URL + "/retry")
+	req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, hub.URL+"/retry", nil)
+	require.NoError(t, reqErr)
+	resp, err = client.Do(req)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	mu.Lock()

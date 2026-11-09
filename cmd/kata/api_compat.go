@@ -8,22 +8,32 @@ import (
 	"strconv"
 	"strings"
 
+	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 const (
-	apiVersionSearchStatus          = "0.20.0"
-	apiVersionListSort              = "0.21.0"
-	apiVersionDiscoveryPagination   = "0.27.0"
-	apiVersionMoveDryRun            = "0.23.0"
-	apiVersionCloseTranscript       = "0.26.0"
-	apiVersionCommentLinks          = "0.28.0"
-	apiVersionReadyAndSearchFilters = "0.8.0"
-	apiVersionGlobalListFilters     = "0.9.0"
+	apiVersionSearchStatus              = "0.20.0"
+	apiVersionListSort                  = "0.21.0"
+	apiVersionDiscoveryPagination       = "0.27.0"
+	apiVersionMoveDryRun                = "0.23.0"
+	apiVersionMoveSubtree               = "0.35.0"
+	apiVersionCloseTranscript           = "0.26.0"
+	apiVersionOtherAgentCloseTranscript = "0.34.0"
+	apiVersionDocbankAttachmentLink     = "0.38.0"
+	apiVersionDocbankKeyHealth          = "0.44.0"
+	apiVersionEffectiveCloseEventUID    = "0.40.0"
+	apiVersionCommentLinks              = "0.28.0"
+	apiVersionReadyAndSearchFilters     = "0.8.0"
+	apiVersionReadyPrioritySort         = "0.41.0"
+	apiVersionGlobalListFilters         = "0.9.0"
 	// apiVersionMCPServer is the oldest daemon the native MCP server can
 	// drive: it pins relationship targets with to_project_uid and
 	// expected_project_uids and pages audit rows by event_id.
 	apiVersionMCPServer = "0.11.0"
+	// Fixed MCP scopes require the daemon to enforce X-Kata-Project-Scope
+	// inside the request transaction before following historical issue refs.
+	apiVersionMCPProjectScope = "0.35.0"
 )
 
 type daemonAPIHealth struct {
@@ -71,17 +81,20 @@ func requireDaemonAPIVersionHealth(
 	if valid && compatible {
 		return health, nil
 	}
-	if reported == "" {
-		reported = "no api_schema_version"
-	}
 	return daemonAPIHealth{}, &cliError{
-		Message: fmt.Sprintf(
-			"%s requires daemon API %s or newer; this daemon reports %s; upgrade the daemon",
-			feature, required, reported),
+		Message:  daemonAPITooOldMessage(feature, required, reported),
 		Kind:     kindValidation,
 		Code:     "daemon_api_too_old",
 		ExitCode: ExitValidation,
 	}
+}
+
+// daemonAPITooOldMessage tells the user a daemon's API predates feature.
+func daemonAPITooOldMessage(feature, required, reported string) string {
+	if reported = textsafe.Line(strings.TrimSpace(reported)); reported == "" {
+		reported = "no api_schema_version"
+	}
+	return fmt.Sprintf("%s requires daemon API %s or newer; this daemon reports %s; upgrade the daemon", feature, required, reported)
 }
 
 func apiVersionAtLeast(reported, required string) (atLeast, valid bool) {

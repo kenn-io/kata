@@ -54,7 +54,7 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 			{"ingress unsigned", ingress, false, http.StatusUnauthorized},
 			{"ingress signed", ingress, true, http.StatusOK},
 		} {
-			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
 			if tc.signed {
 				require.NoError(t, federationsigning.Sign(req, source))
@@ -93,7 +93,7 @@ func TestFederationSigningUploadAdmissionPreservesControlRequests(t *testing.T) 
 		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
 		require.NoError(t, err)
 		request := func(method, path string, body []byte) *http.Request {
-			req := httptest.NewRequest(method, "https://hub.example"+path, bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), method, "https://hub.example"+path, bytes.NewReader(body))
 			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
 			require.NoError(t, federationsigning.Sign(req, source))
 			return req
@@ -198,7 +198,7 @@ func TestSignedUploadHoldsIdleForegroundDuringVerification(t *testing.T) {
 		idle.Start()
 		defer idle.Stop()
 		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v, IdleAdmission: idle})
-		req := httptest.NewRequest(http.MethodPost,
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 			"https://hub.example"+projectPath(project.ID)+"/federation/events:ingest", bytes.NewReader(raw))
 		req.Header.Set("Authorization", "Bearer "+enrollment.Token)
 		require.NoError(t, federationsigning.Sign(req, source))

@@ -2,7 +2,6 @@ package forgejo
 
 import (
 	"bytes"
-	"context"
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +18,7 @@ func exchange(t *testing.T, h connector.Handler, origin, method string, params a
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := connector.ServeOne(context.Background(), bytes.NewReader(raw), &out, h); err != nil {
+	if err := connector.ServeOne(t.Context(), bytes.NewReader(raw), &out, h); err != nil {
 		t.Fatal(err)
 	}
 	var response connector.Response

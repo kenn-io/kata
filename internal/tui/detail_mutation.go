@@ -37,15 +37,14 @@ func (dm detailModel) handleMutationKey(
 }
 
 // handleStatusKey routes the keys that don't open a modal: close,
-// reopen, clear-owner. Each fires a single mutation immediately.
+// clear-owner. Each fires a single mutation immediately. Reopen is routed by
+// Model, which confirms a recurring backlog first.
 func (dm detailModel) handleStatusKey(
 	msg tea.KeyPressMsg, km keymap, api detailAPI,
 ) (detailModel, tea.Cmd, bool) {
 	switch {
 	case km.Close.matches(msg):
 		return dm, dm.dispatchClose(api), true
-	case km.Reopen.matches(msg):
-		return dm, dm.dispatchReopen(api), true
 	case km.ClearOwner.matches(msg):
 		return dm, dm.dispatchAssign(api, ""), true
 	}
@@ -166,24 +165,26 @@ func (dm detailModel) applyMutationState(m mutationDoneMsg) (detailModel, bool) 
 	return dm, true
 }
 
-// successTemplates maps mutation-kind to the printf template used by
-// mutationSuccessText. Keeping the dispatch table-driven keeps the
-// formatter at cyclomatic ≤8 and makes adding kinds (Task 11+) trivial.
-var successTemplates = map[string]string{
-	"close":            "closed #%s",
-	"reopen":           "reopened #%s",
-	"label.add":        "added label to #%s",
-	"label.remove":     "removed label from #%s",
-	"owner.assign":     "assigned #%s",
-	"owner.clear":      "unassigned #%s",
-	"assignment.timed": "assigned #%s for a limited time",
-	"link.parent":      "linked #%s",
-	"link.blocks":      "linked #%s",
-	"link.relates":     "linked #%s",
-	"body.edit":        "updated body of #%s",
-	"comment.add":      "added comment to #%s",
-	"priority.set":     "set priority of #%s",
-	"priority.clear":   "cleared priority of #%s",
+// successTemplates keeps mutation success and repeat failure text together.
+var successTemplates = map[string]struct{ success, failure string }{
+	"close":             {success: "closed #%s"},
+	"reopen":            {success: "reopened #%s"},
+	"label.add":         {success: "added label to #%s"},
+	"label.remove":      {success: "removed label from #%s"},
+	"owner.assign":      {success: "assigned #%s"},
+	"owner.clear":       {success: "unassigned #%s"},
+	"assignment.timed":  {success: "assigned #%s for a limited time"},
+	"link.parent":       {success: "linked #%s"},
+	"link.blocks":       {success: "linked #%s"},
+	"link.relates":      {success: "linked #%s"},
+	"body.edit":         {success: "updated body of #%s"},
+	"comment.add":       {success: "added comment to #%s"},
+	"priority.set":      {success: "set priority of #%s"},
+	"priority.clear":    {success: "cleared priority of #%s"},
+	"dates":             {success: "updated dates of #%s"},
+	"recurrence.start":  {success: "started repeat of #%s", failure: "Could not start repeat: %s"},
+	"recurrence.change": {success: "changed repeat of #%s", failure: "Could not change repeat: %s"},
+	"recurrence.stop":   {success: "stopped repeat of #%s", failure: "Could not stop repeat: %s"},
 }
 
 // mutationSuccessText is the per-kind toast for a successful mutation.
@@ -199,8 +200,8 @@ func mutationSuccessText(m mutationDoneMsg, iss *Issue) string {
 	if m.resp != nil && m.resp.Issue != nil && m.resp.Issue.ShortID != "" {
 		ref = m.resp.Issue.ShortID
 	}
-	if tpl, ok := successTemplates[m.kind]; ok {
-		return fmt.Sprintf(tpl, ref)
+	if tpl, ok := successTemplates[m.kind]; ok && (m.resp == nil || m.resp.Changed || !strings.HasPrefix(m.kind, "recurrence.")) {
+		return fmt.Sprintf(tpl.success, ref)
 	}
 	return ""
 }
@@ -234,22 +235,6 @@ func (dm detailModel) dispatchClose(api detailAPI) tea.Cmd {
 		resp, err := api.Close(ctx, pid, ref, actor)
 		return mutationDoneMsg{
 			origin: "detail", gen: gen, kind: "close", resp: resp, err: err,
-		}
-	}
-}
-
-// dispatchReopen mirrors dispatchClose for the reopen action.
-func (dm detailModel) dispatchReopen(api detailAPI) tea.Cmd {
-	if dm.issue == nil {
-		return nil
-	}
-	pid, ref, actor, gen := dm.scopePID, dm.issue.ShortID, dm.actor, dm.gen
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		resp, err := api.Reopen(ctx, pid, ref, actor)
-		return mutationDoneMsg{
-			origin: "detail", gen: gen, kind: "reopen", resp: resp, err: err,
 		}
 	}
 }

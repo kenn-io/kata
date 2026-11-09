@@ -137,7 +137,7 @@ func (c *stdioConnection) Read(ctx context.Context) (jsonrpc.Message, error) {
 			if item.err != nil {
 				return nil, item.err
 			}
-			message, admitted, err := c.admit(item.line)
+			message, admitted, err := c.admit(ctx, item.line)
 			if err != nil {
 				return nil, err
 			}
@@ -148,13 +148,13 @@ func (c *stdioConnection) Read(ctx context.Context) (jsonrpc.Message, error) {
 	}
 }
 
-func (c *stdioConnection) admit(line []byte) (jsonrpc.Message, bool, error) {
+func (c *stdioConnection) admit(ctx context.Context, line []byte) (jsonrpc.Message, bool, error) {
 	trimmed := bytes.TrimSpace(line)
 	if len(trimmed) == 0 {
-		return nil, false, c.writeError(context.Background(), jsonrpc.ID{}, jsonrpc.CodeParseError, "parse error", nil)
+		return nil, false, c.writeError(ctx, jsonrpc.ID{}, jsonrpc.CodeParseError, "parse error", nil)
 	}
 	if trimmed[0] == '[' && jsontext.Value(trimmed).IsValid() {
-		return nil, false, c.writeError(context.Background(), jsonrpc.ID{}, jsonrpc.CodeInvalidRequest, "JSON-RPC batches are not supported", nil)
+		return nil, false, c.writeError(ctx, jsonrpc.ID{}, jsonrpc.CodeInvalidRequest, "JSON-RPC batches are not supported", nil)
 	}
 
 	message, err := jsonrpc.DecodeMessage(trimmed)
@@ -165,7 +165,7 @@ func (c *stdioConnection) admit(line []byte) (jsonrpc.Message, bool, error) {
 			code = jsonrpc.CodeParseError
 			message = "parse error"
 		}
-		return nil, false, c.writeError(context.Background(), jsonrpc.ID{}, code, message, nil)
+		return nil, false, c.writeError(ctx, jsonrpc.ID{}, code, message, nil)
 	}
 	request, ok := message.(*jsonrpc.Request)
 	if !ok {
@@ -174,7 +174,7 @@ func (c *stdioConnection) admit(line []byte) (jsonrpc.Message, bool, error) {
 
 	if request.Method == "notifications/cancelled" {
 		if request.IsCall() {
-			return nil, false, c.writeError(context.Background(), request.ID, jsonrpc.CodeInvalidRequest, "cancellation must be a notification", nil)
+			return nil, false, c.writeError(ctx, request.ID, jsonrpc.CodeInvalidRequest, "cancellation must be a notification", nil)
 		}
 		c.recordCancellation(request.Params)
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -77,7 +76,7 @@ func TestProjectResolutionHelpersUseDaemonAPI(t *testing.T) {
 
 func TestProjects_ListAgentIncludesStats(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "kata")
 	require.NoError(t, err)
 	open, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "open", Author: "tester"})
@@ -102,14 +101,14 @@ func TestProjectsCreateCreatesProjectWithoutWorkspaceBinding(t *testing.T) {
 	assert.Contains(t, out, "(example-project)")
 	assert.NoFileExists(t, filepath.Join(dir, ".kata.toml"))
 	assert.NoFileExists(t, filepath.Join(dir, ".gitignore"))
-	got, err := env.DB.ProjectByName(context.Background(), "example-project")
+	got, err := env.DB.ProjectByName(t.Context(), "example-project")
 	require.NoError(t, err)
 	assert.Equal(t, "example-project", got.Name)
 }
 
 func TestProjectsCreateExistingProjectIsIdempotent(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 
@@ -159,7 +158,7 @@ func TestProjectsCreateAgentOutput(t *testing.T) {
 
 	out := requireCmdOutput(t, env, "--agent", "projects", "create", "example-project")
 
-	got, err := env.DB.ProjectByName(context.Background(), "example-project")
+	got, err := env.DB.ProjectByName(t.Context(), "example-project")
 	require.NoError(t, err)
 	assert.Equal(t, "OK project action=create id="+itoa(got.ID)+" project=example-project created=true\n", out)
 }
@@ -172,7 +171,7 @@ func TestProjectsCreateRejectsWhitespaceNameBeforeRequest(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), srv.URL),
 		"projects", "create", "   ")
 
 	ce := requireCLIError(t, err, ExitValidation)
@@ -182,7 +181,7 @@ func TestProjectsCreateRejectsWhitespaceNameBeforeRequest(t *testing.T) {
 
 func TestProjectsCreatePreservesArchivedNameConflict(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "archived-project")
 	require.NoError(t, err)
 	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
@@ -197,7 +196,7 @@ func TestProjectsCreatePreservesArchivedNameConflict(t *testing.T) {
 
 func TestProjects_ShowAgentUsesReadShape(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "kata")
 	require.NoError(t, err)
 	closed, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "closed", Author: "tester"})
@@ -230,7 +229,7 @@ func TestProjects_ShowAgentDoesNotFetchStats(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	resetFlags(t)
-	stdout, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), srv.URL),
 		"--agent", "projects", "show", "kata")
 	require.NoError(t, err)
 
@@ -254,7 +253,7 @@ func TestProjects_ShowNumericIDDoesNotListProjects(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	resetFlags(t)
-	stdout, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), srv.URL),
 		"--agent", "projects", "show", "1")
 	require.NoError(t, err)
 
@@ -264,7 +263,7 @@ func TestProjects_ShowNumericIDDoesNotListProjects(t *testing.T) {
 
 func TestProjects_RestoreArchivedProjectByName(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "retry-import")
 	require.NoError(t, err)
 	_, err = env.DB.AttachAlias(ctx, p.ID, "github.com/wesm/retry-import", "git")
@@ -284,7 +283,7 @@ func TestProjects_RestoreArchivedProjectByName(t *testing.T) {
 
 func TestProjects_RenameAgentOutput(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "old")
 	require.NoError(t, err)
 
@@ -295,7 +294,7 @@ func TestProjects_RenameAgentOutput(t *testing.T) {
 
 func TestProjects_RestoreActiveProjectIsNoop(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "active")
 	require.NoError(t, err)
 
@@ -318,7 +317,7 @@ func TestProjects_ResetCounterCommandIsAbsent(t *testing.T) {
 
 func TestProjectsRewriteAuthorCLIReportsCounts(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	from, to := "old-agent", "new-agent"
 	owner := from
 	subject, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -363,7 +362,7 @@ func TestProjectsRewriteAuthorCLIReportsCounts(t *testing.T) {
 
 func TestProjectsRewriteAuthorCLIJSONCounts(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	from, to := "old-agent", "new-agent"
 	_, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: pid,
@@ -414,7 +413,7 @@ func TestProjects_MergeReportsShortIDExtensions(t *testing.T) {
 		dstUID = "01HZNQ7VFPK1XGD8R5MABCD4EX"
 	)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src, err := env.DB.CreateProject(ctx, "src")
 	require.NoError(t, err)
 	dst, err := env.DB.CreateProject(ctx, "dst")
@@ -443,7 +442,7 @@ func TestProjects_MergeReportsShortIDExtensions(t *testing.T) {
 
 func TestProjects_PurgeArchivedFreesName(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
@@ -472,7 +471,7 @@ func TestProjects_PurgeNoConfirmNonTTYFails(t *testing.T) {
 	// Force non-TTY so resolveConfirm rejects with confirm_required instead of
 	// prompting; otherwise a TTY stdin would yield confirm_mismatch.
 	stubIsTTY(t, false)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
@@ -491,7 +490,7 @@ func TestProjects_MergeHumanOutputReportsExtensions(t *testing.T) {
 		dstUID = "01HZNQ7VFPK1XGD8R5MABCD4EX"
 	)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src, err := env.DB.CreateProject(ctx, "src")
 	require.NoError(t, err)
 	dst, err := env.DB.CreateProject(ctx, "dst")

@@ -83,6 +83,9 @@ func (m Model) startUndo() (Model, tea.Cmd) {
 	if m.undoInFlight {
 		return m.undoNotice("undo already in progress", toastInfo)
 	}
+	if m.reopenLookupPending {
+		return m.undoNotice("reopen already in progress", toastInfo)
+	}
 	if len(m.undoHistory.entries) == 0 {
 		message := "nothing to undo"
 		if m.undoHistory.boundary != "" {
@@ -90,22 +93,33 @@ func (m Model) startUndo() (Model, tea.Cmd) {
 		}
 		return m.undoNotice(message, toastInfo)
 	}
-	client, ok := m.api.(*undoClient)
+	_, ok := m.api.(*undoClient)
 	if !ok {
 		return m.undoNotice("undo unavailable for this connection", toastError)
 	}
 	if !m.mutationAllowed(true) {
 		return m.undoNotice("undo unavailable with current permissions", toastError)
 	}
+	return m.runUndo(undoOptions{evidenceRequired: m.closeRequiresEvidence, checkBacklog: true}, 0)
+}
+
+// runUndo undoes the latest history entry. A non-zero wantEntryID names the
+// entry a confirmation was shown for; if another entry is now latest, nothing runs.
+func (m Model) runUndo(opts undoOptions, wantEntryID uint64) (Model, tea.Cmd) {
+	client, ok := m.api.(*undoClient)
+	if !ok || len(m.undoHistory.entries) == 0 {
+		return m.undoNotice("undo action is no longer available", toastError)
+	}
 	entry := m.undoHistory.entries[len(m.undoHistory.entries)-1]
+	if wantEntryID != 0 && entry.id != wantEntryID {
+		return m.undoNotice("undo action is no longer available", toastError)
+	}
 	m.undoInFlight = true
 	connGen := m.connGen
-	evidenceRequired := m.closeRequiresEvidence
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return undoDoneMsg{connGen: connGen, entryID: entry.id,
-			outcome: client.undo(ctx, entry, evidenceRequired, nil)}
+		return undoDoneMsg{connGen: connGen, entryID: entry.id, outcome: client.undo(ctx, entry, opts)}
 	}
 }
 
@@ -146,6 +160,8 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 	switch {
 	case out.needsEvidence:
 		return m.openUndoCloseForm(), nil
+	case out.backlog > 1:
+		return m.promptReopenBacklog(reopenPrompt{ref: target, count: out.backlog, undoEntryID: entry.id}), nil
 	case out.conflict != "":
 		m.undoHistory.entries = m.undoHistory.entries[:len(m.undoHistory.entries)-1]
 		return m.undoNotice("skipped undo for "+target+": "+out.conflict, toastError)
@@ -200,7 +216,12 @@ func (m Model) refreshAfterUndo(entry undoEntry, resp *MutationResp) (Model, tea
 		m.cache.markStale()
 	}
 	cmds := []tea.Cmd{m.fetchInitial()}
-	if m.detail.issue != nil && (m.detail.issue.UID == entry.uid ||
+	if m.attentionVisible() {
+		var refresh tea.Cmd
+		m, refresh = m.reloadAttention()
+		cmds = append(cmds, refresh)
+	}
+	if m.detail.issue != nil && (entry.kind == "delete" || m.detail.issue.UID == entry.uid ||
 		(entry.link != nil && (m.detail.issue.UID == entry.link.From.UID || m.detail.issue.UID == entry.link.To.UID))) {
 		if m.detail.issue.UID == entry.uid && resp != nil && resp.Issue != nil {
 			m.detail.issue = mergeUndoIssue(m.detail.issue, resp.Issue, entry)
@@ -212,11 +233,11 @@ func (m Model) refreshAfterUndo(entry undoEntry, resp *MutationResp) (Model, tea
 		m.detail.fetchSeq.links = max(m.detail.fetchSeq.links, floor)
 		cmds = append(cmds, m.detail.refetch(m.api))
 	}
-	if (entry.kind == "label.add" || entry.kind == "label.remove") && m.projectLabels != nil {
+	if ((entry.kind == "delete" && entry.projectID != 0) || entry.kind == "label.add" || entry.kind == "label.remove") && m.projectLabels != nil {
 		if _, exists := m.projectLabels.byProject[entry.projectID]; exists {
-			var labelCmd tea.Cmd
-			m, labelCmd = m.dispatchLabelFetch(entry.projectID)
-			cmds = append(cmds, labelCmd)
+			var refresh tea.Cmd
+			m, refresh = m.dispatchLabelFetch(entry.projectID)
+			cmds = append(cmds, refresh)
 		}
 	}
 	return m, tea.Batch(cmds...)
@@ -235,6 +256,8 @@ func mergeUndoIssue(current, updated *Issue, entry undoEntry) *Issue {
 		merged.Priority = updated.Priority
 	case "body.edit":
 		merged.Body = updated.Body
+	case "dates":
+		merged.Metadata = updated.Metadata
 	case "label.add":
 		merged.Labels = slices.DeleteFunc(slices.Clone(merged.Labels), func(label string) bool { return label == entry.label })
 	case "label.remove":
@@ -286,7 +309,7 @@ func (m Model) dispatchUndoEvidenceClose(in CloseInput) (Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return undoDoneMsg{connGen: connGen, entryID: entry.id, formGen: formGen,
-			outcome: client.undo(ctx, entry, true, &in)}
+			outcome: client.undo(ctx, entry, undoOptions{evidenceRequired: true, evidence: &in})}
 	}
 }
 
@@ -295,7 +318,7 @@ func (m *Model) rebaseUndoRevisions(entry undoEntry, resp *MutationResp) {
 		return
 	}
 	wantRevision := entry.revision
-	if entry.kind == "close" || entry.kind == "reopen" || entry.kind == "owner.assign" {
+	if entry.kind == "close" || entry.kind == "reopen" || entry.kind == "owner.assign" || entry.kind == "dates" {
 		wantRevision++
 	}
 	if resp.Issue.Revision != wantRevision {

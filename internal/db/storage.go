@@ -32,6 +32,64 @@ type Storage interface {
 	ExportCronWorkflows(context.Context, ExportFilter) iter.Seq2[CronWorkflowExport, error]
 	ExportCronRuns(context.Context, ExportFilter) iter.Seq2[CronRunExport, error]
 
+	// Daemon-owned MCP Events subscriptions with claim fencing.
+	ActivateMCPEventSubscription(ctx context.Context, in MCPEventActivation) (MCPEventSubscription, error)
+	RefreshMCPEventSubscription(ctx context.Context, in MCPEventRefresh) (MCPEventSubscription, error)
+	GetMCPEventSubscription(ctx context.Context, id string) (MCPEventSubscription, error)
+	ListMCPEventSubscriptions(ctx context.Context, principalKey string) ([]MCPEventSubscription, error)
+	MCPEventConsentExists(ctx context.Context, principalKey, callbackURL string) (bool, error)
+	// CountActiveMCPEventSubscriptions counts active rows daemon-wide, for a
+	// pre-check before network activity. Activate stays the authoritative check.
+	CountActiveMCPEventSubscriptions(ctx context.Context) (int, error)
+	ListDueMCPEventSubscriptions(ctx context.Context, now time.Time, limit int) ([]MCPEventSubscription, error)
+	// MarkMCPEventSubscriptionsDirty records that new changes concern the
+	// given active subscriptions. It is idempotent.
+	MarkMCPEventSubscriptionsDirty(ctx context.Context, ids []string) error
+	// MCPEventsRematch reads the range of pulled events federation pulls
+	// applied since an Events worker last matched them again, and the token
+	// AcknowledgeMCPEventsRematch needs.
+	MCPEventsRematch(ctx context.Context) (from, through int64, token string, ok bool, err error)
+	// AcknowledgeMCPEventsRematch records that a worker matched the range
+	// through matchedThrough, only while the record still holds token.
+	AcknowledgeMCPEventsRematch(ctx context.Context, token string, matchedThrough int64) (bool, error)
+	// UpdateMCPEventCatalogs stores each active subscription's visible-project
+	// fingerprint, computed after the archive head observedThrough, and marks
+	// the ones whose fingerprint changed dirty. It stores nothing, and reports
+	// false, once a change that can alter visibility follows observedThrough.
+	UpdateMCPEventCatalogs(ctx context.Context, versions map[string]string, observedThrough int64) (bool, error)
+	// ForgetMCPEventCatalogs replaces active subscriptions' fingerprints with
+	// MCPEventCatalogUnknown, so the next update marks them dirty.
+	ForgetMCPEventCatalogs(ctx context.Context, ids []string) error
+	// MCPEventsScanPosition reads the daemon-wide event position the delivery
+	// worker has matched up to; ok is false before the first scan.
+	MCPEventsScanPosition(ctx context.Context) (position int64, ok bool, err error)
+	// InitializeMCPEventsScanPosition stores head when no position exists and
+	// marks every active subscription dirty in the same transaction.
+	InitializeMCPEventsScanPosition(ctx context.Context, head int64) (bool, error)
+	// AdvanceMCPEventsScanPosition moves the position only from the expected
+	// value; false means another worker moved it first.
+	AdvanceMCPEventsScanPosition(ctx context.Context, from, to int64) (bool, error)
+	// MCPEventsAccessChangesAfter returns up to limit access audit events with
+	// ids in (after, through], ordered by id: project policy and team
+	// membership changes, which the hidden system project records.
+	MCPEventsAccessChangesAfter(ctx context.Context, after, through int64, limit int) ([]Event, error)
+	ClaimMCPEventSubscription(ctx context.Context, in MCPEventClaim) (bool, error)
+	RenewMCPEventClaim(ctx context.Context, id, incarnation string, generation int64, token string, until time.Time) (bool, error)
+	UpdateMCPEventDelivery(ctx context.Context, in MCPEventDeliveryUpdate) (bool, error)
+	EndMCPEventSubscription(ctx context.Context, in MCPEventEnd) (MCPEventSubscription, error)
+	// ExpireMCPEventSubscriptions ends expired active grants regardless of retry or
+	// claim timing, clears pending deliveries, and fences prior workers.
+	ExpireMCPEventSubscriptions(ctx context.Context, now time.Time) (int, error)
+	PruneEndedMCPEventSubscriptions(ctx context.Context, now time.Time, caps MCPEventRetention) (int, error)
+	MCPEventsKeyCheck(ctx context.Context) (value string, ok bool, err error)
+	PutMCPEventsKeyCheckIfAbsent(ctx context.Context, value string) (stored string, err error)
+	// ImportMCPEventSubscription is a validated insert-or-replace used only by
+	// full import and cutover.
+	ImportMCPEventSubscription(ctx context.Context, s MCPEventSubscription) error
+	// ExportMCPEventSubscriptions streams every subscription for a full
+	// backup. A project-scoped filter yields nothing.
+	ExportMCPEventSubscriptions(context.Context, ExportFilter) iter.Seq2[MCPEventSubscriptionExport, error]
+
 	ExportRelayState(ctx context.Context) iter.Seq2[ImportRecord, error]
 	AcceptRelayDeliveries(ctx context.Context, bindingUID string, batch RelayBatch) (RelayAcceptance, error)
 	SetRelayBindingConfig(ctx context.Context, projectID int64, config RelayBindingConfig, expected ...RelayBindingConfig) (FederationBinding, error)
@@ -162,7 +220,9 @@ type Storage interface {
 	UnassignOwner(ctx context.Context, issueID int64, actor string, expectedOwner *string) (Issue, *Event, bool, error)
 	UpdatePriority(ctx context.Context, issueID int64, newPriority *int64, actor string) (Issue, *Event, bool, error)
 	PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
-	ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error)
+	// ListDueNotificationIssueIDs returns live open issues that may be due at now,
+	// or hold an automatic inbox entry that may need cleanup.
+	ListDueNotificationIssueIDs(ctx context.Context, now time.Time) ([]int64, error)
 	ReconcileDueNotification(ctx context.Context, in ReconcileDueNotificationIn) (ReconcileDueNotificationOut, error)
 	// EnsureScheduledReachedFloor stores at as the reached-schedule floor on the
 	// first call and returns the stored floor on every call.
@@ -226,6 +286,9 @@ type Storage interface {
 	AcquireIdempotencyLock(ctx context.Context, projectID int64, key string) (release func() error, err error)
 	LookupIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*IdempotencyMatch, error)
 	LookupIssueMutationIdempotency(ctx context.Context, projectID int64, eventType, key string, since time.Time) (*IdempotencyMatch, error)
+	// LookupIssueMutationIdempotencyByIssue follows one stable issue identity
+	// across project moves, including receipts written before soft deletion.
+	LookupIssueMutationIdempotencyByIssue(ctx context.Context, issueUID, eventType, key string, since time.Time) (*IdempotencyMatch, error)
 	// LookupCommentIdempotency scopes comment keys by issue UID so a committed
 	// receipt survives a later project move without making keys global.
 	LookupCommentIdempotency(ctx context.Context, issueUID, key string, since time.Time) (*CommentIdempotencyMatch, error)
@@ -235,6 +298,12 @@ type Storage interface {
 
 	// search
 	SearchFTS(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
+	// SearchFTSAny finds at least one query term in title and body documents only
+	// for look-alike checks. Comments don't contribute candidates, scores, or MatchedIn flags.
+	// With TitleQuery on stores of 5k+ issues, SQLite retrieves title matches that
+	// can reach the similarity threshold, ordered by similarity score then ID,
+	// with Score holding that similarity. Above Limit warnings or 200 eligible
+	// titles it uses BM25 ranking. Limit and match flags apply to both paths.
 	SearchFTSAny(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
 
 	// embeddings (semantic search)
@@ -368,6 +437,8 @@ type Storage interface {
 	CreateProjectFederationEnrollment(ctx context.Context, p CreateFederationEnrollmentParams) (CreatedFederationEnrollment, error)
 	FindActiveFederationEnrollment(ctx context.Context, p ActiveFederationEnrollmentParams) (FederationEnrollment, error)
 	RotateFederationEnrollment(ctx context.Context, p CreateFederationEnrollmentParams) (CreatedFederationEnrollment, error)
+	SetFederationSpokeName(context.Context, string, string) error
+	ListFederationSpokeNames(context.Context) (map[string]string, error)
 	ListFederationEnrollments(ctx context.Context) ([]FederationEnrollment, error)
 	ListProjectFederationEnrollments(ctx context.Context, projectID int64) ([]FederationEnrollment, error)
 	RevokeFederationEnrollment(ctx context.Context, id int64) error

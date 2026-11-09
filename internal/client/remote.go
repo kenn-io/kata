@@ -109,8 +109,8 @@ func NormalizeRemoteBaseURL(v string, allowInsecure bool) (string, error) {
 // read ResolvedDaemon.AllowInsecure instead. Retained while compatibility CLI
 // lifecycle and federation callers still construct clients from base URLs
 // alone.
-func RemoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
-	return remoteAllowInsecureForBaseURL(baseURL, workspaceStart)
+func RemoteAllowInsecureForBaseURL(ctx context.Context, baseURL, workspaceStart string) bool {
+	return remoteAllowInsecureForBaseURL(ctx, baseURL, workspaceStart)
 }
 
 // resolveRemote checks the opt-in remote sources, in order:
@@ -171,7 +171,7 @@ func resolveRemoteSelection(
 		return resolved, true, nil
 	}
 
-	root, path, ok, err := findLocalConfig(workspaceStart)
+	root, path, ok, err := findLocalConfig(ctx, workspaceStart)
 	if err != nil {
 		return ResolvedDaemon{}, false, err
 	}
@@ -317,8 +317,8 @@ func activeRemoteFromConfig() (activeRemoteTarget, bool, error) {
 // that retained only the selected active daemon's URL. It reads configuration
 // but never re-probes the endpoint.
 // Deprecated: use EnsureResolvedInWorkspace and NewHTTPClientForResolved.
-func activeRemoteTargetAuthForBaseURL(baseURL, workspaceStart string) (TargetAuth, bool, error) {
-	if globalAuthTokenOverrideSet() || higherPriorityRemoteSourceMatchesBaseURL(baseURL, workspaceStart) {
+func activeRemoteTargetAuthForBaseURL(ctx context.Context, baseURL, workspaceStart string) (TargetAuth, bool, error) {
+	if globalAuthTokenOverrideSet() || higherPriorityRemoteSourceMatchesBaseURL(ctx, baseURL, workspaceStart) {
 		return TargetAuth{}, false, nil
 	}
 	target, ok, err := activeRemoteFromConfig()
@@ -347,7 +347,7 @@ func globalAuthTokenOverrideSet() bool {
 	return strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")) != ""
 }
 
-func higherPriorityRemoteSourceMatchesBaseURL(baseURL, workspaceStart string) bool {
+func higherPriorityRemoteSourceMatchesBaseURL(ctx context.Context, baseURL, workspaceStart string) bool {
 	baseURL = strings.TrimRight(baseURL, "/")
 	if v := os.Getenv(remoteServerEnvVar); v != "" {
 		u, err := normalizeRemoteURL(v, envAllowInsecure())
@@ -355,7 +355,7 @@ func higherPriorityRemoteSourceMatchesBaseURL(baseURL, workspaceStart string) bo
 	}
 	// An unverifiable local config aborts resolution before a compatibility
 	// client is built, so no match is safer than guessing at its contents.
-	root, _, ok, findErr := findLocalConfig(workspaceStart)
+	root, _, ok, findErr := findLocalConfig(ctx, workspaceStart)
 	if findErr != nil || !ok {
 		return false
 	}
@@ -383,7 +383,7 @@ func envAllowInsecure() bool {
 	return v == "1" || strings.EqualFold(v, "true")
 }
 
-func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
+func remoteAllowInsecureForBaseURL(ctx context.Context, baseURL, workspaceStart string) bool {
 	activeAllows := func() bool {
 		target, ok, err := activeRemoteFromConfig()
 		return err == nil && ok && target.BaseURL == baseURL && target.entry.AllowInsecure
@@ -393,7 +393,7 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 		u, err := normalizeRemoteURL(v, allow)
 		return err == nil && u == baseURL && allow
 	}
-	root, _, ok, findErr := findLocalConfig(workspaceStart)
+	root, _, ok, findErr := findLocalConfig(ctx, workspaceStart)
 	if findErr != nil {
 		// Unverifiable provenance never grants a plaintext downgrade.
 		return false
@@ -419,8 +419,8 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 // selection, including its workspace boundary and Git provenance checks.
 // An empty path means no override is honored. It does not decode the file,
 // contact a daemon or modify the workspace.
-func LocalConfigPathInWorkspace(start string) (string, error) {
-	_, path, _, err := findLocalConfig(start)
+func LocalConfigPathInWorkspace(ctx context.Context, start string) (string, error) {
+	_, path, _, err := findLocalConfig(ctx, start)
 	return path, err
 }
 
@@ -456,7 +456,7 @@ func LocalConfigPathInWorkspace(start string) (string, error) {
 // active or auto-started local daemon. (A determined-tracked file, by
 // contrast, is definitively illegitimate, so treating it as absent
 // restores exactly the pre-attack behavior.)
-func findLocalConfig(start string) (root, path string, ok bool, err error) {
+func findLocalConfig(ctx context.Context, start string) (root, path string, ok bool, err error) {
 	dir := start
 	if dir == "" {
 		dir, err = os.Getwd()
@@ -484,7 +484,7 @@ func findLocalConfig(start string) (root, path string, ok bool, err error) {
 		}
 		if isWorkspaceBoundary(dir) {
 			if foundLocal {
-				tracked, determined := localConfigTrackState(localRoot)
+				tracked, determined := localConfigTrackState(ctx, localRoot)
 				switch {
 				case determined && tracked:
 					// A .kata.local.toml that is committed into the repo has
@@ -623,8 +623,8 @@ func dotGitInAncestors(dir string) bool {
 // enumerating every tracked file under root, which on a large repo could blow
 // the 5s timeout and — because we now fail closed inside a worktree — wrongly
 // lock a developer out of a legitimate override.
-func localConfigTrackState(root string) (tracked, determined bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func localConfigTrackState(ctx context.Context, root string) (tracked, determined bool) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	out, err := localConfigGitRunner.Output(ctx, root,
 		"ls-files", "-z", "--", ":(icase)"+config.LocalConfigFilename)

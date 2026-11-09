@@ -221,11 +221,11 @@ func TestMergeLocalProfileReplacesRoutingAsOneTarget(t *testing.T) {
 
 func TestLocalProfileEnvironmentIsolatesDaemonOverrides(t *testing.T) {
 	for key, value := range map[string]string{
-		"KATA_HOME": "personal-home", "KATA_DB": "personal.db", "KATA_DSN": "personal-dsn", "KATA_SERVER": "http://127.0.0.1:7790", "KATA_AUTH_TOKEN": "personal-token", "KATA_POSTGRES_SCHEMA": "personal_schema", "PGPASSWORD": "personal-secret", "HTTP_PROXY": "http://proxy.example", "HTTPS_PROXY": "http://proxy.example", "PORT": "8888", "WORK_TOKEN": "work-token", "PATH": os.Getenv("PATH"),
+		"KATA_HOME": "personal-home", "KATA_DB": "personal.db", "KATA_DSN": "personal-dsn", "KATA_SERVER": "http://127.0.0.1:7790", "KATA_AUTH_TOKEN": "personal-token", "KATA_POSTGRES_SCHEMA": "personal_schema", "PGPASSWORD": "personal-secret", "HTTP_PROXY": "http://proxy.example", "HTTPS_PROXY": "http://proxy.example", "PORT": "8888", "WORK_TOKEN": "work-token", "EXAMPLE_DOCBANK_KEY": "example-secret", "PATH": os.Getenv("PATH"),
 	} {
 		t.Setenv(key, value)
 	}
-	profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{Search: config.SearchConfig{Embeddings: config.EmbeddingsConfig{APIKeyEnv: "WORK_TOKEN"}}}}
+	profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{Search: config.SearchConfig{Embeddings: config.EmbeddingsConfig{APIKeyEnv: "WORK_TOKEN"}}, Docbank: config.DocbankConfig{APIKeyEnv: "EXAMPLE_DOCBANK_KEY"}}}
 	env, err := config.LocalProfileEnvironment(profile, true)
 	require.NoError(t, err)
 	values := map[string]string{}
@@ -235,6 +235,7 @@ func TestLocalProfileEnvironmentIsolatesDaemonOverrides(t *testing.T) {
 	}
 	assert.Equal(t, profile.Home, values["KATA_HOME"])
 	assert.Equal(t, "work-token", values["WORK_TOKEN"])
+	assert.Equal(t, "example-secret", values["EXAMPLE_DOCBANK_KEY"])
 	assert.Equal(t, os.Getenv("PATH"), values["PATH"])
 	assert.Equal(t, "1", values["KATA_AUTOSTART"])
 	for _, key := range []string{"KATA_DB", "KATA_DSN", "KATA_SERVER", "KATA_AUTH_TOKEN", "KATA_POSTGRES_SCHEMA", "PGPASSWORD", "HTTP_PROXY", "HTTPS_PROXY", "PORT"} {
@@ -261,6 +262,27 @@ func TestLocalProfileEnvironmentPassesThroughTelemetrySettings(t *testing.T) {
 			require.Contains(t, env, tc.key+"="+tc.value)
 		})
 	}
+}
+
+func TestLocalProfileEnvironmentPassesThroughHTTPTimeout(t *testing.T) {
+	for _, timeout := range []string{"15m", "", "invalid"} {
+		t.Run(timeout, func(t *testing.T) {
+			t.Setenv("KATA_HTTP_TIMEOUT", timeout)
+			env, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir()}, true)
+			require.NoError(t, err)
+			require.Contains(t, env, "KATA_HTTP_TIMEOUT="+timeout)
+			require.Equal(t, timeout, os.Getenv("KATA_HTTP_TIMEOUT"))
+		})
+	}
+	t.Run("unset", func(t *testing.T) {
+		t.Setenv("KATA_HTTP_TIMEOUT", "")
+		require.NoError(t, os.Unsetenv("KATA_HTTP_TIMEOUT"))
+		env, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir()}, true)
+		require.NoError(t, err)
+		for _, entry := range env {
+			require.False(t, strings.HasPrefix(entry, "KATA_HTTP_TIMEOUT="))
+		}
+	})
 }
 
 func TestLocalProfileEnvironmentIncludesDefaultGitHubTokenEnv(t *testing.T) {
@@ -300,7 +322,13 @@ func TestLocalProfileEnvironmentIncludesPlaneToken(t *testing.T) {
 	}
 }
 
-func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *testing.T) {
+func TestLocalProfileEnvironmentIncludesConfiguredMCPNotionAndPlaneTokenEnvs(t *testing.T) {
+	mcpEnv := "EXAMPLE_MCP_TOKEN"
+	t.Setenv(mcpEnv, "example-mcp-token")
+	profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{MCP: config.MCPConfig{TokenEnv: mcpEnv}}}
+	env, err := config.LocalProfileEnvironment(profile, true)
+	require.NoError(t, err)
+	assert.Contains(t, env, "EXAMPLE_MCP_TOKEN=example-mcp-token")
 	for _, tc := range []struct {
 		name      string
 		notionEnv string
@@ -368,9 +396,22 @@ func TestLocalProfileEnvironmentIncludesDocumentedHubCredentials(t *testing.T) {
 	}
 }
 
+// Contract: a local-profile daemon keeps the invoking Docbank vault selection so
+// `docbank daemon start` does not create a second vault under the default home.
+func TestLocalProfileEnvironmentPassesThroughDocbankHome(t *testing.T) {
+	t.Setenv("DOCBANK_HOME", "/srv/docbank-vault")
+
+	env, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir()}, true)
+
+	require.NoError(t, err)
+	assert.Contains(t, env, "DOCBANK_HOME=/srv/docbank-vault")
+}
+
 func TestLocalProfileEnvironmentTrustsConfiguredCertificateAuthority(t *testing.T) {
 	if target := os.Getenv("PROFILE_TLS_PROBE"); target != "" {
-		response, err := http.Get(target) //nolint:gosec // Parent supplies only its loopback TLS fixture.
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, target, nil) //nolint:gosec // Parent supplies only its loopback TLS fixture.
+		require.NoError(t, reqErr)
+		response, err := http.DefaultClient.Do(req) //nolint:gosec // Parent supplies only its loopback TLS fixture.
 		require.NoError(t, err)
 		defer func() { _ = response.Body.Close() }()
 		require.Equal(t, http.StatusNoContent, response.StatusCode)

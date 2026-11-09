@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -36,7 +35,7 @@ func newExternalRootSafetyFixture(
 	suffix string,
 ) externalRootSafetyFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "external-root-safety-"+suffix)
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -60,7 +59,7 @@ func newExternalRootSafetyFixture(
 
 func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("external root storage rejects NUL identities and bodies", func(t *testing.T) {
 		project, err := store.CreateProject(ctx, "external-root-nul-validation")

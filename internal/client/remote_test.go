@@ -87,7 +87,7 @@ token = "example-catalog-token"
 				require.True(t, ok)
 				require.Equal(t, "example-catalog-token", resolved.Token)
 
-				auth, ok, err := activeRemoteTargetAuthForBaseURL(srv.URL, "")
+				auth, ok, err := activeRemoteTargetAuthForBaseURL(t.Context(), srv.URL, "")
 				require.NoError(t, err)
 				require.True(t, ok)
 				require.Equal(t, "example-catalog-token", auth.Token)
@@ -137,7 +137,7 @@ func TestResolveRemote_NoEnvNoFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.False(t, ok)
 	assert.Empty(t, url)
@@ -147,7 +147,7 @@ func TestResolveRemote_EnvWinsAndProbes(t *testing.T) {
 	srv := pingingServer(t)
 	t.Setenv("KATA_SERVER", srv.URL)
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url)
@@ -170,7 +170,7 @@ func TestResolveRemote_HonorsHTTPTimeoutForSlowPing(t *testing.T) {
 	t.Setenv("KATA_SERVER", srv.URL)
 	t.Setenv("KATA_HTTP_TIMEOUT", "1500ms")
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 
 	require.NoError(t, err)
 	assert.True(t, ok)
@@ -180,7 +180,7 @@ func TestResolveRemote_HonorsHTTPTimeoutForSlowPing(t *testing.T) {
 func TestResolveRemote_EnvUnreachableErrors(t *testing.T) {
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1") // closed port
 
-	_, _, err := resolveRemote(context.Background(), "")
+	_, _, err := resolveRemote(t.Context(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "KATA_SERVER")
 	assert.Contains(t, err.Error(), "http://127.0.0.1:1")
@@ -190,7 +190,7 @@ func TestResolveRemote_EnvUnreachableErrors(t *testing.T) {
 func TestResolveRemote_EnvMalformedErrors(t *testing.T) {
 	t.Setenv("KATA_SERVER", "::not-a-url::")
 
-	_, _, err := resolveRemote(context.Background(), "")
+	_, _, err := resolveRemote(t.Context(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "KATA_SERVER")
 }
@@ -207,7 +207,7 @@ func TestResolveRemote_FileWhenNoEnv(t *testing.T) {
 url = "`+srv.URL+`"
 `), 0o600))
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url)
@@ -225,7 +225,7 @@ func TestResolveRemote_EnvWinsOverFile(t *testing.T) {
 url = "http://10.255.255.1:9"
 `), 0o600))
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url, "env URL must win over file URL")
@@ -242,7 +242,7 @@ func TestResolveRemote_FileEmptyURLFallsThrough(t *testing.T) {
 url = ""
 `), 0o600))
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.False(t, ok, "empty server URL must be treated as no remote configured")
 	assert.Empty(t, url)
@@ -264,7 +264,7 @@ name = "shared"
 url = "`+srv.URL+`"
 `), 0o600))
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 
 	require.NoError(t, err)
 	assert.True(t, ok)
@@ -290,7 +290,7 @@ url = "`+srv.URL+`"
 token_env = "KATA_SHARED_TOKEN"
 `), 0o600))
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 
 	require.NoError(t, err)
 	assert.True(t, ok)
@@ -309,7 +309,7 @@ name = "shared"
 url = "`+selected.URL+`"
 `), 0o600))
 
-	url, err := EnsureNamedRunning(context.Background(), "shared")
+	url, err := EnsureNamedRunning(t.Context(), "shared")
 
 	require.NoError(t, err)
 	assert.Equal(t, selected.URL, url)
@@ -342,11 +342,11 @@ url = "`+srv.URL+`"
 token = "catalog-token"
 `), 0o600))
 
-	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	resolved, err := EnsureResolvedNamed(t.Context(), "shared")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req)
 	require.NoError(t, err)
@@ -385,11 +385,11 @@ url = "`+srv.URL+`"
 token_env = "KATA_SHARED_TOKEN"
 `), 0o600))
 
-	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	resolved, err := EnsureResolvedNamed(t.Context(), "shared")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req)
 	require.NoError(t, err)
@@ -426,11 +426,11 @@ name = "shared"
 url = "`+srv.URL+`"
 `), 0o600))
 
-	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	resolved, err := EnsureResolvedNamed(t.Context(), "shared")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req)
 	require.NoError(t, err)
@@ -472,11 +472,11 @@ name = "shared"
 url = "`+srv.URL+`"
 `), 0o600))
 
-	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	resolved, err := EnsureResolvedNamed(t.Context(), "shared")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req)
 	require.NoError(t, err)
@@ -499,9 +499,9 @@ name = "shared"
 url = "`+baseURL+`"
 `), 0o600))
 
-	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	resolved, err := EnsureResolvedNamed(t.Context(), "shared")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
@@ -520,9 +520,9 @@ url = "`+baseURL+`"
 token = "catalog-token"
 `), 0o600))
 
-	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	resolved, err := EnsureResolvedNamed(t.Context(), "shared")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
@@ -547,9 +547,9 @@ url = "`+baseURL+`"
 token_env = "KATA_SHARED_TOKEN"
 `), 0o600))
 
-	resolved, err := EnsureResolvedInWorkspace(context.Background(), "")
+	resolved, err := EnsureResolvedInWorkspace(t.Context(), "")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
@@ -583,11 +583,11 @@ local = true
 token = "local-token"
 `), 0o600))
 
-	resolved, err := EnsureResolvedNamed(context.Background(), "local-auth")
+	resolved, err := EnsureResolvedNamed(t.Context(), "local-auth")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req)
 	require.NoError(t, err)
@@ -619,11 +619,11 @@ local = true
 token = "local-token"
 `), 0o600))
 
-	resolved, err := EnsureResolvedNamed(context.Background(), "local-auth")
+	resolved, err := EnsureResolvedNamed(t.Context(), "local-auth")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req)
 	require.NoError(t, err)
@@ -665,11 +665,11 @@ url = "`+srv.URL+`"
 token_env = "KATA_REMOTE_TOKEN"
 `), 0o600))
 
-	resolved, err := EnsureResolvedNamed(context.Background(), "local")
+	resolved, err := EnsureResolvedNamed(t.Context(), "local")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req)
 	require.NoError(t, err)
@@ -690,7 +690,7 @@ func TestResolveRemote_FileUnreachableErrors(t *testing.T) {
 url = "http://127.0.0.1:1"
 `), 0o600))
 
-	_, _, err := resolveRemote(context.Background(), "")
+	_, _, err := resolveRemote(t.Context(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), ".kata.local.toml")
 	assert.ErrorIs(t, err, ErrRemoteUnavailable)
@@ -710,7 +710,7 @@ url = "`+srv.URL+`"
 `), 0o600))
 	t.Chdir(child)
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url)
@@ -734,7 +734,7 @@ func TestResolveRemote_WorkspaceAnchorOverridesCwd(t *testing.T) {
 url = "`+srv.URL+`"
 `), 0o600))
 
-	url, ok, err := resolveRemote(context.Background(), workspace)
+	url, ok, err := resolveRemote(t.Context(), workspace)
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url, "must walk from workspaceStart, not CWD")
@@ -755,7 +755,7 @@ func TestResolveRemote_EmptyWorkspaceFallsBackToCwd(t *testing.T) {
 url = "`+srv.URL+`"
 `), 0o600))
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url)
@@ -781,7 +781,7 @@ func TestResolveRemote_FileIgnoredWithoutWorkspaceMarker(t *testing.T) {
 url = "`+srv.URL+`"
 `), 0o600))
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.False(t, ok, ".kata.local.toml without a workspace marker must not be honored")
 	assert.Empty(t, url)
@@ -810,7 +810,7 @@ url = "http://127.0.0.1:1"
 `), 0o600))
 	t.Chdir(sub)
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.False(t, ok, "walk must stop at the workspace boundary, never reach outer/.kata.local.toml")
 	assert.Empty(t, url)
@@ -842,7 +842,7 @@ url = "`+srv.URL+`"
 `), 0o600))
 	t.Chdir(workspace)
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url, "workspace-local config must win, outer config must never be reached")
@@ -868,7 +868,7 @@ url = "`+srv.URL+`"
 `), 0o600))
 	t.Chdir(dir)
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url)
@@ -895,7 +895,7 @@ url = "`+srv.URL+`"
 	testfix.RunGit(t, dir, "commit", "--quiet", "-m", "plant local config")
 	t.Chdir(dir)
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.False(t, ok, "a git-tracked .kata.local.toml must not be honored as a server override")
 	assert.Empty(t, url)
@@ -919,7 +919,7 @@ url = "`+srv.URL+`"
 `), 0o600))
 	t.Chdir(dir)
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.True(t, ok, "an untracked/gitignored .kata.local.toml must remain honored")
 	assert.Equal(t, srv.URL, url)
@@ -943,7 +943,7 @@ allow_insecure = true
 	testfix.RunGit(t, dir, "commit", "--quiet", "-m", "plant local config")
 	t.Chdir(dir)
 
-	assert.False(t, remoteAllowInsecureForBaseURL(baseURL, ""),
+	assert.False(t, remoteAllowInsecureForBaseURL(t.Context(), baseURL, ""),
 		"a tracked .kata.local.toml must not grant allow_insecure for its URL")
 }
 
@@ -971,7 +971,7 @@ url = "http://198.51.100.1:7777"
 	testfix.RunGit(t, dir, "add", "-f", ".KATA.LOCAL.TOML")
 	testfix.RunGit(t, dir, "commit", "--quiet", "-m", "plant case-variant config")
 
-	tracked, determined := localConfigTrackState(dir)
+	tracked, determined := localConfigTrackState(t.Context(), dir)
 	assert.True(t, determined, "a working git query must yield a determined result")
 	assert.True(t, tracked,
 		"a committed case-variant .kata.local.toml must be treated as tracked")
@@ -988,7 +988,7 @@ func TestLocalConfigTracked_UntrackedNotRefused(t *testing.T) {
 url = "http://198.51.100.1:7777"
 `), 0o600))
 
-	tracked, determined := localConfigTrackState(dir)
+	tracked, determined := localConfigTrackState(t.Context(), dir)
 	assert.True(t, determined, "a working git query must yield a determined result")
 	assert.False(t, tracked,
 		"an untracked .kata.local.toml must not be treated as tracked")
@@ -1010,7 +1010,7 @@ func TestLocalConfigTracked_SubdirSameNameNotRoot(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
 		[]byte("version = 1\n"), 0o600))
 
-	tracked, determined := localConfigTrackState(dir)
+	tracked, determined := localConfigTrackState(t.Context(), dir)
 	assert.True(t, determined)
 	assert.False(t, tracked,
 		"a committed config in a subdirectory must not mark the root as tracked")
@@ -1052,7 +1052,7 @@ func (f fixedGitRunner) Output(_ context.Context, _ string, _ ...string) ([]byte
 // honored the redirect.
 func TestLocalConfigTrackState_RepoRelativeMatchTracked(t *testing.T) {
 	stubGitRunner(t, fixedGitRunner{out: "workspaces/app/.kata.local.toml\x00"})
-	tracked, determined := localConfigTrackState("/repo/workspaces/app")
+	tracked, determined := localConfigTrackState(t.Context(), "/repo/workspaces/app")
 	assert.True(t, determined, "a successful git query is determined")
 	assert.True(t, tracked,
 		"a matched root-level override must be tracked even when git prints a repo-relative path")
@@ -1085,7 +1085,7 @@ url = "`+srv.URL+`"
 	t.Chdir(dir)
 	stubGitRunner(t, failingGitRunner{err: errors.New("git unavailable")})
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.Error(t, err,
 		"unverifiable tracked status inside a git worktree must error, not fall through to another daemon")
 	assert.Contains(t, err.Error(), ".kata.local.toml")
@@ -1119,7 +1119,7 @@ url = "`+srv.URL+`"
 	require.NoError(t, os.Symlink(nested, link))
 	stubGitRunner(t, failingGitRunner{err: errors.New("git unavailable")})
 
-	url, ok, err := resolveRemote(context.Background(), link)
+	url, ok, err := resolveRemote(t.Context(), link)
 	require.Error(t, err,
 		"a symlinked workspace physically inside a git repo must not dodge the fail-closed path")
 	assert.Contains(t, err.Error(), ".kata.local.toml")
@@ -1145,7 +1145,7 @@ url = "`+srv.URL+`"
 	require.NoError(t, os.Symlink(dir, link))
 	stubGitRunner(t, failingGitRunner{err: errors.New("not a git repository")})
 
-	url, ok, err := resolveRemote(context.Background(), link)
+	url, ok, err := resolveRemote(t.Context(), link)
 	require.NoError(t, err)
 	assert.True(t, ok, "a symlinked non-repo workspace must still honor its local config")
 	assert.Equal(t, srv.URL, url)
@@ -1169,7 +1169,7 @@ url = "`+srv.URL+`"
 	t.Chdir(dir)
 	stubGitRunner(t, failingGitRunner{err: errors.New("not a git repository")})
 
-	url, ok, err := resolveRemote(context.Background(), "")
+	url, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	assert.True(t, ok, "a non-repo workspace with no .git must honor its untracked local config")
 	assert.Equal(t, srv.URL, url)
@@ -1273,7 +1273,7 @@ func TestResolveRemote_EnvSchemeGuardRejectsPublicHTTP(t *testing.T) {
 	t.Setenv("KATA_SERVER", "http://8.8.8.8:7777")
 	t.Setenv("KATA_ALLOW_INSECURE", "")
 
-	_, _, err := resolveRemote(context.Background(), "")
+	_, _, err := resolveRemote(t.Context(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "KATA_SERVER")
 	assert.Contains(t, err.Error(), "allow_insecure")
@@ -1288,7 +1288,7 @@ func TestResolveRemote_EnvAllowInsecureBypassesGuard(t *testing.T) {
 	t.Setenv("KATA_SERVER", "http://198.51.100.1:7777") // TEST-NET-2, never dialed
 	t.Setenv("KATA_ALLOW_INSECURE", "1")
 
-	_, _, err := resolveRemote(context.Background(), "")
+	_, _, err := resolveRemote(t.Context(), "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrRemoteUnavailable)
 	assert.NotContains(t, err.Error(), "allow_insecure",
@@ -1309,7 +1309,7 @@ func TestResolveRemote_FileSchemeGuardRejectsPublicHTTP(t *testing.T) {
 url = "http://8.8.8.8:7777"
 `), 0o600))
 
-	_, _, err := resolveRemote(context.Background(), "")
+	_, _, err := resolveRemote(t.Context(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), ".kata.local.toml")
 	assert.Contains(t, err.Error(), "allow_insecure")
@@ -1332,7 +1332,7 @@ url = "http://198.51.100.1:7777"
 allow_insecure = true
 `), 0o600))
 
-	_, _, err := resolveRemote(context.Background(), "")
+	_, _, err := resolveRemote(t.Context(), "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrRemoteUnavailable)
 	assert.NotContains(t, err.Error(), "is not allowed",

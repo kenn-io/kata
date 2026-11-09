@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -17,7 +16,7 @@ import (
 // the store check catches archival that races that preflight.
 func checkArchivedLinkTargets(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	subject, err := createIssueFixture(ctx, store, "archived-link-subject", "subject", "link-author", nil)
 	if err != nil {
 		return err

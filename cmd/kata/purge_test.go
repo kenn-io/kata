@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -60,7 +59,7 @@ func TestPurge_ReasonFlagPersistsToPurgeLog(t *testing.T) {
 		"--force", "--confirm", "PURGE kata#"+short, "--reason", wantReason))
 
 	var got *string
-	err := f.env.DB.QueryRowContext(context.Background(),
+	err := f.env.DB.QueryRowContext(t.Context(),
 		`SELECT reason FROM purge_log ORDER BY id DESC LIMIT 1`).Scan(&got)
 	require.NoError(t, err)
 	require.NotNil(t, got, "purge_log.reason should not be NULL when --reason was provided")

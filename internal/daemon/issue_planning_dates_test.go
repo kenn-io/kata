@@ -65,3 +65,22 @@ func TestIssuePlanningDatesScopedReadBoundary(t *testing.T) {
 		require.Equalf(t, tc.status, res.StatusCode, "%s", raw)
 	}
 }
+
+func TestIssuePlanningDatesHistoricalReference(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	source, target, issue := seedMovePair(t, env)
+	moved, err := env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/planning-dates", source.ID, issue.ShortID)
+	status, raw := cronHTTP(t, env, http.MethodGet, path, nil)
+	require.Equalf(t, http.StatusOK, status, "%s", raw)
+	var response struct {
+		IssueUID string `json:"issue_uid"`
+		Revision int64  `json:"revision"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &response))
+	require.Equal(t, issue.UID, response.IssueUID)
+	require.Equal(t, moved.NewRevision, response.Revision)
+}

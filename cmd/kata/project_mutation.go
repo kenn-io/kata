@@ -126,19 +126,20 @@ func (p *projectMutation) finishMutation(resp *http.Response, data []byte, callE
 	return data, nil
 }
 
-// Follow-up comments use the project ID returned by the successful mutation,
-// not another lookup of the name which might have changed in the meantime.
-func (p *projectMutation) comment(data []byte, ref, actor, body, teammate string) error {
+// Follow-up comments use the current project ID and stable issue UID returned
+// by the successful mutation, including after a move changes the short ID.
+func (p *projectMutation) comment(data []byte, actor, body, teammate string) error {
 	if body == "" {
 		return nil
 	}
 	var response struct {
 		Issue struct {
-			ProjectID int64 `json:"project_id"`
+			ProjectID int64  `json:"project_id"`
+			UID       string `json:"uid"`
 		} `json:"issue"`
 	}
 	if err := json.Unmarshal(data, &response); err != nil {
-		return fmt.Errorf("issue mutation succeeded but reading its project for --comment failed: %w", err)
+		return fmt.Errorf("issue mutation succeeded but reading its identity for --comment failed: %w", err)
 	}
-	return postFollowupComment(p.api.ctx, p.api.client, p.api.baseURL, response.Issue.ProjectID, ref, actor, body, teammate)
+	return postFollowupComment(p.api.ctx, p.api.client, p.api.baseURL, response.Issue.ProjectID, response.Issue.UID, actor, body, teammate)
 }

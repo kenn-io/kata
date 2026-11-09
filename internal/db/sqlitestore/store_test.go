@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -21,11 +20,11 @@ func TestOpen_AppliesPragmas(t *testing.T) { //nolint:paralleltest // sets KATA_
 	d := openTestDB(t)
 
 	var fk int
-	require.NoError(t, d.QueryRow("PRAGMA foreign_keys").Scan(&fk))
+	require.NoError(t, d.QueryRowContext(t.Context(), "PRAGMA foreign_keys").Scan(&fk))
 	assert.Equal(t, 1, fk)
 
 	var mode string
-	require.NoError(t, d.QueryRow("PRAGMA journal_mode").Scan(&mode))
+	require.NoError(t, d.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&mode))
 	assert.Equal(t, "wal", mode)
 }
 
@@ -34,14 +33,14 @@ func TestOpen_AppliesPragmas(t *testing.T) { //nolint:paralleltest // sets KATA_
 // in place, courtesy of the bootstrap-on-Open transaction.
 func TestOpen_OnFreshDBBootstrapsSchema(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 
 	var n int
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='meta'`).Scan(&n))
 	assert.Equal(t, 1, n)
 
@@ -55,7 +54,7 @@ func TestOpen_OnFreshDBBootstrapsSchema(t *testing.T) {
 // instance_uid.
 func TestOpen_IsIdempotentAfterBootstrap(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
 	d1, err := sqlitestore.Open(ctx, path)
@@ -75,7 +74,7 @@ func TestOpen_IsIdempotentAfterBootstrap(t *testing.T) {
 
 func TestOpen_RejectsVersionZeroExistingTables(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
 	d, err := sqlitestore.Open(ctx, path)
@@ -94,7 +93,7 @@ func TestSchema_IssuesHasShortIDColumn(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 	var typ string
-	err := d.QueryRow(
+	err := d.QueryRowContext(t.Context(),
 		`SELECT type FROM pragma_table_info('issues') WHERE name='short_id'`,
 	).Scan(&typ)
 	require.NoError(t, err)
@@ -105,7 +104,7 @@ func TestSchema_IssuesNumberColumnGone(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 	var n int
-	err := d.QueryRow(
+	err := d.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM pragma_table_info('issues') WHERE name='number'`,
 	).Scan(&n)
 	require.NoError(t, err)
@@ -116,7 +115,7 @@ func TestSchema_ProjectsNextIssueNumberGone(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 	var n int
-	err := d.QueryRow(
+	err := d.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name='next_issue_number'`,
 	).Scan(&n)
 	require.NoError(t, err)
@@ -127,7 +126,7 @@ func TestSchema_EventsIssueNumberGone(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 	var n int
-	err := d.QueryRow(
+	err := d.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='issue_number'`,
 	).Scan(&n)
 	require.NoError(t, err)
@@ -138,7 +137,7 @@ func TestSchema_PurgeLogIssueNumberGone(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 	var n int
-	err := d.QueryRow(
+	err := d.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM pragma_table_info('purge_log') WHERE name='issue_number'`,
 	).Scan(&n)
 	require.NoError(t, err)
@@ -148,7 +147,7 @@ func TestSchema_PurgeLogIssueNumberGone(t *testing.T) {
 func TestSchema_ProjectNameRejectsHash(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	_, err := d.Exec(
+	_, err := d.ExecContext(t.Context(),
 		`INSERT INTO projects(uid, name) VALUES('01HZNQ7VFPK1XGD8R5MABCD4EX', 'has#hash')`,
 	)
 	require.Error(t, err)
@@ -158,7 +157,7 @@ func TestSchema_ProjectNameRejectsHash(t *testing.T) {
 func TestSchemaVersion(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	v, err := d.SchemaVersion(ctx)
 	require.NoError(t, err)
 	require.Equal(t, db.CurrentSchemaVersion(), v)
@@ -170,10 +169,10 @@ func TestOpen_TimestampColumnsScanIntoTime(t *testing.T) {
 
 	projectUID, err := uid.New()
 	require.NoError(t, err)
-	_, err = d.Exec(`INSERT INTO projects(uid, name) VALUES(?,'x')`, projectUID)
+	_, err = d.ExecContext(t.Context(), `INSERT INTO projects(uid, name) VALUES(?,'x')`, projectUID)
 	require.NoError(t, err)
 
-	rows, err := d.Query(`SELECT created_at FROM projects`)
+	rows, err := d.QueryContext(t.Context(), `SELECT created_at FROM projects`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	require.True(t, rows.Next())
@@ -187,7 +186,7 @@ func TestOpen_TimestampColumnsScanIntoTime(t *testing.T) {
 func TestCheckpointTruncatesWAL(t *testing.T) { //nolint:paralleltest // sets KATA_TEST_FAST_SQLITE
 	t.Setenv("KATA_TEST_FAST_SQLITE", "")
 
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
@@ -225,22 +224,22 @@ func TestCheckpointTruncatesWAL(t *testing.T) { //nolint:paralleltest // sets KA
 func TestOpenUsesFastSQLitePragmasWhenTestHarnessRequestsIt(t *testing.T) { //nolint:paralleltest // sets KATA_TEST_FAST_SQLITE
 	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
 
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 
 	var mode string
-	require.NoError(t, d.QueryRow("PRAGMA journal_mode").Scan(&mode))
+	require.NoError(t, d.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&mode))
 	assert.Equal(t, "wal", mode)
 
 	var sync int
-	require.NoError(t, d.QueryRow("PRAGMA synchronous").Scan(&sync))
+	require.NoError(t, d.QueryRowContext(t.Context(), "PRAGMA synchronous").Scan(&sync))
 	assert.Zero(t, sync)
 
 	var tempStore int
-	require.NoError(t, d.QueryRow("PRAGMA temp_store").Scan(&tempStore))
+	require.NoError(t, d.QueryRowContext(t.Context(), "PRAGMA temp_store").Scan(&tempStore))
 	assert.Equal(t, 2, tempStore)
 }
 

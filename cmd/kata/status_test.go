@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -49,14 +48,14 @@ func TestStatusAgentReportsAuthenticatedIdentityAndAssignment(t *testing.T) {
 		testenv.WithRequireTokenIdentity(),
 	)
 	const operatorToken = "operator-bearer"
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{ //nolint:gosec // test-only bearer credential
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{ //nolint:gosec // test-only bearer credential
 		PlaintextToken: operatorToken,
 		Actor:          "operator",
 		AdminActor:     db.BootstrapActor,
 	})
 	require.NoError(t, err)
 	owner := "operator"
-	issue, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: pid,
 		Title:     "report assignment",
 		Author:    "operator",
@@ -92,13 +91,13 @@ func TestStatusJSONReportsDaemonActorAndHold(t *testing.T) {
 		testenv.WithRequireTokenIdentity(),
 	)
 	const operatorToken = "operator-bearer"
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{ //nolint:gosec // test-only bearer credential
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{ //nolint:gosec // test-only bearer credential
 		PlaintextToken: operatorToken,
 		Actor:          "operator",
 		AdminActor:     db.BootstrapActor,
 	})
 	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: pid,
 		Title:     "report json status",
 		Author:    "operator",

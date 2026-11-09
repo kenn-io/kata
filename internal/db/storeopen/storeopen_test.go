@@ -1,7 +1,6 @@
 package storeopen_test
 
 import (
-	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -28,7 +27,7 @@ import (
 // file is fresh.
 func TestOpen_BarePathBootstrapsFreshSQLite(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	store, err := storeopen.Open(ctx, path)
 	require.NoError(t, err)
@@ -41,7 +40,7 @@ func TestOpen_BarePathBootstrapsFreshSQLite(t *testing.T) {
 // and confirms the trim leaves a working SQLite backend.
 func TestOpen_SQLiteSchemeBootstrapsFreshSQLite(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	store, err := storeopen.Open(ctx, "sqlite://"+path)
 	require.NoError(t, err)
@@ -52,7 +51,7 @@ func TestOpen_SQLiteSchemeBootstrapsFreshSQLite(t *testing.T) {
 
 func TestOpenSQLiteDoesNotInspectSourceWhileCutoverLockIsHeld(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
@@ -92,7 +91,7 @@ func TestOpen_PostgresDSNRoundTripsThroughReadOnlyOpen(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -116,7 +115,7 @@ func TestOpenWithConfig_PostgresValidateModeDoesNotInstallSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	admin, err := sql.Open("pgx", dsn)
@@ -145,7 +144,7 @@ func TestOpen_PostgresHonorsResolvedValidationPolicy(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	admin, err := sql.Open("pgx", dsn)
@@ -173,7 +172,7 @@ func TestOpen_PostgresHonorsResolvedValidationPolicy(t *testing.T) {
 // TestOpen_UnknownSchemeIsUnsupported refuses any non-sqlite/non-postgres
 // scheme.
 func TestOpen_UnknownSchemeIsUnsupported(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := storeopen.Open(ctx, "mysql://h/db")
 	assert.Nil(t, store)
 	require.Error(t, err)
@@ -181,30 +180,26 @@ func TestOpen_UnknownSchemeIsUnsupported(t *testing.T) {
 	assert.True(t, strings.Contains(msg, "unsupported"), "error must mark scheme as unsupported, got %q", msg)
 }
 
-// TestOpen_RunsCutoverOnPreCurrentSQLite stands up a DB whose
-// schema_version is below db.CurrentSchemaVersion() and confirms storeopen
-// runs jsonl.AutoCutover before opening.
+const preIndexOnlySchemaVersion = 40
+
+// TestOpen_RunsCutoverOnPreCurrentSQLite confirms storeopen replaces schemas
+// that require more than index additions before opening.
 func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
-
-	// Stand up a fixture and rewrite meta.schema_version to a pre-current
-	// value so storeopen routes through cutover.
-	stageLegacyPreCutoverFixture(t, path, db.CurrentSchemaVersion()-1)
-
-	s, err := storeopen.Open(ctx, path)
+	stageLegacyPreCutoverFixture(t, path, preIndexOnlySchemaVersion)
+	upgraded, err := storeopen.Open(ctx, path)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = s.Close() })
-
-	v, err := s.SchemaVersion(ctx)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, db.CurrentSchemaVersion(), v)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 }
 
 func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	stageLegacyPreCutoverFixture(t, path, 0)
 
@@ -225,7 +220,7 @@ func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {
 func stageLegacyPreCutoverFixture(t *testing.T, path string, version int) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx,
@@ -239,7 +234,7 @@ func stageLegacyPreCutoverFixture(t *testing.T, path string, version int) {
 // error.
 func TestOpen_RejectsNewerThanBinary(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	stageNewerThanBinaryFixture(t, path)
 
@@ -254,7 +249,7 @@ func TestOpen_RejectsNewerThanBinary(t *testing.T) {
 func stageNewerThanBinaryFixture(t *testing.T, path string) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx,
@@ -268,7 +263,7 @@ func stageNewerThanBinaryFixture(t *testing.T, path string) {
 // current-version DB return a usable handle.
 func TestOpenReadOnly_OnCurrentDBSucceeds(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
 	// Stand up a current-version DB via storeopen (auto-bootstrap).
@@ -293,11 +288,11 @@ func TestOpenResolvedFromKataDSNEnvKeepsPasswordOutOfError(t *testing.T) {
 	t.Setenv("KATA_DSN", "postgres://user:SECRET@127.0.0.1:1/kata?connect_timeout=1&sslmode=disable") //nolint:gosec // fixture
 	t.Setenv("KATA_DB", "")
 
-	dsn, err := config.KataDSN(context.Background())
+	dsn, err := config.KataDSN(t.Context())
 	require.NoError(t, err)
 	require.Contains(t, dsn, "SECRET", "raw DSN keeps the secret; redaction happens at error time")
 
-	_, err = storeopen.Open(context.Background(), dsn)
+	_, err = storeopen.Open(t.Context(), dsn)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "SECRET",
 		"password must not leak into the connection error")
@@ -313,11 +308,11 @@ func TestOpenResolvedFromStorageDSNKeepsPasswordOutOfError(t *testing.T) {
 	body := "[storage]\ndsn = \"postgres://user:SECRET@127.0.0.1:1/kata?connect_timeout=1&sslmode=disable\"\n" //nolint:gosec // fixture
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o600))
 
-	dsn, err := config.KataDSN(context.Background())
+	dsn, err := config.KataDSN(t.Context())
 	require.NoError(t, err)
 	require.Contains(t, dsn, "SECRET")
 
-	_, err = storeopen.Open(context.Background(), dsn)
+	_, err = storeopen.Open(t.Context(), dsn)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "SECRET")
 }
@@ -340,7 +335,7 @@ func TestOpenResolvedFromStorageDSNKeepsPasswordOutOfError(t *testing.T) {
 // internal/jsonl/cutover_test.go.
 func TestOpen_V14CutoverCarriesLinks(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV14DBWithLink(t, path)
 
@@ -406,7 +401,7 @@ const (
 // are intentionally omitted because the export SELECT never exercises them.
 func seedV14DBWithLink(t *testing.T, path string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Setenv("KATA_HOME", t.TempDir())
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
@@ -513,7 +508,7 @@ func seedV14DBWithLink(t *testing.T, path string) {
 // tableColumns returns the set of column names for table in raw.
 func tableColumns(t *testing.T, raw *sql.DB, table string) map[string]bool {
 	t.Helper()
-	rows, err := raw.Query(`SELECT name FROM pragma_table_info('` + table + `')`) //nolint:gosec // table is a test-controlled literal
+	rows, err := raw.QueryContext(t.Context(), `SELECT name FROM pragma_table_info('`+table+`')`) //nolint:gosec // table is a test-controlled literal
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	cols := make(map[string]bool)
@@ -617,4 +612,62 @@ func TestOpenCutoverBackupWithoutSourceDoesNotBootstrap(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Cutover moves the file behind a symlinked path to its backup before it
+// installs the upgraded one. If it stops in between, the link dangles; opening
+// it must report the interrupted cutover, not create an empty database through
+// the link.
+func TestOpenRefusesInterruptedCutoverBehindSymlink(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := t.Context()
+	target := filepath.Join(t.TempDir(), "kata.db")
+	source, err := sqlitestore.Open(ctx, target)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `UPDATE meta SET value='28' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	link := filepath.Join(t.TempDir(), "linked.db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	require.NoError(t, os.Rename(target, target+".bak.20261027T000000Z"))
+
+	store, err := storeopen.Open(ctx, link)
+	if store != nil {
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+	}
+
+	require.ErrorIs(t, err, jsonl.ErrCutoverInProgress)
+	require.NoFileExists(t, target, "must not create a database through the dangling link")
+}
+
+// Interrupted-cutover recovery must find the backup when the configured path
+// reaches a relative link through a directory symlink.
+func TestOpenRefusesInterruptedCutoverBehindRelativeLinkInSymlinkedDirectory(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := t.Context()
+	physical := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(physical, "links"), 0o700))
+	require.NoError(t, os.Mkdir(filepath.Join(physical, "data"), 0o700))
+	target := filepath.Join(physical, "data", "kata.db")
+	source, err := sqlitestore.Open(ctx, target)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `UPDATE meta SET value='28' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	if err := os.Symlink(filepath.Join("..", "data", "kata.db"), filepath.Join(physical, "links", "linked.db")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(filepath.Join(physical, "links"), alias))
+	require.NoError(t, os.Rename(target, target+".bak.20261027T000000Z"))
+
+	store, err := storeopen.Open(ctx, filepath.Join(alias, "linked.db"))
+	if store != nil {
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+	}
+
+	require.ErrorIs(t, err, jsonl.ErrCutoverInProgress)
+	require.NoFileExists(t, target)
 }

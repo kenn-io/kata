@@ -36,19 +36,19 @@ func TestIdleHTTPAdmissionClassifiesRequests(t *testing.T) {
 	}))
 
 	clock.Advance(10 * time.Second)
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/ping", nil))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/ping", nil))
 	require.Equal(t, []IdleState{IdleStateArmed}, states)
 	require.Equal(t, initialDeadline, controller.Snapshot().Deadline)
 
 	clock.Advance(10 * time.Second)
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/ping", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/ping", nil)
 	request.Header.Set(IdleKeepaliveHeader, "1")
 	handler.ServeHTTP(httptest.NewRecorder(), request)
 	require.Equal(t, []IdleState{IdleStateArmed, IdleStateForeground}, states)
 	require.Equal(t, clock.Now().Add(time.Minute), controller.Snapshot().Deadline)
 
 	clock.Advance(10 * time.Second)
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil))
 	require.Equal(t, []IdleState{IdleStateArmed, IdleStateForeground, IdleStateForeground}, states)
 	require.Equal(t, clock.Now().Add(time.Minute), controller.Snapshot().Deadline)
 }
@@ -65,7 +65,7 @@ func TestIdleHTTPAdmissionRejectsRequestsAfterStopping(t *testing.T) {
 	}))
 
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
+	handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil))
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.False(t, called)
@@ -87,7 +87,7 @@ func TestIdleHTTPAdmissionLeavesObservationalProbesUnleased(t *testing.T) {
 			}))
 
 			recorder := httptest.NewRecorder()
-			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
 
 			require.Equal(t, http.StatusNoContent, recorder.Code)
 			require.True(t, called)
@@ -111,7 +111,7 @@ func TestIdleKeepaliveMarkerOnlyUpgradesGetPing(t *testing.T) {
 		{name: "get data", method: http.MethodGet, path: "/api/v1/projects"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			request := httptest.NewRequest(tc.method, tc.path, nil)
+			request := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
 			request.Header.Set(IdleKeepaliveHeader, "1")
 			require.Equal(t, tc.want, isMarkedIdleKeepalive(request))
 		})
@@ -133,7 +133,7 @@ func TestServerIdleAdmissionRunsAfterRequestValidation(t *testing.T) {
 		admission := &rejectingIdleAdmission{}
 		recorder := httptest.NewRecorder()
 		newServer(t, admission).Handler().ServeHTTP(
-			recorder, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
+			recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil))
 
 		require.Equal(t, http.StatusUnauthorized, recorder.Code)
 		require.Zero(t, admission.calls.Load())
@@ -141,7 +141,7 @@ func TestServerIdleAdmissionRunsAfterRequestValidation(t *testing.T) {
 
 	t.Run("cross origin socket request", func(t *testing.T) {
 		admission := &rejectingIdleAdmission{}
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 		request.Header.Set("Origin", "https://attacker.example")
 		recorder := httptest.NewRecorder()
 		newServer(t, admission).Handler().ServeHTTP(recorder, request)
@@ -152,7 +152,7 @@ func TestServerIdleAdmissionRunsAfterRequestValidation(t *testing.T) {
 
 	t.Run("cross origin preflight", func(t *testing.T) {
 		admission := &rejectingIdleAdmission{}
-		request := httptest.NewRequest(http.MethodOptions, "/api/v1/projects", nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, "/api/v1/projects", nil)
 		request.Header.Set("Origin", "https://attacker.example")
 		request.Header.Set("Access-Control-Request-Method", http.MethodPost)
 		recorder := httptest.NewRecorder()
@@ -170,7 +170,7 @@ func TestServerIdleAdmissionRunsAfterRequestValidation(t *testing.T) {
 			Origin: "https://kata.example",
 		})
 		require.NoError(t, err)
-		request := httptest.NewRequest(http.MethodOptions, "https://kata.example/api/v1/ping", nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, "https://kata.example/api/v1/ping", nil)
 		request.Host = "kata.example"
 		request.Header.Set("Origin", "https://attacker.example")
 		request.Header.Set("Access-Control-Request-Method", http.MethodGet)
@@ -190,7 +190,7 @@ func TestServerIdleAdmissionRunsAfterRequestValidation(t *testing.T) {
 			Origin: "https://kata.example",
 		})
 		require.NoError(t, err)
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 		request.Host = "attacker.example"
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, request)
@@ -209,7 +209,7 @@ func TestServerIdleAdmissionRunsAfterRequestValidation(t *testing.T) {
 			RequireBrowserSession: true,
 		})
 		require.NoError(t, err)
-		request := httptest.NewRequest(http.MethodGet, "https://kata.example/api/v1/projects", nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://kata.example/api/v1/projects", nil)
 		request.Host = "kata.example"
 		request.Header.Set("Origin", "https://kata.example")
 		recorder := httptest.NewRecorder()
@@ -221,7 +221,7 @@ func TestServerIdleAdmissionRunsAfterRequestValidation(t *testing.T) {
 
 	t.Run("validated bearer request", func(t *testing.T) {
 		admission := &rejectingIdleAdmission{}
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 		request.Header.Set("Authorization", "Bearer expected-token")
 		recorder := httptest.NewRecorder()
 		newServer(t, admission).Handler().ServeHTTP(recorder, request)

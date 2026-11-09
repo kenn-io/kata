@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationsigning"
@@ -54,7 +55,7 @@ import (
 
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "manage the kata daemon"}
-	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonLocateCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd(), daemonDiagnoseCmd(), daemonRecoverCmd())
+	cmd.AddCommand(daemonLocalEmbeddingsCmd(), daemonStartCmd(), daemonStatusCmd(), daemonLocateCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd(), daemonDiagnoseCmd(), daemonRecoverCmd())
 	return cmd
 }
 
@@ -255,6 +256,7 @@ func daemonStartCmd() *cobra.Command {
 		listen           string
 		insecureReadonly bool
 		foreground       bool
+		checkStartup     bool
 		noAutoToken      bool
 	)
 	cmd := &cobra.Command{
@@ -271,12 +273,17 @@ func daemonStartCmd() *cobra.Command {
 					ExitCode: ExitUsage,
 				}
 			}
+			if checkStartup {
+				_, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken)
+				return err
+			}
 			if foreground {
 				ctx, cancel := context.WithCancel(cmd.Context())
 				defer cancel()
+				daemonProcessEntered = true
 				return runDaemonForeground(ctx, listen, insecureReadonly, noAutoToken)
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
+			out, err := startDetachedDaemonLocked(cmd.Context(), listen, insecureReadonly, noAutoToken)
 			if err != nil {
 				return err
 			}
@@ -299,6 +306,8 @@ func daemonStartCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&checkStartup, "check-startup", false, "check startup settings")
+	_ = cmd.Flags().MarkHidden("check-startup")
 	cmd.Flags().BoolVar(&foreground, "foreground", false,
 		"run the daemon in the current process instead of starting it in the background")
 	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
@@ -310,6 +319,22 @@ func daemonStartCmd() *cobra.Command {
 		"permit unauthenticated GETs on non-loopback TCP when no token "+
 			"is configured (DEV ONLY — production must use a token).")
 	return cmd
+}
+
+// startDetachedDaemonLocked holds the start lock an in-place restart holds
+// until its replacement is ready, so an explicit start adopts that replacement
+// instead of launching into the handoff. Restart's own startup already holds it.
+func startDetachedDaemonLocked(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
+	ns, err := daemonruntime.NewNamespace()
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(ctx)
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	defer release()
+	return startDetachedDaemon(ctx, listen, insecureReadonly, noAutoToken)
 }
 
 func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
@@ -381,7 +406,7 @@ func stopIdleShutdownDaemon(ctx context.Context, ns *daemonruntime.Namespace, re
 	if err := daemonruntime.SignalDaemonStop(rec, ns.DBHash); err != nil {
 		return fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
 	}
-	if err := waitForDaemonProcesses(ctx, []int{rec.PID}, daemonRestartProcessWaitTimeout); err != nil {
+	if err := waitForDaemonProcesses(ctx, []int{rec.PID}, daemonRestartProcessWaitTimeout, kitdaemon.ProcessAlive); err != nil {
 		return fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
 	}
 	return nil
@@ -465,16 +490,19 @@ func defaultLaunchDetachedDaemon(
 		childExited.Store(true)
 		exited <- err
 	}
+	var ownerLocks []string
+	if dsn, dsnErr := config.KataDSN(ctx); dsnErr == nil {
+		ownerLocks = daemonruntime.StoreOwnerLockPaths(dataDir, dsn)
+	}
+	if err := daemonruntime.RefuseForeignStoreOwner(ctx, dataDir, ownerLocks); err != nil {
+		return daemonStartOutput{}, err
+	}
 	if err := kitdaemon.StartDetached(ctx, opts); err != nil {
 		return daemonStartOutput{}, fmt.Errorf("start daemon: %w", err)
 	}
 
 	var record kitdaemon.RuntimeRecord
 	adoptedConcurrentDaemon := false
-	var ownerLocks []string
-	if dsn, dsnErr := config.KataDSN(ctx); dsnErr == nil {
-		ownerLocks = daemonruntime.StoreOwnerLockPaths(dataDir, dsn)
-	}
 	// The child may first wait for a replaced daemon to release the store.
 	err = client.WaitForDaemonStartup(ctx, ownerLocks, daemonOwnerLockWait+5*time.Second, exited, func(context.Context) (bool, error) {
 		var ok bool
@@ -640,7 +668,8 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			out.Selected = &selected
 			for _, r := range recs {
-				if daemonruntime.RuntimeProcessAlive(r) {
+				// Match discovery, which can select a record controls skip.
+				if daemonruntime.RuntimeRecordWorthProbing(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
 						PID:           r.PID,
 						Version:       daemonRuntimeVersion(r),
@@ -648,6 +677,7 @@ func daemonStatusCmd() *cobra.Command {
 						WebURL:        r.Metadata["web_origin"],
 						DBPath:        r.Metadata["db_path"],
 						StartedAt:     r.StartedAt,
+						MCP:           r.Metadata["mcp"],
 						ConfigSources: runtimeConfigSources(r.Metadata),
 					})
 				}
@@ -658,9 +688,12 @@ func daemonStatusCmd() *cobra.Command {
 				if len(out.Daemons) > 0 {
 					status = "running"
 				}
-				webURL := ""
+				daemonFields := ""
 				if len(out.Daemons) == 1 && out.Daemons[0].WebURL != "" {
-					webURL = " web_url=" + out.Daemons[0].WebURL
+					daemonFields = " web_url=" + out.Daemons[0].WebURL
+				}
+				if len(out.Daemons) == 1 && out.Daemons[0].MCP != "" {
+					daemonFields += " mcp=" + out.Daemons[0].MCP
 				}
 				message := ""
 				if selected.Message != "" {
@@ -669,7 +702,7 @@ func daemonStatusCmd() *cobra.Command {
 				if selected.RootSigning != nil {
 					message += " root_signing=unavailable"
 				}
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s selected_state=%s selected_profile=%s%s\n", status, webURL, selected.State, agentValue(selected.Profile), message)
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s selected_state=%s selected_profile=%s%s\n", status, daemonFields, selected.State, agentValue(selected.Profile), message)
 				return err
 			case outputJSON:
 				return emitJSON(cmd.OutOrStdout(), out)
@@ -695,6 +728,9 @@ func daemonStatusCmd() *cobra.Command {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "kata running at %s\n", daemonStatusAddress(d.Address))
 				if d.WebURL != "" {
 					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  web UI:  %s\n", d.WebURL)
+				}
+				if d.MCP != "" {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  MCP:     %s\n", d.MCP)
 				}
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  pid:     %d\n", d.PID)
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  version: %s\n", d.Version)
@@ -727,6 +763,7 @@ type daemonStatusEntry struct {
 	WebURL        string            `json:"web_url,omitempty"`
 	DBPath        string            `json:"db_path"`
 	StartedAt     time.Time         `json:"started_at"`
+	MCP           string            `json:"mcp,omitempty"` // "serving" or "unavailable" when [mcp] is enabled
 	ConfigSources map[string]string `json:"config_sources,omitempty"`
 }
 
@@ -753,8 +790,10 @@ func daemonRuntimeVersion(r kitdaemon.RuntimeRecord) string {
 func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) {
 	for _, record := range records {
 		switch kitdaemon.RuntimeProcessScope(record) {
-		case kitdaemon.ProcessScopeForeign, kitdaemon.ProcessScopeUnknown:
-			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (another PID namespace or unverifiable identity)\n", record.PID)
+		case kitdaemon.ProcessScopeForeign:
+			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (another PID namespace)\n", record.PID)
+		case kitdaemon.ProcessScopeUnknown:
+			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (unverifiable identity)\n", record.PID)
 		}
 	}
 }
@@ -762,7 +801,7 @@ func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) {
 func daemonStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "request a graceful shutdown of the running daemon",
+		Short: "gracefully stop the running daemon and wait until it stops serving",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
@@ -776,7 +815,6 @@ func daemonStopCmd() *cobra.Command {
 				return err
 			}
 			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
-			mode := currentOutputMode()
 			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
 				if !daemonruntime.RuntimeProcessAlive(r) {
@@ -785,17 +823,21 @@ func daemonStopCmd() *cobra.Command {
 				// SignalDaemonStop is platform-specific: SIGTERM on Unix,
 				// a named stop event on Windows.
 				if err := daemonruntime.SignalDaemonStop(r, ns.DBHash); err != nil {
-					return &cliError{
-						Kind: kindInternal, ExitCode: ExitInternal,
-						Message: fmt.Sprintf("stop pid %d: %v", r.PID, err),
-					}
+					return &cliError{Kind: kindInternal, ExitCode: ExitInternal, Message: fmt.Sprintf("stop pid %d: %v", r.PID, err)}
 				}
 				pids = append(pids, r.PID)
-				if mode == outputHuman {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", r.PID)
-				}
 			}
-			switch mode {
+			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout, func(pid int) bool {
+				_, ok := liveDaemonRecord(ns.DataDir, pid)
+				return ok
+			}); err != nil {
+				return err
+			}
+			switch currentOutputMode() {
+			case outputHuman:
+				for _, pid := range pids {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", pid)
+				}
 			case outputAgent:
 				switch len(pids) {
 				case 0:
@@ -824,6 +866,20 @@ type daemonStopOutput struct {
 	PIDs    []int  `json:"pids"`
 }
 
+// unsupportedDaemonRestartError explains how to replace a daemon that cannot
+// accept an installed-executable restart request.
+func unsupportedDaemonRestartError(rec kitdaemon.RuntimeRecord) error {
+	note := ""
+	if endpoint := rec.Endpoint(); !endpoint.IsUnix() && endpoint.Address != "" {
+		note = " (it was listening on " + endpoint.Address + ")"
+	}
+	reason := "is from an older kata release; as a one-time step,"
+	if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "0" {
+		reason = "could not identify its installed executable at startup, so it cannot restart itself;"
+	}
+	return fmt.Errorf("daemon pid %d %s run 'kata daemon stop', then 'kata daemon start' in its original host shell or service with its original startup options%s", rec.PID, reason, note)
+}
+
 func daemonRestartCmd() *cobra.Command {
 	var (
 		listen           string
@@ -837,32 +893,39 @@ func daemonRestartCmd() *cobra.Command {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
-			startup, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken)
-			if err != nil {
-				return fmt.Errorf("restart: validate replacement: %w", err)
-			}
-			ns := startup.Namespace
-			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+			ns, err := daemonruntime.NewNamespace()
 			if err != nil {
 				return err
 			}
-			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
-			pids := make([]int, 0, len(recs))
-			for _, rec := range recs {
-				if !daemonruntime.RuntimeProcessAlive(rec) {
-					continue
+			running, release, err := lockLiveDaemons(cmd.Context(), ns, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			defer release()
+			if err := requireRestartable(running); err != nil {
+				return err
+			}
+			pids := make([]int, 0, len(running))
+			var out daemonStartOutput
+			if len(running) == 0 {
+				if _, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken); err != nil {
+					return fmt.Errorf("restart: validate replacement: %w", err)
 				}
-				if err := daemonruntime.SignalDaemonStop(rec, ns.DBHash); err != nil {
-					return fmt.Errorf("restart: stop pid %d: %w", rec.PID, err)
+				out, err = startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
+				if err != nil {
+					return err
 				}
-				pids = append(pids, rec.PID)
-			}
-			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
-				return err
-			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
-			if err != nil {
-				return err
+			} else {
+				var flags []string
+				for _, name := range []string{"listen", "insecure-readonly", "no-auto-token"} {
+					if f := cmd.Flags().Lookup(name); f.Changed {
+						flags = append(flags, "--"+name+"="+f.Value.String())
+					}
+				}
+				pids, out, err = restartRunningDaemons(cmd.Context(), ns, running, flags)
+				if err != nil {
+					return err
+				}
 			}
 			switch currentOutputMode() {
 			case outputJSON:
@@ -908,6 +971,7 @@ func daemonRestartCmd() *cobra.Command {
 type daemonStartupPreflight struct {
 	Config         *config.DaemonConfig
 	Web            config.WebConfig
+	MCPToken       string
 	Listen         string
 	Namespace      *daemonruntime.Namespace
 	Endpoint       kitdaemon.Endpoint
@@ -944,6 +1008,10 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		return daemonStartupPreflight{}, err
 	}
 	endpoint, err := chooseEndpoint(ns, listen)
+	if err != nil {
+		return daemonStartupPreflight{}, err
+	}
+	mcpToken, err := resolveDaemonMCPStartup(ctx, dcfg, endpoint)
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
@@ -1011,6 +1079,7 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	return daemonStartupPreflight{
 		Config:         dcfg,
 		Web:            dcfg.Web,
+		MCPToken:       mcpToken,
 		Listen:         listen,
 		Namespace:      ns,
 		Endpoint:       endpoint,
@@ -1034,14 +1103,14 @@ type daemonRestartOutput struct {
 	WebURL  string `json:"web_url,omitempty"`
 }
 
-func waitForDaemonProcesses(ctx context.Context, pids []int, timeout time.Duration) error {
+func waitForDaemonProcesses(ctx context.Context, pids []int, timeout time.Duration, alive func(int) bool) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 
 	for {
-		allStopped := !slices.ContainsFunc(pids, kitdaemon.ProcessAlive)
+		allStopped := !slices.ContainsFunc(pids, alive)
 		if allStopped {
 			return nil
 		}
@@ -1179,7 +1248,7 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
 	restart := newDaemonRestart(os.Stderr)
 	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart); err != nil {
-		return err
+		return reportRestartFailure(startedForRestartReply, err)
 	}
 	return restart.exec(ctx)
 }
@@ -1238,6 +1307,9 @@ func runDaemonProcess(
 	// does not block startup and its socket sits under a different runtime dir.
 	// The kernel file lock is visible across namespaces.
 	ownerLocks := daemonruntime.StoreOwnerLockPaths(ns.DataDir, startup.DBPath)
+	if err := daemonruntime.RefuseForeignStoreOwner(ctx, ns.DataDir, ownerLocks); err != nil {
+		return err
+	}
 	ownerCtx, ownerCancel := context.WithTimeout(ctx, daemonOwnerLockWait)
 	releaseOwner, err := daemonruntime.AcquireStoreOwnerLock(ownerCtx, ownerLocks)
 	ownerCancel()
@@ -1309,9 +1381,13 @@ func runDaemonProcess(
 	}
 	var acquireHookDrain hooks.AcquireActivity
 	var waitableDrainAdmission activity.WaitableAdmission
+	var idleHealth func() daemon.IdleSnapshot
+	var idleAdmission daemon.IdleForegroundAdmission
 	if idleController != nil {
 		acquireHookDrain = idleController.DrainAdmission()
 		waitableDrainAdmission = idleController.WaitableDrainAdmission()
+		idleHealth = idleController.Snapshot
+		idleAdmission = idleController
 	}
 
 	disp, daemonLog, err := setupHooks(
@@ -1323,7 +1399,8 @@ func runDaemonProcess(
 	}
 	defer func() {
 		if closeDependencies && !hooksClosed {
-			fallbackCtx, fallbackCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			// ctx may already be canceled; shutdown still gets its own budget.
+			fallbackCtx, fallbackCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer fallbackCancel()
 			_ = disp.Shutdown(fallbackCtx)
 		}
@@ -1384,9 +1461,7 @@ func runDaemonProcess(
 		rec.Metadata["config_"+key+"_source"] = source
 	}
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
-	if restart != nil {
-		rec.Metadata[daemonruntime.RuntimeRestartMetadataKey] = "1"
-	}
+	maps.Copy(rec.Metadata, restart.metadata())
 
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
@@ -1422,7 +1497,7 @@ func runDaemonProcess(
 		var restartSignals <-chan os.Signal
 		restartSignals, restartCleanup = installRestartSource(ctx, ns.DBHash)
 		workers.Go(func() {
-			restart.watch(ctx, restartSignals, shutdownTrigger.Call)
+			restart.watch(ctx, restartSignals, idleAdmission, func() error { return restart.accept(ctx, ns.DataDir, rec) }, daemonLog, shutdownTrigger.Call)
 		})
 	}
 	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)
@@ -1436,7 +1511,7 @@ func runDaemonProcess(
 	federationConfigHealth := startFederationConfigReconciler(
 		ctx, workers, waitableDrainAdmission, dcfg, store, federationWake, func(event db.Event, fork activity.Admission) {
 			publisher.EventFrom(event.ProjectID, event, fork)
-		}, daemonLog,
+		}, publisher.Reset, daemonLog,
 	)
 	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
 	gitHubSyncProgress := githubsync.NewProgressTracker()
@@ -1523,12 +1598,6 @@ func runDaemonProcess(
 		}
 	})
 	startExternalRootEventWake(ctx, workers, store, broadcaster, externalRootWake)
-	var idleHealth func() daemon.IdleSnapshot
-	var idleAdmission daemon.IdleForegroundAdmission
-	if idleController != nil {
-		idleHealth = idleController.Snapshot
-		idleAdmission = idleController
-	}
 
 	var signingVerifier *federationsigning.Verifier
 	if dcfg.Federation.Signing.ExternalURL != "" {
@@ -1543,7 +1612,36 @@ func runDaemonProcess(
 	if err != nil {
 		return fmt.Errorf("build embedded web handler: %w", err)
 	}
+	docbankClient := docbank.New(dcfg.Docbank)
+	var mcpHandler http.Handler
+	if dcfg.MCP.Enabled {
+		mcpHandler, err = newDaemonMCPHandler(ctx, store, dcfg.MCP, startup.MCPToken, runtimeEndpoint, dcfg.Auth)
+		rec.Metadata["mcp"] = "serving"
+		if err != nil {
+			mcpHandler = daemonMCPUnavailableHandler(err)
+			rec.Metadata["mcp"] = "unavailable"
+		}
+	}
+	localSetup := &localEmbeddingsSetup{
+		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
+		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
+	}
+	if pg, ok := store.(*pgstore.Store); ok {
+		localSetup.vectorReady = func(ctx context.Context) error {
+			idx, err := vector.OpenPostgres(ctx, pg.DB)
+			if err != nil {
+				return fmt.Errorf("install pgvector in this daemon's database, then try again: %w", err)
+			}
+			return idx.Close()
+		}
+	}
+
+	// Start the Events worker only after the last fallible startup step, so an
+	// earlier failure cannot leave it running past the store closing.
+	mcpEvents, mcpEventsReason := startDaemonMCPEvents(ctx, workers, dcfg, ns.DBHash, store, broadcaster, daemonLog)
 	srv := daemon.NewServer(daemon.ServerConfig{
+		LocalEmbeddings:           localSetup,
+		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,
 		DB:                        store,
@@ -1553,43 +1651,50 @@ func runDaemonProcess(
 		Endpoint:                  &endpoint,
 		Hooks:                     disp,
 		Broadcaster:               broadcaster,
+		MCPEvents:                 mcpEvents,
+		MCPEventsDisabledReason:   mcpEventsReason,
 		FederationWake:            federationWake,
-		EmbeddingWake:             embeddingWake,
-		FederationCatalog:         append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		WebDaemons:                append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		ActiveWebDaemon:           dcfg.ActiveDaemon,
-		GitHubSyncFetcher:         gitHubSyncFetcher,
-		GitHubSyncConfig:          dcfg.GitHubSync,
-		GitHubSyncWake:            gitHubSyncWake,
-		GitHubSyncProgress:        gitHubSyncProgress,
-		NotionSyncFetcher:         notionSyncFetcher,
-		NotionSyncConfig:          dcfg.NotionSync,
-		NotionSyncWake:            notionSyncWake,
-		NotionSyncProgress:        notionSyncProgress,
-		TickTickSyncFetcher:       tickTickSyncFetcher,
-		TickTickSyncConfig:        dcfg.TickTickSync,
-		TickTickSyncWake:          tickTickSyncWake,
-		TickTickSyncProgress:      tickTickSyncProgress,
-		PlaneSyncFetcher:          planeSyncFetcher,
-		PlaneSyncConfig:           dcfg.PlaneSync,
-		PlaneSyncWake:             planeSyncWake,
-		PlaneSyncProgress:         planeSyncProgress,
-		LinearSyncFetcher:         linearSyncFetcher,
-		LinearSyncConfig:          dcfg.LinearSync,
-		LinearSyncWake:            linearSyncWake,
-		LinearSyncProgress:        linearSyncProgress,
-		TwentySyncFetcher:         twentySyncFetcher,
-		TwentySyncConfig:          dcfg.TwentySync,
-		TwentySyncWake:            twentySyncWake,
-		TwentySyncProgress:        twentySyncProgress,
-		TodoistSyncFetcher:        todoistSyncFetcher,
-		TodoistSyncConfig:         dcfg.TodoistSync,
-		TodoistSyncWake:           todoistSyncWake,
-		TodoistSyncProgress:       todoistSyncProgress,
-		ExternalRootRegistry:      externalRootRegistry,
-		ExternalRootService:       externalRootService,
-		ExternalRootReconciler:    externalRootReconciler,
-		ExternalRootWake:          externalRootWake,
+		FederationPullOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
+		},
+		EmbeddingWake:          embeddingWake,
+		FederationCatalog:      append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		WebDaemons:             append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		ActiveWebDaemon:        dcfg.ActiveDaemon,
+		GitHubSyncFetcher:      gitHubSyncFetcher,
+		GitHubSyncConfig:       dcfg.GitHubSync,
+		GitHubSyncWake:         gitHubSyncWake,
+		GitHubSyncProgress:     gitHubSyncProgress,
+		NotionSyncFetcher:      notionSyncFetcher,
+		NotionSyncConfig:       dcfg.NotionSync,
+		NotionSyncWake:         notionSyncWake,
+		NotionSyncProgress:     notionSyncProgress,
+		TickTickSyncFetcher:    tickTickSyncFetcher,
+		TickTickSyncConfig:     dcfg.TickTickSync,
+		TickTickSyncWake:       tickTickSyncWake,
+		TickTickSyncProgress:   tickTickSyncProgress,
+		PlaneSyncFetcher:       planeSyncFetcher,
+		PlaneSyncConfig:        dcfg.PlaneSync,
+		PlaneSyncWake:          planeSyncWake,
+		PlaneSyncProgress:      planeSyncProgress,
+		LinearSyncFetcher:      linearSyncFetcher,
+		LinearSyncConfig:       dcfg.LinearSync,
+		LinearSyncWake:         linearSyncWake,
+		LinearSyncProgress:     linearSyncProgress,
+		TwentySyncFetcher:      twentySyncFetcher,
+		TwentySyncConfig:       dcfg.TwentySync,
+		TwentySyncWake:         twentySyncWake,
+		TwentySyncProgress:     twentySyncProgress,
+		TodoistSyncFetcher:     todoistSyncFetcher,
+		TodoistSyncConfig:      dcfg.TodoistSync,
+		TodoistSyncWake:        todoistSyncWake,
+		TodoistSyncProgress:    todoistSyncProgress,
+		ExternalRootRegistry:   externalRootRegistry,
+		ExternalRootService:    externalRootService,
+		ExternalRootReconciler: externalRootReconciler,
+		ExternalRootWake:       externalRootWake,
+		FederationPushPending:  federation.DirectSpokePushPending(store),
+		FederationHubClient:    federation.CredentialHTTPClient,
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
 			SiblingBurstWindow:  closeThrottleWindow,
@@ -1600,6 +1705,8 @@ func runDaemonProcess(
 		WebHandler:             webHandler,
 		InsecureReadonly:       insecureReadonly,
 		Embedder:               embedder,
+		Docbank:                docbankClient,
+		DocbankFolder:          dcfg.Docbank.Folder,
 		VectorIndex:            vectorIndex,
 		ReconcilerHealth:       reconcilerHealth,
 		FederationConfigHealth: federationConfigHealth,
@@ -1666,7 +1773,7 @@ func runDaemonProcess(
 
 	var federationIngressAddress string
 	if dcfg.Federation.Ingress.Enabled {
-		ingress, err := net.Listen("tcp", dcfg.Federation.Ingress.Listen)
+		ingress, err := new(net.ListenConfig).Listen(ctx, "tcp", dcfg.Federation.Ingress.Listen)
 		if err != nil {
 			return fmt.Errorf("listen for restricted federation: %w", err)
 		}
@@ -1997,7 +2104,7 @@ func preflightEmbeddingStartup(
 	if !ec.Enabled() {
 		return nil, "", nil
 	}
-	embedder, err := embedding.New(embedding.Config{
+	cfg := embedding.Config{
 		BaseURL:             ec.BaseURL,
 		Model:               ec.Model,
 		Credential:          ec.ResolveCredential(),
@@ -2011,7 +2118,15 @@ func preflightEmbeddingStartup(
 		BatchSize:           ec.BatchSize,
 		Timeout:             time.Duration(ec.TimeoutSeconds) * time.Second,
 		TrustPrivateNetwork: ec.TrustPrivateNetwork,
-	})
+	}
+	if ec.UsesLocal() {
+		cfg.Endpoint = func(ctx context.Context) (string, error) {
+			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
+				return false, errors.New("run kata daemon local-embeddings to approve the download")
+			})
+		}
+	}
+	embedder, err := embedding.New(cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
 	}

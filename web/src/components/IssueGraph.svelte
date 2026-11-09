@@ -2,7 +2,6 @@
   import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
   import { FilterDropdown } from '@kenn-io/kit-ui'
-  import { SvelteMap } from 'svelte/reactivity'
   import {
     Background,
     BackgroundVariant,
@@ -14,16 +13,13 @@
   } from '@xyflow/svelte'
   import '@xyflow/svelte/dist/style.css'
 
-  import type {
-    KataReachableGraphEdge,
-    KataReachableGraphResponse,
-    KataTaskSummary,
-  } from '../lib/kata/types'
+  import type { KataReachableGraphResponse, KataTaskSummary } from '../lib/kata/types'
   import {
     recordKataGraphDebugEvent,
     resetKataGraphDebug,
     setKataGraphDebugGraph,
   } from '../lib/graph/debug'
+  import { filterSnapshotGraph } from '../lib/graph/snapshot'
   import GraphIssueNode from './GraphIssueNode.svelte'
   import {
     buildKataReachableGraph,
@@ -331,61 +327,6 @@
     otherUID: string
   }): string {
     return `${ref.side}:${ref.kind}:${ref.uid}:${ref.otherUID}`
-  }
-
-  function graphDistanceByUID(
-    sourceUID: string,
-    edges: readonly KataReachableGraphEdge[],
-  ): ReadonlyMap<string, number> {
-    const distanceByUID = new SvelteMap<string, number>([[sourceUID, 0]])
-    const queue = [sourceUID]
-    while (queue.length > 0) {
-      const uid = queue.shift()!
-      const distance = distanceByUID.get(uid) ?? 0
-      for (const edge of edges) {
-        const adjacentUID =
-          edge.from_uid === uid ? edge.to_uid : edge.to_uid === uid ? edge.from_uid : null
-        if (!adjacentUID || distanceByUID.has(adjacentUID)) continue
-        distanceByUID.set(adjacentUID, distance + 1)
-        queue.push(adjacentUID)
-      }
-    }
-    return distanceByUID
-  }
-
-  function filterSnapshotGraph(
-    snapshot: KataReachableGraphResponse,
-    sourceUID: string,
-    depth: KataGraphDepthLimit,
-    shouldHideDone: boolean,
-  ): KataReachableGraphResponse {
-    const maxDepth = depth === 'full' ? Number.POSITIVE_INFINITY : Number(depth)
-    const hiddenUIDs = new Set(
-      snapshot.nodes
-        .filter((node) => shouldHideDone && node.uid !== sourceUID && node.status === 'closed')
-        .map((node) => node.uid),
-    )
-    const traversableEdges = snapshot.edges.filter(
-      (edge) => !hiddenUIDs.has(edge.from_uid) && !hiddenUIDs.has(edge.to_uid),
-    )
-    const distanceByUID = graphDistanceByUID(sourceUID, traversableEdges)
-    const nodes = snapshot.nodes.filter((node) => {
-      if (hiddenUIDs.has(node.uid)) return false
-      const distance = distanceByUID.get(node.uid)
-      if (distance === undefined || distance > maxDepth) return false
-      return true
-    })
-    const visibleUIDs = new Set(nodes.map((node) => node.uid))
-    return {
-      ...snapshot,
-      depth,
-      hide_done: shouldHideDone,
-      nodes,
-      edges: traversableEdges.filter(
-        (edge) => visibleUIDs.has(edge.from_uid) && visibleUIDs.has(edge.to_uid),
-      ),
-      unresolved_refs: snapshot.unresolved_refs.filter((ref) => visibleUIDs.has(ref.other_uid)),
-    }
   }
 
   function selectNodeID(uid: string): void {

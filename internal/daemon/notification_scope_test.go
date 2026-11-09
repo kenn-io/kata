@@ -90,7 +90,7 @@ func TestNotifyBufferedProjectionRejectsLateDetach(t *testing.T) {
 	cfg.Auth.Token = "bootstrap-token"
 	d := daemon.NewServer(cfg)
 	t.Cleanup(func() { _ = d.Close() })
-	req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", p.ID, source.ShortID), nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", p.ID, source.ShortID), nil)
 	req.Header.Set("Authorization", "Bearer worker-token")
 	response := httptest.NewRecorder()
 	d.Handler().ServeHTTP(response, req)
@@ -167,7 +167,7 @@ func checkNotifySSERejectsLatePointerDetach(t *testing.T, message string) {
 	t.Cleanup(func() { _ = d.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
-	req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/events/stream?project_id=%d&after_id=%d", p.ID, out.Event.ID-1), nil).WithContext(ctx)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", fmt.Sprintf("/api/v1/events/stream?project_id=%d&after_id=%d", p.ID, out.Event.ID-1), nil).WithContext(ctx)
 	req.Header.Set("Authorization", "Bearer worker-token")
 	req.Header.Set("Accept", "text/event-stream")
 	response := httptest.NewRecorder()

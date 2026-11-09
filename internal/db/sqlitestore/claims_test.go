@@ -941,7 +941,7 @@ func TestPendingClaimRequestInsertIsDurable(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = reopened.Close() })
 	var got db.PendingClaimRequest
-	require.NoError(t, reopened.QueryRow(`
+	require.NoError(t, reopened.QueryRowContext(t.Context(), `
 		SELECT request_uid, project_id, issue_id, issue_uid, holder, holder_instance_uid, client_kind, claim_kind,
 		       ttl_seconds, purpose, requested_at
 		  FROM pending_claim_requests
@@ -980,7 +980,7 @@ func TestPendingClaimRequestDuplicateReturnsExisting(t *testing.T) {
 	assert.Equal(t, first.RequestUID, second.RequestUID)
 	assert.Equal(t, first.RequestedAt, second.RequestedAt)
 	var n int
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM pending_claim_requests WHERE issue_uid = ? AND rejected_at IS NULL AND resolved_at IS NULL`,
 		issue.UID,
 	).Scan(&n))
@@ -1803,7 +1803,8 @@ func holdClaimTestWriter(t *testing.T, d *sqlitestore.Store) {
 	conn, err := d.Conn(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, rollbackErr := conn.ExecContext(context.Background(), "ROLLBACK")
+		// t.Context() is already canceled when cleanup runs.
+		_, rollbackErr := conn.ExecContext(context.WithoutCancel(t.Context()), "ROLLBACK")
 		assert.NoError(t, rollbackErr)
 		assert.NoError(t, conn.Close())
 	})
@@ -1973,7 +1974,7 @@ func assertClaimReleasedAndNotLive(t *testing.T, d *sqlitestore.Store, claimID i
 	assertClaimReleased(t, d, claimID)
 
 	var liveCount int
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM issue_claims WHERE issue_uid = ? AND released_at IS NULL`, issueUID,
 	).Scan(&liveCount))
 	assert.Equal(t, 0, liveCount)
@@ -1982,7 +1983,7 @@ func assertClaimReleasedAndNotLive(t *testing.T, d *sqlitestore.Store, claimID i
 func assertClaimReleased(t *testing.T, d *sqlitestore.Store, claimID int64) {
 	t.Helper()
 	var released int
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT released_at IS NOT NULL FROM issue_claims WHERE id = ?`, claimID,
 	).Scan(&released))
 	assert.Equal(t, 1, released)
@@ -1991,7 +1992,7 @@ func assertClaimReleased(t *testing.T, d *sqlitestore.Store, claimID int64) {
 func assertReleaseReason(t *testing.T, d *sqlitestore.Store, claimID int64, want string) {
 	t.Helper()
 	var got string
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT release_reason FROM issue_claims WHERE id = ?`, claimID,
 	).Scan(&got))
 	assert.Equal(t, want, got)
@@ -2000,7 +2001,7 @@ func assertReleaseReason(t *testing.T, d *sqlitestore.Store, claimID int64, want
 func assertPendingResolved(t *testing.T, d *sqlitestore.Store, requestUID string) {
 	t.Helper()
 	var resolved int
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT resolved_at IS NOT NULL FROM pending_claim_requests WHERE request_uid = ?`, requestUID,
 	).Scan(&resolved))
 	assert.Equal(t, 1, resolved)
@@ -2009,7 +2010,7 @@ func assertPendingResolved(t *testing.T, d *sqlitestore.Store, requestUID string
 func assertPendingUnresolved(t *testing.T, d *sqlitestore.Store, requestUID string) {
 	t.Helper()
 	var resolved, rejected int
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT resolved_at IS NOT NULL, rejected_at IS NOT NULL
 		   FROM pending_claim_requests WHERE request_uid = ?`, requestUID,
 	).Scan(&resolved, &rejected))
@@ -2020,7 +2021,7 @@ func assertPendingUnresolved(t *testing.T, d *sqlitestore.Store, requestUID stri
 func assertLiveClaimCount(t *testing.T, d *sqlitestore.Store, issueUID string, want int) {
 	t.Helper()
 	var got int
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM issue_claims WHERE issue_uid = ? AND released_at IS NULL`, issueUID,
 	).Scan(&got))
 	assert.Equal(t, want, got)
@@ -2029,7 +2030,7 @@ func assertLiveClaimCount(t *testing.T, d *sqlitestore.Store, issueUID string, w
 func assertLiveClaimHolder(t *testing.T, d *sqlitestore.Store, issueUID, want string) {
 	t.Helper()
 	var got string
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT holder FROM issue_claims WHERE issue_uid = ? AND released_at IS NULL`, issueUID,
 	).Scan(&got))
 	assert.Equal(t, want, got)
@@ -2041,7 +2042,7 @@ func assertLiveClaimRevisionAndExpiry(t *testing.T, d *sqlitestore.Store, issueU
 		revision int64
 		expires  time.Time
 	)
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT revision, expires_at FROM issue_claims WHERE issue_uid = ? AND released_at IS NULL`, issueUID,
 	).Scan(&revision, &expires))
 	assert.Equal(t, wantRevision, revision)
@@ -2051,7 +2052,7 @@ func assertLiveClaimRevisionAndExpiry(t *testing.T, d *sqlitestore.Store, issueU
 func assertLiveClaimUpdatedAt(t *testing.T, d *sqlitestore.Store, issueUID string, want time.Time) {
 	t.Helper()
 	var got time.Time
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT updated_at FROM issue_claims WHERE issue_uid = ? AND released_at IS NULL`, issueUID,
 	).Scan(&got))
 	assert.True(t, got.Equal(want), got)
@@ -2060,7 +2061,7 @@ func assertLiveClaimUpdatedAt(t *testing.T, d *sqlitestore.Store, issueUID strin
 func assertLiveReleaseReasonNil(t *testing.T, d *sqlitestore.Store, issueUID string) {
 	t.Helper()
 	var reason sql.NullString
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT release_reason FROM issue_claims WHERE issue_uid = ? AND released_at IS NULL`, issueUID,
 	).Scan(&reason))
 	assert.False(t, reason.Valid)
@@ -2069,7 +2070,7 @@ func assertLiveReleaseReasonNil(t *testing.T, d *sqlitestore.Store, issueUID str
 func liveClaimID(t *testing.T, d *sqlitestore.Store, issueUID string) int64 {
 	t.Helper()
 	var id int64
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT id FROM issue_claims WHERE issue_uid = ? AND released_at IS NULL`, issueUID,
 	).Scan(&id))
 	return id
@@ -2105,7 +2106,7 @@ func cachedClaim(
 func latestClaimViolationPayload(t *testing.T, d *sqlitestore.Store) map[string]any {
 	t.Helper()
 	var raw string
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT payload
 		  FROM events
 		 WHERE type = 'claim.violated'

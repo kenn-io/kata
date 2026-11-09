@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,7 +18,7 @@ func TestAllSchemaTablesExist(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 	wanted := []string{
-		"cron_jobs", "cron_workflows", "cron_runs",
+		"cron_jobs", "cron_workflows", "cron_runs", "mcp_event_subscriptions",
 		"federation_embedding_artifacts",
 		"federation_root_keys", "federation_event_provenance", "federation_entity_provenance",
 		"federation_relay_outbox", "federation_relay_inbox", "federation_relay_cursors",
@@ -30,19 +29,20 @@ func TestAllSchemaTablesExist(t *testing.T) {
 		"federation_quarantine", "federation_enrollments",
 		"issue_sync_bindings", "issue_sync_status",
 		"issue_claims", "pending_claim_requests",
-		"meta", "issues_fts", "import_mappings", "recurrences",
+		"meta", "issues_fts", "comments_fts", "import_mappings", "recurrences",
 		"external_root_bindings", "external_field_mappings", "external_field_states",
 	}
 	for _, name := range wanted {
 		assertSchemaObject(t, d, name)
 	}
 
-	rows, err := d.QueryContext(context.Background(), `
+	rows, err := d.QueryContext(t.Context(), `
 		SELECT name
 		  FROM sqlite_master
 		 WHERE type = 'table'
 		   AND name NOT LIKE 'sqlite_%'
 		   AND name NOT GLOB 'issues_fts_*'
+		   AND name NOT GLOB 'comments_fts_*'
 		 ORDER BY name`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
@@ -84,6 +84,7 @@ func TestSchemaUIDColumnsIndexesAndTriggers(t *testing.T) {
 		"idx_links_from_uid",
 		"idx_links_to_uid",
 		"idx_events_issue_uid",
+		"idx_events_resolved_issue_uid",
 		"idx_events_related_issue_uid",
 		"idx_events_origin_instance",
 		"idx_purge_log_issue_uid",
@@ -107,7 +108,7 @@ func TestSchemaUIDColumnsIndexesAndTriggers(t *testing.T) {
 
 func assertColumn(t *testing.T, d *sqlitestore.Store, table, column, typ string, notNull bool) {
 	t.Helper()
-	rows, err := d.QueryContext(context.Background(), `PRAGMA table_info(`+table+`)`)
+	rows, err := d.QueryContext(t.Context(), `PRAGMA table_info(`+table+`)`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
@@ -133,7 +134,7 @@ func assertColumn(t *testing.T, d *sqlitestore.Store, table, column, typ string,
 func assertSchemaObject(t *testing.T, d *sqlitestore.Store, name string) {
 	t.Helper()
 	var got string
-	err := d.QueryRowContext(context.Background(),
+	err := d.QueryRowContext(t.Context(),
 		`SELECT name FROM sqlite_master WHERE name = ?`, name).Scan(&got)
 	require.NoErrorf(t, err, "schema object %q missing", name)
 	assert.Equal(t, name, got)

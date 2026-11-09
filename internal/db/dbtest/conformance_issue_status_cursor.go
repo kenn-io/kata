@@ -13,7 +13,7 @@ import (
 // Status-only settings do not change what content imports fetch or produce, so
 // changing them keeps the content cursor. Other config changes still reset it.
 func checkIssueStatusSettingsKeepContentCursor(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	sqlStore := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})

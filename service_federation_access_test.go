@@ -51,7 +51,7 @@ func TestServiceFederationAccessReceivesAuthenticatedEnrollment(t *testing.T) {
 	controller := &recordingFederationAccessController{decide: allowFederationMutation}
 	service, project, enrollment := newFederationAccessService(t, controller)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/federation/metadata", nil)
 	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
 	response := httptest.NewRecorder()
@@ -77,7 +77,7 @@ func TestServiceFederationAccessDenialDoesNotUseValidCredential(t *testing.T) {
 	}
 	service, project, enrollment := newFederationAccessService(t, controller)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/federation/metadata", nil)
 	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
 	response := httptest.NewRecorder()
@@ -93,7 +93,7 @@ func TestServiceFederationAccessRejectsInvalidCredentialBeforeHostDecision(t *te
 	controller := &recordingFederationAccessController{}
 	service, project, _ := newFederationAccessService(t, controller)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/federation/metadata", nil)
 	request.Header.Set("Authorization", "Bearer invalid-credential")
 	response := httptest.NewRecorder()
@@ -111,7 +111,7 @@ func TestServiceFederationAccessAdmissionLimitStopsIngestBeforeBodyRead(t *testi
 	}
 	service, project, enrollment := newFederationAccessService(t, controller)
 	body := &readTrackingBody{content: []byte(`{"events":[]}`)}
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/federation/events:ingest", body)
 	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
 	request.Header.Set("Content-Type", "application/json")
@@ -175,7 +175,7 @@ func TestServiceFederationAccessChecksBearerOnLeaseStatus(t *testing.T) {
 	service, project, enrollment := newFederationAccessService(t, controller)
 	issue := createFederationAccessIssue(t, service, project.ID)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/issues/"+issue+"/lease", nil)
 	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
 	response := httptest.NewRecorder()
@@ -193,7 +193,7 @@ func TestServiceFederationAccessRejectsInvalidLeaseStatusCredentialBeforeHostDec
 	service, project, _ := newFederationAccessService(t, controller)
 	issue := createFederationAccessIssue(t, service, project.ID)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/issues/"+issue+"/lease", nil)
 	request.Header.Set("Authorization", "Bearer invalid-credential")
 	response := httptest.NewRecorder()
@@ -212,7 +212,7 @@ func TestServiceFederationAccessKeepsTokenlessTrustedLeaseStatus(t *testing.T) {
 	service, project, _ := newFederationAccessService(t, controller)
 	issue := createFederationAccessIssue(t, service, project.ID)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/issues/"+issue+"/lease", nil)
 	response := httptest.NewRecorder()
 	service.Handler().ServeHTTP(response, request)
@@ -225,7 +225,7 @@ func TestServiceFederationAccessMetadataRequiresTransactionFence(t *testing.T) {
 	controller := &recordingFederationAccessController{}
 	service, project, enrollment := newFederationAccessService(t, controller)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/federation/metadata", nil)
 	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
 	response := httptest.NewRecorder()
@@ -276,7 +276,7 @@ func TestServiceFederationAccessFenceRollsBackClaimMutation(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 
 	controller.decide = allowFederationMutation
-	statusRequest := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+	statusRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/issues/"+issue+"/lease", nil)
 	statusRequest.Header.Set("Authorization", "Bearer "+enrollment.Token)
 	statusResponse := httptest.NewRecorder()
@@ -456,7 +456,7 @@ func TestServiceFederationIngestOrdersNativeRevocationWithMutation(t *testing.T)
 			return service.RevokeFederationEnrollment(t.Context(), project.UID, enrollment.Enrollment.ID)
 		},
 	}
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/federation/events:ingest", body)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
@@ -475,7 +475,7 @@ func TestServiceFederationIngestHostDenialPrecedesFederationAuthorization(t *tes
 	access := &recordingAccessController{err: kata.ErrAccessDenied}
 	federation := &recordingFederationAccessController{decide: allowFederationMutation}
 	service, project, enrollment, databasePath := newComposedFederationAccessService(t, access, federation)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/federation/events:ingest",
 		bytes.NewReader(federationIssueIngestBody(t, project)))
 	request.Header.Set("Content-Type", "application/json")
@@ -512,7 +512,7 @@ func ingestFederationIssueAsPrincipal(
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	body := federationIssueIngestBody(t, project)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/federation/events:ingest", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+token)
@@ -563,7 +563,7 @@ func storedFederationIssueCount(t *testing.T, databasePath string) int {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, inspection.Close()) })
 	var count int
-	require.NoError(t, inspection.QueryRow(
+	require.NoError(t, inspection.QueryRowContext(t.Context(),
 		`SELECT count(*) FROM issues WHERE uid = ?`, "01HZNQ7VFPK1XGD8R5MABCD4EC",
 	).Scan(&count))
 	return count
@@ -580,13 +580,13 @@ func newComposedFederationAccessService(
 	if access == nil {
 		config.Auth = kata.AuthConfig{TrustCallerAuthentication: true}
 	}
-	service, err := kata.New(context.Background(), config)
+	service, err := kata.New(t.Context(), config)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	project := ensureEnrollmentTestProject(
 		t, service, "01HZNQ7VFPK1XGD8R5MABCD4EX", "example-project",
 	)
-	enrollment, err := service.CreateFederationEnrollment(context.Background(), kata.FederationEnrollmentSpec{
+	enrollment, err := service.CreateFederationEnrollment(t.Context(), kata.FederationEnrollmentSpec{
 		ProjectUID:       project.UID,
 		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 		Capabilities:     "pull,push",
@@ -601,7 +601,7 @@ func forceFederationBaselineRefresh(t *testing.T, databasePath string, project k
 	inspection, err := sql.Open("sqlite", databasePath)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, inspection.Close()) })
-	_, err = inspection.Exec(`
+	_, err = inspection.ExecContext(t.Context(), `
 		INSERT INTO purge_log(
 			uid, origin_instance_uid, project_id, purged_issue_id,
 			project_uid, project_name, issue_title, issue_author,
@@ -621,7 +621,7 @@ func getFederationMetadataAsPrincipal(
 	token string,
 ) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(projectID, 10)+"/federation/metadata", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	request = request.WithContext(kata.WithPrincipal(request.Context(), kata.Principal{
@@ -640,7 +640,7 @@ func acquireFederationAccessClaim(
 	token string,
 ) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/"+
 		strconv.FormatInt(projectID, 10)+"/issues/"+issue+"/lease/actions/acquire",
 		bytes.NewBufferString(`{"holder":"worker-1","claim_kind":"timed","ttl_seconds":300}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -655,7 +655,7 @@ func newFederationAccessService(
 	controller kata.FederationAccessController,
 ) (*kata.Service, kata.Project, kata.CreatedFederationEnrollment) {
 	t.Helper()
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN:              filepath.Join(t.TempDir(), "service.db"),
 		Auth:             kata.AuthConfig{TrustCallerAuthentication: true},
 		FederationAccess: controller,
@@ -665,7 +665,7 @@ func newFederationAccessService(
 	project := ensureEnrollmentTestProject(
 		t, service, "01HZNQ7VFPK1XGD8R5MABCD4EX", "example-project",
 	)
-	enrollment, err := service.CreateFederationEnrollment(context.Background(), kata.FederationEnrollmentSpec{
+	enrollment, err := service.CreateFederationEnrollment(t.Context(), kata.FederationEnrollmentSpec{
 		ProjectUID:       project.UID,
 		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
 		Capabilities:     "claim,pull,push",
@@ -677,7 +677,7 @@ func newFederationAccessService(
 
 func createFederationAccessIssue(t *testing.T, service *kata.Service, projectID int64) string {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/"+
 		strconv.FormatInt(projectID, 10)+"/issues",
 		bytes.NewBufferString(`{"actor":"Example Operator","title":"claim fence"}`))
 	request.Header.Set("Content-Type", "application/json")

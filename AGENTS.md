@@ -61,6 +61,57 @@
   behavior coverage is not practical, document the manual check instead of
   adding a brittle shell content test.
 
+## Commit messages
+
+Commit subjects must use the Conventional Commits format. Pull requests are
+squash-merged: the PR title becomes the commit subject and the PR description
+becomes the commit body, so PR titles use the same format.
+
+```text
+type(scope): summary
+```
+
+The scope is optional and names the part of the project the change touches.
+Use one of these types:
+
+- `feat`: a new capability users can see or use.
+- `fix`: a bug fix users can notice.
+- `perf`: faster or lighter behavior users can notice.
+- `refactor`, `test`, `docs`, `build`, `ci`, or `chore`: a change that leaves
+  product behavior as it was.
+
+Mark a breaking change with `!` before the colon, as in
+`feat(api)!: remove the v1 endpoints`, and describe the break in a
+`BREAKING CHANGE:` footer at the end of the commit body or PR description.
+
+This format is required. Releases and release notes are generated from these
+messages: the type decides whether a change appears in the notes and under
+which heading, and the version bump follows the largest change since the last
+release, from a breaking change to `feat` to `fix`.
+
+## Context use
+
+- A Go function that does I/O, runs a process, waits on a channel or timer,
+  or calls the daemon, a hub, a connector, or a database takes
+  `ctx context.Context` first and passes it down. Derive new contexts from it.
+  Create a root context only in `main`, `TestMain`, signal handling, the
+  service and daemon lifetime, or a framework callback that supplies none,
+  such as a Bubble Tea command.
+- Connector, hook, and federation provider children run under
+  `internal/processtree`, which owns their cancellation and termination grace;
+  those `exec.Command` calls carry a `//nolint:noctx` reason.
+- Detach only work that must outlive its caller: cleanup or finalization after
+  cancellation (`context.WithoutCancel(ctx)` with its own timeout), lease and
+  lock release functions, and `Close`. Say why in a short comment.
+- A per-invocation value such as `daemonAPI` may carry that invocation's
+  context. Never keep a context in a struct that outlives one call unless the
+  struct owns that context's lifetime and cancels it.
+- Tests use `t.Context()`. It is canceled before `t.Cleanup` functions run, so
+  cleanup work, and fixtures that must keep serving through later cleanups,
+  use `context.WithoutCancel(t.Context())`.
+- `make lint` checks this with `noctx`, `usetesting`, `fatcontext`, and govet's
+  `lostcancel`; see `.golangci.yml`.
+
 ## Documentation
 
 - Follow the [page frontmatter policy](docs/development/contributing.md#page-frontmatter)
@@ -177,9 +228,16 @@ closes with `kata reopen <ref>`.
 
 ## CI runners
 
-All CI jobs use GitHub-hosted runners: `ubuntu-latest` for Linux and
+CI test jobs use GitHub-hosted runners: `ubuntu-latest` for Linux and
 `windows-2025` for Windows. Pull requests call the reusable test workflow from
 the same commit so workflow changes are exercised before merge.
+
+The `CI gate` job in `test-pr.yml` runs on the Namespace profile
+`namespace-profile-linux-1cpu` so it does not wait in the GitHub-hosted queue.
+That profile uses Namespace's
+[Restricted access level](https://namespace.so/docs/solutions/github-actions/runner-controls/access-levels),
+which disables workload access to Namespace features and APIs. GitHub fork
+approvals, token permissions, and secrets are separate controls.
 
 ## Repository-writer trust/threat model
 
@@ -282,8 +340,10 @@ authorization service. Review browser changes against these boundaries:
   assertions never reach a target. Targets are canonical root HTTP(S) origins,
   bearer credentials are pinned to that origin, and redirects are rejected.
   Identity-bound browser principals remain read-only across a remote gateway
-  hop because Kata has no delegated-identity protocol; request-actor sources
-  remain writable only when the target advertises the same actor policy. Before
+  hop because Kata has no delegated-identity protocol. Request-actor sources
+  remain writable when the target advertises the same actor policy or binds
+  its credential to an account; an account-bound target records every write
+  as that account, as it does for the CLI with the same catalog token. Before
   every remote mutation, the gateway rechecks the exact target origin and
   credential's live writable and actor-policy capabilities without projection
   reads.
@@ -303,6 +363,15 @@ authorization service. Review browser changes against these boundaries:
   continue through daemon bearer/private-network authentication. A bearer
   header never bypasses Host validation. Bearer CLI event streams remain CLI
   traffic. Do not weaken one boundary to make the other client class work.
+- **The daemon `/mcp` mount is a gateway client class.** Only when `[mcp]`
+  mounts it, `/mcp` requires its own constant-time MCP bearer instead of the
+  daemon bearer, skips the browser-listener Origin requirement unless the
+  request carries browser evidence (Origin, Fetch Metadata, session headers,
+  or session cookies), and leaves media-type checks to the MCP SDK. Host
+  validation still applies. Its REST self-calls use the bootstrap token or
+  owner-local socket, so an all-project mount is daemon-wide authority and must
+  be chosen with `all_projects = true`; the mount never registers token, team,
+  or storage tools. An unmounted `/mcp` is an ordinary browser route.
 - **Plain HTTP is local or explicit private-network trust.** Loopback browser
   origins may use HTTP. A non-loopback HTTP public origin requires the same
   explicit `[auth].trust_private_network` opt-in used for plaintext private

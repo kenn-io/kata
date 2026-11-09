@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-10-23
+last_edited: 2026-11-06
 ---
 
 # Metadata
@@ -66,6 +66,38 @@ offsets are rejected because they pin an instant while duplicating the named
 timezone. `deadline_on` accepts the same three forms and uses the same timezone
 rules. It is a deadline only; it does not control `ready` or `next`.
 
+### Calendar dates on issue rows
+
+`kata list --json`, `kata show --json` and `kata.list` rows carry
+`scheduled_on_date` and `deadline_on_date`: the `scheduled_on` and
+`deadline_on` values as `YYYY-MM-DD` calendar dates. A field is omitted when
+its key is absent or its stored value cannot be read, so one bad value never
+fails the list. These are the names and values the web UI's snapshot
+uses, resolved by one shared rule. A date-only value keeps its written date. A
+local date-time resolves in the issue `timezone`, then the daemon's top-level
+`timezone`, then UTC, as above. For a recurring occurrence without `timezone`
+metadata, `scheduled_on` resolves in the recurrence's timezone before the
+daemon's; `deadline_on` does not. An RFC 3339 `Z` instant is read in that same
+zone chain, so it can fall on a different calendar date than its UTC date.
+The web UI snapshot uses the same field names but reads instants in the
+viewer's zone, so it differs only when that zone differs from the issue's. For
+an unreadable stored value the snapshot returns an error, while a row omits the
+field; a row that has the metadata key but no date means the value could not be
+read.
+Requests carry no zone. A daemon older than API `0.36.0` omits both fields, so
+a client should treat a missing field as unsupported rather than as an
+absent date.
+
+The TUI offers Today and Scheduled date filters. The CLI has no due-date filter.
+Select on the dates yourself, for example the issues due on or before a day:
+
+```sh
+kata list --all --meta deadline_on --json \
+  | jq '.issues[] | select(.deadline_on_date <= "2026-10-29")'
+```
+
+Add `select(.blocked | not)` to keep only issues that are not actively blocked.
+
 The daemon surfaces a reached `scheduled_on` or `deadline_on` through ordinary
 `notify.*` metadata. It addresses the current owner, falling back to the author
 when the issue is unowned. Existing manual inbox content wins until cleared.
@@ -73,6 +105,8 @@ Clearing a generated request acknowledges that exact date and recipient; a
 changed date or assignment can surface again. Kata stores no separate reminder
 record. A reached `scheduled_on` also records an `issue.scheduled_reached`
 event for adapters; see [Reached schedules](cron.md#reached-schedules).
+
+`attachment.*` keys hold [Docbank file references](../guide/attachments.md#read-references-as-metadata). The browser checks field types for display; the daemon validates the full reference when serving content.
 
 All other keys are accepted opaquely by design: consumers carry their own
 metadata without a daemon release. When an opaque key later needs query
@@ -86,9 +120,9 @@ taken only when the daemon starts to attach real semantics to the key.
 The project metadata value `"role": "inbox"` designates the Inbox project,
 regardless of the project's name. The TUI Inbox shows its open tasks, and the
 web UI captures new tasks there. The web Inbox view itself lists open tasks from
-every project. In the web UI, the first **New task** asks you to choose the
-project when none is designated, and **Change** in the **New task** dialog
-switches it later.
+every project. In the web UI, **New task** asks you to choose a project when
+none is designated. With no projects, it asks you to create one and makes it
+Inbox. **Change** in the **New task** dialog switches it later.
 
 API clients can designate it with a project metadata patch:
 

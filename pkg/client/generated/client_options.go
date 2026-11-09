@@ -658,6 +658,103 @@ func (o *RotateFederationEnrollmentRequestOptions) GetHeader() (map[string]strin
 	return nil, nil
 }
 
+// ClearFederationSpokeNameRequestOptions is the options needed to make a request to ClearFederationSpokeName.
+type ClearFederationSpokeNameRequestOptions struct {
+	PathParams *ClearFederationSpokeNamePath
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ClearFederationSpokeNameRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ClearFederationSpokeNameRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ClearFederationSpokeNameRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ClearFederationSpokeNameRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ClearFederationSpokeNameRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// SetFederationSpokeNameRequestOptions is the options needed to make a request to SetFederationSpokeName.
+type SetFederationSpokeNameRequestOptions struct {
+	PathParams *SetFederationSpokeNamePath
+	Body       *SetFederationSpokeNameBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *SetFederationSpokeNameRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *SetFederationSpokeNameRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *SetFederationSpokeNameRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *SetFederationSpokeNameRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *SetFederationSpokeNameRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // RevokeFederationEnrollmentRequestOptions is the options needed to make a request to RevokeFederationEnrollment.
 type RevokeFederationEnrollmentRequestOptions struct {
 	PathParams *RevokeFederationEnrollmentPath
@@ -1105,6 +1202,94 @@ func (o *ShowIssueByUIDRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ShowIssueByUIDRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// McpEventsSubscribeRequestOptions is the options needed to make a request to McpEventsSubscribe.
+type McpEventsSubscribeRequestOptions struct {
+	Body *McpEventsSubscribeBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *McpEventsSubscribeRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *McpEventsSubscribeRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *McpEventsSubscribeRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *McpEventsSubscribeRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *McpEventsSubscribeRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// McpEventsUnsubscribeRequestOptions is the options needed to make a request to McpEventsUnsubscribe.
+type McpEventsUnsubscribeRequestOptions struct {
+	Body *McpEventsUnsubscribeBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *McpEventsUnsubscribeRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *McpEventsUnsubscribeRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *McpEventsUnsubscribeRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *McpEventsUnsubscribeRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *McpEventsUnsubscribeRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
@@ -1756,6 +1941,7 @@ func (o *ListCronJobsRequestOptions) GetHeader() (map[string]string, error) {
 type CreateCronJobRequestOptions struct {
 	PathParams *CreateCronJobPath
 	Body       *CreateCronJobBody
+	Header     *CreateCronJobHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -1775,6 +1961,14 @@ func (o *CreateCronJobRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -1802,13 +1996,14 @@ func (o *CreateCronJobRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *CreateCronJobRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ArchiveCronJobRequestOptions is the options needed to make a request to ArchiveCronJob.
 type ArchiveCronJobRequestOptions struct {
 	PathParams *ArchiveCronJobPath
 	Body       *ArchiveCronJobBody
+	Header     *ArchiveCronJobHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -1828,6 +2023,14 @@ func (o *ArchiveCronJobRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -1855,7 +2058,7 @@ func (o *ArchiveCronJobRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ArchiveCronJobRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ShowCronJobRequestOptions is the options needed to make a request to ShowCronJob.
@@ -1906,6 +2109,7 @@ func (o *ShowCronJobRequestOptions) GetHeader() (map[string]string, error) {
 type ReplaceCronJobRequestOptions struct {
 	PathParams *ReplaceCronJobPath
 	Body       *ReplaceCronJobBody
+	Header     *ReplaceCronJobHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -1925,6 +2129,14 @@ func (o *ReplaceCronJobRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -1952,13 +2164,14 @@ func (o *ReplaceCronJobRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ReplaceCronJobRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // RestoreCronJobRequestOptions is the options needed to make a request to RestoreCronJob.
 type RestoreCronJobRequestOptions struct {
 	PathParams *RestoreCronJobPath
 	Body       *RestoreCronJobBody
+	Header     *RestoreCronJobHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -1978,6 +2191,14 @@ func (o *RestoreCronJobRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2005,7 +2226,7 @@ func (o *RestoreCronJobRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *RestoreCronJobRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ListCronRunsRequestOptions is the options needed to make a request to ListCronRuns.
@@ -4386,6 +4607,165 @@ func (o *UnassignIssueRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
+// AddAttachmentRequestOptions is the options needed to make a request to AddAttachment.
+type AddAttachmentRequestOptions struct {
+	PathParams *AddAttachmentPath
+	Query      *AddAttachmentQuery
+	Body       *AddAttachmentBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *AddAttachmentRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *AddAttachmentRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *AddAttachmentRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *AddAttachmentRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *AddAttachmentRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// LinkAttachmentRequestOptions is the options needed to make a request to LinkAttachment.
+type LinkAttachmentRequestOptions struct {
+	PathParams *LinkAttachmentPath
+	Body       *LinkAttachmentBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *LinkAttachmentRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *LinkAttachmentRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *LinkAttachmentRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *LinkAttachmentRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *LinkAttachmentRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// AttachmentContentRequestOptions is the options needed to make a request to AttachmentContent.
+type AttachmentContentRequestOptions struct {
+	PathParams *AttachmentContentPath
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *AttachmentContentRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *AttachmentContentRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *AttachmentContentRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *AttachmentContentRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *AttachmentContentRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // UnbindExternalRootRequestOptions is the options needed to make a request to UnbindExternalRoot.
 type UnbindExternalRootRequestOptions struct {
 	PathParams *UnbindExternalRootPath
@@ -5981,6 +6361,7 @@ func (o *ListRecurrencesRequestOptions) GetHeader() (map[string]string, error) {
 type CreateRecurrenceRequestOptions struct {
 	PathParams *CreateRecurrencePath
 	Body       *CreateRecurrenceBody
+	Header     *CreateRecurrenceHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -6000,6 +6381,14 @@ func (o *CreateRecurrenceRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -6027,7 +6416,7 @@ func (o *CreateRecurrenceRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *CreateRecurrenceRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // DeleteRecurrenceRequestOptions is the options needed to make a request to DeleteRecurrence.

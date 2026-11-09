@@ -24,6 +24,7 @@ func reconcileProviderMapping(
 	ctx context.Context, store db.Storage, credentials config.FederationCredentialStore,
 	catalog config.CatalogDaemonConfig, mapping config.FederationProjectConfig,
 	wake func(), projectEventSink func(db.Event),
+	projectResetSink func(projectID, cursor int64),
 ) (resultErr error) {
 	if store == nil || credentials == nil || mapping.Hub != catalog.Name {
 		return reconcileError(ErrConfigurationConflict, "invalid federation mapping dependencies")
@@ -82,6 +83,7 @@ func reconcileProviderMapping(
 		AdoptExisting: decision.Intent == federationprovider.IntentMigrate, AttachEmpty: decision.Intent != federationprovider.IntentMigrate,
 		ManagedReservation: &daemon.FederationReplicaManagedReservation{ProjectUID: reservation.ProjectUID, Expected: credential},
 		ProjectEventSink:   projectEventSink,
+		ProjectResetSink:   projectResetSink,
 	}
 	if reservation.ProjectUID != decision.HubProjectUID {
 		params.CredentialRekey = &daemon.FederationReplicaCredentialRekeySource{ProjectUID: reservation.ProjectUID, Expected: credential}

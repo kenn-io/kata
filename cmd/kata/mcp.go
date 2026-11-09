@@ -105,8 +105,12 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			requiredAPI := apiVersionMCPServer
+			if !allProjects {
+				requiredAPI = apiVersionMCPProjectScope
+			}
 			health, err := requireDaemonAPIVersionHealth(
-				ctx, httpClient, baseURL, apiVersionMCPServer, "kata mcp serve",
+				ctx, httpClient, baseURL, requiredAPI, "kata mcp serve",
 			)
 			if err != nil {
 				return err
@@ -114,18 +118,7 @@ func newMCPServeCmd() *cobra.Command {
 			stopKeepalive := startMCPIdleKeepalive(ctx, httpClient, baseURL, health)
 			defer stopKeepalive()
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			apiClient, err := kataclient.NewWithHTTPClient(baseURL, httpClient)
-			if err != nil {
-				return err
-			}
-			// Sync passes, bounded waits, and SSE streams use their own
-			// request contexts and may legitimately outlive the ordinary
-			// request budget or delay response headers until completion.
-			longRunningHTTPClient, err := longRunningClientForResolved(ctx, resolved)
-			if err != nil {
-				return err
-			}
-			longRunningAPIClient, err := kataclient.NewWithHTTPClient(baseURL, longRunningHTTPClient)
+			apiClient, longRunningAPIClient, err := newMCPAPIClients(ctx, resolved, httpClient)
 			if err != nil {
 				return err
 			}
@@ -154,25 +147,30 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
-			var observe func()
-			if posthog.Eligible("KATA", version.Version) {
-				var stopReporting context.CancelFunc
-				observe, stopReporting = startMCPAgentUseReporter(ctx, apiClient, resolved)
-				defer stopReporting()
+			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+			defer stopReporting()
+			// Events forwards to the daemon, which owns every subscription, and is
+			// served only on stdio and the 2026-07-28 HTTP path. The legacy-session
+			// server never registers or advertises it.
+			admission := mcpserver.NewToolAdmission()
+			newServer := func(events bool) (*sdkmcp.Server, error) {
+				return mcpserver.New(mcpserver.Options{
+					Events:            events,
+					Admission:         admission,
+					Client:            apiClient,
+					ObserveToolCall:   observe,
+					LongRunningClient: longRunningAPIClient,
+					Scope:             scope,
+					ProjectID:         projectID,
+					ProjectName:       projectName,
+					Actor:             actor,
+					Teammate:          handle,
+					Version:           version.Version,
+					StorageAdmin:      storage,
+					EnableTokenAdmin:  enableTokenAdmin,
+				})
 			}
-			server, err := mcpserver.New(mcpserver.Options{
-				Client:            apiClient,
-				ObserveToolCall:   observe,
-				LongRunningClient: longRunningAPIClient,
-				Scope:             scope,
-				ProjectID:         projectID,
-				ProjectName:       projectName,
-				Actor:             actor,
-				Teammate:          handle,
-				Version:           version.Version,
-				StorageAdmin:      storage,
-				EnableTokenAdmin:  enableTokenAdmin,
-			})
+			server, err := newServer(true)
 			if err != nil {
 				return err
 			}
@@ -185,7 +183,11 @@ func newMCPServeCmd() *cobra.Command {
 				if resolved.Network == "unix" {
 					backendURL = "unix://" + resolved.UnixSocket
 				}
-				return serveMCPHTTP(ctx, command.ErrOrStderr(), httpAddress, httpToken, server, filepath.Join(home, "mcp"), backendURL)
+				legacyServer, err := newServer(false)
+				if err != nil {
+					return err
+				}
+				return serveMCPHTTP(ctx, command.ErrOrStderr(), httpAddress, httpToken, legacyServer, server, filepath.Join(home, "mcp"), backendURL)
 			}
 			transport := mcpserver.NewStdioTransport(
 				asReadCloser(command.InOrStdin()),
@@ -214,7 +216,24 @@ func newMCPServeCmd() *cobra.Command {
 	return command
 }
 
+func newMCPAPIClients(ctx context.Context, resolved client.ResolvedDaemon, httpClient *http.Client) (*kataclient.Client, *kataclient.Client, error) {
+	apiClient, err := kataclient.NewWithHTTPClient(resolved.BaseURL, httpClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Sync passes, bounded waits, and SSE streams use their own request contexts.
+	longRunningHTTPClient, err := longRunningClientForResolved(ctx, resolved)
+	if err != nil {
+		return nil, nil, err
+	}
+	longRunningAPIClient, err := kataclient.NewWithHTTPClient(resolved.BaseURL, longRunningHTTPClient)
+	return apiClient, longRunningAPIClient, err
+}
+
 func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client, target client.ResolvedDaemon) (func(), context.CancelFunc) {
+	if !posthog.Eligible("KATA", version.Version) {
+		return nil, func() {}
+	}
 	reportCtx, cancel := context.WithCancel(ctx)
 	queue := make(chan struct{}, 128)
 	marker := client.TelemetryDayMarkerPath(target, "agent-full-")

@@ -49,3 +49,12 @@ func (*CloseActionRequest) Resolve(ctx huma.Context) []error {
 	}
 	return nil
 }
+
+// Resolve rejects an empty If-Match on recurrence creation so a malformed
+// conditional attach is not silently downgraded to an unconditional one.
+func (*CreateRecurrenceRequest) Resolve(ctx huma.Context) []error {
+	if ifMatchPresentButEmpty(ctx) {
+		return []error{NewError(400, "validation", "If-Match header required", "", nil)}
+	}
+	return nil
+}

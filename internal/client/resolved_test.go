@@ -26,7 +26,7 @@ func TestNewHTTPClientForResolvedUsesCarriedUnixSocket(t *testing.T) {
 	}
 	setupKataEnv(t)
 	socket := filepath.Join(t.TempDir(), "kata.sock")
-	ln, err := net.Listen("unix", socket)
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 

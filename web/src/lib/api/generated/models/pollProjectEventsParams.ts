@@ -9,4 +9,8 @@ export type PollProjectEventsParams = {
   issue?: string
   after_id?: number
   limit?: number
+  /**
+   * Include the effective native close event UID in issue history when available.
+   */
+  include_effective_close_event_uid?: boolean
 }

@@ -74,7 +74,7 @@ func TestAssign_IdentityModeOverridesBodyActor(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	issue := mkIssue(t, env, pid, "assign me")
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -185,7 +185,7 @@ func TestClaim_IdentityModeDerivesActorWhenBodyOmitsIt(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	issue := mkIssue(t, env, pid, "claim me")
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -649,7 +649,7 @@ func TestClaim_HonorsBrowserSessionPrincipal(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		"http://127.0.0.1:27123"+issuePathRef(project.ID, issue.ShortID, "actions/claim"),
 		strings.NewReader(`{"actor":"worker","ttl_seconds":300}`))
 	request.Host = "127.0.0.1:27123"
@@ -698,7 +698,7 @@ func TestClaim_HonorsLocalBrowserSessionPrincipal(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		"http://127.0.0.1:27123"+issuePathRef(project.ID, issue.ShortID, "actions/claim"),
 		strings.NewReader(`{"actor":"worker","ttl_seconds":300}`))
 	request.Host = "127.0.0.1:27123"
@@ -743,7 +743,7 @@ func TestClaim_HostPrincipalUsesAttributedActorForAssignment(t *testing.T) {
 		DB: d.db, StartedAt: d.now, HostAccess: assignmentHostAccess{},
 	})
 	t.Cleanup(func() { _ = server.Close() })
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		issuePathRef(project.ID, issue.ShortID, "actions/claim"),
 		strings.NewReader(`{"actor":"ignored","ttl_seconds":300}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -785,7 +785,7 @@ func TestClaim_HonorsTrustedProxyActor(t *testing.T) {
 				}},
 			})
 			t.Cleanup(func() { _ = server.Close() })
-			request := httptest.NewRequest(http.MethodPost,
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 				"http://127.0.0.1:27123"+issuePathRef(project.ID, issue.ShortID, "actions/claim"),
 				strings.NewReader(`{"actor":"forged"}`))
 			request.Header.Set("Content-Type", "application/json")

@@ -43,7 +43,7 @@ func TestRelayParentRevocationWaitsForTransaction(t *testing.T) {
 	go func() { _, _, err := store.RevokeAPIToken(ctx, parent.ID, "admin"); completed <- err }()
 	blocked := false
 	early := false
-	//nolint:kennlint // PostgreSQL lock observation requires native server I/O outside a synctest bubble.
+	//nolint:kennlint // sleeptest: PostgreSQL lock observation requires native server I/O outside a synctest bubble.
 	require.Eventually(t, func() bool {
 		select {
 		case err := <-completed:

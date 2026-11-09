@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"net/http"
 	"testing"
@@ -16,7 +15,7 @@ import (
 )
 
 func TestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hooksSink := &recordingSink{}
 	bcast := daemon.NewEventBroadcaster()
 	d := openTestDB(t)
@@ -62,7 +61,7 @@ func TestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing.T)
 }
 
 func TestIngestClaimViolationBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hooksSink := &recordingSink{}
 	bcast := daemon.NewEventBroadcaster()
 	d := openTestDB(t)
@@ -112,7 +111,7 @@ func TestIngestClaimViolationBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing
 }
 
 func TestIngestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hooksSink := &recordingSink{}
 	bcast := daemon.NewEventBroadcaster()
 	d := openTestDB(t)
@@ -163,7 +162,7 @@ func TestIngestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *test
 
 func createClaimAuditDeliveryEnrollment(t *testing.T, store *sqlitestore.Store, projectID int64) db.CreatedFederationEnrollment {
 	t.Helper()
-	created, err := store.CreateFederationEnrollment(context.Background(), db.CreateFederationEnrollmentParams{
+	created, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
 		Token:            "claim-audit-delivery-token",
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &projectID,

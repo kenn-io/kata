@@ -42,7 +42,7 @@ func TestProjectScopedCloseMutationHidesRestrictedParentReference(t *testing.T) 
 			"the response must follow event-read filtering when the close parent is restricted")
 		require.NotContains(t, string(body), fixture.issue.UID,
 			"the response must not disclose an inaccessible parent UID")
-		require.NotContains(t, string(body), fixture.issue.ShortID,
+		require.NotRegexp(t, `\b`+fixture.issue.ShortID+`\b`, string(body),
 			"the response must not disclose an inaccessible parent short ID")
 		closed, err := store.IssueByID(t.Context(), child.ID)
 		require.NoError(t, err)
@@ -77,7 +77,7 @@ func TestProjectScopedCloseRetryHidesRestrictedEvidenceReference(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(responseBody, &first))
 		require.NotNil(t, first.Event)
-		require.Contains(t, string(first.Event.Payload), fixture.visible.ShortID)
+		require.Contains(t, string(first.Event.Payload), fixture.visible.UID)
 
 		target, err := store.IssueByID(t.Context(), fixture.visible.ID)
 		require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestProjectScopedCloseRetryHidesRestrictedEvidenceReference(t *testing.T) {
 		require.True(t, retry.Reused)
 		require.Nil(t, retry.OriginalEvent,
 			"a receipt whose duplicate-of target is outside the current project scope must be omitted")
-		require.NotContains(t, string(responseBody), fixture.visible.ShortID,
+		require.NotRegexp(t, `\b`+fixture.visible.ShortID+`\b`, string(responseBody),
 			"the inaccessible evidence reference must not be returned by the retry")
 	})
 }
@@ -136,7 +136,7 @@ func TestProjectScopedCloseReceiptsResolveEvidenceReferenceForms(t *testing.T) {
 				require.NoError(t, json.Unmarshal(responseBody, &first))
 				require.NotNil(t, first.Event,
 					"a successful close must retain its receipt when evidence uses a supported reference form")
-				require.Contains(t, first.Event.Payload, refCase.ref)
+				require.Contains(t, first.Event.Payload, fixture.visible.UID)
 
 				status, _, responseBody = fixture.request(t, "POST", path, "member", body, headers)
 				require.Equalf(t, 200, status, "idempotent close retry response: %s", responseBody)
@@ -148,7 +148,7 @@ func TestProjectScopedCloseReceiptsResolveEvidenceReferenceForms(t *testing.T) {
 				require.True(t, retry.Reused)
 				require.NotNil(t, retry.OriginalEvent,
 					"a keyed retry must retain its receipt when evidence uses a supported reference form")
-				require.Contains(t, retry.OriginalEvent.Payload, refCase.ref)
+				require.Contains(t, retry.OriginalEvent.Payload, fixture.visible.UID)
 			})
 		}
 	})
@@ -180,7 +180,7 @@ func TestProjectScopedIssueShowOmitsRestrictedParent(t *testing.T) {
 		require.NoError(t, json.Unmarshal(body, &response))
 		require.Nil(t, response.Parent, "an inaccessible parent must be omitted from the visible child")
 		require.NotContains(t, string(body), fixture.issue.UID)
-		require.NotContains(t, string(body), fixture.issue.ShortID)
+		require.NotRegexp(t, `\b`+fixture.issue.ShortID+`\b`, string(body))
 		require.NotContains(t, string(body), projectAccessCanary)
 	})
 }

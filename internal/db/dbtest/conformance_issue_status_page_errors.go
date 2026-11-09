@@ -14,7 +14,7 @@ import (
 // A mapping whose private state cannot be loaded is reported on its own, so
 // the scan can record it and still reach later mappings.
 func checkIssueStatusPageIsolatesInvalidMapping(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	reader := store.(db.IssueStatusReader)
 	sqlStore := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)

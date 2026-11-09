@@ -48,7 +48,7 @@ func TestResolveWebEndpointConfiguredZeroUsesAssignedPort(t *testing.T) {
 }
 
 func TestResolveWebEndpointConfiguredPortCollisionFails(t *testing.T) {
-	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	occupied, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = occupied.Close() })
 

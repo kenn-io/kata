@@ -59,9 +59,12 @@ type ListAllIssuesQuery struct {
 	Cursor *string `json:"cursor,omitempty"`
 
 	// IncludeTotal Count all matching issues, ignoring cursor and limit
-	IncludeTotal *bool                     `json:"include_total,omitempty"`
-	ProjectID    *int64                    `json:"project_id,omitempty"`
-	Status       *ListAllIssuesQueryStatus `json:"status,omitempty"`
+	IncludeTotal *bool `json:"include_total,omitempty"`
+
+	// Compact Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+	Compact   *bool                     `json:"compact,omitempty"`
+	ProjectID *int64                    `json:"project_id,omitempty"`
+	Status    *ListAllIssuesQueryStatus `json:"status,omitempty"`
 
 	// Priority exact priority filter (0..4 or none for unset); empty = no filter
 	Priority *string `json:"priority,omitempty"`
@@ -179,6 +182,9 @@ type PollProjectEventsQuery struct {
 	Issue   *string `json:"issue,omitempty"`
 	AfterID *int64  `json:"after_id,omitempty"`
 	Limit   *int64  `json:"limit,omitempty"`
+
+	// IncludeEffectiveCloseEventUID Include the effective native close event UID in issue history when available.
+	IncludeEffectiveCloseEventUID *bool `json:"include_effective_close_event_uid,omitempty"`
 }
 
 type GetProjectFederationQuery struct {
@@ -192,7 +198,10 @@ func (g GetProjectFederationQuery) Validate() error {
 
 type PollFederationProjectEventsQuery struct {
 	AfterID *int64 `json:"after_id,omitempty"`
-	Limit   *int64 `json:"limit,omitempty"`
+
+	// IssueUID Read retained history only for an issue currently owned by this project, independently of the project cursor.
+	IssueUID *string `json:"issue_uid,omitempty"`
+	Limit    *int64  `json:"limit,omitempty"`
 }
 
 type OfferRelayDeliveriesQuery struct {
@@ -216,6 +225,9 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 			errors = errors.Append("Limit", err)
 		}
 	}
+	if len(o.ArtifactDigest) > 32 {
+		errors = errors.Add("ArtifactDigest", fmt.Sprintf("must have at most 32 items, got %d", len(o.ArtifactDigest)))
+	}
 	if o.Epoch != nil {
 		if err := typesValidator.Var(o.Epoch, "omitempty,gte=0"); err != nil {
 			errors = errors.Append("Epoch", err)
@@ -232,8 +244,11 @@ type ListIssuesQuery struct {
 	Cursor *string `json:"cursor,omitempty"`
 
 	// IncludeTotal Count all matching issues, ignoring cursor and limit
-	IncludeTotal *bool                  `json:"include_total,omitempty"`
-	Status       *ListIssuesQueryStatus `json:"status,omitempty"`
+	IncludeTotal *bool `json:"include_total,omitempty"`
+
+	// Compact Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+	Compact *bool                  `json:"compact,omitempty"`
+	Status  *ListIssuesQueryStatus `json:"status,omitempty"`
 
 	// Priority exact priority filter (0..4 or none for unset); empty = no filter
 	Priority *string `json:"priority,omitempty"`
@@ -296,6 +311,15 @@ func (s ShowIssueQuery) Validate() error {
 	return errors
 }
 
+type AddAttachmentQuery struct {
+	Name  string  `json:"name" validate:"required"`
+	Actor *string `json:"actor,omitempty"`
+}
+
+func (a AddAttachmentQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+}
+
 type UnbindExternalRootQuery struct {
 	Actor *string `json:"actor,omitempty"`
 }
@@ -346,11 +370,28 @@ func (i IssuePlanningDatesQuery) Validate() error {
 }
 
 type ReadyIssuesQuery struct {
-	Limit        *int64   `json:"limit,omitempty"`
-	Unowned      *bool    `json:"unowned,omitempty"`
-	Owner        *string  `json:"owner,omitempty"`
-	Label        []string `json:"label,omitempty"`
-	ExcludeLabel []string `json:"exclude_label,omitempty"`
+	// Sort priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+	Sort         *ReadyIssuesQuerySort `json:"sort,omitempty"`
+	Limit        *int64                `json:"limit,omitempty"`
+	Unowned      *bool                 `json:"unowned,omitempty"`
+	Owner        *string               `json:"owner,omitempty"`
+	Label        []string              `json:"label,omitempty"`
+	ExcludeLabel []string              `json:"exclude_label,omitempty"`
+}
+
+func (r ReadyIssuesQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if r.Sort != nil {
+		if v, ok := any(r.Sort).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Sort", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type DeleteRecurrenceQuery struct {
@@ -415,11 +456,28 @@ func (s SearchIssuesQuery) Validate() error {
 }
 
 type ReadyIssuesGlobalQuery struct {
-	Limit        *int64   `json:"limit,omitempty"`
-	Unowned      *bool    `json:"unowned,omitempty"`
-	Owner        *string  `json:"owner,omitempty"`
-	Label        []string `json:"label,omitempty"`
-	ExcludeLabel []string `json:"exclude_label,omitempty"`
+	// Sort priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+	Sort         *ReadyIssuesGlobalQuerySort `json:"sort,omitempty"`
+	Limit        *int64                      `json:"limit,omitempty"`
+	Unowned      *bool                       `json:"unowned,omitempty"`
+	Owner        *string                     `json:"owner,omitempty"`
+	Label        []string                    `json:"label,omitempty"`
+	ExcludeLabel []string                    `json:"exclude_label,omitempty"`
+}
+
+func (r ReadyIssuesGlobalQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if r.Sort != nil {
+		if v, ok := any(r.Sort).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Sort", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type ResolveUIIssueReferenceQuery struct {

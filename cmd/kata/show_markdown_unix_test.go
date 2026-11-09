@@ -26,7 +26,7 @@ func TestExternalShowMarkdownRendererTimeoutKillsDescendant(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := renderer.Render(context.Background(), markdownDescription, "body", 80)
+		_, err := renderer.Render(t.Context(), markdownDescription, "body", 80)
 		errCh <- err
 	}()
 
@@ -40,7 +40,7 @@ func TestExternalShowMarkdownRendererCancellationKillsDescendant(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer(t, "spawn-descendant", filepath.Join(t.TempDir(), "ready"))
 	renderer.grace = 50 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	errCh := make(chan error, 1)
@@ -67,7 +67,7 @@ func TestExternalShowMarkdownRendererBoundsInheritedDescendantStdout(t *testing.
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := renderer.Render(context.Background(), markdownDescription, "body", 80)
+		_, err := renderer.Render(t.Context(), markdownDescription, "body", 80)
 		errCh <- err
 	}()
 

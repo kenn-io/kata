@@ -140,7 +140,7 @@ func TestExchangeRejectsBeforeStartingProvider(t *testing.T) {
 }
 
 func TestExchangeCancelsRunningProvider(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond) //nolint:kennlint // the deadline is the expected result; the wait-mode provider runs until it fires
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the wait-mode provider runs until it fires
 	defer cancel()
 	_, err := federationprovider.Exchange(ctx, providerCommand(t, "wait"), authorizationRequest())
 	require.ErrorIs(t, err, context.DeadlineExceeded)

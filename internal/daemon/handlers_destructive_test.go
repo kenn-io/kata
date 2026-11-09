@@ -249,7 +249,7 @@ func TestPurge_FederatedHubRequiresIssueClaim(t *testing.T) {
 
 func TestPurge_FederatedHubUsesResolvedIdentityActorForClaimGate(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	ctx := context.Background()
+	ctx := t.Context()
 	project, issue := createClaimHubIssue(t, env)
 	_, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",

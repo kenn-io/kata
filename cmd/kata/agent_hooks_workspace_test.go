@@ -49,7 +49,7 @@ func TestAgentHooksStatusReadsCommittedGuidanceFromAliasedWorkspace(t *testing.T
 	alias := filepath.Join(t.TempDir(), "workspace-alias")
 	require.NoError(t, os.Symlink(repo, alias))
 
-	got, err := readCommittedGuidance(alias)
+	got, err := readCommittedGuidance(t.Context(), alias)
 	require.NoError(t, err)
 	require.Equal(t, []string{"AGENTS.md"}, got)
 }

@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -107,7 +106,7 @@ func TestReachableGraph_RelatedEdges(t *testing.T) {
 
 func TestReachableGraph_TraversesCrossProjectLinksWithQualifiedIDs(t *testing.T) {
 	h, ts, sourceProjectID := graphProject(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	foreignProject, err := h.DB().CreateProject(ctx, "foreign")
 	require.NoError(t, err)
 	source := graphIssue(t, h, sourceProjectID, "01HZNQ7VFPK1XGD8R5MABCD4E1", "source")
@@ -151,7 +150,7 @@ func TestReachableGraph_HideDoneFiltersClosedTraversal(t *testing.T) {
 	c := graphIssue(t, h, pid, "01HZNQ7VFPK1XGD8R5MABCD4E3", "c")
 	graphLink(t, h, pid, a.ID, b.ID, "blocks")
 	graphLink(t, h, pid, b.ID, c.ID, "blocks")
-	_, _, changed, err := h.DB().CloseIssue(context.Background(), b.ID, "done", "tester", "closed for graph test", nil)
+	_, _, changed, err := h.DB().CloseIssue(t.Context(), b.ID, "done", "tester", "closed for graph test", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -180,7 +179,7 @@ func TestReachableGraph_UnresolvedReferences(t *testing.T) {
 
 func TestReachableGraph_OmitsDeletedAndArchivedEndpoints(t *testing.T) {
 	h, ts, pid := graphProject(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := graphIssue(t, h, pid, "01HZNQ7VFPK1XGD8R5MABCD4E1", "source")
 	deleted := graphIssue(t, h, pid, "01HZNQ7VFPK1XGD8R5MABCD4E2", "deleted")
 	graphLink(t, h, pid, source.ID, deleted.ID, "blocks")
@@ -233,7 +232,7 @@ func graphProject(t *testing.T) (*httptestServerHandle, *httptest.Server, int64)
 
 func graphIssue(t *testing.T, h *httptestServerHandle, projectID int64, uid, title string) db.Issue {
 	t.Helper()
-	issue, _, err := h.DB().CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID,
 		UID:       uid,
 		Title:     title,
@@ -245,7 +244,7 @@ func graphIssue(t *testing.T, h *httptestServerHandle, projectID int64, uid, tit
 
 func graphLink(t *testing.T, h *httptestServerHandle, _ int64, fromID, toID int64, kind string) {
 	t.Helper()
-	_, err := h.DB().CreateLink(context.Background(), db.CreateLinkParams{
+	_, err := h.DB().CreateLink(t.Context(), db.CreateLinkParams{
 		FromIssueID: fromID,
 		ToIssueID:   toID,
 		Type:        kind,
@@ -269,9 +268,9 @@ func insertUnresolvedGraphLink(
 	fromUID, toUID, kind string,
 ) {
 	t.Helper()
-	_, err := h.DB().ExecContext(context.Background(), `PRAGMA foreign_keys = OFF`)
+	_, err := h.DB().ExecContext(t.Context(), `PRAGMA foreign_keys = OFF`)
 	require.NoError(t, err)
-	_, err = h.DB().ExecContext(context.Background(),
+	_, err = h.DB().ExecContext(t.Context(),
 		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 		 VALUES(?, ?, ?, ?, ?, ?)`,
 		fromID, toID, fromUID, toUID, kind, "tester")

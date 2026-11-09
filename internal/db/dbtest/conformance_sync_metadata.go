@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -21,7 +20,7 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 
 func checkIssueSyncLifecycleProvider(t *testing.T, store db.Storage, provider string) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, provider+"-sync-project")
 	if err != nil {
 		return fmt.Errorf("create issue sync project: %w", err)
@@ -191,7 +190,7 @@ func checkIssueSyncLifecycleProvider(t *testing.T, store db.Storage, provider st
 
 func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture, err := createIssueFixture(ctx, store, "metadata-atomic", "original", "author", nil)
 	if err != nil {
 		return err
@@ -633,7 +632,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 
 func checkImportMappings(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture, err := createIssueFixture(ctx, store, "mapping-project", "mapped issue", "importer", nil)
 	if err != nil {
 		return err
@@ -731,7 +730,7 @@ func checkNotionSyncStorage(t *testing.T, store db.Storage) error {
 	if err := checkIssueSyncLifecycleProvider(t, store, "notion"); err != nil {
 		return err
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	at := time.Date(2026, 9, 28, 1, 0, 0, 0, time.UTC)
 	newBinding := func(name string) (db.Project, db.IssueSyncBinding, db.UpsertIssueSyncBindingParams) {
 		p, err := store.CreateProject(ctx, name)
@@ -844,7 +843,7 @@ func checkNotionSyncStorage(t *testing.T, store db.Storage) error {
 }
 
 func checkIssueSyncExpectedBinding(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "expected-binding-project")
 	require.NoError(t, err)
 	p := db.UpsertIssueSyncBindingParams{ProjectID: project.ID, Provider: "notion", SourceKey: "notion:source", RemoteID: "source", DisplayName: "Tasks", Config: jsontext.Value(`{"since":"first"}`), IntervalSeconds: 300}

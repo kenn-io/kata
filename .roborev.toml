@@ -62,6 +62,18 @@ ordinary UI trust boundary, but it never grants token administration. Remote
 mutable access is opt-in and follows the private-network bearer model described
 in AGENTS.md.
 
+Non-loopback TCP starts only with `--insecure-readonly` and no token, a token
+plus `[auth].trust_private_network`, or the explicit
+`[auth].allow_unauthenticated_private_network_writes` opt-in on a literal
+private IP bind. That tokenless writable mode deliberately treats the private
+network as the access boundary, uses client-supplied actors, and blocks token
+administration. Hosted mode (`docs/operations/hosted-mode.md`) binds
+`0.0.0.0:$PORT` for `kata daemon start --foreground` when `PORT` is set and no
+listen address is configured; auto-started daemons do not. Do not report these
+opt-in modes as missing authentication or public exposure. Do flag a path that
+reaches them without the opt-in, or that lets the tokenless mode administer
+tokens.
+
 Not findings: missing multi-user authorization on owner-local or direct-loopback paths,
 `validateActor` "not authorizing" (it is audit metadata), DoS via large bodies
 or bulk endpoints on trusted local/private input, symlink following beneath the
@@ -72,11 +84,14 @@ The browser is a distinct ambient-credential boundary even though it is served
 by the daemon. Reviewers MUST enforce all of these invariants:
 
 1. A direct browser tab may create a local-web session only on the keyless local
-   trust boundary: direct loopback peer, exact configured loopback Host and
-   Origin, no forwarding headers, and no daemon token, identity, or trusted
-   proxy authentication. It must be unavailable on non-loopback, proxied, or
-   authenticated deployments. The resulting data authority still requires the
-   split cookie and tab header in item 2 and never grants token administration.
+   trust boundary: direct loopback peer, exact configured loopback Host, no
+   forwarding headers, and no identity-mode or trusted-proxy authentication. A
+   static daemon token does not disable this path. The mint requires the exact
+   configured Origin when one is sent; an absent or empty Origin is accepted
+   only on this mint and never with cross-site Fetch Metadata. It must be
+   unavailable on non-loopback, proxied, or identity-authenticated
+   deployments. The resulting data authority still requires the split cookie
+   and tab header in item 2 and never grants token administration.
    `kata ui` opens the advertised loopback URL directly; launch credentials,
    secret runtime siblings, credential fragments, and private browser handoffs
    are not part of the contract. The resulting local-web principal may perform
@@ -107,9 +122,9 @@ by the daemon. Reviewers MUST enforce all of these invariants:
    aliases; it is never inferred from forwarded headers. Foreign DNS Host
    values are never made safe by classifying traffic as CLI or presenting a
    bearer header. Browser-bearing mutations require the exact configured
-   Origin even when the header would otherwise be absent, while ordinary
-   health, CLI, and federation requests remain governed by daemon
-   bearer/private-network auth. Bearer CLI
+   Origin even when the header would otherwise be absent; the only exception
+   is the local-session mint in item 1. Ordinary health, CLI, and federation
+   requests remain governed by daemon bearer/private-network auth. Bearer CLI
    event streams remain CLI traffic.
 5. HTTP browser origins are accepted for loopback. Non-loopback HTTP requires
    explicit `[auth].trust_private_network = true` and represents an
@@ -169,9 +184,23 @@ by the daemon. Reviewers MUST enforce all of these invariants:
    bypass, cross-origin credential redirects, and streams surviving source
    revocation. Missing multi-tenant ACLs between principals already trusted for
    one configured daemon are not findings by themselves.
-10. The production CSP keeps scripts same-origin-only. Kata's dynamic layout
-   requires inline style attributes, so `style-src-attr 'unsafe-inline'` is an
-   intentional narrow allowance and must not be broadened to inline scripts.
+10. The production CSP keeps scripts same-origin-only. `script-src 'self'
+   'wasm-unsafe-eval'` allows Shiki's regex engine; JavaScript eval and inline
+   scripts stay blocked. Kata's dynamic layout requires inline style
+   attributes, so `style-src-attr 'unsafe-inline'` is an intentional narrow
+   allowance and must not be broadened to inline scripts.
+11. When `[mcp]` mounts `/mcp` on the daemon, that path requires its own MCP
+   bearer (`[mcp].token_file` or `token_env`) in place of the daemon bearer,
+   and it skips the browser Origin requirement unless the request carries
+   browser evidence (Origin, Fetch Metadata, session headers, or session
+   cookies). Host validation still applies. The mount calls REST with the
+   bootstrap token or owner-local socket, so a mount without `projects` is
+   daemon-wide authority and requires `all_projects = true`; the mount never
+   registers token, team, or storage tools. Do not report the separate bearer
+   or the skipped Origin check for gateway clients as a bypass. Do flag a
+   browser-evidence request that reaches `/mcp` without the Origin check, Host
+   validation skipped for `/mcp`, or token, team, or storage tools on the mount.
+   An unmounted `/mcp` is an ordinary browser route.
 
 Snapshot responses are backend-consistency contracts: a matching ETag performs
 no projection reads, a built snapshot captures its cursor inside the same
@@ -207,23 +236,14 @@ installer or updater, asset names that no longer match kit's default
 self-update contract, missing assets in a successful release, or code/docs
 that claim signed updates exist before signing is implemented.
 
-Semver tag pushes are the release publication mechanism. A repository writer
-who can push a semver release tag to a commit already contained in `origin/main`
-is trusted to initiate the GitHub release and GoReleaser artifact upload through
-the tag-triggered Release workflow. Do not raise a blocking finding merely
-because the tag-triggered release job has `contents: write`, lacks an additional
-`release` environment approval, or publishes with `GITHUB_TOKEN`.
-
-The release workflow must still validate the tag shape, verify the tag target is
-contained in `origin/main`, run that validation without release-write
-permissions and from trusted default-branch code, check out the immutable
-validated commit SHA for packaging, and re-check the tag immediately before
-creating the GitHub release. Valid findings remain: shell injection in tag
-handling, publishing from non-semver tags, publishing a tag whose target is not
-in `origin/main`, running validation from tag-controlled code before containment
-is proven, checking out a mutable ref for packaging after validation, skipping
-the immediate pre-publish tag re-check, or broadening write credentials beyond
-the release publication job.
+Releases are published by an external release process. This repository keeps
+the build and packaging definitions (`.goreleaser.yaml`, `cmd/release-artifacts`,
+`docker/release`, `docker-bake.hcl`), and `workflow-validation.yml` builds a
+GoReleaser snapshot in pull requests that touch them. Pushing a tag here
+publishes nothing. Flag a change that adds a local script or workflow that
+creates tags or publishes releases (AGENTS.md "Release PRs"). Renaming a
+Homebrew archive breaks the tap updater's archive-name contract in
+`docs/development/packaging.md`; flag a rename without that coordination.
 
 Every GoReleaser entry point runs `make web-release-check` and must provision
 the pinned Node/Bun toolchain plus frozen web dependencies before creating or
@@ -234,12 +254,6 @@ Stronger release provenance such as GPG tag verification, artifact signing, or
 SLSA-style attestations is future hardening work. Do not block current release
 changes solely because those mechanisms are absent unless the diff claims they
 already exist or weakens an existing verification step.
-
-The Publish Release workflow may create the GitHub release before GoReleaser
-finishes uploading artifacts. A visible release during an in-progress or failed
-GoReleaser run is an operational cleanup issue, not a supply-chain
-vulnerability. It is valid to flag a successful publish run that leaves the
-release without the expected archives, packages, or `SHA256SUMS`.
 
 ## Tailscale/private-overlay hostnames
 
@@ -263,38 +277,49 @@ rendered in errors, a config/default that exposes bearer HTTP publicly by
 default, or a code path that claims to support `allow_insecure` but silently
 ignores it.
 
-## Schema upgrades use JSONL cutover, not ALTER-TABLE migrations
+## Schema changes: SQLite cutover, PostgreSQL forward migrations
 
-Schema lives in the embedded `internal/db/schema.sql`. There is no
-migrations directory; `db.Open` returns `ErrSchemaCutoverRequired`
-when versions mismatch, and `jsonl.AutoCutover` rebuilds the DB from
-JSONL into a fresh current-schema bootstrap.
+The two backends upgrade differently.
 
-Bumping the version: edit `schema.sql`. For shape changes (added /
-removed / retyped columns), add a version-aware exporter for the old
-shape in `internal/jsonl/export.go` and make the importer tolerant of
-the missing field. For CHECK widenings, no exporter is needed — old
-rows still satisfy the wider constraint after the rebuild.
+SQLite schema lives in the embedded `internal/db/sqlitestore/schema.sql` and
+has no migrations directory. `sqlitestore` returns `ErrSchemaCutoverRequired`
+for an older database, and `storeopen.Open` runs `jsonl.AutoCutover`, which
+rebuilds the database from JSONL into a fresh current-schema bootstrap. For
+shape changes (added / removed / retyped columns), add a version-aware exporter
+for the old shape in `internal/jsonl/export.go` and make the importer tolerant
+of the missing field. Don't flag a missing SQLite migration file; every old
+SQLite DB is torn down and rebuilt by JSONL cutover.
 
-Don't flag "missing migration file" or "the existing DB keeps the old
-CHECK". No DDL script would run, and every old DB is torn down and
-rebuilt by JSONL cutover.
+PostgreSQL installs fresh databases from `internal/db/pgstore/schema.sql` and
+upgrades released schemas with forward-only migrations under
+`internal/db/pgstore/migrations/`, registered in
+`internal/db/pgstore/migrations.go`. Follow
+`docs/development/postgres-migrations.md`: flag a PostgreSQL schema change
+that lacks a registered migration or an upgrade test, a migration whose result
+differs from the canonical `schema.sql`, an edited or deleted migration that is
+already on main, or a down migration. The `migration-history` pre-commit hook
+checks file naming and immutability; review the SQL itself.
 
 ## Pre-transaction close guards: accepted v1 trade-off
 
 `CheckSiblingCloseThrottle` and `CheckRepeatedMessageGuard` in
-`internal/daemon/close_guards.go` read before `db.CloseIssue`'s write
-tx, so concurrent closes can momentarily exceed the limit by one. The
-spec documents this (anti-agent-justification §3.9); agents are
+`internal/daemon/close_guards.go` read before the `CloseIssueGuarded`
+write tx, so concurrent closes can momentarily exceed the limit by one.
+Both guards run only when `[close.throttle] enabled = true`. The
+function comments document this trade-off; agents are
 typically serial and the next close in the window still trips the
 guard and emits `close.throttled`. Don't re-raise — if a real attack
 path exists, name it concretely.
 
 ## TUI close bypass: intentional trust-on-claim, scoped to reason=done
 
-`internal/daemon/handlers_actions.go` skips substance/evidence
-validation only when `source == "tui"` AND `reason == "done"` (the
-only shape the interactive close keystroke produces). A TUI claim
+`tuiBypassAllowed` in `internal/daemon/identity.go` skips
+substance/evidence validation only when `source == "tui"` AND
+`reason == "done"` (the only shape the interactive close keystroke
+produces) and the request arrived over owner-local transport (the Unix
+socket, or direct loopback TCP without forwarding headers) with no
+browser session and no database-token, trusted-proxy, host, or
+local-web principal. A TUI claim
 with any other reason still runs full validation, including
 duplicate-of / superseded-by target checks. Forging the source field
 on a `done` close costs the same as forging evidence — adding a

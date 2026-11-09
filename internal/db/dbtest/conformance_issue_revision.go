@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ import (
 // after an A -> B -> A handoff.
 func checkIssueRevisionOwner(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -83,7 +82,7 @@ func checkIssueRevisionOwner(t *testing.T, store db.Storage) error {
 // even when it is combined with a title or body edit.
 func checkIssueRevisionEdits(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -138,7 +137,7 @@ func checkIssueRevisionEdits(t *testing.T, store db.Storage) error {
 // still invalidate a revision captured before either transition.
 func checkIssueRevisionStatus(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -191,7 +190,7 @@ func checkIssueRevisionStatus(t *testing.T, store db.Storage) error {
 
 func checkIssueRevisionImport(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
@@ -267,7 +266,7 @@ func checkIssueRevisionImport(t *testing.T, store db.Storage) error {
 
 func checkIssueRevisionAuthorRewrite(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	a, b := "worker-a", "worker-b"

@@ -124,6 +124,11 @@ func newMetaGetCmd() *cobra.Command {
 			if len(args) == 2 {
 				key = args[1]
 			}
+			if currentOutputMode() == outputAgent || currentOutputMode() == outputJSON {
+				// Metadata-only responses omit stable identity. Retain the accepted
+				// input reference instead of rendering a potentially moved short ID.
+				issue.ShortID = textsafe.Line(strings.TrimSpace(args[0]))
+			}
 			return printMetaGet(cmd, issue, key)
 		},
 	}
@@ -134,12 +139,19 @@ func newMetaGetCmd() *cobra.Command {
 // status, metadata, and revision are the only fields those consumers read.
 // show.go keeps its own richer struct for the full `kata show` surface. Status
 // is unused by meta but lets waitFetchState and liveAttnDaemon.lookup decode the
-// lifecycle status through the same struct instead of anonymous copies.
+// lifecycle status through the same struct instead of anonymous copies. The
+// content fields, ProjectID and RecurrenceID are read by kata schedule --repeat.
 type metaIssueWire struct {
-	ShortID  string                    `json:"short_id"`
-	Status   string                    `json:"status"`
-	Metadata map[string]jsontext.Value `json:"metadata"`
-	Revision int64                     `json:"revision"`
+	ProjectID    int64                     `json:"project_id"`
+	UID          string                    `json:"uid"`
+	ShortID      string                    `json:"short_id"`
+	Status       string                    `json:"status"`
+	Title        string                    `json:"title"`
+	Body         string                    `json:"body"`
+	Priority     *int64                    `json:"priority"`
+	Metadata     map[string]jsontext.Value `json:"metadata"`
+	Revision     int64                     `json:"revision"`
+	RecurrenceID *int64                    `json:"recurrence_id"`
 }
 
 type metaShowResponse struct {
@@ -368,7 +380,7 @@ func runMetaPatchGuarded(
 		return callErr
 	}
 	bs := response.Body
-	return printMetaPatch(cmd, bs, verb, key)
+	return printMetaPatch(cmd, bs, verb, key, ref.ProjectName)
 }
 
 func fetchIssueMetadata(ctx context.Context, client *http.Client, baseURL string, pid int64, ref string) (metaIssueWire, error) {
@@ -451,7 +463,7 @@ func metaAPIError(status int, bs []byte) *cliError {
 	return err
 }
 
-func printMetaPatch(cmd *cobra.Command, bs []byte, verb, key string) error {
+func printMetaPatch(cmd *cobra.Command, bs []byte, verb, key, requestedProject string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
@@ -465,6 +477,11 @@ func printMetaPatch(cmd *cobra.Command, bs []byte, verb, key string) error {
 	if err := json.Unmarshal(bs, &out); err != nil {
 		return err
 	}
+	displayRef, err := mutationIssueRefForOutput(cmd, bs, requestedProject)
+	if err != nil {
+		return err
+	}
+	out.Issue.ShortID = displayRef
 	rev := fmt.Sprintf("rev-%d", out.Issue.Revision)
 	if mode == outputAgent {
 		if flags.Quiet {
@@ -484,7 +501,7 @@ func printMetaPatch(cmd *cobra.Command, bs []byte, verb, key string) error {
 	if flags.Quiet {
 		return nil
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "meta %s %s %s %s\n",
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "meta %s %s %s %s\n",
 		textsafe.Line(verb), textsafe.Line(out.Issue.ShortID), textsafe.Line(key), textsafe.Line(rev))
 	return err
 }

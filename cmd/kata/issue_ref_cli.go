@@ -132,11 +132,34 @@ func hydrateRefWithQualified(ctx context.Context, baseURL string, pid int64, ref
 	bs := response.Body
 	var out struct {
 		Issue struct {
-			ShortID string `json:"short_id"`
+			ShortID   string `json:"short_id"`
+			ProjectID int64  `json:"project_id"`
 		} `json:"issue"`
 	}
 	if err := json.Unmarshal(bs, &out); err != nil {
 		return ref, err
+	}
+	// Former short IDs and ULIDs can resolve to an issue that moved out of
+	// the route's project. Confirmation must name its current project.
+	if out.Issue.ProjectID != 0 && out.Issue.ProjectID != pid {
+		response, callErr := apiClient.ShowProjectWithResponse(ctx, &generated.ShowProjectRequestOptions{
+			PathParams: &generated.ShowProjectPath{ProjectID: out.Issue.ProjectID},
+		})
+		if response == nil {
+			return ref, externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return ref, err
+		}
+		var project struct {
+			Project struct {
+				Name string `json:"name"`
+			} `json:"project"`
+		}
+		if err := json.Unmarshal(response.Body, &project); err != nil {
+			return ref, err
+		}
+		ref.ProjectName = project.Project.Name
 	}
 	ref.ShortID = out.Issue.ShortID
 	if ref.ProjectName != "" && ref.ShortID != "" {

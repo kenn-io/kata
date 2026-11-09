@@ -77,7 +77,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			if match != nil {
-				return replayComment(ctx, cfg, in.ProjectID, match, actor, in.Body.Body, handle, in.Body.ReplyTo, in.Body.Kind)
+				return replayComment(ctx, cfg, in.ProjectID, in.Ref, match, actor, in.Body.Body, handle, in.Body.ReplyTo, in.Body.Kind)
 			}
 		}
 		if !resolved {
@@ -256,13 +256,14 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 }
 
 // replayComment returns a committed comment receipt to an exact retry. The
-// route must be the project the comment was written in or the project the
-// issue lives in now, and that current project must still be active and
-// inside the caller's host scope, because the reply exposes current state.
+// route must resolve to the same stable issue, and its current project must
+// still be active and inside the caller's host scope, because the reply
+// exposes current state.
 func replayComment(
 	ctx context.Context,
 	cfg ServerConfig,
 	routeProjectID int64,
+	routeRef string,
 	match *db.CommentIdempotencyMatch,
 	actor, body, teammate string,
 	links ...string,
@@ -271,8 +272,13 @@ func replayComment(
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
-	if current.DeletedAt != nil ||
-		(routeProjectID != match.Event.ProjectID && routeProjectID != current.ProjectID) {
+	// The historical route must still resolve to this receipt's stable issue.
+	// This also rejects a full UID supplied through an unrelated project.
+	routed, err := activeIssueByRef(ctx, cfg.DB, routeProjectID, routeRef, db.IncludeDeletedNo)
+	if err != nil {
+		return nil, err
+	}
+	if current.DeletedAt != nil || routed.UID != match.IssueUID || current.UID != match.IssueUID {
 		return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 	}
 	currentProject, err := activeProjectByID(ctx, cfg.DB, current.ProjectID)

@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,8 +15,8 @@ func TestDoctorRejectsBrowserAuthorityEvenWithOperatorToken(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			mux := http.NewServeMux()
 			registerDoctorHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{})
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/doctor", nil)
-			req = req.WithContext(withWebSession(context.Background(), Principal{Kind: kind}))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/doctor", nil)
+			req = req.WithContext(withWebSession(t.Context(), Principal{Kind: kind}))
 			rr := httptest.NewRecorder()
 			mux.ServeHTTP(rr, req)
 			require.Equal(t, http.StatusForbidden, rr.Code)

@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -47,7 +46,7 @@ func TestSoftDeleteIssue_AlreadyDeletedIsNoOp(t *testing.T) {
 func TestSoftDeleteIssue_UnknownIssueIsErrNotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, _, _, err := d.SoftDeleteIssue(ctx, 9999, "agent")
 	assert.True(t, errors.Is(err, db.ErrNotFound))
 }
@@ -81,7 +80,7 @@ func TestRestoreIssue_NotDeletedIsNoOp(t *testing.T) {
 func TestRestoreIssue_UnknownIssueIsErrNotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, _, _, err := d.RestoreIssue(ctx, 9999, "agent")
 	assert.True(t, errors.Is(err, db.ErrNotFound))
 }
@@ -136,7 +135,7 @@ func TestSoftDeleteIssue_ScopesByIssueID(t *testing.T) {
 	// SoftDeleteIssue takes an issue ID, not a project ID — it must work
 	// across projects without requiring a project context.
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p1, err := d.CreateProject(ctx, "p1")
 	require.NoError(t, err)
 	p2, err := d.CreateProject(ctx, "p2")
@@ -161,7 +160,7 @@ func TestSoftDeleteIssue_ScopesByIssueID(t *testing.T) {
 func TestPurgeIssue_RemovesAllDependentsAndAudits(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createKataProject(ctx, t, d)
 	target, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID, Title: "delete me", Body: "body", Author: "tester",
@@ -255,6 +254,8 @@ func TestPurgeIssue_RemovesAllDependentsAndAudits(t *testing.T) {
 		target.ID, target.ID)
 	assertRowCount(ctx, t, d, 0, "FTS row removed",
 		`SELECT count(*) FROM issues_fts WHERE rowid = ?`, target.ID)
+	assertRowCount(ctx, t, d, 0, "comment FTS tokens removed",
+		`SELECT count(*) FROM comments_fts WHERE comments_fts MATCH 'comment'`)
 
 	// keeper's events.created is the only event attributed to keeper that
 	// survives — keeper's issue.linked was deleted because related_issue_id
@@ -564,7 +565,7 @@ func TestPurgeIssue_ReservesSqliteSequenceAboveMaxEventID(t *testing.T) {
 func TestPurgeIssue_UnknownIssueIsErrNotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	_, err := d.PurgeIssue(context.Background(), 9999, "agent", nil)
+	_, err := d.PurgeIssue(t.Context(), 9999, "agent", nil)
 	assert.True(t, errors.Is(err, db.ErrNotFound))
 }
 
@@ -681,7 +682,7 @@ func TestPurgeTombstone_DifferentProjectsDoNotInterfere(t *testing.T) {
 func TestEditIssueAtomic_ChangesCarryPeerProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	alpha := createProject(ctx, t, d, "alpha")
 	beta := createProject(ctx, t, d, "beta")

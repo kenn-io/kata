@@ -3,7 +3,6 @@ package release
 import (
 	"archive/tar"
 	"compress/gzip"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -21,7 +20,7 @@ func TestBuildSourceArchive_TaggedReleaseUsesExactTagAndProductionAssets(t *test
 	repo := newSourceFixture(t, "release tree\n", "production-assets")
 	out := filepath.Join(t.TempDir(), "kata_0.14.2_source.tar.gz")
 
-	meta, err := BuildSourceArchive(context.Background(), SourceArchiveOptions{
+	meta, err := BuildSourceArchive(t.Context(), SourceArchiveOptions{
 		RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: out,
 	})
 
@@ -49,7 +48,7 @@ func TestBuildSourceArchive_SnapshotUsesHEADAndSnapshotVersion(t *testing.T) {
 	runGitEnv(t, repo, []string{"GIT_AUTHOR_DATE=2026-08-08T01:02:04Z", "GIT_COMMITTER_DATE=2026-08-08T01:02:04Z"}, "commit", "-m", "snapshot head")
 	out := filepath.Join(t.TempDir(), "snapshot.tar.gz")
 
-	meta, err := BuildSourceArchive(context.Background(), SourceArchiveOptions{
+	meta, err := BuildSourceArchive(t.Context(), SourceArchiveOptions{
 		RepoRoot: repo, Version: "0.14.2-SNAPSHOT", Snapshot: true, Output: out,
 	})
 
@@ -70,7 +69,7 @@ func TestBuildSourceArchive_RealReleaseRejectsMissingOrMismatchedTag(t *testing.
 		{name: "mismatched", tag: "v0.14.3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := BuildSourceArchive(context.Background(), SourceArchiveOptions{
+			_, err := BuildSourceArchive(t.Context(), SourceArchiveOptions{
 				RepoRoot: repo, Version: "0.14.2", Tag: tc.tag, Output: filepath.Join(t.TempDir(), "source.tar.gz"),
 			})
 			require.Error(t, err)
@@ -82,9 +81,9 @@ func TestBuildSourceArchive_IsByteDeterministic(t *testing.T) {
 	repo := newSourceFixture(t, "release tree\n", "production-assets")
 	outA := filepath.Join(t.TempDir(), "a.tar.gz")
 	outB := filepath.Join(t.TempDir(), "b.tar.gz")
-	metaA, err := BuildSourceArchive(context.Background(), SourceArchiveOptions{RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: outA})
+	metaA, err := BuildSourceArchive(t.Context(), SourceArchiveOptions{RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: outA})
 	require.NoError(t, err)
-	metaB, err := BuildSourceArchive(context.Background(), SourceArchiveOptions{RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: outB})
+	metaB, err := BuildSourceArchive(t.Context(), SourceArchiveOptions{RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: outB})
 	require.NoError(t, err)
 	bytesA, err := os.ReadFile(outA) //nolint:gosec // test-owned temporary path
 	require.NoError(t, err)
@@ -102,7 +101,7 @@ func TestBuildSourceArchive_IgnoresGitLineEndingConfiguration(t *testing.T) {
 	runGit(t, repo, "config", "core.eol", "crlf")
 	out := filepath.Join(t.TempDir(), "source.tar.gz")
 
-	_, err := BuildSourceArchive(context.Background(), SourceArchiveOptions{
+	_, err := BuildSourceArchive(t.Context(), SourceArchiveOptions{
 		RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: out,
 	})
 
@@ -115,7 +114,7 @@ func TestBuildSourceArchive_IncludesVendoredDependencies(t *testing.T) {
 	repo := newBuildableSourceFixture(t, false)
 	out := filepath.Join(t.TempDir(), "source.tar.gz")
 
-	_, err := BuildSourceArchive(context.Background(), SourceArchiveOptions{
+	_, err := BuildSourceArchive(t.Context(), SourceArchiveOptions{
 		RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: out,
 	})
 
@@ -128,17 +127,17 @@ func TestBuildSourceArchive_IncludesVendoredDependencies(t *testing.T) {
 func TestVerifySourceArchive_BuildsCoreBinaryFromCleanTree(t *testing.T) {
 	repo := newBuildableSourceFixture(t, false)
 	out := filepath.Join(t.TempDir(), "source.tar.gz")
-	meta, err := BuildSourceArchive(context.Background(), SourceArchiveOptions{RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: out})
+	meta, err := BuildSourceArchive(t.Context(), SourceArchiveOptions{RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: out})
 	require.NoError(t, err)
-	require.NoError(t, VerifySourceArchive(context.Background(), out, meta))
+	require.NoError(t, VerifySourceArchive(t.Context(), out, meta))
 }
 
 func TestVerifySourceArchive_RejectsCompilationStub(t *testing.T) {
 	repo := newBuildableSourceFixture(t, true)
 	out := filepath.Join(t.TempDir(), "source.tar.gz")
-	meta, err := BuildSourceArchive(context.Background(), SourceArchiveOptions{RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: out})
+	meta, err := BuildSourceArchive(t.Context(), SourceArchiveOptions{RepoRoot: repo, Version: "0.14.2", Tag: "v0.14.2", Output: out})
 	require.NoError(t, err)
-	require.Error(t, VerifySourceArchive(context.Background(), out, meta))
+	require.Error(t, VerifySourceArchive(t.Context(), out, meta))
 }
 
 func TestVerificationBinaryPath(t *testing.T) {
@@ -174,7 +173,7 @@ func TestRenderHomebrewCoreFormula_ProducesValidRuby(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(formula), `assert_match '"distribution":"homebrew"', info`)
 	assert.NotContains(t, string(formula), `%Q("distribution":"homebrew")`)
-	cmd := exec.Command(ruby, "-c", output) //nolint:gosec // fixed test tool and generated fixture path
+	cmd := exec.CommandContext(t.Context(), ruby, "-c", output) //nolint:gosec // fixed test tool and generated fixture path
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "%s", out)
 }
@@ -305,7 +304,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 
 func runGitEnv(t *testing.T, dir string, extraEnv []string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // fixed test helper arguments
+	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // fixed test helper arguments
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), extraEnv...)
 	out, err := cmd.CombinedOutput()

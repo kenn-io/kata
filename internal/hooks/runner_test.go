@@ -219,7 +219,7 @@ func TestRunner_TimedOut_TermDelay(t *testing.T) {
 	rs.deps.GraceWindow = 200 * time.Millisecond
 	got := rs.runProbe(func(h *ResolvedHook) {
 		h.Args = []string{"term-delay", "10ms"}
-		h.Timeout = 50 * time.Millisecond
+		h.Timeout = 50 * time.Millisecond //nolint:kennlint // deadlinetest: the helper remains running until cancellation; the test asserts timeout termination
 	})
 	if got.Result != "timed_out" {
 		t.Fatalf("result = %q, want timed_out", got.Result)
@@ -231,7 +231,7 @@ func TestRunner_TimedOut_TermIgnore_Killed(t *testing.T) {
 	rs.deps.GraceWindow = 50 * time.Millisecond
 	got := rs.runProbe(func(h *ResolvedHook) {
 		h.Args = []string{"term-ignore", "10s"}
-		h.Timeout = 50 * time.Millisecond
+		h.Timeout = 50 * time.Millisecond //nolint:kennlint // deadlinetest: the helper remains running until cancellation; the test asserts timeout termination
 	})
 	if got.Result != "timed_out" {
 		t.Fatalf("result = %q, want timed_out (SIGKILL fallback)", got.Result)

@@ -330,7 +330,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, federationFeatureError(err)
 		}
-		body := api.ProjectFederationBody{ProjectID: result.Project.ID, ProjectUID: result.Project.UID, ProjectName: result.Project.Name, ReplayHorizonEventID: result.Binding.ReplayHorizonEventID, BaselineThroughEventID: result.BaselineThroughEventID}
+		body := api.ProjectFederationBody{NativeCronWrites: result.Binding.Role == db.FederationRoleHub && result.Binding.Enabled, ProjectID: result.Project.ID, ProjectUID: result.Project.UID, ProjectName: result.Project.Name, ReplayHorizonEventID: result.Binding.ReplayHorizonEventID, BaselineThroughEventID: result.BaselineThroughEventID}
 		return &api.ProjectFederationResponse{Body: body, EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures}, nil
 	})
 
@@ -366,7 +366,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			projectIDs = []int64{*in.Body.ProjectID}
 		}
 		var err error
-		ctx, err = authorizeHostProjectScope(ctx, projectIDs, nil, in.Body.ProjectID == nil)
+		// A name belongs to the instance across every project, so naming
+		// also requires a global host decision for a project-scoped grant.
+		ctx, err = authorizeHostProjectScope(ctx, projectIDs, nil, in.Body.ProjectID == nil || in.Body.SpokeName != "")
 		if err != nil {
 			return nil, err
 		}
@@ -415,11 +417,15 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		created, err := cfg.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 			Token:                        in.Body.Token,
 			SpokeInstanceUID:             in.Body.SpokeInstanceUID,
+			SpokeName:                    in.Body.SpokeName,
 			ProjectID:                    in.Body.ProjectID,
 			Capabilities:                 in.Body.Capabilities,
 			Actor:                        actor,
 			AllowAdoptionSnapshotAuthors: in.Body.AllowAdoptionSnapshotAuthors,
 		})
+		if err := federationSpokeNameAPIError(err); err != nil {
+			return nil, err
+		}
 		if errors.Is(err, db.ErrFederationEnrollmentTokenConflict) {
 			return nil, api.NewError(http.StatusConflict, "federation_enrollment_token_conflict",
 				"federation enrollment token conflicts with an existing enrollment", "", nil)
@@ -428,6 +434,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		out := federationEnrollmentToOut(created.Enrollment, created.Token)
+		out.SpokeName = federationSpokeNameForCredentialResponse(ctx, cfg.DB, created.Enrollment.SpokeInstanceUID)
 		if join != nil {
 			join.Token, join.Actor, join.Capabilities = created.Token, created.Enrollment.Actor, created.Enrollment.Capabilities
 			join.PushEnabled = slices.Contains(strings.Split(created.Enrollment.Capabilities, ","), "push")
@@ -486,9 +493,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		return &api.RotateFederationEnrollmentResponse{
-			Body: federationEnrollmentToOut(created.Enrollment, created.Token),
-		}, nil
+		out := federationEnrollmentToOut(created.Enrollment, created.Token)
+		out.SpokeName = federationSpokeNameForCredentialResponse(ctx, cfg.DB, created.Enrollment.SpokeInstanceUID)
+		return &api.RotateFederationEnrollmentResponse{Body: out}, nil
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -500,13 +507,39 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		names, err := cfg.DB.ListFederationSpokeNames(ctx)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
 		out := make([]api.FederationEnrollmentOut, 0, len(enrollments))
 		for _, enrollment := range enrollments {
-			out = append(out, federationEnrollmentToOut(enrollment, ""))
+			row := federationEnrollmentToOut(enrollment, "")
+			row.SpokeName = names[enrollment.SpokeInstanceUID]
+			out = append(out, row)
 		}
 		return &api.ListFederationEnrollmentsResponse{
 			Body: api.ListFederationEnrollmentsBody{Enrollments: out},
 		}, nil
+	})
+
+	spokeNamePath := "/api/v1/federation/enrollments/spokes/{spoke_instance_uid}/name"
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "setFederationSpokeName", Method: http.MethodPut, Path: spokeNamePath,
+		Summary: "Set an enrolled spoke's hub-local name",
+	}, func(ctx context.Context, in *api.SetFederationSpokeNameRequest) (*api.SetFederationSpokeNameResponse, error) {
+		if err := setFederationSpokeName(ctx, cfg.DB, in.SpokeInstanceUID, in.Body.Name); err != nil {
+			return nil, err
+		}
+		return &api.SetFederationSpokeNameResponse{Body: api.FederationSpokeNameOut{SpokeInstanceUID: in.SpokeInstanceUID, SpokeName: in.Body.Name}}, nil
+	})
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "clearFederationSpokeName", Method: http.MethodDelete, Path: spokeNamePath,
+		Summary: "Clear an enrolled spoke's hub-local name",
+	}, func(ctx context.Context, in *api.ClearFederationSpokeNameRequest) (*api.SetFederationSpokeNameResponse, error) {
+		if err := setFederationSpokeName(ctx, cfg.DB, in.SpokeInstanceUID, ""); err != nil {
+			return nil, err
+		}
+		return &api.SetFederationSpokeNameResponse{Body: api.FederationSpokeNameOut{SpokeInstanceUID: in.SpokeInstanceUID}}, nil
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -575,6 +608,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				ProjectEventSink: func(event db.Event) {
 					deliverProjectMutation(cfg, &event)
 				},
+				ProjectResetSink: cfg.Publish().Reset,
 			},
 		)
 		if result.CreatedEvent != nil {
@@ -911,7 +945,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, Limit: limit})
+		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, IssueUID: in.IssueUID, Limit: limit})
 		if err != nil {
 			return nil, federationFeatureError(err)
 		}
@@ -953,7 +987,15 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateFederationAdoptionBaseline(in.Body.AdoptionBaseline, in.Body.AdoptionBaselineEndEventID); err != nil {
 			return nil, err
 		}
+		moveSources, err := authenticateFederationMoveSources(ctx, cfg, principal, in.Body.MoveSourceTokens)
+		if err != nil {
+			return nil, err
+		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
+			MoveSourceEnrollmentIDs: moveSources,
+			AuthorizeMove: func(ctx context.Context, transaction db.Transaction, sourceGrant db.FederationEnrollment, source db.Project) error {
+				return authorizeFederationMoveSource(ctx, cfg, transaction, sourceGrant, source)
+			},
 			EventFeatures:                    in.EventFeatures,
 			ProjectID:                        in.ProjectID,
 			FederationEnrollmentID:           principal.EnrollmentID,
@@ -966,6 +1008,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		})
 		if err != nil {
 			return nil, federationIngestError(err)
+		}
+		for _, reset := range result.Resets {
+			cfg.Publish().Reset(reset.ProjectID, reset.EventID)
 		}
 		if err := federationFailpoint("after_federation_ingest_commit_before_broadcast"); err != nil {
 			return nil, api.NewError(http.StatusInternalServerError, "federation_failpoint", err.Error(), "", nil)
@@ -1044,8 +1089,14 @@ func federationIngestError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
+	case errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
+		return federationCredentialDenied()
 	case errors.Is(err, ErrHostAccessDenied):
 		return federationCredentialDenied()
+	case errors.Is(err, ErrHostFederationAdmissionLimited):
+		return api.NewError(http.StatusTooManyRequests, "admission_limited", "federation request admission is full", "", nil)
+	case errors.Is(err, errHostFederationAccessUnavailable):
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation transaction access decision unavailable", "", nil)
 	case errors.Is(err, db.ErrRemoteEventConflict):
 		return api.NewError(http.StatusConflict, "remote_event_conflict", err.Error(), "", nil)
 	case errors.Is(err, db.ErrRemoteEventHashMismatch), errors.Is(err, db.ErrFederationIngestValidation):
@@ -1131,6 +1182,10 @@ func abortFederationReplicaLeave(
 func federationReplicaAPIError(err error) error {
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
+	}
+	if errors.Is(err, db.ErrFederationProjectIdentityRequired) {
+		return api.NewError(http.StatusConflict, "federation_project_identity_required", db.ErrFederationProjectIdentityRequired.Error(),
+			"leave the joined projects still replaying this history before adopting this former project under a different UID", nil)
 	}
 	if errors.Is(err, db.ErrFederationResetBlockedByPendingPush) || errors.Is(err, db.ErrFederationResetBlockedByDownstream) {
 		return api.NewError(http.StatusConflict, "federation_lifecycle_blocked", "federation change requires resolved deliveries and detached downstream enrollments", "sync retained work through root acceptance and explicitly revoke or detach descendants, then retry", nil)
@@ -1245,6 +1300,51 @@ func federationBindingToOut(binding db.FederationBinding) api.FederationBindingO
 		UpdatedAt:            binding.UpdatedAt,
 		LastSyncAt:           binding.LastSyncAt,
 	}
+}
+
+// setFederationSpokeName sets a label, or clears it when name is empty.
+func setFederationSpokeName(ctx context.Context, store db.Storage, uid, name string) error {
+	err := store.SetFederationSpokeName(ctx, uid, name)
+	if apiErr := federationSpokeNameAPIError(err); apiErr != nil {
+		return apiErr
+	}
+	if errors.Is(err, db.ErrNotFound) {
+		return api.NewError(http.StatusNotFound, "federation_enrollment_not_found", "spoke has no enrollment", "", nil)
+	}
+	if err != nil {
+		return internalAPIError(err)
+	}
+	return nil
+}
+
+// federationSpokeNameAPIError maps label failures; nil means err is not one.
+func federationSpokeNameAPIError(err error) error {
+	if errors.Is(err, db.ErrFederationSpokeNameConflict) {
+		return api.NewError(http.StatusConflict, "federation_spoke_name_conflict", err.Error(), "", nil)
+	}
+	if errors.Is(err, db.ErrFederationSpokeNameValidation) {
+		return api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
+	}
+	return nil
+}
+
+// federationSpokeName reads one instance's current label for a response.
+func federationSpokeName(ctx context.Context, store db.Storage, uid string) (string, error) {
+	names, err := store.ListFederationSpokeNames(ctx)
+	if err != nil {
+		return "", internalAPIError(err)
+	}
+	return names[uid], nil
+}
+
+// federationSpokeNameForCredentialResponse keeps optional metadata lookup
+// failures from hiding a token after the enrollment or rotation has committed.
+func federationSpokeNameForCredentialResponse(ctx context.Context, store db.Storage, uid string) string {
+	name, err := federationSpokeName(ctx, store, uid)
+	if err != nil {
+		return ""
+	}
+	return name
 }
 
 func federationEnrollmentToOut(enrollment db.FederationEnrollment, token string) api.FederationEnrollmentOut {
@@ -1605,6 +1705,7 @@ func buildProjectFederationBody(ctx context.Context, store db.Storage, projectID
 		through = maxSnapshot
 	}
 	return api.ProjectFederationBody{
+		NativeCronWrites:       binding.Role == db.FederationRoleHub && binding.Enabled,
 		ProjectID:              project.ID,
 		ProjectUID:             project.UID,
 		ProjectName:            project.Name,

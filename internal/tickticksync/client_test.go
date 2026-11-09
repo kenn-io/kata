@@ -45,18 +45,18 @@ func TestClientPinnedCredentialsAndScopedReads(t *testing.T) {
 			return nil, errors.New("unexpected request")
 		}
 	})
-	s, err := c.ForRun(context.Background(), clientConfig())
+	s, err := c.ForRun(t.Context(), clientConfig())
 	require.NoError(t, err)
-	_, err = s.Project(context.Background())
+	_, err = s.Project(t.Context())
 	require.NoError(t, err)
-	data, err := s.Data(context.Background())
+	data, err := s.Data(t.Context())
 	require.NoError(t, err)
 	require.Len(t, data.Tasks, 1)
 	for _, body := range []string{`{"project":{"id":"other-project","kind":"TASK"}}`, `{"project":{"id":"project-1","kind":"TASK","closed":true}}`, `{"project":{"id":"project-1","kind":"TASK"},"tasks":[{"id":"task-1","projectId":"other-project","status":0}]}`, `{"project":{"id":"project-1","kind":"TASK"},"tasks":[{"id":"task-1","projectId":"project-1"}]}`, `null`} {
 		bad, _ := testClient(t, func(*http.Request) (*http.Response, error) { return reply(200, body), nil })
-		s, err := bad.ForRun(context.Background(), clientConfig())
+		s, err := bad.ForRun(t.Context(), clientConfig())
 		require.NoError(t, err)
-		_, err = s.Data(context.Background())
+		_, err = s.Data(t.Context())
 		require.Error(t, err)
 	}
 	calls := 0
@@ -66,9 +66,9 @@ func TestClientPinnedCredentialsAndScopedReads(t *testing.T) {
 		r.Header.Set("Location", "https://foreign.example/")
 		return r, nil
 	})
-	s, err = redirect.ForRun(context.Background(), clientConfig())
+	s, err = redirect.ForRun(t.Context(), clientConfig())
 	require.NoError(t, err)
-	_, err = s.Project(context.Background())
+	_, err = s.Project(t.Context())
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "example-secret")
 	require.Equal(t, 1, calls)
@@ -86,18 +86,18 @@ func TestClientRetryCooldownAuthAndBounds(t *testing.T) {
 		return reply(200, `{"id":"project-1","kind":"TASK"}`), nil
 	})
 	before := *now
-	s, err := c.ForRun(context.Background(), clientConfig())
+	s, err := c.ForRun(t.Context(), clientConfig())
 	require.NoError(t, err)
-	_, err = s.Project(context.Background())
+	_, err = s.Project(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
 	require.GreaterOrEqual(t, now.Sub(before), 12*time.Second)
 	for _, code := range []int{401, 403, 404} {
 		calls = 0
 		c, _ = testClient(t, func(*http.Request) (*http.Response, error) { calls++; return reply(code, "secret remote body"), nil })
-		s, err = c.ForRun(context.Background(), clientConfig())
+		s, err = c.ForRun(t.Context(), clientConfig())
 		require.NoError(t, err)
-		_, err = s.Project(context.Background())
+		_, err = s.Project(t.Context())
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "secret")
 		require.Equal(t, 1, calls)
@@ -105,12 +105,12 @@ func TestClientRetryCooldownAuthAndBounds(t *testing.T) {
 	// Valid JSON padded past the limit: only the size check can reject it.
 	oversized := `{"id":"project-1","kind":"TASK"}` + strings.Repeat(" ", 8<<20)
 	c, _ = testClient(t, func(*http.Request) (*http.Response, error) { return reply(200, oversized), nil })
-	s, err = c.ForRun(context.Background(), clientConfig())
+	s, err = c.ForRun(t.Context(), clientConfig())
 	require.NoError(t, err)
-	_, err = s.Project(context.Background())
+	_, err = s.Project(t.Context())
 	require.Error(t, err)
 	c = NewClient(ClientConfig{LookupEnv: func(string) (string, bool) { return "", false }})
-	_, err = c.ForRun(context.Background(), clientConfig())
+	_, err = c.ForRun(t.Context(), clientConfig())
 	require.Error(t, err)
 }
 
@@ -140,26 +140,26 @@ func TestClientCompletionVerifiedAndUnsafeWritesBlocked(t *testing.T) {
 		}
 		return reply(200, fmt.Sprintf(`{"id":"task-1","projectId":"project-1","status":%d,"repeatFlag":%q}`, status, repeat)), nil
 	})
-	s, err := c.ForRun(context.Background(), clientConfig())
+	s, err := c.ForRun(t.Context(), clientConfig())
 	require.NoError(t, err)
-	obs, err := s.(StatusSession).WriteStatus(context.Background(), "task-1", "closed", func() error { admitted = true; return nil })
+	obs, err := s.(StatusSession).WriteStatus(t.Context(), "task-1", "closed", func() error { admitted = true; return nil })
 	require.NoError(t, err)
 	require.Equal(t, "closed", obs.Status)
 	require.Equal(t, 1, posts)
-	_, err = s.(StatusSession).WriteStatus(context.Background(), "task-1", "closed", func() error { return errors.New("must not dispatch") })
+	_, err = s.(StatusSession).WriteStatus(t.Context(), "task-1", "closed", func() error { return errors.New("must not dispatch") })
 	require.NoError(t, err)
 	require.Equal(t, 1, posts)
-	_, err = s.(StatusSession).WriteStatus(context.Background(), "task-1", "open", func() error { return nil })
+	_, err = s.(StatusSession).WriteStatus(t.Context(), "task-1", "open", func() error { return nil })
 	require.Error(t, err)
 	require.True(t, err.(*issuesync.StatusError).Blocked)
 	require.Equal(t, 1, posts)
 	status = 0
 	recurring = true
-	_, err = s.(StatusSession).WriteStatus(context.Background(), "task-1", "closed", func() error { return nil })
+	_, err = s.(StatusSession).WriteStatus(t.Context(), "task-1", "closed", func() error { return nil })
 	require.Error(t, err)
 	require.Equal(t, 1, posts)
 	recurring = false
-	_, err = s.(StatusSession).WriteStatus(context.Background(), "task-1", "closed", func() error { return errors.New("new intent replaced it") })
+	_, err = s.(StatusSession).WriteStatus(t.Context(), "task-1", "closed", func() error { return errors.New("new intent replaced it") })
 	require.ErrorContains(t, err, "new intent")
 	require.Equal(t, 1, posts)
 }
@@ -182,15 +182,15 @@ func TestStatusSyncIgnoresImportContentValidationFailures(t *testing.T) {
 			return nil, fmt.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
 	})
-	s, err := c.ForRun(context.Background(), clientConfig())
+	s, err := c.ForRun(t.Context(), clientConfig())
 	require.NoError(t, err)
 	statusSession := s.(StatusSession)
 
-	obs, err := statusSession.ReadStatus(context.Background(), "task-1")
+	obs, err := statusSession.ReadStatus(t.Context(), "task-1")
 	require.NoError(t, err)
 	require.Equal(t, "open", obs.Status)
 
-	obs, err = statusSession.WriteStatus(context.Background(), "task-1", "closed", func() error { return nil })
+	obs, err = statusSession.WriteStatus(t.Context(), "task-1", "closed", func() error { return nil })
 	require.NoError(t, err)
 	require.Equal(t, "closed", obs.Status)
 	require.Equal(t, 1, posts)
@@ -212,9 +212,9 @@ func TestClientNeverBlindlyRetriesCompletion(t *testing.T) {
 				}
 				return reply(200, `{"id":"project-1","kind":"TASK"}`), nil
 			})
-			s, err := c.ForRun(context.Background(), clientConfig())
+			s, err := c.ForRun(t.Context(), clientConfig())
 			require.NoError(t, err)
-			_, err = s.(StatusSession).WriteStatus(context.Background(), "task-1", "closed", func() error { return nil })
+			_, err = s.(StatusSession).WriteStatus(t.Context(), "task-1", "closed", func() error { return nil })
 			require.Error(t, err)
 			var se *issuesync.StatusError
 			require.ErrorAs(t, err, &se)
@@ -224,7 +224,7 @@ func TestClientNeverBlindlyRetriesCompletion(t *testing.T) {
 			require.NotContains(t, err.Error(), "secret")
 			if code == 429 {
 				before := *now
-				_, err = s.Project(context.Background())
+				_, err = s.Project(t.Context())
 				require.NoError(t, err)
 				require.GreaterOrEqual(t, now.Sub(before), 10*time.Second)
 			}
@@ -254,15 +254,15 @@ func TestStatusSessionRechecksLiveProjectPolicy(t *testing.T) {
 				taskReads++
 				return reply(200, `{"id":"task-1","projectId":"project-1","status":0}`), nil
 			})
-			session, err := c.ForRun(context.Background(), clientConfig())
+			session, err := c.ForRun(t.Context(), clientConfig())
 			require.NoError(t, err)
 			status := session.(StatusSession)
-			_, err = status.ReadStatus(context.Background(), "task-1")
+			_, err = status.ReadStatus(t.Context(), "task-1")
 			require.NoError(t, err)
 			changed = true
-			_, err = status.ReadStatus(context.Background(), "task-1")
+			_, err = status.ReadStatus(t.Context(), "task-1")
 			require.NoError(t, err)
-			_, err = status.WriteStatus(context.Background(), "task-1", "closed", func() error { return nil })
+			_, err = status.WriteStatus(t.Context(), "task-1", "closed", func() error { return nil })
 			require.Error(t, err)
 			require.Equal(t, 2, taskReads)
 			require.Zero(t, posts)
@@ -279,9 +279,9 @@ func TestClientCapsRetryAfterCooldown(t *testing.T) {
 				r.Header.Set("Retry-After", header)
 				return r, nil
 			})
-			s, err := c.ForRun(context.Background(), clientConfig())
+			s, err := c.ForRun(t.Context(), clientConfig())
 			require.NoError(t, err)
-			_, err = s.Project(context.Background())
+			_, err = s.Project(t.Context())
 			se, ok := errors.AsType[*issuesync.StatusError](err)
 			require.True(t, ok)
 			require.LessOrEqual(t, se.RetryAfter, maxCooldown)
@@ -306,15 +306,15 @@ func TestStatusPassChecksProjectOncePerRun(t *testing.T) {
 	})
 	b := db.IssueSyncBinding{Provider: "ticktick", SourceKey: "ticktick:project-1", RemoteID: "project-1", Config: jsontext.Value(`{"project_id":"project-1","status_sync":"two-way"}`)}
 	adapter := NewAdapter(nil, c)
-	run, err := adapter.OpenStatus(context.Background(), b, time.Time{})
+	run, err := adapter.OpenStatus(t.Context(), b, time.Time{})
 	require.NoError(t, err)
 	mapping := db.IssueStatusMapping{Mapping: db.ImportMapping{ExternalID: "task:task-1"}}
 	for range 3 {
-		_, err = run.ReadStatus(context.Background(), mapping)
+		_, err = run.ReadStatus(t.Context(), mapping)
 		require.NoError(t, err)
 	}
 	require.Equal(t, 1, projectReads)
 	archived = true
-	_, err = adapter.OpenStatus(context.Background(), b, time.Time{})
+	_, err = adapter.OpenStatus(t.Context(), b, time.Time{})
 	require.True(t, issuesync.IsBlockedStatusWarning(err))
 }

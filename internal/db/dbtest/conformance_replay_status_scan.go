@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"testing"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func checkSnapshotReplayRejectsMalformedRetainedStatusScan(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	for _, tc := range []struct{ name, config, uid string }{
 		{"reversed cursor", `{"status_sync":"two-way","_status_sync":{"pending":{"after":3,"through":2}}}`, "01HZZZZZZZZZZZZZZZZZZZZZ21"},
 		{"unknown member", `{"status_sync":"two-way","_status_sync":{"unexpected":true}}`, "01HZZZZZZZZZZZZZZZZZZZZZ22"},

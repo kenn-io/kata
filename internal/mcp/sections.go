@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -28,13 +29,35 @@ type toolSection struct {
 	register    func(*sdkmcp.Server, toolHandlers)
 }
 
-func registerSectionLoaders(server *sdkmcp.Server, options Options) {
+func registerSectionLoaders(server *sdkmcp.Server, options Options) error {
 	handlers := toolHandlers{options: options}
 	sections := toolSections(
 		options.StorageAdmin != nil,
 		options.EnableTokenAdmin && options.Scope.Mode() == ScopeAll,
 	)
+	if options.Events {
+		for i := range sections {
+			if sections[i].section == "coordination" {
+				sections[i].tools = []string{"kata.assign", "kata.event_subscriptions", "kata.inbox", "kata.status", "kata.unassign"}
+				sections[i].description += " Native Events can signal exact-recipient inbox changes. Includes the principal's webhook delivery health from the daemon."
+				sections[i].register = func(server *sdkmcp.Server, h toolHandlers) {
+					registerCoordinationTools(server, h)
+					registerEventDeliveryTools(server, h)
+				}
+			}
+		}
+	}
+	byID := make(map[string]toolSection, len(sections))
+	for _, definition := range sections {
+		byID[definition.section] = definition
+	}
 	loaded := make(map[string]bool, len(sections))
+	load := func(definition toolSection) {
+		if definition.available && !loaded[definition.section] {
+			definition.register(server, handlers)
+			loaded[definition.section] = true
+		}
+	}
 	var mutex sync.Mutex
 	for _, definition := range sections {
 		addTool(server, definition.loader, definition.title, definition.description,
@@ -42,16 +65,27 @@ func registerSectionLoaders(server *sdkmcp.Server, options Options) {
 			func(_ context.Context, _ *sdkmcp.CallToolRequest, _ ToolSectionInput) (*sdkmcp.CallToolResult, ToolSectionOutput, error) {
 				mutex.Lock()
 				defer mutex.Unlock()
-				if definition.available && !loaded[definition.section] {
-					definition.register(server, handlers)
-					loaded[definition.section] = true
-				}
+				load(definition)
 				return successResult(), ToolSectionOutput{
 					Section: definition.section, Available: definition.available,
 					Loaded: loaded[definition.section], Tools: append([]string(nil), definition.tools...),
 				}, nil
 			})
 	}
+	for _, id := range options.StartupSections {
+		definition, ok := byID[id]
+		if !ok {
+			return fmt.Errorf("unknown MCP startup section %q", id)
+		}
+		if loaded[id] {
+			return fmt.Errorf("duplicate MCP startup section %q", id)
+		}
+		if !definition.available {
+			return fmt.Errorf("MCP startup section %q is unavailable", id)
+		}
+		load(definition)
+	}
+	return nil
 }
 
 func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
@@ -63,8 +97,14 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		},
 		{
 			loader: "kata.load_coordination", section: "coordination", title: "Load coordination tools",
-			description: "Load typed assign, unassign, inbox, and issue-status tools for handing work between actors, then refresh the MCP tool list.",
+			description: "Load inbox, assign, unassign, and issue-status tools. Inbox reads are paginated. Refresh the MCP tool list.",
 			tools:       []string{"kata.assign", "kata.inbox", "kata.status", "kata.unassign"}, available: true, register: registerCoordinationTools,
+		},
+		{
+			loader: "kata.load_cron", section: "cron", title: "Load cron tools",
+			description: "Load native recurring notification jobs and external-adapter execution definitions. Run evidence does not launch work. Distinct from RRULE recurrence tools; refresh the MCP tool list.",
+			tools:       []string{"kata.cron_capabilities", "kata.cron_new_uid", "kata.cron_jobs", "kata.cron_job", "kata.cron_job_create", "kata.cron_job_update", "kata.cron_job_delete", "kata.cron_job_restore", "kata.cron_workflows", "kata.cron_workflow", "kata.cron_workflow_create", "kata.cron_workflow_update", "kata.cron_workflow_delete", "kata.cron_workflow_restore", "kata.cron_runs", "kata.cron_run", "kata.cron_run_observe"},
+			available:   true, register: registerCronTools,
 		},
 		{
 			loader: "kata.load_docs", section: "docs", title: "Load documentation tools",
@@ -85,7 +125,7 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		{
 			loader: "kata.load_federation", section: "federation", title: "Load federation tools",
 			description: "Load typed project bridge connect/status/disconnect, federation status, enrollment revocation, rebind, leave, quarantine, and root key repin tools, then refresh the MCP tool list.",
-			tools:       []string{"kata.federation_bridge_connect", "kata.federation_bridge_disconnect", "kata.federation_bridge_status", "kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_root_key_repin", "kata.federation_status"},
+			tools:       []string{"kata.federation_bridge_connect", "kata.federation_bridge_disconnect", "kata.federation_bridge_status", "kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_root_key_repin", "kata.federation_spoke_name", "kata.federation_status"},
 			available:   true, register: registerFederationTools,
 		},
 		{

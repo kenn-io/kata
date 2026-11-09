@@ -2,12 +2,24 @@ package client
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/pkg/client/generated"
 )
+
+func TestTranscriptAgentCompatibility(t *testing.T) {
+	for _, agent := range []generated.TranscriptAgent{generated.Claude, generated.Codex, "pi", generated.TranscriptAgent(strings.Repeat("a", 32))} {
+		ref := generated.Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}
+		require.NoError(t, ref.Validate())
+	}
+	for _, agent := range []generated.TranscriptAgent{"", "Pi", "-pi", "pi_omp", generated.TranscriptAgent(strings.Repeat("a", 33))} {
+		ref := generated.Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}
+		require.Error(t, ref.Validate())
+	}
+}
 
 // ReadyGlobalIssue was renamed to ReadyGlobalIssueOut when ready rows were
 // hydrated to full IssueOut. The deprecated alias must keep pre-rename

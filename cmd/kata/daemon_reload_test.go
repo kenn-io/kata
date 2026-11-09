@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -14,7 +13,7 @@ func TestDaemonReload_NoRunningDaemon_ExitUsage(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	_, _, err := executeRootCapture(t, context.Background(), "daemon", "reload")
+	_, _, err := executeRootCapture(t, t.Context(), "daemon", "reload")
 	require.Error(t, err)
 	var ce *cliError
 	require.True(t, errors.As(err, &ce))

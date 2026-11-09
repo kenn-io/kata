@@ -7,6 +7,9 @@ import type {
   AckRelayDeliveriesPathParameters,
   AcquireIssueLeasePathParameters,
   ActionRequestBody,
+  AddAttachmentParams,
+  AddAttachmentPathParameters,
+  AddAttachmentResponseBody,
   AddLabelPathParameters,
   AddLabelRequestBody,
   AddLabelResponseBody,
@@ -15,6 +18,7 @@ import type {
   ArchiveCronWorkflowPathParameters,
   AssignIssuePathParameters,
   AssignRequestBody,
+  AttachmentContentPathParameters,
   AuditClosesParams,
   AuditClosesResponseBody,
   BindExternalRootPathParameters,
@@ -27,6 +31,7 @@ import type {
   ClaimRequestBody,
   ClaimResponseBody,
   ClaimStatusBody,
+  ClearFederationSpokeNamePathParameters,
   CloseActionRequestBody,
   CloseIssuePathParameters,
   CommentRequestBody,
@@ -104,6 +109,7 @@ import type {
   FederationIngestEventsRequestBody,
   FederationQuarantineSummary,
   FederationRootKeyRepinResult,
+  FederationSpokeNameOut,
   FederationStatusBody,
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
@@ -138,6 +144,8 @@ import type {
   LeaveFederationReplicaPathParameters,
   LeaveFederationReplicaRequestBody,
   LeaveFederationReplicaResultBody,
+  LinkAttachmentInput,
+  LinkAttachmentPathParameters,
   ListAllIssuesParams,
   ListAllIssuesResponseBody,
   ListConnectorFieldsPathParameters,
@@ -160,6 +168,13 @@ import type {
   ListRecurrencesResponseBody,
   ListTeamsResponseBody,
   ListTokensResponseBody,
+  LocalEmbeddingsStatus,
+  MCPEventsListResponseBody,
+  MCPEventsSubscribeBody,
+  MCPEventsSubscribeResponseBody,
+  MCPEventsSubscriptionsResponseBody,
+  MCPEventsUnsubscribeBody,
+  MCPEventsUnsubscribeResponseBody,
   MapConnectorFieldPathParameters,
   MapConnectorFieldRequestBody,
   MergeProjectPathParameters,
@@ -273,6 +288,8 @@ import type {
   SearchIssuesParams,
   SearchIssuesPathParameters,
   SearchResponseBody,
+  SetFederationSpokeNamePathParameters,
+  SetFederationSpokeNameRequestBody,
   SetIssuePriorityPathParameters,
   SetProjectAccessPathParameters,
   SetProjectAccessRequestBody,
@@ -720,6 +737,102 @@ export const doctor = async (
   })
 }
 
+export type getLocalEmbeddingsResponse200 = {
+  data: LocalEmbeddingsStatus
+  status: 200
+}
+
+export type getLocalEmbeddingsResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type getLocalEmbeddingsResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type getLocalEmbeddingsResponseSuccess = getLocalEmbeddingsResponse200 & {
+  headers: Headers
+}
+export type getLocalEmbeddingsResponseError = (
+  | getLocalEmbeddingsResponse404
+  | getLocalEmbeddingsResponse500
+) & {
+  headers: Headers
+}
+
+export type getLocalEmbeddingsResponse =
+  | getLocalEmbeddingsResponseSuccess
+  | getLocalEmbeddingsResponseError
+
+export const getGetLocalEmbeddingsUrl = () => {
+  return `/api/v1/embeddings/local`
+}
+
+export const getLocalEmbeddings = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getLocalEmbeddingsResponse> => {
+  return orvalFetch<getLocalEmbeddingsResponse>(getGetLocalEmbeddingsUrl(), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type turnOnLocalEmbeddingsResponse202 = {
+  data: LocalEmbeddingsStatus
+  status: 202
+}
+
+export type turnOnLocalEmbeddingsResponse403 = {
+  data: ErrorEnvelope
+  status: 403
+}
+
+export type turnOnLocalEmbeddingsResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type turnOnLocalEmbeddingsResponse409 = {
+  data: ErrorEnvelope
+  status: 409
+}
+
+export type turnOnLocalEmbeddingsResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type turnOnLocalEmbeddingsResponseSuccess = turnOnLocalEmbeddingsResponse202 & {
+  headers: Headers
+}
+export type turnOnLocalEmbeddingsResponseError = (
+  | turnOnLocalEmbeddingsResponse403
+  | turnOnLocalEmbeddingsResponse404
+  | turnOnLocalEmbeddingsResponse409
+  | turnOnLocalEmbeddingsResponse500
+) & {
+  headers: Headers
+}
+
+export type turnOnLocalEmbeddingsResponse =
+  | turnOnLocalEmbeddingsResponseSuccess
+  | turnOnLocalEmbeddingsResponseError
+
+export const getTurnOnLocalEmbeddingsUrl = () => {
+  return `/api/v1/embeddings/local`
+}
+
+export const turnOnLocalEmbeddings = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<turnOnLocalEmbeddingsResponse> => {
+  return orvalFetch<turnOnLocalEmbeddingsResponse>(getTurnOnLocalEmbeddingsUrl(), {
+    ...options,
+    method: 'POST',
+  })
+}
+
 export type pollEventsResponse200 = {
   data: PollEventsBody
   status: 200
@@ -1038,6 +1151,103 @@ export const rotateFederationEnrollment = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(rotateFederationEnrollmentRequestBody),
   })
+}
+
+export type clearFederationSpokeNameResponse200 = {
+  data: FederationSpokeNameOut
+  status: 200
+}
+
+export type clearFederationSpokeNameResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type clearFederationSpokeNameResponseSuccess = clearFederationSpokeNameResponse200 & {
+  headers: Headers
+}
+export type clearFederationSpokeNameResponseError = clearFederationSpokeNameResponseDefault & {
+  headers: Headers
+}
+
+export type clearFederationSpokeNameResponse =
+  | clearFederationSpokeNameResponseSuccess
+  | clearFederationSpokeNameResponseError
+
+export const getClearFederationSpokeNameUrl = ({
+  spokeInstanceUid,
+}: ClearFederationSpokeNamePathParameters) => {
+  return `/api/v1/federation/enrollments/spokes/${encodeURIComponent(String(spokeInstanceUid))}/name`
+}
+
+/**
+ * @summary Clear an enrolled spoke's hub-local name
+ */
+export const clearFederationSpokeName = async (
+  { spokeInstanceUid }: ClearFederationSpokeNamePathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<clearFederationSpokeNameResponse> => {
+  return orvalFetch<clearFederationSpokeNameResponse>(
+    getClearFederationSpokeNameUrl({ spokeInstanceUid }),
+    {
+      ...options,
+      method: 'DELETE',
+    },
+  )
+}
+
+export type setFederationSpokeNameResponse200 = {
+  data: FederationSpokeNameOut
+  status: 200
+}
+
+export type setFederationSpokeNameResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type setFederationSpokeNameResponseSuccess = setFederationSpokeNameResponse200 & {
+  headers: Headers
+}
+export type setFederationSpokeNameResponseError = setFederationSpokeNameResponseDefault & {
+  headers: Headers
+}
+
+export type setFederationSpokeNameResponse =
+  | setFederationSpokeNameResponseSuccess
+  | setFederationSpokeNameResponseError
+
+export const getSetFederationSpokeNameUrl = ({
+  spokeInstanceUid,
+}: SetFederationSpokeNamePathParameters) => {
+  return `/api/v1/federation/enrollments/spokes/${encodeURIComponent(String(spokeInstanceUid))}/name`
+}
+
+/**
+ * @summary Set an enrolled spoke's hub-local name
+ */
+export const setFederationSpokeName = async (
+  { spokeInstanceUid }: SetFederationSpokeNamePathParameters,
+  setFederationSpokeNameRequestBody: SetFederationSpokeNameRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<setFederationSpokeNameResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<setFederationSpokeNameResponse>(
+    getSetFederationSpokeNameUrl({ spokeInstanceUid }),
+    {
+      ...options,
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(setFederationSpokeNameRequestBody),
+    },
+  )
 }
 
 export type revokeFederationEnrollmentResponse200 = {
@@ -1532,6 +1742,174 @@ export const showIssueByUID = async (
   return orvalFetch<showIssueByUIDResponse>(getShowIssueByUIDUrl({ uid }, params), {
     ...options,
     method: 'GET',
+  })
+}
+
+export type mcpEventsListResponse200 = {
+  data: MCPEventsListResponseBody
+  status: 200
+}
+
+export type mcpEventsListResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type mcpEventsListResponseSuccess = mcpEventsListResponse200 & {
+  headers: Headers
+}
+export type mcpEventsListResponseError = mcpEventsListResponseDefault & {
+  headers: Headers
+}
+
+export type mcpEventsListResponse = mcpEventsListResponseSuccess | mcpEventsListResponseError
+
+export const getMcpEventsListUrl = () => {
+  return `/api/v1/mcp-events/list`
+}
+
+/**
+ * @summary List the MCP Events this daemon can deliver
+ */
+export const mcpEventsList = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<mcpEventsListResponse> => {
+  return orvalFetch<mcpEventsListResponse>(getMcpEventsListUrl(), {
+    ...options,
+    method: 'POST',
+  })
+}
+
+export type mcpEventsSubscribeResponse200 = {
+  data: MCPEventsSubscribeResponseBody
+  status: 200
+}
+
+export type mcpEventsSubscribeResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type mcpEventsSubscribeResponseSuccess = mcpEventsSubscribeResponse200 & {
+  headers: Headers
+}
+export type mcpEventsSubscribeResponseError = mcpEventsSubscribeResponseDefault & {
+  headers: Headers
+}
+
+export type mcpEventsSubscribeResponse =
+  | mcpEventsSubscribeResponseSuccess
+  | mcpEventsSubscribeResponseError
+
+export const getMcpEventsSubscribeUrl = () => {
+  return `/api/v1/mcp-events/subscribe`
+}
+
+/**
+ * @summary Create or refresh an MCP Events webhook subscription
+ */
+export const mcpEventsSubscribe = async (
+  mCPEventsSubscribeBody: MCPEventsSubscribeBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<mcpEventsSubscribeResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<mcpEventsSubscribeResponse>(getMcpEventsSubscribeUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(mCPEventsSubscribeBody),
+  })
+}
+
+export type mcpEventSubscriptionsResponse200 = {
+  data: MCPEventsSubscriptionsResponseBody
+  status: 200
+}
+
+export type mcpEventSubscriptionsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type mcpEventSubscriptionsResponseSuccess = mcpEventSubscriptionsResponse200 & {
+  headers: Headers
+}
+export type mcpEventSubscriptionsResponseError = mcpEventSubscriptionsResponseDefault & {
+  headers: Headers
+}
+
+export type mcpEventSubscriptionsResponse =
+  | mcpEventSubscriptionsResponseSuccess
+  | mcpEventSubscriptionsResponseError
+
+export const getMcpEventSubscriptionsUrl = () => {
+  return `/api/v1/mcp-events/subscriptions`
+}
+
+/**
+ * @summary List the caller's MCP Events subscriptions and whether Events is running
+ */
+export const mcpEventSubscriptions = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<mcpEventSubscriptionsResponse> => {
+  return orvalFetch<mcpEventSubscriptionsResponse>(getMcpEventSubscriptionsUrl(), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type mcpEventsUnsubscribeResponse200 = {
+  data: MCPEventsUnsubscribeResponseBody
+  status: 200
+}
+
+export type mcpEventsUnsubscribeResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type mcpEventsUnsubscribeResponseSuccess = mcpEventsUnsubscribeResponse200 & {
+  headers: Headers
+}
+export type mcpEventsUnsubscribeResponseError = mcpEventsUnsubscribeResponseDefault & {
+  headers: Headers
+}
+
+export type mcpEventsUnsubscribeResponse =
+  | mcpEventsUnsubscribeResponseSuccess
+  | mcpEventsUnsubscribeResponseError
+
+export const getMcpEventsUnsubscribeUrl = () => {
+  return `/api/v1/mcp-events/unsubscribe`
+}
+
+/**
+ * @summary End an MCP Events webhook subscription
+ */
+export const mcpEventsUnsubscribe = async (
+  mCPEventsUnsubscribeBody: MCPEventsUnsubscribeBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<mcpEventsUnsubscribeResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<mcpEventsUnsubscribeResponse>(getMcpEventsUnsubscribeUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(mCPEventsUnsubscribeBody),
   })
 }
 
@@ -4352,6 +4730,152 @@ export const unassignIssue = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(unassignRequestBody),
   })
+}
+
+export type addAttachmentResponse200 = {
+  data: AddAttachmentResponseBody
+  status: 200
+}
+
+export type addAttachmentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type addAttachmentResponseSuccess = addAttachmentResponse200 & {
+  headers: Headers
+}
+export type addAttachmentResponseError = addAttachmentResponseDefault & {
+  headers: Headers
+}
+
+export type addAttachmentResponse = addAttachmentResponseSuccess | addAttachmentResponseError
+
+export const getAddAttachmentUrl = (
+  { projectId, ref }: AddAttachmentPathParameters,
+  params: AddAttachmentParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments`
+}
+
+export const addAttachment = async (
+  { projectId, ref }: AddAttachmentPathParameters,
+  addAttachmentBody: Blob,
+  params: AddAttachmentParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<addAttachmentResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<addAttachmentResponse>(getAddAttachmentUrl({ projectId, ref }, params), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', ...getHeaders(options?.headers) },
+    body: addAttachmentBody,
+  })
+}
+
+export type linkAttachmentResponse200 = {
+  data: AddAttachmentResponseBody
+  status: 200
+}
+
+export type linkAttachmentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type linkAttachmentResponseSuccess = linkAttachmentResponse200 & {
+  headers: Headers
+}
+export type linkAttachmentResponseError = linkAttachmentResponseDefault & {
+  headers: Headers
+}
+
+export type linkAttachmentResponse = linkAttachmentResponseSuccess | linkAttachmentResponseError
+
+export const getLinkAttachmentUrl = ({ projectId, ref }: LinkAttachmentPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/links`
+}
+
+export const linkAttachment = async (
+  { projectId, ref }: LinkAttachmentPathParameters,
+  linkAttachmentInput: LinkAttachmentInput,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<linkAttachmentResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<linkAttachmentResponse>(getLinkAttachmentUrl({ projectId, ref }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(linkAttachmentInput),
+  })
+}
+
+export type attachmentContentResponse200 = {
+  data: Blob
+  status: 200
+}
+
+export type attachmentContentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type attachmentContentResponseSuccess = attachmentContentResponse200 & {
+  headers: Headers
+}
+export type attachmentContentResponseError = attachmentContentResponseDefault & {
+  headers: Headers
+}
+
+export type attachmentContentResponse =
+  | attachmentContentResponseSuccess
+  | attachmentContentResponseError
+
+export const getAttachmentContentUrl = ({
+  projectId,
+  ref,
+  attachmentId,
+}: AttachmentContentPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/${encodeURIComponent(String(attachmentId))}/content`
+}
+
+export const attachmentContent = async (
+  { projectId, ref, attachmentId }: AttachmentContentPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<attachmentContentResponse> => {
+  return orvalFetch<attachmentContentResponse>(
+    getAttachmentContentUrl({ projectId, ref, attachmentId }),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
 }
 
 export type unbindExternalRootResponse200 = {

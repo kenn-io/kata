@@ -119,7 +119,7 @@ func checkRecurringCron(t *testing.T, s db.Storage, b Backend) error {
 		out, e := s.DispatchRecurringCron(ctx, in)
 		require.NoError(t, e)
 		require.Empty(t, out.Events)
-		ids, e := s.ListDueNotificationIssueIDs(ctx)
+		ids, e := s.ListDueNotificationIssueIDs(ctx, in.Now)
 		require.NoError(t, e)
 		require.Empty(t, ids)
 		children, e = s.ListIssues(ctx, db.ListIssuesParams{ProjectID: p.ID})
@@ -184,6 +184,59 @@ func checkRecurringCron(t *testing.T, s db.Storage, b Backend) error {
 		require.Error(t, e, "edits must not initialize missing progress")
 		_ = updated
 	})
+	return nil
+}
+
+// The backlog a client previews for a reopened parent must equal what the
+// daemon delivers for it, for every catch-up policy.
+func checkRecurringBacklogMatchesDelivery(t *testing.T, s db.Storage) error {
+	ctx := t.Context()
+	for _, tc := range []struct {
+		catchup string
+		grace   int64
+		want    int
+	}{
+		{"all", 0, 1000},
+		{"latest", 0, 1},
+		{"skip", 20000, 3},
+	} {
+		t.Run(tc.catchup, func(t *testing.T) {
+			p, e := s.CreateProject(ctx, "backlog-"+tc.catchup)
+			require.NoError(t, e)
+			parent, _, e := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Ongoing commitment", Author: "operator"})
+			require.NoError(t, e)
+			def := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}, Overlap: "allow", Catchup: tc.catchup, GraceSeconds: tc.grace}
+			job, _, e := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Periodic review", Actor: "operator", Definition: def})
+			require.NoError(t, e)
+			_, _, _, e = s.CloseIssue(ctx, parent.ID, "done", "operator", "Recurring commitment paused", nil)
+			require.NoError(t, e)
+			closed, e := s.IssueByID(ctx, parent.ID)
+			require.NoError(t, e)
+			var values map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal([]byte(closed.Metadata), &values))
+			var progress cron.RecurringProgress
+			require.NoError(t, json.Unmarshal(values["cron.progress."+job.UID], &progress))
+			now := progress.Anchor.Add(2000*time.Hour + 30*time.Minute)
+
+			backlog, e := cron.RecurringBacklog(ctx, job.Definition, job.DefinitionEventUID, progress, now)
+			require.NoError(t, e)
+			require.Equal(t, tc.want, backlog)
+
+			_, _, _, e = s.ReopenIssue(ctx, parent.ID, "operator")
+			require.NoError(t, e)
+			in := db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: now}
+			for {
+				out, e := s.DispatchRecurringCron(ctx, in)
+				require.NoError(t, e)
+				if !out.More {
+					break
+				}
+			}
+			issues, e := s.ListIssues(ctx, db.ListIssuesParams{ProjectID: p.ID})
+			require.NoError(t, e)
+			require.Len(t, issues, backlog+1, "children created equal the previewed backlog")
+		})
+	}
 	return nil
 }
 
@@ -624,7 +677,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	probe.candidates = nil
 	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
-	require.Equal(t, db.MergeEventFeatures(db.SupportedEventFeatures), features)
+	require.Equal(t, db.CronEventFeature, features)
 	require.Equal(t, []int{1}, probe.candidates, "escaped native definition remains the only candidate")
 	return nil
 }
@@ -814,9 +867,13 @@ func checkRecurringAdoptionSnapshots(t *testing.T, s db.Storage) error {
 		afterRead, err := s.MaxEventID(ctx)
 		require.NoError(t, err)
 		require.Equal(t, beforeRead, afterRead)
-		page, err := s.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: "cron_v1", Limit: 100})
+		features := db.CronEventFeature
+		if i == 2 {
+			features = db.MergeEventFeatures(features, db.IssueMoveEventFeature)
+		}
+		page, err := s.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: features, Limit: 100})
 		require.NoError(t, err)
-		require.Equal(t, "cron_v1", page.RequiredFeatures)
+		require.Equal(t, features, page.RequiredFeatures)
 	}
 	return nil
 }

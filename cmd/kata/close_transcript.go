@@ -1,13 +1,11 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
@@ -25,19 +23,41 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 		return nil
 	}
 	agent, id := os.Getenv("KATA_TRANSCRIPT_AGENT"), os.Getenv("KATA_TRANSCRIPT_SESSION_ID")
+	var source string
 	if agent == "" && id == "" {
-		var ok bool
-		if agent, id, ok = currentSession(); !ok {
-			warn("ambiguous current session; skipping attachment")
-			return nil
+		variables := []struct{ agent, name string }{
+			{"claude", "CLAUDE_CODE_SESSION_ID"},
+			{"codex", "CODEX_THREAD_ID"},
+			{"codex", "CODEX_SESSION_ID"},
+		}
+		for configuredAgent, name := range cfg.SessionIDEnv {
+			variables = append(variables, struct{ agent, name string }{configuredAgent, name})
+		}
+		for _, variable := range variables {
+			value := os.Getenv(variable.name)
+			if value == "" {
+				continue
+			}
+			if id != "" && (agent != variable.agent || id != value) {
+				warn("ambiguous current session; skipping attachment")
+				return nil
+			}
+			if id == "" {
+				agent, id = variable.agent, value
+				source = variable.name
+			}
 		}
 	}
 	ref := &transcript.Transcript{Agent: agent, SessionID: id}
 	if err := ref.Validate(); err != nil {
-		warn("current session unavailable or invalid; skipping attachment")
+		if source != "" {
+			warn(fmt.Sprintf("current session from %s invalid; skipping attachment", source))
+		} else {
+			warn("current session unavailable or invalid; skipping attachment")
+		}
 		return nil
 	}
-	// Preserve the exact harness UUID: no filesystem path, transcript body,
+	// Preserve the exact harness session ID: no filesystem path, transcript body,
 	// hook ownership hash, or another session is used as a fallback.
 	if cfg.AgentsViewURL != "" {
 		link, err := ref.Link(cfg.AgentsViewURL)
@@ -50,30 +70,20 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 	return ref
 }
 
-// currentSession reads the invoking harness's session. Child agents inherit
-// their parent's environment, so context from both harnesses is ambiguous.
-func currentSession() (agent, id string, ok bool) {
-	thread, session := os.Getenv("CODEX_THREAD_ID"), os.Getenv("CODEX_SESSION_ID")
-	if thread != "" && session != "" && !strings.EqualFold(thread, session) {
-		return "", "", false
-	}
-	codex, claude := cmp.Or(thread, session), os.Getenv("CLAUDE_CODE_SESSION_ID")
-	switch {
-	case codex != "" && claude != "":
-		return "", "", false
-	case claude != "":
-		return "claude", claude, true
-	default:
-		return "codex", codex, true
-	}
-}
-
-// dropUnsupportedTranscript keeps provenance optional: older daemons reject
-// the unknown field, so the close proceeds without it instead of failing.
+// dropUnsupportedTranscript keeps provenance optional when a daemon predates
+// the supplied transcript shape.
 func dropUnsupportedTranscript(
 	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, body map[string]any,
 ) error {
-	err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionCloseTranscript, "close transcript")
+	ref, ok := body["transcript"].(*transcript.Transcript)
+	if !ok || ref == nil {
+		return nil
+	}
+	required := apiVersionOtherAgentCloseTranscript
+	if ref.Agent == "claude" || ref.Agent == "codex" {
+		required = apiVersionCloseTranscript
+	}
+	err := requireDaemonAPIVersion(ctx, client, baseURL, required, "close transcript")
 	if err == nil {
 		return nil
 	}

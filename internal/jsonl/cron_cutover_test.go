@@ -1,7 +1,6 @@
 package jsonl_test
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"path/filepath"
 	"testing"
@@ -14,7 +13,7 @@ import (
 )
 
 func TestNativeCronCutoverPreservesVersion30DueRequest(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source := openCutoverTargetDB(t, ctx, path)
 	freshShape := sqliteCronPhysicalShape(t, source)

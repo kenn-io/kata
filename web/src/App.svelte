@@ -14,6 +14,7 @@
   import VersionMismatch from './components/VersionMismatch.svelte'
   import { createCredentialedFetch, setGeneratedFetch } from './lib/api/client'
   import {
+    addAttachment,
     addLabel as addLabelRequest,
     assignIssue,
     captureTelemetryEvent,
@@ -38,6 +39,7 @@
     unassignIssue,
     type CreateRecurrenceRequestBody,
     type PatchRecurrenceRequestBody,
+    type ProjectOut,
     type RecurrenceTemplateInput,
     type RecurrenceTemplateUpdateInput,
     type UIIssueReference,
@@ -112,7 +114,8 @@
   let acceptedRoute = $state<AppRoute | undefined>()
   let returnPath = $state(launch.returnPath)
   let mode = $state(initialMode(launch, initialRoute, selectedAuthentication))
-  let authority = $state<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
+  let authority = $state.raw<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
+  const shellSnapshot = $derived(authority?.snapshot)
   let references = $state<UIReferencesResponseBody | undefined>()
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
@@ -157,6 +160,11 @@
   const browserFetch = createCredentialedFetch(
     undefined,
     daemonFetch,
+    rejectCredentialsAndRequireAuthentication,
+  )
+  const searchSettingsPostFetch = createCredentialedFetch(
+    undefined,
+    fetch,
     rejectCredentialsAndRequireAuthentication,
   )
   setGeneratedFetch(browserFetch)
@@ -230,9 +238,13 @@
   })
 
   function canAdministerAccess(): boolean {
+    return authority?.snapshot?.capabilities.access_admin === true && canAdministerDaemon()
+  }
+
+  function canAdministerDaemon(): boolean {
     const expiresAt = authority?.snapshot?.capabilities.expires_at
     return (
-      authority?.snapshot?.capabilities.access_admin === true &&
+      authority?.snapshot !== undefined &&
       !authority.stale &&
       !authority.loading &&
       !authority.authenticationRequired &&
@@ -256,7 +268,7 @@
       if (state === 'reconnecting' || (state === 'online' && wasReconnecting)) {
         invalidations.reconnect()
       } else if (state === 'online') {
-        invalidations.refreshAll()
+        invalidations.refresh()
       }
     },
   })
@@ -392,7 +404,7 @@
 
   function navigate(next: AppRoute): void {
     const opensCredentials =
-      route.kind !== 'route-error' && route.view !== 'credentials' && next.view === 'credentials'
+      route.kind !== 'route-error' && !isDaemonView(route.view) && isDaemonView(next.view)
     if (opensCredentials && route.kind !== 'route-error') {
       credentialReturnRoutes.set(credentialRouteKey(activeDaemonID), route)
     }
@@ -430,15 +442,28 @@
     )
   }
 
-  async function createProject(name: string): Promise<{ changed: boolean }> {
+  async function createProject(name: string, makeInbox = false): Promise<{ changed: boolean }> {
     let changed = false
     const accepted = await runMutation({}, async (context) => {
       const result = await initProject(context.body({ name }, requestActor))
-      if (result.status === 200) changed = result.data.created
-      return result
+      if (result.status !== 200) return result
+      changed = result.data.created
+      return makeInbox ? patchInboxProject(result.data.project, context) : result
     })
-    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create project.')
+    if (!accepted) {
+      if (changed && mutationState.kind === 'domain-error') await refreshSnapshot(true)
+      throw new Error(mutationMessage(mutationState) ?? 'Could not create project.')
+    }
     return { changed }
+  }
+
+  function patchInboxProject(project: ProjectOut, context: MutationContext) {
+    context.headers.set('If-Match', `"rev-${project.revision}"`)
+    return patchProjectMetadata(
+      { projectId: project.id },
+      { actor: requestActor, patch: { role: 'inbox' } },
+      { headers: context.headers },
+    )
   }
 
   async function designateInbox(projectUID: string): Promise<void> {
@@ -447,14 +472,8 @@
     if (!target) throw new Error('Inbox project is not available.')
     if (target.metadata?.role === 'inbox') return
 
-    const accepted = await runMutation(
-      { draft: projectUID, revision: `"rev-${target.revision}"` },
-      (context) =>
-        patchProjectMetadata(
-          { projectId: target.id },
-          { actor: requestActor, patch: { role: 'inbox' } },
-          { headers: context.headers },
-        ),
+    const accepted = await runMutation({ draft: projectUID }, (context) =>
+      patchInboxProject(target, context),
     )
     if (!accepted) {
       throw new Error(mutationMessage(mutationState) ?? 'Could not designate the Inbox project.')
@@ -577,6 +596,20 @@
         { headers: context.headers },
       ),
     )
+  }
+
+  async function attachFile(uid: string, file: File): Promise<void> {
+    const target = selectedMutationTarget(uid)
+    if (!target) throw new Error('issue_not_found')
+    const accepted = await runMutation({ draft: file }, (context) =>
+      addAttachment(
+        { projectId: target.project_id, ref: target.ref },
+        file,
+        { name: file.name, ...context.body<{ actor?: string }>({}, requestActor) },
+        { headers: context.headers },
+      ),
+    )
+    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'attachment_upload_failed')
   }
 
   async function addComment(
@@ -1178,6 +1211,10 @@
     credentialError = undefined
   }
 
+  function isDaemonView(view: AppRoute['view']): boolean {
+    return view === 'credentials' || view === 'settings'
+  }
+
   function credentialRouteKey(daemonID: string | undefined): string {
     return daemonID ?? '__direct__'
   }
@@ -1241,9 +1278,10 @@
     {/if}
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
       <AppShell
+        {searchSettingsPostFetch}
         route={acceptedRoute ?? route}
         onSearchEmpty={() => reportOutcome('search_empty')}
-        snapshot={authority.snapshot}
+        snapshot={shellSnapshot!}
         loading={authority.loading}
         canMutate={authority.canMutate}
         {mutationPending}
@@ -1263,6 +1301,7 @@
         {credentialError}
         onAccessMutation={(draft, mutate) => runMutation({ draft }, mutate, accessMutations)}
         onRefreshCredentials={refreshCredentials}
+        canAdministerDaemon={canAdministerDaemon()}
         onBackFromCredentials={returnFromCredentials}
         onSelectDaemon={(id) => void switchDaemon(id)}
         onPreferencesChange={updatePreferences}
@@ -1274,6 +1313,7 @@
         {searchReferences}
         onMoveIssue={moveIssue}
         onPatchMetadata={patchMetadata}
+        onUploadAttachment={attachFile}
         onAddComment={addComment}
         onEditIssue={editIssue}
         onAssignOwner={assignOwner}

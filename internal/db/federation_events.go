@@ -82,6 +82,15 @@ func remoteEventCreatedAt(event RemoteEvent) string {
 // embedded comments and links to be JSON objects on created and snapshot events.
 // Ingest and pull paths must call it before persisting the event.
 func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value) error {
+	if eventType == "issue.moved" {
+		snapshot := PayloadMap(payloadJSON)["snapshot"]
+		// Historical local moves have no snapshot; federation ingest separately
+		// requires one through FederationMoveProjects.
+		if len(snapshot) == 0 {
+			return nil
+		}
+		return ValidateFederationEntries("issue.snapshot", eventUID, snapshot)
+	}
 	if eventType == "issue.commented" || eventType == "issue.comment_edited" {
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal(payloadJSON, &payload); err != nil {

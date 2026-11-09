@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // Issue is a strict subset of the daemon's wire shape. Labels rides on
@@ -23,32 +25,58 @@ import (
 // (api.IssueOut.QualifiedID).
 type Issue struct {
 	db.AttributionView
-	ID                  int64        `json:"id"`
-	UID                 string       `json:"uid,omitempty"`
-	ProjectID           int64        `json:"project_id"`
-	ProjectUID          string       `json:"project_uid,omitempty"`
-	ShortID             string       `json:"short_id"`
-	QualifiedID         string       `json:"qualified_id,omitempty"`
-	Title               string       `json:"title"`
-	Body                string       `json:"body"`
-	Status              string       `json:"status"`
-	ClosedReason        *string      `json:"closed_reason,omitempty"`
-	Owner               *string      `json:"owner,omitempty"`
-	AssignmentExpiresOn *time.Time   `json:"assignment_expires_on,omitempty"`
-	Author              string       `json:"author"`
-	CreatedAt           time.Time    `json:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at"`
-	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
-	DeletedAt           *time.Time   `json:"deleted_at,omitempty"`
-	Labels              []string     `json:"labels,omitempty"`
-	Parent              *LinkPeer    `json:"parent,omitempty"`
-	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
-	Blocks              []LinkPeer   `json:"blocks,omitempty"`
-	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
-	Related             []LinkPeer   `json:"related,omitempty"`
-	Priority            *int64       `json:"priority,omitempty"`
-	Revision            int64        `json:"revision"`
-	RecurrenceID        *int64       `json:"recurrence_id,omitempty"`
+	ID                  int64         `json:"id"`
+	UID                 string        `json:"uid,omitempty"`
+	ProjectID           int64         `json:"project_id"`
+	ProjectUID          string        `json:"project_uid,omitempty"`
+	ShortID             string        `json:"short_id"`
+	QualifiedID         string        `json:"qualified_id,omitempty"`
+	Title               string        `json:"title"`
+	Body                string        `json:"body"`
+	Status              string        `json:"status"`
+	ClosedReason        *string       `json:"closed_reason,omitempty"`
+	Owner               *string       `json:"owner,omitempty"`
+	AssignmentExpiresOn *time.Time    `json:"assignment_expires_on,omitempty"`
+	Author              string        `json:"author"`
+	CreatedAt           time.Time     `json:"created_at"`
+	UpdatedAt           time.Time     `json:"updated_at"`
+	ClosedAt            *time.Time    `json:"closed_at,omitempty"`
+	DeletedAt           *time.Time    `json:"deleted_at,omitempty"`
+	Labels              []string      `json:"labels,omitempty"`
+	Parent              *LinkPeer     `json:"parent,omitempty"`
+	ChildCounts         *ChildCounts  `json:"child_counts,omitempty"`
+	Blocks              []LinkPeer    `json:"blocks,omitempty"`
+	BlockedBy           []LinkPeer    `json:"blocked_by,omitempty"`
+	Related             []LinkPeer    `json:"related,omitempty"`
+	Priority            *int64        `json:"priority,omitempty"`
+	Revision            int64         `json:"revision"`
+	RecurrenceID        *int64        `json:"recurrence_id,omitempty"`
+	Metadata            issueMetadata `json:"metadata,omitzero"`
+	// Resolved YYYY-MM-DD planning dates from the daemon.
+	ScheduledOnDate string `json:"scheduled_on_date,omitempty"`
+	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
+}
+
+// issueMetadata keeps the two planning-date keys and the timezone of an
+// issue's metadata as the daemon stores them. Other keys are not read by the TUI.
+type issueMetadata struct {
+	ScheduledOn jsontext.Value `json:"scheduled_on,omitzero"`
+	DeadlineOn  jsontext.Value `json:"deadline_on,omitzero"`
+	Timezone    jsontext.Value `json:"timezone,omitzero"`
+}
+
+// scheduledOn, deadlineOn and timezone are the raw stored values, "" when
+// absent.
+func (i Issue) scheduledOn() string { return rawString(i.Metadata.ScheduledOn) }
+func (i Issue) deadlineOn() string  { return rawString(i.Metadata.DeadlineOn) }
+func (i Issue) timezone() string    { return rawString(i.Metadata.Timezone) }
+
+func rawString(v jsontext.Value) string {
+	var s string
+	if len(v) == 0 || json.Unmarshal(v, &s) != nil {
+		return ""
+	}
+	return s
 }
 
 // LinkPeer mirrors api.LinkPeer: UID, short_id, project, and qualified_id
@@ -89,8 +117,14 @@ type IssueRef struct {
 // daemon work and is deferred to a future task.
 type ListFilter struct {
 	Status, Owner, Author, Search string
-	Labels                        []string
-	Limit                         int
+	// Date is "" (off), dateToday, or dateScheduled; see matchesDate.
+	Date string
+	// Day is the calendar day the Date filter evaluates against. It is
+	// stamped when the filter is committed and on each fetch, so rows do
+	// not change membership between fetches when midnight passes.
+	Day    string
+	Labels []string
+	Limit  int
 }
 
 // CreateInitialLinkBody requests a link created atomically with a new
@@ -143,7 +177,23 @@ type MutationResp struct {
 	Event   *EventEnvelope `json:"event,omitempty"`
 	Changed bool           `json:"changed"`
 	Reused  bool           `json:"reused,omitempty"`
-	undo    *undoAttempt
+	// Issues lists every issue a move (or its dry run) covers, the moved
+	// issue first. NewShortID is the moved issue's id in its new project.
+	Issues     []Issue `json:"issues,omitempty"`
+	NewShortID string  `json:"new_short_id,omitempty"`
+	// Revision is the issue revision the daemon reported in its ETag.
+	Revision int64 `json:"-"`
+	undo     *undoAttempt
+}
+
+// MoveInput is one move request. A DryRun validates and previews without
+// writing. IfMatchRevision guards the move on the revision the preview read;
+// zero sends no If-Match header.
+type MoveInput struct {
+	Actor           string
+	ToProjectUID    string
+	DryRun          bool
+	IfMatchRevision int64
 }
 
 // EventEnvelope is the minimal event projection embedded in mutation
@@ -179,6 +229,7 @@ type ProjectSummary struct {
 	UID      string `json:"uid,omitempty"`
 	Metadata struct {
 		Role jsontext.Value `json:"role"`
+		Area jsontext.Value `json:"area"`
 	} `json:"metadata"`
 }
 
@@ -280,6 +331,8 @@ type ProjectSummaryWithStats struct {
 
 // CommentEntry is the per-comment projection rendered in the comments tab.
 type CommentEntry struct {
+	depth  int
+	leaves []commentLeaf
 	db.AttributionView
 	UID                string            `json:"uid"`
 	Handle             string            `json:"handle"`
@@ -329,6 +382,7 @@ type APIError struct {
 	Code         string
 	Message      string
 	Hint         string
+	Data         jsontext.Value
 }
 
 // Error returns "code: message[: hint: ...]" when the daemon supplied a
@@ -366,6 +420,9 @@ type IssueDetail struct {
 	Parent   *IssueRef
 	Children []Issue
 	Lease    *api.IssueClaimOut
+	// Recurrence is nil when absent or unreadable; RecurrenceErr distinguishes them.
+	Recurrence    *recurrenceclient.View
+	RecurrenceErr error
 }
 
 // showIssueLabel is the per-label projection from showIssue's labels

@@ -137,7 +137,22 @@ func (d *Store) LookupIdempotency(ctx context.Context, projectID int64, key stri
 func (d *Store) LookupIssueMutationIdempotency(
 	ctx context.Context, projectID int64, eventType, key string, since time.Time,
 ) (*db.IdempotencyMatch, error) {
-	const q = `
+	return d.lookupIssueMutationIdempotency(ctx, "e.project_id", projectID, eventType, key, since)
+}
+
+// LookupIssueMutationIdempotencyByIssue finds a receipt regardless of which
+// project the issue belonged to when the mutation committed.
+func (d *Store) LookupIssueMutationIdempotencyByIssue(
+	ctx context.Context, issueUID, eventType, key string, since time.Time,
+) (*db.IdempotencyMatch, error) {
+	return d.lookupIssueMutationIdempotency(ctx, "e.issue_uid", issueUID, eventType, key, since)
+}
+
+func (d *Store) lookupIssueMutationIdempotency(
+	ctx context.Context, scopeColumn string, scopeValue any, eventType, key string, since time.Time,
+) (*db.IdempotencyMatch, error) {
+	// scopeColumn is supplied only by the two fixed internal wrappers above.
+	q := `
 		SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
 		       e.issue_id, e.issue_uid,
 		       e.related_issue_id, e.related_issue_uid, e.type, e.actor, e.payload,
@@ -146,12 +161,12 @@ func (d *Store) LookupIssueMutationIdempotency(
 		FROM events e
 		JOIN projects p ON p.id = e.project_id
 		WHERE e.type = ?
-		  AND e.project_id = ?
+		  AND ` + scopeColumn + ` = ?
 		  AND json_extract(e.payload, '$.idempotency_key') = ?
 		  AND e.created_at >= ?
 		ORDER BY e.id DESC
 		LIMIT 1`
-	row := d.QueryRowContext(ctx, q, eventType, projectID, key, since.UTC().Format(sqliteTimeFormat))
+	row := d.QueryRowContext(ctx, q, eventType, scopeValue, key, since.UTC().Format(sqliteTimeFormat))
 
 	var (
 		evt db.Event

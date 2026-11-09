@@ -88,7 +88,7 @@ func TestListConnectorsResponseDoesNotExposeExecutableConfiguration(t *testing.T
 	srv := NewServer(ServerConfig{})
 	t.Cleanup(func() { require.NoError(t, srv.Close()) })
 	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/connectors", nil))
+	srv.Handler().ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/connectors", nil))
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.NotContains(t, rr.Body.String(), "command")
 	assert.NotContains(t, rr.Body.String(), "settings")
@@ -103,19 +103,19 @@ func TestExternalRootAdministrationPolicy(t *testing.T) {
 		allowIdentity bool
 		wantAllowed   bool
 	}{
-		{name: "owner local", ctx: context.Background(), wantAllowed: true},
-		{name: "static token", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalStaticToken}), wantAllowed: true},
-		{name: "host", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalHost, Actor: "operator", Subject: "example-service"}), wantAllowed: true},
-		{name: "DB token default", ctx: WithPrincipal(context.Background(), dbPrincipal)},
-		{name: "DB token opted in", ctx: WithPrincipal(context.Background(), dbPrincipal), allowIdentity: true, wantAllowed: true},
-		{name: "bootstrap opted in", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalBootstrap}), allowIdentity: true},
-		{name: "browser local opted in", ctx: withWebSession(context.Background(), Principal{Kind: PrincipalWebLocal, Actor: "operator"}), allowIdentity: true},
-		{name: "browser DB token opted in", ctx: withWebSession(context.Background(), dbPrincipal), allowIdentity: true},
-		{name: "web local principal opted in", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalWebLocal, Actor: "operator"}), allowIdentity: true},
-		{name: "trusted proxy opted in", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalTrustedProxy, Actor: "operator"}), allowIdentity: true},
-		{name: "missing proxy actor opted in", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalTrustedProxyAbsent}), allowIdentity: true},
-		{name: "insecure readonly opted in", ctx: withInsecureReadonlyRequest(context.Background()), allowIdentity: true},
-		{name: "unauthenticated private network opted in", ctx: withUnauthenticatedPrivateNetworkRequest(context.Background()), allowIdentity: true},
+		{name: "owner local", ctx: t.Context(), wantAllowed: true},
+		{name: "static token", ctx: WithPrincipal(t.Context(), Principal{Kind: PrincipalStaticToken}), wantAllowed: true},
+		{name: "host", ctx: WithPrincipal(t.Context(), Principal{Kind: PrincipalHost, Actor: "operator", Subject: "example-service"}), wantAllowed: true},
+		{name: "DB token default", ctx: WithPrincipal(t.Context(), dbPrincipal)},
+		{name: "DB token opted in", ctx: WithPrincipal(t.Context(), dbPrincipal), allowIdentity: true, wantAllowed: true},
+		{name: "bootstrap opted in", ctx: WithPrincipal(t.Context(), Principal{Kind: PrincipalBootstrap}), allowIdentity: true},
+		{name: "browser local opted in", ctx: withWebSession(t.Context(), Principal{Kind: PrincipalWebLocal, Actor: "operator"}), allowIdentity: true},
+		{name: "browser DB token opted in", ctx: withWebSession(t.Context(), dbPrincipal), allowIdentity: true},
+		{name: "web local principal opted in", ctx: WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal, Actor: "operator"}), allowIdentity: true},
+		{name: "trusted proxy opted in", ctx: WithPrincipal(t.Context(), Principal{Kind: PrincipalTrustedProxy, Actor: "operator"}), allowIdentity: true},
+		{name: "missing proxy actor opted in", ctx: WithPrincipal(t.Context(), Principal{Kind: PrincipalTrustedProxyAbsent}), allowIdentity: true},
+		{name: "insecure readonly opted in", ctx: withInsecureReadonlyRequest(t.Context()), allowIdentity: true},
+		{name: "unauthenticated private network opted in", ctx: withUnauthenticatedPrivateNetworkRequest(t.Context()), allowIdentity: true},
 	}
 
 	for _, test := range tests {
@@ -165,7 +165,7 @@ func TestExternalRootAdministrationRejectsUnauthenticatedPrivateNetworkClient(t 
 		Kind: ListenerSharedTCP, Origin: "http://100.64.0.5:7777", BackendAuthority: "100.64.0.5:7777",
 	})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodGet, "http://100.64.0.5:7777/api/v1/connectors", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://100.64.0.5:7777/api/v1/connectors", nil)
 	req.Host = "100.64.0.5:7777"
 	req.RemoteAddr = "100.64.0.10:23456"
 	rr := httptest.NewRecorder()

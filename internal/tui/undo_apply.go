@@ -6,7 +6,29 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"time"
+
+	"go.kenn.io/kata/internal/api"
 )
+
+// undoBacklogLookupTimeout bounds the optional backlog lookup so a slow read
+// cannot use up the deadline the reopen itself needs.
+var undoBacklogLookupTimeout = 2 * time.Second
+
+// undoReopenReserve is the part of the attempt's deadline kept for the reopen
+// itself; the backlog lookup only gets time beyond it.
+const undoReopenReserve = 2 * time.Second
+
+// undoBacklogLookupBudget is how long the backlog lookup may run: at most
+// undoBacklogLookupTimeout, and never into the reserve for the reopen. Zero
+// means too little time remains, so the lookup is skipped.
+func undoBacklogLookupBudget(ctx context.Context) time.Duration {
+	budget := undoBacklogLookupTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = min(budget, time.Until(deadline)-undoReopenReserve)
+	}
+	return max(budget, 0)
+}
 
 type undoOutcome struct {
 	attempt       *undoAttempt
@@ -15,11 +37,22 @@ type undoOutcome struct {
 	changed       bool
 	already       bool
 	needsEvidence bool
+	backlog       int
 	conflict      string
 	err           error
 }
 
-func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired bool, evidence *CloseInput) undoOutcome {
+// undoOptions tunes one undo attempt. checkBacklog asks for the recurring
+// backlog before undoing a close, so the user can confirm a reopen that
+// delivers several children.
+type undoOptions struct {
+	evidenceRequired bool
+	evidence         *CloseInput
+	checkBacklog     bool
+}
+
+func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions) undoOutcome {
+	evidenceRequired, evidence := opts.evidenceRequired, opts.evidence
 	attempt, err := c.begin(ctx, false)
 	if err != nil {
 		return undoOutcome{err: err}
@@ -38,7 +71,13 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 		out.conflict = "daemon principal changed"
 		return out
 	}
-	detail, err := c.GetIssueDetail(ctx, entry.projectID, entry.uid)
+	// A deleted issue cannot be read. Restore by UID and let changed=false
+	// report that another client already restored it.
+	if entry.kind == "delete" {
+		out.resp, out.err = c.RestoreIssue(ctx, entry.projectID, entry.uid, entry.actor)
+		return c.finishUndo(ctx, entry, out)
+	}
+	detail, err := c.readIssue(ctx, entry.projectID, entry.uid)
 	if err != nil {
 		out.err = err
 		return out
@@ -74,6 +113,19 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 		if entry.kind == "reopen" && evidenceRequired && evidence == nil {
 			out.needsEvidence = true
 			return out
+		}
+		if entry.kind == "close" && opts.checkBacklog {
+			// A failed, slow or skipped lookup must not block undo; only a
+			// known backlog prompts.
+			if budget := undoBacklogLookupBudget(ctx); budget > 0 {
+				lookupCtx, cancel := context.WithTimeout(ctx, budget)
+				count, err := c.ReopenBacklog(lookupCtx, entry.projectID, entry.uid)
+				cancel()
+				if err == nil && count > 1 {
+					out.backlog = count
+					return out
+				}
+			}
 		}
 		if entry.kind == "close" {
 			out.resp, out.err = c.KataAPI.Reopen(ctx, entry.projectID, entry.uid, entry.actor)
@@ -125,6 +177,30 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 			return out
 		}
 		out.resp, out.err = c.KataAPI.EditBody(ctx, entry.projectID, entry.uid, entry.before.Body, entry.actor)
+	case "dates":
+		keys := changedDateKeys(&entry.before, &entry.after)
+		if sameDates(current, &entry.before, keys) {
+			out.already = true
+			return out
+		}
+		if !sameDates(current, &entry.after, keys) || current.Revision != entry.revision {
+			out.conflict = "issue dates changed since the action"
+			return out
+		}
+		writer, ok := c.KataAPI.(datesAPI)
+		if !ok {
+			out.err = errors.New("connected client cannot edit dates")
+			return out
+		}
+		restore := DatesInput{Actor: entry.actor, IfMatchRevision: entry.revision, Set: map[string]*string{}}
+		for _, key := range keys {
+			if value := issueDate(&entry.before, key); value != "" {
+				restore.Set[key] = &value
+			} else {
+				restore.Set[key] = nil
+			}
+		}
+		out.resp, out.err = writer.SetDates(ctx, entry.projectID, entry.uid, restore)
 	case "label.add", "label.remove":
 		present := slices.Contains(current.Labels, entry.label)
 		if (entry.kind == "label.add" && !present) || (entry.kind == "label.remove" && present) {
@@ -185,17 +261,25 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 		out.err = fmt.Errorf("unsupported undo action %q", entry.kind)
 		return out
 	}
+	return c.finishUndo(ctx, entry, out)
+}
+
+func (c *undoClient) finishUndo(ctx context.Context, entry undoEntry, out undoOutcome) undoOutcome {
 	if out.err != nil {
-		attempt.unknown = ambiguousWriteError(out.err)
+		out.attempt.unknown = ambiguousWriteError(out.err)
 		return out
 	}
 	if out.resp == nil {
 		out.err = errors.New("undo returned no response")
-		attempt.unknown = true
+		out.attempt.unknown = true
 		return out
 	}
 	out.changed = out.resp.Changed
 	if !out.changed {
+		if entry.kind == "delete" {
+			out.already = true
+			return out
+		}
 		out.already, out.err = c.restoredAfterNoop(ctx, entry)
 		if out.err == nil && !out.already {
 			out.err = errors.New("undo returned no change; issue still needs correction")
@@ -205,7 +289,7 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 }
 
 func (c *undoClient) restoredAfterNoop(ctx context.Context, entry undoEntry) (bool, error) {
-	detail, err := c.GetIssueDetail(ctx, entry.projectID, entry.uid)
+	detail, err := c.readIssue(ctx, entry.projectID, entry.uid)
 	if err != nil {
 		return false, err
 	}
@@ -222,6 +306,8 @@ func (c *undoClient) restoredAfterNoop(ctx context.Context, entry undoEntry) (bo
 		return equalInt64Ptr(current.Priority, entry.before.Priority), nil
 	case "body.edit":
 		return current.Body == entry.before.Body, nil
+	case "dates":
+		return sameDates(current, &entry.before, changedDateKeys(&entry.before, &entry.after)), nil
 	case "label.add":
 		return !slices.Contains(current.Labels, entry.label), nil
 	case "label.remove":
@@ -250,6 +336,30 @@ func ambiguousWriteError(err error) bool {
 		return false
 	}
 	return err != nil
+}
+
+var dateKeys = []string{api.MetadataKeyScheduledOn, api.MetadataKeyDeadlineOn}
+
+func issueDate(i *Issue, key string) string {
+	if key == api.MetadataKeyScheduledOn {
+		return i.scheduledOn()
+	}
+	return i.deadlineOn()
+}
+
+// changedDateKeys lists the planning-date keys whose stored value differs
+// between two reads of an issue.
+func changedDateKeys(before, after *Issue) []string {
+	return slices.DeleteFunc(slices.Clone(dateKeys), func(key string) bool {
+		return issueDate(before, key) == issueDate(after, key)
+	})
+}
+
+// sameDates reports whether a and b hold the same stored value under every key.
+func sameDates(a, b *Issue, keys []string) bool {
+	return len(keys) > 0 && !slices.ContainsFunc(keys, func(key string) bool {
+		return issueDate(a, key) != issueDate(b, key)
+	})
 }
 
 func equalStringPtr(a, b *string) bool {

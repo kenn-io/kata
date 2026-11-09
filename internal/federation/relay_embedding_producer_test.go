@@ -151,7 +151,7 @@ func TestEmbeddingSelectedRelayProducer(t *testing.T) {
 					runCtx, cancel := context.WithCancel(ctx)
 					done := make(chan error, 1)
 					go func() { done <- worker.Run(runCtx) }()
-					//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+					//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 					require.Eventually(t, func() bool { return worker.Health().LastSuccessAt != nil }, 10*time.Second, 10*time.Millisecond)
 					cancel()
 					select {
@@ -187,7 +187,7 @@ func TestEmbeddingSelectedRelayProducer(t *testing.T) {
 								t.Cleanup(stop)
 								finished := make(chan error, 1)
 								go func() { finished <- replay.Run(replayCtx) }()
-								//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+								//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 								require.Eventually(t, func() bool { return replay.Health().LastSuccessAt != nil }, 10*time.Second, 10*time.Millisecond)
 								stop()
 								select {

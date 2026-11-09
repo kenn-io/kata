@@ -19,7 +19,7 @@ func registerIssuePlanningDateHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		dates, err := cfg.DB.IssuePlanningDates(ctx, db.IssuePlanningDatesIn{ProjectID: in.ProjectID, IssueID: issue.ID, IncludeDeleted: in.IncludeDeleted, DefaultTimezone: cfg.DefaultTimezone})
+		dates, err := cfg.DB.IssuePlanningDates(ctx, db.IssuePlanningDatesIn{ProjectID: issue.ProjectID, IssueID: issue.ID, IncludeDeleted: in.IncludeDeleted, DefaultTimezone: cfg.DefaultTimezone})
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
 				return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)

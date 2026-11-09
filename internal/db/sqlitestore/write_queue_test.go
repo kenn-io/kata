@@ -20,7 +20,7 @@ import (
 // make materialization fail.
 func TestFederatedMaterializationSharesWriterWithLocalWrites(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "spoke.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
@@ -92,7 +92,7 @@ func TestFederatedMaterializationSharesWriterWithLocalWrites(t *testing.T) {
 func TestWriteQueueAdmitsInArrivalOrder(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		q := newWriteQueue()
 		require.NoError(t, q.acquire(ctx))
 		admitted := make(chan int, 3)
@@ -117,7 +117,7 @@ func TestWriteQueueAdmitsInArrivalOrder(t *testing.T) {
 func TestWriteQueueRetryPreservesArrivalOrder(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		q := newWriteQueue()
 		require.NoError(t, q.acquire(ctx))
@@ -155,26 +155,26 @@ func TestWriteQueueCancellation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		q := newWriteQueue()
-		require.NoError(t, q.acquire(context.Background()))
-		ctx, cancel := context.WithCancel(context.Background())
+		require.NoError(t, q.acquire(t.Context()))
+		ctx, cancel := context.WithCancel(t.Context())
 		result := make(chan error, 1)
 		go func() { result <- q.acquire(ctx) }()
 		synctest.Wait()
 		cancel()
 		require.ErrorIs(t, <-result, context.Canceled)
 		q.release()
-		require.NoError(t, q.acquire(context.Background()))
+		require.NoError(t, q.acquire(t.Context()))
 		q.release()
 	})
 }
 
 func TestWriteQueueAlreadyCanceled(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	q := newWriteQueue()
 	require.ErrorIs(t, q.acquire(ctx), context.Canceled)
-	require.NoError(t, q.acquire(context.Background()))
+	require.NoError(t, q.acquire(t.Context()))
 	q.release()
 }
 
@@ -182,14 +182,14 @@ func TestWriteQueueDeadline(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		q := newWriteQueue()
-		require.NoError(t, q.acquire(context.Background()))
-		ctx, cancel := context.WithTimeout(context.Background(), 2*sqliteBusyTimeout)
+		require.NoError(t, q.acquire(t.Context()))
+		ctx, cancel := context.WithTimeout(t.Context(), 2*sqliteBusyTimeout)
 		defer cancel()
 		started := time.Now()
 		require.ErrorIs(t, q.acquire(ctx), context.DeadlineExceeded)
 		require.Equal(t, 2*sqliteBusyTimeout, time.Since(started))
 		q.release()
-		require.NoError(t, q.acquire(context.Background()))
+		require.NoError(t, q.acquire(t.Context()))
 		q.release()
 	})
 }
@@ -199,8 +199,8 @@ func TestWriteQueueCancellationRacesHandoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		for range 100 {
 			q := newWriteQueue()
-			require.NoError(t, q.acquire(context.Background()))
-			ctx, cancel := context.WithCancel(context.Background())
+			require.NoError(t, q.acquire(t.Context()))
+			ctx, cancel := context.WithCancel(t.Context())
 			result := make(chan error, 1)
 			go func() {
 				err := q.acquire(ctx)
@@ -214,8 +214,64 @@ func TestWriteQueueCancellationRacesHandoff(t *testing.T) {
 			cancel()
 			q.release()
 			<-result
-			require.NoError(t, q.acquire(context.Background()), "canceled waiter must pass the slot on")
+			require.NoError(t, q.acquire(t.Context()), "canceled waiter must pass the slot on")
 			q.release()
 		}
 	})
+}
+
+func TestReconcileDueNotificationInvalidRecipientDoesNotWaitForWriter(t *testing.T) {
+	for _, recipient := range []string{"valid", "author", "owner"} {
+		t.Run(recipient, func(t *testing.T) {
+			ctx := t.Context()
+			store, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			project, err := store.CreateProject(ctx, "unaddressable-project")
+			require.NoError(t, err)
+			params := db.CreateIssueParams{
+				ProjectID: project.ID, Title: "Unaddressable scheduled work", Author: "bad\nactor",
+				Metadata: map[string]jsontext.Value{"scheduled_on": []byte(`"2020-01-01"`)},
+			}
+			if recipient != "author" {
+				params.Author = "worker-a"
+			}
+			if recipient == "owner" {
+				params.Owner = new("bad\nactor")
+			}
+			issue, _, err := store.CreateIssue(ctx, params)
+			require.NoError(t, err)
+			floor := time.Time{}
+			in := db.ReconcileDueNotificationIn{
+				IssueID: issue.ID, Now: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC),
+				DefaultTimezone: "UTC", ScheduledReachedFloor: &floor,
+			}
+			out, err := store.ReconcileDueNotification(ctx, in)
+			require.NoError(t, err)
+			if recipient == "valid" {
+				require.NoError(t, out.NotificationErr)
+				require.NotNil(t, out.Event)
+			} else {
+				require.Error(t, out.NotificationErr)
+				require.Nil(t, out.Event)
+			}
+			require.NotNil(t, out.Reached)
+
+			writer, err := store.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, writer.Rollback()) }()
+			readCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			out, err = store.ReconcileDueNotification(readCtx, in)
+			require.NoError(t, err)
+			if recipient == "valid" {
+				require.NoError(t, out.NotificationErr)
+			} else {
+				require.Error(t, out.NotificationErr)
+			}
+			require.False(t, out.Changed)
+			require.Nil(t, out.Reached)
+			require.Nil(t, out.Event)
+		})
+	}
 }

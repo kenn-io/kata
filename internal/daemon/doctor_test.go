@@ -45,7 +45,7 @@ func TestDoctorEndpointRequiresOperatorAuthorityBeforeCollection(t *testing.T) {
 			d := openTestDB(t)
 			sink := &doctorSink{}
 			ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Hooks: sink, Auth: config.AuthConfig{Token: tc.token, AllowUnauthenticatedPrivateNetworkWrites: tc.private}, InsecureReadonly: tc.readonly})
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/doctor", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/doctor", nil)
 			if tc.bearer != "" {
 				req.Header.Set("Authorization", "Bearer "+tc.bearer)
 			}
@@ -96,7 +96,7 @@ func TestAnonymousReadonlyBrowserCannotReadDoctorDiagnostics(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			req := httptest.NewRequest(http.MethodGet, origin+"/api/v1/doctor", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, origin+"/api/v1/doctor", nil)
 			req.Host = "127.0.0.1:27123"
 			req.RemoteAddr = "127.0.0.1:54321"
 			req.Header.Set("Origin", origin)
@@ -131,7 +131,7 @@ func TestDoctorBrowserListenerAllowsConfiguredOperatorBearer(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, origin+"/api/v1/doctor", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, origin+"/api/v1/doctor", nil)
 	req.Host = "127.0.0.1:27123"
 	req.Header.Set("Authorization", "Bearer operator-token")
 	rr := httptest.NewRecorder()
@@ -148,7 +148,7 @@ func TestDoctorAllowsOwnerLocalRequestWithTokenlessPrivateWritesEnabled(t *testi
 		DB: d.db, StartedAt: d.now, Hooks: sink,
 		Auth: config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true},
 	})
-	req := httptest.NewRequest(http.MethodGet, ts.URL+"/api/v1/doctor", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/doctor", nil)
 	req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey, &net.UnixAddr{Name: "/tmp/kata.sock", Net: "unix"}))
 	rr := httptest.NewRecorder()
 	ts.Config.Handler.ServeHTTP(rr, req)
@@ -171,7 +171,7 @@ func TestDoctorAllowsOwnerLocalRequestInInsecureReadonlyMode(t *testing.T) {
 			ts := startTestServer(t, daemon.ServerConfig{
 				DB: d.db, StartedAt: d.now, Hooks: sink, InsecureReadonly: true,
 			})
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/doctor", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/doctor", nil)
 			if tc.remote != "" {
 				req.RemoteAddr = tc.remote
 			}

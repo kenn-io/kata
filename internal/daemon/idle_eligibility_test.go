@@ -47,6 +47,14 @@ func TestAutostartIdleShutdownRequiresOwnerLocalExposure(t *testing.T) {
 			}}},
 		},
 		{
+			name:   "daemon MCP endpoint",
+			daemon: localDaemon,
+			web:    localWeb,
+			config: config.DaemonConfig{MCP: config.MCPConfig{ // #nosec G101 -- synthetic test configuration names an environment variable, not a credential value.
+				Enabled: true, Actor: "example-agent", TokenEnv: "KATA_MCP_TEST_TOKEN",
+			}},
+		},
+		{
 			name:   "restricted federation ingress",
 			daemon: localDaemon,
 			web:    localWeb,

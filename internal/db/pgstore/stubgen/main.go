@@ -43,8 +43,34 @@ const (
 // *sql.DB. Each method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
-	"DispatchRecurringCron": true, // cron.go
-	"ListRecurringCronJobs": true, // cron.go
+	"DispatchRecurringCron":            true, // cron.go
+	"ListRecurringCronJobs":            true, // cron.go
+	"ActivateMCPEventSubscription":     true, // mcp_event_subscriptions.go
+	"RefreshMCPEventSubscription":      true, // mcp_event_subscriptions.go
+	"GetMCPEventSubscription":          true, // mcp_event_subscriptions.go
+	"ListMCPEventSubscriptions":        true, // mcp_event_subscriptions.go
+	"MCPEventConsentExists":            true, // mcp_event_subscriptions.go
+	"CountActiveMCPEventSubscriptions": true, // mcp_event_subscriptions.go
+	"ListDueMCPEventSubscriptions":     true, // mcp_event_subscriptions.go
+	"MarkMCPEventSubscriptionsDirty":   true, // mcp_event_subscriptions.go
+	"ForgetMCPEventCatalogs":           true, // mcp_event_subscriptions.go
+	"UpdateMCPEventCatalogs":           true, // mcp_event_subscriptions.go
+	"MCPEventsRematch":                 true, // mcp_event_subscriptions.go
+	"AcknowledgeMCPEventsRematch":      true, // mcp_event_subscriptions.go
+	"MCPEventsScanPosition":            true, // mcp_event_subscriptions.go
+	"InitializeMCPEventsScanPosition":  true, // mcp_event_subscriptions.go
+	"AdvanceMCPEventsScanPosition":     true, // mcp_event_subscriptions.go
+	"MCPEventsAccessChangesAfter":      true, // mcp_event_subscriptions.go
+	"ClaimMCPEventSubscription":        true, // mcp_event_subscriptions.go
+	"RenewMCPEventClaim":               true, // mcp_event_subscriptions.go
+	"UpdateMCPEventDelivery":           true, // mcp_event_subscriptions.go
+	"EndMCPEventSubscription":          true, // mcp_event_subscriptions.go
+	"ExpireMCPEventSubscriptions":      true, // mcp_event_subscriptions.go
+	"PruneEndedMCPEventSubscriptions":  true, // mcp_event_subscriptions.go
+	"MCPEventsKeyCheck":                true, // mcp_event_subscriptions.go
+	"PutMCPEventsKeyCheckIfAbsent":     true, // mcp_event_subscriptions.go
+	"ImportMCPEventSubscription":       true, // mcp_event_subscriptions.go
+	"ExportMCPEventSubscriptions":      true, // mcp_event_subscription_export.go
 
 	"PrepareSetupFinished":  true, // setup_finished.go
 	"CompleteSetupFinished": true, // setup_finished.go
@@ -120,6 +146,8 @@ var alreadyImplemented = map[string]bool{
 	"FederationSyncStatusByProject":        true, // federation_control.go
 	"FindActiveFederationEnrollment":       true, // federation_control.go
 	"ListFederationBindings":               true, // federation_control.go
+	"ListFederationSpokeNames":             true, // spoke_names.go
+	"SetFederationSpokeName":               true, // spoke_names.go
 	"ListFederationEnrollments":            true, // federation_control.go
 	"ListProjectFederationEnrollments":     true, // federation_control.go
 	"LeaveFederationReplica":               true, // federation_projection.go
@@ -276,6 +304,9 @@ var alreadyImplemented = map[string]bool{
 	"Path":                                 true, // store.go
 	"LookupIdempotency":                    true, // idempotency.go
 	"LookupIssueMutationIdempotency":       true, // idempotency.go
+
+	"LookupIssueMutationIdempotencyByIssue": true, // idempotency.go
+
 	"LookupCommentIdempotency":             true, // idempotency.go
 	"MaxEventID":                           true, // events.go
 	"MaxFederationBaselineEventID":         true, // events.go

@@ -32,7 +32,7 @@ func TestDaemonStartsWithPinnedProjectAndMissingRootKey(t *testing.T) {
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
 	t.Cleanup(func() { newTelemetryReporter = orig })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
 	hub, err := store.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestDaemonStartsWithPinnedProjectAndMissingRootKey(t *testing.T) {
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
 	var record daemonRuntimeRecordJSON
-	require.Eventually(t, func() bool { //nolint:kennlint // daemon startup publishes readiness only through its runtime record file
+	require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: daemon startup publishes readiness only through its runtime record file
 		select {
 		case err := <-done:
 			t.Fatalf("daemon exited during startup: %v", err)
@@ -77,7 +77,9 @@ func TestDaemonStartsWithPinnedProjectAndMissingRootKey(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist, "a pinned instance never generates a replacement key at startup")
 
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://" + record.Address + "/api/v1/health") //nolint:noctx // bounded test client
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+record.Address+"/api/v1/health", nil)
+	require.NoError(t, reqErr)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	var health struct {
 		RootSigning struct {

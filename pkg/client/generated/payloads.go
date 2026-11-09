@@ -2,6 +2,10 @@
 
 package generated
 
+import (
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+)
+
 type ReconcileExternalRootByKeyBody = ReconcileExternalRootByKeyRequestBody
 
 type MapConnectorFieldBody = MapConnectorFieldRequestBody
@@ -14,6 +18,8 @@ type CreateFederationEnrollmentBody = CreateFederationEnrollmentRequestBody
 
 type RotateFederationEnrollmentBody = RotateFederationEnrollmentRequestBody
 
+type SetFederationSpokeNameBody = SetFederationSpokeNameRequestBody
+
 type CreateFederationReplicaBody = CreateFederationReplicaRequestBody
 
 type LeaveFederationReplicaBody = LeaveFederationReplicaRequestBody
@@ -23,6 +29,10 @@ type RebindFederationReplicaBody = RebindFederationReplicaRequestBody
 type ConfigureFederationSigningBody = ConfigureFederationSigningRequestBody
 
 type RepinFederationRootKeyBody = RepinFederationRootKeyRequestBody
+
+type McpEventsSubscribeBody = MCPEventsSubscribeBody
+
+type McpEventsUnsubscribeBody = MCPEventsUnsubscribeBody
 
 type InitProjectBody = InitProjectRequestBody
 
@@ -97,6 +107,10 @@ type ReopenIssueBody = ActionRequestBody
 type RestoreIssueBody = RestoreRequestBody
 
 type UnassignIssueBody = UnassignRequestBody
+
+type AddAttachmentBody = runtime.File
+
+type LinkAttachmentBody = LinkAttachmentInput
 
 type BindExternalRootBody = BindExternalRootRequestBody
 

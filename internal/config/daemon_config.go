@@ -54,15 +54,20 @@ type DaemonConfig struct {
 	Close CloseConfig `toml:"close"`
 	// Auth carries the daemon's bearer-auth token, if any.
 	Auth AuthConfig `toml:"auth"`
+	// MCP configures the optional daemon-mounted MCP listener.
+	MCP MCPConfig `toml:"mcp"`
 	// Web carries browser-listener and externally published origin settings.
 	Web    WebConfig    `toml:"web"`
 	Backup BackupConfig `toml:"backup"`
+	// MCPEvents enables daemon-owned MCP Events delivery.
+	MCPEvents MCPEventsConfig `toml:"mcp_events"`
 	// Storage carries DB selection plus backend-specific startup policy; see
 	// config.KataDSN for DSN precedence (env > file > default).
 	Storage StorageConfig `toml:"storage"`
 	// Search carries opt-in semantic-search settings. An empty
 	// [search.embeddings] section leaves kata on lexical-only FTS.
-	Search SearchConfig `toml:"search"`
+	Search  SearchConfig  `toml:"search"`
+	Docbank DocbankConfig `toml:"docbank"`
 	// GitHubSync carries daemon-owned GitHub API credential settings for
 	// background synchronization.
 	GitHubSync   GitHubSyncConfig   `toml:"github_sync"`
@@ -74,6 +79,17 @@ type DaemonConfig struct {
 	TickTickSync TickTickSyncConfig `toml:"ticktick_sync"`
 	// Connectors declares operator-controlled external root connector processes.
 	Connectors []ConnectorConfig `toml:"connector"`
+}
+
+// MCPConfig configures the daemon's /mcp endpoint. Secrets resolve at startup.
+type MCPConfig struct {
+	Enabled         bool     `toml:"enabled"`
+	Actor           string   `toml:"actor"`
+	Projects        []string `toml:"projects"`
+	AllProjects     bool     `toml:"all_projects"` // required when Projects is empty
+	StartupSections []string `toml:"startup_sections"`
+	TokenFile       string   `toml:"token_file"`
+	TokenEnv        string   `toml:"token_env"`
 }
 
 // MinAutostartIdleTimeout leaves enough time for detached startup discovery
@@ -110,11 +126,11 @@ type SearchConfig struct {
 	Embeddings EmbeddingsConfig `toml:"embeddings"`
 }
 
-// EmbeddingsConfig is the [search.embeddings] block. It is opt-in: when BaseURL
-// and Model are both empty kata stays on lexical-only search. BaseURL and Model
-// must be set together (a partial config is rejected at load). Credentials use
-// inline > file > environment precedence.
+// EmbeddingsConfig opts into semantic search with Local or a BaseURL and Model.
+// Credentials use inline > file > environment precedence.
 type EmbeddingsConfig struct {
+	// Local uses the shared built-in Nomic embeddings server.
+	Local bool `toml:"local"`
 	// BaseURL is the OpenAI-compatible endpoint base, e.g.
 	// "http://localhost:11434/v1". The client appends "/embeddings".
 	BaseURL string `toml:"base_url"`
@@ -156,11 +172,20 @@ type EmbeddingsConfig struct {
 	TrustPrivateNetwork bool `toml:"trust_private_network"`
 }
 
-// Enabled reports whether semantic search is configured. Both base_url and
-// model are required; validateEmbeddings rejects a partial config so Enabled
-// never sees a half-set section.
+// Enabled reports whether semantic search uses a local or configured server.
 func (e EmbeddingsConfig) Enabled() bool {
-	return strings.TrimSpace(e.BaseURL) != "" && strings.TrimSpace(e.Model) != ""
+	return e.Local || strings.TrimSpace(e.BaseURL) != "" && strings.TrimSpace(e.Model) != ""
+}
+
+// UsesLocal reports whether the built-in server is selected without a configured endpoint.
+func (e EmbeddingsConfig) UsesLocal() bool {
+	return e.Local && strings.TrimSpace(e.BaseURL) == ""
+}
+
+// LocalRecipeCompatible reports whether the built-in server supports this model and width.
+func (e EmbeddingsConfig) LocalRecipeCompatible() bool {
+	return (e.Model == "nomic-embed-text" || e.Model == "nomic-embed-text:latest" || e.Model == "nomic-embed-text:v1.5") &&
+		(e.Dims == 0 || e.Dims == 768 || e.Dims > 0 && e.Dims < 768 && e.RequestDimensions)
 }
 
 // StorageConfig is the [storage] block of <KATA_HOME>/config.toml. An empty
@@ -487,6 +512,9 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	if _, _, err := cfg.Backup.Durations(); err != nil {
 		return nil, err
 	}
+	if _, err := cfg.MCPEvents.MaxTTLDuration(); err != nil {
+		return nil, err
+	}
 	if cfg.Timezone != "" {
 		if _, err := time.LoadLocation(cfg.Timezone); err != nil {
 			return nil, fmt.Errorf("timezone %q is not a valid IANA timezone: %w", cfg.Timezone, err)
@@ -499,6 +527,9 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 		return nil, err
 	}
 	if _, err := cfg.Close.Throttle.ThrottleWindow(); err != nil {
+		return nil, err
+	}
+	if err := normalizeDocbank(&cfg.Docbank); err != nil {
 		return nil, err
 	}
 	if err := validateEmbeddings(cfg.Search.Embeddings); err != nil {
@@ -590,8 +621,34 @@ func ReadSearchConfig() (SearchConfig, error) {
 	if _, err := decodeConfigSection("search", &file); err != nil {
 		return SearchConfig{}, err
 	}
-	// Reuse the daemon's deployment overlay so search environment overrides stay consistent.
+	return resolveSearchConfig(file.Search)
+}
+
+// ParseSearchConfig applies the same environment overrides and validation as daemon startup.
+func ParseSearchConfig(data []byte) (SearchConfig, error) {
+	search, err := ParseSearchFile(data)
+	if err != nil {
+		return SearchConfig{}, err
+	}
+	return resolveSearchConfig(search)
+}
+
+// ParseSearchFile reads [search] as written, without environment overrides or validation.
+func ParseSearchFile(data []byte) (SearchConfig, error) {
+	var file struct {
+		Search SearchConfig `toml:"search"`
+	}
+	if err := decodeSectionData(data, "search", &file); err != nil {
+		return SearchConfig{}, err
+	}
 	cfg := DaemonConfig{Search: file.Search}
+	trimSearchEmbeddings(&cfg)
+	return cfg.Search, nil
+}
+
+func resolveSearchConfig(search SearchConfig) (SearchConfig, error) {
+	// Reuse the daemon's deployment overlay so search environment overrides stay consistent.
+	cfg := DaemonConfig{Search: search}
 	trimSearchEmbeddings(&cfg)
 	initializeDeploymentSources(&cfg)
 	if err := applyDeploymentEnv(&cfg); err != nil {
@@ -615,9 +672,16 @@ func decodeConfigSection(name string, dst any) (string, error) {
 	if err != nil {
 		return path, fmt.Errorf("read %s: %w", path, err)
 	}
+	if err := decodeSectionData(data, name, dst); err != nil {
+		return path, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return path, nil
+}
+
+func decodeSectionData(data []byte, name string, dst any) error {
 	meta, err := toml.Decode(string(data), dst)
 	if err != nil {
-		return path, fmt.Errorf("parse %s: %w", path, err)
+		return err
 	}
 	var unknown []string
 	for _, key := range meta.Undecoded() {
@@ -626,9 +690,9 @@ func decodeConfigSection(name string, dst any) (string, error) {
 		}
 	}
 	if len(unknown) > 0 {
-		return path, fmt.Errorf("parse %s: unknown %s key(s): %s", path, name, strings.Join(unknown, ", "))
+		return fmt.Errorf("unknown %s key(s): %s", name, strings.Join(unknown, ", "))
 	}
-	return path, nil
+	return nil
 }
 
 func isClientConfigKey(key toml.Key) bool {
@@ -769,6 +833,9 @@ func trimSearchEmbeddings(cfg *DaemonConfig) {
 	e := &cfg.Search.Embeddings
 	e.BaseURL = strings.TrimSpace(e.BaseURL)
 	e.Model = strings.TrimSpace(e.Model)
+	if e.UsesLocal() && e.Model == "" {
+		e.Model = "nomic-embed-text"
+	}
 	e.APIKey = strings.TrimSpace(e.APIKey)
 	e.APIKeyEnv = strings.TrimSpace(e.APIKeyEnv)
 	e.APIKeyFile = strings.TrimSpace(e.APIKeyFile)
@@ -877,7 +944,12 @@ func validateAuthProxy(p ProxyConfig) error {
 func validateEmbeddings(e EmbeddingsConfig) error {
 	hasBase := strings.TrimSpace(e.BaseURL) != ""
 	hasModel := strings.TrimSpace(e.Model) != ""
-	if hasBase != hasModel {
+	if e.UsesLocal() {
+		// Kit embedserver/handler.go defines the built-in model aliases and widths.
+		if !e.LocalRecipeCompatible() {
+			return errors.New("search.embeddings: local requires a nomic-embed-text model and dims 768, or request_dimensions for a smaller width")
+		}
+	} else if hasBase != hasModel {
 		return errors.New(
 			"search.embeddings: base_url and model must both be set or both omitted")
 	}

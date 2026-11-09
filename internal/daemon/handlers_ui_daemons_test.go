@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,62 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 )
+
+type attachmentDeadlineTransport struct {
+	base   http.RoundTripper
+	budget chan time.Duration
+}
+
+func (t attachmentDeadlineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if (r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attachments")) ||
+		(r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content")) {
+		if deadline, ok := r.Context().Deadline(); ok {
+			t.budget <- time.Until(deadline)
+		}
+	}
+	return t.base.RoundTrip(r)
+}
+
+func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
+	responses := map[string]any{
+		"/api/v1/instance":                           map[string]any{"web_ui_contract_version": api.UISnapshotContractVersion, "web_ui_capabilities": api.UICapabilities{Writable: true, ActorPolicy: "request"}},
+		"/api/v1/projects/1/issues/abc4/attachments": map[string]string{"attachment_id": "saved"},
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			assert.Equal(t, "operator", r.URL.Query().Get("actor"))
+			assert.Equal(t, "screen.png", r.URL.Query().Get("name"))
+			raw, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+			assert.Equal(t, "image", string(raw))
+		}
+		_ = json.NewEncoder(w).Encode(responses[r.URL.Path])
+	}))
+	defer upstream.Close()
+	base := http.DefaultTransport
+	budgets := make(chan time.Duration, 1)
+	http.DefaultTransport = attachmentDeadlineTransport{base: base, budget: budgets}
+	defer func() { http.DefaultTransport = base }()
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/projects/1/issues/abc4/attachments?name=screen.png&actor=operator"},
+		{http.MethodGet, "/api/v1/projects/1/issues/abc4/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/content"},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), tc.method, server.URL+"/api/v1/ui/proxy"+tc.path, strings.NewReader("image"))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/octet-stream")
+			// Keep the caller out of the transport being observed.
+			resp, err := (&http.Client{Transport: base}).Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			require.Len(t, budgets, 1, "upstream attachment request had no deadline")
+			require.GreaterOrEqual(t, <-budgets, 74*time.Minute)
+		})
+	}
+}
 
 func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	connected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +99,9 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 		},
 	})
 
-	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+	require.NoError(t, reqErr)
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
@@ -88,7 +147,9 @@ func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {
 		},
 	})
 
-	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+	require.NoError(t, reqErr)
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	var roster struct {
@@ -120,7 +181,9 @@ func TestWebDaemonRosterRejectsPreviousSnapshotContract(t *testing.T) {
 		},
 	})
 
-	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+	require.NoError(t, reqErr)
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	var roster struct {
@@ -151,7 +214,9 @@ func TestAnonymousReadonlyRosterHidesConfiguredCredentialTargetsBeforeProbing(t 
 		},
 	})
 
-	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+	require.NoError(t, reqErr)
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	var roster struct {
@@ -166,7 +231,7 @@ func TestAnonymousReadonlyRosterHidesConfiguredCredentialTargetsBeforeProbing(t 
 	assert.True(t, roster.Daemons[0].Default)
 	assert.Equal(t, int64(0), calls.Load())
 
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ui/snapshot?view=all-open", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -193,7 +258,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Accept"))
 		w.Header().Set("Set-Cookie", "upstream=secret")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"contract_version":%q,"cursor":7,"capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`,
+		_, _ = fmt.Fprintf(w, `{"contract_version":%q,"cursor":7,"capabilities":{"attachments":true,"writable":true,"updates":"sse","actor_policy":"request"}}`,
 			api.UISnapshotContractVersion)
 	}))
 	t.Cleanup(upstream.Close)
@@ -205,7 +270,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 			Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
 		}},
 	})
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ui/snapshot?view=all-open", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -223,7 +288,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
-	assert.JSONEq(t, fmt.Sprintf(`{"contract_version":%q,"cursor":7,"capabilities":{"writable":true,"updates":"poll","actor_policy":"request"}}`,
+	assert.JSONEq(t, fmt.Sprintf(`{"contract_version":%q,"cursor":7,"capabilities":{"attachments":true,"writable":true,"updates":"poll","actor_policy":"request"}}`,
 		api.UISnapshotContractVersion), string(body))
 	assert.Empty(t, response.Header.Get("Set-Cookie"))
 }
@@ -262,11 +327,12 @@ func TestWebDaemonProxyRestrictsDownstreamOperations(t *testing.T) {
 		{name: "ordinary metadata", path: "/api/v1/projects/7/metadata", body: `{}`, want: http.StatusNoContent},
 		{name: "project lookup", path: "/api/v1/projects/resolve", body: `{"name":"example-project"}`, want: http.StatusNoContent},
 		{name: "filesystem project", path: "/api/v1/projects", body: `{"start_path":" "}`, want: http.StatusForbidden},
+		{name: "local embeddings setup", path: "/api/v1/embeddings/local", body: `{}`, want: http.StatusForbidden},
 		{name: "federation", path: "/api/v1/federation/replicas", body: `{}`, want: http.StatusForbidden},
 		{name: "purge", path: "/api/v1/projects/7/actions/purge", body: `{}`, want: http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request, err := http.NewRequest(http.MethodPost,
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 				server.URL+"/api/v1/ui/proxy"+test.path, strings.NewReader(test.body))
 			require.NoError(t, err)
 			request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -293,7 +359,7 @@ func TestWebDaemonGatewayAllowsIssueReferenceLookup(t *testing.T) {
 		WebDaemons: []config.CatalogDaemonConfig{{Name: "example-local", Local: true}},
 	})
 
-	request, err := http.NewRequest(http.MethodGet, fmt.Sprintf(
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
 		"%s/api/v1/ui/proxy/api/v1/ui/issue-reference?project_id=%d&ref=%s", server.URL, project.ID, issue.ShortID,
 	), nil)
 	require.NoError(t, err)
@@ -324,7 +390,7 @@ func TestWebDaemonGatewayRejectsDownstreamRosterBeforeProxying(t *testing.T) {
 		}},
 	})
 
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ui/daemons", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -351,7 +417,7 @@ func TestWebDaemonGatewayRejectsDeletedIssueLookupBeforeProxying(t *testing.T) {
 		}},
 	})
 
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/projects/7/issues/abc4?include_deleted=true", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -375,7 +441,7 @@ func TestWebDaemonProxyDoesNotMisclassifyUpstreamAuthAsBrowserExpiry(t *testing.
 			Name: "example-remote", URL: upstream.URL, Token: "invalid-token", AllowInsecure: true,
 		}},
 	})
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ui/snapshot", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -408,7 +474,7 @@ func TestWebDaemonProxyRejectsUpstreamRedirects(t *testing.T) {
 			Name: "example-remote", URL: upstream.URL, AllowInsecure: true,
 		}},
 	})
-	request, err := http.NewRequest(http.MethodPost,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 		server.URL+"/api/v1/ui/proxy/api/v1/projects/resolve",
 		strings.NewReader(`{"name":"example-project"}`))
 	require.NoError(t, err)
@@ -431,7 +497,7 @@ func TestWebDaemonProxyDispatchesLocalSelectionInProcess(t *testing.T) {
 		DB: d.db, StartedAt: d.now,
 		WebDaemons: []config.CatalogDaemonConfig{{Name: "example-local", Local: true}},
 	})
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-local")
@@ -451,21 +517,25 @@ func TestLocalProfileGatewayOmitsAndRejectsHomeEntries(t *testing.T) {
 					entries = append(entries, config.CatalogDaemonConfig{Name: "personal", Local: true})
 				}
 				server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: name, WebDaemons: entries})
-				response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+				req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+				require.NoError(t, reqErr)
+				response, err := http.DefaultClient.Do(req)
 				require.NoError(t, err)
 				body, err := io.ReadAll(response.Body)
 				require.NoError(t, err)
 				require.NoError(t, response.Body.Close())
 				assert.NotContains(t, string(body), fmt.Sprintf(`"id":%q`, name))
 				assert.NotContains(t, string(body), "/work-home")
-				request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
 				require.NoError(t, err)
 				request.Header.Set("X-Kata-Web-Daemon", name)
 				response, err = http.DefaultClient.Do(request)
 				require.NoError(t, err)
 				require.NoError(t, response.Body.Close())
 				assert.Equal(t, http.StatusBadRequest, response.StatusCode)
-				response, err = http.Get(server.URL + "/api/v1/ui/proxy/api/v1/ping")
+				req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+				require.NoError(t, reqErr)
+				response, err = http.DefaultClient.Do(req)
 				require.NoError(t, err)
 				require.NoError(t, response.Body.Close())
 				assert.Equal(t, http.StatusOK, response.StatusCode)

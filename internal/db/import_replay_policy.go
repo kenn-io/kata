@@ -70,6 +70,9 @@ func ValidateImportRecords(records []ImportRecord) error {
 			return fmt.Errorf("import record %d: %w", i, err)
 		}
 	}
+	if err := validateSpokeNameReplay(records); err != nil {
+		return err
+	}
 	if err := validateCronImportEvents(records); err != nil {
 		return err
 	}
@@ -277,6 +280,11 @@ func validateImportRecord(record ImportRecord) error {
 	switch rec := record.(type) {
 	case *CronJobExport, *CronWorkflowExport, *CronRunExport:
 		return ValidateCronRecord(record)
+	case *MCPEventSubscriptionExport:
+		if rec == nil {
+			return errors.New("nil mcp event subscription")
+		}
+		return ValidateMCPEventSubscription(rec.Subscription())
 	case nil:
 		return errors.New("nil record")
 	case *EmbeddingArtifactExport:

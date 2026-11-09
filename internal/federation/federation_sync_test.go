@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,12 +27,13 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
 func TestSyncFederationOncePullsAndAdvancesCursor(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 
@@ -123,7 +125,7 @@ func TestClientOptsForCredentialPreservesAllowInsecureOptIn(t *testing.T) {
 }
 
 func TestFederationRunnerUsesBindingEndpointWithStaleCredentialMetadata(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", spoke.Home)
 	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
@@ -163,7 +165,7 @@ func TestFederationRunnerUsesBindingEndpointWithStaleCredentialMetadata(t *testi
 }
 
 func TestFederationRunnerMakesParentDrainAvailableToPulledEventSink(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", spoke.Home)
@@ -235,7 +237,7 @@ func TestFederationRunnerMakesParentDrainAvailableToPulledEventSink(t *testing.T
 }
 
 func TestSyncFederationOnceDuplicateOnlyPullMaterializesStaleProjection(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 
@@ -302,7 +304,7 @@ func TestSyncFederationOnceDuplicateOnlyPullMaterializesStaleProjection(t *testi
 }
 
 func TestSyncFederationOnceReportsFreshPulledEvents(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	hubProject, err := hub.DB.CreateProject(ctx, "hub")
@@ -373,7 +375,7 @@ func TestSyncFederationOnceReportsFreshPulledEvents(t *testing.T) {
 }
 
 func TestSyncFederationOnceAdvancesAcrossIncompleteBaselineLinkPage(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	hubProjectUID := mustTestUID(t)
 	sourceUID := mustTestUID(t)
@@ -458,7 +460,7 @@ func TestSyncFederationOnceAdvancesAcrossIncompleteBaselineLinkPage(t *testing.T
 }
 
 func TestSyncFederationOnceHandlesResetRequired(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -525,7 +527,7 @@ func TestSyncFederationOnceHandlesResetRequired(t *testing.T) {
 }
 
 func TestSyncFederationOnceErrorsWhenResetStillRequiredAfterRefresh(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -586,7 +588,7 @@ func TestSyncFederationOnceErrorsWhenResetStillRequiredAfterRefresh(t *testing.T
 }
 
 func TestSyncFederationOnceRecordsPullErrorStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -621,36 +623,57 @@ func TestSyncFederationOnceRecordsPullErrorStatus(t *testing.T) {
 }
 
 func TestSyncFederationOnceRecordsClientConstructionErrorStatus(t *testing.T) {
-	ctx := context.Background()
-	spoke := testenv.New(t)
-	project, err := spoke.DB.CreateProject(ctx, "hub")
-	require.NoError(t, err)
-	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
-		ProjectID:            project.ID,
-		Role:                 db.FederationRoleSpoke,
-		HubURL:               "http://example.com",
-		HubProjectID:         42,
-		HubProjectUID:        project.UID,
-		ReplayHorizonEventID: 1,
-		Enabled:              true,
-	})
-	require.NoError(t, err)
+	for _, futureClock := range []bool{false, true} {
+		t.Run(fmt.Sprintf("future-clock=%t", futureClock), func(t *testing.T) {
+			ctx := t.Context()
+			spoke := testenv.New(t)
+			project, err := spoke.DB.CreateProject(ctx, "hub")
+			require.NoError(t, err)
+			binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID:            project.ID,
+				Role:                 db.FederationRoleSpoke,
+				HubURL:               "http://example.com",
+				HubProjectID:         42,
+				HubProjectUID:        project.UID,
+				ReplayHorizonEventID: 1,
+				Enabled:              true,
+			})
+			require.NoError(t, err)
 
-	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
-		Token: "token",
-	})
+			var previousStart, previousSuccess time.Time
+			if futureClock {
+				previousSuccess = time.Now().UTC().Add(time.Hour).Truncate(time.Millisecond)
+				previousStart = previousSuccess.Add(time.Millisecond)
+				require.NoError(t, spoke.DB.RecordFederationSyncPullSuccess(ctx, project.ID, previousSuccess))
+				require.NoError(t, spoke.DB.RecordFederationSyncPullStarted(ctx, project.ID, previousStart))
+			}
 
-	require.Error(t, err)
-	status := requireFederationSyncStatus(t, spoke.DB, project.ID)
-	assertStatusTimeSet(t, status.LastPullStartedAt)
-	assert.Nil(t, status.LastPullSuccessAt)
-	assertStatusTimeSet(t, status.LastErrorAt)
-	require.NotNil(t, status.LastError)
-	assert.Contains(t, *status.LastError, "http://example.com")
+			err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+				Token: "token",
+			})
+
+			require.Error(t, err)
+			status := requireFederationSyncStatus(t, spoke.DB, project.ID)
+			assertStatusTimeSet(t, status.LastPullStartedAt)
+			if futureClock {
+				require.NotNil(t, status.LastPullSuccessAt)
+				assert.Equal(t, previousSuccess, *status.LastPullSuccessAt)
+			} else {
+				assert.Nil(t, status.LastPullSuccessAt)
+			}
+			assertStatusTimeSet(t, status.LastErrorAt)
+			require.NotNil(t, status.LastError)
+			assert.Contains(t, *status.LastError, "http://example.com")
+			if futureClock {
+				assert.True(t, status.LastPullStartedAt.After(previousStart), "failed attempts must preserve monotonic recovery status")
+				assert.False(t, status.LastErrorAt.Before(*status.LastPullStartedAt), "the failure must belong to the recorded attempt")
+			}
+		})
+	}
 }
 
 func TestSyncFederationOncePushPoisonLeavesCursorUnchanged(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -706,7 +729,7 @@ func TestSyncFederationOncePushPoisonLeavesCursorUnchanged(t *testing.T) {
 }
 
 func TestSyncFederationOncePushPoisonRecordsQuarantine(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -761,7 +784,7 @@ func TestSyncFederationOncePushPoisonRecordsQuarantine(t *testing.T) {
 }
 
 func TestSyncFederationOnceValidationBadRequestRecordsQuarantine(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -817,7 +840,7 @@ func TestSyncFederationOnceValidationBadRequestRecordsQuarantine(t *testing.T) {
 }
 
 func TestSyncFederationOnceUnsupportedSchemaDoesNotQuarantine(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -884,7 +907,7 @@ func TestSyncFederationOnceUnsupportedSchemaDoesNotQuarantine(t *testing.T) {
 }
 
 func TestSyncFederationOnceActiveQuarantineStopsPushBeforeNetwork(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -930,7 +953,7 @@ func TestSyncFederationOnceActiveQuarantineStopsPushBeforeNetwork(t *testing.T) 
 }
 
 func TestSyncFederationOnceAutoRetriesLegacySchemaSkewQuarantine(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -1000,7 +1023,7 @@ func TestSyncFederationOnceAutoRetriesLegacySchemaSkewQuarantine(t *testing.T) {
 	_, err = spoke.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	var skipReason string
-	require.NoError(t, spoke.DB.QueryRow(`
+	require.NoError(t, spoke.DB.QueryRowContext(t.Context(), `
 		SELECT skip_reason
 		  FROM federation_quarantine
 		 WHERE project_id = ?`,
@@ -1009,7 +1032,7 @@ func TestSyncFederationOnceAutoRetriesLegacySchemaSkewQuarantine(t *testing.T) {
 }
 
 func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -1105,7 +1128,7 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 	_, err = spoke.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	var skipReason string
-	require.NoError(t, spoke.DB.QueryRow(`
+	require.NoError(t, spoke.DB.QueryRowContext(t.Context(), `
 		SELECT skip_reason
 		  FROM federation_quarantine
 		 WHERE project_id = ?`,
@@ -1142,7 +1165,7 @@ func TestAutoRetryFederationQuarantineRequiresExactFormerPeerMessage(t *testing.
 }
 
 func TestSyncFederationOnceNonLinkSecondaryReferenceQuarantineStillStopsBeforeNetwork(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -1202,7 +1225,7 @@ func TestSyncFederationOnceNonLinkSecondaryReferenceQuarantineStillStopsBeforeNe
 }
 
 func TestSyncFederationOnceUnknownPrimaryQuarantineStillStopsBeforeNetwork(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -1258,7 +1281,7 @@ func TestSyncFederationOnceUnknownPrimaryQuarantineStillStopsBeforeNetwork(t *te
 }
 
 func TestSyncFederationOnceAfterQuarantineRetryPushesAgain(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -1335,7 +1358,7 @@ func TestSyncFederationOnceAfterQuarantineRetryPushesAgain(t *testing.T) {
 }
 
 func TestSyncFederationOnceResetBlockedByLocalEventCreatedDuringMetadataRefresh(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -1423,7 +1446,7 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 		name := fmt.Sprintf("first_before=%t/peer_before=%t/eager=%t/peer_first=%t",
 			tc.firstTaskBeforeEnrollment, tc.peerTaskBeforeEnrollment, tc.eagerSync, tc.peerSyncsFirst)
 		t.Run(name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			hub := testenv.New(t)
 			spoke := testenv.New(t)
 			firstHub := matrixCreateHubProject(t, hub, "spoke-project")
@@ -1457,9 +1480,15 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 				linked = true
 			}
 			syncEligible := func() {
+				credentials := newMoveCredentialStore()
+				for _, project := range projects {
+					if project.enrolled {
+						credentials[project.hub.UID] = project.credential
+					}
+				}
 				for _, project := range syncOrder {
 					if project.enrolled {
-						matrixSyncProject(t, spoke.DB, project)
+						matrixSyncProject(t, spoke.DB, project, credentials)
 					}
 				}
 			}
@@ -1511,7 +1540,7 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 }
 
 func TestSyncFederationOncePushesAndAdvancesCursor(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	hubProject := createFederatedHubForPush(t, hub)
@@ -1567,7 +1596,7 @@ func TestSyncFederationOncePushesAndAdvancesCursor(t *testing.T) {
 }
 
 func TestSyncFederationOncePushEchoDoesNotDeliverPulledLocalEvent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	hubProject := createFederatedHubForPush(t, hub)
@@ -1627,7 +1656,7 @@ func TestSyncFederationOncePushEchoDoesNotDeliverPulledLocalEvent(t *testing.T) 
 }
 
 func TestSyncFederationOnceRejectsLocalPushEchoHashMismatch(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
@@ -1680,7 +1709,7 @@ func TestSyncFederationOnceRejectsLocalPushEchoHashMismatch(t *testing.T) {
 }
 
 func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -1757,7 +1786,7 @@ func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
 }
 
 func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -1857,7 +1886,7 @@ func TestSyncFederationOnceResetRetryRepairsAcknowledgedLocalProjectEvent(t *tes
 
 func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -1968,7 +1997,7 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
 }
 
 func TestSyncFederationOnceRecoveredResetDoesNotDeliverLocalProjectPushEcho(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -2034,7 +2063,7 @@ func TestSyncFederationOnceRecoveredResetDoesNotDeliverLocalProjectPushEcho(t *t
 }
 
 func TestSyncFederationOncePendingResetDoesNotDeliverPostResetLocalProjectPushEcho(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -2100,7 +2129,7 @@ func TestSyncFederationOncePendingResetDoesNotDeliverPostResetLocalProjectPushEc
 }
 
 func TestSyncFederationOncePushRetryDuplicateAdvancesCursor(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	hubProject := createFederatedHubForPush(t, hub)
@@ -2153,7 +2182,7 @@ func TestSyncFederationOncePushRetryDuplicateAdvancesCursor(t *testing.T) {
 }
 
 func TestSyncFederationOnceRejectsPushAckBeyondSubmittedBatch(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -2208,7 +2237,7 @@ func TestSyncFederationOnceRejectsPushAckBeyondSubmittedBatch(t *testing.T) {
 }
 
 func TestFederationPushOfflineReconnect(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	hubProject := createFederatedHubForPush(t, hub)
@@ -2297,7 +2326,7 @@ func TestFederationPushOfflineReconnect(t *testing.T) {
 }
 
 func TestSyncFederationOncePushesAdoptedIssueSnapshotsAndLinks(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 
@@ -2414,7 +2443,7 @@ func TestSyncFederationOncePushesAdoptedIssueSnapshotsAndLinks(t *testing.T) {
 }
 
 func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 
@@ -2608,7 +2637,7 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 }
 
 func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 
@@ -2738,7 +2767,7 @@ func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T
 }
 
 func TestSyncFederationOncePushesLargeAdoptionMetadataWithHistoricalSnapshots(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 
@@ -2812,7 +2841,7 @@ func TestSyncFederationOncePushesLargeAdoptionMetadataWithHistoricalSnapshots(t 
 }
 
 func TestSyncFederationOnceConsumesAdoptionMarkerForMetadataOnlyProject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 
@@ -2875,7 +2904,7 @@ func TestSyncFederationOnceConsumesAdoptionMarkerForMetadataOnlyProject(t *testi
 }
 
 func TestSyncFederationOnceConsumesAdoptionMarkerForEmptyProject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 
@@ -2961,7 +2990,7 @@ func TestNextFederationPushIngestBatchMarksSingleSnapshotBaselineComplete(t *tes
 }
 
 func TestSyncFederationOncePushesAllPendingBatchesBeforePull(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -3022,7 +3051,7 @@ func TestSyncFederationOncePushesAllPendingBatchesBeforePull(t *testing.T) {
 }
 
 func TestSyncFederationOnceSplitsLargePushRequestsBeforePull(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -3100,7 +3129,7 @@ func TestFederationRunnerNoBindingsMakesNoRequests(t *testing.T) {
 	store, _ := openDaemonclientTestDB(t)
 	runner := &Runner{DB: store}
 
-	require.NoError(t, runner.RunOnce(context.Background()))
+	require.NoError(t, runner.RunOnce(t.Context()))
 }
 
 func TestFederationRunnerSkipsSpokeWhenDrainAdmissionIsClosed(t *testing.T) {
@@ -3111,7 +3140,7 @@ func TestFederationRunnerSkipsSpokeWhenDrainAdmissionIsClosed(t *testing.T) {
 	}
 
 	// A denied scan must return before touching even a nil store.
-	require.NoError(t, runner.RunOnce(context.Background()))
+	require.NoError(t, runner.RunOnce(t.Context()))
 }
 
 func TestFederationRunnerRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.T) {
@@ -3130,7 +3159,7 @@ func TestFederationRunnerRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.
 				return activity.NewLease(func() { close(completed) }, nil), true, nil
 			},
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan error, 1)
 		go func() { done <- runner.Run(ctx) }()
 		defer func() {
@@ -3151,7 +3180,7 @@ func TestFederationRunnerRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.
 }
 
 func TestFederationRunnerRetriesWhenSpokeAdmissionReopens(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "spoke")
@@ -3203,7 +3232,7 @@ func TestFederationRunnerWaitsForCancellationAfterTerminalDrainDenial(t *testing
 				return nil, false, nil
 			},
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan error, 1)
 		go func() { done <- runner.Run(ctx) }()
 		defer func() {
@@ -3233,12 +3262,12 @@ func TestFederationRunnerNoBindingsNoNetwork(t *testing.T) {
 		Token:        "unused-token",
 	}))
 
-	require.NoError(t, runner.RunOnce(context.Background()))
+	require.NoError(t, runner.RunOnce(t.Context()))
 	require.False(t, requested)
 }
 
 func TestFederationRunnerUsesClientTimeout(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", spoke.Home)
 	project, err := spoke.DB.CreateProject(ctx, "spoke")
@@ -3271,7 +3300,7 @@ func TestFederationRunnerUsesClientTimeout(t *testing.T) {
 		HubProjectID: 42,
 		Token:        "runner-timeout-token",
 	}))
-	runner := &Runner{DB: spoke.DB, Opts: clientpkg.Opts{Timeout: 50 * time.Millisecond}}
+	runner := &Runner{DB: spoke.DB, Opts: clientpkg.Opts{Timeout: 50 * time.Millisecond}} //nolint:kennlint // deadlinetest: the hub delays its response past the client budget; RunOnce must report timeout
 
 	start := time.Now()
 	err = runner.RunOnce(ctx)
@@ -3281,7 +3310,7 @@ func TestFederationRunnerUsesClientTimeout(t *testing.T) {
 }
 
 func TestFederationRunnerSkipsArchivedSpokeBindings(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	project, err := spoke.DB.CreateProject(ctx, "archived-spoke")
@@ -3319,7 +3348,7 @@ func TestFederationRunnerSkipsArchivedSpokeBindings(t *testing.T) {
 }
 
 func TestFederationRunnerRetriesAfterSyncError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", t.TempDir())
@@ -3376,7 +3405,7 @@ func TestFederationRunnerRetriesAfterSyncError(t *testing.T) {
 	select {
 	case err := <-errCh:
 		require.NoError(t, err)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; the offline hub keeps sync failing, and Run must not exit before cancel
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; the offline hub keeps sync failing, and Run must not exit before cancel
 	}
 
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
@@ -3398,7 +3427,7 @@ func TestFederationRunnerRetriesAfterSyncError(t *testing.T) {
 }
 
 func TestFederationRunnerRunOnceContinuesAfterBindingError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", t.TempDir())
@@ -3460,7 +3489,7 @@ func TestFederationRunnerRunOnceContinuesAfterBindingError(t *testing.T) {
 }
 
 func TestFederationRunnerRunOnceNoBindingsDoesNotCreateSyncStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 
 	require.NoError(t, (&Runner{DB: spoke.DB}).RunOnce(ctx))
@@ -3471,7 +3500,7 @@ func TestFederationRunnerRunOnceNoBindingsDoesNotCreateSyncStatus(t *testing.T) 
 }
 
 func TestFederationRunnerRunOnceMalformedCredentialsRecordsEachSpokeError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", spoke.Home)
 	projectA, err := spoke.DB.CreateProject(ctx, "spoke-a")
@@ -3506,7 +3535,7 @@ func TestFederationRunnerRunOnceMalformedCredentialsRecordsEachSpokeError(t *tes
 }
 
 func TestFederationRunnerRunOnceKeepsClaimRetryErrorWhenPullSucceeds(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", spoke.Home)
 	project, issue, binding := createPendingClaimRetrySpoke(t, spoke.DB, "retry-error-preserved")
@@ -3541,7 +3570,7 @@ func TestFederationRunnerRunOnceKeepsClaimRetryErrorWhenPullSucceeds(t *testing.
 }
 
 func TestPendingClaimRetryResolvesAfterHubReconnectWithFreshTimedTTL(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", spoke.Home)
@@ -3621,7 +3650,7 @@ func TestPendingClaimRetryResolvesAfterHubReconnectWithFreshTimedTTL(t *testing.
 }
 
 func TestPendingClaimRetryResolvesClaimOnlyResponseFromOlderHub(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, issue, binding := createPendingClaimRetrySpoke(t, spoke.DB, "legacy-claim-response")
 	pending, err := spoke.DB.EnqueuePendingClaim(
@@ -3670,7 +3699,7 @@ func TestPendingClaimRetryResolvesClaimOnlyResponseFromOlderHub(t *testing.T) {
 }
 
 func TestPendingClaimRetryKeepsQueuedUpstreamRequestPending(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", spoke.Home)
 	project, issue, binding := createPendingClaimRetrySpoke(t, spoke.DB, "pending-upstream-claim")
@@ -3699,7 +3728,7 @@ func TestPendingClaimRetryKeepsQueuedUpstreamRequestPending(t *testing.T) {
 }
 
 func TestPendingClaimRetryUnknownCapabilitiesTransportFailureRetriesAfterReconnect(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	t.Setenv("KATA_HOME", spoke.Home)
@@ -3786,7 +3815,7 @@ func TestPendingClaimRetryUnknownCapabilitiesTransportFailureRetriesAfterReconne
 }
 
 func TestFederationClaimRetryCapabilityRules(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Run("known credential without claim rejects without claim request", func(t *testing.T) {
 		spoke := testenv.New(t)
 		t.Setenv("KATA_HOME", spoke.Home)
@@ -3864,7 +3893,7 @@ func TestFederationClaimRetryCapabilityRules(t *testing.T) {
 }
 
 func TestPendingClaimRetryDoesNotPersistAfterLeaseLoss(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, issue, binding := createPendingClaimRetrySpoke(t, spoke.DB, "claim-lease-loss")
 	pending, err := spoke.DB.EnqueuePendingClaim(
@@ -3922,7 +3951,7 @@ func TestPendingClaimRetryDoesNotPersistAfterLeaseLoss(t *testing.T) {
 
 func requireFederationSyncStatus(t *testing.T, store *sqlitestore.Store, projectID int64) db.FederationSyncStatus {
 	t.Helper()
-	got, err := store.FederationSyncStatusByProject(context.Background(), projectID)
+	got, err := store.FederationSyncStatusByProject(t.Context(), projectID)
 	require.NoError(t, err)
 	return got
 }
@@ -3936,14 +3965,14 @@ func assertStatusTimeSet(t *testing.T, got *time.Time) {
 func mustIssueUIDByTitle(t *testing.T, store *sqlitestore.Store, title string) string {
 	t.Helper()
 	var uid string
-	require.NoError(t, store.QueryRowContext(context.Background(),
+	require.NoError(t, store.QueryRowContext(t.Context(),
 		`SELECT uid FROM issues WHERE title = ?`, title).Scan(&uid))
 	return uid
 }
 
 func createPendingClaimRetrySpoke(t *testing.T, store *sqlitestore.Store, name string) (db.Project, db.Issue, db.FederationBinding) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, name)
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -3974,7 +4003,7 @@ func setFederationBindingHubURL(
 ) db.FederationBinding {
 	t.Helper()
 	binding.HubURL = hubURL
-	updated, err := store.UpsertFederationBinding(context.Background(), binding)
+	updated, err := store.UpsertFederationBinding(t.Context(), binding)
 	require.NoError(t, err)
 	return updated
 }
@@ -3999,7 +4028,7 @@ func assertPendingRejectedWithError(t *testing.T, store *sqlitestore.Store, requ
 		rejectedAt time.Time
 		lastError  string
 	)
-	require.NoError(t, store.QueryRowContext(context.Background(), `
+	require.NoError(t, store.QueryRowContext(t.Context(), `
 		SELECT rejected_at, last_error
 		  FROM pending_claim_requests
 		 WHERE request_uid = ?`, requestUID).Scan(&rejectedAt, &lastError))
@@ -4033,9 +4062,9 @@ type matrixFederationProject struct {
 
 func matrixCreateHubProject(t *testing.T, hub *testenv.Env, name string) db.Project {
 	t.Helper()
-	project, err := hub.DB.CreateProject(context.Background(), name)
+	project, err := hub.DB.CreateProject(t.Context(), name)
 	require.NoError(t, err)
-	_, err = hub.DB.EnableProjectFederation(context.Background(), project.ID, "tester")
+	_, err = hub.DB.EnableProjectFederation(t.Context(), project.ID, "tester")
 	require.NoError(t, err)
 	return project
 }
@@ -4047,7 +4076,7 @@ func matrixCreateEnrollment(
 	token string,
 ) db.CreatedFederationEnrollment {
 	t.Helper()
-	created, err := hub.DB.CreateFederationEnrollment(context.Background(), db.CreateFederationEnrollmentParams{
+	created, err := hub.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
 		Token:                        token,
 		SpokeInstanceUID:             spoke.DB.InstanceUID(),
 		ProjectID:                    &project.ID,
@@ -4072,7 +4101,7 @@ func matrixCreateInitialState(t *testing.T, store *sqlitestore.Store, project db
 	t.Helper()
 	owner := tag + "-initial-owner"
 	priority := int64(3)
-	issue, _, err := store.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     tag + " initial title",
 		Body:      tag + " initial body",
@@ -4085,19 +4114,19 @@ func matrixCreateInitialState(t *testing.T, store *sqlitestore.Store, project db
 		},
 	})
 	require.NoError(t, err)
-	_, _, err = store.CreateComment(context.Background(), db.CreateCommentParams{
+	_, _, err = store.CreateComment(t.Context(), db.CreateCommentParams{
 		IssueID: issue.ID,
 		Author:  "tester",
 		Body:    tag + " initial comment",
 	})
 	require.NoError(t, err)
-	_, _, changed, err := store.CloseIssue(context.Background(), issue.ID, "done", "tester", "initial close", nil)
+	_, _, changed, err := store.CloseIssue(t.Context(), issue.ID, "done", "tester", "initial close", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
-	issue, _, changed, err = store.ReopenIssue(context.Background(), issue.ID, "tester")
+	issue, _, changed, err = store.ReopenIssue(t.Context(), issue.ID, "tester")
 	require.NoError(t, err)
 	require.True(t, changed)
-	_, err = store.PatchProjectMetadata(context.Background(), db.PatchProjectMetadataIn{
+	_, err = store.PatchProjectMetadata(t.Context(), db.PatchProjectMetadataIn{
 		ProjectID: project.ID,
 		Actor:     "tester",
 		Patch: map[string]jsontext.Value{
@@ -4110,7 +4139,7 @@ func matrixCreateInitialState(t *testing.T, store *sqlitestore.Store, project db
 
 func matrixCreateCrossProjectLink(t *testing.T, store *sqlitestore.Store, first, peer db.Issue) {
 	t.Helper()
-	_, _, err := store.CreateLinkAndEvent(context.Background(), db.CreateLinkParams{
+	_, _, err := store.CreateLinkAndEvent(t.Context(), db.CreateLinkParams{
 		FromIssueID: first.ID,
 		ToIssueID:   peer.ID,
 		Type:        "blocks",
@@ -4134,9 +4163,9 @@ func matrixAdoptProject(
 	project *matrixFederationProject,
 ) {
 	t.Helper()
-	hubBinding, err := hub.FederationBindingByProject(context.Background(), project.hub.ID)
+	hubBinding, err := hub.FederationBindingByProject(t.Context(), project.hub.ID)
 	require.NoError(t, err)
-	result, err := spoke.AdoptProjectIntoFederation(context.Background(), db.AdoptProjectIntoFederationParams{
+	result, err := spoke.AdoptProjectIntoFederation(t.Context(), db.AdoptProjectIntoFederationParams{
 		ProjectID:            project.local.ID,
 		HubURL:               hubURL,
 		HubProjectID:         project.hub.ID,
@@ -4147,7 +4176,7 @@ func matrixAdoptProject(
 	require.NoError(t, err)
 	project.local = result.Project
 	if project.issue.ID != 0 {
-		project.issue, err = spoke.IssueByUID(context.Background(), project.issue.UID, db.IncludeDeletedYes)
+		project.issue, err = spoke.IssueByUID(t.Context(), project.issue.UID, db.IncludeDeletedYes)
 		require.NoError(t, err)
 	}
 	project.enrolled = true
@@ -4164,16 +4193,16 @@ func matrixApplyPostEnrollmentState(
 	body := tag + " final body"
 	owner := tag + "-final-owner"
 	priority := int64(1)
-	result, err := store.EditIssueAtomic(context.Background(), db.EditIssueAtomicParams{
+	result, err := store.EditIssueAtomic(t.Context(), db.EditIssueAtomicParams{
 		IssueID: issue.ID, Actor: "tester", Title: &title, Body: &body,
 		Owner: &owner, SetPriority: &priority,
 	})
 	require.NoError(t, err)
-	_, _, err = store.AddLabelAndEvent(context.Background(), issue.ID, db.LabelEventParams{
+	_, _, err = store.AddLabelAndEvent(t.Context(), issue.ID, db.LabelEventParams{
 		EventType: "issue.labeled", Label: tag + "-final-label", Actor: "tester",
 	})
 	require.NoError(t, err)
-	_, err = store.PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
+	_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 		IssueID: issue.ID,
 		Actor:   "tester",
 		Patch: map[string]jsontext.Value{
@@ -4181,18 +4210,18 @@ func matrixApplyPostEnrollmentState(
 		},
 	})
 	require.NoError(t, err)
-	_, _, err = store.CreateComment(context.Background(), db.CreateCommentParams{
+	_, _, err = store.CreateComment(t.Context(), db.CreateCommentParams{
 		IssueID: issue.ID, Author: "tester", Body: tag + " final comment",
 	})
 	require.NoError(t, err)
 	return result.Issue
 }
 
-func matrixSyncProject(t *testing.T, spoke *sqlitestore.Store, project *matrixFederationProject) {
+func matrixSyncProject(t *testing.T, spoke *sqlitestore.Store, project *matrixFederationProject, credentials config.FederationCredentialStore) {
 	t.Helper()
-	binding, err := spoke.FederationBindingByProject(context.Background(), project.local.ID)
+	binding, err := spoke.FederationBindingByProject(t.Context(), project.local.ID)
 	require.NoError(t, err)
-	require.NoError(t, SyncFederationOnce(context.Background(), spoke, binding, project.credential))
+	require.NoError(t, SyncFederationOnce(t.Context(), spoke, binding, project.credential, credentials))
 }
 
 func matrixAssertPortableState(
@@ -4202,7 +4231,7 @@ func matrixAssertPortableState(
 	issueUID, tag string,
 ) {
 	t.Helper()
-	issue, err := hub.IssueByUID(context.Background(), issueUID, db.IncludeDeletedYes)
+	issue, err := hub.IssueByUID(t.Context(), issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	assert.Equal(t, hubProjectID, issue.ProjectID)
 	assert.Equal(t, tag+" final title", issue.Title)
@@ -4213,39 +4242,39 @@ func matrixAssertPortableState(
 	assert.Equal(t, int64(1), *issue.Priority)
 	assert.Equal(t, "open", issue.Status)
 	assert.JSONEq(t, `{"phase":"final"}`, string(issue.Metadata))
-	labels, err := hub.LabelsByIssue(context.Background(), issue.ID)
+	labels, err := hub.LabelsByIssue(t.Context(), issue.ID)
 	require.NoError(t, err)
 	var gotLabels []string
 	for _, label := range labels {
 		gotLabels = append(gotLabels, label.Label)
 	}
 	assert.ElementsMatch(t, []string{tag + "-initial-label", tag + "-final-label"}, gotLabels)
-	comments, err := hub.CommentsByIssue(context.Background(), issue.ID)
+	comments, err := hub.CommentsByIssue(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 2)
 	assert.Equal(t, tag+" initial comment", comments[0].Body)
 	assert.Equal(t, tag+" final comment", comments[1].Body)
-	project, err := hub.ProjectByID(context.Background(), hubProjectID)
+	project, err := hub.ProjectByID(t.Context(), hubProjectID)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"phase":"`+tag+`-initial"}`, string(project.Metadata))
 }
 
 func matrixAssertPushDrained(t *testing.T, spoke *sqlitestore.Store, projectID int64) {
 	t.Helper()
-	binding, err := spoke.FederationBindingByProject(context.Background(), projectID)
+	binding, err := spoke.FederationBindingByProject(t.Context(), projectID)
 	require.NoError(t, err)
 	pending, _, err := spoke.PendingFederationPushStats(
-		context.Background(), projectID, spoke.InstanceUID(), binding.PushCursorEventID)
+		t.Context(), projectID, spoke.InstanceUID(), binding.PushCursorEventID)
 	require.NoError(t, err)
 	assert.Zero(t, pending)
-	_, err = spoke.ActiveFederationQuarantine(context.Background(), projectID, db.FederationQuarantineDirectionPush)
+	_, err = spoke.ActiveFederationQuarantine(t.Context(), projectID, db.FederationQuarantineDirectionPush)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func matrixAssertLinkCount(t *testing.T, store *sqlitestore.Store, firstUID, peerUID string, want int) {
 	t.Helper()
 	var got int
-	require.NoError(t, store.QueryRowContext(context.Background(), `
+	require.NoError(t, store.QueryRowContext(t.Context(), `
 		SELECT COUNT(*)
 		  FROM links
 		 WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
@@ -4259,25 +4288,25 @@ func matrixApplyHubFollowup(
 	first, peer *matrixFederationProject,
 ) {
 	t.Helper()
-	firstIssue, err := hub.IssueByUID(context.Background(), first.issue.UID, db.IncludeDeletedYes)
+	firstIssue, err := hub.IssueByUID(t.Context(), first.issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	title := "first hub followup"
-	_, err = hub.EditIssueAtomic(context.Background(), db.EditIssueAtomicParams{
+	_, err = hub.EditIssueAtomic(t.Context(), db.EditIssueAtomicParams{
 		IssueID: firstIssue.ID, Actor: "hub-operator", Title: &title,
 	})
 	require.NoError(t, err)
-	_, _, err = hub.CreateComment(context.Background(), db.CreateCommentParams{
+	_, _, err = hub.CreateComment(t.Context(), db.CreateCommentParams{
 		IssueID: firstIssue.ID, Author: "hub-operator", Body: "first hub comment",
 	})
 	require.NoError(t, err)
-	peerIssue, err := hub.IssueByUID(context.Background(), peer.issue.UID, db.IncludeDeletedYes)
+	peerIssue, err := hub.IssueByUID(t.Context(), peer.issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
-	_, _, err = hub.AddLabelAndEvent(context.Background(), peerIssue.ID, db.LabelEventParams{
+	_, _, err = hub.AddLabelAndEvent(t.Context(), peerIssue.ID, db.LabelEventParams{
 		EventType: "issue.labeled", Label: "peer-hub-label", Actor: "hub-operator",
 	})
 	require.NoError(t, err)
 	_, _, changed, err := hub.CloseIssue(
-		context.Background(), peerIssue.ID, "done", "hub-operator", "hub close", nil)
+		t.Context(), peerIssue.ID, "done", "hub-operator", "hub close", nil)
 	require.NoError(t, err)
 	require.True(t, changed)
 }
@@ -4288,19 +4317,19 @@ func matrixAssertPulledFollowup(
 	first, peer *matrixFederationProject,
 ) {
 	t.Helper()
-	firstIssue, err := spoke.IssueByUID(context.Background(), first.issue.UID, db.IncludeDeletedYes)
+	firstIssue, err := spoke.IssueByUID(t.Context(), first.issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	assert.Equal(t, first.local.ID, firstIssue.ProjectID)
 	assert.Equal(t, "first hub followup", firstIssue.Title)
-	comments, err := spoke.CommentsByIssue(context.Background(), firstIssue.ID)
+	comments, err := spoke.CommentsByIssue(t.Context(), firstIssue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 3)
 	assert.Equal(t, "first hub comment", comments[2].Body)
-	peerIssue, err := spoke.IssueByUID(context.Background(), peer.issue.UID, db.IncludeDeletedYes)
+	peerIssue, err := spoke.IssueByUID(t.Context(), peer.issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	assert.Equal(t, peer.local.ID, peerIssue.ProjectID)
 	assert.Equal(t, "closed", peerIssue.Status)
-	labels, err := spoke.LabelsByIssue(context.Background(), peerIssue.ID)
+	labels, err := spoke.LabelsByIssue(t.Context(), peerIssue.ID)
 	require.NoError(t, err)
 	var hasHubLabel bool
 	for _, label := range labels {
@@ -4317,9 +4346,9 @@ func matrixAssertPullCursors(
 	t.Helper()
 	for _, project := range projects {
 		var hubHighWater int64
-		require.NoError(t, hub.QueryRowContext(context.Background(),
+		require.NoError(t, hub.QueryRowContext(t.Context(),
 			`SELECT COALESCE(MAX(id), 0) FROM events WHERE project_id = ?`, project.hub.ID).Scan(&hubHighWater))
-		binding, err := spoke.FederationBindingByProject(context.Background(), project.local.ID)
+		binding, err := spoke.FederationBindingByProject(t.Context(), project.local.ID)
 		require.NoError(t, err)
 		assert.Equal(t, hubHighWater, binding.PullCursorEventID)
 	}
@@ -4327,7 +4356,7 @@ func matrixAssertPullCursors(
 
 func createFederatedHubForPush(t *testing.T, env *testenv.Env) db.Project {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
 	_, err = env.DB.EnableProjectFederation(ctx, project.ID, "tester")
@@ -4357,7 +4386,10 @@ func postJSON(t *testing.T, baseURL, path string, body, out any) {
 	t.Helper()
 	bs, err := json.Marshal(body)
 	require.NoError(t, err)
-	resp, err := http.Post(baseURL+path, "application/json", bytes.NewReader(bs)) //nolint:gosec,noctx // test helper against loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+path, bytes.NewReader(bs))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test helper against loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "POST %s", path)
@@ -4366,7 +4398,7 @@ func postJSON(t *testing.T, baseURL, path string, body, out any) {
 
 func assertFoldedIssuesMatch(t *testing.T, hub, spoke *sqlitestore.Store, hubProjectID, spokeProjectID, hubAfterID int64) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hubEvents, err := hub.EventsAfter(ctx, db.EventsAfterParams{ProjectID: hubProjectID, AfterID: hubAfterID, Limit: 1000})
 	require.NoError(t, err)
 	spokeEvents, err := spoke.EventsAfter(ctx, db.EventsAfterParams{ProjectID: spokeProjectID, Limit: 1000})
@@ -4569,7 +4601,7 @@ func shortIDForSyncTest(uid string) string {
 func openDaemonclientTestDB(t *testing.T) (*sqlitestore.Store, string) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	store, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
@@ -4613,7 +4645,7 @@ func TestClientOptsWithDefaultKeepsExplicitTimeout(t *testing.T) {
 // version, which the spoke retries after the hub upgrades, instead of
 // validating the reply target and quarantining the push.
 func TestSyncFederationOnceReplyPushToOlderHubDoesNotQuarantine(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
@@ -4688,7 +4720,7 @@ func (s *pullMaterializationCounter) MaterializeFederatedProject(ctx context.Con
 }
 
 func TestSyncFederationOnceMaterializesOnlyTouchedIssue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, spoke := testenv.New(t), testenv.New(t)
 	p, err := hub.DB.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
@@ -4754,4 +4786,333 @@ func TestSyncFederationOnceMaterializesOnlyTouchedIssue(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, got, folded, "incremental issue state must match a full fold")
 	assertFoldedIssuesMatch(t, hub.DB, spoke.DB, p.ID, replica.ID, meta.ReplayHorizonEventID-1)
+}
+
+// The exported push phase needs push authority only. In particular, it cannot
+// accidentally start the runner's pull phase after acknowledging local parents.
+func TestPushDirectSpokeWithPushOnlyEnrollment(t *testing.T) {
+	ctx := t.Context()
+	hub, spoke := testenv.New(t), testenv.New(t)
+	project := createFederatedHubForPush(t, hub)
+	enrollment, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "push-only-token", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &project.ID, Capabilities: "push", Actor: "tester"})
+	require.NoError(t, err)
+	replica, err := spoke.DB.CreateProjectWithUID(ctx, "spoke-project", project.UID)
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, PushEnabled: true, Enabled: true, Actor: "tester", ReplayHorizonEventID: 1})
+	require.NoError(t, err)
+	parent, event, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: "Local parent", Author: "tester"})
+	require.NoError(t, err)
+	client, err := NewClient(ctx, hub.URL, enrollment.Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	var polls atomic.Int32
+	transport := client.client.Transport
+	client.client.Transport = pushOnlyTestTransport(func(request *http.Request) (*http.Response, error) {
+		if request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/federation/events") {
+			polls.Add(1)
+		}
+		return transport.RoundTrip(request)
+	})
+	release, err := federationcoord.BeginSync(ctx, federationcoord.Key(spoke.DB.InstanceUID(), replica.ID), spoke.DB, replica.ID)
+	require.NoError(t, err)
+	defer release()
+	require.NoError(t, PushDirectSpoke(ctx, spoke.DB, binding, project.ID, client))
+	// Replaying the original binding re-submits the already acknowledged batch.
+	require.NoError(t, PushDirectSpoke(ctx, spoke.DB, binding, project.ID, client))
+	require.Zero(t, polls.Load())
+	mirrored, err := hub.DB.IssueByUID(ctx, parent.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, parent.Title, mirrored.Title)
+	require.NoError(t, spoke.DB.AdvanceFederationPushCursor(ctx, replica.ID, event.ID-1))
+	current, err := spoke.DB.FederationBindingByProject(ctx, replica.ID)
+	require.NoError(t, err)
+	require.Equal(t, event.ID, current.PushCursorEventID)
+	events, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, IssueUID: parent.UID, Types: []string{"issue.created"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+}
+
+type pushOnlyTestTransport func(*http.Request) (*http.Response, error)
+
+func (f pushOnlyTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestSyncFederationOnceMoveUsesEnvelopeProject(t *testing.T) {
+	ctx := t.Context()
+	hub, spoke := testenv.New(t), testenv.New(t)
+	projects := make([]db.Project, 2)
+	replicas := make([]db.Project, 2)
+	for i, name := range []string{"source-project", "destination-project"} {
+		var err error
+		projects[i], err = hub.DB.CreateProject(ctx, name)
+		require.NoError(t, err)
+		_, err = hub.DB.EnableProjectFederation(ctx, projects[i].ID, "worker")
+		require.NoError(t, err)
+		replicas[i], err = spoke.DB.CreateProjectWithUID(ctx, name, projects[i].UID)
+		require.NoError(t, err)
+		_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replicas[i].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[i].ID, HubProjectUID: projects[i].UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		require.NoError(t, err)
+	}
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "moving", Author: "worker"})
+	require.NoError(t, err)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "move-pull-token", SpokeInstanceUID: spoke.DB.InstanceUID(), Capabilities: "pull,push", Actor: "worker"})
+	require.NoError(t, err)
+	sync := func(i int, onEvents func(int64, []db.Event)) {
+		t.Helper()
+		binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[i].ID)
+		require.NoError(t, err)
+		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[i].ID, Token: created.Token}, clientpkg.Opts{}, onEvents, newMoveCredentialStore()))
+	}
+	sync(0, nil)
+	sync(1, nil)
+	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	seen := false
+	sync(0, func(project int64, events []db.Event) {
+		for _, e := range events {
+			if e.Type == "issue.moved" {
+				seen = true
+				require.Equal(t, replicas[1].ID, project)
+				require.Equal(t, replicas[1].ID, e.ProjectID)
+			}
+		}
+	})
+	require.True(t, seen)
+	binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[0].ID)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, binding.PullCursorEventID, move.Events[0].ID)
+	sync(0, nil)
+	sync(1, nil)
+	moved, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: replicas[1].ID, ToProjectID: replicas[0].ID, IfMatchRev: moved.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	sync(0, nil)
+	// The former destination receives a hash-identical local echo whose event
+	// row belongs to the new destination.
+	sync(1, func(project int64, events []db.Event) {
+		for _, e := range events {
+			if e.Type == "issue.moved" {
+				require.Equal(t, replicas[0].ID, project)
+				require.NotEqual(t, spoke.DB.InstanceUID(), e.OriginInstanceUID, "an acknowledged local move must not be published a second time")
+			}
+		}
+	})
+}
+
+func TestSyncFederationOnceRetriesMoveAfterSourceCreation(t *testing.T) {
+	ctx := t.Context()
+	hub, spoke := testenv.New(t), testenv.New(t)
+	projects, replicas := make([]db.Project, 2), make([]db.Project, 2)
+	creds := make([]config.FederationCredential, 2)
+	credentials := newMoveCredentialStore()
+	for i, name := range []string{"creation-source", "creation-destination"} {
+		var err error
+		projects[i], err = hub.DB.CreateProject(ctx, name)
+		require.NoError(t, err)
+		_, err = hub.DB.EnableProjectFederation(ctx, projects[i].ID, "worker")
+		require.NoError(t, err)
+		replicas[i], err = spoke.DB.CreateProjectWithUID(ctx, name, projects[i].UID)
+		require.NoError(t, err)
+		_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replicas[i].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[i].ID, HubProjectUID: projects[i].UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		require.NoError(t, err)
+		grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: name + "-token", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &projects[i].ID, Capabilities: "push,pull", Actor: "worker"})
+		require.NoError(t, err)
+		creds[i] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[i].ID, Token: grant.Token}
+		require.NoError(t, credentials.StoreFederationCredential(ctx, projects[i].UID, creds[i]))
+	}
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replicas[0].ID, Title: "created before first push", Author: "worker"})
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: replicas[0].ID, ToProjectID: replicas[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	syncProject := func(i int) error {
+		binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[i].ID)
+		if err != nil {
+			return err
+		}
+		return SyncFederationOnce(ctx, spoke.DB, binding, creds[i], credentials)
+	}
+	err = syncProject(1)
+	var status *HubStatusError
+	require.ErrorAs(t, err, &status)
+	require.Equal(t, http.StatusNotFound, status.StatusCode)
+	_, err = spoke.DB.ActiveFederationQuarantine(ctx, replicas[1].ID, db.FederationQuarantineDirectionPush)
+	require.ErrorIs(t, err, db.ErrNotFound, "missing source creation must not poison the push")
+	binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[1].ID)
+	require.NoError(t, err)
+	require.True(t, binding.Enabled)
+	require.NoError(t, syncProject(0))
+	require.NoError(t, syncProject(1), "the next ordinary sync must retry without credential or quarantine intervention")
+	got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, projects[1].ID, got.ProjectID)
+}
+
+func TestSyncFederationMoveProofRejectsOtherOrigin(t *testing.T) {
+	for _, kind := range []string{"binding", "credential"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := t.Context()
+			hub, spoke := testenv.New(t), testenv.New(t)
+			var otherRequests atomic.Int32
+			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				otherRequests.Add(1)
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(other.Close)
+			projects, replicas := make([]db.Project, 2), make([]db.Project, 2)
+			for i, name := range []string{"proof-source", "proof-destination"} {
+				var err error
+				projects[i], err = hub.DB.CreateProject(ctx, name)
+				require.NoError(t, err)
+				_, err = hub.DB.EnableProjectFederation(ctx, projects[i].ID, "worker")
+				require.NoError(t, err)
+				replicas[i], err = spoke.DB.CreateProjectWithUID(ctx, name, projects[i].UID)
+				require.NoError(t, err)
+				_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replicas[i].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[i].ID, HubProjectUID: projects[i].UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+				require.NoError(t, err)
+			}
+			issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "origin-bound move", Author: "worker"})
+			require.NoError(t, err)
+			local, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replicas[0].ID, UID: issue.UID, Title: issue.Title, Author: "worker"})
+			require.NoError(t, err)
+			_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: replicas[0].ID, ToProjectID: replicas[1].ID, IfMatchRev: local.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "origin-proof-destination-token", SpokeInstanceUID: spoke.DB.InstanceUID(), Capabilities: "push,pull", Actor: "worker"})
+			require.NoError(t, err)
+			credentials := newMoveCredentialStore()
+			require.NoError(t, credentials.StoreFederationCredential(ctx, projects[1].UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: grant.Token, Actor: "worker"}))
+			require.NoError(t, credentials.StoreFederationCredential(ctx, projects[0].UID, config.FederationCredential{HubURL: other.URL, HubProjectID: projects[0].ID, Token: "other-origin-source-token", Actor: "worker"}))
+			if kind == "binding" {
+				binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[0].ID)
+				require.NoError(t, err)
+				binding.HubURL = other.URL
+				_, err = spoke.DB.UpsertFederationBinding(ctx, binding)
+				require.NoError(t, err)
+			}
+			binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[1].ID)
+			require.NoError(t, err)
+			runner := Runner{DB: spoke.DB}
+			_, err = runner.runSpoke(ctx, activeSpokeBinding{project: replicas[1], binding: binding}, credentials, nil, nil)
+			require.Error(t, err, "a pending move must not cross an altered source credential origin")
+			var status *HubStatusError
+			require.False(t, errors.As(err, &status), "reject the target mismatch locally before sending source proof")
+			got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, projects[0].ID, got.ProjectID)
+			require.Zero(t, otherRequests.Load())
+		})
+	}
+}
+
+// moveCredentialStore keeps source proofs isolated from host credentials.
+type moveCredentialStore map[string]config.FederationCredential
+
+func newMoveCredentialStore() moveCredentialStore { return make(moveCredentialStore) }
+func (s moveCredentialStore) FederationCredential(_ context.Context, projectUID string) (config.FederationCredential, bool, error) {
+	credential, ok := s[projectUID]
+	return credential, ok, nil
+}
+func (s moveCredentialStore) StoreFederationCredential(_ context.Context, projectUID string, credential config.FederationCredential) error {
+	s[projectUID] = credential
+	return nil
+}
+func (s moveCredentialStore) DeleteFederationCredential(_ context.Context, projectUID string) error {
+	delete(s, projectUID)
+	return nil
+}
+
+func TestFederationMoveSourceProofPreservesPlaintextPolicy(t *testing.T) {
+	for _, test := range []struct {
+		name                          string
+		bindingAllow, credentialAllow bool
+		wantError                     bool
+	}{
+		{"source opt-in missing", false, false, true},
+		{"source credential opt-in", false, true, false},
+		{"source binding opt-in", true, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			env := testenv.New(t)
+			source, err := env.DB.CreateProject(ctx, "plaintext-source")
+			require.NoError(t, err)
+			destination, err := env.DB.CreateProject(ctx, "plaintext-destination")
+			require.NoError(t, err)
+			var destinationBinding db.FederationBinding
+			for _, project := range []db.Project{source, destination} {
+				allow := true
+				if project.ID == source.ID {
+					allow = test.bindingAllow
+				}
+				binding, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://daemon.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true, AllowInsecure: allow})
+				require.NoError(t, err)
+				if project.ID == destination.ID {
+					destinationBinding = binding
+				}
+			}
+			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "source policy", Author: "worker"})
+			require.NoError(t, err)
+			move, err := env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			credentials := newMoveCredentialStore()
+			require.NoError(t, credentials.StoreFederationCredential(ctx, source.UID, config.FederationCredential{HubURL: "http://daemon.example", HubProjectID: source.ID, Actor: "worker", Token: "source-plaintext-proof", AllowInsecure: test.credentialAllow}))
+			tokens, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, move.Events, clientpkg.Opts{})
+			if test.wantError {
+				require.Error(t, err)
+				require.Empty(t, tokens)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, "source-plaintext-proof", tokens[source.UID])
+			}
+		})
+	}
+}
+
+// A pull commits remote events before it applies them, and an MCP Events
+// worker on any daemon sharing the store may have matched them in between.
+// Applying them records where that worker must match again, in the same
+// transaction, so the record survives a crash and reaches every daemon.
+func TestSyncFederationApplyRecordsAnMCPEventsRematch(t *testing.T) {
+	ctx := t.Context()
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	hubProject, err := hub.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	_, hubEvent, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hubProject.ID, Title: "from hub", Author: "tester"})
+	require.NoError(t, err)
+	var meta api.ProjectFederationBody
+	postJSON(t, hub.URL, "/api/v1/projects/"+strconv.FormatInt(hubProject.ID, 10)+"/federation/enable",
+		map[string]any{"actor": "tester"}, &meta)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token: "pull-token", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &hubProject.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	spokeProject, err := spoke.DB.CreateProjectWithUID(ctx, "hub", hubProject.UID)
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: spokeProject.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL,
+		HubProjectID: hubProject.ID, HubProjectUID: hubProject.UID, ReplayHorizonEventID: 1, Enabled: true,
+	})
+	require.NoError(t, err)
+	_, _, _, ok, err := spoke.DB.MCPEventsRematch(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	var pulled []db.Event
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL: hub.URL, HubProjectID: hubProject.ID, Token: created.Token,
+	}, clientpkg.Opts{}, func(_ int64, events []db.Event) { pulled = append(pulled, events...) }))
+
+	var local int64
+	for _, event := range pulled {
+		if event.UID == hubEvent.UID {
+			local = event.ID
+		}
+	}
+	require.Positive(t, local, "the hub's issue creation was pulled")
+	from, through, _, ok, err := spoke.DB.MCPEventsRematch(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.LessOrEqual(t, from, local, "the record covers the applied event")
+	assert.GreaterOrEqual(t, through, local, "the record covers the applied event")
 }

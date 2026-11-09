@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -12,7 +11,7 @@ import (
 // batch, so an unrelated issue update must not rewrite existing comments.
 func TestFederationIngestDoesNotRewriteUnchangedComments(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	p := createProject(ctx, t, d, "hub-project")
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "work", Author: "tester"})

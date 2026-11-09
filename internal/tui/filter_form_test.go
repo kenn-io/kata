@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -15,7 +16,8 @@ import (
 // contains a []string slice.
 func listFilterEqual(a, b ListFilter) bool {
 	if a.Status != b.Status || a.Owner != b.Owner ||
-		a.Author != b.Author || a.Search != b.Search {
+		a.Author != b.Author || a.Search != b.Search ||
+		a.Date != b.Date || a.Day != b.Day {
 		return false
 	}
 	if len(a.Labels) != len(b.Labels) {
@@ -122,11 +124,11 @@ func assertActiveField(t *testing.T, m Model, want int) {
 // Search / Labels in order (Labels axis added in Plan 8 commit 5b).
 func TestFilterForm_OpensOnFKey(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
-	if len(m.input.fields) != 4 {
-		t.Fatalf("form fields = %d, want 4 (Status/Owner/Search/Labels)",
+	if len(m.input.fields) != 5 {
+		t.Fatalf("form fields = %d, want 5 (Status/Owner/Search/Labels/Date)",
 			len(m.input.fields))
 	}
-	wantLabels := []string{"Status", "Owner", "Search", "Labels"}
+	wantLabels := []string{"Status", "Owner", "Search", "Labels", "Date"}
 	for i, f := range m.input.fields {
 		if f.label != wantLabels[i] {
 			t.Fatalf("field[%d].label = %q, want %q", i, f.label, wantLabels[i])
@@ -151,12 +153,11 @@ func TestFilterForm_AllProjectsScopeStillRenders(t *testing.T) {
 	assertInputKind(t, m, inputFilterForm)
 }
 
-// TestFilterForm_TabCyclesFourFields_WithWrap: tab cycles
-// 0→1→2→3→0 (Status → Owner → Search → Labels → Status). Plan 8
-// commit 5b added the Labels axis as the 4th field.
-func TestFilterForm_TabCyclesFourFields_WithWrap(t *testing.T) {
+// TestFilterForm_TabCyclesAllFields_WithWrap: tab cycles
+// 0→1→2→3→4→0 (Status → Owner → Search → Labels → Date → Status).
+func TestFilterForm_TabCyclesAllFields_WithWrap(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
-	wants := []int{1, 2, 3, 0}
+	wants := []int{1, 2, 3, 4, 0}
 	for i, want := range wants {
 		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if m.input.active != want {
@@ -271,24 +272,19 @@ func TestFilterForm_CommitResetsCursorToZero(t *testing.T) {
 	}
 }
 
-// TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact: ctrl+r zeros
-// every field on the form but leaves preFilter intact so a subsequent
-// esc still restores the at-open snapshot. Plan 8 commit 5b: the
-// Labels field is now part of the reset.
-func TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact(t *testing.T) {
+// Reset changes the draft fields while the applied filter stays intact.
+func TestFilterForm_CtrlRResetsFieldsOnly_AppliedFilterIntact(t *testing.T) {
 	m := filterFormFixture()
 	m.list.filter = ListFilter{
 		Status: "open", Owner: "wesm", Search: "bug",
 		Labels: []string{"prio-1", "needs-review"},
+		Date:   dateToday, Day: "2026-11-10",
 	}
 	m = openFilterForm(t, m)
-	// preFilter snapshot should match.
-	wantPre := ListFilter{
+	want := ListFilter{
 		Status: "open", Owner: "wesm", Search: "bug",
 		Labels: []string{"prio-1", "needs-review"},
-	}
-	if !listFilterEqual(m.input.preFilter, wantPre) {
-		t.Fatalf("preFilter = %+v, want %+v", m.input.preFilter, wantPre)
+		Date:   dateToday, Day: "2026-11-10",
 	}
 	// ctrl+r resets.
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
@@ -304,19 +300,18 @@ func TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact(t *testing.T) {
 	if got := m.input.fields[3].input.Value(); got != "" {
 		t.Fatalf("Labels not reset: %q, want empty", got)
 	}
-	if !listFilterEqual(m.input.preFilter, wantPre) {
-		t.Fatalf("preFilter mutated by ctrl+r: %+v, want %+v",
-			m.input.preFilter, wantPre)
+	if got := m.input.field(fieldDate).radio.value(); got != "any" {
+		t.Fatalf("Date not reset: %q, want any", got)
+	}
+	if !listFilterEqual(m.list.filter, want) {
+		t.Fatalf("applied filter changed by ctrl+r: %+v, want %+v", m.list.filter, want)
 	}
 }
 
-// TestFilterForm_EscRestoresPreFilter: esc closes the form AND
-// restores lm.filter to the preFilter snapshot (in case a future
-// "live preview" path mutated it; today the commit is the only mutator
-// but the symmetry is locked down for safety).
-func TestFilterForm_EscRestoresPreFilter(t *testing.T) {
+// Esc closes the form and leaves the applied filter intact.
+func TestFilterForm_EscKeepsAppliedFilter(t *testing.T) {
 	m := filterFormFixture()
-	m.list.filter = ListFilter{Status: "open", Owner: "wesm"}
+	m.list.filter = ListFilter{Status: "open", Owner: "wesm", Date: dateToday, Day: "2026-11-10"}
 	m = openFilterForm(t, m)
 	// Make a change inside the form (just type into Owner via tab+keys).
 	m = pressTabN(m, 1)
@@ -324,9 +319,9 @@ func TestFilterForm_EscRestoresPreFilter(t *testing.T) {
 	// Esc cancels.
 	nm, _ := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	assertInputKind(t, nm, inputNone)
-	want := ListFilter{Status: "open", Owner: "wesm"}
+	want := ListFilter{Status: "open", Owner: "wesm", Date: dateToday, Day: "2026-11-10"}
 	if !listFilterEqual(nm.list.filter, want) {
-		t.Fatalf("filter not restored: got %+v, want %+v", nm.list.filter, want)
+		t.Fatalf("applied filter changed on Esc: got %+v, want %+v", nm.list.filter, want)
 	}
 }
 
@@ -515,7 +510,7 @@ func TestSnapshot_FilterForm_AllAxes(t *testing.T) {
 	s := newFilterForm(ListFilter{
 		Status: "open", Owner: "alice", Search: "login",
 	}, scope{})
-	got := renderCenteredForm(s, 120, 30)
+	got := renderCenteredForm(s, 120, 30, time.Time{})
 	assertGolden(t, "filter-form-all-axes", got)
 }
 
@@ -528,7 +523,7 @@ func TestSnapshot_FilterForm_WithLabelsAxis(t *testing.T) {
 		Status: "open", Owner: "alice", Search: "login",
 		Labels: []string{"bug", "prio-1"},
 	}, scope{})
-	got := renderCenteredForm(s, 120, 30)
+	got := renderCenteredForm(s, 120, 30, time.Time{})
 	assertGolden(t, "filter-form-with-labels-axis", got)
 }
 

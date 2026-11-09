@@ -26,7 +26,7 @@ func TestJoinCommandPreservesArguments(t *testing.T) {
 			// Execute only shell argument parsing. The kata function captures arguments
 			// as NUL-separated words rather than launching the enrollment command.
 			script := `kata() { printf '%s\0' "$@"; }; ` + joincommand.Build(in)
-			out, err := exec.Command("sh", "-c", script).CombinedOutput() //nolint:gosec // G204: tests the generated command against a shell stub that only captures arguments.
+			out, err := exec.CommandContext(t.Context(), "sh", "-c", script).CombinedOutput() //nolint:gosec // G204: tests the generated command against a shell stub that only captures arguments.
 			require.NoError(t, err, "%s", out)
 			args := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
 			assert.Equal(t, []string{

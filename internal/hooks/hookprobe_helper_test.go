@@ -36,7 +36,7 @@ func hookprobePath(t testing.TB) string {
 			out += ".exe" // Windows won't exec a binary without a recognized extension
 		}
 		// Test-only build of an in-tree helper; args are constants.
-		cmd := exec.Command("go", "build", "-o", out, "./hookprobe") //nolint:gosec // test build
+		cmd := exec.CommandContext(t.Context(), "go", "build", "-o", out, "./hookprobe") //nolint:gosec // test build
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
@@ -65,7 +65,7 @@ func TestMain(m *testing.M) {
 // with the resolved exit code.
 func runHookprobe(t testing.TB, stdin string, env []string, args ...string) (string, string, int) {
 	t.Helper()
-	cmd := exec.Command(hookprobePath(t), args...) //nolint:gosec // bin is the test-built helper
+	cmd := exec.CommandContext(t.Context(), hookprobePath(t), args...) //nolint:gosec // bin is the test-built helper
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}

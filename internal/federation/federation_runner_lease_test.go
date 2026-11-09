@@ -23,7 +23,7 @@ func TestRunnerCancelsInFlightPassWhenLeaseIsLost(t *testing.T) {
 	runner := &Runner{DB: store, Interval: time.Hour, OnError: func(err error) {
 		errorOnce.Do(func() { runnerErrors <- err })
 	}}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx) }()
 
@@ -55,7 +55,7 @@ func TestLeadershipLossDoesNotWriteFederationSyncError(t *testing.T) {
 		context.Canceled,
 	} {
 		store := &syncErrorRecordingStore{}
-		err := recordFederationSyncError(context.Background(), store, 42, syncErr)
+		err := recordFederationSyncError(t.Context(), store, 42, syncErr)
 
 		assert.ErrorIs(t, err, syncErr)
 		assert.Zero(t, store.writes.Load(), "a former leader must not update shared sync status")

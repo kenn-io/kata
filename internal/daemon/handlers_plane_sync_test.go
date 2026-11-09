@@ -52,7 +52,7 @@ func planeEnableBody() map[string]any {
 }
 func TestPlaneSyncLifecycle(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.db.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	f := newLifecyclePlaneFetcher()
@@ -113,7 +113,7 @@ func TestPlaneEnableRejectsBeforeCredentials(t *testing.T) {
 	for _, kind := range []string{"federation", "foreign provider", "bad origin", "unknown config"} {
 		t.Run(kind, func(t *testing.T) {
 			d := openTestDB(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			p, err := d.db.CreateProject(ctx, "example-project")
 			require.NoError(t, err)
 			f := newLifecyclePlaneFetcher()
@@ -149,7 +149,7 @@ func TestPlaneEnableRemoteFailureAndIdentity(t *testing.T) {
 	for _, kind := range []string{"credentials", "timeout", "project", "states"} {
 		t.Run(kind, func(t *testing.T) {
 			d := openTestDB(t)
-			p, err := d.db.CreateProject(context.Background(), "example-project")
+			p, err := d.db.CreateProject(t.Context(), "example-project")
 			require.NoError(t, err)
 			f := newLifecyclePlaneFetcher()
 			want := 400
@@ -168,14 +168,14 @@ func TestPlaneEnableRemoteFailureAndIdentity(t *testing.T) {
 			resp, raw := postJSON(t, server, issueSyncEndpoint(p.ID, "plane", "enable"), planeEnableBody())
 			require.Equal(t, want, resp.StatusCode, string(raw))
 			require.NotContains(t, string(raw), "example-secret")
-			_, err = d.db.IssueSyncBindingByProject(context.Background(), p.ID)
+			_, err = d.db.IssueSyncBindingByProject(t.Context(), p.ID)
 			require.ErrorIs(t, err, db.ErrNotFound)
 		})
 	}
 }
 func TestPlaneEnableConcurrentChangeAndOnceProgress(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.db.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	f := newLifecyclePlaneFetcher()

@@ -1,3 +1,5 @@
+import '../../../../scripts/test/resize-observer'
+
 // Svelte window reactivity reads matchMedia while component modules load.
 if (typeof window !== 'undefined') {
   Object.defineProperty(window, 'matchMedia', {

@@ -1,29 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import type { KataReachableGraphResponse, KataTaskSummary } from '../kata/types'
+import type { KataReachableGraphResponse } from '../kata/types'
+import { task } from '../../test/task'
 import { buildKataReachableGraph } from './layout'
-
-function task(overrides: Partial<KataTaskSummary> = {}): KataTaskSummary {
-  const shortID = overrides.short_id ?? 'root'
-  return {
-    id: overrides.id ?? 1,
-    uid: overrides.uid ?? 'issue-root',
-    project_id: overrides.project_id ?? 7,
-    project_uid: overrides.project_uid ?? 'project-example',
-    project_name: overrides.project_name ?? 'example-project',
-    short_id: shortID,
-    qualified_id: overrides.qualified_id ?? `example-project#${shortID}`,
-    title: overrides.title ?? 'Root issue',
-    status: overrides.status ?? 'open',
-    metadata: overrides.metadata ?? {},
-    revision: overrides.revision ?? 1,
-    author: overrides.author ?? 'user-a',
-    priority: overrides.priority,
-    closed_reason: overrides.closed_reason,
-    created_at: overrides.created_at ?? '2026-08-01T12:00:00Z',
-    updated_at: overrides.updated_at ?? '2026-08-01T12:00:00Z',
-  }
-}
 
 function graph(overrides: Partial<KataReachableGraphResponse> = {}): KataReachableGraphResponse {
   return {
@@ -38,6 +17,101 @@ function graph(overrides: Partial<KataReachableGraphResponse> = {}): KataReachab
 }
 
 describe('buildKataReachableGraph', () => {
+  it('keeps stable layer ordering when new nodes become ready', () => {
+    const nodes = ['root', 'a', 'b', 'c', 'd', 'z'].map((uid) =>
+      task({ uid, short_id: uid, title: uid }),
+    )
+    const built = buildKataReachableGraph({
+      sourceUID: 'root',
+      selectedUID: null,
+      graph: graph({
+        source_uid: 'root',
+        nodes,
+        edges: [
+          { from_uid: 'root', to_uid: 'b', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'c', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'd', kind: 'blocks', layout: true },
+          { from_uid: 'b', to_uid: 'z', kind: 'blocks', layout: true },
+          { from_uid: 'c', to_uid: 'a', kind: 'blocks', layout: true },
+        ],
+      }),
+    })
+
+    expect(
+      built.nodes
+        .filter((node) => node.id === 'a' || node.id === 'z')
+        .map((node) => [node.id, node.position]),
+    ).toEqual([
+      ['a', { x: 640, y: -54 }],
+      ['z', { x: 640, y: 54 }],
+    ])
+
+    const wider = buildKataReachableGraph({
+      sourceUID: 'root',
+      selectedUID: null,
+      graph: graph({
+        source_uid: 'root',
+        nodes: ['root', 'a', 'b', 'c', 'd', 'e', 'f', 'x', 'y', 'z'].map((uid) =>
+          task({ uid, short_id: uid, title: uid }),
+        ),
+        edges: [
+          { from_uid: 'root', to_uid: 'b', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'c', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'd', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'e', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'f', kind: 'blocks', layout: true },
+          { from_uid: 'b', to_uid: 'z', kind: 'blocks', layout: true },
+          { from_uid: 'c', to_uid: 'a', kind: 'blocks', layout: true },
+          { from_uid: 'e', to_uid: 'y', kind: 'blocks', layout: true },
+          { from_uid: 'f', to_uid: 'x', kind: 'blocks', layout: true },
+        ],
+      }),
+    })
+    expect(
+      wider.nodes
+        .filter((node) => ['a', 'x', 'y', 'z'].includes(node.id))
+        .map((node) => [node.id, node.position]),
+    ).toEqual([
+      ['a', { x: 640, y: -162 }],
+      ['x', { x: 640, y: -54 }],
+      ['y', { x: 640, y: 54 }],
+      ['z', { x: 640, y: 162 }],
+    ])
+  })
+
+  it('scales with the number of edges', () => {
+    const timings = [1000, 8000].map((size) => {
+      const input = {
+        sourceUID: 'root',
+        selectedUID: 'root',
+        contextDepth: '1' as const,
+        graph: graph({
+          source_uid: 'root',
+          nodes: [
+            task({ uid: 'root' }),
+            ...Array.from({ length: size }, (_, index) => task({ uid: `issue-${index}` })),
+          ],
+          edges: Array.from({ length: size }, (_, index) => ({
+            from_uid: 'root',
+            to_uid: `issue-${index}`,
+            kind: 'related' as const,
+            layout: true,
+          })),
+        }),
+      }
+      const built = buildKataReachableGraph(input)
+      expect(built.nodes).toHaveLength(size + 1)
+      expect(built.edges).toHaveLength(size)
+      const samples = Array.from({ length: 3 }, () => {
+        const start = performance.now()
+        buildKataReachableGraph(input)
+        return performance.now() - start
+      })
+      return samples.sort((a, b) => a - b)[1]!
+    })
+    expect(timings[1]!).toBeLessThan(timings[0]! * 8 ** 1.5)
+  }, 120_000)
+
   it('uses the native graph node and edge set directly', () => {
     const root = task({ uid: 'issue-root', short_id: 'root', title: 'Root' })
     const child = task({ uid: 'issue-child', short_id: 'child', title: 'Child' })

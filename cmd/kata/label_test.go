@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -112,7 +111,7 @@ func TestLabelRm_WithComment_AppendsComment(t *testing.T) {
 // silently dropped by the daemon. Reject client-side instead.
 func TestCreate_RejectsWhitespaceLabel(t *testing.T) {
 	resetFlags(t)
-	_, _, err := executeRootCapture(t, context.Background(), "create", "title", "--label", "   ")
+	_, _, err := executeRootCapture(t, t.Context(), "create", "title", "--label", "   ")
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, ce.Message, "label must not be empty")
 }

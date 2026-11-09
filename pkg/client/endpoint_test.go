@@ -52,7 +52,7 @@ func TestUnixSocketEndpointRequiresAbsolutePath(t *testing.T) {
 func TestStatusCodeReportsDaemonErrorEnvelope(t *testing.T) {
 	server := katatest.New(t)
 
-	_, err := server.Client(t).ShowProjectWithResponse(t.Context(), &generated.ShowProjectRequestOptions{
+	resp, err := server.Client(t).ShowProjectWithResponse(t.Context(), &generated.ShowProjectRequestOptions{
 		PathParams: &generated.ShowProjectPath{ProjectID: 424242},
 	})
 	require.Error(t, err)
@@ -61,6 +61,9 @@ func TestStatusCodeReportsDaemonErrorEnvelope(t *testing.T) {
 	envelope, ok := errors.AsType[generated.ErrorEnvelope](err)
 	require.True(t, ok)
 	assert.Equal(t, "not_found", envelope.ErrorData.Code)
+	require.NotNil(t, resp.JSONDefault, "the default error body is decoded onto the response")
+	assert.Equal(t, "not_found", resp.JSONDefault.ErrorData.Code)
+	assert.Equal(t, int64(http.StatusNotFound), resp.JSONDefault.Status)
 }
 
 func TestStatusCodeReportsUndecodableErrorBody(t *testing.T) {
@@ -73,10 +76,12 @@ func TestStatusCodeReportsUndecodableErrorBody(t *testing.T) {
 	api, err := client.NewWithHTTPClient(proxy.URL, proxy.Client())
 	require.NoError(t, err)
 
-	_, err = api.ListProjectsWithResponse(t.Context(), &generated.ListProjectsRequestOptions{})
+	resp, err := api.ListProjectsWithResponse(t.Context(), &generated.ListProjectsRequestOptions{})
 	require.Error(t, err)
 
 	assert.Equal(t, http.StatusBadGateway, client.StatusCode(err))
+	assert.Nil(t, resp.JSONDefault)
+	assert.Equal(t, "<html>bad gateway</html>", string(resp.Body))
 }
 
 func TestStatusCodeIsZeroWithoutResponse(t *testing.T) {

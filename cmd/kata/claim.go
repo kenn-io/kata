@@ -24,8 +24,7 @@ func newClaimCmd() *cobra.Command {
 the client-selected actor when present. Use kata status <ref> to check the
 effective actor and current owner; kata whoami shows only the client-selected actor.
 Refuses when another actor owns it unless --force.
---ttl releases the claim after 1m-24h. After claiming, mark the work tracked:
-  kata meta set <ref> work.attention ok
+--ttl releases the claim after 1m-24h.
 kata assign sets a different owner; kata unassign --expect-owner releases.`,
 		Example: `  kata claim abc4 --agent
   kata claim abc4 --if-unowned --ttl 2h --comment "starting on the Safari path" --agent`,
@@ -89,13 +88,13 @@ func runClaim(cmd *cobra.Command, raw string, force, ifUnowned bool, ttlSeconds 
 	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, handle); err != nil {
 		return err
 	}
-	return printClaimMutation(cmd, bs)
+	return printClaimMutation(cmd, bs, issue.ProjectName)
 }
 
 // printClaimMutation formats the claim response for the selected output mode.
 // Quiet human mode prints nothing; JSON mode emits the daemon body under the
 // kata_api_version envelope; agent mode uses the mutation contract.
-func printClaimMutation(cmd *cobra.Command, bs []byte) error {
+func printClaimMutation(cmd *cobra.Command, bs []byte, requestedProject string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
@@ -106,7 +105,7 @@ func printClaimMutation(cmd *cobra.Command, bs []byte) error {
 		return err
 	}
 	if mode == outputAgent {
-		return printAgentMutation(cmd, "claim", bs, func(w io.Writer, m agentIssueMutation) error {
+		return printAgentMutation(cmd, "claim", bs, requestedProject, func(w io.Writer, m agentIssueMutation) error {
 			if m.Issue.Owner != nil {
 				if err := writeAgentField(w, "Owner", agentValue(*m.Issue.Owner)); err != nil {
 					return err
@@ -135,6 +134,11 @@ func printClaimMutation(cmd *cobra.Command, bs []byte) error {
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	displayRef, err := mutationIssueRefForOutput(cmd, bs, requestedProject)
+	if err != nil {
+		return err
+	}
+	b.Issue.ShortID = displayRef
 	if flags.Quiet {
 		return nil
 	}
@@ -156,7 +160,7 @@ func printClaimMutation(cmd *cobra.Command, bs []byte) error {
 			b.Issue.ShortID, owner, assignmentExpirySuffix(b.Issue.AssignmentExpiresOn), *b.PreviousOwner)
 		return err
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s assigned to %s%s\n",
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s assigned to %s%s\n",
 		b.Issue.ShortID, owner, assignmentExpirySuffix(b.Issue.AssignmentExpiresOn))
 	return err
 }

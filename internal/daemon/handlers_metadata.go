@@ -130,7 +130,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 			// the persisted issue.metadata_updated event. Only broadcast when
 			// the patch actually changed something — a no-op patch persists no
 			// event and must not spuriously wake subscribers.
-			cfg.Publish().Event(in.ProjectID, ev)
+			cfg.Publish().Event(ev.ProjectID, ev)
 		}
 		return out, nil
 	}
@@ -256,7 +256,7 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 			out.Body.Event = &ev
 			// Wake SSE followers and hook consumers on the persisted
 			// project.metadata_updated event. No broadcast on a no-op patch.
-			cfg.Publish().Event(in.ProjectID, ev)
+			cfg.Publish().Event(ev.ProjectID, ev)
 		}
 		return out, nil
 	}

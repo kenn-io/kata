@@ -95,7 +95,7 @@ func (f relationshipAccessFixture) visibleIDs() []int64 {
 // relationship projection, while in-project relationships still resolve. A
 // hidden open blocker does not gate readiness for that reader.
 func checkRestrictedRelationshipReads(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newRelationshipAccessFixture(ctx, t, store)
 	scoped := db.WithAuthorizedProjects(ctx, []string{f.visible.UID})
 
@@ -178,7 +178,7 @@ func RunUISnapshotProjectAuthorityRelationshipsContract(t *testing.T, open func(
 	store := open(t)
 	uiStore, ok := store.(db.UIStore)
 	require.True(t, ok, "storage backend must implement db.UIStore")
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newRelationshipAccessFixture(ctx, t, store)
 	scoped := db.WithAuthorizedProjects(ctx, []string{f.visible.UID})
 	uids := func(ctx context.Context, query db.UISnapshotQuery) []string {

@@ -46,6 +46,7 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 		var apiError *APIError
 		m.activeAuthRejected = errors.As(msg.err, &apiError) && apiError != nil && apiError.Status == http.StatusUnauthorized
 		m.input = inputState{}
+		m = m.closeMoveForm()
 		if attentionPending {
 			m.attention.capabilityPending = false
 			m.attention.loading = false
@@ -89,6 +90,9 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 	if !m.inputMutationAllowed() {
 		m.input = inputState{}
 	}
+	if !m.mutationAllowed(false) {
+		m = m.closeMoveForm()
+	}
 	var viewCmd tea.Cmd
 	if credentialsPending {
 		m.credentials.capabilityPending = false
@@ -112,7 +116,7 @@ func (m Model) inputMutationAllowed() bool {
 		return true
 	case inputNewIssueForm:
 		return m.mutationAllowed(strings.TrimSpace(m.input.fieldValue(fieldParent)) != "")
-	case inputParentPrompt:
+	case inputParentPrompt, inputDeleteForm:
 		return m.mutationAllowed(false)
 	default:
 		return m.mutationAllowed(true)
@@ -134,7 +138,7 @@ func (m Model) routeCloseKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.Close.matches(msg) {
 		return m, nil, false
 	}
-	target, ok := m.activeCloseTarget()
+	target, _, ok := m.activeIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
@@ -144,27 +148,29 @@ func (m Model) routeCloseKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	return m, dispatchLegacyClose(m.api, target, m.list.actor), true
 }
 
-func (m Model) activeCloseTarget() (formTarget, bool) {
+// activeIssueTarget is the issue a list or detail action key acts on: the open
+// detail's issue, else the list row under the cursor.
+func (m Model) activeIssueTarget() (formTarget, Issue, bool) {
 	if m.detailIsActive() {
 		if m.detail.issue == nil {
-			return formTarget{}, false
+			return formTarget{}, Issue{}, false
 		}
 		return formTarget{
 			projectID: m.detail.scopePID, issueShortID: m.detail.issue.ShortID,
 			detailGen: m.detail.gen, origin: "detail",
-		}, true
+		}, *m.detail.issue, true
 	}
 	if !m.listIsActive() {
-		return formTarget{}, false
+		return formTarget{}, Issue{}, false
 	}
 	issue, ok := m.list.targetRow()
 	if !ok {
-		return formTarget{}, false
+		return formTarget{}, Issue{}, false
 	}
 	return formTarget{
 		projectID: projectIDForRow(issue, m.scope), issueShortID: issue.ShortID,
 		origin: "list",
-	}, true
+	}, issue, true
 }
 
 func (m Model) openCloseForm(target formTarget) Model {

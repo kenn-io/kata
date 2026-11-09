@@ -54,7 +54,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
@@ -91,7 +91,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
@@ -150,10 +150,16 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if pl.PurgeResetAfterEventID != nil {
-			if err := refreshFederationBaselineAfterPurge(ctx, cfg, in.ProjectID, actor); err != nil {
+			projects := pl.ResetProjectIDs
+			if len(projects) == 0 {
+				projects = []int64{pl.ProjectID}
+			}
+			for _, projectID := range projects {
+				cfg.Publish().Reset(projectID, *pl.PurgeResetAfterEventID)
+			}
+			if err := refreshFederationBaselineAfterPurge(ctx, cfg, pl.ProjectID, actor); err != nil {
 				return nil, internalAPIError(err)
 			}
-			cfg.Publish().Reset(in.ProjectID, *pl.PurgeResetAfterEventID)
 		}
 		out := &api.PurgeResponse{}
 		out.Body.PurgeLog = pl

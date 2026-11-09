@@ -70,7 +70,7 @@ func TestRunnerDefersRelayOutcomesUntilCatchUpCompletes(t *testing.T) {
 			runCtx, cancel := context.WithCancel(ctx)
 			done := make(chan error, 1)
 			go func() { done <- runner.Run(runCtx) }()
-			//nolint:kennlint // The runner drives real HTTP relay hops; bounded polling observes the mirrored projection.
+			//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; bounded polling observes the mirrored projection.
 			require.Eventually(t, func() bool { return mirrored() == 10 }, 20*time.Second, 20*time.Millisecond, "the runner reschedules budgeted turns instead of waiting an hour")
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
@@ -124,7 +124,7 @@ func TestRunnerRepollsOnlySpokesWithRemainingWork(t *testing.T) {
 				require.NoError(t, err)
 				return len(issues)
 			}
-			//nolint:kennlint // The runner drives real HTTP relay hops; bounded polling observes the mirrored projection.
+			//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; bounded polling observes the mirrored projection.
 			require.Eventually(t, func() bool { return mirrored() == 7 }, 20*time.Second, 20*time.Millisecond)
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
@@ -212,7 +212,7 @@ func TestRunnerLeavesFailedTurnsOnTheInterval(t *testing.T) {
 			case <-time.After(20 * time.Second):
 				t.Fatal("the second turn did not report the outage")
 			}
-			//nolint:kennlint // The runner drives real HTTP relay hops; a bounded observation window shows no third attempt follows the failure.
+			//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; a bounded observation window shows no third attempt follows the failure.
 			require.Never(t, func() bool { return metadata.Load() > 2 }, time.Second, 20*time.Millisecond, "the failed second turn is not retried until the interval")
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
@@ -287,7 +287,7 @@ func TestRunnerCatchUpIgnoresWakesFromItsOwnPulls(t *testing.T) {
 				require.NoError(t, err)
 				return len(issues)
 			}
-			//nolint:kennlint // The runner drives real HTTP relay hops; bounded polling observes the mirrored projection.
+			//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; bounded polling observes the mirrored projection.
 			require.Eventually(t, func() bool { return mirrored() == 7 && published.Load() >= 7 }, 20*time.Second, 20*time.Millisecond)
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
@@ -351,7 +351,7 @@ func TestRunnerLeavesSpokesWithFailedClaimRetriesOnTheInterval(t *testing.T) {
 			case <-time.After(20 * time.Second):
 				t.Fatal("the failed claim retry was not reported")
 			}
-			//nolint:kennlint // The runner drives real HTTP relay hops; a bounded observation window shows the spoke is not repeated.
+			//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; a bounded observation window shows the spoke is not repeated.
 			require.Never(t, func() bool { return metadata.Load() > 1 }, time.Second, 20*time.Millisecond, "a turn with a failed claim retry is not repeated before the interval")
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)

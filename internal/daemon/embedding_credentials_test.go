@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +15,7 @@ import (
 )
 
 func TestMissingEmbeddingCredentialPreservesBacklogAndExplainsSearch(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	idx := openTestVectorIndex(t)
 	p, err := store.CreateProject(ctx, "spoke-project")
@@ -72,7 +71,7 @@ func TestEmptyReconcilerReportsSuccessfulReconciliation(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := NewReconciler(newReconcilerTestStore(t), openTestVectorIndex(t), c, ReconcilerConfig{})
-	if err := r.reconcileOnce(context.Background()); err != nil {
+	if err := r.reconcileOnce(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if r.Health().LastSuccessAt == nil {
@@ -84,7 +83,7 @@ func TestEmptyReconcilerReportsSuccessfulReconciliation(t *testing.T) {
 }
 
 func TestQueryCredentialRejectionUpdatesHealthAndRecovers(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	idx := openTestVectorIndex(t)
 	p, _ := store.CreateProject(ctx, "spoke-project")
@@ -126,7 +125,7 @@ func TestQueryCredentialRejectionUpdatesHealthAndRecovers(t *testing.T) {
 }
 
 func TestRejectedCredentialExplainsUnavailableOldGeneration(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	idx := openTestVectorIndex(t)
 	p, _ := store.CreateProject(ctx, "spoke-project")
@@ -166,7 +165,7 @@ func TestRequestWideRejectionKeepsBacklogAndWaitsMaxBackoff(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := newReconcilerTestStore(t)
 			idx := openTestVectorIndex(t)
 			p, _ := store.CreateProject(ctx, "spoke-project")

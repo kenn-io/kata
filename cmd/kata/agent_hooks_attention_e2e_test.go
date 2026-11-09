@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -58,7 +58,7 @@ func executeAttentionAtDaemon(t *testing.T, env *testenv.Env, input io.Reader, a
 	t.Helper()
 	resetFlags(t)
 	cmd := newRootCmd()
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
@@ -92,7 +92,7 @@ func TestE2E_AgentHooksAttentionParity(t *testing.T) {
 			var snapshots []agentHookAttentionSnapshot
 			var deltas []int64
 			for _, visible := range []bool{false, true} {
-				ref := createIssue(t, env, pid, "example tracked work")
+				ref := createIssue(t, env, pid, fmt.Sprintf("example tracked work %s visible=%t", scenario.name, visible))
 				runCLI(t, env, dir, "meta", "set", ref, attentionMsgKey, "existing context")
 				if scenario.initial != "" {
 					runCLI(t, env, dir, "meta", "set", ref, attentionKey, scenario.initial, "--json-value")

@@ -2,6 +2,7 @@ package daemonruntime
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,12 +10,12 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"go.kenn.io/kata/internal/linkpath"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 const storeOwnerLockRetry = 50 * time.Millisecond
-
-// maxStoreSymlinkHops bounds a symlink chain, as the OS does when it opens one.
-const maxStoreSymlinkHops = 40
 
 // StoreOwnerLockPaths names the locks a daemon holds for its whole life so no
 // second daemon opens the same store. A SQLite lock sits beside the database
@@ -22,9 +23,9 @@ const maxStoreSymlinkHops = 40
 // path, which hashes to a different runtime namespace but the same lock file.
 //
 // Every name on a symlink chain to the database gets a lock, including a
-// target SQLite has not created yet. Cutover renames the upgraded database
-// onto the configured path, which turns that link into a regular file, so
-// every name another daemon might be configured with must stay owned.
+// target SQLite has not created yet. Another daemon can be configured with
+// any of those names, and a link can later be replaced by a regular file (an
+// older release's cutover did that), so every name must stay owned.
 // Directory symlinks are resolved first so one file never gets two locks.
 // Hard links to one file are not unified. PostgreSQL has no file, so its lock
 // lives in the runtime namespace. The paths are sorted so every daemon takes
@@ -34,32 +35,11 @@ func StoreOwnerLockPaths(dataDir, dsn string) []string {
 		return []string{filepath.Join(dataDir, "store-owner.lock")}
 	}
 	var paths []string
-	for _, name := range sqliteFileNames(strings.TrimPrefix(dsn, "sqlite://")) {
+	for _, name := range linkpath.Chain(strings.TrimPrefix(dsn, "sqlite://")) {
 		paths = append(paths, name+".owner.lock")
 	}
 	slices.Sort(paths)
 	return slices.Compact(paths)
-}
-
-// sqliteFileNames lists path and each symlink hop from it, whether or not the
-// last name exists yet.
-func sqliteFileNames(path string) []string {
-	var names []string
-	for range maxStoreSymlinkHops {
-		if dir, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
-			path = filepath.Join(dir, filepath.Base(path))
-		}
-		names = append(names, path)
-		target, err := os.Readlink(path)
-		if err != nil {
-			break
-		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(path), target)
-		}
-		path = target
-	}
-	return names
 }
 
 // AcquireStoreOwnerLock waits until ctx ends to hold every path exclusively.
@@ -100,4 +80,55 @@ func StoreOwnerLocked(paths []string) bool {
 		}
 	}
 	return false
+}
+
+// ForeignStoreOwnerGrace is how long startup waits for a held store lock to
+// clear before it blames a live daemon in another PID namespace.
+var ForeignStoreOwnerGrace = 3 * time.Second
+
+// RefuseForeignStoreOwner reports an error when ownerLocks stay held through
+// ForeignStoreOwnerGrace and dataDir has a live record from another PID
+// namespace. That daemon keeps the store until it stops, unlike a restarting
+// local daemon, so waiting for the lock would only delay the same refusal.
+// The grace covers a local daemon still releasing the store. With no such
+// record it returns nil at once and the caller's normal wait applies.
+func RefuseForeignStoreOwner(ctx context.Context, dataDir string, ownerLocks []string) error {
+	if _, ok := foreignRuntimeRecord(dataDir); !ok {
+		return nil
+	}
+	deadline := time.NewTimer(ForeignStoreOwnerGrace)
+	defer deadline.Stop()
+	tick := time.NewTicker(storeOwnerLockRetry)
+	defer tick.Stop()
+	for StoreOwnerLocked(ownerLocks) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		case <-deadline.C:
+			// That daemon can exit while a local starter takes the lock between
+			// polls, so blame it only if its record is still there.
+			owner, ok := foreignRuntimeRecord(dataDir)
+			if !ok {
+				return nil
+			}
+			return fmt.Errorf("a kata daemon in another PID namespace owns this store (pid %d there; runtime record %s); run kata where that daemon runs, or set KATA_SERVER to reach it", owner.PID, owner.SourcePath)
+		}
+	}
+	return nil
+}
+
+// foreignRuntimeRecord returns a record in dataDir for a live process in
+// another PID namespace.
+func foreignRuntimeRecord(dataDir string) (kitdaemon.RuntimeRecord, bool) {
+	records, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, false
+	}
+	for _, record := range records {
+		if kitdaemon.RuntimeProcessScope(record) == kitdaemon.ProcessScopeForeign {
+			return record, true
+		}
+	}
+	return kitdaemon.RuntimeRecord{}, false
 }

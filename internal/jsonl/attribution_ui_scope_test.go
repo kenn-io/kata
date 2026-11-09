@@ -36,14 +36,16 @@ func TestAttributionUIResetExportScope(t *testing.T) {
 			require.NoError(t, err)
 			var keys []string
 			for _, project := range []db.Project{selected, private} {
-				key := "attribution_ui_reset." + project.UID
-				keys = append(keys, key)
-				q := `INSERT INTO meta(key,value) VALUES(?,?)`
-				if backend == "postgres" {
-					q = `INSERT INTO meta(key,value) VALUES($1,$2)`
+				for _, prefix := range []string{db.AttributionUIResetMetadataPrefix, db.ProjectStreamResetMetadataPrefix} {
+					key := prefix + project.UID
+					keys = append(keys, key)
+					q := `INSERT INTO meta(key,value) VALUES(?,?)`
+					if backend == "postgres" {
+						q = `INSERT INTO meta(key,value) VALUES($1,$2)`
+					}
+					_, err = store.ExecContext(t.Context(), q, key, "777")
+					require.NoError(t, err)
 				}
-				_, err = store.ExecContext(t.Context(), q, key, "777")
-				require.NoError(t, err)
 			}
 			for _, cutover := range []bool{false, true} {
 				if cutover && backend == "postgres" {
@@ -63,14 +65,19 @@ func TestAttributionUIResetExportScope(t *testing.T) {
 					}
 					require.NoError(t, err)
 					for _, key := range keys {
-						require.NotContains(t, output.String(), key, "project exports exclude even their own local UI reset state")
+						require.NotContains(t, output.String(), key, "project exports exclude even their own local reset state")
+					}
+					output.Reset()
+					if cutover {
+						err = exportForCutover(t.Context(), store, &output, ExportOptions{})
+					} else {
+						err = Export(t.Context(), store, &output, ExportOptions{})
+					}
+					require.NoError(t, err)
+					for _, key := range keys {
+						require.Contains(t, output.String(), key, "owner backups retain durable local cursors")
 					}
 				})
-			}
-			var owner bytes.Buffer
-			require.NoError(t, Export(t.Context(), store, &owner, ExportOptions{}))
-			for _, key := range keys {
-				require.Contains(t, owner.String(), key, "owner backups retain durable local cursors")
 			}
 		})
 	}

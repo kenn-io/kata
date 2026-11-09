@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -30,7 +29,7 @@ func TestHelpExamplesParse(t *testing.T) {
 	})
 	// Only full quickstart output lists commands on their own lines; the
 	// contract and compact guidance embed them in prose and DOT labels.
-	out, _, err := executeRootCapture(t, context.Background(), "quickstart")
+	out, _, err := executeRootCapture(t, t.Context(), "quickstart")
 	if err != nil {
 		t.Fatal(err)
 	}

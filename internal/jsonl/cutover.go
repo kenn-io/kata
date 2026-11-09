@@ -13,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/linkpath"
 	"go.kenn.io/kit/atomicfile"
 )
 
@@ -22,9 +23,9 @@ var ErrCutoverInProgress = errors.New("jsonl cutover in progress")
 
 var errSourceChangedDuringCutover = errors.New("source changed during cutover; stop all database users and retry; original source retained")
 
-// AutoCutover upgrades an older SQLite database by exporting it to JSONL,
-// importing into a fresh current-schema temp DB, then swapping the temp DB into
-// place. Databases already at the current schema are left untouched.
+// AutoCutover applies registered additive SQLite upgrades in place. Other
+// older schemas are exported to JSONL, imported into a fresh current-schema
+// temp DB, and swapped into place. Current-schema databases stay untouched.
 func AutoCutover(ctx context.Context, path string) error {
 	return autoCutover(ctx, path, cutoverOperations{exportCutoverSource, atomicfile.Replace})
 }
@@ -44,9 +45,25 @@ func autoCutover(ctx context.Context, path string, ops cutoverOperations) error 
 // It coordinates source inspections with AutoCutover. fn must not call
 // AutoCutover or WithCutoverLock for the same path.
 func WithCutoverLock(ctx context.Context, path string, fn func() error) error {
+	// Daemons, offline import, and readiness probes share the configured
+	// path's lock. A cutover through a symlink also works on the target's temp
+	// files, so it takes the target's lock too, after the configured one.
+	// Compare resolved names: one file can be spelled two ways, and locking it
+	// twice would make this process wait on itself.
+	locks := []string{linkpath.Chain(path + ".import.lock")[0]}
+	if target := cutoverFilePath(path) + ".import.lock"; target != locks[0] {
+		locks = append(locks, target)
+	}
+	return withCutoverLocks(ctx, locks, fn)
+}
+
+func withCutoverLocks(ctx context.Context, paths []string, fn func() error) error {
+	if len(paths) == 0 {
+		return fn()
+	}
 	// Keep the lock file: unlinking it after unlock lets two processes lock
 	// different inodes at the same pathname.
-	lock := flock.New(path + ".import.lock")
+	lock := flock.New(paths[0])
 	defer func() { _ = lock.Close() }()
 	// Readiness polling briefly probes this same lock. Retry transient
 	// contention before treating it as another importer holding the source.
@@ -62,10 +79,11 @@ func WithCutoverLock(ctx context.Context, path string, fn func() error) error {
 	if !locked {
 		return fmt.Errorf("%w: another process holds %s; wait for migration and inspect kata daemon logs", ErrCutoverInProgress, lock.Path())
 	}
-	return fn()
+	return withCutoverLocks(ctx, paths[1:], fn)
 }
 
 func autoCutoverLocked(ctx context.Context, path string, ops cutoverOperations) error {
+	path = cutoverFilePath(path)
 	tmpJSONL := path + ".import.tmp.jsonl"
 	tmpDB := path + ".import.tmp.db"
 	if err := CheckCutoverSource(ctx, path); err != nil {
@@ -77,6 +95,12 @@ func autoCutoverLocked(ctx context.Context, path string, ops cutoverOperations) 
 	}
 	if version >= db.CurrentSchemaVersion() {
 		return rejectCutoverTemps(cutoverTempPaths(path)...)
+	}
+	if sqlitestore.UpgradesInPlace(version) {
+		if err := preserveCutoverTemps(path); err != nil {
+			return err
+		}
+		return sqlitestore.UpgradeInPlace(ctx, path)
 	}
 
 	if err := checkpointCutoverSource(ctx, path); err != nil {
@@ -162,6 +186,7 @@ func autoCutoverLocked(ctx context.Context, path string, ops cutoverOperations) 
 // CheckCutoverSource prevents a missing source with cutover recovery artifacts
 // from being mistaken for a fresh database by the storage opener.
 func CheckCutoverSource(ctx context.Context, path string) error {
+	path = cutoverFilePath(path)
 	artifacts := cutoverTempPaths(path)
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil && !os.IsNotExist(err) {
@@ -188,6 +213,16 @@ func CheckCutoverSource(ctx context.Context, path string) error {
 		return nil
 	}
 	return nil
+}
+
+// cutoverFilePath is the file a symlinked database path names. Cutover swaps
+// the upgraded database in there so the link keeps working, and keeps its temp
+// files and backup beside that file so the final rename stays on one
+// filesystem. The file may be missing: an interrupted cutover leaves the link
+// dangling, and recovery files must still be found beside the target.
+func cutoverFilePath(path string) string {
+	chain := linkpath.Chain(path)
+	return chain[len(chain)-1]
 }
 
 func cutoverTempPaths(path string) []string {

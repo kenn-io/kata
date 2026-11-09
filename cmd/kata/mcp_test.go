@@ -72,15 +72,22 @@ func serveMCPTestHealth(writer http.ResponseWriter, request *http.Request) bool 
 
 func startMCPHTTPTestServer(t *testing.T, daemonURL string, extraArgs ...string) string {
 	t.Helper()
+	return startMCPHTTPTestServerWithScope(t, daemonURL, []string{"--all"}, extraArgs...)
+}
+
+// startMCPHTTPTestServerWithScope runs `kata mcp serve --http` with the given
+// project-scope flags and returns its MCP endpoint.
+func startMCPHTTPTestServerWithScope(t *testing.T, daemonURL string, scopeArgs []string, extraArgs ...string) string {
+	t.Helper()
 	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
 	command := newRootCmd()
 	stderrReader, stderrWriter := io.Pipe()
 	command.SetOut(io.Discard)
 	command.SetErr(stderrWriter)
-	command.SetArgs(append([]string{
-		"mcp", "serve", "--all", "--http", "127.0.0.1:0",
+	command.SetArgs(append(append([]string{"mcp", "serve"}, scopeArgs...), append([]string{
+		"--http", "127.0.0.1:0",
 		"--http-token-env", "KATA_MCP_TEST_TOKEN",
-	}, extraArgs...))
+	}, extraArgs...)...))
 	commandContext, cancel := context.WithCancel(context.WithValue(
 		t.Context(), internalclient.BaseURLKey{}, daemonURL,
 	))
@@ -199,7 +206,9 @@ func TestMCPServeHTTPBearerProtectsMCPButNotHealth(t *testing.T) {
 	t.Cleanup(daemon.Close)
 
 	endpoint := startMCPHTTPTestServer(t, daemon.URL)
-	healthResponse, err := http.Get(strings.TrimSuffix(endpoint, "/mcp") + "/healthz") //nolint:noctx // bounded local test server
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, strings.TrimSuffix(endpoint, "/mcp")+"/healthz", nil)
+	require.NoError(t, reqErr)
+	healthResponse, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, healthResponse.Body.Close())
 	require.Equal(t, http.StatusOK, healthResponse.StatusCode)
@@ -221,9 +230,8 @@ func TestMCPServeHTTPBearerProtectsMCPButNotHealth(t *testing.T) {
 	require.NoError(t, session.Close())
 }
 
-// The session listener keeps loaders' list-changed notifications working, so a
-// per-request 2026-07-28 call must learn which session versions it can use.
-func TestMCPServeHTTPPerRequestProtocolListsSessionVersions(t *testing.T) {
+// Native per-request clients share the endpoint with legacy sessions.
+func TestMCPServeHTTPPerRequestProtocolListsTools(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -242,20 +250,22 @@ func TestMCPServeHTTPPerRequestProtocolListsSessionVersions(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer test-mcp-token")
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
+	request.Header.Set("Mcp-Method", "tools/list")
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = response.Body.Close() })
-	require.Equal(t, http.StatusBadRequest, response.StatusCode)
+	require.Equal(t, http.StatusOK, response.StatusCode)
 	var decoded struct {
-		Error struct {
-			Code int64                                 `json:"code"`
-			Data sdkmcp.UnsupportedProtocolVersionData `json:"data"`
-		} `json:"error"`
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
 	}
 	require.NoError(t, json.NewDecoder(response.Body).Decode(&decoded))
-	require.EqualValues(t, sdkmcp.CodeUnsupportedProtocolVersion, decoded.Error.Code)
-	require.Contains(t, decoded.Error.Data.Supported, "2025-11-25")
-	require.NotContains(t, decoded.Error.Data.Supported, currentMCPProtocolVersion)
+	require.Empty(t, decoded.Error)
+	require.NotEmpty(t, decoded.Result.Tools)
 }
 
 func TestMCPServeHTTPCrossOriginBrowserMutationRejected(t *testing.T) {
@@ -347,7 +357,7 @@ func TestMCPServeHTTPLoopbackRequiresBearer(t *testing.T) {
 }
 
 func TestRunMCPHTTPServerWaitsForInflightHandlersDuringShutdown(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -388,7 +398,7 @@ func TestRunMCPHTTPServerWaitsForInflightHandlersDuringShutdown(t *testing.T) {
 	select {
 	case err := <-serveDone:
 		t.Fatalf("server returned before its in-flight handler completed: %v", err)
-	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; release holds the in-flight handler, so Serve must not return
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; release holds the in-flight handler, so Serve must not return
 	}
 	close(release)
 	require.NoError(t, <-serveDone)

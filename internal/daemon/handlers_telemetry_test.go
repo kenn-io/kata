@@ -341,7 +341,7 @@ func TestAppOpenedGate(t *testing.T) {
 		select {
 		case <-done:
 			t.Fatal("a caller returned while the first capture was still pending")
-		case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the first capture, so the second caller must not return
+		case <-time.After(50 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; release holds the first capture, so the second caller must not return
 		}
 		close(release)
 		<-done

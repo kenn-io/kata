@@ -184,7 +184,7 @@ idempotent. Labels use kata label; metadata uses kata meta.`,
 		if err != nil {
 			return err
 		}
-		if err := project.comment(bs, issue.RefForAPI, actor, comment, handle); err != nil {
+		if err := project.comment(bs, actor, comment, handle); err != nil {
 			return err
 		}
 		return printMutationWithApplied(cmd, bs, nil, project.name)

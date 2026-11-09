@@ -1,6 +1,6 @@
 <script lang="ts">
   /* eslint-disable svelte/prefer-svelte-reactivity */
-  import { onDestroy, tick } from 'svelte'
+  import { onDestroy, tick, untrack, type Snippet } from 'svelte'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
   import ChevronUpIcon from '@lucide/svelte/icons/chevron-up'
@@ -18,12 +18,13 @@
     type KataTaskSort,
     type KataTaskSortKey,
   } from '../lib/kata/sort'
+  import { PageHeader } from '@kenn-io/kit-ui'
   import ColumnPicker from './ColumnPicker.svelte'
   import {
     KATA_OPTIONAL_TASK_COLUMNS,
-    defaultKataTaskColumnVisibility,
     loadKataTaskColumnVisibility,
     persistKataTaskColumnVisibility,
+    summarizeBlockedBy,
     type KataOptionalTaskColumn,
     type KataTaskColumnVisibility,
   } from '../lib/kata/columns'
@@ -37,6 +38,8 @@
 
   interface Props {
     currentView: KataCurrentView
+    now: number
+    resultsKey?: string
     issueCatalog: readonly KataTaskSummary[]
     scopeLabel?: string
     scopedProjectName?: string | null
@@ -49,12 +52,16 @@
     revealRequest?: KataIssueRevealRequest | null
     onSelect: (issue: KataTaskSummary) => void
     onOpenGraph?: ((issue: KataTaskSummary) => void) | undefined
+    /** Replaces the bare `No tasks` line when the list has no rows. */
+    empty?: Snippet | undefined
   }
 
   const EMPTY_READY_ISSUE_UIDS: ReadonlySet<string> = new Set()
 
   let {
     currentView,
+    now,
+    resultsKey = '',
     issueCatalog,
     scopeLabel = undefined,
     scopedProjectName = null,
@@ -67,6 +74,7 @@
     revealRequest = null,
     onSelect,
     onOpenGraph = undefined,
+    empty = undefined,
   }: Props = $props()
 
   const SORT_STORAGE_KEY = 'kata:issue-sort/v1'
@@ -88,6 +96,7 @@
       priority: 'minmax(68px, 80px)',
       due: 'minmax(56px, 70px)',
       owner: 'minmax(72px, 110px)',
+      blockedBy: 'minmax(96px, 150px)',
       tags: 'minmax(96px, 200px)',
     },
     medium: {
@@ -95,6 +104,7 @@
       priority: 'minmax(68px, 80px)',
       due: 'minmax(56px, 70px)',
       owner: 'minmax(72px, 110px)',
+      blockedBy: 'minmax(96px, 150px)',
       tags: null,
     },
     compact: {
@@ -102,6 +112,7 @@
       priority: 'minmax(64px, 78px)',
       due: 'minmax(54px, 68px)',
       owner: null,
+      blockedBy: null,
       tags: null,
     },
     narrow: {
@@ -109,6 +120,7 @@
       priority: 'minmax(62px, 74px)',
       due: null,
       owner: null,
+      blockedBy: null,
       tags: null,
     },
   }
@@ -150,17 +162,27 @@
   let lastRevealGeneration: number | null = null
   let anchorMeasurementGeneration = 0
   let catalogByUID = $derived(new Map(issueCatalog.map((issue) => [issue.uid, issue])))
+  let catalogByHierarchyKey = $derived(
+    new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue])),
+  )
+
+  function parentUIDOf(issue: KataTaskSummary): string | undefined {
+    return (
+      issue.parent?.uid ??
+      (issue.parent_short_id
+        ? catalogByHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
+        : undefined)
+    )
+  }
+
   let childrenByParentUID = $derived.by(() => {
-    const byHierarchyKey = new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue]))
     const children = new Map<string, KataTaskSummary[]>()
     for (const issue of issueCatalog) {
-      const parentUID =
-        issue.parent?.uid ??
-        (issue.parent_short_id
-          ? byHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
-          : undefined)
+      const parentUID = parentUIDOf(issue)
       if (!parentUID) continue
-      children.set(parentUID, [...(children.get(parentUID) ?? []), issue])
+      const siblings = children.get(parentUID)
+      if (siblings) siblings.push(issue)
+      else children.set(parentUID, [issue])
     }
     return children
   })
@@ -197,9 +219,9 @@
         }
       }
     }
-    const allIssues = groups.flatMap((group) => group.issues)
+    const visibleKeys = new Set(groups.flatMap((group) => group.issues.map(issueHierarchyKey)))
     return groups
-      .map((group) => ({ ...group, issues: topLevelIssues(group.issues, allIssues) }))
+      .map((group) => ({ ...group, issues: topLevelIssues(group.issues, visibleKeys) }))
       .filter((group) => group.issues.length > 0)
   })
 
@@ -218,10 +240,13 @@
         )
       : [],
   )
+  let sortedGroups = $derived(
+    visibleGroups.map((group) => ({ ...group, issues: sortKataTasks(group.issues, sort) })),
+  )
   let ordinaryRootIssues = $derived.by(() => {
     if (isProjectScoped) return sortKataTasks(flatIssues, sort)
     if (shouldFlatten) return globalSortedIssues
-    return visibleGroups.flatMap((group) => sortKataTasks(group.issues, sort))
+    return sortedGroups.flatMap((group) => group.issues)
   })
   let visibleTemporaryRevealChain = $derived(revealChainForStatus(temporaryRevealChain))
   let hasTemporaryReveal = $derived(visibleTemporaryRevealChain.length > 0)
@@ -242,6 +267,69 @@
       knownExpandableIssues.every((issue) => expanded[issue.uid] === true),
   )
   let hasAnyExpandedRows = $derived(Object.values(expanded).some(Boolean))
+
+  const ROW_LIMIT_STEP = 150
+  let listKey = $derived(JSON.stringify([currentView.name, resultsKey]))
+  // showRows overrides this; a new list key recomputes it in the same render.
+  let rowLimit = $derived.by(() => {
+    void listKey
+    return ROW_LIMIT_STEP
+  })
+
+  let rootIndexByUID = $derived(
+    new Map(visibleRootIssues.map((issue, index) => [issue.uid, index])),
+  )
+
+  function rootIndexOf(uid: string | null | undefined): number {
+    const seen = new Set<string>()
+    while (uid && !seen.has(uid)) {
+      const index = rootIndexByUID.get(uid)
+      if (index !== undefined) return index
+      seen.add(uid)
+      const issue = catalogByUID.get(uid)
+      uid = issue ? parentUIDOf(issue) : undefined
+    }
+    return -1
+  }
+
+  let pinnedRows = $derived.by(() => {
+    // Refresh focus pins even when there is no selection to look up.
+    void rootIndexByUID
+    const key = listKey
+    const focusedUID = untrack(() => {
+      const active = typeof document === 'undefined' ? null : document.activeElement
+      const row = active?.closest('.row-frame')?.querySelector<HTMLButtonElement>('button.row')
+      return row?.dataset.listKey === key && tableBody?.contains(row) ? row.dataset.uid : undefined
+    })
+    return Math.max(rootIndexOf(selectedIssueUID), rootIndexOf(focusedUID)) + 1
+  })
+  let renderedLimit = $derived(Math.max(rowLimit, pinnedRows))
+  let rowSentinel: HTMLDivElement | null = $state(null)
+  let hasHiddenRows = $derived(visibleRootIssues.length > renderedLimit)
+  let renderedRoots = $derived(visibleRootIssues.slice(0, renderedLimit))
+  let renderedGroups = $derived.by(() => {
+    let remaining = renderedLimit
+    const groups = []
+    for (const group of sortedGroups) {
+      if (remaining <= 0) break
+      groups.push({
+        ...group,
+        total: group.issues.length,
+        issues: group.issues.slice(0, remaining),
+      })
+      remaining -= group.issues.length
+    }
+    return groups
+  })
+
+  function showRows(count: number): void {
+    if (count > rowLimit) rowLimit = count
+  }
+
+  // Rows revealed by a pin stay rendered after selection or focus moves away.
+  $effect(() => {
+    showRows(pinnedRows)
+  })
 
   function loadSort(): KataTaskSort {
     if (typeof window === 'undefined') return DEFAULT_KATA_TASK_SORT
@@ -303,7 +391,11 @@
   }
 
   function showAllColumns(): void {
-    setColumnVisibility(defaultKataTaskColumnVisibility())
+    setColumnVisibility(
+      Object.fromEntries(
+        KATA_OPTIONAL_TASK_COLUMNS.map((column) => [column.id, true]),
+      ) as KataTaskColumnVisibility,
+    )
   }
 
   function viewTitle(view: KataCurrentView): string {
@@ -392,13 +484,12 @@
 
   function topLevelIssues(
     issues: readonly KataTaskSummary[],
-    allIssues: readonly KataTaskSummary[] = issues,
+    visibleKeys: ReadonlySet<string> = new Set(issues.map(issueHierarchyKey)),
   ): KataTaskSummary[] {
     // A child collapses into its parent only when that parent is actually
     // present in the visible set. Search and filter results often surface a
     // matching child without its parent; those rows must still render as
     // their own top-level row instead of vanishing into a missing ancestor.
-    const visibleKeys = new Set(allIssues.map(issueHierarchyKey))
     return issues.filter((issue) => {
       const parentKey = parentHierarchyKey(issue)
       return parentKey === null || !visibleKeys.has(parentKey)
@@ -588,6 +679,20 @@
     switch (event.key) {
       case 'ArrowDown':
       case 'j':
+        if (idx === rows.length - 1 && hasHiddenRows) {
+          // Past the rendered prefix: render the next chunk, then move.
+          event.preventDefault()
+          heldNavKeys.add(event.code)
+          showRows(renderedLimit + ROW_LIMIT_STEP)
+          void tick().then(() => {
+            const nextRows = Array.from(
+              tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [],
+            )
+            const at = nextRows.indexOf(target)
+            if (at !== -1) focusRow(nextRows[at + 1] ?? null)
+          })
+          return
+        }
         nextIdx = Math.min(rows.length - 1, idx + 1)
         break
       case 'ArrowUp':
@@ -600,6 +705,17 @@
         break
       case 'End':
       case 'G':
+        if (hasHiddenRows) {
+          // End means the last row of the whole list, so render all of it.
+          event.preventDefault()
+          heldNavKeys.add(event.code)
+          showRows(Infinity)
+          void tick().then(() => {
+            const all = Array.from(tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [])
+            focusRow(all[all.length - 1] ?? null)
+          })
+          return
+        }
         nextIdx = rows.length - 1
         break
       case 'ArrowRight': {
@@ -697,6 +813,24 @@
     }
   })
 
+  // Grow when the end sentinel comes within a few screens of the viewport.
+  $effect(() => {
+    const body = tableBody
+    const sentinel = rowSentinel
+    // A fresh observer reports the sentinel's current state, so a sentinel
+    // that is still near the viewport after a chunk lands asks for another.
+    void renderedLimit
+    if (!body || !sentinel || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) showRows(renderedLimit + ROW_LIMIT_STEP)
+      },
+      { root: body, rootMargin: '1500px 0px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  })
+
   // Clear stale expansion before the reveal effect below so a snapshot that
   // changes structure can still restore its hidden selected ancestor chain.
   $effect(() => {
@@ -764,14 +898,13 @@
 
 <section class="issue-list" aria-label="Issues">
   <div class="pane-header">
-    <div class="heading-row">
-      <div class="heading">
-        <h2>{viewTitle(currentView)}</h2>
+    <PageHeader level={2} title={viewTitle(currentView)}>
+      {#snippet trailing()}
         <span class="count"
           >{totalFilteredIssues()} {totalFilteredIssues() === 1 ? 'task' : 'tasks'}</span
         >
-      </div>
-      <div class="header-actions">
+      {/snippet}
+      {#snippet actions()}
         <ColumnPicker
           visibility={columnVisibility}
           onchange={setColumnVisibility}
@@ -803,8 +936,8 @@
             </button>
           </div>
         {/if}
-      </div>
-    </div>
+      {/snippet}
+    </PageHeader>
     {#if loading}
       <span class="kit-sr-only" aria-live="polite">Loading snapshot</span>
     {/if}
@@ -905,37 +1038,39 @@
             {/if}
           </button>
         {/if}
+        {#if columnVisibility.blockedBy}
+          <span class="col col-blocked-by col-static">Blocked by</span>
+        {/if}
         {#if columnVisibility.tags}<span class="col col-tags col-static">Tags</span>{/if}
       </div>
 
       {#if visibleRootIssues.length === 0}
-        <div class="empty">No tasks</div>
+        {#if empty}
+          {@render empty()}
+        {:else}
+          <div class="empty">No tasks</div>
+        {/if}
       {/if}
 
-      {#if hasTemporaryReveal}
-        {#each visibleRootIssues as issue (issue.uid)}
-          {@render row(issue)}
-        {/each}
-      {:else if isProjectScoped}
-        {#each visibleRootIssues as issue (issue.uid)}
-          {@render row(issue)}
-        {/each}
-      {:else if shouldFlatten}
-        {#each globalSortedIssues as issue (issue.uid)}
+      {#if hasTemporaryReveal || isProjectScoped || shouldFlatten}
+        {#each renderedRoots as issue (issue.uid)}
           {@render row(issue)}
         {/each}
       {:else}
-        {#each visibleGroups as group (group.id)}
+        {#each renderedGroups as group (group.id)}
           <section class="group" aria-labelledby={`group-${group.id}`}>
             <h3 class="group-title" id={`group-${group.id}`}>
               <span>{group.title}</span>
-              <span class="group-count">{group.issues.length}</span>
+              <span class="group-count">{group.total}</span>
             </h3>
-            {#each sortKataTasks(group.issues, sort) as issue (issue.uid)}
+            {#each group.issues as issue (issue.uid)}
               {@render row(issue)}
             {/each}
           </section>
         {/each}
+      {/if}
+      {#if hasHiddenRows}
+        <div class="row-sentinel" bind:this={rowSentinel} aria-hidden="true"></div>
       {/if}
     </div>
   </div>
@@ -956,6 +1091,7 @@
       aria-current={isSelected(issue) ? 'true' : undefined}
       aria-expanded={expandable ? isExpanded : undefined}
       data-uid={issue.uid}
+      data-list-key={listKey}
       onclick={() => selectNow(issue)}
     >
       <span class="cell cell-id"
@@ -982,7 +1118,7 @@
       </span>
       {#if columnVisibility.updated}
         <span class="cell cell-updated" title={issue.updated_at}>
-          {relativeTime(issue.updated_at)}
+          {relativeTime(issue.updated_at, new Date(now))}
         </span>
       {/if}
       {#if columnVisibility.priority}
@@ -998,6 +1134,13 @@
         </span>
       {/if}
       {#if columnVisibility.owner}<span class="cell cell-owner">{issue.owner ?? ''}</span>{/if}
+      {#if columnVisibility.blockedBy}
+        {@const blockers = summarizeBlockedBy(issue.open_blocked_by, issue.qualified_id)}
+        <span class="cell cell-blocked-by" title={blockers.title}>
+          <span class="blocked-ids">{blockers.ids}</span>
+          {#if blockers.more}<span class="blocked-more">{blockers.more}</span>{/if}
+        </span>
+      {/if}
       {#if columnVisibility.tags}
         <span class="cell cell-tags" title={labels}>
           {#if labels}{labels}{/if}
@@ -1055,38 +1198,6 @@
     flex-shrink: 0;
     padding: 12px 12px 8px;
     background: var(--bg-surface);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .heading-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
-  }
-
-  .heading {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-4);
-    min-width: 0;
-  }
-
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-
-  .pane-header h2 {
-    font-size: var(--font-size-xl);
-    line-height: 1.2;
-    font-weight: var(--font-weight-semibold);
   }
 
   .count {
@@ -1221,6 +1332,9 @@
   .table-body {
     flex: 1;
     overflow: auto;
+    /* Reserve the scrollbar's width so columns do not shift when a search or
+       filter changes whether the rows overflow. */
+    scrollbar-gutter: stable;
     padding: 0 0 12px;
   }
 
@@ -1233,6 +1347,9 @@
 
   .group {
     margin-top: 6px;
+  }
+  .row-sentinel {
+    height: 1px;
   }
 
   .group:first-of-type {
@@ -1465,6 +1582,22 @@
     color: var(--text-secondary);
   }
 
+  /* The +N stays visible: only the ID list ellipsizes. */
+  .cell-blocked-by {
+    display: flex;
+    gap: 4px;
+  }
+
+  .blocked-ids {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .blocked-more {
+    flex-shrink: 0;
+  }
+
   .cell-due,
   .cell-updated {
     color: var(--text-muted);
@@ -1486,8 +1619,8 @@
   /* Pane-width-driven column visibility. The list narrows whenever the
      user picks the side-by-side layout and drags the list pane down to
      its minimum; viewport queries miss this because the *window* is
-     still wide. Tags + Owner drop first (low scanning value), then
-     Due, leaving the irreducible quartet of ID / title / updated /
+     still wide. Tags, Blocked by and Owner drop first (low scanning
+     value), then Due, leaving the irreducible quartet of ID / title / updated /
      priority that you need to triage a row. */
   @container list (max-width: 880px) {
     .col-tags,
@@ -1502,6 +1635,8 @@
   }
 
   @container list (max-width: 680px) {
+    .col-blocked-by,
+    .cell-blocked-by,
     .table:not(.table--keep-owner-sort) .col-owner,
     .table:not(.table--keep-owner-sort) .cell-owner {
       display: none;
@@ -1518,7 +1653,7 @@
       --table-min-width: 560px;
     }
 
-    .header-actions :global(.action-label) {
+    .pane-header :global(.action-label) {
       display: none;
     }
   }

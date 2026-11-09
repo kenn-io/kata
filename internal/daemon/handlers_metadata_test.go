@@ -221,7 +221,7 @@ func TestPatchMetadata_PresentEmptyIfMatch_400(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("tok"))
 			url, _ := subject.setup(t, env)
 
-			req, err := http.NewRequest(http.MethodPost, url,
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url,
 				strings.NewReader(`{"actor":"tester","patch":{}}`))
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer tok")
@@ -331,7 +331,7 @@ func TestPatchIssueMetadata_UnknownKey_Accepted(t *testing.T) {
 		"unknown key must round-trip into the persisted metadata blob")
 
 	// GET-after view confirms the key is durably stored and surfaced.
-	getReq, err := http.NewRequest(http.MethodGet, url[:len(url)-len("/metadata")], nil)
+	getReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url[:len(url)-len("/metadata")], nil)
 	require.NoError(t, err)
 	getReq.Header.Set("Authorization", "Bearer tok")
 	getResp, err := env.HTTP.Do(getReq) //nolint:gosec // G704: test server URL, not user-controlled
@@ -510,7 +510,7 @@ func TestPatchIssueMetadata_Broadcasts(t *testing.T) {
 	raw := readClose(t, resp)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "no-op body: %s", raw)
 	assert.Contains(t, string(raw), `"changed":false`, "no-op patch must report changed=false")
-	assertNoReceive(t, sub.Ch, 200*time.Millisecond, "no-op issue metadata patch must not broadcast")
+	assertNoReceive(t, sub.Ch, 200*time.Millisecond, "no-op issue metadata patch must not broadcast") //nolint:kennlint // deadlinetest: bounded absence checks that no-op issue metadata patch must not broadcast
 }
 
 // TestPatchProjectMetadata_Broadcasts is the project-subject mirror: a changing
@@ -538,7 +538,7 @@ func TestPatchProjectMetadata_Broadcasts(t *testing.T) {
 	raw := readClose(t, resp)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "no-op body: %s", raw)
 	assert.Contains(t, string(raw), `"changed":false`, "no-op patch must report changed=false")
-	assertNoReceive(t, sub.Ch, 200*time.Millisecond, "no-op project metadata patch must not broadcast")
+	assertNoReceive(t, sub.Ch, 200*time.Millisecond, "no-op project metadata patch must not broadcast") //nolint:kennlint // deadlinetest: bounded absence checks that no-op project metadata patch must not broadcast
 }
 
 func TestPatchProjectMetadata_DesignatesInboxAtomically(t *testing.T) {

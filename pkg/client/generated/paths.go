@@ -64,6 +64,22 @@ func (d DisconnectFederationBridgePath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
+type ClearFederationSpokeNamePath struct {
+	SpokeInstanceUID string `json:"spoke_instance_uid" validate:"required"`
+}
+
+func (c ClearFederationSpokeNamePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type SetFederationSpokeNamePath struct {
+	SpokeInstanceUID string `json:"spoke_instance_uid" validate:"required"`
+}
+
+func (s SetFederationSpokeNamePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
 type RevokeFederationEnrollmentPath struct {
 	EnrollmentID int64 `json:"enrollment_id"`
 }
@@ -469,6 +485,34 @@ type UnassignIssuePath struct {
 
 func (u UnassignIssuePath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type AddAttachmentPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (a AddAttachmentPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+}
+
+type LinkAttachmentPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (l LinkAttachmentPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type AttachmentContentPath struct {
+	ProjectID    int64  `json:"project_id"`
+	Ref          string `json:"ref" validate:"required"`
+	AttachmentID string `json:"attachment_id" validate:"required"`
+}
+
+func (a AttachmentContentPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
 type UnbindExternalRootPath struct {

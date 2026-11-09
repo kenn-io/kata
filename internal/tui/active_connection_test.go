@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,10 +8,11 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+
+	"go.kenn.io/kata/internal/api"
 )
 
-// A11: the existing current-authority read supplies every view's connection
-// header without opening token inventory or accepting an old connection reply.
+// Every view shows the connection status when it needs attention.
 func TestActiveConnectionHeaderEveryView(t *testing.T) {
 	for _, view := range []viewID{viewList, viewDetail, viewHelp, viewEmpty, viewProjects, viewDaemons, viewFederation, viewCredentials} {
 		t.Run(fmt.Sprint(view), func(t *testing.T) {
@@ -22,21 +22,19 @@ func TestActiveConnectionHeaderEveryView(t *testing.T) {
 			m.view = view
 			m.activeDaemon = daemonTarget{Name: "shared-hub"}
 			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: "token", Actor: "member", TokenAuditRead: false}})
-			before := m.viewContent()
-			header, _, _ := strings.Cut(stripANSI(before), "\n")
+			m.sseStatus = sseReconnecting
+			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
 			require.Contains(t, header, "Hub: shared-hub")
-			require.Contains(t, header, "Account: member")
-			require.Contains(t, header, "Connected")
-			require.False(t, m.tokenAuditRead)
+			require.Contains(t, header, "Reconnecting")
 			m.width = 60
 			narrow, _, _ := strings.Cut(m.viewContent(), "\n")
 			require.LessOrEqual(t, ansi.StringWidth(narrow), 60)
-			require.Contains(t, stripANSI(narrow), "Connected")
+			require.Contains(t, stripANSI(narrow), "Reconnecting")
 		})
 	}
 }
 
-func TestActiveConnectionHeaderFencesStaleAccountAndExpiry(t *testing.T) {
+func TestActiveConnectionHeaderFencesStaleReplies(t *testing.T) {
 	m := newTestModel()
 	m.width = 100
 	m.height = 24
@@ -44,61 +42,17 @@ func TestActiveConnectionHeaderFencesStaleAccountAndExpiry(t *testing.T) {
 	expiry := time.Now().Add(time.Hour)
 	m, cmd := m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 1, auth: AuthInfo{Kind: "token", Actor: "member-one", ExpiresAt: &expiry}})
 	require.NotNil(t, cmd, "finite credential expiry must schedule a UI update")
-	require.Contains(t, stripANSI(m.viewContent()), "Account: member-one")
 	m.connGen = 2
 	m.authCapabilitiesReady = false
+	m.activeAuth = AuthInfo{}
 	m.activeDaemon = daemonTarget{Name: "other-hub"}
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 1, auth: AuthInfo{Actor: "old-reply"}})
-	require.NotContains(t, stripANSI(m.viewContent()), "member-one")
-	require.NotContains(t, stripANSI(m.viewContent()), "old-reply")
+	require.Empty(t, m.activeAuth.Actor)
 	require.Contains(t, stripANSI(m.viewContent()), "Connecting")
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, auth: AuthInfo{Kind: "token", Actor: "member-two"}})
-	require.Contains(t, stripANSI(m.viewContent()), "Account: member-two")
-	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, err: errors.New("authentication required")})
-	require.NotContains(t, stripANSI(m.viewContent()), "member-two")
-	require.Contains(t, stripANSI(m.viewContent()), "Authentication required")
-	past := time.Now().Add(-time.Minute)
-	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, auth: AuthInfo{Actor: "expired-member", ExpiresAt: &past}})
-	require.Contains(t, stripANSI(m.viewContent()), "Credential expired")
-}
-
-// A11 narrow layouts must preserve readable status even for long account and
-// configured hub names. Clipping labels must not hide expiry or reconnection.
-func TestActiveConnectionHeaderLongLabelsPreserveStatus(t *testing.T) {
-	m := newTestModel()
-	m.width = 60
-	m.height = 24
-	m.activeDaemon = daemonTarget{Name: strings.Repeat("long-hub-", 12)}
-	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: strings.Repeat("member-", 12)}})
-	header, _, _ := strings.Cut(m.viewContent(), "\n")
-	require.LessOrEqual(t, ansi.StringWidth(header), 60)
-	require.Contains(t, stripANSI(header), "Connected")
-	require.Contains(t, stripANSI(header), "Hub:")
-	require.Contains(t, stripANSI(header), "Account:")
-}
-
-// Connections without an account must say how they authenticated; only an
-// owner-local connection is labeled local.
-func TestActiveConnectionHeaderLabelsActorlessAuthKinds(t *testing.T) {
-	for kind, want := range map[string]string{
-		"static_token":                    "Account: Shared daemon token",
-		"bootstrap":                       "Account: Bootstrap token",
-		"insecure_readonly":               "Account: Anonymous (read-only)",
-		"unauthenticated_private_network": "Account: Unauthenticated private network",
-		"trusted_proxy_absent":            "Account: Proxy without account",
-		"none":                            "Account: Local connection",
-		"":                                "Account: No account",
-	} {
-		t.Run(kind, func(t *testing.T) {
-			m := newTestModel()
-			m.width = 120
-			m.height = 24
-			m.activeDaemon = daemonTarget{URL: "http://100.64.0.5:7777"}
-			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: kind}})
-			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
-			require.Contains(t, header, want)
-		})
-	}
+	require.True(t, m.authCapabilitiesReady)
+	require.Equal(t, "member-two", m.activeAuth.Actor)
+	require.NotContains(t, stripANSI(m.viewContent()), "Hub:")
 }
 
 // The connection summary shares the title-bar row, so it must yield to the
@@ -109,31 +63,115 @@ func TestActiveConnectionHeaderKeepsTitleBarContent(t *testing.T) {
 	priorVersion := kataVersion
 	kataVersion = "v0.1.0"
 	t.Cleanup(func() { kataVersion = priorVersion })
-	model := func(width int, hub, account string) Model {
+	model := func(width int, hub string) Model {
 		m := newTestModel()
 		m.width = width
 		m.height = 24
 		m.scope = scope{projectID: 7, projectName: "example-project"}
 		m.activeDaemon = daemonTarget{Name: hub, URL: "http://100.64.0.5:7777"}
-		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: "db_token", Actor: account}})
+		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{
+			Kind:  "db_token",
+			Actor: strings.Repeat("long-actor-", 12),
+			Scope: &api.TokenScopeOut{
+				Kind: "issue_subtree", ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
+			},
+			ExpiresAt:             new(time.Now().UTC().Add(time.Hour)),
+			AllowedActions:        []string{"issue.read"},
+			CloseRequiresEvidence: true,
+		}})
 		return m
 	}
 	var rows []string
 	for _, tc := range []struct {
-		width        int
-		hub, account string
+		width int
+		hub   string
 	}{
-		{80, strings.Repeat("long-hub-", 12), strings.Repeat("member-", 12)},
-		{100, strings.Repeat("long-hub-", 12), strings.Repeat("member-", 12)},
-		{160, "shared-hub", "member"},
+		{80, strings.Repeat("long-hub-", 12)},
+		{100, strings.Repeat("long-hub-", 12)},
+		{240, "shared-hub"},
 	} {
-		header, _, _ := strings.Cut(model(tc.width, tc.hub, tc.account).viewContent(), "\n")
-		require.LessOrEqual(t, ansi.StringWidth(header), tc.width)
-		header = stripANSI(header)
-		require.Contains(t, header, "Connected")
-		require.Contains(t, header, "Project: example-project", "width %d", tc.width)
+		m := model(tc.width, tc.hub)
+		header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+		if tc.width < 240 {
+			require.NotContains(t, header, m.activeDaemon.Name)
+			require.NotContains(t, header, m.activeAuth.Actor)
+		}
 		rows = append(rows, header)
 	}
 	require.Contains(t, rows[2], "Daemon: shared-hub · kata カタ · v0.1.0")
 	assertGolden(t, "active-connection-header", strings.Join(rows, "\n"))
+}
+
+// A healthy connection must leave the title bar exactly as it renders
+// without connection authority.
+func TestActiveConnectionHeaderHiddenWhenConnected(t *testing.T) {
+	for _, view := range []viewID{viewList, viewDetail, viewHelp, viewEmpty, viewProjects, viewDaemons, viewFederation, viewCredentials} {
+		t.Run(fmt.Sprint(view), func(t *testing.T) {
+			m := newTestModel()
+			m.view = view
+			m.width = 100
+			m.height = 24
+			m.activeDaemon = daemonTarget{Name: "shared-hub"}
+			want, _, _ := strings.Cut(m.viewContent(), "\n")
+			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: "token", Actor: "member"}})
+			got, _, _ := strings.Cut(m.viewContent(), "\n")
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+// Attention states clear the account until a read-only connection is ready.
+func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		auth   AuthInfo
+		absent string
+		ready  bool
+		sse    sseConnState
+		err    string
+	}{
+		{status: "Authentication required", err: "authentication required"},
+		{status: "Connection unavailable", err: "service unavailable"},
+		{status: "Connecting"},
+		{status: "Reconnecting", auth: AuthInfo{Kind: "insecure_readonly"}, absent: "Anonymous (read-only)", ready: true, sse: sseReconnecting},
+		{status: "Credential expired", auth: AuthInfo{Kind: "db_token", Actor: "expired-member", ExpiresAt: new(time.Now().Add(-time.Minute))}, absent: "expired-member", ready: true},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			m := newTestModel()
+			m.width = 160
+			m.height = 24
+			m.scope.projectName = "example-project"
+			m.activeDaemon = daemonTarget{Name: "shared-hub"}
+			m.authCapabilitiesRequired = true
+			m.authCapabilitiesReady = tc.ready
+			m.activeAuth = tc.auth
+			m.activeAuthError = tc.err
+			m.sseStatus = tc.sse
+			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+			require.True(t, strings.HasPrefix(header, tc.status+" · Hub: shared-hub · Account: — · Project: example-project"), "header: %s", header)
+			if tc.absent != "" {
+				require.NotContains(t, header, tc.absent)
+			}
+		})
+	}
+}
+
+func TestActiveConnectionHeaderReadOnlyAccount(t *testing.T) {
+	for _, tc := range []struct {
+		kind    string
+		account string
+	}{
+		{kind: "insecure_readonly", account: "Anonymous (read-only)"},
+		{kind: "bootstrap", account: "Bootstrap token"},
+		{kind: "trusted_proxy_absent", account: "Proxy without account"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			m := newTestModel()
+			m.width = 160
+			m.height = 24
+			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: tc.kind}})
+			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+			require.True(t, strings.HasPrefix(header, "Read-only · Hub: Local daemon · Account: "+tc.account+" · "), "header: %s", header)
+		})
+	}
 }

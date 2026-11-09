@@ -12,6 +12,8 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 )
 
+const mcpPath = "/mcp"
+
 // ListenerKind identifies which trust boundary accepted a request.
 type ListenerKind string
 
@@ -36,13 +38,16 @@ type ListenerPolicy struct {
 	RequireBrowserSession bool
 	AllowLocalSession     bool
 	WebAuthentication     string
+	// MCP exempts the mounted /mcp endpoint, which owns its bearer and media
+	// type checks, from the ordinary API guards. Server.HandlerFor sets it.
+	MCP bool
 }
 
 // ApplyListenerPolicy wraps a shared handler for one listener.
 func ApplyListenerPolicy(next http.Handler, policy ListenerPolicy) (http.Handler, error) {
 	switch policy.Kind {
 	case ListenerSocket:
-		return withCSRFGuards(restrictLocalSession(next, policy)), nil
+		return withCSRFGuards(restrictLocalSession(next, policy), policy.MCP), nil
 	case ListenerBrowser, ListenerSharedTCP:
 		origin, err := url.Parse(policy.Origin)
 		if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" {
@@ -66,13 +71,20 @@ func ApplyListenerPolicy(next http.Handler, policy ListenerPolicy) (http.Handler
 				addAllowedAuthority(allowedHosts, host)
 			}
 		}
-		jsonHandler := requireJSONMutation(next)
+		jsonHandler := requireJSONMutation(next, policy.MCP)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, ok := allowedHosts[strings.ToLower(r.Host)]; !ok || r.Host == "" {
 				api.WriteEnvelope(w, http.StatusBadRequest, "host_invalid", "Host header does not match listener authority")
 				return
 			}
-			if (policy.Kind == ListenerBrowser && !ordinaryAPIBearerRequest(r)) || isBrowserRequest(r) {
+			browser := isBrowserRequest(r)
+			if policy.MCP && r.URL.Path == mcpPath {
+				// Gateways are not browsers; only browser evidence needs the Origin check.
+				browser = hasBrowserEvidence(r)
+			} else if policy.Kind == ListenerBrowser && !ordinaryAPIBearerRequest(r) {
+				browser = true
+			}
+			if browser {
 				if isMutation(r.Method) && !browserMutationOriginAllowed(r, policy.Origin) {
 					api.WriteEnvelope(w, http.StatusForbidden, "origin_forbidden", "Origin header does not match browser origin")
 					return
@@ -151,13 +163,14 @@ func addAllowedAuthority(allowed map[string]struct{}, authority string) {
 		}
 		allowed[strings.ToLower(alias)] = struct{}{}
 	}
+	ip := net.ParseIP(host)
 	switch {
 	case strings.EqualFold(host, "localhost"):
 		add("127.0.0.1")
 		add("::1")
-	case net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback():
+	case ip != nil && ip.IsLoopback():
 		add("localhost")
-	case host == "0.0.0.0" || host == "::":
+	case ip != nil && ip.IsUnspecified():
 		add("127.0.0.1")
 		add("localhost")
 		add("::1")
@@ -165,6 +178,10 @@ func addAllowedAuthority(allowed map[string]struct{}, authority string) {
 }
 
 func isBrowserRequest(r *http.Request) bool {
+	return hasBrowserEvidence(r) || (!strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml")
+}
+
+func hasBrowserEvidence(r *http.Request) bool {
 	// Terminal telemetry uses the browser's operation, so this path alone marks nothing.
 	uiPath := strings.HasPrefix(r.URL.Path, "/api/v1/ui/") &&
 		(r.Method != http.MethodPost || r.URL.Path != "/api/v1/ui/telemetry")
@@ -178,7 +195,7 @@ func isBrowserRequest(r *http.Request) bool {
 			return true
 		}
 	}
-	return !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml"
+	return false
 }
 
 // ordinaryAPIBearerRequest classifies CLI, TUI and federation traffic, leaving

@@ -24,7 +24,7 @@ func collectExport[T any](t *testing.T, seq func(yield func(T, error) bool)) []T
 func TestExportMeta(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	// Open seeds meta (schema_version, instance_uid). Add a probe that sorts last.
 	_, err := d.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES('zzz_probe', 'v1')`)
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestExportProjects(t *testing.T) {
 func TestExportProjectsContextCanceledErrors(t *testing.T) {
 	t.Parallel()
 	d, _, _ := setupTestProject(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // force QueryContext to fail
 
 	var sawErr error
@@ -164,7 +164,7 @@ func TestExportPendingClaimRequestsEmpty(t *testing.T) {
 func TestExportSequences(t *testing.T) {
 	t.Parallel()
 	d, _, _, _ := setupTestIssue(t) // creating rows advances sqlite_sequence
-	ctx := context.Background()
+	ctx := t.Context()
 	got := collectExport(t, d.ExportSequences(ctx))
 	require.NotEmpty(t, got)
 	for i := 1; i < len(got); i++ {
@@ -367,7 +367,7 @@ func TestExportEvents_UIDOnlyPeerSoftDeleted(t *testing.T) {
 func TestExportEvents_ScrubsOmittedPeerRefs(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	alpha, err := d.CreateProject(ctx, "alpha")
 	require.NoError(t, err)
 	beta, err := d.CreateProject(ctx, "beta")
@@ -473,7 +473,7 @@ func TestExportIssues(t *testing.T) {
 func TestExportEvents_MovedIssueEventsSurvive(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	srcP, err := d.CreateProject(ctx, "src")
 	require.NoError(t, err)
 	tgtP, err := d.CreateProject(ctx, "target")
@@ -531,7 +531,7 @@ func TestExportEvents_MovedIssueEventsSurvive(t *testing.T) {
 func TestExportEvents_MovedIssueEventsSurviveReExport(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	srcP, err := d.CreateProject(ctx, "src")
 	require.NoError(t, err)
 	tgtP, err := d.CreateProject(ctx, "target")

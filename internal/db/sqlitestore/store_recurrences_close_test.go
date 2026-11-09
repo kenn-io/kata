@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,7 +21,7 @@ func TestCloseDone_MaterializesNextRecurrence(t *testing.T) {
 
 	// Next-week instance must exist.
 	var n int
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT COUNT(*) FROM issues
 		 WHERE recurrence_id = ? AND occurrence_key = ?`,
 		rec.ID, "2026-05-18",
@@ -32,7 +31,7 @@ func TestCloseDone_MaterializesNextRecurrence(t *testing.T) {
 	assertEventCount(t, d, "recurrence.materialized", 1)
 
 	// issue.created event for the new instance should also exist.
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT COUNT(*) FROM events WHERE type='issue.created'
 		  AND issue_id = (SELECT id FROM issues WHERE recurrence_id = ? AND occurrence_key = ?)`,
 		rec.ID, "2026-05-18",
@@ -41,7 +40,7 @@ func TestCloseDone_MaterializesNextRecurrence(t *testing.T) {
 
 	// recurrence next_occurrence_key should advance to the week after 2026-05-18.
 	var nextKey *string
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT next_occurrence_key FROM recurrences WHERE id = ?`, rec.ID,
 	).Scan(&nextKey))
 	require.NotNil(t, nextKey)
@@ -67,7 +66,7 @@ func TestCloseDone_DisallowsRecurrenceEffectsAtomically(t *testing.T) {
 	require.Equal(t, "open", issue.Status)
 
 	var n int
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT COUNT(*) FROM issues
 		 WHERE recurrence_id = ? AND occurrence_key = ?`, rec.ID, "2026-05-18").Scan(&n))
 	require.Zero(t, n)
@@ -116,7 +115,7 @@ func TestCloseWontfix_DoesNotMaterialize(t *testing.T) {
 
 	// Confirm no new recurrence instance was created.
 	var n int
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT COUNT(*) FROM issues WHERE recurrence_id = ? AND status='open'`, rec.ID,
 	).Scan(&n))
 	assert.Equal(t, 0, n, "no open instances should exist after wontfix close")
@@ -125,7 +124,7 @@ func TestCloseWontfix_DoesNotMaterialize(t *testing.T) {
 func TestCloseDone_NonRecurrenceIssueIsNoOp(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "p")
 	require.NoError(t, err)
 	iss := seedIssueInProject(t, d, p.ID, "regular", "tester")
@@ -135,7 +134,7 @@ func TestCloseDone_NonRecurrenceIssueIsNoOp(t *testing.T) {
 
 	// No recurrence-related events.
 	var n int
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT COUNT(*) FROM events
 		 WHERE type IN (
 		   'recurrence.materialized',
@@ -161,14 +160,14 @@ func TestCloseDone_LabelsSeededFromTemplate(t *testing.T) {
 
 	// Retrieve the new instance's ID.
 	var newID int64
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT id FROM issues WHERE recurrence_id = ? AND occurrence_key = ?`,
 		rec.ID, "2026-05-18",
 	).Scan(&newID))
 
 	// Both template labels must be present.
 	var labelCount int
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT COUNT(*) FROM issue_labels WHERE issue_id = ?`, newID,
 	).Scan(&labelCount))
 	assert.Equal(t, 2, labelCount, "new instance should inherit both template labels")
@@ -186,7 +185,7 @@ func TestCloseDone_MetadataContainsScheduledOn(t *testing.T) {
 	require.NoError(t, err)
 
 	var metadata string
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT metadata FROM issues WHERE recurrence_id = ? AND occurrence_key = ?`,
 		rec.ID, "2026-05-18",
 	).Scan(&metadata))

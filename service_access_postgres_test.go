@@ -17,7 +17,7 @@ import (
 )
 
 func TestServicePostgresTransactionFenceRollsBackWithMutation(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
@@ -48,7 +48,7 @@ func TestServicePostgresTransactionFenceRollsBackWithMutation(t *testing.T) {
 		`CREATE TABLE kata.fence_markers (attempt BIGINT NOT NULL)`)
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/"+
 		strconv.FormatInt(project.Project.ID, 10)+"/issues",
 		bytes.NewBufferString(`{"actor":"ignored","title":"must roll back"}`))
 	request.Header.Set("Content-Type", "application/json")

@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -28,7 +29,7 @@ import (
 
 func doctorServerContext(t *testing.T, replies map[string]string, statuses map[string]int) context.Context {
 	ts := doctorTestServer(t, replies, statuses)
-	return context.WithValue(context.Background(), client.BaseURLKey{}, ts.URL)
+	return context.WithValue(t.Context(), client.BaseURLKey{}, ts.URL)
 }
 
 func doctorTestServer(t *testing.T, replies map[string]string, statuses map[string]int) *httptest.Server {
@@ -68,7 +69,7 @@ func TestDoctorRejectsOversizedResponses(t *testing.T) {
 	t.Cleanup(server.Close)
 	apiClient, err := newDoctorAPIClient(server.URL, server.Client())
 	require.NoError(t, err)
-	_, err = apiClient.PingWithResponse(context.Background())
+	_, err = apiClient.PingWithResponse(t.Context())
 	require.ErrorIs(t, err, errDoctorResponseTooLarge, "doctor's generated client must preserve the bounded read budget")
 }
 
@@ -90,7 +91,7 @@ func TestDoctorRejectsOversizedDecompressedResponses(t *testing.T) {
 	t.Cleanup(transport.CloseIdleConnections)
 	apiClient, err := newDoctorAPIClient(server.URL, &http.Client{Transport: transport})
 	require.NoError(t, err)
-	_, err = apiClient.PingWithResponse(context.Background())
+	_, err = apiClient.PingWithResponse(t.Context())
 	require.ErrorIs(t, err, errDoctorResponseTooLarge, "doctor must cap the decoded response body")
 }
 
@@ -141,7 +142,7 @@ func TestDoctorWarnsWhenScopedCatalogCannotConfirmProject(t *testing.T) {
 	t.Setenv("KATA_SERVER", server.URL)
 	flags = globalFlags{Workspace: workspace, Project: "example-project"}
 
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	require.EqualValues(t, "ok", doctorFinding(t, report, "daemon.connection").Status)
 	require.EqualValues(t, "warn", doctorFinding(t, report, "workspace.project").Status,
 		"a scoped catalog cannot prove that an unlisted project is absent")
@@ -172,6 +173,54 @@ func TestDoctorReportsLexicalSearchWhenEmbeddingsAreDisabled(t *testing.T) {
 	require.Contains(t, finding.Summary, "lexical search remains available")
 }
 
+func TestDoctorReportsUnresolvableDocbankKey(t *testing.T) {
+	_, workspace := doctorTestEnv(t)
+	keyFile := filepath.Join(t.TempDir(), "missing", "docbank.key")
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.Docbank = docbank.NewClient("http://127.0.0.1:9", config.DocbankConfig{APIKeyFile: keyFile}.ResolveKey)
+	})
+	ctx := context.WithValue(t.Context(), client.BaseURLKey{}, env.URL)
+	flags = globalFlags{Workspace: workspace}
+
+	finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+
+	require.EqualValues(t, "warn", finding.Status)
+	require.Equal(t, []string{"source: file:" + keyFile, "reason: cannot read credential file"}, finding.Details)
+}
+
+func TestDoctorDocbankCheckFollowsHealth(t *testing.T) {
+	for _, tc := range []struct {
+		name, health, status, summary string
+	}{
+		{"key resolves", `{"ok":true,"schema_version":28,"api_schema_version":"0.44.0","db_path":"/data/kata.db","docbank":{"credential":"ok"}}`, "ok", "resolves its Docbank API key"},
+		{"no key source", `{"ok":true,"schema_version":28,"api_schema_version":"0.44.0","db_path":"/data/kata.db"}`, "info", "no Docbank key source to check"},
+		{"daemon predates key health", `{"ok":true,"schema_version":28,"api_schema_version":"0.43.0","db_path":"/data/kata.db"}`, "info", "Docbank key health requires daemon API 0.44.0 or newer; this daemon reports 0.43.0; upgrade the daemon"},
+		{"daemon reports no API version", `{"ok":true,"schema_version":28,"db_path":"/data/kata.db"}`, "info", "this daemon reports no api_schema_version"},
+		{"health without diagnostics", `{"ok":true,"schema_version":28,"api_schema_version":"0.44.0"}`, "info", "did not provide Docbank health details"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, workspace := doctorTestEnv(t)
+			flags = globalFlags{Workspace: workspace, Project: "example-project"}
+			ctx := doctorServerContext(t, map[string]string{"/api/v1/health": tc.health}, nil)
+			finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+			require.EqualValues(t, tc.status, finding.Status)
+			require.Contains(t, finding.Summary, tc.summary)
+		})
+	}
+}
+
+func TestDoctorStripsTerminalControlsFromReportedAPIVersion(t *testing.T) {
+	_, workspace := doctorTestEnv(t)
+	flags = globalFlags{Workspace: workspace, Project: "example-project"}
+	health := `{"ok":true,"schema_version":28,"api_schema_version":"0.43.0\u001b[2J\n[ok] daemon.docbank: forged","db_path":"/data/kata.db"}`
+	ctx := doctorServerContext(t, map[string]string{"/api/v1/health": health}, nil)
+
+	summary := doctorFinding(t, collectDoctor(ctx), "daemon.docbank").Summary
+
+	require.NotContains(t, summary, "\x1b", "doctor prints summaries unfiltered")
+	require.NotContains(t, summary, "\n")
+}
+
 func TestDoctorProfileIdentityUsesBoundedTimeout(t *testing.T) {
 	instanceCalls := &atomic.Int32{}
 	server := setupDoctorLocalProfileTarget(t, func(uid string, w http.ResponseWriter, _ *http.Request) {
@@ -181,7 +230,7 @@ func TestDoctorProfileIdentityUsesBoundedTimeout(t *testing.T) {
 	t.Cleanup(server.Close)
 	t.Setenv("KATA_HTTP_TIMEOUT", "1ns")
 
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	require.EqualValues(t, "ok", doctorFinding(t, report, "daemon.connection").Status,
 		"profile identity must use doctor's five-second client budget rather than KATA_HTTP_TIMEOUT")
 	require.EqualValues(t, 1, instanceCalls.Load())
@@ -197,7 +246,7 @@ func TestDoctorProfileIdentityRejectsOversizedResponse(t *testing.T) {
 	t.Cleanup(server.Close)
 	t.Setenv("KATA_HTTP_TIMEOUT", "10s")
 
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	require.EqualValues(t, "fail", doctorFinding(t, report, "daemon.connection").Status,
 		"the profile identity response must obey doctor's eight-MiB body limit")
 	require.EqualValues(t, 1, instanceCalls.Load())
@@ -251,7 +300,7 @@ func TestDoctorStoppedLocalProfileDoesNotCreateFiles(t *testing.T) {
 	config := fmt.Sprintf("[[daemon]]\nname='example-local'\nlocal=true\nhome=%q\ninstance_uid='01HZZZZZZZZZZZZZZZZZZZZZ01'\n", profileHome)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600))
 	flags = globalFlags{Workspace: workspace, Daemon: "example-local"}
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	require.EqualValues(t, "info", doctorFinding(t, report, "daemon.connection").Status)
 	require.False(t, report.Failed(), "a stopped local profile starts on its next command")
 	_, err := os.Stat(profileHome)
@@ -282,7 +331,7 @@ func TestDoctorChecksExplicitDaemonWhenWorkspaceCannotResolve(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600))
 	flags = globalFlags{Workspace: filepath.Join(workspace, "missing"), Daemon: "example-remote"}
 
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	require.EqualValues(t, "ok", doctorFinding(t, report, "daemon.connection").Status)
 	require.True(t, pinged, "doctor must contact the explicitly selected daemon without a valid workspace")
 	require.EqualValues(t, "fail", doctorFinding(t, report, "config.workspace").Status)
@@ -294,7 +343,7 @@ func TestDoctorUsesKataServerWhenWorkspaceCannotResolve(t *testing.T) {
 	t.Setenv("KATA_SERVER", server.URL)
 	flags = globalFlags{Workspace: filepath.Join(workspace, "missing")}
 
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	require.EqualValues(t, "ok", doctorFinding(t, report, "daemon.connection").Status)
 	require.EqualValues(t, "fail", doctorFinding(t, report, "config.workspace").Status)
 }
@@ -308,7 +357,7 @@ func TestDoctorUsesExplicitProjectWhenWorkspaceCannotResolve(t *testing.T) {
 		Project:   "example-project",
 	}
 
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	require.EqualValues(t, "fail", doctorFinding(t, report, "config.workspace").Status)
 	require.EqualValues(t, "ok", doctorFinding(t, report, "daemon.connection").Status)
 	require.EqualValues(t, "ok", doctorFinding(t, report, "workspace.project").Status,
@@ -322,7 +371,7 @@ func TestDoctorUsesActiveDaemonWhenWorkspaceCannotResolve(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600))
 	flags = globalFlags{Workspace: filepath.Join(workspace, "missing")}
 
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	require.EqualValues(t, "ok", doctorFinding(t, report, "daemon.connection").Status)
 	require.EqualValues(t, "fail", doctorFinding(t, report, "config.workspace").Status)
 }
@@ -351,7 +400,7 @@ func TestDoctorBoundsNamedDaemonResolutionPingResponse(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600))
 	flags = globalFlags{Workspace: workspace, Daemon: "example-remote"}
 
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	require.EqualValues(t, 1, pingRequests.Load(), "named discovery must not issue an unbounded ping before doctor's capped request")
 	require.EqualValues(t, "fail", doctorFinding(t, report, "daemon.connection").Status)
 }
@@ -364,7 +413,7 @@ func TestDoctorNamedLocalDiscoveryDoesNotRepairRuntimePermissions(t *testing.T) 
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[[daemon]]\nname='example-local'\nlocal=true\n"), 0600))
 	flags = globalFlags{Workspace: workspace, Daemon: "example-local"}
 
-	require.EqualValues(t, "warn", doctorFinding(t, collectDoctor(context.Background()), "daemon.connection").Status)
+	require.EqualValues(t, "warn", doctorFinding(t, collectDoctor(t.Context()), "daemon.connection").Status)
 	assertUnchanged()
 }
 
@@ -381,7 +430,7 @@ func TestDoctorFailsForLocalProfileDirectoryWithLoosePermissions(t *testing.T) {
 	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, ns.DataDir)
 	flags = globalFlags{Workspace: workspace, Daemon: "example-local"}
 
-	report := collectDoctor(context.Background())
+	report := collectDoctor(t.Context())
 	check := doctorFinding(t, report, "daemon.connection")
 	require.EqualValues(t, "fail", check.Status,
 		"ordinary commands reject a local profile directory with loose permissions instead of repairing it")
@@ -401,7 +450,7 @@ func TestDoctorFailsWhenLiveLocalRuntimeIsUnreachable(t *testing.T) {
 	require.NoError(t, err)
 	flags = globalFlags{Workspace: workspace}
 
-	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(context.Background()), "daemon.connection").Status,
+	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(t.Context()), "daemon.connection").Status,
 		"a live runtime record whose endpoint does not answer is a real failure, not a stopped daemon")
 }
 
@@ -422,7 +471,7 @@ func TestDoctorDiscoveryRejectsRedirects(t *testing.T) {
 	}))
 	t.Cleanup(source.Close)
 	t.Setenv("KATA_SERVER", source.URL)
-	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(context.Background()), "daemon.connection").Status)
+	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(t.Context()), "daemon.connection").Status)
 	require.False(t, contacted, "discovery must never contact a redirected origin")
 }
 
@@ -471,7 +520,7 @@ func TestDoctorUnavailableRemoteDoesNotCreateLocalRuntime(t *testing.T) {
 	home, workspace := doctorTestEnv(t)
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
 	flags = globalFlags{Workspace: workspace}
-	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(context.Background()), "daemon.connection").Status)
+	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(t.Context()), "daemon.connection").Status)
 	entries, err := os.ReadDir(home)
 	require.NoError(t, err)
 	require.Empty(t, entries)

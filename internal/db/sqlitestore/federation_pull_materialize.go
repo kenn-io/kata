@@ -18,10 +18,7 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 	if len(eventUIDs) == 0 {
 		return nil
 	}
-	attempt := 0
-	return d.RetryTransient(ctx, func() error {
-		attempt++
-		locked := attempt > federationIngestOptimisticAttempts
+	return d.retryFederationPreparation(ctx, func(locked bool) error {
 		txCtx := ctx
 		if !locked {
 			txCtx = withOptimisticWrite(ctx)
@@ -40,6 +37,12 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 		if err != nil {
 			return err
 		}
+		if materialization.fullReplay {
+			if err := tx.Rollback(); err != nil {
+				return err
+			}
+			return d.MaterializeFederatedProject(ctx, projectID)
+		}
 		if !locked {
 			if d.federationIngestPrepared != nil {
 				d.federationIngestPrepared()
@@ -49,6 +52,9 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 			}
 		}
 		if err := materialization.apply(ctx, tx, projectID, db.NewCronReplayValidator(tx, false)); err != nil {
+			return err
+		}
+		if err := db.RecordMCPEventsRematch(ctx, tx, eventUIDs); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -65,11 +71,14 @@ func preparePulledFederationMaterializationTx(ctx context.Context, tx *sql.Tx, p
 	full := false
 	for _, ev := range events {
 		uid := db.FederationEventIssueUID(ev.IssueUID, ev.Payload)
-		// Project/cron state, moves and unidentified events can affect more than
-		// one issue. Keep the complete fold for these and replay-horizon baselines.
-		if uid == "" || strings.HasPrefix(ev.Type, "project.") || strings.HasPrefix(ev.Type, "cron.") || ev.Type == "issue.moved" {
+		switch {
+		case db.EventRequiredFeatures(ev.Type) == db.CronEventFeature:
+			// Common preparation folds complete cron history separately.
+		case uid == "" || strings.HasPrefix(ev.Type, "project.") || ev.Type == "issue.moved":
+			// Project state, moves and unidentified events can affect more than
+			// one issue.
 			full = true
-		} else if !slices.Contains(scope, uid) {
+		case !slices.Contains(scope, uid):
 			scope = append(scope, uid)
 		}
 		prepared = append(prepared, preparedFederationIngestEvent{Event: db.RemoteEvent{

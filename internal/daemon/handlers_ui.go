@@ -108,20 +108,13 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
-			return nil, err
-		}
-		issue, err := resolveIssueRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-		if err != nil {
-			return nil, err
-		}
-		if err := authorizeIssueScopedIssue(ctx, cfg.DB, issue); err != nil {
 			return nil, err
 		}
 		out := &api.UIIssueReferenceResponse{}
 		out.Body.Issue.UID = issue.UID
-		out.Body.Issue.ProjectUID = project.UID
+		out.Body.Issue.ProjectUID = issue.ProjectUID
 		return out, nil
 	})
 
@@ -729,7 +722,8 @@ func uiValidationError(field, message string, data map[string]any) error {
 
 func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	policy := uiPolicy{Capabilities: api.UICapabilities{
-		Writable: !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
+		Attachments: cfg.Docbank != nil,
+		Writable:    !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
 	}}
 	if cfg.WebSessions != nil {
 		principal, _ := PrincipalFromContext(ctx)

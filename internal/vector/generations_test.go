@@ -21,13 +21,13 @@ func fillAll(t *testing.T, ix *Index, key string) {
 		}
 		return out, nil
 	}
-	if _, err := ix.Fill(context.Background(), key, enc, 0, nil, nil); err != nil {
+	if _, err := ix.Fill(t.Context(), key, enc, 0, nil, nil); err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 }
 
 func TestLifecycleEnsureCutOverBacklog(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	seedMirror(t, ix, "u1", 1)
 
@@ -97,7 +97,7 @@ func TestLifecycleEnsureCutOverBacklog(t *testing.T) {
 // requested key doesn't exist. An unknown key must error with zero side
 // effects: the previously active generation stays active and queryable.
 func TestCutOverUnknownKeyLeavesStateUntouched(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	seedMirror(t, ix, "u1", 1)
 
@@ -133,7 +133,7 @@ func TestCutOverUnknownKeyLeavesStateUntouched(t *testing.T) {
 // reclaiming its storage. A generation left retired-but-unreclaimed must
 // still be cleaned up by the next CutOver.
 func TestCutOverReclaimsAlreadyRetiredGenerations(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	seedMirror(t, ix, "u1", 1)
 

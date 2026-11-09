@@ -434,7 +434,25 @@ WHERE revoked_at IS NULL AND spoke_instance_uid=$1 AND project_id=$2 AND token_h
 	return output, err
 }
 
-func createFederationEnrollmentTx(
+func createFederationEnrollmentTx(ctx context.Context, tx *sql.Tx, prepared db.PreparedFederationEnrollment) (db.CreatedFederationEnrollment, error) {
+	if prepared.Params.SpokeName != "" {
+		if err := lockSpokeNames(ctx, tx); err != nil {
+			return db.CreatedFederationEnrollment{}, err
+		}
+	}
+	created, err := insertFederationEnrollmentTx(ctx, tx, prepared)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if prepared.Params.SpokeName != "" {
+		if err := db.WriteFederationSpokeName(ctx, tx, prepared.Params.SpokeInstanceUID, prepared.Params.SpokeName); err != nil {
+			return db.CreatedFederationEnrollment{}, err
+		}
+	}
+	return created, nil
+}
+
+func insertFederationEnrollmentTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	prepared db.PreparedFederationEnrollment,

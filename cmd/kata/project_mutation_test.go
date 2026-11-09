@@ -31,6 +31,55 @@ func TestFinishMutationRepairsBindingBeforeReportingDecodeError(t *testing.T) {
 	assert.Equal(t, "renamed-project", repaired)
 }
 
+func TestHistoricalMutationFollowupCommentUsesStableIssueUID(t *testing.T) {
+	for _, operation := range []string{"edit", "label add"} {
+		t.Run(operation, func(t *testing.T) {
+			t.Setenv("KATA_AUTHOR", "worker")
+			env, dir := setupCLIEnv(t)
+			source, err := env.DB.CreateProject(t.Context(), "source-project")
+			require.NoError(t, err)
+			target, err := env.DB.CreateProject(t.Context(), "target-project")
+			require.NoError(t, err)
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Title: "moved task", Author: "worker",
+			})
+			require.NoError(t, err)
+			collision, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: target.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "existing target task", Author: "worker",
+			})
+			require.NoError(t, err)
+			require.Equal(t, issue.ShortID, collision.ShortID)
+			_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+				IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker",
+			})
+			require.NoError(t, err)
+			moved, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.NotEqual(t, issue.ShortID, moved.ShortID)
+			oldRef := source.Name + "#" + issue.ShortID
+			if operation == "edit" {
+				runCLI(t, env, dir, "edit", oldRef, "--title", "continued work", "--comment", "continuing after relocation")
+				updated, err := env.DB.IssueByID(t.Context(), issue.ID)
+				require.NoError(t, err)
+				assert.Equal(t, "continued work", updated.Title)
+			} else {
+				runCLI(t, env, dir, "label", "add", oldRef, "example-label", "--comment", "continuing after relocation")
+				labels, err := env.DB.LabelsByIssue(t.Context(), issue.ID)
+				require.NoError(t, err)
+				require.Len(t, labels, 1)
+				assert.Equal(t, "example-label", labels[0].Label)
+			}
+			unrelatedComments, err := env.DB.CommentsByIssue(t.Context(), collision.ID)
+			require.NoError(t, err)
+			assert.Empty(t, unrelatedComments, "the destination's original short ID belongs to another issue")
+			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1, "the follow-up comment must stay with the mutated issue")
+			assert.Equal(t, "continuing after relocation", comments[0].Body)
+		})
+	}
+}
+
 func TestCreateRepairsRenamedWorkspaceAfterInlineResolution(t *testing.T) {
 	env := testenv.New(t)
 	dir, pid := initLocalBoundWorkspace(t, env, "old-project")

@@ -9,54 +9,74 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/stacktest"
 )
 
 func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = listener.Close() })
+	for _, tt := range []struct {
+		name       string
+		closeError bool
+		timeout    time.Duration
+	}{
+		{name: "plain", timeout: 5 * time.Second},
+		{name: "concurrent_close", closeError: true, timeout: time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = listener.Close() })
 
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(entered)
-		<-release
-		w.WriteHeader(http.StatusNoContent)
-	})
-	server := &Server{handler: handler}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx, listener) }()
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				close(entered)
+				<-release
+				w.WriteHeader(http.StatusNoContent)
+			})
+			server := &Server{handler: handler}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+			serveListener := listener
+			if tt.closeError {
+				serveListener = closeErrorListener{Listener: listener}
+			}
+			go func() { done <- server.Serve(ctx, serveListener) }()
 
-	responseDone := make(chan error, 1)
-	go func() {
-		response, err := http.Get("http://" + listener.Addr().String())
-		if err == nil {
-			_ = response.Body.Close()
-		}
-		responseDone <- err
-	}()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("request did not enter handler")
+			responseDone := make(chan error, 1)
+			go func() {
+				req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+listener.Addr().String(), nil)
+				require.NoError(t, reqErr)
+				response, err := http.DefaultClient.Do(req)
+				if err == nil {
+					_ = response.Body.Close()
+				}
+				responseDone <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(tt.timeout):
+				stacktest.Dump(t)
+				t.Fatal("request did not enter handler")
+			}
+
+			cancel()
+			select {
+			case err := <-done:
+				t.Fatalf("Serve returned before active handler completed: %v", err)
+			case <-time.After(50 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; release holds the active handler, so Serve must not return
+			}
+
+			close(release)
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(tt.timeout):
+				stacktest.Dump(t)
+				t.Fatal("Serve did not return after active handler completed")
+			}
+			require.NoError(t, <-responseDone)
+		})
 	}
-
-	cancel()
-	select {
-	case err := <-done:
-		t.Fatalf("Serve returned before active handler completed: %v", err)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the active handler, so Serve must not return
-	}
-
-	close(release)
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("Serve did not return after active handler completed")
-	}
-	require.NoError(t, <-responseDone)
 }
 
 type closeErrorListener struct {
@@ -68,52 +88,8 @@ func (l closeErrorListener) Close() error {
 	return net.ErrClosed
 }
 
-func TestServeTreatsConcurrentListenerCloseAsDrained(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	server := &Server{handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(entered)
-		<-release
-		w.WriteHeader(http.StatusNoContent)
-	})}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx, closeErrorListener{Listener: listener}) }()
-
-	responseDone := make(chan error, 1)
-	go func() {
-		response, requestErr := http.Get("http://" + listener.Addr().String())
-		if requestErr == nil {
-			_ = response.Body.Close()
-		}
-		responseDone <- requestErr
-	}()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("request did not enter handler")
-	}
-	cancel()
-	select {
-	case err := <-done:
-		t.Fatalf("Serve returned before active handler completed: %v", err)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the active handler, so Serve must not return
-	}
-	close(release)
-
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("Serve did not return after context cancellation")
-	}
-	require.NoError(t, <-responseDone)
-}
-
 func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
 
@@ -123,12 +99,14 @@ func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
 		close(entered)
 		<-release
 	})
-	server := &Server{handler: handler, shutdownTimeout: 20 * time.Millisecond}
-	ctx, cancel := context.WithCancel(context.Background())
+	server := &Server{handler: handler, shutdownTimeout: 20 * time.Millisecond} //nolint:kennlint // deadlinetest: the handler stays blocked; shutdown deadline expiry must prevent safe dependency cleanup
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx, listener) }()
 	go func() {
-		response, requestErr := http.Get("http://" + listener.Addr().String())
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+listener.Addr().String(), nil)
+		require.NoError(t, reqErr)
+		response, requestErr := http.DefaultClient.Do(req)
 		if requestErr == nil {
 			_ = response.Body.Close()
 		}
@@ -137,6 +115,7 @@ func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("request did not enter handler")
 	}
 	cancel()
@@ -144,20 +123,16 @@ func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
 	case serveErr := <-done:
 		require.ErrorIs(t, serveErr, ErrHTTPHandlersUnjoined)
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("Serve did not report the unjoined handler")
-	}
-	select {
-	case <-release:
-		t.Fatal("handler release channel unexpectedly closed")
-	default:
 	}
 	close(release)
 }
 
 func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.T) {
-	first, err := net.Listen("tcp", "127.0.0.1:0")
+	first, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	second, err := net.Listen("tcp", "127.0.0.1:0")
+	second, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
 	entered := make(chan struct{})
@@ -170,7 +145,7 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 	stopping := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- server.ServeListenersWithStop(context.Background(), func() {
+		done <- server.ServeListenersWithStop(t.Context(), func() {
 			close(stopping)
 		},
 			ListenerBinding{Listener: first, Policy: ListenerPolicy{Kind: ListenerSocket}},
@@ -178,7 +153,9 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 		)
 	}()
 	go func() {
-		response, requestErr := http.Get("http://" + second.Addr().String())
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+second.Addr().String(), nil)
+		require.NoError(t, reqErr)
+		response, requestErr := http.DefaultClient.Do(req)
 		if requestErr == nil {
 			_ = response.Body.Close()
 		}
@@ -186,6 +163,7 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("request did not enter sibling handler")
 	}
 
@@ -193,26 +171,27 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 	select {
 	case <-stopping:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("listener exit did not notify root shutdown")
 	}
 	select {
 	case err := <-done:
 		t.Fatalf("ServeListeners returned before sibling handler drained: %v", err)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the sibling handler, so ServeListeners must not return
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; release holds the sibling handler, so ServeListeners must not return
 	}
 	close(release)
 	require.True(t, errors.Is(<-done, net.ErrClosed))
 }
 
 func TestServeListenersDoesNotNotifyReadyBeforeHandlerValidation(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
 
 	server := &Server{handler: http.NotFoundHandler()}
 	ready := false
 	err = server.ServeListenersWithLifecycle(
-		context.Background(),
+		t.Context(),
 		func() error {
 			ready = true
 			return nil

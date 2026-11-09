@@ -1,7 +1,6 @@
 package pgstore_test
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"sort"
@@ -22,7 +21,7 @@ func TestSchemaBootstrapRejectsExtensionsOutsidePublic(t *testing.T) {
 
 	for _, extension := range []string{"unaccent", "vector"} {
 		t.Run(extension, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 			t.Cleanup(cleanup)
 
@@ -69,7 +68,7 @@ func TestSchemaBootstrapRejectsExtensionsOutsidePublic(t *testing.T) {
 // Full constraint/index name parity with sqlitestore belongs in the later
 // conformance suite; this test pins the baseline acceptance subset.
 var expectedTables = []string{
-	"cron_jobs", "cron_workflows", "cron_runs",
+	"cron_jobs", "cron_workflows", "cron_runs", "mcp_event_subscriptions",
 	"federation_embedding_artifacts",
 	"federation_relay_outbox", "federation_relay_inbox", "federation_relay_cursors",
 	"federation_root_keys", "federation_event_provenance", "federation_entity_provenance",
@@ -112,9 +111,6 @@ var expectedTriggers = []string{
 	// FTS sync.
 	"issues_search_after_issue_insert",
 	"issues_search_after_issue_update",
-	"issues_search_after_comment_insert",
-	"issues_search_after_comment_update",
-	"issues_search_after_comment_delete",
 }
 
 // expectedFKCounts pins the per-table foreign-key counts. The conformance
@@ -152,7 +148,7 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -230,6 +226,14 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 		   AND indexname = 'idx_issues_search_tsv'`).Scan(&ftsGinIndex)
 	require.NoError(t, err)
 	assert.Equal(t, "idx_issues_search_tsv", ftsGinIndex)
+	var commentGinIndex string
+	err = s.QueryRowContext(ctx, `
+		SELECT indexdef FROM pg_indexes
+		 WHERE schemaname = current_schema()
+		   AND tablename = 'comments'
+		   AND indexname = 'idx_comments_search'`).Scan(&commentGinIndex)
+	require.NoError(t, err)
+	assert.Contains(t, commentGinIndex, "USING gin (to_tsvector('kata_simple_unaccent'::regconfig, body))")
 
 	// --- text search config ---
 	var textSearchConfig string
@@ -258,9 +262,6 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 		"enforce_uid_immutable",
 		"rebuild_issue_search",
 		"issues_search_trigger_on_issue",
-		"issues_search_trigger_on_comment_insert",
-		"issues_search_trigger_on_comment_update",
-		"issues_search_trigger_on_comment_delete",
 	} {
 		var name string
 		err := s.QueryRowContext(ctx, `
@@ -277,7 +278,7 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 // test on error.
 func queryStrings(t *testing.T, s *pgstore.Store, q string) []string {
 	t.Helper()
-	rows, err := s.QueryContext(context.Background(), q)
+	rows, err := s.QueryContext(t.Context(), q)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var out []string

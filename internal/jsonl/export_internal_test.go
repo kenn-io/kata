@@ -2,7 +2,6 @@ package jsonl
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -77,7 +76,7 @@ func TestExportForCutoverPreservesAssignment(t *testing.T) {
 
 func TestExportSnapshotV14FederationEnrollmentPreservesAdoptionMarker(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = source.Close() })
@@ -116,7 +115,7 @@ func TestMarshalLegacyGitHubSyncConfigUsesDeterministicJSON(t *testing.T) {
 
 func TestExportSnapshotCarriesExternalRootStateWithoutLiveClaim(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = source.Close() })

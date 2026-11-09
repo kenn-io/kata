@@ -45,6 +45,7 @@ type HealthResponse struct {
 		Uptime           string                  `json:"uptime"`
 		StartedAt        time.Time               `json:"started_at"`
 		Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
+		Docbank          *DocbankHealth          `json:"docbank,omitempty"`
 		FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 		IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
 		RootSigning      *RootSigningHealth      `json:"root_signing,omitempty"`
@@ -96,6 +97,16 @@ type UISessionResponse struct {
 	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
 }
 
+// DocbankHealth reports whether the daemon can resolve its Docbank API key.
+// It is present only when [docbank] is configured, and it never contacts Docbank.
+type DocbankHealth struct {
+	// Not an enum: a generated DocbankHealthCredential would take the Missing/Ok
+	// constant names from EmbeddingsHealthCredential in pkg/client.
+	Credential       string `json:"credential" doc:"Docbank API key state, ok or missing; an advisory warning that does not change health.ok."`
+	CredentialSource string `json:"credential_source,omitempty" doc:"Key source that failed: file:<path> or env:<NAME>; never the key value."`
+	CredentialReason string `json:"credential_reason,omitempty" doc:"Why the key source cannot supply a key."`
+}
+
 // EmbeddingsHealth is the semantic-search reconciler's operator-visible state
 // on the wire. It is present only when the daemon has embeddings configured;
 // an absent block means semantic search is disabled. It mirrors
@@ -105,8 +116,8 @@ type EmbeddingsHealth struct {
 	Credential       string     `json:"credential,omitempty" enum:"missing,rejected,ok" doc:"Embedding credential state; an advisory warning that does not change health.ok."`
 	CredentialSource string     `json:"credential_source,omitempty" doc:"Selected credential source: inline, file:<path>, env:<NAME>, or none; never the key value."`
 	CredentialReason string     `json:"credential_reason,omitempty" doc:"Readable missing or rejected credential reason, without provider response bodies."`
-	LastError        string     `json:"last_error,omitempty" doc:"Sanitized credential rejection; cleared after the next successful embedding call."`
-	LastErrorAt      *time.Time `json:"last_error_at,omitempty" doc:"Time of the credential rejection; cleared after the next successful embedding call."`
+	LastError        string     `json:"last_error,omitempty" doc:"Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call."`
+	LastErrorAt      *time.Time `json:"last_error_at,omitempty" doc:"Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call."`
 	Configured       bool       `json:"configured"`
 	LastSuccessAt    *time.Time `json:"last_success_at,omitempty" doc:"Time of the last successful reconciliation, including cycles with no pending issues; query requests do not update it."`
 	LastErrorStatus  int        `json:"last_error_status,omitempty,omitzero"`
@@ -278,8 +289,8 @@ type PendingClaimOut struct {
 }
 
 // ProjectStatsOut is the per-project aggregate returned by GET
-// /api/v1/projects?include=stats. LastEventAt is nil for a project with
-// zero events. Spec §7.2.
+// /api/v1/projects?include=stats. LastEventAt is the created_at of the project's
+// newest event by id, or nil for zero events. Spec §7.2.
 type ProjectStatsOut struct {
 	Open        int        `json:"open"`
 	Closed      int        `json:"closed"`
@@ -527,6 +538,7 @@ type MutationResponse struct {
 type ListIssuesRequest struct {
 	Cursor       string `query:"cursor,omitempty" doc:"Opaque next_cursor from a matching stable-order page"`
 	IncludeTotal bool   `query:"include_total,omitempty" doc:"Count all matching issues, ignoring cursor and limit"`
+	Compact      bool   `query:"compact,omitempty" doc:"Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read"`
 
 	ProjectID     int64    `path:"project_id" required:"true"`
 	Status        string   `query:"status,omitempty" enum:"open,closed,"`
@@ -554,6 +566,7 @@ type ListAllIssuesRequest struct {
 
 	Cursor       string `query:"cursor,omitempty" doc:"Opaque next_cursor from a matching stable-order page"`
 	IncludeTotal bool   `query:"include_total,omitempty" doc:"Count all matching issues, ignoring cursor and limit"`
+	Compact      bool   `query:"compact,omitempty" doc:"Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read"`
 
 	ProjectID     int64    `query:"project_id,omitempty"`
 	Status        string   `query:"status,omitempty" enum:"open,closed,"`
@@ -613,6 +626,13 @@ type IssueOut struct {
 	// server-computed display state, distinct from BlockedBy which carries
 	// the full (policy-free) set of blocker relationship edges.
 	Blocked bool `json:"blocked,omitempty,omitzero"`
+	// ScheduledOnDate and DeadlineOnDate are the issue's planning dates as
+	// calendar dates, resolved by the same rule as the browser snapshot.
+	ScheduledOnDate string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
+	DeadlineOnDate  string `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
+	// Oversized marks a compact row too large to send whole. It then carries
+	// only the issue's identity and status.
+	Oversized bool `json:"oversized,omitempty,omitzero" doc:"Set on a compact row too large to send whole; the row then carries only the issue's identity and status."`
 }
 
 // PageMetadata distinguishes terminal pages from bounded discovery results.
@@ -785,7 +805,9 @@ type ReachableGraphResponse struct {
 // author and timestamp detail.
 type ShowIssueOut struct {
 	db.Issue
-	Labels []string `json:"labels"`
+	Labels          []string `json:"labels"`
+	ScheduledOnDate string   `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
+	DeadlineOnDate  string   `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
 }
 
 // ShowIssueResponse is the per-issue read payload (Plan 2: + links, + labels).
@@ -1247,6 +1269,7 @@ type ClaimResponseBody struct {
 // ReadyRequest is GET /api/v1/projects/{id}/ready.
 type ReadyRequest struct {
 	ProjectID     int64    `path:"project_id" required:"true"`
+	Sort          string   `query:"sort,omitempty" enum:"priority," doc:"priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order"`
 	Limit         int      `query:"limit,omitempty"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
@@ -1266,6 +1289,7 @@ type ReadyResponse struct {
 // ReadyGlobalRequest is GET /api/v1/ready (no project_id; spans every
 // non-archived project).
 type ReadyGlobalRequest struct {
+	Sort          string   `query:"sort,omitempty" enum:"priority," doc:"priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order"`
 	Limit         int      `query:"limit,omitempty"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
@@ -1450,7 +1474,8 @@ type SearchHit struct {
 // response is byte-identical to its pre-semantic shape apart from the
 // always-present mode echo.
 type SearchResponse struct {
-	Body struct {
+	EmbeddingsConfigured string `header:"X-Kata-Embeddings-Configured" doc:"Whether the daemon has an embeddings provider configured."`
+	Body                 struct {
 		PageMetadata
 
 		Query          string      `json:"query"`
@@ -1570,14 +1595,18 @@ type RecurrenceTemplateInput struct {
 }
 
 // CreateRecurrenceRequest is POST /api/v1/projects/{project_id}/recurrences.
+//
+// An optional If-Match carries the "rev-N" ETag of the initial issue and is
+// accepted only with initial_issue_ref; a revision other than N is 412.
 type CreateRecurrenceRequest struct {
-	ProjectID int64 `path:"project_id" required:"true"`
+	ProjectID int64  `path:"project_id" required:"true"`
+	IfMatch   string `header:"If-Match"`
 	Body      struct {
 		Actor           string                  `json:"actor,omitempty"`
 		InitialIssueRef string                  `json:"initial_issue_ref,omitempty"`
 		RRule           string                  `json:"rrule" required:"true"`
 		DTStart         string                  `json:"dtstart" required:"true"`
-		Timezone        string                  `json:"timezone" required:"true"`
+		Timezone        string                  `json:"timezone" required:"true" doc:"IANA time zone such as America/New_York or UTC. Local is rejected because it depends on the daemon host."`
 		Template        RecurrenceTemplateInput `json:"template"`
 	}
 }
@@ -1638,7 +1667,7 @@ type PatchRecurrenceRequest struct {
 		Actor    string                         `json:"actor,omitempty"`
 		RRule    *string                        `json:"rrule,omitempty"`
 		DTStart  *string                        `json:"dtstart,omitempty"`
-		Timezone *string                        `json:"timezone,omitempty"`
+		Timezone *string                        `json:"timezone,omitempty" doc:"IANA time zone such as America/New_York or UTC. Changes to Local are rejected; an existing Local value may be retained by omitting timezone or echoing Local."`
 		Template *RecurrenceTemplateUpdateInput `json:"template,omitempty"`
 	}
 }
@@ -1753,6 +1782,7 @@ type MoveIssueRequest struct {
 	Body      struct {
 		Actor        string `json:"actor,omitempty"`
 		DryRun       bool   `json:"dry_run,omitempty" doc:"Validate without moving; If-Match may be omitted for a preview."`
+		Single       bool   `json:"single,omitempty" doc:"Move only this issue instead of its subtree."`
 		ToProjectUID string `json:"to_project_uid" required:"true"`
 	}
 }
@@ -1765,10 +1795,11 @@ type MoveIssueRequest struct {
 type MoveIssueResponse struct {
 	ETag string `header:"ETag"`
 	Body struct {
-		Issue      db.Issue `json:"issue"`
-		EventID    int64    `json:"event_id"`
-		NewShortID *string  `json:"new_short_id,omitempty"`
-		Changed    bool     `json:"changed"`
+		Issue      db.Issue   `json:"issue"`
+		Issues     []db.Issue `json:"issues,omitempty"`
+		EventID    int64      `json:"event_id"`
+		NewShortID *string    `json:"new_short_id,omitempty"`
+		Changed    bool       `json:"changed"`
 	}
 }
 
@@ -1787,3 +1818,32 @@ const (
 const (
 	ProjectMetadataKeyArea = "area"
 )
+
+// LocalEmbeddingsStatus reports daemon-wide search setup and its current work.
+type LocalEmbeddingsStatus struct {
+	Provider        string                   `json:"provider" enum:"none,ollama,built_in,other"`
+	DownloadBytes   int64                    `json:"download_bytes"`
+	OllamaAvailable bool                     `json:"ollama_available"`
+	CanChange       bool                     `json:"can_change"`
+	Job             *LocalEmbeddingsJob      `json:"job,omitempty"`
+	Indexing        *LocalEmbeddingsIndexing `json:"indexing,omitempty"`
+}
+
+// LocalEmbeddingsJob reports the current installation or restart.
+type LocalEmbeddingsJob struct {
+	State      string `json:"state"`
+	Downloaded int64  `json:"downloaded"`
+	Total      int64  `json:"total"`
+	Error      string `json:"error,omitempty"`
+}
+
+// LocalEmbeddingsIndexing reports indexing progress.
+type LocalEmbeddingsIndexing struct {
+	Done       int64  `json:"done"`
+	Total      int64  `json:"total"`
+	ETASeconds *int64 `json:"eta_seconds,omitempty"`
+	Failed     bool   `json:"failed"`
+}
+
+// LocalEmbeddingsResponse carries the daemon-wide setup status.
+type LocalEmbeddingsResponse struct{ Body LocalEmbeddingsStatus }

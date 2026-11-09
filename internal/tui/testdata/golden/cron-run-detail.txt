@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ jobs [runs] workflows
+ runs / 01ARZ3NDEKTSV4RRFFQ69G5FAY
+
+▶ Status:     succeeded
+  Started:    05-01 10:00
+  Ended:      05-01 11:00
+  Recorded:   2026-05-01T11:00:00Z
+  Actor:      worker
+  Executor:   executor-a
+  Tokens:     30 input, 10 output
+
+  Message
+  Report ready
+
+  Recorded with
+  Job: Daily summary · current definition changed since this run
+  Workflow: Summary flow
+
+
+
+
+
+ j/k move▕ ↵/l follow▕ h/esc back▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

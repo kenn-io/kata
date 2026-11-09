@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +11,7 @@ import (
 func TestMoveIssueProject_HappyPath(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	srcP, err := d.CreateProject(ctx, "src")
 	require.NoError(t, err)
 	tgtP, err := d.CreateProject(ctx, "target")
@@ -54,7 +53,7 @@ func TestMoveIssueProject_HappyPath(t *testing.T) {
 func TestMoveIssueProject_PreservesLinks(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	srcP, _ := d.CreateProject(ctx, "src")
 	tgtP, _ := d.CreateProject(ctx, "target")
 	a := seedIssueInProject(t, d, srcP.ID, "A", "tester")
@@ -77,7 +76,7 @@ func TestMoveIssueProject_PreservesLinks(t *testing.T) {
 func TestMoveIssueProject_RefusesRecurrencePinned(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _ := d.CreateProject(ctx, "src")
 	tgt, _ := d.CreateProject(ctx, "target")
 	iss := seedIssueInProject(t, d, src.ID, "weekly", "tester")
@@ -98,7 +97,7 @@ func TestMoveIssueProject_RefusesRecurrencePinned(t *testing.T) {
 func TestMoveIssueProject_RefusesRevisionConflict(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _ := d.CreateProject(ctx, "src")
 	tgt, _ := d.CreateProject(ctx, "target")
 	iss := seedIssueInProject(t, d, src.ID, "stale", "tester")
@@ -115,7 +114,7 @@ func TestMoveIssueProject_RefusesRevisionConflict(t *testing.T) {
 func TestMoveIssueProject_RefusesSameProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, _ := d.CreateProject(ctx, "p")
 	iss := seedIssueInProject(t, d, p.ID, "same", "tester")
 
@@ -130,7 +129,7 @@ func TestMoveIssueProject_RefusesSameProject(t *testing.T) {
 func TestMoveIssueProject_RefusesSoftDeleted(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _ := d.CreateProject(ctx, "src")
 	tgt, _ := d.CreateProject(ctx, "tgt")
 	iss := seedIssueInProject(t, d, src.ID, "bye", "tester")
@@ -151,7 +150,7 @@ func TestMoveIssueProject_RefusesSoftDeleted(t *testing.T) {
 func TestMoveIssueProject_RehomesImportMappings(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _ := d.CreateProject(ctx, "src")
 	tgt, _ := d.CreateProject(ctx, "tgt")
 	iss := seedIssueInProject(t, d, src.ID, "mappable", "tester")
@@ -188,7 +187,7 @@ func TestMoveIssueProject_RehomesImportMappings(t *testing.T) {
 func TestMoveIssueProject_RejectsImportMappingCollisionsAtomically(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _ := d.CreateProject(ctx, "src")
 	tgt, _ := d.CreateProject(ctx, "tgt")
 	iss := seedIssueInProject(t, d, src.ID, "collision", "tester")

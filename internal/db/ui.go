@@ -71,18 +71,12 @@ func MatchUICalendarView(
 	query UISnapshotQuery,
 	scheduledDefaultTimezone string,
 ) (string, string, bool, error) {
-	scheduledDate, scheduled, err := metadata.ScheduledOnCalendarDate(
-		raw, query.TimeZone, scheduledDefaultTimezone,
-	)
-	if err != nil {
+	dates := resolvePlanningCalendarDates(raw, &query.TimeZone, scheduledDefaultTimezone, query.DefaultTimezone)
+	if err := dates.err(); err != nil {
 		return "", "", false, err
 	}
-	deadlineDate, deadline, err := metadata.DeadlineOnCalendarDate(
-		raw, query.TimeZone, query.DefaultTimezone,
-	)
-	if err != nil {
-		return "", "", false, err
-	}
+	scheduledDate, scheduled := dates.scheduledOn, dates.hasScheduledOn
+	deadlineDate, deadline := dates.deadlineOn, dates.hasDeadlineOn
 	switch query.View {
 	case "upcoming":
 		return scheduledDate, deadlineDate, scheduled && scheduledDate > query.LocalDate, nil

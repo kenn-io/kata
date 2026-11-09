@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -39,7 +38,7 @@ func TestDoctorLocalConfiguration(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(home, tc.file), []byte(tc.content), 0600))
 			}
 			flags = globalFlags{Workspace: workspace}
-			r := collectDoctor(context.Background())
+			r := collectDoctor(t.Context())
 			require.EqualValues(t, tc.status, doctorFinding(t, r, tc.id).Status)
 			data, err := json.Marshal(r)
 			require.NoError(t, err)
@@ -65,7 +64,7 @@ func TestDoctorWorkspaceConfiguration(t *testing.T) {
 				}
 			}
 			flags = globalFlags{Workspace: workspace, Project: tc.project}
-			r := collectDoctor(context.Background())
+			r := collectDoctor(t.Context())
 			require.EqualValues(t, tc.status, doctorFinding(t, r, "config.workspace").Status)
 		})
 	}
@@ -87,11 +86,11 @@ func TestDoctorSelectsTheSameProjectAsOrdinaryCommands(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			flags = globalFlags{Workspace: workspace, Project: tc.explicitProject}
 			var state doctorState
-			finding := state.workspaceConfig()
+			finding := state.workspaceConfig(t.Context())
 			require.EqualValues(t, "ok", finding.Status)
 			require.Equal(t, tc.wantProject, state.project)
 
-			ordinary, _, err := buildResolveRequest(context.Background(), workspace)
+			ordinary, _, err := buildResolveRequest(t.Context(), workspace)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantProject, ordinary["name"], "ordinary commands must resolve the same project")
 		})
@@ -101,7 +100,7 @@ func TestDoctorSelectsTheSameProjectAsOrdinaryCommands(t *testing.T) {
 func TestDoctorInvalidWorkspaceDoesNotProbeAnotherTarget(t *testing.T) {
 	_, workspace := doctorTestEnv(t)
 	flags = globalFlags{Workspace: filepath.Join(workspace, "missing")}
-	r := collectDoctor(context.Background())
+	r := collectDoctor(t.Context())
 	require.EqualValues(t, "fail", doctorFinding(t, r, "config.workspace").Status)
 	require.EqualValues(t, "info", doctorFinding(t, r, "daemon.connection").Status)
 }
@@ -121,7 +120,7 @@ func TestDoctorValidatesClosestLocalOverride(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(nested, ".kata.local.toml"), []byte(tc.nested), 0600))
 			flags = globalFlags{Workspace: nested}
 			var state doctorState
-			finding := state.workspaceConfig()
+			finding := state.workspaceConfig(t.Context())
 			require.EqualValues(t, tc.status, finding.Status)
 			require.Equal(t, "example-project", state.project)
 		})

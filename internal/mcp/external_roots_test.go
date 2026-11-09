@@ -39,7 +39,7 @@ var externalRootToolNames = []string{
 
 func TestExternalRootSectionPublishesTypedTools(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+		Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 		Actor: "example-agent", Version: "test-version",
 	})
 
@@ -59,13 +59,13 @@ func TestExternalRootSectionPublishesTypedTools(t *testing.T) {
 
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	want := append(append([]string(nil), sectionLoaderNames...), externalRootToolNames...)
+	want := append(append([]string(nil), sectionLoaderNames...), append([]string{"kata.search_tools", "kata.skills"}, externalRootToolNames...)...)
 	require.ElementsMatch(t, want, toolNames(result.Tools))
 }
 
 func TestExternalRootInputSchemasBoundEnumsAndCommentModes(t *testing.T) {
 	session := connectTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
+		Client: inertTestClient(t), Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
 	})
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
@@ -260,7 +260,7 @@ func TestBridgeUnbindResolvesArchivedProjectWithinStartupScope(t *testing.T) {
 func TestExternalRootMutationsKeepStartupScope(t *testing.T) {
 	bound, err := NewBoundScope(ProjectIdentity{ID: 42, Name: "spoke-project"})
 	require.NoError(t, err)
-	boundHandlers := toolHandlers{options: Options{Client: &kataclient.Client{}, Scope: bound, Actor: "example-agent"}}
+	boundHandlers := toolHandlers{options: Options{Client: inertTestClient(t), Scope: bound, Actor: "example-agent"}}
 
 	_, _, err = boundHandlers.connectorFieldMap(t.Context(), nil, ConnectorFieldMapInput{
 		Instance: "example-connector", KataField: "scheduled_on", ExternalField: "start-date",
@@ -275,7 +275,7 @@ func TestExternalRootMutationsKeepStartupScope(t *testing.T) {
 		ID: 42, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
 	}})
 	require.NoError(t, err)
-	allowlistHandlers := toolHandlers{options: Options{Client: &kataclient.Client{}, Scope: allowlist, Actor: "example-agent"}}
+	allowlistHandlers := toolHandlers{options: Options{Client: inertTestClient(t), Scope: allowlist, Actor: "example-agent"}}
 	_, _, err = allowlistHandlers.bridgePause(t.Context(), nil, BridgePauseInput{Ref: "abc4"})
 	require.ErrorContains(t, err, "multi-project writes require project#ref")
 }
@@ -329,6 +329,32 @@ func TestBridgeBindRequiresAllProjectsScopeBeforeUsingConnectorCredentials(t *te
 		Ref: "abc4", Connector: "example-connector", External: "root-locator",
 	})
 	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
+	require.Zero(t, requests.Load())
+}
+
+// A spoke name belongs to the instance across every project, so a scoped
+// server must not rename it, and must refuse before contacting the daemon.
+func TestFederationSpokeNameRequiresAllProjectsScope(t *testing.T) {
+	var requests atomic.Int64
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		writeExternalRootJSON(t, w, map[string]any{"spoke_instance_uid": "01HZNQ7VFPK1XGD8R5MABCD4EA"})
+	}))
+	t.Cleanup(httpServer.Close)
+
+	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
+	require.NoError(t, err)
+	bound, err := NewBoundScope(ProjectIdentity{ID: 42, Name: "spoke-project"})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: bound, Actor: "example-agent"}}
+	for _, input := range []FederationSpokeNameInput{
+		{SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", Name: "laptop"},
+		{SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", Clear: true},
+	} {
+		_, _, err = handlers.federationSpokeName(t.Context(), nil, input)
+		require.ErrorContains(t, err, "requires the --all daemon-wide scope")
+	}
 	require.Zero(t, requests.Load())
 }
 

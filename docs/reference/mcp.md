@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-22
+last_edited: 2026-11-09
 ---
 
 # Model Context Protocol server
@@ -29,10 +29,27 @@ kata mcp serve --all
 kata mcp serve --all --enable-token-admin
 ```
 
+Workspace-bound and explicit project scopes require daemon API `0.35.0` or
+newer so the daemon enforces their project limits inside each request.
+`--all` retains the daemon API `0.11.0` minimum. Startup rejects an older
+daemon before resolving projects or serving tool calls.
+
 With the default stdio transport, JSON-RPC uses stdin and stdout. Kata writes
 no status text or logs to stdout. The actor is fixed when the process starts
 and uses the normal precedence: `--as`, `KATA_AUTHOR`, `USER`, Git `user.name`,
 then `anonymous`.
+
+### Server identity
+
+MCP clients receive Kata's website and icon in server metadata.
+The icon is an embedded PNG data URI, so stdio and HTTP clients can load it
+without an external request. Whether it appears depends on the client.
+
+The standalone HTTP listener and the daemon's enabled MCP mount also serve
+the same PNG at `/icon.png` and `/favicon.ico`. These public image routes
+accept GET and HEAD without a bearer token. Listener Host validation still
+applies, and `/mcp` still requires its configured MCP bearer or, for an
+identity-mode daemon mount in Kata 0.23.0 and later, the caller's identity token.
 
 ### Discover running HTTP listeners
 
@@ -98,6 +115,54 @@ an HTTPS reverse proxy. Public IPs and DNS hostnames are rejected. The
 listener also serves unauthenticated `GET` and `HEAD` requests at `/healthz`;
 the probe returns only readiness text and disables caching.
 
+For a remote gateway, enable the daemon's [`[mcp]` section](configuration.md#daemon-config) and restart.
+Route `/mcp` through the hub's HTTPS reverse proxy to the daemon. Give the gateway `https://daemon.example/mcp` and the separate MCP bearer.
+Choose the mount's scope with `[mcp] projects` or `all_projects = true`; daemon startup stops when neither or both are set. Listed names resolve to UIDs at startup, so renames don't widen scope. Missing or archived listed projects disable `/mcp` (503, reason logged); REST and the web UI keep serving. Create or restore the project, then restart.
+An allowlist limits tools to those projects and rejects project administration operations, including purge. With `all_projects = true`, the mount includes future projects and permits project administration.
+Treat an all-project MCP bearer as equivalent to the daemon's `[auth]` token, or to owner-local access when the daemon has no token.
+The mount never exposes token administration; use `kata mcp serve --all --enable-token-admin` with an identity-mode token.
+Outside identity mode, the mount uses the actor chosen at startup.
+The mount has no `/healthz` probe or `kata mcp status` record; `kata daemon status` reports it as `serving` or `unavailable`.
+The daemon's `/api/v1/ping` endpoint works as a container health probe.
+When `actor` is unset, it defaults to `KATA_AUTHOR`, `USER`, or Git `user.name`, then `anonymous`.
+With a TCP daemon `listen`, a gateway using a container hostname needs that authority in `[web].allowed_hosts`.
+With a Unix-socket daemon and `[web] listen`, the gateway's Host must match the web listener's bound address or `public_origin`.
+
+### Daemon mount with identity tokens
+
+In Kata 0.23.0 and later, a daemon with `[auth] require_token_identity = true`
+accepts each caller's database identity token at `/mcp`. Create the token with
+[`kata tokens create`](../operations/remote-daemon.md#identity-tokens) and
+configure the MCP client to send it as `Authorization: Bearer <token>` on every
+request. The daemon uses that same credential for REST reads and writes, and
+uses the token's stored actor for the session. Project scope, token grants,
+expiration, revocation, and REST authorization still apply.
+
+```toml
+[mcp]
+enabled = true
+projects = ["example-project"] # or all_projects = true
+```
+
+Remove `[mcp] token_file` and `token_env` in identity mode; startup rejects
+either setting. `[mcp] actor` and `KATA_MCP_ACTOR` have no effect in this mode.
+Missing, invalid, expired, revoked, and bootstrap tokens receive HTTP 401.
+Each session is bound to the exact token that initialized it. To switch tokens,
+initialize a new session, even when both tokens name the same actor. Token
+administration remains available only through the explicitly enabled sidecar
+tools. Kata 0.21.0 and 0.22.0 require the sidecar in identity mode.
+
+### Separate HTTP process
+
+You can also run a separate MCP process alongside the hub using [Client configuration](#client-configuration).
+Route `/mcp` to this listener through the HTTPS proxy and give the gateway its separate MCP bearer:
+
+```sh
+kata mcp serve --all --http 0.0.0.0:8080 --http-token-file /run/secrets/mcp-token --trust-private-network
+```
+
+Use `--projects <names>` in place of `--all` to limit the sidecar's project scope.
+
 ## Client configuration
 
 A typical stdio client command has this shape:
@@ -152,9 +217,20 @@ require an explicit `project` in multi-project mode. Project administration
 `--all` daemon-wide scope; a scoped server can read its projects but
 cannot alter or destroy the catalog it was bound to.
 
-Tool calls cannot change the startup actor or expand the startup scope. The
-daemon remains authoritative for authentication, attribution, revision
-checks, federation trust, claims, and mutation policy. Scoped servers replace
+Tool calls cannot change the startup actor or expand the startup scope.
+Historical issue references remain usable while both the lookup route and the
+issue's current project are visible within the startup scope. Retained
+references also work as relationship and closure evidence targets. Returned
+references and delete/purge confirmations use the current project and short ID.
+Reads and writes retain that boundary if
+an issue moves during a call. `kata.move` moves the issue and its active
+descendants by default and lists every moved issue; pass `single: true` to move
+only the selected issue or `dry_run: true` to preview. A subtree move is
+rejected atomically if any descendant comes from an excluded project. Against a
+daemon older than API `0.35.0`, `kata.move` requires `single: true` instead of
+silently moving only the root. The daemon remains authoritative for
+authentication, attribution, revision checks, federation trust, claims, and
+mutation policy. Scoped servers replace
 close-guard refusal messages (`parent_has_open_children`,
 `sibling_throttle`, `duplicate_message`) with scope-safe guidance because
 the daemon prose can name children, siblings, and prior closes in other
@@ -185,6 +261,10 @@ project UID scope, including after project moves or renames. See the
 [CLI reference](cli.md#issue-lifecycle) for selector behavior, reply validation,
 and handle syntax.
 
+An empty first page of a lexical multi-word `kata.search` includes
+`hints: [{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}]`,
+including when status or label filters are set.
+
 `kata.search` accepts optional `status: "open"` or `status: "closed"`; omit
 it to search both statuses. It combines with labels and the selected search
 mode across every project in scope. Empty and other status values are invalid.
@@ -200,6 +280,13 @@ another page exists. Its default limit is 20 and its maximum is 100. Pass
 `sort: "created"` orders newest creation first; `sort: "oldest"` reverses it.
 Both use the issue ID to break creation-time ties. Ordinary edits do not move
 issues between pages. These calls require daemon API 0.27.0 or newer.
+
+Each row carries `scheduled_on_date` and `deadline_on_date` when the issue has
+`scheduled_on` or `deadline_on` metadata: `YYYY-MM-DD` calendar dates resolved
+as described in [Calendar dates on issue
+rows](metadata.md#calendar-dates-on-issue-rows). A daemon older than API
+`0.36.0` omits them. `kata.list` takes no date filter; compare the row dates
+yourself.
 
 Set `include_total: true` to request `total`, the count of all matching issues
 in the permitted projects, independent of the page limit and cursor. Counts
@@ -222,26 +309,67 @@ scope, sort, and filters. Changing these rejects a cursor. The page size and
 restart a scan after changes to filter membership, project membership, deletion,
 or imported creation timestamps. Stop only when `complete` is true.
 
+## Find tools for a task
+
+In Kata 0.23.0 and later, call `kata.search_tools` to find an operation without
+knowing its section. For example:
+
+```json
+{"query":"add a comment to an issue","limit":3}
+```
+
+This searches tool metadata. `kata.search` searches issue data. Discovery
+works before loading sections and returns the same ranked results after loading
+them. It does not call issue APIs, run CLI commands, or activate public sections.
+
+Each result gives the exact tool `name`, its `summary`, section `loader`,
+applicable `guides`, and sorted top-level `inputs`. Each input lists its name,
+JSON `types`, and whether it is unconditionally required. An empty types list
+requires consulting the full schema. Call the returned loader if present,
+refresh `tools/list`, and read the tool's `inputSchema` for full constraints,
+conditional requirements, and nested inputs. Loaders are safe to call again.
+For a returned guide name, call `kata.skills` with that `name`.
+
+`query` must be non-blank UTF-8 text of at most 512 bytes. Omit `limit` for five
+results, or supply an integer from 1 through 10. Invalid input returns an MCP
+tool error. Unmatched, punctuation-only, and stopword-only queries return an
+empty `results` array. Results are deterministic; an exact tool name ranks first.
+Structured output is capped at 32 KiB, with `truncated: true` when that byte
+limit prevents returning another result.
+
+Discovery respects the server's startup scope. It omits operations that always
+require daemon-wide scope from project-limited servers. Storage tools also
+require configured host storage; token and team tools require explicit token
+administration. Discovery does not grant permission to invoke a returned tool.
+
 ## Progressive tool catalog
 
-The initial catalog exposes read-only section loaders. Call the applicable
+The initial catalog exposes read-only section loaders, `kata.skills`, and, in
+Kata 0.23.0 and later, `kata.search_tools`. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
 typed tools needed for the current task instead of placing every detailed tool in the
 model context at startup.
+
+The first `tools/list` from the workspace-bound default `kata mcp serve` is about 21 KB for 19 tools.
+With every section available by default loaded, it is about 263 KB for 110 tools;
+output schemas account for about two thirds. A test keeps these catalogs under
+24 KB and 289 KB, including every section loader. Detailed storage, team, and token tools
+require startup flags and fall outside these default catalogs.
 
 | Loader | Detailed tools |
 | --- | --- |
 | `kata.load_issue_discovery` | `kata.search`, `kata.list`, `kata.show`, `kata.ready`, `kata.next`, `kata.labels`, `kata.graph` |
 | `kata.load_issue_mutation` | `kata.create`, `kata.edit`, `kata.comment`, `kata.edit_comment`, `kata.claim`, `kata.set_label`, `kata.set_metadata`, `kata.set_schedule`, `kata.set_deadline`, `kata.move` |
 | `kata.load_coordination` | `kata.assign`, `kata.unassign`, `kata.inbox`, `kata.status` |
+| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 | `kata.load_issue_lifecycle` | `kata.close`, `kata.reopen`, `kata.delete`, `kata.restore`, `kata.purge`, `kata.wait`, `kata.audit_closes` |
 | `kata.load_leases` | `kata.lease_status`, `kata.lease`, `kata.lease_force_release`, `kata.lease_steal` |
 | `kata.load_projects` | `kata.projects`, `kata.project_show`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
 | `kata.load_teams` | `kata.teams`, `kata.team_create`, `kata.team_show`, `kata.team_delete`, `kata.team_member_set`, `kata.project_access_show`, `kata.project_access_set` with the same explicit daemon-wide administration capability |
 | `kata.load_tokens` | `kata.tokens`, `kata.token_create`, `kata.token_revoke` when `--enable-token-admin` is set in daemon-wide mode |
 | `kata.load_system` | `kata.system` |
-| `kata.load_federation` | `kata.federation_bridge_connect`, `kata.federation_bridge_status`, `kata.federation_bridge_disconnect`, `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine`, `kata.federation_root_key_repin` |
+| `kata.load_federation` | `kata.federation_bridge_connect`, `kata.federation_bridge_status`, `kata.federation_bridge_disconnect`, `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_spoke_name`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine`, `kata.federation_root_key_repin` |
 | `kata.load_sync` | `kata.sync_status`, `kata.sync_update`, `kata.sync_once` |
 | `kata.load_recurrence` | `kata.recurrences`, `kata.recurrence_update`, `kata.recurrence_delete` |
 | `kata.load_activity` | `kata.digest`, `kata.events` |
@@ -290,6 +418,8 @@ non-idempotent: the first two mint a new record on every identical retry, a
 forced storage import replaces the target again (with a fresh instance
 identity when `new_instance` is set), a lease renewal extends the expiry on
 every call, and each sync pass re-imports from the provider.
+`kata.cron_new_uid` is read-only but non-idempotent: each call returns a fresh,
+unreserved UID.
 `kata.lease_steal` acquires first and only force-releases a holder that
 denies that acquire, so a retry after a lost response keeps a lease the
 startup principal already holds instead of releasing and re-acquiring it.
@@ -308,6 +438,151 @@ assignment expiry and previous owner when present. `kata.edit` supports field,
 owner, priority, relationship, scheduling, and generic metadata changes. An
 issue-field or relationship change and a metadata change must use separate
 `kata.edit` calls so one failed request cannot leave a partial edit.
+
+### Startup sections
+
+For gateways that need typed tools in their first `tools/list`, configure the
+daemon-mounted endpoint before starting it:
+
+```toml
+[mcp]
+startup_sections = ["issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"]
+```
+
+Use section IDs, such as `issue_discovery`, rather than loader tool names such
+as `kata.load_issue_discovery`. The IDs are `activity`, `coordination`, `cron`,
+`docs`, `external_roots`, `federation`, `import`, `issue_discovery`, `issue_lifecycle`,
+`issue_mutation`, `leases`, `projects`, `recurrence`, `storage`, `sync`, `system`,
+`teams`, and `tokens`. Each ID selects the detailed tools in its loader row above.
+
+Only available sections can load at startup. `storage` requires host storage
+opt-in; `teams` and `tokens` require explicit token administration with
+daemon-wide scope. These three sections are unavailable on the daemon mount.
+An unknown, duplicate, or unavailable requested ID disables `/mcp` with HTTP
+503 and logs the reason; the daemon's REST API and web UI keep serving.
+
+`KATA_MCP_STARTUP_SECTIONS` overrides the array with comma-separated, trimmed
+IDs. An empty environment value preserves TOML. Restart the daemon after
+changing either setting, then reconnect the gateway or refresh its catalog.
+Every fresh server publishes the configured tools before any loader call;
+no priming hook is needed. All loaders remain available and idempotent, so
+clients can still load other sections progressively. Omit the setting or use
+`startup_sections = []` to retain the default loader-only initial catalog.
+These settings apply to the daemon mount; `kata mcp serve` retains progressive
+loading.
+
+## Native cron through MCP
+
+Load `kata.load_cron` for job and workflow lifecycle tools, live capability
+discovery, and attributed run evidence. This interface uses cron job definitions;
+the separate `kata.load_recurrence` tools manage RRULE issue templates.
+
+| Purpose | Tools |
+| --- | --- |
+| Discovery and identity | `kata.cron_capabilities`, `kata.cron_new_uid` |
+| Jobs | `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore` |
+| Workflows | `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore` |
+| Run evidence | `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
+
+Every operation uses the MCP server's configured daemon credentials, project
+scope, and accountable actor. Select `project` explicitly in multi-project modes.
+Run observations accept the usual per-call `teammate` override; an empty value
+suppresses the startup default without changing the actor. Issue-scoped tokens
+do not gain project-level cron authority.
+
+Call `kata.cron_new_uid` before creation and retain its returned `uid`. The helper
+creates and reserves nothing and does not bind the UID to a project. Creates use
+that caller-retained identity without an expected event UID. After a lost create
+response, read the same UID with `kata.cron_job` or `kata.cron_workflow`; repeating
+a create preserves the daemon's conflict rather than becoming an update.
+
+Update, delete, and restore require the current `expected_event_uid`. Read the
+current definition after a conflict and decide whether to retry; MCP never fetches
+a new CAS value on the caller's behalf. Delete is the existing reversible cron
+tombstone operation. Workflow-in-use checks and native parent bindings are
+preserved. Typed definitions and opaque option objects retain exact JSON numbers.
+
+`kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
+and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`
+filters history. See [Run list page size](cron.md#run-list-page-size) for
+the HTTP, CLI and TUI defaults. `kata.cron_run_observe` requires a caller-retained run UID,
+`expected_revision` (`0` for new evidence), a job or workflow reference with its
+definition event UID, status, and a versioned summary. Identical retries return
+`replayed: true`; distinct run UIDs for one scheduled occurrence remain separate
+observations. Recording evidence does not launch execution, claim an issue, or
+change its status.
+
+Enabled native `notify` jobs activate the existing daemon delivery. Execution
+jobs and workflows require an installed external adapter. Check
+`kata.cron_capabilities` for the selected daemon's actual advertised features;
+permission denial, unsupported capability, and temporary unavailability remain
+distinct errors. See [Native cron](cron.md) for job definitions and adapters,
+its [MCP recurring inbox example](cron.md#mcp-recurring-inbox-example), and
+[MCP Events](../operations/mcp-events.md) for signed webhook pings.
+
+## Agent guides (`kata.skills`)
+
+`kata.skills` is always in the first tool catalog. It is not a section loader:
+no loader call is needed to list or read a guide. Call it with no arguments to
+list the catalog, or pass a name:
+
+```json
+{"name":"workflow"}
+```
+
+In Kata 0.23.0 and later, the names are `setup`, `quickstart`, `workflow`, `issues`,
+`claiming`, `closing`, `teammates`, `scheduling`, and `events`. Read `workflow`
+at session start and before your first write. `quickstart` walks through search,
+creation, ownership, progress and completion using native JSON tool calls.
+The guides describe the connected server's scope, section loaders, required
+idempotency keys and typed close evidence. They require no shell commands.
+The Markdown body is returned once as text content; structured content holds
+the guide's name, title and summary. `setup` also returns `managed_block`.
+
+### Install MCP-only instructions
+
+An assistant with a connected Kata server and its own local file editor can
+request the exact repository instruction block:
+
+```json
+{"name":"setup"}
+```
+
+Pass this input to `kata.skills`. The server returns content and a bounded edit
+plan. It reads or writes no client files and accepts no filesystem path or file
+content. This sets up instructions for an already authorized connection; it
+does not create a project or bind a workspace. Without a local file tool, the
+assistant presents the returned text as pending setup.
+
+The caller inspects local `AGENTS.md` and `CLAUDE.md`, refuses a symlinked
+`AGENTS.md`, skips a symlinked `CLAUDE.md`, and updates selected regular files.
+If neither exists, it creates `AGENTS.md`. It replaces only one unambiguous Kata
+managed span, or appends the block if no markers exist. Both instruction modes
+share markers, so mode changes preserve all unrelated content. Malformed,
+reversed, orphaned or duplicate markers require conflict resolution.
+
+The edit plan preserves permissions, compares the preimage before writing and
+checks readback afterward. Complete Beads integration blocks leave the original
+untouched and produce an exclusive-create `.kata-proposed` sidecar; existing
+sidecars are never overwritten. If the local editor cannot enforce these rules,
+the caller returns a proposal. Receiving content alone is never reported as a
+successful file installation.
+
+For local CLI installation and switching back to CLI guidance, see
+[workspace initialization](cli.md#workspace-initialization).
+
+This is a fixed catalog of agent workflow guidance. It cannot read arbitrary
+files or other skills. For reference documentation, load `kata.load_docs`, then
+use `kata.search_docs` and `kata.read_doc`.
+
+Some workflows have no equivalent MCP call in this version. Notifications require an
+operator with CLI access to send or clear requests. `kata.wait` waits on issue
+status only. For an attention wait, poll `kata.show` for every watched ref with
+your own deadline: a closed issue completes first, then `work.attention` of
+`needs-human` or `stuck`. Report timeout distinctly. `kata.inbox` lists notifications on open
+issues; it does not replace an attention wait. In multi-project scope, use
+`project#ref` for existing-issue calls and pass `project` only where the tool's
+schema includes it.
 
 ## Scheduling and someday
 
@@ -430,8 +705,15 @@ optional `previous_key_file`, and optional `strand_relays`, and calls the
 [root key repin endpoint](../operations/federation.md#root-signing-key). It
 requires `--all` and daemon-owner authority at the API.
 
-`kata.federation_status` lists secret-free enrollment records, and
+`kata.federation_status` lists secret-free enrollment records, including each
+instance's hub-local `spoke_name` when set, and
 `kata.federation_enrollment_revoke` can revoke one.
+
+`kata.federation_spoke_name` accepts `spoke_instance_uid` and either `name` or
+`clear: true`, and sets or clears that instance's
+[hub-local name](../operations/federation.md#operator-commands). A name belongs
+to the instance across every project, so the tool requires `--all` and
+daemon-owner authority at the API.
 
 Enabling issue synchronization selects which external repository the daemon's
 configured GitHub credentials read, so `kata.sync_update` with
@@ -497,7 +779,9 @@ other calls that carry 2026-07-28 per-request metadata with an
 unsupported-version error listing the session versions it accepts. JSON-RPC
 batches are rejected. Each compact JSON message is limited to 8 MiB.
 
-Kata advertises tools only, including tool-list changes. It does not advertise prompts, resources, roots,
+Kata advertises tools, including tool-list changes, and the webhook Events
+capability described in [Native inbox events](#native-inbox-events). It does
+not advertise prompts, resources, roots,
 logging, sampling, subscriptions, or server-to-client requests. Discovery uses
 a five-minute private cache hint. Tool execution allows 20 starts per second,
 a burst of 20, and at most eight concurrent daemon calls per server process.
@@ -505,3 +789,35 @@ a burst of 20, and at most eight concurrent daemon calls per server process.
 Host process control stays outside MCP: daemon lifecycle, the TUI and Web UI,
 install/update, database migrations and cutovers, and raw internal replication
 endpoints remain CLI or operator workflows.
+
+## Native inbox events
+
+The daemon owns MCP Events. Turn it on with `[mcp_events] enabled = true` in the
+daemon configuration (see [MCP Events](configuration.md#mcp-events)). Then
+`kata mcp serve` forwards `events/list`, `events/subscribe`, and
+`events/unsubscribe` to the daemon and keeps no Events state of its own. It has
+no Events flag. A forwarder advertises Events on stdio and on the MCP
+2026-07-28 HTTP path. It does not advertise or serve Events on legacy-session
+HTTP, where `events/*` gets the SDK's plain HTTP 400 "not handled" answer.
+
+`kata.inbox.changed` accepts an exact `for` recipient and optional
+`project_uids` and `issue_uid` filters. `project_uids` must be non-empty, sorted
+ascending, and free of duplicates. Every forwarder mode except `--all` (the
+default workspace scope, `--project`, and `--projects`) requires an explicit
+`project_uids` list that stays inside the projects it serves. Delivery is a
+signed HTTPS webhook ping that names only the recipient. The event type does
+not replay: a supplied cursor is ignored and results carry `cursor: null`.
+Receivers deduplicate by `webhook-id`, exhaust `kata.inbox` pages, and read the
+issue. A ping does not claim, clear, or complete work.
+
+On the HTTP path, `events/subscribe` and `events/unsubscribe` need an `Mcp-Name`
+header equal to `params.name`. A missing or mismatched header gets 400 and
+`-32020`, and a body over 1 MiB gets 413. The capability is
+`extensions["io.modelcontextprotocol/events"]` plus a top-level `events` alias.
+
+The [MCP Events operator guide](../operations/mcp-events.md) owns subscription
+ownership, project selection, lifetimes, what triggers a ping, delivery and
+retry rules, terminated notices, and key handling. `kata.event_subscriptions`,
+available through `kata.load_coordination`, shows the caller's subscriptions
+and their delivery health. For a narrowed forwarder it lists only
+subscriptions inside that forwarder's projects.

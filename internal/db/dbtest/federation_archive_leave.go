@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"crypto/ed25519"
 	"testing"
 
@@ -13,7 +12,7 @@ import (
 // audit path without creating a new relay delivery on every native backend.
 func RunArchiveAndLeaveDoesNotCreateRelayDebt(t *testing.T, store db.Storage) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{

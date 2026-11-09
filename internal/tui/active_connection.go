@@ -28,20 +28,13 @@ func (m *Model) activeCredentialExpiryCmd() tea.Cmd {
 	return tea.Tick(delay, func(time.Time) tea.Msg { return activeCredentialExpiredMsg{connGen: gen, expiresAt: expiry} })
 }
 
-// actorlessConnectionLabel describes a connection that carries no account
-// from the daemon's authentication kind. Only owner-local requests are local.
+// actorlessConnectionLabel explains read-only access without an account.
 func actorlessConnectionLabel(kind string) string {
 	switch kind {
-	case "none", "web_local":
-		return "Local connection"
-	case "static_token":
-		return "Shared daemon token"
 	case "bootstrap":
 		return "Bootstrap token"
 	case "insecure_readonly":
 		return "Anonymous (read-only)"
-	case "unauthenticated_private_network":
-		return "Unauthenticated private network"
 	case "trusted_proxy_absent":
 		return "Proxy without account"
 	default:
@@ -68,9 +61,16 @@ func (m Model) withActiveConnectionHeader(body string) string {
 		status = "Reconnecting"
 	case m.sseStatus == sseDisconnected:
 		status = "Disconnected"
+	case m.activeAuth.Kind == "insecure_readonly" || m.activeAuth.Kind == "bootstrap" || m.activeAuth.Kind == "trusted_proxy_absent" || !m.mutationAllowed(true):
+		status = "Read-only"
+	}
+	// A healthy connection keeps the normal header row; the summary is
+	// only for states that need attention.
+	if status == "Connected" {
+		return body
 	}
 	account := "—"
-	if m.authCapabilitiesReady && m.sseStatus == sseConnected {
+	if status == "Read-only" {
 		account = sanitizeForLine(m.activeAuth.Actor)
 		if account == "" {
 			account = actorlessConnectionLabel(m.activeAuth.Kind)

@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,8 +20,8 @@ func TestEventIssueLookupRegistersSubjectNamedByUID(t *testing.T) {
 			return Issue{ID: 41, UID: visibleUID, ProjectUID: projectUID}, nil
 		}
 		return Issue{}, ErrNotFound
-	}, func(string, string) (Issue, error) { return Issue{}, ErrNotFound })
-	ctx := WithExposedIssues(WithAuthorizedProjects(context.Background(), []string{projectUID}))
+	}, func(string, string) (Issue, error) { return Issue{}, ErrNotFound }, nil)
+	ctx := WithExposedIssues(WithAuthorizedProjects(t.Context(), []string{projectUID}))
 
 	for _, tc := range []struct {
 		uid   string
@@ -38,7 +37,7 @@ func TestEventIssueLookupRegistersSubjectNamedByUID(t *testing.T) {
 	assert.Equal(t, 2, lookups, "each UID resolves once per read")
 
 	purgedUID := "00000000000000000000000004"
-	reset, err := lookup.RequiresProjectScopeReset(context.Background(), Event{
+	reset, err := lookup.RequiresProjectScopeReset(t.Context(), Event{
 		ProjectUID: projectUID, IssueUID: &purgedUID, Type: "issue.snapshot", Payload: `{}`,
 	})
 	require.NoError(t, err)

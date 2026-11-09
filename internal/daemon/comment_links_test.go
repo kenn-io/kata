@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -90,7 +91,9 @@ func TestCommentShowGraphSelectors(t *testing.T) {
 		Comments          []commentref.Record
 		CommentsTruncated bool `json:"comments_truncated"`
 	} {
-		resp, err := ts.Client().Get(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s%s", ts.URL, pid, issue.ShortID, query))
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s%s", ts.URL, pid, issue.ShortID, query), nil)
+		require.NoError(t, reqErr)
+		resp, err := ts.Client().Do(req)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, resp.Body.Close()) }()
 		require.Equal(t, 200, resp.StatusCode)
@@ -136,7 +139,9 @@ func TestDeletedIssueCommentSelectors(t *testing.T) {
 	require.NoError(t, err)
 	_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), id, "worker")
 	require.NoError(t, err)
-	resp, err := ts.Client().Get(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s?include_deleted=true&thread=%s&since=%s", ts.URL, pid, issue.ShortID, root.UID, root.UID))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s?include_deleted=true&thread=%s&since=%s", ts.URL, pid, issue.ShortID, root.UID, root.UID), nil)
+	require.NoError(t, reqErr)
+	resp, err := ts.Client().Do(req)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 	require.Equal(t, 200, resp.StatusCode)
@@ -191,7 +196,9 @@ func TestDeletedSourceCommentRetainsReplyEndpointState(t *testing.T) {
 
 			path := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s?include_deleted=true",
 				ts.URL, projectID, sourceIssue.ShortID)
-			response, err := ts.Client().Get(path)
+			req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+			require.NoError(t, reqErr)
+			response, err := ts.Client().Do(req)
 			require.NoError(t, err)
 			defer func() { require.NoError(t, response.Body.Close()) }()
 			require.Equal(t, 200, response.StatusCode)

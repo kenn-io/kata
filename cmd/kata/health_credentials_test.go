@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -27,7 +26,7 @@ func TestHealthCredentialWarningVisibleInHumanAndAgent(t *testing.T) {
 					return daemon.ReconcilerHealth{Configured: true}
 				}
 			})
-			out, stderr, err := executeRootCapture(t, contextWithBaseURL(context.Background(), env.URL), args...)
+			out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
 			require.NoError(t, err)
 			if args[0] != "--json" {
 				assert.Contains(t, stderr, "EXAMPLE_KEY")

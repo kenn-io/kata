@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"testing"
 
@@ -20,7 +19,7 @@ func RunUISnapshotScopedAuthorityContract(t *testing.T, open func(*testing.T) db
 	store := open(t)
 	uiStore, ok := store.(db.UIStore)
 	require.True(t, ok, "storage backend must implement db.UIStore")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	scopeProject, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)

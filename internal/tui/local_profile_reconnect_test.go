@@ -59,7 +59,7 @@ func TestLocalProfileReconnectAcrossRuntimeEndpoints(t *testing.T) {
 				if network == "unix" {
 					address = filepath.Join(sockets, label+".sock")
 				}
-				listener, err := net.Listen(network, address)
+				listener, err := new(net.ListenConfig).Listen(t.Context(), network, address)
 				require.NoError(t, err)
 				srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method != http.MethodGet {
@@ -169,7 +169,7 @@ func TestActiveLegacyLocalReconnectRetainsCatalogCredential(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
 	start := func(label string) *http.Server {
 		socket := filepath.Join(socketDir, label+".sock")
-		listener, listenErr := net.Listen("unix", socket)
+		listener, listenErr := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 		require.NoError(t, listenErr)
 		srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/v1/ping" {
@@ -283,7 +283,7 @@ func TestLocalProfileConcurrentRefreshHonorsRequestDeadline(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("refresh never started")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond) //nolint:kennlint // the deadline is the expected result; release holds the SSE refresh past it
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; release holds the SSE refresh past it
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { _, err := conn.api.GetInstance(ctx); done <- err }()

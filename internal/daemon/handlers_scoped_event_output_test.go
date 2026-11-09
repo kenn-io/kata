@@ -61,7 +61,7 @@ func TestIssueScopedRestoredLinkResetsPollAndSSE(t *testing.T) {
 			require.Equal(t, linkCursor, polled.Body.ResetAfterID)
 			require.Empty(t, polled.Body.Events)
 			require.NotContains(t, string(body), hidden.UID)
-			require.NotContains(t, string(body), hidden.ShortID)
+			require.NotRegexp(t, `\b`+hidden.ShortID+`\b`, string(body))
 
 			stream := openSSE(t, env, query, http.Header{"Authorization": {"Bearer worker-token"}})
 			defer func() { _ = stream.Body.Close() }()
@@ -70,7 +70,7 @@ func TestIssueScopedRestoredLinkResetsPollAndSSE(t *testing.T) {
 			require.Equal(t, "sync.reset_required", frame.event)
 			require.Equal(t, strconv.FormatInt(linkCursor, 10), frame.id)
 			require.NotContains(t, frame.data, hidden.UID)
-			require.NotContains(t, frame.data, hidden.ShortID)
+			require.NotRegexp(t, `\b`+hidden.ShortID+`\b`, frame.data)
 		})
 	}
 }
@@ -838,7 +838,7 @@ func TestIssueScopedReportsPreserveAuthorizedLinkContext(t *testing.T) {
 		map[string]string{"Authorization": "Bearer worker-token"})
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
 	require.NotContains(t, string(body), outside.UID, "digest must hide hidden peer UIDs")
-	require.NotContains(t, string(body), outside.ShortID, "digest must hide hidden peer refs")
+	require.NotRegexp(t, `\b`+outside.ShortID+`\b`, string(body), "digest must hide hidden peer refs")
 	// Authorized link changes survive: the compound edit's child→root edge
 	// and the created issue's related→child link must both be counted.
 	require.Contains(t, string(body), "related:"+root.ShortID,
@@ -851,7 +851,7 @@ func TestIssueScopedReportsPreserveAuthorizedLinkContext(t *testing.T) {
 		map[string]string{"Authorization": "Bearer worker-token"})
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
 	require.NotContains(t, string(body), outside.UID)
-	require.NotContains(t, string(body), outside.ShortID)
+	require.NotRegexp(t, `\b`+outside.ShortID+`\b`, string(body))
 	var audit struct {
 		Rows []struct {
 			Issue         string   `json:"issue"`

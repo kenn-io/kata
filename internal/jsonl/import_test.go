@@ -2,7 +2,6 @@ package jsonl_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json/jsontext"
 	"fmt"
 	"path/filepath"
@@ -19,7 +18,7 @@ import (
 )
 
 func TestImportRoundTripsExportedRows(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	p, err := src.CreateProject(ctx, "kata")
 	require.NoError(t, err)
@@ -67,7 +66,7 @@ func TestImportRoundTripsExportedRows(t *testing.T) {
 }
 
 func TestImportRejectsInvalidCommentTeammateBeforeReplacingTarget(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 	project, err := target.CreateProject(ctx, "live-project")
 	require.NoError(t, err)
@@ -88,7 +87,7 @@ func TestImportRejectsInvalidCommentTeammateBeforeReplacingTarget(t *testing.T) 
 }
 
 func TestImportRoundTripsExportedLargeIssueBody(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	p, err := src.CreateProject(ctx, "kata")
 	require.NoError(t, err)
@@ -113,7 +112,7 @@ func TestImportRoundTripsExportedLargeIssueBody(t *testing.T) {
 }
 
 func TestImportSQLiteSequenceUsesUpdateOrInsert(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	require.NoError(t, importJSONL(ctx, target,
@@ -133,7 +132,7 @@ func TestImportSQLiteSequenceUsesUpdateOrInsert(t *testing.T) {
 }
 
 func TestImportFederationSyncStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 	require.NoError(t, importJSONL(ctx, target,
 		`{"kind":"meta","data":{"key":"export_version","value":"12"}}`,
@@ -155,7 +154,7 @@ func TestImportFederationSyncStatus(t *testing.T) {
 }
 
 func TestGitHubSyncDirectImportPreservesBindingAndStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 	require.NoError(t, importJSONL(ctx, target,
 		validExportVersion,
@@ -192,7 +191,7 @@ func TestGitHubSyncDirectImportPreservesBindingAndStatus(t *testing.T) {
 }
 
 func TestImportV11JSONLDefaultsWithoutFederationSyncStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 	require.NoError(t, importJSONL(ctx, target,
 		`{"kind":"meta","data":{"key":"export_version","value":"11"}}`,
@@ -204,12 +203,12 @@ func TestImportV11JSONLDefaultsWithoutFederationSyncStatus(t *testing.T) {
 	_, err := target.FederationSyncStatusByProject(ctx, 1)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	var schemaVersion string
-	require.NoError(t, target.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&schemaVersion))
+	require.NoError(t, target.QueryRowContext(t.Context(), `SELECT value FROM meta WHERE key='schema_version'`).Scan(&schemaVersion))
 	assert.Equal(t, fmt.Sprint(db.CurrentSchemaVersion()), schemaVersion)
 }
 
 func TestImportLegacyFederationBindingWithoutActorDisablesPush(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 	require.NoError(t, importJSONL(ctx, target,
 		`{"kind":"meta","data":{"key":"export_version","value":"12"}}`,
@@ -227,7 +226,7 @@ func TestImportLegacyFederationBindingWithoutActorDisablesPush(t *testing.T) {
 }
 
 func TestImportLegacyFederationEnrollmentWithoutActorKeepsPullOnlyAccess(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 	require.NoError(t, importJSONL(ctx, target,
 		`{"kind":"meta","data":{"key":"export_version","value":"12"}}`,
@@ -238,7 +237,7 @@ func TestImportLegacyFederationEnrollmentWithoutActorKeepsPullOnlyAccess(t *test
 	))
 
 	var capabilities, actor string
-	require.NoError(t, target.QueryRow(`
+	require.NoError(t, target.QueryRowContext(t.Context(), `
 		SELECT capabilities, bound_actor
 		  FROM federation_enrollments
 		 WHERE id = 1`).Scan(&capabilities, &actor))
@@ -247,7 +246,7 @@ func TestImportLegacyFederationEnrollmentWithoutActorKeepsPullOnlyAccess(t *test
 }
 
 func TestImportV1FillsUIDsDeterministically(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rows := []string{
 		validExportVersion,
 		`{"kind":"project","data":{"id":1,"identity":"github.com/wesm/kata","name":"kata","created_at":"2026-05-03T00:00:00.000Z","next_issue_number":2}}`,
@@ -267,12 +266,12 @@ func TestImportV1FillsUIDsDeterministically(t *testing.T) {
 		assert.True(t, uid.Valid(got), "invalid uid %q", got)
 	}
 	var schemaVersion string
-	require.NoError(t, first.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&schemaVersion))
+	require.NoError(t, first.QueryRowContext(t.Context(), `SELECT value FROM meta WHERE key='schema_version'`).Scan(&schemaVersion))
 	assert.Equal(t, fmt.Sprint(db.CurrentSchemaVersion()), schemaVersion)
 }
 
 func TestImportV1NormalizesGoStringIssueAndCommentTimestamps(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	require.NoError(t, importJSONL(ctx, target,
@@ -305,7 +304,7 @@ func TestImportV1NormalizesGoStringIssueAndCommentTimestamps(t *testing.T) {
 }
 
 func TestImportV1NormalizesFractionalGoStringTimestamps(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	require.NoError(t, importJSONL(ctx, target,
@@ -328,7 +327,7 @@ func TestImportV1NormalizesFractionalGoStringTimestamps(t *testing.T) {
 }
 
 func TestImportV1NormalizesGoStringEventTimestampForStats(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	require.NoError(t, importJSONL(ctx, target,
@@ -346,7 +345,7 @@ func TestImportV1NormalizesGoStringEventTimestampForStats(t *testing.T) {
 }
 
 func TestImportCurrentVersionRejectsEventHashForPreNormalizedTimestamp(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 	projectUID := "01HZZZZZZZZZZZZZZZZZZZZZ11"
 	eventUID := "01HZNQ7VFPK1XGD8R5MABCD4EX"
@@ -376,7 +375,7 @@ func TestImportCurrentVersionRejectsEventHashForPreNormalizedTimestamp(t *testin
 }
 
 func TestImportLegacyEventSnapshotsUseFinalProjectName(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	require.NoError(t, importJSONL(ctx, target,
@@ -395,7 +394,7 @@ func TestImportLegacyEventSnapshotsUseFinalProjectName(t *testing.T) {
 }
 
 func TestImportV1RejectsCorruptEventFK(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	err := importJSONL(ctx, target,
@@ -410,7 +409,7 @@ func TestImportV1RejectsCorruptEventFK(t *testing.T) {
 }
 
 func TestImportRejectsInvalidExportVersion(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	err := importJSONL(ctx, target,
@@ -424,7 +423,7 @@ func TestImportRejectsInvalidExportVersion(t *testing.T) {
 }
 
 func TestImportRejectsTooNewExportVersion(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	err := importJSONL(ctx, target,
@@ -440,7 +439,7 @@ func TestImportRejectsTooNewExportVersion(t *testing.T) {
 func TestImportDurableReplayFieldsRejectMismatchedEventContentHash(t *testing.T) {
 	for _, version := range []string{"12", "24"} {
 		t.Run("v"+version, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			target := openImportTargetDB(t)
 
 			err := importJSONL(ctx, target,
@@ -458,7 +457,7 @@ func TestImportDurableReplayFieldsRejectMismatchedEventContentHash(t *testing.T)
 }
 
 func TestImportRejectsForeignKeyViolationBeforeCommit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	err := importJSONL(ctx, target,
@@ -475,7 +474,7 @@ func TestImportRejectsForeignKeyViolationBeforeCommit(t *testing.T) {
 }
 
 func TestImportRejectsForeignKeyViolationsListsEveryRow(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	// Two project_alias rows each referencing a different missing project.
@@ -501,7 +500,7 @@ func TestImportRejectsForeignKeyViolationsListsEveryRow(t *testing.T) {
 }
 
 func TestImportRejectsTokenCreatedMissingRequiredFields(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	err := importJSONL(ctx, target,
@@ -516,7 +515,7 @@ func TestImportRejectsTokenCreatedMissingRequiredFields(t *testing.T) {
 }
 
 func TestImportRejectsTokenRevokedForUnknownToken(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	err := importJSONL(ctx, target,
@@ -531,7 +530,7 @@ func TestImportRejectsTokenRevokedForUnknownToken(t *testing.T) {
 }
 
 func TestImportRejectsTokenEventsOutsideSystemProject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	err := importJSONL(ctx, target,
@@ -575,7 +574,7 @@ func TestImportRejectsMalformedTokenReplayFields(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			target := openImportTargetDB(t)
 
 			err := importJSONL(ctx, target,
@@ -593,7 +592,7 @@ func TestImportRejectsMalformedTokenReplayFields(t *testing.T) {
 func openImportTargetDB(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	d, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "target.db"))
+	d, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "target.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d
@@ -602,8 +601,8 @@ func openImportTargetDB(t *testing.T) *sqlitestore.Store {
 func assertTableCount(t *testing.T, src, dst *sqlitestore.Store, table string) {
 	t.Helper()
 	var want, got int
-	require.NoError(t, src.QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&want))
-	require.NoError(t, dst.QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&got))
+	require.NoError(t, src.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM `+table).Scan(&want))
+	require.NoError(t, dst.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM `+table).Scan(&got))
 	assert.Equal(t, want, got, table)
 }
 
@@ -614,21 +613,21 @@ func assertTableEmpty(t *testing.T, d *sqlitestore.Store, table string) {
 	if table == "projects" {
 		query += ` WHERE name <> '` + db.SystemProjectName + `'`
 	}
-	require.NoError(t, d.QueryRow(query).Scan(&got))
+	require.NoError(t, d.QueryRowContext(t.Context(), query).Scan(&got))
 	assert.Equal(t, 0, got, table)
 }
 
 func readFilledUIDs(t *testing.T, d *sqlitestore.Store) []string {
 	t.Helper()
 	var projectUID, issueUID, eventIssueUID string
-	require.NoError(t, d.QueryRow(`SELECT uid FROM projects WHERE id = 1`).Scan(&projectUID))
-	require.NoError(t, d.QueryRow(`SELECT uid FROM issues WHERE id = 1`).Scan(&issueUID))
-	require.NoError(t, d.QueryRow(`SELECT issue_uid FROM events WHERE id = 1`).Scan(&eventIssueUID))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT uid FROM projects WHERE id = 1`).Scan(&projectUID))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT uid FROM issues WHERE id = 1`).Scan(&issueUID))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT issue_uid FROM events WHERE id = 1`).Scan(&eventIssueUID))
 	return []string{projectUID, issueUID, eventIssueUID}
 }
 
 func TestNotionSyncRestoreRequiresLocalReenable(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture := exportNotionFixture(t)
 	target := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(fixture.exported), target))
@@ -666,7 +665,7 @@ func TestNotionSyncRestoreRequiresLocalReenable(t *testing.T) {
 }
 
 func TestNotionSyncTrustedCutoverPreservesEnabled(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture := exportNotionFixture(t)
 	target := openImportTargetDB(t)
 	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(fixture.exported), target, jsonl.ImportOptions{PreserveIssueSyncBindingEnabled: true}))

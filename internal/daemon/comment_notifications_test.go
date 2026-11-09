@@ -395,7 +395,8 @@ func checkBroadcastHistoryBoundaryBackend(t *testing.T, second uint8, postgres b
 			admin, err := sql.Open("pgx", dsn)
 			require.NoError(t, err)
 			defer func() { _ = admin.Close() }()
-			_, err = admin.ExecContext(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+			// t.Context() is already canceled when cleanup runs.
+			_, err = admin.ExecContext(context.WithoutCancel(t.Context()), "DROP SCHEMA "+schema+" CASCADE")
 			require.NoError(t, err)
 		})
 	} else {

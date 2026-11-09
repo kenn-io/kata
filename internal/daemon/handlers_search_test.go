@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +35,7 @@ func TestSearchEndpoint_ReturnsHitsWithScores(t *testing.T) {
 		"unrelated issue should not appear in results")
 }
 
-func TestSearchEndpoint_InsecureReadonlyUnauthenticatedAutoSearchStaysLexical(t *testing.T) {
+func TestSearchEndpoint_EmbeddingConfigurationHeaderAndReadonlyLexicalSearch(t *testing.T) {
 	var embeddingCalls atomic.Int32
 	embedderSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		embeddingCalls.Add(1)
@@ -46,24 +45,37 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedAutoSearchStaysLexical(t 
 	emb, err := embedding.New(embedding.Config{BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
 	require.NoError(t, err)
 
-	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
-		cfg.Embedder = emb
-	})
-	ctx := context.Background()
-	project, err := env.DB.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: project.ID,
-		Title:     "index credential rotation",
-		Body:      "keep provider calls behind daemon credentials",
-		Author:    "agent",
-	})
-	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, header string
+		embedder     *embedding.Client
+	}{
+		{"off", "false", nil},
+		{"configured", "true", emb},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
+				cfg.Embedder = tc.embedder
+			})
+			ctx := t.Context()
+			project, err := env.DB.CreateProject(ctx, "spoke-project")
+			require.NoError(t, err)
+			_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID,
+				Title:     "index credential rotation",
+				Body:      "keep provider calls behind daemon credentials",
+				Author:    "agent",
+			})
+			require.NoError(t, err)
 
-	resp, bs := envGetRaw(t, env, projectPath(project.ID)+"/search?q="+url.QueryEscape("credential rotation"))
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
-	assert.Contains(t, string(bs), `"mode":"lexical"`)
-	assert.Equal(t, int32(0), embeddingCalls.Load(), "unauthenticated read-only search must not call embedding provider")
+			resp, bs := envGetRaw(t, env, projectPath(project.ID)+"/search?q="+url.QueryEscape("credential rotation"))
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+			require.Equal(t, tc.header, resp.Header.Get("X-Kata-Embeddings-Configured"))
+			if tc.embedder != nil {
+				assert.Contains(t, string(bs), `"mode":"lexical"`)
+				assert.Equal(t, int32(0), embeddingCalls.Load(), "unauthenticated read-only search must not call embedding provider")
+			}
+		})
+	}
 }
 
 func TestSearchEndpoint_InsecureReadonlyUnauthenticatedExplicitVectorModesRequireAuth(t *testing.T) {
@@ -79,7 +91,7 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedExplicitVectorModesRequir
 	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
 		cfg.Embedder = emb
 	})
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 
@@ -175,7 +187,7 @@ func TestSearchEndpointMissingKeyIsValidation(t *testing.T) {
 	emb, err := embedding.New(embedding.Config{Credential: config.EmbeddingCredential{Source: "env:EXAMPLE_KEY", Reason: "no embedding API key (env EXAMPLE_KEY is unset)"}, BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 2})
 	require.NoError(t, err)
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder = emb })
-	p, err := env.DB.CreateProject(context.Background(), "spoke-project")
+	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	// A configured embedder must explain the credential even before the index
 	// becomes usable. The absent index otherwise looks like unconfigured search.

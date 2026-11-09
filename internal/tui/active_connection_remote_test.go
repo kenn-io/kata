@@ -9,7 +9,7 @@ import (
 )
 
 // A11: an unnamed direct remote target must not be labeled a local daemon,
-// and typed authentication rejection must clear current account authority.
+// and typed authentication rejection must show that authentication is required.
 func TestActiveConnectionDirectRemoteAndRevoked(t *testing.T) {
 	t.Run("direct_remote", func(t *testing.T) {
 		m := newTestModel()
@@ -17,6 +17,7 @@ func TestActiveConnectionDirectRemoteAndRevoked(t *testing.T) {
 		m.height = 24
 		m.activeDaemon = daemonTarget{URL: "https://daemon.example"}
 		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: "member"}})
+		m.sseStatus = sseReconnecting
 		header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
 		require.Contains(t, header, "Hub: daemon.example")
 		require.NotContains(t, header, "Local daemon")

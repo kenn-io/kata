@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -37,7 +36,7 @@ func TestEmbedNormalizesVectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vecs, err := c.Embed(context.Background(), []string{"hello"})
+	vecs, err := c.Embed(t.Context(), []string{"hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +53,7 @@ func TestEmbedRejectsNullComponent(t *testing.T) {
 	srv := newFakeServer(t, 200, `{"data":[{"embedding":[0.5,null]}]}`, "")
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
-	_, err := c.Embed(context.Background(), []string{"x"})
+	_, err := c.Embed(t.Context(), []string{"x"})
 	if err == nil || !strings.Contains(err.Error(), "null") {
 		t.Fatalf("want null-component error, got %v", err)
 	}
@@ -66,7 +65,7 @@ func TestEmbedRejectsZeroNormVector(t *testing.T) {
 	srv := newFakeServer(t, 200, `{"data":[{"embedding":[0,0]}]}`, "")
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
-	_, err := c.Embed(context.Background(), []string{"x"})
+	_, err := c.Embed(t.Context(), []string{"x"})
 	if err == nil || !strings.Contains(err.Error(), "zero norm") {
 		t.Fatalf("want zero-norm error, got %v", err)
 	}
@@ -76,7 +75,7 @@ func TestEmbedDimsMismatchErrors(t *testing.T) {
 	srv := newFakeServer(t, 200, `{"data":[{"embedding":[1,2,3]}]}`, "")
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
-	_, err := c.Embed(context.Background(), []string{"x"})
+	_, err := c.Embed(t.Context(), []string{"x"})
 	if err == nil {
 		t.Fatal("expected dims-mismatch error")
 	}
@@ -86,7 +85,7 @@ func TestEmbed401IsDefinitive(t *testing.T) {
 	srv := newFakeServer(t, 401, `{"error":"bad key"}`, "")
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
-	_, err := c.Embed(context.Background(), []string{"x"})
+	_, err := c.Embed(t.Context(), []string{"x"})
 	var apiErr *embedclient.APIError
 	if !errors.As(err, &apiErr) || !apiErr.CredentialsRejected() {
 		t.Fatalf("want definitive APIError, got %v", err)
@@ -97,7 +96,7 @@ func TestEmbed429CarriesRetryAfter(t *testing.T) {
 	srv := newFakeServer(t, 429, `{}`, "7")
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
-	_, err := c.Embed(context.Background(), []string{"x"})
+	_, err := c.Embed(t.Context(), []string{"x"})
 	var apiErr *embedclient.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("want APIError, got %v", err)
@@ -118,7 +117,7 @@ func TestEmbed429RetryAfterHTTPDate(t *testing.T) {
 	srv := newFakeServer(t, 429, `{}`, future)
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
-	_, err := c.Embed(context.Background(), []string{"x"})
+	_, err := c.Embed(t.Context(), []string{"x"})
 	var apiErr *embedclient.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("want APIError, got %v", err)
@@ -139,7 +138,7 @@ func TestEmbed429RetryAfterPastHTTPDateClampsToZero(t *testing.T) {
 	srv := newFakeServer(t, 429, `{}`, past)
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
-	_, err := c.Embed(context.Background(), []string{"x"})
+	_, err := c.Embed(t.Context(), []string{"x"})
 	var apiErr *embedclient.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("want APIError, got %v", err)
@@ -183,7 +182,7 @@ func TestEmbedBatchesPreserveOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	inputs := []string{"0", "1", "2", "3", "4"}
-	vecs, err := c.Embed(context.Background(), inputs)
+	vecs, err := c.Embed(t.Context(), inputs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +210,7 @@ func TestEmbedKeyOnlyToConfiguredOrigin(t *testing.T) {
 	}))
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2, Credential: config.EmbeddingCredential{Key: "secret", Source: "inline"}})
-	if _, err := c.Embed(context.Background(), []string{"x"}); err != nil {
+	if _, err := c.Embed(t.Context(), []string{"x"}); err != nil {
 		t.Fatal(err)
 	}
 	if gotAuth != "Bearer secret" {
@@ -249,7 +248,7 @@ func TestEncodeFuncRecoversPanic(t *testing.T) {
 	// nil ctx makes http.NewRequestWithContext panic-free but forcing a panic
 	// requires a hostile transport; instead verify the recover wrapper directly.
 	c.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) { panic("boom") })
-	_, err := enc(context.Background(), []string{"x"})
+	_, err := enc(t.Context(), []string{"x"})
 	if err == nil || !strings.Contains(err.Error(), "encoder panic") {
 		t.Fatalf("want recovered panic error, got %v", err)
 	}
@@ -276,7 +275,7 @@ func TestEmbedRejectsCrossOriginRedirectWithoutAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new embedding client: %v", err)
 	}
-	_, err = c.Embed(context.Background(), []string{"x"})
+	_, err = c.Embed(t.Context(), []string{"x"})
 	if err == nil {
 		t.Fatal("expected cross-origin redirect to be rejected without an API key")
 	}

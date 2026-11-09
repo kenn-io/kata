@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 	"testing"
@@ -104,7 +103,7 @@ func (d *digestBody) actionsFor(actor, issueShortID string) []string {
 // translate fixture-time row IDs into the short_id keyed digest output.
 func shortIDOf(t *testing.T, env *testenv.Env, issueID int64) string {
 	t.Helper()
-	iss, err := env.DB.IssueByID(context.Background(), issueID)
+	iss, err := env.DB.IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
 	return iss.ShortID
 }

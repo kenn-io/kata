@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   createCredentialedFetch,
+  fetchAttachmentBlob,
+  setGeneratedFetch,
   orvalFetch,
   responseTriggeredAuthenticationTransition,
 } from './client'
-import { getReadUISnapshotUrl } from './generated'
+import { attachmentContent, getReadUISnapshotUrl } from './generated'
 
 describe('Kata browser API credentials', () => {
   it('serializes exploded array query parameters as repeated keys', () => {
@@ -95,4 +97,51 @@ describe('Kata browser API credentials', () => {
     expect(onAuthenticationRequired).not.toHaveBeenCalled()
     expect(responseTriggeredAuthenticationTransition(result)).toBe(false)
   })
+})
+
+it('fetches attachment blobs through the active browser transport and exposes stable errors', async () => {
+  const transport = vi.fn(async () => new Response('bytes'))
+  setGeneratedFetch(transport as typeof fetch)
+  try {
+    expect(await (await fetchAttachmentBlob('/attachments/content')).text()).toBe('bytes')
+    expect(transport).toHaveBeenCalled()
+    setGeneratedFetch(async () =>
+      Response.json({ error: { code: 'docbank_not_configured' } }, { status: 503 }),
+    )
+    await expect(fetchAttachmentBlob('/attachments/content')).rejects.toThrow(
+      'docbank_not_configured',
+    )
+  } finally {
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
+
+it.each([
+  ['non-UTF-8 image bytes', 'image/png', [0x89, 0x50, 0x4e, 0x47, 0xff]],
+  ['an empty file', 'application/octet-stream', []],
+])('returns %s from the generated attachment client as a Blob', async (_case, type, bytes) => {
+  setGeneratedFetch(
+    async () => new Response(new Uint8Array(bytes), { headers: { 'Content-Type': type } }),
+  )
+  try {
+    const result = await attachmentContent({ projectId: 7, ref: 'abc4', attachmentId: 'saved' })
+    expect(result.status).toBe(200)
+    expect(result.data).toBeInstanceOf(Blob)
+    expect(Array.from(new Uint8Array(await (result.data as Blob).arrayBuffer()))).toEqual(bytes)
+  } finally {
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
+
+it('keeps JSON errors from the generated attachment client', async () => {
+  setGeneratedFetch(async () =>
+    Response.json({ error: { code: 'docbank_unreachable' } }, { status: 502 }),
+  )
+  try {
+    const result = await attachmentContent({ projectId: 7, ref: 'abc4', attachmentId: 'saved' })
+    expect(result.status).toBe(502)
+    expect(result.data).toEqual({ error: { code: 'docbank_unreachable' } })
+  } finally {
+    setGeneratedFetch(createCredentialedFetch())
+  }
 })

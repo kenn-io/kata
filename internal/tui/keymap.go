@@ -10,6 +10,7 @@ import (
 // reads from this same value so rendered help stays in lockstep with
 // what Update actually handles.
 type keymap struct {
+	Tabs                                                         key
 	Help, Quit                                                   key
 	Projects, Inbox, Daemons, Federation, Credentials, Attention key
 	ToggleLayout                                                 key
@@ -21,6 +22,7 @@ type keymap struct {
 	SortChildren                                                 key
 	FilterStatus, FilterForm, ClearFilters                       key
 	Close, Reopen, Undo                                          key
+	SetDates, Delete, MoveIssue, SetRecurrence                   key
 	NextTab, PrevTab, JumpRef, Back                              key
 	EditBody, NewComment                                         key
 	ReplyComment, NextCommentLink, PrevCommentLink               key
@@ -41,6 +43,7 @@ type key struct {
 // newKeymap returns the spec §7.3 bindings.
 func newKeymap() keymap {
 	return keymap{
+		Tabs:         key{Keys: []string{"1", "2", "3", "4"}, Help: "switch tab", Display: "1-4"},
 		Help:         key{Keys: []string{"?"}, Help: "help"},
 		Quit:         key{Keys: []string{"q", "ctrl+c"}, Help: "quit"},
 		Projects:     key{Keys: []string{"P"}, Help: "projects"},
@@ -92,6 +95,10 @@ func newKeymap() keymap {
 		Close:           key{Keys: []string{"x"}, Help: "close"},
 		Reopen:          key{Keys: []string{"r"}, Help: "reopen"},
 		Undo:            key{Keys: []string{"u"}, Help: "undo last issue action"},
+		SetDates:        key{Keys: []string{"d"}, Help: "set dates"},
+		Delete:          key{Keys: []string{"X"}, Help: "delete issue"},
+		MoveIssue:       key{Keys: []string{"M"}, Help: "move to another project"},
+		SetRecurrence:   key{Keys: []string{"O"}, Help: "set repeat"},
 		NextTab:         key{Keys: []string{"tab", "ctrl+j"}, Help: "next tab", Display: "tab/C-j"},
 		PrevTab:         key{Keys: []string{"shift+tab", "ctrl+k"}, Help: "prev tab", Display: "shift+tab/C-k"},
 		JumpRef:         key{Keys: []string{"enter"}, Help: "jump to referenced issue"},

@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/v2"
 	"testing"
 
@@ -11,7 +10,7 @@ import (
 )
 
 func checkNativeCronDefinitions(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-cron")
 	require.NoError(t, err)
 	other, err := store.CreateProject(ctx, "other-cron")

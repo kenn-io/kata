@@ -43,7 +43,7 @@ func assertTimePtrEqual(t *testing.T, want time.Time, got *time.Time) {
 // pragma_table_info call is safe.
 func assertTableShape(t *testing.T, raw *sql.DB, table string, expected []string) {
 	t.Helper()
-	rows, err := raw.Query(`SELECT name FROM pragma_table_info('` + table + `')`) //nolint:gosec // table is a test-controlled literal
+	rows, err := raw.QueryContext(t.Context(), `SELECT name FROM pragma_table_info('`+table+`')`) //nolint:gosec // table is a test-controlled literal
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var got []string
@@ -88,7 +88,7 @@ func importJSONL(ctx context.Context, d *sqlitestore.Store, lines ...string) err
 func setupClosedTestDB(t *testing.T) (context.Context, string) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ func assertCurrentSchemaVersion(t *testing.T, path string) {
 // the expected schema version.
 func assertSchemaVersion(t *testing.T, path string, expected int) {
 	t.Helper()
-	ver, err := sqlitestore.PeekSchemaVersion(context.Background(), path)
+	ver, err := sqlitestore.PeekSchemaVersion(t.Context(), path)
 	require.NoError(t, err)
 	assert.Equal(t, expected, ver, "schema version mismatch")
 }
@@ -121,7 +121,7 @@ func writeLegacyDBFromFixture(t *testing.T, path, fixtureName string) {
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
-	_, err = raw.Exec(string(schema))
+	_, err = raw.ExecContext(t.Context(), string(schema))
 	require.NoError(t, err)
 }
 
@@ -215,7 +215,7 @@ func attachAlias(ctx context.Context, t *testing.T, d *sqlitestore.Store, projec
 
 func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openExportTestDB(t)
 
 	p1, err := d.CreateProject(ctx, "kata")
@@ -395,14 +395,14 @@ func seedV3DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
 
-	_, err = raw.Exec(`PRAGMA foreign_keys = OFF`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = OFF`)
 	require.NoError(t, err)
 
 	// Seed 3 valid issues under project_id=1 (the proj-a project from the
 	// legacy fixture). UIDs use only valid Crockford base32 characters
 	// (uppercase, no I/L/O/U) so the v7→v8 short_id derivation accepts them.
 	for i := 1; i <= 3; i++ {
-		_, err = raw.Exec(`INSERT INTO issues (id, uid, project_id, number, title, author)
+		_, err = raw.ExecContext(t.Context(), `INSERT INTO issues (id, uid, project_id, number, title, author)
 			VALUES (?, ?, 1, ?, ?, 'tester')`,
 			i,
 			fmt.Sprintf("01HZZZZZZZZZZZZZZZZZZZZA%02d", i),
@@ -413,54 +413,54 @@ func seedV3DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	}
 
 	for i := 0; i < spec.OrphanComments; i++ {
-		_, err = raw.Exec(`INSERT INTO comments (issue_id, author, body) VALUES (999, 'tester', ?)`,
+		_, err = raw.ExecContext(t.Context(), `INSERT INTO comments (issue_id, author, body) VALUES (999, 'tester', ?)`,
 			fmt.Sprintf("orphan comment %d", i))
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanLinks; i++ {
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO links (project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 			VALUES (1, 1, 999, '01HZZZZZZZZZZZZZZZZZZZZA01', '01HZZZZZZZZZZZZZZZZZZZZA99', 'related', 'tester')`)
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanLinkBothEnds; i++ {
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO links (project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 			VALUES (1, 998, 999, '01HZZZZZZZZZZZZZZZZZZZZA98', '01HZZZZZZZZZZZZZZZZZZZZA99', 'related', 'tester')`)
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanIssueLabels; i++ {
-		_, err = raw.Exec(`INSERT INTO issue_labels (issue_id, label, author) VALUES (999, ?, 'tester')`,
+		_, err = raw.ExecContext(t.Context(), `INSERT INTO issue_labels (issue_id, label, author) VALUES (999, ?, 'tester')`,
 			fmt.Sprintf("orphan-%d", i))
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanEventIssueID; i++ {
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO events (uid, origin_instance_uid, project_id, project_identity, issue_id, type, actor)
 			VALUES (?, '01HZZZZZZZZZZZZZZZZZZZZZ00', 1, 'proj-a', 999, 'issue.created', 'tester')`,
 			fmt.Sprintf("01HZZZZZZZZZZZZZZZZZEV0A%02d", i))
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanEventRelated; i++ {
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO events (uid, origin_instance_uid, project_id, project_identity, issue_id, related_issue_id, type, actor)
 			VALUES (?, '01HZZZZZZZZZZZZZZZZZZZZZ00', 1, 'proj-a', 1, 999, 'issue.linked', 'tester')`,
 			fmt.Sprintf("01HZZZZZZZZZZZZZZZZZEVRA%02d", i))
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanEventBoth; i++ {
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO events (uid, origin_instance_uid, project_id, project_identity, issue_id, related_issue_id, type, actor)
 			VALUES (?, '01HZZZZZZZZZZZZZZZZZZZZZ00', 1, 'proj-a', 998, 999, 'issue.linked', 'tester')`,
 			fmt.Sprintf("01HZZZZZZZZZZZZZZZZZEVBA%02d", i))
 		require.NoError(t, err)
 	}
 	if spec.OrphanProjectAlias {
-		_, err = raw.Exec(`INSERT INTO project_aliases (project_id, alias_identity, alias_kind, root_path)
+		_, err = raw.ExecContext(t.Context(), `INSERT INTO project_aliases (project_id, alias_identity, alias_kind, root_path)
 			VALUES (777, 'github.com/wesm/missing', 'git', '/tmp/missing')`)
 		require.NoError(t, err)
 	}
-	_, err = raw.Exec(`PRAGMA foreign_keys = ON`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = ON`)
 	require.NoError(t, err)
 }
 
@@ -476,16 +476,16 @@ func seedV2DBWithOrphanRelatedEvent(t *testing.T, path string) {
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
 
-	_, err = raw.Exec(`PRAGMA foreign_keys = OFF`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = OFF`)
 	require.NoError(t, err)
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO events (project_id, project_identity, issue_id, issue_uid, issue_number,
 		                     related_issue_id, related_issue_uid, type, actor, payload, created_at)
 		 VALUES (1, 'spoke-project', 1, '01HZZZZZZZZZZZZZZZZZZZZZZ1', 1,
 		         999, '01HZZZZZZZZZZZZZZZZZZZZA99', 'issue.linked', 'tester', '{}',
 		         '2026-05-03T00:00:03.000Z')`)
 	require.NoError(t, err)
-	_, err = raw.Exec(`PRAGMA foreign_keys = ON`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = ON`)
 	require.NoError(t, err)
 }
 
@@ -498,15 +498,15 @@ func seedV1DBWithOrphanRelatedEvent(t *testing.T, path string) {
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
 
-	_, err = raw.Exec(`PRAGMA foreign_keys = OFF`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = OFF`)
 	require.NoError(t, err)
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO events (project_id, project_identity, issue_id, issue_number,
 		                     related_issue_id, type, actor, payload, created_at)
 		 VALUES (1, 'spoke-project', 1, 1, 999, 'issue.linked', 'tester', '{}',
 		         '2026-05-03T00:00:03.000Z')`)
 	require.NoError(t, err)
-	_, err = raw.Exec(`PRAGMA foreign_keys = ON`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = ON`)
 	require.NoError(t, err)
 }
 
@@ -576,7 +576,7 @@ func dropV10Additions(t *testing.T, raw *sql.DB) {
 		`ALTER TABLE projects DROP COLUMN revision`,
 	}
 	for _, sql := range stmts {
-		_, err := raw.Exec(sql)
+		_, err := raw.ExecContext(t.Context(), sql)
 		require.NoErrorf(t, err, "drop v10 additions: %s", sql)
 	}
 }
@@ -615,7 +615,7 @@ func assertV8V9Shape(t *testing.T, raw *sql.DB) {
 // the v5+ import_mappings code path; the v3 fixture cannot reach it.
 func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// First bootstrap the DB so meta is populated correctly, then close to
 	// release the handle before the raw connection takes over.
@@ -643,27 +643,27 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	}
 	issueShortIDs := []string{"za01", "za02", "za03"}
 
-	_, err = raw.Exec(`INSERT INTO projects(id, uid, name) VALUES (1, ?, 'kata')`, projectUID)
+	_, err = raw.ExecContext(t.Context(), `INSERT INTO projects(id, uid, name) VALUES (1, ?, 'kata')`, projectUID)
 	require.NoError(t, err)
 	for i, uid := range issueUIDs {
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO issues(id, uid, project_id, short_id, title, author)
 			 VALUES (?, ?, 1, ?, ?, 'tester')`,
 			i+1, uid, issueShortIDs[i], fmt.Sprintf("issue %d", i+1))
 		require.NoError(t, err)
 	}
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO links(id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 		 VALUES (1, 1, 2, ?, ?, 'related', 'tester')`,
 		issueUIDs[0], issueUIDs[1])
 	require.NoError(t, err)
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO comments(id, issue_id, author, body) VALUES (1, 1, 'tester', 'valid comment')`)
 	require.NoError(t, err)
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO issue_labels(issue_id, label, author) VALUES (1, 'bug', 'tester')`)
 	require.NoError(t, err)
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO events(uid, origin_instance_uid, project_id, project_name, issue_id, type, actor, payload)
 		 VALUES ('01HZZZZZZZZZZZZZZZZZEVAL01', '01HZZZZZZZZZZZZZZZZZZZZZ00', 1, 'kata', 1, 'issue.created', 'tester', '{}')`)
 	require.NoError(t, err)
@@ -671,19 +671,19 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	// One valid import_mappings row per object_type. These are the
 	// rows that exercise the v5+ exportImportMappings code path on the
 	// happy path, alongside any orphans the spec requests.
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO import_mappings(source, external_id, object_type, project_id, issue_id) VALUES
 		 ('beads', 'iss-1', 'issue', 1, 1)`)
 	require.NoError(t, err)
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO import_mappings(source, external_id, object_type, project_id, issue_id, comment_id) VALUES
 		 ('beads', 'cmt-1', 'comment', 1, 1, 1)`)
 	require.NoError(t, err)
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO import_mappings(source, external_id, object_type, project_id, issue_id, link_id) VALUES
 		 ('beads', 'lnk-1', 'link', 1, 1, 1)`)
 	require.NoError(t, err)
-	_, err = raw.Exec(
+	_, err = raw.ExecContext(t.Context(),
 		`INSERT INTO import_mappings(source, external_id, object_type, project_id, issue_id, label) VALUES
 		 ('beads', 'lbl-1', 'label', 1, 1, 'bug')`)
 	require.NoError(t, err)
@@ -691,58 +691,58 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	// Finally inject orphans with FKs disabled, schema_version
 	// rewrite, then FKs re-enabled so PRAGMA foreign_key_check sees
 	// every violation when the cutover preflight runs.
-	_, err = raw.Exec(`PRAGMA foreign_keys = OFF`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = OFF`)
 	require.NoError(t, err)
 
 	for i := 0; i < spec.OrphanComments; i++ {
-		_, err = raw.Exec(`INSERT INTO comments(issue_id, author, body) VALUES (999, 'tester', ?)`,
+		_, err = raw.ExecContext(t.Context(), `INSERT INTO comments(issue_id, author, body) VALUES (999, 'tester', ?)`,
 			fmt.Sprintf("orphan comment %d", i))
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanLinks; i++ {
 		// Vary to_issue_id per row so the (from, to, type) UNIQUE on
 		// links doesn't collide across multiple orphan inserts.
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 			 VALUES (1, ?, ?, '01HZZZZZZZZZZZZZZZZZZZZA99', 'related', 'tester')`,
 			900+i, issueUIDs[0])
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanIssueLabels; i++ {
-		_, err = raw.Exec(`INSERT INTO issue_labels(issue_id, label, author) VALUES (999, ?, 'tester')`,
+		_, err = raw.ExecContext(t.Context(), `INSERT INTO issue_labels(issue_id, label, author) VALUES (999, ?, 'tester')`,
 			fmt.Sprintf("orphan-%d", i))
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanEventIssueID; i++ {
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO events(uid, origin_instance_uid, project_id, project_name, issue_id, type, actor, payload)
 			 VALUES (?, '01HZZZZZZZZZZZZZZZZZZZZZ00', 1, 'kata', 999, 'issue.created', 'tester', '{}')`,
 			fmt.Sprintf("01HZZZZZZZZZZZZZZZZZEV0A%02d", i))
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanEventRelated; i++ {
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO events(uid, origin_instance_uid, project_id, project_name, issue_id, related_issue_id, type, actor, payload)
 			 VALUES (?, '01HZZZZZZZZZZZZZZZZZZZZZ00', 1, 'kata', 1, 999, 'issue.linked', 'tester', '{}')`,
 			fmt.Sprintf("01HZZZZZZZZZZZZZZZZZEVRA%02d", i))
 		require.NoError(t, err)
 	}
 	for i := 0; i < spec.OrphanImportMappingLink; i++ {
-		_, err = raw.Exec(
+		_, err = raw.ExecContext(t.Context(),
 			`INSERT INTO import_mappings(source, external_id, object_type, project_id, issue_id, link_id) VALUES
 			 ('beads', ?, 'link', 1, 1, 999)`,
 			fmt.Sprintf("orphan-link-%d", i))
 		require.NoError(t, err)
 	}
 	if spec.OrphanProjectAlias {
-		_, err = raw.Exec(`INSERT INTO project_aliases(project_id, alias_identity, alias_kind)
+		_, err = raw.ExecContext(t.Context(), `INSERT INTO project_aliases(project_id, alias_identity, alias_kind)
 			VALUES (777, 'github.com/wesm/missing', 'git')`)
 		require.NoError(t, err)
 	}
 
-	_, err = raw.Exec(`UPDATE meta SET value='8' WHERE key='schema_version'`)
+	_, err = raw.ExecContext(t.Context(), `UPDATE meta SET value='8' WHERE key='schema_version'`)
 	require.NoError(t, err)
-	_, err = raw.Exec(`PRAGMA foreign_keys = ON`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = ON`)
 	require.NoError(t, err)
 }
 
@@ -754,13 +754,13 @@ func seedV9SchemaDB(t *testing.T, path string) {
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
 
-	_, err = raw.Exec(`UPDATE meta SET value='9' WHERE key='schema_version'`)
+	_, err = raw.ExecContext(t.Context(), `UPDATE meta SET value='9' WHERE key='schema_version'`)
 	require.NoError(t, err)
 }
 
 func deleteAutoSystemProject(t *testing.T, raw *sql.DB) {
 	t.Helper()
-	_, err := raw.Exec(`DELETE FROM projects WHERE uid = ? AND name = ?`,
+	_, err := raw.ExecContext(t.Context(), `DELETE FROM projects WHERE uid = ? AND name = ?`,
 		db.SystemProjectUID, db.SystemProjectName)
 	require.NoError(t, err)
 }
@@ -776,16 +776,16 @@ func addWithoutRowidOrphan(t *testing.T, path string) {
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
 
-	_, err = raw.Exec(`PRAGMA foreign_keys = OFF`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = OFF`)
 	require.NoError(t, err)
-	_, err = raw.Exec(`CREATE TABLE wr_child (
+	_, err = raw.ExecContext(t.Context(), `CREATE TABLE wr_child (
 		key        TEXT NOT NULL PRIMARY KEY,
 		project_id INTEGER NOT NULL REFERENCES projects(id)
 	) WITHOUT ROWID`)
 	require.NoError(t, err)
-	_, err = raw.Exec(`INSERT INTO wr_child(key, project_id) VALUES ('orphan', 999)`)
+	_, err = raw.ExecContext(t.Context(), `INSERT INTO wr_child(key, project_id) VALUES ('orphan', 999)`)
 	require.NoError(t, err)
-	_, err = raw.Exec(`PRAGMA foreign_keys = ON`)
+	_, err = raw.ExecContext(t.Context(), `PRAGMA foreign_keys = ON`)
 	require.NoError(t, err)
 }
 

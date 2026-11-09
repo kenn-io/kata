@@ -28,6 +28,8 @@ func (m Model) screenName() string {
 		return ""
 	}
 	switch m.view {
+	case viewCron:
+		return ""
 	case viewHelp:
 		return "help"
 	case viewEmpty:

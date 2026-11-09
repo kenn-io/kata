@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,7 +27,7 @@ func TestIssueScopedTokenCannotAttachAliasThroughProjectResolution(t *testing.T)
 	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
 
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	token, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	token, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
 		Scope: &db.APITokenScope{
 			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,

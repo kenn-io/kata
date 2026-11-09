@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 )
 
 func TestAssignmentSweeperExpiresLocalAndHubAssignmentsButSkipsSpokes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	now := time.Date(2026, time.September, 17, 14, 0, 0, 0, time.UTC)
 

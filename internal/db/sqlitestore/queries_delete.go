@@ -267,6 +267,12 @@ func (d *Store) purgeIssue(ctx context.Context, issueID int64, actor string, rea
 	if err != nil {
 		return db.PurgeLog{}, fmt.Errorf("re-fetch purge_log: %w", err)
 	}
+	if pl.PurgeResetAfterEventID != nil {
+		pl.ResetProjectIDs, err = db.ProjectStreamResetProjectIDs(ctx, conn, pl.ProjectID, *pl.PurgeResetAfterEventID)
+		if err != nil {
+			return db.PurgeLog{}, fmt.Errorf("collect purge reset projects: %w", err)
+		}
+	}
 
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return db.PurgeLog{}, fmt.Errorf("commit: %w", err)
@@ -318,7 +324,7 @@ func rejectActiveExternalRootProjectPurge(ctx context.Context, q sqlReader, proj
 // readable and to bound its cyclomatic complexity.
 func purgeCascade(
 	ctx context.Context,
-	c connExec,
+	c projectPurgeQueryer,
 	issue db.Issue,
 	projectName string,
 	actor string,
@@ -338,7 +344,7 @@ func purgeCascade(
 	eventsWhere, eventsArgs := purgeEventsCleanupWhere(issue)
 	var minEventID, maxEventID sql.NullInt64
 	if err := c.QueryRowContext(ctx,
-		`SELECT MIN(id), MAX(id) FROM events WHERE `+eventsWhere,
+		`SELECT MIN(e.id), MAX(e.id) FROM events e WHERE `+eventsWhere,
 		eventsArgs...).Scan(&minEventID, &maxEventID); err != nil {
 		return 0, fmt.Errorf("scan event id range: %w", err)
 	}
@@ -361,9 +367,14 @@ func purgeCascade(
 		return 0, fmt.Errorf("count labels: %w", err)
 	}
 	eventCount, err := scanCount(ctx, c,
-		`SELECT count(*) FROM events WHERE `+eventsWhere, eventsArgs...)
+		`SELECT count(*) FROM events e WHERE `+eventsWhere, eventsArgs...)
 	if err != nil {
 		return 0, fmt.Errorf("count events: %w", err)
+	}
+
+	affectedProjects, err := db.PurgeResetProjects(ctx, c, issue, false)
+	if err != nil {
+		return 0, fmt.Errorf("collect affected federation streams: %w", err)
 	}
 
 	// Step 4: cascade-delete dependents. Order is bounded by foreign keys —
@@ -372,7 +383,7 @@ func purgeCascade(
 	// they must go before the issues row in step 7. Mutual ordering between
 	// the four below is otherwise free.
 	if _, err := c.ExecContext(ctx,
-		`DELETE FROM events WHERE `+eventsWhere, eventsArgs...); err != nil {
+		`DELETE FROM events WHERE id IN (SELECT e.id FROM events e WHERE `+eventsWhere+")", eventsArgs...); err != nil {
 		return 0, fmt.Errorf("delete events: %w", err)
 	}
 	// Detach surviving aggregated issue.links_changed events from the
@@ -445,6 +456,10 @@ func purgeCascade(
 	reservedCursor, err := reserveEventSequence(ctx, c, true)
 	if err != nil {
 		return 0, err
+	}
+
+	if err := db.RecordProjectStreamResets(ctx, c, affectedProjects, reservedCursor.Int64); err != nil {
+		return 0, fmt.Errorf("invalidate former federation streams: %w", err)
 	}
 
 	purgeUID, err := katauid.New()
@@ -611,7 +626,7 @@ func lookupIssueIncludingDeleted(ctx context.Context, r sqlReader, issueID int64
 // (issue.created with an initial-link to this issue, issue.links_changed
 // with this issue in a *_uids slice) are likewise PRESERVED.
 func purgeEventsCleanupWhere(issue db.Issue) (string, []any) {
-	clause := `(issue_id = ? OR (related_issue_id = ? AND type NOT IN ('issue.links_changed', 'issue.commented')))`
-	args := []any{issue.ID, issue.ID}
+	clause := `(e.issue_id = ? OR ` + db.FederationReadIssueUIDExpr(false) + ` = ? OR ((e.related_issue_id = ? OR e.related_issue_uid = ?) AND e.type NOT IN ('issue.links_changed', 'issue.commented')))`
+	args := []any{issue.ID, issue.UID, issue.ID, issue.UID}
 	return clause, args
 }

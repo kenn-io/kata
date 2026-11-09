@@ -148,10 +148,13 @@ describe('RecurrenceEditor — Common-mode rendering', () => {
     ) as HTMLInputElement | undefined
     expect(yearlyOnDay).toBeTruthy()
     await fireEvent.click(yearlyOnDay!)
-    // The number input in the yearly "On day" row should be enabled,
-    // not blocked by the leaked Monthly lastDay flag.
+    // The day field in the yearly "On day" row should be enabled, not
+    // blocked by the leaked Monthly lastDay flag. NumberInput publishes
+    // its limit as aria-valuemax.
     const dayInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[]
-    const yearlyDayInput = dayInputs.find((el) => el.max === '31' && !el.disabled)
+    const yearlyDayInput = dayInputs.find(
+      (el) => el.getAttribute('aria-valuemax') === '31' && !el.disabled,
+    )
     expect(yearlyDayInput).toBeTruthy()
   })
 

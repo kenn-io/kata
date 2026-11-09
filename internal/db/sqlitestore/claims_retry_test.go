@@ -16,7 +16,7 @@ import (
 
 func newLeaseRetryStore(t *testing.T) (*Store, db.Project, db.Issue) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
@@ -54,7 +54,7 @@ func countClaimExpired(events []db.Event) int {
 // result. The expiry events of a rolled-back attempt were never committed, so
 // broadcasting them would emit phantom SSE frames and phantom hook deliveries.
 func TestAcquireClaimRetryDoesNotDuplicateExpiryEvents(t *testing.T) { //nolint:paralleltest // swaps package var commitClaimTx
-	ctx := context.Background()
+	ctx := t.Context()
 	d, project, issue := newLeaseRetryStore(t)
 	start := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
 
@@ -99,7 +99,7 @@ func TestAcquireClaimRetryDoesNotDuplicateExpiryEvents(t *testing.T) { //nolint:
 // expire, then lost its commit to a busy lock and retried into a clean renew,
 // must report success.
 func TestRenewClaimRetriedIntoSuccessDoesNotReturnExpired(t *testing.T) { //nolint:paralleltest // swaps package var commitClaimTx
-	ctx := context.Background()
+	ctx := t.Context()
 	d, project, issue := newLeaseRetryStore(t)
 	start := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
 	holder := newLeasePrincipal(t, "holder-a")

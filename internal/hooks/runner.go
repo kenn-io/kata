@@ -15,6 +15,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/processtree"
+	"go.kenn.io/kit/consolewindow"
 )
 
 // runRecord is the JSONL line shape for runs.jsonl. The dispatcher's
@@ -279,7 +280,7 @@ func runJob(ctx context.Context, shutdown <-chan struct{}, job HookJob, deps run
 	stdinPayload, payloadTruncated := buildStdinJSON(ctx, job.Event, deps.Project, deps.Issue, deps.Comment,
 		frozenAliasResolver(asnap, hasAlias, aliasErr), logf)
 
-	cmd := exec.Command(job.Hook.Command, job.Hook.Args...) //nolint:gosec // G204: command validated at config load
+	cmd := exec.Command(job.Hook.Command, job.Hook.Args...) //nolint:gosec,noctx // G204: command validated at config load; processtree and waitForCompletion own timeout and shutdown.
 	cmd.Dir = job.Hook.WorkingDir
 	baseEnv := deps.Environment
 	if baseEnv == nil {
@@ -289,6 +290,7 @@ func runJob(ctx context.Context, shutdown <-chan struct{}, job HookJob, deps run
 	cmd.Stdin = bytes.NewReader(stdinPayload)
 	cmd.Stdout = rc.outFile
 	cmd.Stderr = rc.errFile
+	consolewindow.Hide(cmd)
 	tree, err := processtree.New(cmd)
 	if err != nil {
 		rc.finalize("spawn_failed", err.Error(), -1, payloadTruncated)

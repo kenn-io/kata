@@ -3,7 +3,6 @@
 package e2e_test
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -26,13 +25,13 @@ func TestFederationFailpointHubRestartMidIngestBatch(t *testing.T) {
 
 	spokeIssue := fx.createIssueOnNode(t, fx.spokes[0], "precommit-crash")
 	fx.waitForNodeUnavailable(t, fx.hub)
-	_, err := fx.hub.db.IssueByUID(context.Background(), spokeIssue.UID, db.IncludeDeletedYes)
+	_, err := fx.hub.db.IssueByUID(t.Context(), spokeIssue.UID, db.IncludeDeletedYes)
 	require.Error(t, err, "pre-commit crash must not leave a partially-ingested issue")
 
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
 	fx.restartHub(t)
 	fx.waitForConvergence(t)
-	got, err := fx.hub.db.IssueByUID(context.Background(), spokeIssue.UID, db.IncludeDeletedNo)
+	got, err := fx.hub.db.IssueByUID(t.Context(), spokeIssue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	assert.Equal(t, spokeIssue.ShortID, got.ShortID)
 }
@@ -44,7 +43,7 @@ func TestFederationFailpointHubCommitBeforeBroadcastStillConverges(t *testing.T)
 
 	spokeIssue := fx.createIssueOnNode(t, fx.spokes[0], "postcommit-crash")
 	fx.waitForNodeUnavailable(t, fx.hub)
-	got, err := fx.hub.db.IssueByUID(context.Background(), spokeIssue.UID, db.IncludeDeletedNo)
+	got, err := fx.hub.db.IssueByUID(t.Context(), spokeIssue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err, "post-commit crash must retain the accepted issue")
 	assert.Equal(t, spokeIssue.ShortID, got.ShortID)
 
@@ -68,7 +67,7 @@ func TestFederationFailpointBeforeSpokePushCursorAdvanceRetriesDuplicateBatch(t 
 	fx.restartSpoke(t, fx.spokes[0])
 	fx.waitForConvergence(t)
 	fx.assertHubEventCountForIssue(t, spokeIssue.UID, 1)
-	binding, err := fx.spokes[0].db.FederationBindingByProject(context.Background(), fx.spokes[0].projectID)
+	binding, err := fx.spokes[0].db.FederationBindingByProject(t.Context(), fx.spokes[0].projectID)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, binding.PushCursorEventID, int64(1))
 }
@@ -130,7 +129,7 @@ func TestFederationFailpointHubUnavailableClaimStatusFallsBackToCache(t *testing
 		Revision:          1,
 		UpdatedAt:         now,
 	}
-	require.NoError(t, fx.spokes[0].db.ApplyClaimStatus(context.Background(),
+	require.NoError(t, fx.spokes[0].db.ApplyClaimStatus(t.Context(),
 		fx.spokes[0].projectID, statusIssue.UID, db.ClaimStatus{
 			Held: true,
 			Holder: db.ClaimPrincipal{
@@ -188,7 +187,7 @@ func TestFederationFailpointStoppedHubKeepsProcessIndependentAssertions(t *testi
 // no product persisted state.
 func (fx *federationStressFixture) injectDuplicateLiveClaims(t *testing.T, node *federationStressNode) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	issue, err := node.db.IssueByUID(ctx, fx.hubIssue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, err = node.db.ExecContext(ctx, `DROP INDEX IF EXISTS uniq_issue_claims_live_issue`)
@@ -224,7 +223,7 @@ func (fx *federationStressFixture) waitForFailpointMarker(t *testing.T, path str
 func (fx *federationStressFixture) assertHubEventCountForIssue(t *testing.T, issueUID string, want int) {
 	t.Helper()
 	var got int
-	require.NoError(t, fx.hub.db.QueryRowContext(context.Background(),
+	require.NoError(t, fx.hub.db.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM events WHERE project_id = ? AND issue_uid = ?`,
 		fx.hub.projectID, issueUID).Scan(&got))
 	assert.Equal(t, want, got, fmt.Sprintf("hub event count for issue %s", issueUID))
@@ -246,7 +245,9 @@ func (fx *federationStressFixture) waitForHTTPUnavailable(t *testing.T, client *
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(base + "/api/v1/ping") //nolint:noctx
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/api/v1/ping", nil)
+		require.NoError(t, err)
+		resp, err := client.Do(req)
 		if err != nil {
 			return
 		}
@@ -275,7 +276,7 @@ func (fx *federationStressFixture) restartSpoke(t *testing.T, spoke *federationS
 
 func (fx *federationStressFixture) assertEventOrderValid(t *testing.T, store *sqlitestore.Store, projectID int64) {
 	t.Helper()
-	rows, err := store.QueryContext(context.Background(), `
+	rows, err := store.QueryContext(t.Context(), `
 		SELECT id, hlc_physical_ms, hlc_counter
 		  FROM events
 		 WHERE project_id = ?

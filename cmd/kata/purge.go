@@ -39,6 +39,7 @@ for this exact ref.`,
 			}
 			// Resolve to the qualified display form so X-Kata-Confirm
 			// works whether the user passed a ULID or a short_id.
+			requestedProject := issue.ProjectName
 			issue, err = hydrateRefWithQualified(ctx, baseURL, pid, issue, true)
 			if err != nil {
 				return err
@@ -53,7 +54,7 @@ for this exact ref.`,
 			if reason != "" {
 				extra = map[string]any{"reason": reason}
 			}
-			return runDestructive(ctx, cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, "purge", confirm, extra)
+			return runDestructive(ctx, cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, requestedProject, "purge", confirm, extra)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "required to perform the purge")

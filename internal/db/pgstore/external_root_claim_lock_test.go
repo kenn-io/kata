@@ -1,7 +1,6 @@
 package pgstore
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ func TestExternalRootCompletionClaimsWaitForIssueLock(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := OpenWithConfig(ctx, dsn, Config{
@@ -84,7 +83,7 @@ func TestExternalRootCompletionClaimsWaitForIssueLock(t *testing.T) {
 			select {
 			case got := <-result:
 				require.Failf(t, "claim bypassed issue lock", "result=%+v", got)
-			case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; the blocker transaction holds the issue lock, so the claim must not finish
+			case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; the blocker transaction holds the issue lock, so the claim must not finish
 			}
 			require.NoError(t, blocker.Rollback())
 			select {

@@ -22,7 +22,7 @@ func TestCronCapabilitiesEmptyProjectReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	response, raw := envDoRaw(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", project.ID), nil, nil)
 	require.Equalf(t, 200, response.StatusCode, "%s", raw)
-	require.Equal(t, "cron_v1", response.Header.Get(db.EventFeaturesHeader))
+	require.Equal(t, db.SupportedEventFeatures, response.Header.Get(db.EventFeaturesHeader))
 	var body struct {
 		EventFeatures []string `json:"event_features"`
 	}
@@ -59,7 +59,7 @@ func TestCronCapabilitiesProjectScopedHostRead(t *testing.T) {
 		id   int64
 		want int
 	}{{project.ID, 200}, {other.ID, 404}} {
-		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", tc.id), nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", tc.id), nil)
 		request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "reader", Actor: "reader"}))
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, request)
