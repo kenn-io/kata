@@ -121,11 +121,13 @@ func TestFullPulledMaterializationReplaysMoveHistory(t *testing.T) {
 	require.NoError(t, err)
 	_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: away.Issue.ID, FromProjectID: other.ID, ToProjectID: p.ID, IfMatchRev: away.Issue.Revision, Actor: "tester"})
 	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `UPDATE issues SET title='stale projection' WHERE uid=?`, issue.UID)
-	require.NoError(t, err)
 	ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
-	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
+	update := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"remote title"}`, 9_000_000_000_001)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev, update})
 	require.NoError(t, err)
+	before, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, "work", before.Title)
 	prepared, err := d.prepareFullPull(ctx, p.ID, []string{ev.EventUID})
 	require.NoError(t, err)
 	require.True(t, prepared.fullReplay)
@@ -133,7 +135,7 @@ func TestFullPulledMaterializationReplaysMoveHistory(t *testing.T) {
 	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, p.ID, got.ProjectID)
-	require.Equal(t, "work", got.Title)
+	require.Equal(t, "remote title", got.Title)
 }
 
 // Group links include endpoints outside the page's touched issue scope.
