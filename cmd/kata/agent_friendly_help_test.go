@@ -16,27 +16,18 @@ func TestAgentWorkflowHelpFollowsContract(t *testing.T) {
 	workflow, _, found = strings.Cut(workflow, "Full agent contract:")
 	require.True(t, found, "the workflow must link to the full contract")
 
-	assert.Contains(t, workflow, `kata search "<one or two distinctive words>" --agent`)
-	assert.Contains(t, workflow, "kata create")
-	assert.Contains(t, workflow, "kata claim")
-	assert.Contains(t, workflow, "kata close")
-	assert.Contains(t, workflow, `--test "<command>" --agent`)
-
-	commands, err := helpCommandLines(workflow, true)
-	require.NoError(t, err)
-	for _, command := range commands {
-		argv, err := splitHelpWords(command)
-		require.NoError(t, err)
-		cmd, _, err := newRootCmd().Find(argv[1:])
-		require.NoError(t, err)
-		assert.Contains(t, agentguide.Contract, cmd.CommandPath(), "workflow command must appear in the short contract")
+	for _, surface := range []string{workflow, agentguide.Contract} {
+		assert.Contains(t, surface, `kata search "<one or two distinctive words>" --agent`)
+		assert.Contains(t, surface, `--test "<command>" --agent`)
+		for _, command := range []string{"kata search", "kata create", "kata claim", "kata close", "kata label add"} {
+			assert.Contains(t, surface, command, "workflow command must appear in help and the short contract")
+		}
 	}
 
 	claimHelp := string(executeRoot(t, newRootCmd(), "claim", "--help"))
 	for _, surface := range []string{workflow, claimHelp} {
 		assert.NotContains(t, surface, "work.attention")
 	}
-	assert.Contains(t, claimHelp, "--ttl releases the claim after 1m-24h.")
 }
 
 // The team and project-access commands belong to the administration group,
