@@ -1965,7 +1965,7 @@ SQLite push and pull application first prepare without holding the writer.
 For a full-history pull, Kata folds project and link history in a read-only
 snapshot, then prepares row changes there. Before applying them under the
 writer, Kata checks the event history, link group, and rows. A changed input
-or a newly recorded move retries the preparation.
+or a newly recorded move of an issue in that history retries the preparation.
 If a concurrent write invalidates that snapshot, Kata tries once more the same
 way, unless the invalidated preparation took a second or longer. After that,
 the next attempt acquires the writer before preparing. Optimistic preparation
