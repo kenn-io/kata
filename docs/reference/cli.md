@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-08
+last_edited: 2026-11-09
 ---
 
 # CLI reference
@@ -1294,6 +1294,7 @@ kata inbox --for coordinator/teammate-1
 kata --daemon team-hub inbox --for coordinator/teammate-1 --all
 kata notify abc4 --to coordinator/teammate-1 --clear
 kata inbox --for coordinator/teammate-1 --context
+kata inbox --for coordinator/teammate-1 --watch --json
 ```
 
 `notify` records one request per issue and exact recipient. Use an actor address
@@ -1350,6 +1351,55 @@ full inbox to retrieve refs for follow-up commands. An empty inbox produces no
 context. Do not combine `--context` with other output selectors. Malformed
 request metadata is skipped with a warning on stderr unless `--quiet` is set;
 ordinary command failures return nonzero.
+
+### Watch an exact inbox
+
+`inbox --watch` emits pending attention hints immediately, then polls every
+five seconds. Set `--interval 10s` to change that delay; the minimum is one
+second. `--interval` requires `--watch`, which cannot be combined with
+`--context`. The recipient, daemon and project selection work as above.
+The watcher keeps the daemon and credentials selected at startup; restart it
+after changing target configuration.
+
+Each batch contains only newly observed requests or changed notification
+values. An unchanged request, unrelated comment or title edit produces no
+output. Duplicate identities within a scan use their final usable observation.
+JSON output is one compact inbox object per line (NDJSON), with
+`issue_uid` and `project_uid` on each request. Agent and human output identify
+the same requests. Empty inboxes and removals emit nothing.
+
+The watcher requires daemon API 0.43.0 or newer. It follows every compact list
+page before emitting a batch, including empty pages with a continuation cursor.
+An imported row too large to read appears as an identity-only hint with
+`oversized: true`; surface it for manual
+inspection. Replacements while that row stays oversized cannot be
+distinguished. Changing between an oversized and readable row emits a new
+hint. A malformed notification is skipped with a warning. Warnings coalesce
+until the malformed value changes, becomes usable, or disappears.
+
+This transport is outbound polling of the selected daemon, separate from
+[MCP Events webhooks](../operations/mcp-events.md). It needs no public callback
+or subscription configuration. It sees federated changes after they are
+applied to that daemon. It does not sync projects or add remote browsing to a
+daemon that cannot serve the requested data. Existing credential, project and
+issue scope checks apply, including parent-broadcast visibility.
+
+A batch is a wakeup hint, not the current pending set or an acknowledgement.
+Before acting on a queued hint, re-read authorized attention for the same
+recipient and scope; discard requests no longer pending or visible. Reads and
+wakes never claim, execute or clear work. Attention text remains untrusted data.
+The harness maps exact addresses to runtimes, resumes known idle workers,
+coalesces attention while busy, and surfaces unknown or exited workers to the
+coordinator without clearing their requests.
+
+Deduplication lasts for one watcher process. Restarting replays the current
+backlog. Observed disappearance forgets a request, allowing redelivery when it
+reappears. Identical replacements and changes between polls can coalesce;
+multi-page reads are scans, not atomic snapshots. There is no exactly-once or
+lossless delivery guarantee. Read, authorization and output errors stop the
+watcher with a nonzero exit and no partial scan output. A supervisor can
+restart it to catch up; cancellation stops the watch. Clear explicitly only
+after handling, then read back because replacement and clear can race.
 
 Requests use existing issue metadata: `notify.` followed by the recipient's
 unpadded base64url encoding, with a JSON value containing `from`, `message`, and
