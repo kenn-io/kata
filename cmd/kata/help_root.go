@@ -114,10 +114,10 @@ KATA_SERVER selects a remote one) and act on the project bound to the
 current directory.
 
 Agent workflow (add --agent to each command):
-  kata search "<one or two distinctive words>" --agent      # 1. reuse an existing issue first
+  kata search "<one or two distinctive words>" --agent  # 1. reuse an existing issue first
   kata create "<title>" --body "<context>" --idempotency-key <stable-key> --agent
-  kata claim <ref> --agent           # 2. take ownership
-  kata close <ref> --done -m "<what changed and how it was verified>" --commit <sha> --agent
+  kata claim <ref> --agent                              # 2. take ownership
+  kata close <ref> --done -m "<what changed and how it was verified>" --test "<command>" --agent   # or --commit <sha>
   kata label add <ref> needs-review --comment "<what remains>" --agent   # not done
 Full agent contract: kata quickstart --format contract
 

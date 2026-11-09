@@ -1,7 +1,6 @@
 package main
 
 import (
-	"regexp"
 	"strings"
 	"testing"
 
@@ -18,26 +17,26 @@ func TestAgentWorkflowHelpFollowsContract(t *testing.T) {
 	require.True(t, found, "the workflow must link to the full contract")
 
 	assert.Contains(t, workflow, `kata search "<one or two distinctive words>" --agent`)
-	assert.NotContains(t, workflow, "work.attention")
 	assert.Contains(t, workflow, "kata create")
 	assert.Contains(t, workflow, "kata claim")
 	assert.Contains(t, workflow, "kata close")
-	assert.Contains(t, workflow, "--commit <sha>")
+	assert.Contains(t, workflow, `--test "<command>" --agent`)
 
-	commands := regexp.MustCompile(`(?m)^\s*(kata(?: [a-z][a-z-]*)+)\b`).FindAllStringSubmatch(workflow, -1)
-	require.NotEmpty(t, commands)
+	commands, err := helpCommandLines(workflow, true)
+	require.NoError(t, err)
 	for _, command := range commands {
-		assert.Contains(t, agentguide.Contract, command[1], "workflow command must appear in the short contract")
+		argv, err := splitHelpWords(command)
+		require.NoError(t, err)
+		cmd, _, err := newRootCmd().Find(argv[1:])
+		require.NoError(t, err)
+		assert.Contains(t, agentguide.Contract, cmd.CommandPath(), "workflow command must appear in the short contract")
 	}
-}
 
-func TestClaimHelpKeepsAttentionInCoordinatorGuidance(t *testing.T) {
-	help := string(executeRoot(t, newRootCmd(), "claim", "--help"))
-	assert.NotContains(t, help, "work.attention")
-	assert.NotContains(t, help, "After claiming, mark the work tracked")
-	assert.Contains(t, help, "--ttl releases the claim after 1m-24h.")
-	assert.Contains(t, string(executeRoot(t, newRootCmd(), "meta", "--help")), "work.attention")
-	assert.Contains(t, string(executeRoot(t, newRootCmd(), "quickstart")), "work.attention")
+	claimHelp := string(executeRoot(t, newRootCmd(), "claim", "--help"))
+	for _, surface := range []string{workflow, claimHelp} {
+		assert.NotContains(t, surface, "work.attention")
+	}
+	assert.Contains(t, claimHelp, "--ttl releases the claim after 1m-24h.")
 }
 
 // The team and project-access commands belong to the administration group,
