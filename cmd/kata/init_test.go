@@ -443,32 +443,50 @@ func TestInit_ReadOnlyKataTomlWarns(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can write read-only files")
 	}
-	resetFlags(t)
-	flags.Mode = outputHuman
-	env := testenv.New(t)
-	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	dir := t.TempDir()
-	runGit(t, dir, "init", "--quiet")
-	path := filepath.Join(dir, ".kata.toml")
-	original := "version = 1\n[project]\nname = \"spoke-project\"\n"
-	require.NoError(t, os.WriteFile(path, []byte(original), 0o444)) //nolint:gosec // read-only fixture reproduces an unwritable committed binding
-	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })                 //nolint:gosec // restore test fixture permissions for cleanup
-	stderr := captureProcessStderr(t, func() {
-		_, err = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
-	})
-	require.NoError(t, err)
-	assert.Contains(t, stderr, ".kata.toml")
-	assert.Contains(t, stderr, "kata: warning: could not update .kata.toml header:")
-	content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	assert.Equal(t, original, string(content))
-	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore")) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	assert.Contains(t, string(gitignore), ".kata.local.toml")
-	agents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	assert.Contains(t, string(agents), agentsBlockBegin+"\n"+agentContractText+agentsBlockEnd)
+	for _, mode := range []outputMode{outputHuman, outputAgent, outputJSON} {
+		t.Run(string(mode), func(t *testing.T) {
+			resetFlags(t)
+			flags.Mode = mode
+			env := testenv.New(t)
+			_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			dir := t.TempDir()
+			runGit(t, dir, "init", "--quiet")
+			path := filepath.Join(dir, ".kata.toml")
+			original := "version = 1\n[project]\nname = \"spoke-project\"\n"
+			require.NoError(t, os.WriteFile(path, []byte(original), 0o444)) //nolint:gosec // read-only fixture reproduces an unwritable committed binding
+			t.Cleanup(func() { _ = os.Chmod(path, 0o644) })                 //nolint:gosec // restore test fixture permissions for cleanup
+			var out string
+			stderr := captureProcessStderr(t, func() {
+				out, err = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
+			})
+			require.NoError(t, err)
+			if mode == outputHuman {
+				assert.Contains(t, stderr, ".kata.toml")
+			} else {
+				assert.Empty(t, stderr)
+				if mode == outputJSON {
+					var body struct {
+						Warning string `json:"agent_guidance_warning"`
+					}
+					require.NoError(t, json.Unmarshal([]byte(out), &body))
+					assert.Contains(t, body.Warning, ".kata.toml")
+				} else {
+					assert.Contains(t, out, "agent_guidance_warning=")
+					assert.Contains(t, out, ".kata.toml")
+				}
+			}
+			content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+			require.NoError(t, err)
+			assert.Equal(t, original, string(content))
+			gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore")) //nolint:gosec // test fixture under TempDir
+			require.NoError(t, err)
+			assert.Contains(t, string(gitignore), ".kata.local.toml")
+			agents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+			require.NoError(t, err)
+			assert.Contains(t, string(agents), agentsBlockBegin+"\n"+agentContractText+agentsBlockEnd)
+		})
+	}
 }
 
 func TestInit_AgentOutputQuotesProjectName(t *testing.T) {

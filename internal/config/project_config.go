@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	"github.com/BurntSushi/toml"
-	"go.kenn.io/kit/atomicfile"
 )
 
 // ErrProjectConfigMissing is returned by ReadProjectConfig when the workspace
@@ -137,15 +136,10 @@ func EnsureProjectConfigHeader(workspaceRoot string) (bool, error) {
 	if hasBOM {
 		header = "\ufeff" + header
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY, 0) //nolint:gosec // check existing binding is writable without truncating it
-	if err != nil {
+	if err := os.WriteFile(path, []byte(header+body), 0o644); err != nil { //nolint:gosec // committed project file, world-readable by design
 		return false, err
 	}
-	if err := file.Close(); err != nil {
-		return false, err
-	}
-	err = atomicfile.WriteFile(path, []byte(header+body), atomicfile.WithPreserveMode())
-	return err == nil || errors.Is(err, atomicfile.ErrPublished), err
+	return true, nil
 }
 
 // ValidateProjectName rejects names that can spoof terminal output when echoed

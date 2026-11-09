@@ -373,6 +373,7 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	}
 
 	dest := config.WriteDestination(in.Disc, in.StartPath)
+	guidanceWarning := ""
 	tomlChanged := needsTomlWrite(in.ExistingToml, resp.Project.Name)
 	if tomlChanged {
 		if err := config.WriteProjectConfig(dest, resp.Project.Name); err != nil {
@@ -380,20 +381,25 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 		}
 	} else {
 		tomlChanged, err = config.EnsureProjectConfigHeader(dest)
-		if err != nil && currentOutputMode() == outputHuman {
-			fmt.Fprintf(os.Stderr, "kata: warning: could not update .kata.toml header: %v\n", err)
+		if err != nil {
+			err = fmt.Errorf("write .kata.toml: %w", err)
+			warnAgentsUpdate(err)
+			guidanceWarning = err.Error()
 		}
 	}
 	gitignoreChanged, err := ensureGitignoreEntry(dest, ".kata.local.toml")
 	if err != nil {
 		warnGitignoreUpdate(err)
 	}
-	agentsChanged, guidanceWarning := false, ""
+	agentsChanged := false
 	if opts.WithAgents {
 		agentsChanged, err = applyAgentGuidance(dest, opts.AgentMode)
 		if err != nil {
 			warnAgentsUpdate(err)
-			guidanceWarning = err.Error()
+			if guidanceWarning != "" {
+				guidanceWarning += "; "
+			}
+			guidanceWarning += err.Error()
 		}
 	}
 	hooksChanged := false
