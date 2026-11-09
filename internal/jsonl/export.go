@@ -283,6 +283,9 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 		if opts.ProjectID != 0 && (strings.HasPrefix(rec.Key, db.FederationSpokeNamePrefix) || strings.HasPrefix(rec.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.ProjectStreamResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(rec.Key, db.PendingCreationMetadataPrefix)) {
 			continue
 		}
+		if opts.ProjectID != 0 && strings.HasPrefix(rec.Key, db.TrackerMetadataPrefix) {
+			continue
+		}
 		if opts.ProjectID != 0 && rec.Key == "project_access_revision" {
 			continue
 		}
@@ -546,10 +549,18 @@ func exportProjectAliases(ctx context.Context, d exportQuerier, enc *Encoder, op
 }
 
 func exportIssueSyncBindings(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
+	hasConnection, err := tableHasColumn(ctx, d, "issue_sync_bindings", "connection_uid")
+	if err != nil {
+		return err
+	}
+	marker := "NULL"
+	if hasConnection {
+		marker = "connection_uid"
+	}
 	query := `SELECT id, project_id, provider, source_key, remote_id,
 	                 display_name, config_json, enabled, interval_seconds,
 	                 CAST(last_cursor_at AS TEXT),
-	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT)
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), ` + marker + `
 	          FROM issue_sync_bindings`
 	args := []any{}
 	if opts.ProjectID > 0 {
@@ -567,9 +578,12 @@ func exportIssueSyncBindings(ctx context.Context, d exportQuerier, enc *Encoder,
 		var config string
 		err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.Provider, &rec.SourceKey,
 			&rec.RemoteID, &rec.DisplayName, &config, &enabled,
-			&rec.IntervalSeconds, &rec.LastCursorAt, &rec.CreatedAt, &rec.UpdatedAt)
+			&rec.IntervalSeconds, &rec.LastCursorAt, &rec.CreatedAt, &rec.UpdatedAt, &rec.ConnectionUID)
 		rec.Config = jsontext.Value(config)
 		rec.Enabled = enabled == 1
+		if err == nil {
+			err = db.ValidateIssueSyncConnectionMarker(rec.ConnectionUID, rec.Config)
+		}
 		return rec, err
 	})
 }

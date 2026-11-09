@@ -57,7 +57,7 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 			if err != nil {
 				return db.IssueSyncBinding{}, err
 			}
-			config, err := db.PreserveIssueStatusScanConfig(existing.Config, p.Config)
+			config, _, err := db.PrepareIssueSyncBindingConfig(&existing, p)
 			if err != nil {
 				return db.IssueSyncBinding{}, err
 			}
@@ -106,17 +106,17 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 			return db.IssueSyncBinding{}, err
 		}
 
-		insertConfig, err := db.PublicIssueSyncConfig(p.Config)
+		insertConfig, connectionUID, err := db.PrepareIssueSyncBindingConfig(nil, p)
 		if err != nil {
 			return db.IssueSyncBinding{}, err
 		}
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO issue_sync_bindings(
 				project_id, provider, source_key, remote_id, display_name,
-				config_json, enabled, interval_seconds
-			) VALUES(?, ?, ?, ?, ?, ?, 1, ?)`,
+				config_json, enabled, interval_seconds, connection_uid
+			) VALUES(?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 			p.ProjectID, p.Provider, p.SourceKey, p.RemoteID, p.DisplayName,
-			string(insertConfig), p.IntervalSeconds)
+			string(insertConfig), p.IntervalSeconds, connectionUID)
 		if err != nil {
 			return db.IssueSyncBinding{}, fmt.Errorf("insert issue sync binding: %w", err)
 		}
@@ -520,7 +520,7 @@ func issueSyncBindingByID(ctx context.Context, q queryer, bindingID int64) (db.I
 
 const issueSyncBindingSelect = `SELECT b.id, b.project_id, b.provider, b.source_key,
        b.remote_id, b.display_name, b.config_json, b.enabled, b.interval_seconds, b.last_cursor_at,
-       b.created_at, b.updated_at
+       b.created_at, b.updated_at, b.connection_uid
   FROM issue_sync_bindings b`
 
 func scanIssueSyncBinding(r rowScanner) (db.IssueSyncBinding, error) {
@@ -533,7 +533,7 @@ func scanIssueSyncBinding(r rowScanner) (db.IssueSyncBinding, error) {
 	err := r.Scan(&binding.ID, &binding.ProjectID, &binding.Provider, &binding.SourceKey,
 		&binding.RemoteID, &binding.DisplayName, &config,
 		&enabled, &binding.IntervalSeconds, &lastCursorAt,
-		&binding.CreatedAt, &binding.UpdatedAt)
+		&binding.CreatedAt, &binding.UpdatedAt, &binding.ConnectionUID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.IssueSyncBinding{}, db.ErrNotFound
 	}
@@ -541,6 +541,9 @@ func scanIssueSyncBinding(r rowScanner) (db.IssueSyncBinding, error) {
 		return db.IssueSyncBinding{}, fmt.Errorf("scan issue sync binding: %w", err)
 	}
 	binding.Config = jsontext.Value(config)
+	if err := db.ValidateIssueSyncConnectionMarker(binding.ConnectionUID, binding.Config); err != nil {
+		return db.IssueSyncBinding{}, err
+	}
 	binding.Enabled = enabled == 1
 	if lastCursorAt.Valid {
 		binding.LastCursorAt = &lastCursorAt.Time

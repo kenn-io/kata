@@ -584,7 +584,7 @@ func (s *Store) ExportExternalFieldStates(ctx context.Context, filter db.ExportF
 // ExportIssueSyncBindings streams provider bindings for selected projects.
 func (s *Store) ExportIssueSyncBindings(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.IssueSyncBindingExport, error] {
 	query, args := pgProjectFilter(`SELECT id, project_id, provider, source_key, remote_id,
-       display_name, config_json, enabled, interval_seconds, last_cursor_at, created_at, updated_at
+       display_name, config_json, enabled, interval_seconds, last_cursor_at, created_at, updated_at, connection_uid
   FROM issue_sync_bindings`, "project_id", filter)
 	query += ` ORDER BY id ASC`
 	return streamExportRows(ctx, s, "issue_sync_bindings", query, args,
@@ -595,13 +595,16 @@ func (s *Store) ExportIssueSyncBindings(ctx context.Context, filter db.ExportFil
 			if err := rows.Scan(&record.ID, &record.ProjectID, &record.Provider, &record.SourceKey,
 				&record.RemoteID, &record.DisplayName, &config, &enabled,
 				&record.IntervalSeconds, &record.LastCursorAt, &record.CreatedAt,
-				&record.UpdatedAt); err != nil {
+				&record.UpdatedAt, &record.ConnectionUID); err != nil {
 				return db.IssueSyncBindingExport{}, pgExportScanError("issue_sync_binding", err)
 			}
 			if !jsontext.Value([]byte(config)).IsValid() {
 				return db.IssueSyncBindingExport{}, pgInvalidJSONError("issue_sync_binding", record.ID, "config_json")
 			}
 			record.Config = jsontext.Value(config)
+			if err := db.ValidateIssueSyncConnectionMarker(record.ConnectionUID, record.Config); err != nil {
+				return db.IssueSyncBindingExport{}, err
+			}
 			record.Enabled = enabled == 1
 			return record, nil
 		})

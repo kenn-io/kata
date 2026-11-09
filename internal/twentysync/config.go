@@ -130,7 +130,7 @@ func DecodeConfig(raw jsontext.Value) (Config, error) {
 	if _, err := db.DecodeIssueStatusScan(raw); err != nil {
 		return Config{}, fmt.Errorf("invalid Twenty config JSON")
 	}
-	public, err := db.PublicIssueSyncConfig(raw)
+	public, err := db.ProviderIssueSyncConfig(raw)
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid Twenty config JSON")
 	}

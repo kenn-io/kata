@@ -87,9 +87,12 @@ func SetIssueStatusScanConfig(config jsontext.Value, state IssueStatusScanState)
 	return json.Marshal(fields, json.Deterministic(true))
 }
 
-// PublicIssueSyncConfig excludes daemon-owned scan checkpoints from typed
-// provider validation and ordinary restores; user configuration remains intact.
+// PublicIssueSyncConfig excludes private runner checkpoints while retaining
+// nonsecret binding identity. Provider decoders use ProviderIssueSyncConfig.
 func PublicIssueSyncConfig(config jsontext.Value) (jsontext.Value, error) {
+	if _, err := IssueSyncConnectionFromConfig(config); err != nil {
+		return nil, err
+	}
 	var fields map[string]jsontext.Value
 	if err := json.Unmarshal(config, &fields); err != nil || fields == nil {
 		return nil, invalidIssueStatusState()
@@ -157,7 +160,13 @@ func PreserveIssueStatusScanConfig(previous, next jsontext.Value) (jsontext.Valu
 	if err := json.Unmarshal(clean, &fields); err != nil || fields == nil {
 		return nil, invalidIssueStatusState()
 	}
-	for _, key := range []string{issueStatusScanKey, IssueSyncProviderCheckpointKey} {
+	// Ordinary edits cannot introduce or replace a selected credential owner.
+	// The separately authorized selection path sets it after this merge.
+	delete(fields, issueSyncConnectionKey)
+	if _, err := IssueSyncConnectionFromConfig(previous); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{issueStatusScanKey, IssueSyncProviderCheckpointKey, issueSyncConnectionKey} {
 		if raw, present := old[key]; present {
 			if key == issueStatusScanKey {
 				if _, err := DecodeIssueStatusScan(previous); err != nil {

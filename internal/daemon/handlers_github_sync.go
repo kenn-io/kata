@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/tracker"
 )
 
 const defaultGitHubSyncIntervalSeconds = 300
@@ -249,6 +250,23 @@ func validateIssueSyncProvider(provider string) (string, error) {
 }
 
 func issueSyncEnableParams(ctx context.Context, cfg ServerConfig, provider string, in *api.EnableIssueSyncRequest) (db.UpsertIssueSyncBindingParams, error) {
+	selectionRequired := func() (db.UpsertIssueSyncBindingParams, error) {
+		return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusConflict, "tracker_selection_required", "use an explicit tracker operation to configure a named connection", "", nil)
+	}
+	for _, key := range []string{"_tracker_connection", "connection_uid", "connection_owner_instance_uid", "connection_generation"} {
+		if _, supplied := in.Body.Config[key]; supplied {
+			return selectionRequired()
+		}
+	}
+	if _, selected := tracker.RunSelection(ctx); !selected {
+		binding, err := cfg.DB.IssueSyncBindingByProject(ctx, in.ProjectID)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return db.UpsertIssueSyncBindingParams{}, issueSyncStorageError(err, provider)
+		}
+		if err == nil && binding.ConnectionUID != nil {
+			return selectionRequired()
+		}
+	}
 	switch provider {
 	case issueSyncProviderGitHub:
 		return githubSyncEnableParams(ctx, cfg, in)

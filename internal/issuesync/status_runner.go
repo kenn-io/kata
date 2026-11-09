@@ -83,6 +83,20 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 	if mode != "two-way" {
 		return binding, false, nil
 	}
+	if binding.ConnectionUID != nil {
+		coordinator, ok := namedStatusCoordinator(ctx)
+		if !ok {
+			return binding, true, db.ErrTrackerOutcomeUnknown
+		}
+		recovery, ok := coordinator.(NamedStatusRecovery)
+		if !ok {
+			return binding, true, db.ErrTrackerOutcomeUnknown
+		}
+		guard := db.IssueSyncImportGuard{BindingID: binding.ID, Provider: binding.Provider, StartedAt: startedAt, BindingUpdatedAt: &binding.UpdatedAt}
+		if err := recovery.RecoverNamedStatus(ctx, binding, guard); err != nil {
+			return binding, true, err
+		}
+	}
 	adapter, ok := r.config.Adapter.(StatusAdapter)
 	if !ok {
 		return binding, true, &StatusError{Message: "provider does not support two-way status sync", Blocked: true}
@@ -290,7 +304,7 @@ func (p *statusPass) service(m db.IssueStatusMapping, pending bool) error {
 		// Invalid local state cannot change until repaired, so content proceeds.
 		return &StatusError{Message: m.LoadError.Error(), Blocked: true}
 	}
-	if !pending {
+	if !pending || readOnlyStatusReconciliation(p.statusCtx) {
 		obs, err := p.run.ReadStatus(p.statusCtx, m)
 		if err != nil {
 			return err
@@ -304,7 +318,19 @@ func (p *statusPass) service(m db.IssueStatusMapping, pending bool) error {
 	if m.PendingEvent.Type == "issue.closed" {
 		desired = "closed"
 	}
-	obs, err := p.run.WriteStatus(p.statusCtx, m, desired, p.admission(m))
+	var obs StatusObservation
+	var err error
+	if p.binding.ConnectionUID != nil {
+		coordinator, ok := namedStatusCoordinator(p.statusCtx)
+		if !ok {
+			return db.ErrTrackerOutcomeUnknown
+		}
+		obs, err = coordinator.WriteNamedStatus(p.statusCtx, p.binding, m, desired, p.guard, func(ctx context.Context, admit func() error) (StatusObservation, error) {
+			return p.run.WriteStatus(ctx, m, desired, admit)
+		}, p.admission(m))
+	} else {
+		obs, err = p.run.WriteStatus(p.statusCtx, m, desired, p.admission(m))
+	}
 	if err != nil {
 		return err
 	}
@@ -341,6 +367,7 @@ func (p *statusPass) observe(m db.IssueStatusMapping, obs StatusObservation, ser
 		return err
 	}
 	params := db.IssueStatusObservationParams{Guard: p.guard, MappingID: m.Mapping.ID, ExternalID: m.Mapping.ExternalID, IssueUID: issue.UID, Observation: db.IssueStatusObservation{Raw: obs.RawStatus, Version: obs.Version}, Status: obs.Status, ClosedReason: obs.ClosedReason, ClosedAt: obs.ClosedAt, ServicedEventUID: serviced}
+	params.TrackerWriteUID = obs.TrackerWriteUID
 	// Notion's page UUID is already external_id. Only an additional provider
 	// API identifier, such as the GitHub issue number, belongs in the locator.
 	if p.binding.Provider == "github" && obs.Locator != "" {

@@ -52,7 +52,7 @@ var canonicalTableColumns = map[string]string{
 	"import_mappings":                "id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at,observed_status,observed_status_at,pending_event_uid,remote_locator",
 	"issue_claims":                   "id,claim_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,purpose,claim_kind,acquired_at,expires_at,released_at,release_reason,revision,updated_at",
 	"issue_labels":                   "issue_id,label,author,created_at",
-	"issue_sync_bindings":            "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at",
+	"issue_sync_bindings":            "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at,connection_uid",
 	"issue_sync_status":              "binding_id,project_id,sync_started_at,last_attempt_at,last_success_at,last_error_at,last_error,last_created,last_updated,last_unchanged,last_comments",
 	"issues":                         "id,uid,project_id,short_id,title,body,status,closed_reason,owner,assignment_expires_on,priority,author,created_at,updated_at,closed_at,deleted_at,metadata,revision,content_revision,recurrence_id,occurrence_key",
 	"issues_search":                  "issue_id,tsv",

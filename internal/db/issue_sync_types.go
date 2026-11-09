@@ -8,13 +8,16 @@ import (
 // IssueSyncBinding mirrors issue_sync_bindings, the durable association
 // between one kata project and one external issue provider source.
 type IssueSyncBinding struct {
-	ID              int64
-	ProjectID       int64
-	Provider        string
-	SourceKey       string
-	RemoteID        string
-	DisplayName     string
-	Config          jsontext.Value
+	ID          int64
+	ProjectID   int64
+	Provider    string
+	SourceKey   string
+	RemoteID    string
+	DisplayName string
+	Config      jsontext.Value
+	// ConnectionUID is the schema-level named-account marker. It must agree
+	// with the complete nonsecret selection in Config; nil alone is legacy.
+	ConnectionUID   *string
 	Enabled         bool
 	IntervalSeconds int
 	LastCursorAt    *time.Time
@@ -49,6 +52,9 @@ type IssueSyncBindingPrecondition struct {
 // UpsertIssueSyncBindingParams creates or re-enables the binding for a
 // project. SourceKey is caller-derived, normally "<provider>:<remote_id>".
 type UpsertIssueSyncBindingParams struct {
+	// Connection is supplied only after explicit tracker grant admission.
+	// Ordinary refresh/re-enable preserves the prior selection.
+	Connection      *IssueSyncConnection
 	ExpectedBinding *IssueSyncBindingPrecondition
 	ProjectID       int64
 	Provider        string

@@ -38,6 +38,7 @@ type CredentialResolver struct {
 	cfg           config.GitHubSyncConfig
 	runner        CommandRunner
 	baseTransport http.RoundTripper
+	named         bool
 }
 
 // NewCredentialResolver returns a resolver using cfg and runner. A nil runner
@@ -51,6 +52,15 @@ func NewCredentialResolver(cfg config.GitHubSyncConfig, runner CommandRunner) *C
 		runner:        runner,
 		baseTransport: http.DefaultTransport,
 	}
+}
+
+// NewNamedCredentialResolver resolves only the explicitly configured account.
+// An unmatched App or absent selected token is unavailable; it never consults
+// the default environment selector or the owner's unrelated gh CLI account.
+func NewNamedCredentialResolver(cfg config.GitHubSyncConfig, runner CommandRunner) *CredentialResolver {
+	r := NewCredentialResolver(cfg, runner)
+	r.named = true
+	return r
 }
 
 // ResolveKind reports which credential source would be used for binding.
@@ -120,6 +130,9 @@ func (r *CredentialResolver) resolve(ctx context.Context, binding Binding) (reso
 	if token, ok := r.envToken(binding); ok {
 		return resolvedCredential{binding: binding, kind: CredentialKindEnv, token: token}, nil
 	}
+	if r.named {
+		return resolvedCredential{}, errors.New("selected GitHub connection has no credential for this repository")
+	}
 	if token, ok, err := r.ghAuthToken(ctx, binding.Host); err != nil {
 		return resolvedCredential{}, err
 	} else if ok {
@@ -129,6 +142,9 @@ func (r *CredentialResolver) resolve(ctx context.Context, binding Binding) (reso
 }
 
 func (r *CredentialResolver) envToken(binding Binding) (string, bool) {
+	if r.named && strings.TrimSpace(r.cfg.TokenEnv) == "" {
+		return "", false
+	}
 	if binding.Host != r.cfg.TokenHostName() {
 		return "", false
 	}

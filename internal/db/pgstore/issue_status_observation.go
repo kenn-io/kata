@@ -58,12 +58,18 @@ func (s *Store) observeIssueStatusTx(ctx context.Context, tx *sql.Tx, p db.Issue
 	}
 	accept, apply, err := db.PlanIssueStatusObservation(current, p, issue.Status)
 	if err != nil || !accept {
+		if err == nil && p.TrackerWriteUID != "" {
+			err = db.ErrTrackerFenceChanged
+		}
 		return false, nil, err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE import_mappings SET observed_status=$1,observed_status_at=$2,
  remote_locator=COALESCE($3,remote_locator),pending_event_uid=CASE WHEN pending_event_uid=$4 THEN NULL ELSE pending_event_uid END WHERE id=$5`,
 		p.Observation.Raw, p.Observation.Version.UTC().Format(time.RFC3339Nano), p.RemoteLocator, p.ServicedEventUID, p.MappingID)
 	if err != nil {
+		return false, nil, err
+	}
+	if err := s.trackerFenceSQL().AcknowledgeStatusInTransaction(ctx, tx, binding, p); err != nil {
 		return false, nil, err
 	}
 	if !apply {

@@ -14,13 +14,21 @@ import (
 )
 
 func pgReplayMeta(ctx context.Context, tx *sql.Tx, meta *db.MetaKV, opts db.ImportOptions) error {
+	normalized, keep, err := db.TrackerMetadataForImport(*meta, opts)
+	if err != nil || !keep {
+		return err
+	}
+	meta = &normalized
+	if err := db.CheckTrackerMetadataRestoreSQL(ctx, tx, *meta); err != nil {
+		return err
+	}
 	if meta.Key == "export_version" || meta.Key == "schema_version" {
 		return nil
 	}
 	if meta.Key == "instance_uid" && opts.NewInstance {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
+	_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
 ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, meta.Key, meta.Value)
 	return pgReplayError(db.ImportKindMeta, err)
 }
@@ -99,6 +107,9 @@ func pgReplayIssueSyncBinding(
 	binding *db.IssueSyncBindingExport,
 	preserveEnabled bool,
 ) error {
+	if err := db.ValidateIssueSyncConnectionMarker(binding.ConnectionUID, binding.Config); err != nil {
+		return err
+	}
 	enabled := preserveEnabled && binding.Enabled
 	configJSON := binding.Config
 	if len(configJSON) == 0 {
@@ -113,11 +124,11 @@ func pgReplayIssueSyncBinding(
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO issue_sync_bindings(
 id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,
-interval_seconds,last_cursor_at,created_at,updated_at
-) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+interval_seconds,last_cursor_at,created_at,updated_at,connection_uid
+) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 		binding.ID, binding.ProjectID, binding.Provider, binding.SourceKey, binding.RemoteID,
 		binding.DisplayName, string(configJSON), pgReplayBoolInt(enabled), binding.IntervalSeconds,
-		binding.LastCursorAt, binding.CreatedAt, binding.UpdatedAt)
+		binding.LastCursorAt, binding.CreatedAt, binding.UpdatedAt, binding.ConnectionUID)
 	return pgReplayError(db.ImportKindIssueSyncBinding, err)
 }
 

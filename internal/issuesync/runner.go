@@ -10,6 +10,7 @@ import (
 
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/tracker"
 )
 
 const (
@@ -32,9 +33,13 @@ type Runner struct {
 
 // RunnerConfig configures an issue sync runner.
 type RunnerConfig struct {
-	Progress *ProgressTracker
-	Store    db.Storage
-	Adapter  Adapter
+	// RouteBinding checks live service authority and selects the exact account
+	// before a named binding reaches any content or status adapter. Nil means
+	// named execution is unavailable, never a legacy credential fallback.
+	RouteBinding func(context.Context, db.IssueSyncBinding) (context.Context, error)
+	Progress     *ProgressTracker
+	Store        db.Storage
+	Adapter      Adapter
 	// RunTimeout bounds preparation, imports, and finalization after claim.
 	// Zero preserves detached GitHub finalization after caller cancellation.
 	RunTimeout time.Duration
@@ -255,6 +260,37 @@ func (r *Runner) runDue(ctx context.Context) (<-chan struct{}, bool, error) {
 }
 
 func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, syncStartedAt time.Time, eventFork activity.Admission) (result RunResult, runErr error) {
+	if err := db.ValidateIssueSyncConnectionMarker(binding.ConnectionUID, binding.Config); err != nil {
+		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+	}
+	selection, err := db.IssueSyncConnectionFromConfig(binding.Config)
+	if err != nil {
+		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+	}
+	if selection != nil {
+		if r.config.RouteBinding == nil {
+			return r.recordError(ctx, binding, syncStartedAt, tracker.ErrUnavailable, db.ImportBatchResult{})
+		}
+		routed, err := r.config.RouteBinding(ctx, binding)
+		if err != nil {
+			return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+		}
+		if routed == nil {
+			return r.recordError(ctx, binding, syncStartedAt, tracker.ErrUnavailable, db.ImportBatchResult{})
+		}
+		actual, ok := tracker.RunSelection(routed)
+		if !ok || actual != *selection {
+			return r.recordError(ctx, binding, syncStartedAt, tracker.ErrUnavailable, db.ImportBatchResult{})
+		}
+		ctx = routed
+		// Release remote read/status sessions after the whole run. This bounded
+		// cleanup must survive caller cancellation; durable receipts are untouched.
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			_ = tracker.CloseRun(cleanup)
+		}()
+	}
 	statusUpdated := 0
 	defer func() { result.StatusUpdated = statusUpdated }()
 	binding, separateStatus, statusErr := r.runStatuses(ctx, binding, syncStartedAt, eventFork, &statusUpdated)

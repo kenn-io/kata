@@ -90,6 +90,10 @@ type Migration struct {
 // migrationAssets begins at the first schema version released with Postgres
 // support. The first release installs canonicalSchemaSQL directly, so there
 // is no historical Postgres database to upgrade in this branch.
+//
+//go:embed migrations/000051_tracker_connection_identity.up.sql
+var trackerConnectionIdentityMigrationSQL string
+
 var migrationAssets = []Migration{
 	{
 		FromVersion: 25,
@@ -138,6 +142,7 @@ var migrationAssets = []Migration{
 	{FromVersion: 47, ToVersion: 48, Name: "000048_event_moved_from_id_index.up.sql", SQL: eventMovedFromIDIndexMigrationSQL},
 	{FromVersion: 48, ToVersion: 49, Name: "000049_cron_run_uid_index.up.sql", SQL: cronRunUIDIndexMigrationSQL},
 	{FromVersion: 49, ToVersion: 50, Name: "000050_mcp_event_subscriptions.up.sql", SQL: mcpEventSubscriptionsMigrationSQL},
+	{FromVersion: 50, ToVersion: 51, Name: "000051_tracker_connection_identity.up.sql", SQL: trackerConnectionIdentityMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

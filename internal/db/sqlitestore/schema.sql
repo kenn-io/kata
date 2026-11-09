@@ -401,6 +401,7 @@ CREATE TABLE issue_sync_bindings (
   last_cursor_at   DATETIME,
   created_at       DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at       DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  connection_uid   TEXT,
   CHECK (length(trim(provider)) > 0),
   CHECK (length(trim(source_key)) > 0),
   CHECK (length(trim(remote_id)) > 0),

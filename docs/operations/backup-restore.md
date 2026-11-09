@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-11-07
+last_edited: 2026-11-09
 ---
 
 # Backup and restore
@@ -55,15 +55,18 @@ damaged database.
 
 ## Slow or interrupted upgrade startup
 
-SQLite in-place upgrades from schemas 41 through 49 to 50 add the missing
-indexes, and the empty MCP Events subscriptions table, inside the existing
-database in one transaction. Allow free space for the new indexes, their WAL
-pages, and temporary sort files. These upgrades keep
-no `kata.db.bak.*` backup. An interrupted or failed transaction leaves the old
-schema version intact, and the next start retries. Take a backup before upgrading
-if you need to return to an older binary.
+Schema 51 upgrades older SQLite stores through JSONL cutover. It exports the
+source, imports a replacement, and keeps a `kata.db.bak.*` rollback file. Allow
+free space for the source, export, replacement, and backup during the upgrade.
 
-Other SQLite upgrades export the old database and import a replacement before
+Schema 50 binaries upgrade schemas 41 through 49 in place: they add the missing
+indexes and the empty MCP Events subscriptions table in one transaction. Allow
+free space for the new indexes, their WAL pages, and temporary sort files. This
+schema 50 upgrade keeps no `kata.db.bak.*` backup. An interrupted or failed
+transaction leaves the old schema version intact, and the next start retries.
+Take a backup before upgrading if you need to return to an older binary.
+
+JSONL cutovers export the old database and import a replacement before
 publishing a ready daemon. Large databases can take minutes. Detached
 `kata daemon start` and `kata daemon restart` keep waiting while an SQLite
 migration is pending and report that progress on stderr. Cancelling detached

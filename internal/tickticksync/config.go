@@ -48,7 +48,7 @@ func EncodeConfig(c Config) (jsontext.Value, error) {
 
 // DecodeConfig validates public settings while excluding private worker state.
 func DecodeConfig(raw jsontext.Value) (Config, error) {
-	public, err := db.PublicIssueSyncConfig(raw)
+	public, err := db.ProviderIssueSyncConfig(raw)
 	if err != nil {
 		return Config{}, err
 	}

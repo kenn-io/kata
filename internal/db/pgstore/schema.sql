@@ -515,6 +515,7 @@ CREATE TABLE issue_sync_bindings (
   last_cursor_at   TEXT,
   created_at       TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   updated_at       TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+  connection_uid   TEXT,
   CHECK (length(trim(provider)) > 0),
   CHECK (length(trim(source_key)) > 0),
   CHECK (length(trim(remote_id)) > 0),
