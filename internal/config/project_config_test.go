@@ -121,7 +121,11 @@ func TestEnsureProjectConfigHeader(t *testing.T) {
 		changed bool
 	}{
 		{"headerless", body, header + body, true},
+		{"headerless CRLF", strings.ReplaceAll(body, "\n", "\r\n"), header + strings.ReplaceAll(body, "\n", "\r\n"), true},
+		{"UTF-8 BOM", "\xef\xbb\xbf" + body, "\xef\xbb\xbf" + header + body, true},
 		{"headed", header + body, header + body, false},
+		{"comment above", "# User comment.\n" + header + body, "# User comment.\n" + header + body, false},
+		{"reworded", "# Read kata quickstart --format contract first.\n" + body, "# Read kata quickstart --format contract first.\n" + body, false},
 		{"CRLF", strings.ReplaceAll(header+body, "\n", "\r\n"), strings.ReplaceAll(header+body, "\n", "\r\n"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -132,6 +136,15 @@ func TestEnsureProjectConfigHeader(t *testing.T) {
 			content, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, string(content))
+			cfg, err := config.ReadProjectConfig(dir)
+			require.NoError(t, err)
+			assert.Equal(t, "spoke-project", cfg.Project.Name)
+			changed, err = config.EnsureProjectConfigHeader(dir)
+			require.NoError(t, err)
+			assert.False(t, changed)
+			again, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
+			require.NoError(t, err)
+			assert.Equal(t, content, again)
 		})
 	}
 }

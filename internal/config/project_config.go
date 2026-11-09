@@ -128,10 +128,15 @@ func EnsureProjectConfigHeader(workspaceRoot string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if strings.HasPrefix(strings.ReplaceAll(string(data), "\r\n", "\n"), projectConfigHeader) {
+	if strings.Contains(string(data), "kata quickstart --format contract") {
 		return false, nil
 	}
-	if err := os.WriteFile(path, append([]byte(projectConfigHeader), data...), 0o644); err != nil { //nolint:gosec // committed project file, world-readable by design
+	body, hasBOM := strings.CutPrefix(string(data), "\ufeff")
+	header := projectConfigHeader
+	if hasBOM {
+		header = "\ufeff" + header
+	}
+	if err := os.WriteFile(path, []byte(header+body), 0o644); err != nil { //nolint:gosec // committed project file, world-readable by design
 		return false, err
 	}
 	return true, nil

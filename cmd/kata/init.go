@@ -381,7 +381,7 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	} else {
 		tomlChanged, err = config.EnsureProjectConfigHeader(dest)
 		if err != nil {
-			return "", fmt.Errorf("write .kata.toml: %w", err)
+			warnAgentsUpdate(fmt.Errorf("write .kata.toml: %w", err))
 		}
 	}
 	gitignoreChanged, err := ensureGitignoreEntry(dest, ".kata.local.toml")

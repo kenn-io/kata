@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-07
+last_edited: 2026-11-08
 ---
 
 # Configuration
@@ -302,6 +302,8 @@ it does not dial Postgres or stat SQLite paths.
 `.kata.toml` is committed with the project:
 
 ```toml
+# This repository tracks its work in kata.
+# Coding agents: read `kata quickstart --format contract` before changing code here.
 version = 1
 
 [project]
