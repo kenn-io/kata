@@ -1,5 +1,5 @@
 [tools]
-prek = "0.5.7"
+prek = "0.5.9"
 go = "1.27.3"
 bun = "1.4.4"
 "github:golangci/golangci-lint" = "2.14.0"
