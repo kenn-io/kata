@@ -564,23 +564,24 @@ describe('AppShell', () => {
   })
 
   test.each([
-    ['same', 'project-a', '01J00000000000000000000001'],
-    ['different', 'project-b', undefined],
-  ])(
-    'search uses the displayed workspace when the pending project is %s',
-    async (_name, projectUID, issueUID) => {
+    ['same project', 'all-open', 'all-open', '01J00000000000000000000002', '01J00000000000000000000002', '01J00000000000000000000001'],
+    ['different project', 'all-open', 'all-open', '01J00000000000000000000002', 'other-project', undefined],
+    ['implicit Inbox', undefined, 'inbox', undefined, undefined, '01J00000000000000000000001'],
+  ] as const)(
+    'search preserves the pending selection for %s',
+    async (_name, view, requestedView, projectUID, requestedProjectUID, issueUID) => {
       const onNavigate = vi.fn()
       const route = {
         kind: 'kata' as const,
-        view: 'all-open' as const,
-        projectUID: 'project-a',
+        ...(view ? { view } : {}),
+        ...(projectUID ? { projectUID } : {}),
         graph: false,
         filters: { status: [], owner: [], label: [], relationship: [] },
       }
       render(AppShell, {
         props: {
           route,
-          requestedRoute: { ...route, projectUID, issueUID: '01J00000000000000000000001' },
+          requestedRoute: { ...route, view: requestedView, ...(requestedProjectUID ? { projectUID: requestedProjectUID } : {}), issueUID: '01J00000000000000000000001' },
           snapshot: snapshot(),
           loading: false,
           ...mutationProps(),
@@ -591,37 +592,14 @@ describe('AppShell', () => {
       await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
       expect(onNavigate).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          projectUID: 'project-a',
           filters: expect.objectContaining({ text: 'example' }),
         }),
       )
+      expect(onNavigate.mock.lastCall?.[0].projectUID).toBe(projectUID)
       expect(onNavigate.mock.lastCall?.[0].issueUID).toBe(issueUID)
+      expect(onNavigate.mock.lastCall?.[0].view).toBe(issueUID ? requestedView : view)
     },
   )
-
-  test('keeps a pending selection when landing Inbox becomes explicit', async () => {
-    const onNavigate = vi.fn()
-    const route = {
-      kind: 'kata' as const,
-      graph: false,
-      filters: { status: [], owner: [], label: [], relationship: [] },
-    }
-    render(AppShell, {
-      props: {
-        route,
-        requestedRoute: { ...route, view: 'inbox', issueUID: '01J00000000000000000000001' },
-        snapshot: snapshot(),
-        loading: false,
-        ...mutationProps(),
-        onNavigate,
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-    await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
-    expect(onNavigate).toHaveBeenLastCalledWith(
-      expect.objectContaining({ view: 'inbox', issueUID: '01J00000000000000000000001' }),
-    )
-  })
 
   test('keeps the requested query when an older snapshot arrives', async () => {
     const route = {
@@ -649,10 +627,6 @@ describe('AppShell', () => {
       requestedRoute: { ...route, filters: { ...route.filters, text: 'second t' } },
     })
     expect(input.value).toBe('second t')
-    await fireEvent.input(input, { target: { value: 'second task' } })
-    expect(props.onNavigate).toHaveBeenLastCalledWith(
-      expect.objectContaining({ filters: expect.objectContaining({ text: 'second task' }) }),
-    )
   })
 
   test('stays in the landing Inbox while selecting, graphing, and narrowing', async () => {

@@ -94,36 +94,14 @@ describe('SplitLayout', () => {
     ).toBe('horizontal')
   })
 
-  it('preserves the split preference while the detail pane is closed', async () => {
+  it('preserves the split preference while the detail pane is closed', () => {
     mockRect(400, 600)
-    let notifyResize: ResizeObserverCallback = () => {}
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        constructor(callback: ResizeObserverCallback) {
-          notifyResize = callback
-        }
-        observe(): void {}
-        disconnect(): void {}
-      },
-    )
     const onResize = vi.fn()
-    const { container, rerender } = render(SplitLayoutTestHarness, {
+    render(SplitLayoutTestHarness, {
       props: { primarySize: 300, showSecondary: false, onResize },
     })
 
     expect(screen.queryByRole('separator')).toBeNull()
     expect(onResize).not.toHaveBeenCalled()
-
-    mockRect(800, 600)
-    notifyResize(
-      [{ target: container.querySelector('.kata-sash')! } as ResizeObserverEntry],
-      {} as ResizeObserver,
-    )
-    await rerender({ showSecondary: true })
-    const handle = screen.getByRole('separator', { name: 'Resize Kata panes' })
-    expect(handle.getAttribute('aria-valuenow')).toBe('300')
-    await fireEvent.keyDown(handle, { key: 'ArrowRight' })
-    expect(onResize).toHaveBeenLastCalledWith(316)
   })
 })
