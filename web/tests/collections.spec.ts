@@ -32,12 +32,19 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
 
   const parentRow = page.getByRole('button', { name: /Example parent task/ })
   await parentRow.focus()
+  await page.clock.install()
+  await page.clock.pauseAt(Date.now())
   await parentRow.press('ArrowDown')
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeFocused()
 
-  // Selection opens a split pane and remounts the search field after focus moves.
+  const search = page.getByRole('searchbox', { name: 'Search tasks' })
+  await search.focus()
+  await page.clock.runFor(50)
   await expect(page.getByRole('heading', { name: 'Example child task', exact: true })).toBeVisible()
-  await page.getByRole('searchbox', { name: 'Search tasks' }).fill('child')
+  await expect(search).toBeFocused()
+  await page.clock.resume()
+  await page.keyboard.type('child')
+  await expect(search).toHaveValue('child')
   await expect(page).toHaveURL(/text=child/)
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 

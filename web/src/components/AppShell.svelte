@@ -800,21 +800,17 @@
         {#if mutationMessage}
           <p class="mutation-message" role="alert">{mutationMessage}</p>
         {/if}
-        {#if route.issueUID}
-          <SplitLayout
-            orientation={preferences.splitDirection}
-            primarySize={preferences.splitSize}
-            minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
-            minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
-            responsiveBreakpoint={700}
-            ariaLabel="Resize Kata panes"
-            onResize={resizeSplit}
-            primary={listPane}
-            secondary={detailPane}
-          />
-        {:else}
-          {@render listPane()}
-        {/if}
+        <SplitLayout
+          orientation={preferences.splitDirection}
+          primarySize={preferences.splitSize}
+          minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
+          minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
+          responsiveBreakpoint={700}
+          ariaLabel="Resize Kata panes"
+          onResize={resizeSplit}
+          primary={listPane}
+          secondary={route.issueUID ? detailPane : undefined}
+        />
       {/if}
     </div>
   </div>
