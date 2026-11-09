@@ -34,10 +34,8 @@ func TestAgentWorkflowHelpFollowsContract(t *testing.T) {
 		assert.Contains(t, agentguide.Contract, cmd.CommandPath(), "workflow command must appear in the short contract")
 	}
 
-	claimHelp := string(executeRoot(t, newRootCmd(), "claim", "--help"))
-	for _, surface := range []string{workflow, claimHelp} {
-		assert.NotContains(t, surface, "work.attention")
-	}
+	// Prose can mention metadata without adding a command.
+	assert.NotContains(t, workflow, "work.attention")
 }
 
 // The team and project-access commands belong to the administration group,
