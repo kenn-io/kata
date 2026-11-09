@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -13,14 +14,20 @@ import (
 
 // A downstream enrollment cannot author root policy, even if it asserts the
 // pinned root in its source event. Upstream baseline and recovery still work.
-func checkCronProjectPauseIngress(t *testing.T, store db.Storage) error {
-	return checkCronControlIngressValue(t, store, "cron.pause", `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"maintenance"}`)
-}
-func checkCronPassoverIngress(t *testing.T, store db.Storage) error {
-	return checkCronControlIngressValue(t, store, "cron.passover", `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}`)
+func checkCronControlIngress(t *testing.T, store db.Storage) error {
+	request, err := json.Marshal(map[string]any{"kind": "run", "job_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAW", "requested_by": "operator", "requested_at": "2026-01-02T03:04:05Z", "expires_at": "2026-01-02T03:05:05Z"})
+	require.NoError(t, err)
+	for _, control := range []struct{ name, key, value string }{
+		{"pause", "cron.pause", `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"maintenance"}`},
+		{"passover", "cron.passover", `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}`},
+		{"request", "cron.request." + requestUIDAt(t, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)), string(request)},
+	} {
+		t.Run(control.name, func(t *testing.T) { checkCronControlIngressValue(t, store, control.name, control.key, control.value) })
+	}
+	return nil
 }
 
-func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause string) error {
+func checkCronControlIngressValue(t *testing.T, store db.Storage, name, key, value string) {
 	readValue := func(t *testing.T, p db.Project) jsontext.Value {
 		t.Helper()
 		var values map[string]jsontext.Value
@@ -29,12 +36,12 @@ func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause str
 	}
 	t.Run("legacy enrollment", func(t *testing.T) {
 		ctx := t.Context()
-		p, err := store.CreateProject(ctx, "pause-ingress-project")
+		p, err := store.CreateProject(ctx, name+"-ingress-project")
 		require.NoError(t, err)
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
 		require.NoError(t, err)
 		peer := "00000000000000000000000006"
-		source := newRemoteEvent(t, p, nil, "project.metadata_updated", "member", peer, 300, jsontext.Value(`{"project_uid":"`+p.UID+`","diff":{"`+key+`":{"from":null,"to":`+pause+`}}}`))
+		source := newRemoteEvent(t, p, nil, "project.metadata_updated", "member", peer, 300, jsontext.Value(`{"project_uid":"`+p.UID+`","diff":{"`+key+`":{"from":null,"to":`+value+`}}}`))
 		_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: peer, BoundActor: "member", Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: source}}})
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		current, err := store.ProjectByID(ctx, p.ID)
@@ -42,13 +49,13 @@ func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause str
 		require.Empty(t, readValue(t, current))
 	})
 	for _, downstream := range []bool{false, true} {
-		name := "upstream"
+		direction := "upstream"
 		if downstream {
-			name = "downstream"
+			direction = "downstream"
 		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(direction, func(t *testing.T) {
 			ctx := t.Context()
-			p, err := store.CreateProject(ctx, "pause-relay-"+name)
+			p, err := store.CreateProject(ctx, name+"-relay-"+direction)
 			require.NoError(t, err)
 			root := "00000000000000000000000002"
 			public, _, err := ed25519.GenerateKey(nil)
@@ -63,10 +70,10 @@ func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause str
 			sender := root
 			path := []string{root}
 			if downstream {
-				token, _, e := store.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "member", AdminActor: "admin", PlaintextToken: "pause-parent-token"})
+				token, _, e := store.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "member", AdminActor: "admin", PlaintextToken: name + "-parent-token"})
 				require.NoError(t, e)
 				sender = "00000000000000000000000006"
-				grant, e := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: p.ID, ParentTokenID: token.ID, SpokeInstanceUID: sender, ProtocolVersion: db.RelayProtocolVersion, Token: "pause-child-token", ServeDownstream: true})
+				grant, e := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: p.ID, ParentTokenID: token.ID, SpokeInstanceUID: sender, ProtocolVersion: db.RelayProtocolVersion, Token: name + "-child-token", ServeDownstream: true})
 				require.NoError(t, e)
 				binding = grant.Enrollment.RelayBindingUID
 				path = []string{root, sender}
@@ -81,17 +88,17 @@ func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause str
 				return e
 			}
 			if downstream {
-				require.ErrorIs(t, deliver(1, pause), db.ErrFederationIngestValidation)
+				require.ErrorIs(t, deliver(1, value), db.ErrFederationIngestValidation)
 				current, e := store.ProjectByID(ctx, p.ID)
 				require.NoError(t, e)
 				require.Empty(t, readValue(t, current))
 				return
 			}
 			require.ErrorIs(t, deliver(1, `{"unknown":true}`), db.ErrFederationIngestValidation)
-			require.NoError(t, deliver(1, pause), "root from-empty baseline must remain accepted")
+			require.NoError(t, deliver(1, value), "root from-empty baseline must remain accepted")
 			current, err := store.ProjectByID(ctx, p.ID)
 			require.NoError(t, err)
-			require.JSONEq(t, pause, string(readValue(t, current)))
+			require.JSONEq(t, value, string(readValue(t, current)))
 			if key == "cron.passover" {
 				require.ErrorIs(t, deliver(2, `null`), db.ErrFederationIngestValidation)
 				return
@@ -102,5 +109,4 @@ func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause str
 			require.Empty(t, readValue(t, current))
 		})
 	}
-	return nil
 }

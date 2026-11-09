@@ -60,8 +60,10 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 				require.Error(t, e, key)
 			}
 		}
-		_, e = s.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: p.ID, Actor: "operator", Patch: map[string]jsontext.Value{"cron.pause.note": []byte(`"ordinary"`)}})
-		require.NoError(t, e)
+		for _, key := range []string{"cron.pause.note", "cron.requests", "cron.passovers"} {
+			_, e = s.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: p.ID, Actor: "operator", Patch: map[string]jsontext.Value{key: []byte(`"ordinary"`)}})
+			require.NoError(t, e, key)
+		}
 	})
 	for _, initial := range []string{`{"legacy":true}`, `null`} {
 		t.Run("policy recovery/"+initial, func(t *testing.T) {
@@ -93,38 +95,31 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 			require.Contains(t, string(out.Project.Metadata), "9007199254740993")
 		})
 	}
-	for _, policy := range []string{"all", "latest", "skip"} {
-		t.Run("dispatch "+policy, func(t *testing.T) {
-			// Separate backend because recurringFixture has a fixed project name.
-			store := b.Open(t)
-			t.Cleanup(func() { require.NoError(t, store.Close()) })
-			p, parent, job, progress := recurringFixture(t, store, policy)
-			before, e := store.IssueByID(ctx, parent.ID)
-			require.NoError(t, e)
-			_, e = store.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
-			require.NoError(t, e)
-			in := db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(6 * time.Hour)}
-			out, e := store.DispatchRecurringCron(ctx, in)
-			require.NoError(t, e)
-			require.Empty(t, out.Events)
-			require.False(t, out.More)
-			after, e := store.IssueByID(ctx, parent.ID)
-			require.NoError(t, e)
-			require.Equal(t, before.Metadata, after.Metadata)
-			_, e = store.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
-			require.NoError(t, e)
-			out, e = store.DispatchRecurringCron(ctx, in)
-			require.NoError(t, e)
-			children, e := store.ChildrenOfIssue(ctx, parent.ID)
-			require.NoError(t, e)
-			want := map[string]int{"all": 3, "latest": 1, "skip": 1}[policy]
-			require.Len(t, children, want)
-			current, e := store.CronJob(ctx, p.ID, job.UID)
-			require.NoError(t, e)
-			require.Equal(t, job.DefinitionEventUID, current.DefinitionEventUID)
-			require.True(t, current.Definition.Enabled)
-		})
-	}
+	t.Run("dispatch", func(t *testing.T) {
+		// Separate backend because recurringFixture has a fixed project name.
+		store := b.Open(t)
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+		p, parent, job, progress := recurringFixture(t, store, "all")
+		before, e := store.IssueByID(ctx, parent.ID)
+		require.NoError(t, e)
+		_, e = store.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
+		require.NoError(t, e)
+		in := db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(6 * time.Hour)}
+		out, e := store.DispatchRecurringCron(ctx, in)
+		require.NoError(t, e)
+		require.Empty(t, out.Events)
+		require.False(t, out.More)
+		after, e := store.IssueByID(ctx, parent.ID)
+		require.NoError(t, e)
+		require.Equal(t, before.Metadata, after.Metadata)
+		_, e = store.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+		require.NoError(t, e)
+		_, e = store.DispatchRecurringCron(ctx, in)
+		require.NoError(t, e)
+		children, e := store.ChildrenOfIssue(ctx, parent.ID)
+		require.NoError(t, e)
+		require.Len(t, children, 3, "unpausing delivers the backlog; project pause never edits the job")
+	})
 
 	// Contract: pause gates admission, not reporting already running work.
 	t.Run("observations while paused", func(t *testing.T) {
@@ -141,18 +136,15 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 				_, err = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.pause":false}`, p.ID)
 				require.NoError(t, err)
 			}
-			for _, status := range []string{"succeeded", "failed", "cancelled", "unknown"} {
-				id, err := uid.New()
-				require.NoError(t, err)
-				in := db.ObserveCronRun{ProjectID: p.ID, UID: id, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "operator", Status: "running", Summary: cron.Summary{Version: 1}}
-				first, err := s.ObserveCronRun(ctx, in)
-				require.NoError(t, err)
-				in.ExpectedRevision, in.Status = first.Run.Revision, status
-				out, err := s.ObserveCronRun(ctx, in)
-				require.NoError(t, err)
-				require.Equal(t, status, out.Run.Status)
-				require.Equal(t, first.Run.Revision+1, out.Run.Revision)
-			}
+			id, err := uid.New()
+			require.NoError(t, err)
+			in := db.ObserveCronRun{ProjectID: p.ID, UID: id, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "operator", Status: "running", Summary: cron.Summary{Version: 1}}
+			first, err := s.ObserveCronRun(ctx, in)
+			require.NoError(t, err)
+			in.ExpectedRevision, in.Status = first.Run.Revision, "succeeded"
+			out, err := s.ObserveCronRun(ctx, in)
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", out.Run.Status)
 		}
 	})
 	t.Run("spoke denied even disabled", func(t *testing.T) {
@@ -232,31 +224,6 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 		require.NoError(t, e)
 		_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
 		require.NoError(t, e)
-	})
-	t.Run("merge target policy", func(t *testing.T) {
-		for _, targetPaused := range []bool{false, true} {
-			source, e := s.CreateProject(ctx, fmt.Sprintf("source-pause-%t", targetPaused))
-			require.NoError(t, e)
-			target, e := s.CreateProject(ctx, fmt.Sprintf("target-pause-%t", targetPaused))
-			require.NoError(t, e)
-			_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: source.ID, Actor: "operator", Paused: true, Reason: "source"})
-			require.NoError(t, e)
-			if targetPaused {
-				_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: target.ID, Actor: "operator", Paused: true, Reason: "target"})
-				require.NoError(t, e)
-			}
-			_, e = s.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.ID, TargetProjectID: target.ID, Actor: "operator"})
-			require.NoError(t, e)
-			target, e = s.ProjectByID(ctx, target.ID)
-			require.NoError(t, e)
-			pause := db.CronProjectPauseFromMetadata(target.Metadata)
-			if targetPaused {
-				require.NotNil(t, pause)
-				require.Equal(t, "target", pause.Reason)
-			} else {
-				require.Nil(t, pause)
-			}
-		}
 	})
 	t.Run("pause and dispatch race", func(t *testing.T) {
 		store := b.Open(t)

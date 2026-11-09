@@ -221,12 +221,3 @@ func checkCronRequests(t *testing.T, s db.Storage, b Backend) error {
 	})
 	return nil
 }
-
-// Request values use exactly the same4 authenticated ingress boundaries.
-func checkCronRequestsIngress(t *testing.T, store db.Storage) error {
-	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	id := requestUIDAt(t, now)
-	value, e := json.Marshal(map[string]any{"kind": "run", "job_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAW", "requested_by": "operator", "requested_at": now, "expires_at": now.Add(time.Minute)})
-	require.NoError(t, e)
-	return checkCronControlIngressValue(t, store, "cron.request."+id, string(value))
-}

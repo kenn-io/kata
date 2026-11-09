@@ -20,15 +20,6 @@ func controlRecoveryEvent(t *testing.T, key string, from, to jsontext.Value, ori
 // An exact later root deletion recovers legacy opaque values without accepting
 // unrepaired, forged, regressing or currently malformed signed-reset state.
 func TestCronResetDeletedLegacyControls(t *testing.T) {
-	for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
-		t.Run(key, func(t *testing.T) {
-			payload, err := json.Marshal(map[string]any{"diff": map[string]any{key: map[string]any{"from": nil, "to": false}}})
-			require.NoError(t, err)
-			event := RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: "root", Payload: payload}
-			require.ErrorIs(t, validateCronResetHistory([]RemoteEvent{event}, nil, "root"), ErrFederationIngestValidation)
-		})
-	}
-
 	for _, key := range []string{"cron.pause", "cron.request." + passoverJobUID, "cron.request.legacy"} {
 		for _, mode := range []string{"repaired", "unrepaired", "wrong-origin", "wrong-repair-origin", "mismatched-old", "not-later", "current-malformed"} {
 			t.Run(key+"/"+mode, func(t *testing.T) {
@@ -76,13 +67,23 @@ func TestCronResetRequestMutationNotRepairedByDeletion(t *testing.T) {
 	}
 }
 
-func TestCronRootDeletesMalformedRequestKey(t *testing.T) {
-	key := "cron.request.legacy"
-	deletion := controlRecoveryEvent(t, key, jsontext.Value(`{"note":"legacy"}`), jsontext.Value("null"), "root", 2)
-	require.NoError(t, ValidateCronControlEvent(deletion, "root"))
-	require.ErrorIs(t, ValidateCronControlEvent(deletion, ""), ErrFederationIngestValidation)
-	deletion.OriginInstanceUID = "spoke"
-	require.ErrorIs(t, ValidateCronControlEvent(deletion, "root"), ErrFederationIngestValidation)
-	creation := controlRecoveryEvent(t, key, jsontext.Value("null"), jsontext.Value(`{"note":"legacy"}`), "root", 1)
-	require.ErrorIs(t, ValidateCronControlEvent(creation, "root"), ErrFederationIngestValidation)
+// All controls in one event remain independently validated, including when a
+// repaired historical cutoff shares a diff with malformed non-passover state.
+func TestCronControlMixedHistory(t *testing.T) {
+	good := jsontext.Value(`{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}`)
+	for _, key := range []string{"cron.pause", "cron.request." + passoverJobUID} {
+		changes := map[string]cronResetChange{
+			"cron.passover":                  {From: jsontext.Value("null"), To: jsontext.Value("false")},
+			"cron.pause":                     {From: jsontext.Value("null"), To: jsontext.Value(`{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"maintenance"}`)},
+			"cron.request." + passoverJobUID: {From: jsontext.Value("null"), To: jsontext.Value("null")},
+		}
+		changes[key] = cronResetChange{From: jsontext.Value("null"), To: jsontext.Value("false")}
+		payload, err := json.Marshal(map[string]any{"diff": changes})
+		require.NoError(t, err)
+		history := []RemoteEvent{{Type: "project.metadata_updated", OriginInstanceUID: "root", Payload: payload, HLCPhysicalMS: 1}}
+		repairPayload, err := json.Marshal(map[string]any{"diff": map[string]cronResetChange{"cron.passover": {From: jsontext.Value("false"), To: good}}})
+		require.NoError(t, err)
+		repair := RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: "root", Payload: repairPayload, HLCPhysicalMS: 2}
+		require.ErrorIs(t, validateCronResetHistory(append(history, repair), []RemoteEvent{repair}, "root"), ErrFederationIngestValidation, key)
+	}
 }

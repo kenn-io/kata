@@ -116,29 +116,12 @@ func checkCronDiscardResume(t *testing.T, _ db.Storage, b Backend) error {
 		require.ErrorIs(t, err, db.ErrCronConflict)
 
 	})
-	t.Run("project discard retains requests", func(t *testing.T) {
-		s := b.Open(t)
-		t.Cleanup(func() { require.NoError(t, s.Close()) })
-		p, job, _ := requestJobFixture(t, s, "discard-request-project")
-		now := time.Now().UTC()
-		id := requestUIDAt(t, now)
-		_, e := s.RequestCron(t.Context(), db.RequestCronIn{ProjectID: p.ID, UID: id, Kind: "run", TargetUID: job.UID, Actor: "operator", Now: now})
-		require.NoError(t, e)
-		paused, e := s.SetCronProjectPause(t.Context(), db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
-		require.NoError(t, e)
-		var before map[string]jsontext.Value
-		require.NoError(t, json.Unmarshal([]byte(paused.Project.Metadata), &before))
-		resumed, e := s.SetCronProjectPause(t.Context(), db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", DiscardMissed: true, ExpectedRevision: &paused.NewRevision})
-		require.NoError(t, e)
-		var after map[string]jsontext.Value
-		require.NoError(t, json.Unmarshal([]byte(resumed.Project.Metadata), &after))
-		require.Equal(t, before[db.CronRequestMetadataPrefix+id], after[db.CronRequestMetadataPrefix+id])
-		require.NotEmpty(t, after[db.CronRequestMetadataPrefix+id])
-	})
 	t.Run("project", func(t *testing.T) {
 		s := b.Open(t)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
-		p, err := s.CreateProject(t.Context(), "discard-project")
+		p, job, _ := requestJobFixture(t, s, "discard-project")
+		now := time.Now().UTC()
+		request, err := s.RequestCron(t.Context(), db.RequestCronIn{ProjectID: p.ID, UID: requestUIDAt(t, now), Kind: "run", TargetUID: job.UID, Actor: "operator", Now: now})
 		require.NoError(t, err)
 		paused, err := s.SetCronProjectPause(t.Context(), db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
 		require.NoError(t, err)
@@ -155,6 +138,12 @@ func checkCronDiscardResume(t *testing.T, _ db.Storage, b Backend) error {
 		require.Contains(t, string(resumed.Event.Payload), `"cron.pause"`)
 		require.Contains(t, string(resumed.Event.Payload), `"cron.passover"`)
 		require.Contains(t, string(resumed.Project.Metadata), `"paused_at"`)
+		var before, after map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal([]byte(paused.Project.Metadata), &before))
+		require.NoError(t, json.Unmarshal([]byte(resumed.Project.Metadata), &after))
+		key := db.CronRequestMetadataPrefix + request.Request.UID
+		require.NotEmpty(t, after[key])
+		require.Equal(t, before[key], after[key], "discard retains runtime requests")
 		_, err = s.SetCronProjectPause(t.Context(), in)
 		require.ErrorAs(t, err, new(*db.RevisionConflictError))
 		second, err := s.SetCronProjectPause(t.Context(), db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})

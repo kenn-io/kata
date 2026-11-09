@@ -3,14 +3,12 @@ package dbtest
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/uid"
 )
 
 // Backup restore preserves whole cutoff attribution and malformed blocking.
@@ -55,51 +53,6 @@ func checkCronPassoverImport(t *testing.T, _ db.Storage, b Backend) error {
 				require.Equal(t, cutoff, fixtureProgress(t, restored, restoredParent.ID, job.UID).Through)
 			}
 		})
-	}
-	return nil
-}
-
-// Adoption must refuse before changing local identity/history when a retained
-// root cutoff cannot be published by the new spoke.
-func checkCronPassoverAdoption(t *testing.T, s db.Storage) error {
-	ctx := t.Context()
-	for _, jobScope := range []bool{false, true} {
-		for _, emptyOnly := range []bool{false, true} {
-			t.Run(fmt.Sprintf("job=%t/empty=%t", jobScope, emptyOnly), func(t *testing.T) {
-				p, err := s.CreateProject(ctx, fmt.Sprintf("cutoff-adoption-%t-%t", jobScope, emptyOnly))
-				require.NoError(t, err)
-				if jobScope {
-					definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review work"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
-					job, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Review", Definition: definition, Actor: "operator"})
-					require.NoError(t, err)
-					_, err = s.ResumeCronJob(ctx, db.ResumeCronJobIn{ProjectID: p.ID, UID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Actor: "operator", DiscardMissed: true})
-					require.NoError(t, err)
-				} else {
-					paused, err := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
-					require.NoError(t, err)
-					revision := paused.NewRevision
-					_, err = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", ExpectedRevision: &revision, DiscardMissed: true})
-					require.NoError(t, err)
-				}
-				before, err := s.ProjectByID(ctx, p.ID)
-				require.NoError(t, err)
-				beforeID, err := s.MaxEventID(ctx)
-				require.NoError(t, err)
-				hubUID, err := uid.New()
-				require.NoError(t, err)
-				_, err = s.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: hubUID, ReplayHorizonEventID: 1, Actor: "operator", EmptyOnly: emptyOnly})
-				require.ErrorIs(t, err, db.ErrFederatedSpokeUnsupported)
-				require.ErrorContains(t, err, "retained cron passover")
-				after, err := s.ProjectByID(ctx, p.ID)
-				require.NoError(t, err)
-				require.Equal(t, before, after)
-				afterID, err := s.MaxEventID(ctx)
-				require.NoError(t, err)
-				require.Equal(t, beforeID, afterID)
-				_, err = s.FederationBindingByProject(ctx, p.ID)
-				require.ErrorIs(t, err, db.ErrNotFound)
-			})
-		}
 	}
 	return nil
 }

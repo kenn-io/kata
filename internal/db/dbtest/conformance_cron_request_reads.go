@@ -68,8 +68,6 @@ func checkCronRequestReads(t *testing.T, s db.Storage) error {
 			require.Empty(t, rows)
 		}
 	}
-	_, e = s.ListCronRequests(ctx, db.CronRequestList{ProjectID: p.ID, State: "unknown", Now: now})
-	require.ErrorIs(t, e, cron.ErrInvalid)
 	rows, e := s.ListCronRequests(ctx, db.CronRequestList{ProjectID: other.ID, Now: now})
 	require.NoError(t, e)
 	require.Empty(t, rows)
@@ -138,6 +136,8 @@ func checkCronRequestSweep(t *testing.T, s db.Storage) error {
 				values[key] = jsontext.Value(`{"note":"legacy"}`)
 				values["ordinary"] = jsontext.Value(`{"note":"keep"}`)
 				seedPassover(t, s, p.ID, values)
+				_, e = s.ListCronRequests(t.Context(), db.CronRequestList{ProjectID: p.ID, Now: now})
+				require.ErrorIs(t, e, cron.ErrInvalid, "reads do not hide malformed requests")
 				event, e := s.SweepCronRequests(t.Context(), p.ID, now)
 				require.Error(t, e, "report the malformed value on its single cleanup event")
 				require.NotNil(t, event, "root sweep must recover reserved legacy keys")
@@ -177,30 +177,11 @@ func checkCronRequestSweep(t *testing.T, s db.Storage) error {
 	early, e := s.SweepCronRequests(ctx, p.ID, now)
 	require.NoError(t, e)
 	require.Nil(t, early)
-	// Legacy malformed data is collected and reported while valid expiry progresses.
-	q := s.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	})
-	p, e = s.ProjectByID(ctx, p.ID)
-	require.NoError(t, e)
-	var values map[string]jsontext.Value
-	require.NoError(t, json.Unmarshal([]byte(p.Metadata), &values))
-	if values == nil {
-		values = make(map[string]jsontext.Value)
-	}
-	values["cron.request.bad"] = jsontext.Value(`{"kind":"run"}`)
-	values["ordinary"] = jsontext.Value(`12345678901234567890`)
-	raw, e := json.Marshal(values)
-	require.NoError(t, e)
-	_, e = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, string(raw), p.ID)
-	require.NoError(t, e)
-	_, e = s.ListCronRequests(ctx, db.CronRequestList{ProjectID: p.ID, Now: now})
-	require.ErrorIs(t, e, cron.ErrInvalid)
 	ids, e := s.ListCronRequestProjects(ctx)
 	require.NoError(t, e)
 	require.Contains(t, ids, p.ID)
 	event, e := s.SweepCronRequests(ctx, p.ID, first.Request.ExpiresAt)
-	require.Error(t, e)
+	require.NoError(t, e)
 	require.NotNil(t, event)
 	require.Equal(t, "project.metadata_updated", event.Type)
 	require.Equal(t, "system", event.Actor)
@@ -208,25 +189,17 @@ func checkCronRequestSweep(t *testing.T, s db.Storage) error {
 	require.NotContains(t, string(event.Payload), "cron.request."+live)
 	p, e = s.ProjectByID(ctx, p.ID)
 	require.NoError(t, e)
-	values = nil
+	var values map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(p.Metadata), &values))
 	require.NotContains(t, values, "cron.request."+expired)
 	require.Contains(t, values, "cron.request."+live)
-	require.NotContains(t, values, "cron.request.bad")
-	require.Equal(t, "12345678901234567890", string(values["ordinary"]))
 	event, e = s.SweepCronRequests(ctx, p.ID, first.Request.ExpiresAt)
 	require.NoError(t, e)
 	require.Nil(t, event)
-	if values == nil {
-		t.Fatal("expected project metadata object before seeding malformed spoke state")
-	}
-	// A spoke may not repair even malformed root-owned state.
+	// A stale candidate rechecks authority under the project lock: a spoke may
+	// not collect, or repair even malformed, root-owned state.
 	values["cron.request.bad"] = jsontext.Value(`{"note":"legacy"}`)
-	raw, e = json.Marshal(values)
-	require.NoError(t, e)
-	_, e = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, string(raw), p.ID)
-	require.NoError(t, e)
-	// A stale expiry candidate must recheck authority under the project lock.
+	seedPassover(t, s, p.ID, values)
 	_, e = s.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: p.UID, Actor: "operator", Enabled: false})
 	require.NoError(t, e)
 	event, e = s.SweepCronRequests(ctx, p.ID, now.Add(time.Hour))

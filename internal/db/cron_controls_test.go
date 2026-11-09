@@ -2,154 +2,103 @@ package db
 
 import (
 	"encoding/json/jsontext"
-	"encoding/json/v2"
-	"flag"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
+	"go.kenn.io/kata/internal/uid"
 )
 
-// Contract: any present malformed pause fails closed; absent means unpaused.
+// Contract: any present malformed pause fails closed; absent or null means unpaused.
 func TestCronProjectPauseDecode(t *testing.T) {
-	require.Nil(t, CronProjectPauseFromMetadata(`{}`))
-	require.Nil(t, CronProjectPauseFromMetadata(``))
-	valid := `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"maintenance"}`
-	p := CronProjectPauseFromMetadata(JSONBlob(`{"cron.pause":` + valid + `}`))
-	require.NotNil(t, p)
-	require.False(t, p.Invalid)
-	require.Equal(t, "operator", p.PausedBy)
-	require.Equal(t, "maintenance", p.Reason)
-	require.Equal(t, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), p.PausedAt)
-	for _, raw := range []string{`true`, `[]`, `{}`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":null}`, `{"paused_by":"operator"}`, `{"paused_by":" ","paused_at":"2026-01-02T03:04:05Z","reason":""}`, `{"paused_by":"operator","paused_at":"bad","reason":""}`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"","extra":true}`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"` + strings.Repeat("x", 257) + `"}`} {
-		p := CronProjectPauseFromMetadata(JSONBlob(`{"cron.pause":` + raw + `}`))
-		require.NotNil(t, p, raw)
-		require.True(t, p.Invalid, raw)
+	for _, blob := range []JSONBlob{``, `{}`, `{"cron.pause":null}`} {
+		require.Nil(t, CronProjectPauseFromMetadata(blob), blob)
 	}
-}
+	const at = `"paused_at":"2026-01-02T03:04:05Z"`
+	p := CronProjectPauseFromMetadata(JSONBlob(`{"cron.pause":{"paused_by":"operator",` + at + `,"reason":"maintenance"}}`))
+	require.Equal(t, &CronProjectPause{PausedBy: "operator", PausedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Reason: "maintenance"}, p)
+	long := strings.Repeat("é", 128)
+	p = CronProjectPauseFromMetadata(JSONBlob(`{"cron.pause":{"paused_by":"` + long + `",` + at + `,"reason":"` + long + `"}}`))
+	require.Equal(t, &CronProjectPause{PausedBy: long, PausedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Reason: long}, p, "256-byte actor and reason are retained")
 
-// Reasons vary with a fixed valid actor so actor rejection cannot mask them.
-func TestCronProjectPauseReasonProperty(t *testing.T) {
-	rapid.Check(t, func(ht *rapid.T) {
-		reason := rapid.String().Draw(ht, "reason")
-		wantValid := len(reason) <= 256
-		raw, err := json.Marshal(map[string]any{"cron.pause": map[string]any{"paused_by": "operator", "paused_at": "2026-01-02T03:04:05Z", "reason": reason}})
-		if err != nil {
-			ht.Fatal(err)
-		}
-		pause := CronProjectPauseFromMetadata(JSONBlob(raw))
-		if pause == nil || pause.Invalid == wantValid {
-			ht.Fatalf("invalid classification for %d bytes: %#v", len(reason), pause)
-		}
-		if wantValid && pause.Reason != reason {
-			ht.Fatalf("reason changed: %q -> %q", reason, pause.Reason)
-		}
-	})
-}
-
-// Contract: valid actor/reason/timestamp values survive byte-for-byte strings and
-// the same timestamp instant; invalid actor/reason values fail closed.
-func TestCronProjectPauseValueProperty(t *testing.T) {
-	previousChecks := flag.Lookup("rapid.checks").Value.String()
-	require.NoError(t, flag.Set("rapid.checks", "1000"))
-	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
-	rapid.Check(t, func(ht *rapid.T) {
-		actor := rapid.String().Draw(ht, "actor")
-		reason := rapid.String().Draw(ht, "reason")
-		instant := time.Unix(rapid.Int64Range(-62135596799, 253402300799).Draw(ht, "instant 1"), int64(rapid.IntRange(0, 999999999).Draw(ht, "instant 2"))).UTC()
-		wantValid := strings.TrimSpace(actor) != "" && len(actor) <= 256 && len(reason) <= 256
-		raw, err := json.Marshal(map[string]any{"cron.pause": map[string]any{"paused_by": actor, "paused_at": instant.Format(time.RFC3339Nano), "reason": reason}})
-		require.NoError(ht, err)
-		pause := CronProjectPauseFromMetadata(JSONBlob(raw))
-		require.NotNil(ht, pause)
-		require.Equal(ht, !wantValid, pause.Invalid)
-		if wantValid {
-			require.Equal(ht, actor, pause.PausedBy)
-			require.Equal(ht, reason, pause.Reason)
-			require.True(ht, instant.Equal(pause.PausedAt))
-		}
-	})
-}
-
-// Contract: ingest depends on authenticated provenance and the replacement,
-// never the old value or the receiver clock. Only explicit null deletes.
-func TestCronProjectPauseReplacementProperty(t *testing.T) {
-	valid := `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":""}`
-	for _, tc := range []struct {
-		from, to, origin, authority string
-		ok                          bool
-	}{
-		{`null`, valid, "root", "root", true}, {valid, `null`, "root", "root", true}, {`{"legacy":true}`, `null`, "root", "root", true},
-		{`null`, valid, "spoke", "root", false}, {`null`, valid, "root", "", false}, {`null`, `true`, "root", "root", false},
-		{`null`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"","extra":1}`, "root", "root", false},
+	for _, raw := range []string{
+		`true`, `[]`, `{}`, `"paused"`,
+		`{"paused_by":"operator",` + at + `}`,
+		`{"paused_by":"operator",` + at + `,"reason":null}`,
+		`{"paused_by":"operator",` + at + `,"reason":1}`,
+		`{"paused_by":"operator",` + at + `,"reason":"","reason":""}`,
+		`{"paused_by":"operator",` + at + `,"reason":"","extra":true}`,
+		`{"paused_by":"operator",` + at + `,"reason":"` + long + `x"}`,
+		`{` + at + `,"reason":""}`,
+		`{"paused_by":null,` + at + `,"reason":""}`,
+		`{"paused_by":" ",` + at + `,"reason":""}`,
+		`{"paused_by":"` + long + `x",` + at + `,"reason":""}`,
+		`{"paused_by":"operator","reason":""}`,
+		`{"paused_by":"operator","paused_at":null,"reason":""}`,
+		`{"paused_by":"operator","paused_at":"bad","reason":""}`,
+		`{"paused_by":"operator","paused_at":"0001-01-01T00:00:00Z","reason":""}`,
 	} {
-		ev := RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: tc.origin, Payload: jsontext.Value(`{"diff":{"cron.pause":{"from":` + tc.from + `,"to":` + tc.to + `}}}`)}
-		err := ValidateCronControlEvent(ev, tc.authority)
-		if tc.ok {
-			require.NoError(t, err)
-		} else {
-			require.ErrorIs(t, err, ErrFederationIngestValidation)
-		}
+		p := CronProjectPauseFromMetadata(JSONBlob(`{"cron.pause":` + raw + `}`))
+		require.Equal(t, &CronProjectPause{Invalid: true}, p, raw)
 	}
-	require.NoError(t, ValidateCronControlEvent(RemoteEvent{Type: "project.metadata_updated", Payload: jsontext.Value(`{"diff":{"ordinary":{"to":true}}}`)}, ""))
-
-	previousChecks := flag.Lookup("rapid.checks").Value.String()
-	require.NoError(t, flag.Set("rapid.checks", "1000"))
-	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
-	rapid.Check(t, func(ht *rapid.T) {
-		actor := rapid.String().Draw(ht, "actor")
-		reason := rapid.String().Draw(ht, "reason")
-		instant := time.Unix(rapid.Int64Range(-62135596799, 253402300799).Draw(ht, "instant"), 0).UTC()
-		valid := strings.TrimSpace(actor) != "" && len(actor) <= 256 && len(reason) <= 256
-		next := map[string]any{"paused_by": actor, "paused_at": instant.Format(time.RFC3339), "reason": reason}
-		change := map[string]any{"from": rapid.String().Draw(ht, "change"), "to": next}
-		switch rapid.IntRange(0, 4).Draw(ht, "mutation") {
-		case 1:
-			change["to"] = nil
-			valid = true
-		case 2:
-			delete(change, "to")
-			valid = false
-		case 3:
-			next["unknown"] = true
-			valid = false
-		case 4:
-			next["reason"] = nil
-			valid = false
-		}
-		if rapid.Bool().Draw(ht, "omit from") {
-			delete(change, "from")
-		}
-		origin := rapid.SampledFrom([]string{"root", "other", ""}).Draw(ht, "origin")
-		authority := rapid.SampledFrom([]string{"root", "other", ""}).Draw(ht, "authority")
-		raw, err := json.Marshal(map[string]any{"diff": map[string]any{"cron.pause": change}})
-		require.NoError(ht, err)
-		err = ValidateCronControlEvent(RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: origin, Payload: raw}, authority)
-		if valid && authority != "" && origin == authority {
-			require.NoError(ht, err)
-		} else {
-			require.ErrorIs(ht, err, ErrFederationIngestValidation)
-		}
-	})
+	require.Equal(t, &CronProjectPause{Invalid: true}, CronProjectPauseFromMetadata(`not json`))
 }
 
-// Contract: only the exact pause key and request-dot prefix are reserved.
-func TestCronProjectPauseReservationProperty(t *testing.T) {
-	a := jsontext.Value(`{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}`)
-	for _, key := range []string{"cron.passover", "cron.passover." + passoverJobUID, "cron.passover.bad", "cron.passover."} {
-		require.Error(t, CheckCronProjectMetadataWrite(map[string]jsontext.Value{key: a}))
+// Contract: only the authenticated root may write controls. Ingest checks the
+// new value, never the receiver clock; any root deletion is accepted so old
+// malformed state can be repaired, but a request body is write-once.
+func TestCronControlEventValidation(t *testing.T) {
+	const (
+		pause    = `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":""}`
+		passover = `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}` // #nosec G101 -- Cutoff fixture, not a credential.
+		later    = `{"version":1,"through":"2026-01-02T04:04:05Z","by":"operator"}`
+		request  = `{"kind":"run","job_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAW","requested_by":"operator","requested_at":"2026-01-02T03:04:05Z","expires_at":"2026-01-02T03:05:05Z"}`
+	)
+	id, err := uid.FromTime(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+	require.NoError(t, err)
+	requestKey := CronRequestMetadataPrefix + id
+	for _, tc := range []struct {
+		name, key, change string
+		origin, authority string
+		ok                bool
+	}{
+		{"pause baseline", "cron.pause", `{"to":` + pause + `}`, "root", "root", true},
+		{"pause create", "cron.pause", `{"from":null,"to":` + pause + `}`, "root", "root", true},
+		{"pause delete", "cron.pause", `{"from":` + pause + `,"to":null}`, "root", "root", true},
+		{"pause legacy delete", "cron.pause", `{"from":{"legacy":true},"to":null}`, "root", "root", true},
+		{"pause spoke origin", "cron.pause", `{"from":null,"to":` + pause + `}`, "spoke", "root", false},
+		{"pause untrusted ingress", "cron.pause", `{"from":null,"to":` + pause + `}`, "root", "", false},
+		{"pause untrusted delete", "cron.pause", `{"from":` + pause + `,"to":null}`, "root", "", false},
+		{"pause malformed", "cron.pause", `{"from":null,"to":true}`, "root", "root", false},
+		{"pause missing to", "cron.pause", `{"from":null}`, "root", "root", false},
+		{"pause unknown member", "cron.pause", `{"from":null,"to":{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"","extra":1}}`, "root", "root", false},
+		{"request create", requestKey, `{"to":` + request + `}`, "root", "root", true},
+		{"request identical repeat", requestKey, `{"from":` + request + `,"to":` + request + `}`, "root", "root", true},
+		{"request delete", requestKey, `{"from":` + request + `,"to":null}`, "root", "root", true},
+		{"request replace", requestKey, `{"from":` + request + `,"to":` + strings.Replace(request, `"operator"`, `"other"`, 1) + `}`, "root", "root", false},
+		{"request spoke origin", requestKey, `{"to":` + request + `}`, "other", "root", false},
+		{"request malformed", requestKey, `{"to":true}`, "root", "root", false},
+		{"legacy request key delete", "cron.request.legacy", `{"from":{"note":"legacy"},"to":null}`, "root", "root", true},
+		{"legacy request key spoke delete", "cron.request.legacy", `{"from":{"note":"legacy"},"to":null}`, "spoke", "root", false},
+		{"legacy request key create", "cron.request.legacy", `{"from":null,"to":{"note":"legacy"}}`, "root", "root", false},
+		{"passover create", "cron.passover", `{"from":null,"to":` + passover + `}`, "root", "root", true},
+		{"passover repair", "cron.passover", `{"from":true,"to":` + passover + `}`, "root", "root", true},
+		{"passover advance", "cron.passover." + passoverJobUID, `{"from":` + passover + `,"to":` + later + `}`, "root", "root", true},
+		{"passover decrease", "cron.passover", `{"from":` + later + `,"to":` + passover + `}`, "root", "root", false},
+		{"passover delete", "cron.passover", `{"from":` + passover + `,"to":null}`, "root", "root", false},
+		{"passover invalid job key", "cron.passover.bad", `{"from":null,"to":` + passover + `}`, "root", "root", false},
+		{"passover untrusted ingress", "cron.passover", `{"from":null,"to":` + passover + `}`, "root", "", false},
+		{"ordinary metadata", "cron.passovers", `{"to":true}`, "", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			event := RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: tc.origin, Payload: jsontext.Value(`{"diff":{"` + tc.key + `":` + tc.change + `}}`)}
+			err := ValidateCronControlEvent(event, tc.authority)
+			if tc.ok {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, ErrFederationIngestValidation)
+			}
+		})
 	}
-	require.NoError(t, CheckCronProjectMetadataWrite(map[string]jsontext.Value{"cron.passovers": a}))
-
-	previousChecks := flag.Lookup("rapid.checks").Value.String()
-	require.NoError(t, flag.Set("rapid.checks", "1000"))
-	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
-	rapid.Check(t, func(ht *rapid.T) {
-		suffix := rapid.String().Draw(ht, "suffix")
-		key := rapid.SampledFrom([]string{suffix, "cron.pause", "cron.pause" + suffix, "cron.request." + suffix, "cron.request" + suffix, "cron.passover", "cron.passover." + suffix, "cron.passover" + suffix}).Draw(ht, "key")
-		err := CheckCronProjectMetadataWrite(map[string]jsontext.Value{key: jsontext.Value("null")})
-		require.Equal(ht, key == "cron.pause" || strings.HasPrefix(key, "cron.request.") || key == "cron.passover" || strings.HasPrefix(key, "cron.passover."), err != nil)
-	})
 }

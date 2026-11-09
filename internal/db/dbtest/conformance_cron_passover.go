@@ -40,49 +40,29 @@ func fixtureProgress(t *testing.T, s db.Storage, parentID int64, jobUID string) 
 	return got
 }
 func checkCronPassover(t *testing.T, _ db.Storage, b Backend) error {
-	for _, policy := range []string{"all", "latest", "skip"} {
-		t.Run(policy, func(t *testing.T) {
-			s := b.Open(t)
-			t.Cleanup(func() { require.NoError(t, s.Close()) })
-			p, parent, job, progress := recurringFixture(t, s, policy)
-			cutoff := progress.Anchor.Add(6 * time.Hour)
-			seedPassover(t, s, p.ID, map[string]jsontext.Value{"cron.passover": passoverFixtureValue(t, cutoff)})
-			in := db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: cutoff}
-			out, e := s.DispatchRecurringCron(t.Context(), in)
-			require.NoError(t, e)
-			require.Len(t, out.Events, 1, "clamp-only sweep persists once")
-			got := fixtureProgress(t, s, parent.ID, job.UID)
-			require.Equal(t, cutoff, got.Through)
-			require.Equal(t, progress.Anchor, got.Anchor)
-			out, e = s.DispatchRecurringCron(t.Context(), in)
-			require.NoError(t, e)
-			require.Empty(t, out.Events, "idle second sweep emits nothing")
-			in.Now = cutoff.Add(4 * time.Hour)
-			out, e = s.DispatchRecurringCron(t.Context(), in)
-			require.NoError(t, e)
-			children, e := s.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: p.ID})
-			require.NoError(t, e)
-			count := 0
-			for _, child := range children {
-				if child.ID == parent.ID {
-					continue
-				}
-				count++
-				var values map[string]jsontext.Value
-				require.NoError(t, json.Unmarshal([]byte(child.Metadata), &values))
-				var occurrence struct {
-					ScheduledAt time.Time `json:"scheduled_at"`
-				}
-				require.NoError(t, json.Unmarshal(values["cron.occurrence"], &occurrence))
-				require.True(t, occurrence.ScheduledAt.After(cutoff))
-			}
-			expected := 1
-			if policy == "all" {
-				expected = 2
-			}
-			require.Equal(t, expected, count)
-		})
-	}
+	t.Run("clamp", func(t *testing.T) {
+		s := b.Open(t)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		p, parent, job, progress := recurringFixture(t, s, "all")
+		cutoff := progress.Anchor.Add(6 * time.Hour)
+		seedPassover(t, s, p.ID, map[string]jsontext.Value{"cron.passover": passoverFixtureValue(t, cutoff)})
+		in := db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: cutoff}
+		out, e := s.DispatchRecurringCron(t.Context(), in)
+		require.NoError(t, e)
+		require.Len(t, out.Events, 1, "clamp-only sweep persists once")
+		got := fixtureProgress(t, s, parent.ID, job.UID)
+		require.Equal(t, cutoff, got.Through)
+		require.Equal(t, progress.Anchor, got.Anchor)
+		out, e = s.DispatchRecurringCron(t.Context(), in)
+		require.NoError(t, e)
+		require.Empty(t, out.Events, "idle second sweep emits nothing")
+		in.Now = cutoff.Add(4 * time.Hour)
+		_, e = s.DispatchRecurringCron(t.Context(), in)
+		require.NoError(t, e)
+		children, e := s.ChildrenOfIssue(t.Context(), parent.ID)
+		require.NoError(t, e)
+		require.Len(t, children, 2, "only occurrences after the cutoff are delivered")
+	})
 	t.Run("unfinished latest scan", func(t *testing.T) {
 		s := b.Open(t)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })

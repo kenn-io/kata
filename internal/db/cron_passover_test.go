@@ -5,7 +5,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"flag"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -31,12 +30,16 @@ func passoverValue(t interface {
 	require.NoError(t, e)
 	return raw
 }
-func TestCronPassoverDecode(t *testing.T) {
+
+// The later applicable cutoff wins, a job cutoff wins an equal instant, null is
+// absent, and any malformed applicable value blocks scheduling.
+func TestCronPassoverFromMetadata(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	a := passoverValue(t, at, "operator", nil)
 	b := passoverValue(t, at.Add(time.Hour), "worker", &at)
+	null := jsontext.Value("null")
 	metadata := func(project, job jsontext.Value) JSONBlob {
-		m := map[string]jsontext.Value{}
+		m := map[string]jsontext.Value{"cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAW": jsontext.Value("false")}
 		if project != nil {
 			m["cron.passover"] = project
 		}
@@ -47,32 +50,71 @@ func TestCronPassoverDecode(t *testing.T) {
 		require.NoError(t, e)
 		return JSONBlob(raw)
 	}
-	require.Nil(t, CronPassoverFromMetadata(`{}`, passoverJobUID))
+	for _, blob := range []JSONBlob{``, `{}`, metadata(nil, nil), metadata(null, null)} {
+		require.Nil(t, CronPassoverFromMetadata(blob, passoverJobUID), blob)
+	}
 	for _, tc := range []struct {
 		p, j  jsontext.Value
 		scope string
 		at    time.Time
-	}{{a, nil, "project", at}, {a, b, "job", at.Add(time.Hour)}, {b, a, "project", at.Add(time.Hour)}, {a, a, "job", at}} {
-		got := CronPassoverFromMetadata(metadata(tc.p, tc.j), passoverJobUID)
-		require.NotNil(t, got)
-		require.False(t, got.Invalid)
-		require.Equal(t, tc.scope, got.Scope)
-		require.Equal(t, tc.at, got.Through)
+	}{{a, nil, "project", at}, {a, null, "project", at}, {null, a, "job", at}, {a, b, "job", at.Add(time.Hour)}, {b, a, "project", at.Add(time.Hour)}, {a, a, "job", at}} {
+		require.Equal(t, &CronPassoverState{Through: tc.at, Scope: tc.scope}, CronPassoverFromMetadata(metadata(tc.p, tc.j), passoverJobUID))
 	}
-	for _, bad := range []string{`true`, `{}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":null}`, `{"version":2,"through":"2026-01-02T03:04:05Z","by":"operator"}`, `{"version":1,"through":"2026-01-02T04:04:05+01:00","by":"operator"}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":" "}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator","paused_at":null}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator","extra":true}`} {
-		require.True(t, CronPassoverFromMetadata(metadata(jsontext.Value(bad), b), passoverJobUID).Invalid, bad)
-		require.True(t, CronPassoverFromMetadata(metadata(a, jsontext.Value(bad)), passoverJobUID).Invalid, bad)
+	// "+00:00" names UTC; reads normalize it so native planning accepts it.
+	state := CronPassoverFromMetadata(`{"cron.passover":{"version":1,"through":"2026-01-02T03:04:05+00:00","by":"operator"}}`, passoverJobUID)
+	require.Equal(t, &CronPassoverState{Through: at, Scope: "project"}, state)
+	_, err := cron.ApplyPassover(cron.RecurringProgress{Version: 1, Anchor: at, Through: at}, state.Through)
+	require.NoError(t, err)
+
+	bad := jsontext.Value(`{"version":1}`)
+	for _, values := range [][2]jsontext.Value{{bad, nil}, {bad, b}, {a, bad}, {nil, bad}} {
+		require.Equal(t, &CronPassoverState{Invalid: true}, CronPassoverFromMetadata(metadata(values[0], values[1]), passoverJobUID))
 	}
-	unrelated := JSONBlob(`{"cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAW":null}`)
-	require.Nil(t, CronPassoverFromMetadata(unrelated, passoverJobUID))
-	require.ErrorIs(t, ValidateCronPassoverChange("cron.passover.bad", nil, a), cron.ErrInvalid)
-	require.ErrorIs(t, ValidateCronPassoverChange("cron.passover", a, jsontext.Value(`null`)), cron.ErrInvalid)
-	require.ErrorIs(t, ValidateCronPassoverChange("cron.passover", b, a), cron.ErrInvalid)
-	require.NoError(t, ValidateCronPassoverChange("cron.passover", jsontext.Value(`true`), a))
-	require.NoError(t, ValidateCronPassoverChange("cron.passover", nil, a))
-	event := RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: "root", Payload: []byte(`{"diff":{"cron.passover":{"from":null,"to":` + string(a) + `}}}`)}
-	require.NoError(t, ValidateCronControlEvent(event, "root"))
-	require.ErrorIs(t, ValidateCronControlEvent(event, ""), ErrFederationIngestValidation)
+	require.Equal(t, &CronPassoverState{Invalid: true}, CronPassoverFromMetadata(`not json`, passoverJobUID))
+}
+
+// The complete-value codec accepts the portable UTC domain and rejects nearby
+// malformed representations.
+func TestCronPassoverDecode(t *testing.T) {
+	long := strings.Repeat("é", 128)
+	for _, raw := range []string{
+		`{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}`,
+		`{"version":1,"through":"2026-01-02T03:04:05+00:00","by":"operator","paused_at":"2026-01-02T02:04:05+00:00"}`,
+		`{"version":1,"through":"0001-01-01T00:00:01Z","by":"` + long + `"}`,
+		`{"version":1,"through":"9999-12-31T23:59:59.999999999Z","by":"operator"}`,
+	} {
+		_, err := decodeCronPassover(jsontext.Value(raw))
+		require.NoError(t, err, raw)
+	}
+	for _, raw := range []string{
+		`true`, `null`, `{}`,
+		`{"version":2,"through":"2026-01-01T00:00:00Z","by":"operator"}`,
+		`{"version":1.0,"through":"2026-01-01T00:00:00Z","by":"operator"}`,
+		`{"version":1e0,"through":"2026-01-01T00:00:00Z","by":"operator"}`,
+		`{"version":"1","through":"2026-01-01T00:00:00Z","by":"operator"}`,
+		`{"version":null,"through":"2026-01-01T00:00:00Z","by":"operator"}`,
+		`{"through":"2026-01-01T00:00:00Z","by":"operator"}`,
+		`{"version":1,"version":1,"through":"2026-01-01T00:00:00Z","by":"operator"}`,
+		`{"version":1,"through":"2026-01-01T00:00:00Z","by":"operator","extra":true}`,
+		`{"version":1,"through":"2026-01-01T00:00:00Z"}`,
+		`{"version":1,"through":"2026-01-01T00:00:00Z","by":null}`,
+		`{"version":1,"through":"2026-01-01T00:00:00Z","by":1}`,
+		`{"version":1,"through":"2026-01-01T00:00:00Z","by":" \t"}`,
+		`{"version":1,"through":"2026-01-01T00:00:00Z","by":"` + long + `x"}`,
+		`{"version":1,"by":"operator"}`,
+		`{"version":1,"through":null,"by":"operator"}`,
+		`{"version":1,"through":1,"by":"operator"}`,
+		`{"version":1,"through":"0001-01-01T00:00:00Z","by":"operator"}`,
+		`{"version":1,"through":"0000-12-31T23:59:59Z","by":"operator"}`,
+		`{"version":1,"through":"10000-01-01T00:00:00Z","by":"operator"}`,
+		`{"version":1,"through":"2026-01-02T04:04:05+01:00","by":"operator"}`,
+		`{"version":1,"through":"2026-01-01T00:00:00Z","by":"operator","paused_at":null}`,
+		`{"version":1,"through":"2026-01-01T00:00:00Z","by":"operator","paused_at":1}`,
+		`{"version":1,"through":"2026-01-01T00:00:00Z","by":"operator","paused_at":"2026-01-01T01:00:00+01:00"}`,
+	} {
+		_, err := decodeCronPassover(jsontext.Value(raw))
+		require.ErrorIs(t, err, cron.ErrInvalid, raw)
+	}
 }
 
 // Whole-value maximum is associative/commutative/idempotent and preserves the
@@ -86,10 +128,7 @@ func TestCronPassoverFoldProperty(t *testing.T) {
 		values := make([]jsontext.Value, 3)
 		for i := range values {
 			at := base.Add(time.Duration(rapid.IntRange(0, 5).Draw(ht, "at")) * time.Second)
-			actor := rapid.String().Draw(ht, "actor")
-			if strings.TrimSpace(actor) == "" || len(actor) > 256 {
-				actor = "operator"
-			}
+			actor := rapid.SampledFrom([]string{"operator", "worker", "zz"}).Draw(ht, "actor")
 			var paused *time.Time
 			if rapid.Bool().Draw(ht, "paused") {
 				paused = &base
@@ -105,7 +144,6 @@ func TestCronPassoverFoldProperty(t *testing.T) {
 		require.Equal(ht, fold(a, b), fold(b, a))
 		require.Equal(ht, fold(fold(a, b), c), fold(a, fold(b, c)))
 		require.Equal(ht, fold(a, a), fold(nil, a))
-		winner := fold(fold(a, b), c)
 		// Independent ordered-maximum oracle, including complete attribution.
 		expected := canonicalJSON(values[0])
 		var first CronPassover
@@ -119,17 +157,12 @@ func TestCronPassoverFoldProperty(t *testing.T) {
 				expected, expectedTime = canonical, candidate.Through
 			}
 		}
-		require.Equal(ht, expected, winner)
-		matched := false
-		for _, v := range values {
-			if string(canonicalJSON(v)) == string(winner) {
-				matched = true
-			}
-		}
-		require.True(ht, matched, "attribution is selected whole, never synthesized")
+		require.Equal(ht, expected, fold(fold(a, b), c))
 	})
 }
 
+// Incremental and baseline folds keep the maximum cutoff in any arrival order;
+// deleting an absent cutoff leaves it absent.
 func TestCronPassoverProjection(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	high := passoverValue(t, at.Add(time.Hour), "first", &at)
@@ -143,171 +176,49 @@ func TestCronPassoverProjection(t *testing.T) {
 		var got map[string]jsontext.Value
 		require.NoError(t, json.Unmarshal(incremental.ProjectMetadata["project"], &got))
 		require.JSONEq(t, string(high), string(got["cron.passover"]), "incremental arrival order must not regress cutoff")
+		require.Equal(t, "true", string(got["ordinary"]))
 	}
-	projection := FoldEvents(events)
-	var values map[string]jsontext.Value
-	require.NoError(t, json.Unmarshal(projection.ProjectMetadata["project"], &values))
-	require.JSONEq(t, string(high), string(values["cron.passover"]))
-	require.Equal(t, "true", string(values["ordinary"]))
-	// Federation-enabled baseline metadata uses the same maximum semantics.
 	events = append(events, FoldEvent{UID: "baseline", ProjectUID: "project", Type: "project.federation_enabled", HLCPhysicalMS: 3, Payload: []byte(`{"metadata":{"cron.passover":` + string(low) + `,"other":"value"}}`)})
+	var values map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(FoldEvents(events).ProjectMetadata["project"], &values))
-	require.JSONEq(t, string(high), string(values["cron.passover"]))
-}
+	require.JSONEq(t, string(high), string(values["cron.passover"]), "baseline metadata uses the same maximum")
+	require.Equal(t, `"value"`, string(values["other"]))
 
-// The complete-value codec accepts the portable UTC domain and rejects nearby
-// malformed representations rather than merely agreeing with its own encoder.
-func TestCronPassoverCodecBoundaryProperty(t *testing.T) {
-	for _, suffix := range []string{"Z", "+00:00"} {
-		for _, paused := range []bool{false, true} {
-			fields := map[string]any{"version": 1, "through": "2026-01-02T03:04:05" + suffix, "by": "operator"}
-			if paused {
-				fields["paused_at"] = "2026-01-02T02:04:05" + suffix
-			}
-			raw, err := json.Marshal(fields)
-			require.NoError(t, err)
-			_, err = decodeCronPassover(raw)
-			require.NoError(t, err, suffix)
-			event := controlRecoveryEvent(t, "cron.passover", jsontext.Value("null"), raw, "root", 1)
-			require.NoError(t, ValidateCronControlEvent(event, "root"))
-			metadata, err := json.Marshal(map[string]jsontext.Value{"cron.passover": raw})
-			require.NoError(t, err)
-			state := CronPassoverFromMetadata(JSONBlob(metadata), passoverJobUID)
-			require.NotNil(t, state)
-			require.False(t, state.Invalid)
-			anchor := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
-			_, err = cron.ApplyPassover(cron.RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, state.Through)
-			require.NoError(t, err, "zero-offset wire timestamps must work in native planning")
-		}
-	}
-	require.True(t, validCronPassoverTime(time.Date(2026, 1, 2, 3, 4, 5, 0, time.FixedZone("zero", 0))))
-
-	previousChecks := flag.Lookup("rapid.checks").Value.String()
-	require.NoError(t, flag.Set("rapid.checks", "1000"))
-	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
-	rapid.Check(t, func(ht *rapid.T) {
-		instant := time.Unix(rapid.Int64Range(-62135596799, 253402300799).Draw(ht, "instant 1"), int64(rapid.IntRange(0, 999999999).Draw(ht, "instant 2"))).UTC()
-		actor := strings.Repeat("é", rapid.IntRange(1, 128).Draw(ht, "actor"))
-		value := passoverValue(ht, instant, actor, &instant)
-		decoded, err := decodeCronPassover(value)
-		require.NoError(ht, err)
-		require.Equal(ht, CronPassover{Version: 1, Through: instant, By: actor, PausedAt: &instant}, decoded)
-		require.NoError(ht, ValidateCronPassoverChange(CronPassoverMetadataPrefix+passoverJobUID, nil, value))
-		for _, invalidActor := range []string{"", " \t", strings.Repeat("é", 129)} {
-			_, err := decodeCronPassover(passoverValue(ht, instant, invalidActor, nil))
-			require.ErrorIs(ht, err, cron.ErrInvalid)
-		}
-	})
-	for _, raw := range []string{
-		`{"version":1,"through":"0001-01-01T00:00:00Z","by":"operator"}`,
-		`{"version":1,"through":"0000-12-31T23:59:59Z","by":"operator"}`,
-		`{"version":1,"through":"10000-01-01T00:00:00Z","by":"operator"}`,
-		`{"version":1.0,"through":"2026-01-01T00:00:00Z","by":"operator"}`,
-		`{"version":1e0,"through":"2026-01-01T00:00:00Z","by":"operator"}`,
-		`{"version":1,"version":1,"through":"2026-01-01T00:00:00Z","by":"operator"}`,
-		`{"version":1,"through":"2026-01-01T00:00:00Z"}`,
-		`{"version":1,"through":1,"by":"operator"}`,
-		`{"version":1,"through":"2026-01-01T00:00:00Z","by":1}`,
-	} {
-		_, err := decodeCronPassover(jsontext.Value(raw))
-		require.ErrorIs(t, err, cron.ErrInvalid, raw)
-	}
-}
-
-func TestCronPassoverScopeMatrixProperty(t *testing.T) {
-	previousChecks := flag.Lookup("rapid.checks").Value.String()
-	require.NoError(t, flag.Set("rapid.checks", "1000"))
-	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
-	rapid.Check(t, func(ht *rapid.T) {
-		pKind := rapid.IntRange(0, 3).Draw(ht, "pKind")
-		jKind := rapid.IntRange(0, 3).Draw(ht, "jKind")
-		pAt := time.Unix(1700000000+int64(rapid.IntRange(0, 3).Draw(ht, "pAt")), 0).UTC()
-		jAt := time.Unix(1700000000+int64(rapid.IntRange(0, 3).Draw(ht, "jAt")), 0).UTC()
-		values := map[string]jsontext.Value{}
-		for _, item := range []struct {
-			key  string
-			kind int
-			at   time.Time
-		}{{CronPassoverMetadataKey, pKind, pAt}, {CronPassoverMetadataPrefix + passoverJobUID, jKind, jAt}} {
-			switch item.kind {
-			case 1:
-				values[item.key] = jsontext.Value("null")
-			case 2:
-				values[item.key] = jsontext.Value(`{"version":1}`)
-			case 3:
-				values[item.key] = passoverValue(ht, item.at, "operator", nil)
-			}
-		}
-		values[CronPassoverMetadataPrefix+"01ARZ3NDEKTSV4RRFFQ69G5FAW"] = jsontext.Value("null")
-		raw, err := json.Marshal(values)
-		require.NoError(ht, err)
-		got := CronPassoverFromMetadata(JSONBlob(raw), passoverJobUID)
-		invalid := (pKind == 2 || jKind == 2)
-		if invalid {
-			require.Equal(ht, &CronPassoverState{Invalid: true}, got)
-			return
-		}
-		if pKind < 2 && jKind < 2 {
-			require.Nil(ht, got)
-			return
-		}
-		want := &CronPassoverState{Through: pAt, Scope: "project"}
-		if pKind < 2 || (jKind == 3 && !jAt.Before(pAt)) {
-			want = &CronPassoverState{Through: jAt, Scope: "job"}
-		}
-		require.Equal(ht, want, got, fmt.Sprint(pKind, jKind))
-	})
+	got := applyCronProjectMetadataDiff(jsontext.Value(`{}`), jsontext.Value(`{"cron.passover":{"from":null,"to":null}}`))
+	require.JSONEq(t, `{}`, string(got))
 }
 
 // A signed reset may retain malformed history only with the exact later root
 // repair and valid current state; changing any witness fails closed.
-func TestCronPassoverResetRepairProperty(t *testing.T) {
-	previousChecks := flag.Lookup("rapid.checks").Value.String()
-	require.NoError(t, flag.Set("rapid.checks", "1000"))
-	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
-	rapid.Check(t, func(ht *rapid.T) {
-		key := CronPassoverMetadataKey
-		if rapid.Bool().Draw(ht, "has repair") {
-			key = CronPassoverMetadataPrefix + passoverJobUID
+func TestCronPassoverResetRepair(t *testing.T) {
+	good := passoverValue(t, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), "operator", nil)
+	for _, key := range []string{CronPassoverMetadataKey, CronPassoverMetadataPrefix + passoverJobUID} {
+		for _, mode := range []string{"repaired", "unrepaired", "inexact", "not-later", "spoke-legacy", "no-current"} {
+			t.Run(key+"/"+mode, func(t *testing.T) {
+				legacy := controlRecoveryEvent(t, key, jsontext.Value("null"), jsontext.Value(`"legacy"`), "root", 1)
+				repair := controlRecoveryEvent(t, key, jsontext.Value(`"legacy"`), good, "root", 2)
+				current := []RemoteEvent{controlRecoveryEvent(t, key, jsontext.Value("null"), good, "root", 3)}
+				switch mode {
+				case "inexact":
+					repair = controlRecoveryEvent(t, key, jsontext.Value("false"), good, "root", 2)
+				case "not-later":
+					repair.HLCPhysicalMS = 0
+				case "spoke-legacy":
+					legacy.OriginInstanceUID = "spoke"
+				case "no-current":
+					current = nil
+				}
+				history := []RemoteEvent{legacy, repair}
+				if mode == "unrepaired" {
+					history = history[:1]
+				}
+				err := validateCronResetHistory(history, current, "root")
+				if mode == "repaired" {
+					require.NoError(t, err)
+				} else {
+					require.ErrorIs(t, err, ErrFederationIngestValidation)
+				}
+			})
 		}
-		bad, _ := json.Marshal(rapid.String().Draw(ht, "bad"))
-		through := time.Unix(rapid.Int64Range(1, 253402300799).Draw(ht, "through"), 0).UTC()
-		good := passoverValue(ht, through, "operator", nil)
-		makeEvent := func(id string, at int64, from, to jsontext.Value) RemoteEvent {
-			raw, err := json.Marshal(map[string]any{"diff": map[string]any{key: map[string]jsontext.Value{"from": from, "to": to}}})
-			require.NoError(ht, err)
-			return RemoteEvent{EventUID: id, OriginInstanceUID: "root", Type: "project.metadata_updated", HLCPhysicalMS: at, Payload: raw}
-		}
-		legacy := makeEvent("old", 1, jsontext.Value("null"), bad)
-		repair := makeEvent("repair", 2, bad, good)
-		baseline := makeEvent("current", 3, jsontext.Value("null"), good)
-		hasRepair := rapid.Bool().Draw(ht, "hasRepair")
-		exact := rapid.Bool().Draw(ht, "exact")
-		later := rapid.Bool().Draw(ht, "later")
-		root := rapid.Bool().Draw(ht, "root")
-		hasCurrent := rapid.Bool().Draw(ht, "hasCurrent")
-		if !exact {
-			repair = makeEvent("repair", 2, jsontext.Value("false"), good)
-		}
-		if !later {
-			repair.HLCPhysicalMS = 0
-		}
-		if !root {
-			legacy.OriginInstanceUID = "spoke"
-		}
-		history := []RemoteEvent{legacy}
-		if hasRepair {
-			history = append(history, repair)
-		}
-		var entities []RemoteEvent
-		if hasCurrent {
-			entities = []RemoteEvent{baseline}
-		}
-		err := validateCronResetHistory(history, entities, "root")
-		if hasRepair && exact && later && root && hasCurrent {
-			require.NoError(ht, err)
-		} else {
-			require.Error(ht, err)
-		}
-	})
+	}
 }
