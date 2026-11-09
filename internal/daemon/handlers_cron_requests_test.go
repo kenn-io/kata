@@ -87,3 +87,27 @@ func TestCronRequestsHTTP(t *testing.T) {
 	require.Equal(t, "cancel", cancel.Request.Kind)
 	require.Equal(t, run.Run.UID, *cancel.Request.RunUID)
 }
+
+// Contract: the REST schema is the only TTL and body validation for
+// admission (the store defaults a zero TTL), and clock skew maps to 410/400.
+func TestCronRequestsStrictBodyAndClock(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p := seedProject(t, env, "request-project")
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Actor: "operator", Name: "Execute review", Definition: cronHTTPDefinition(t)})
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/requests", p.ID, job.UID)
+	for _, body := range []any{nil, map[string]any{"actor": "operator"}, map[string]any{"uid": "bad", "actor": "operator"}, map[string]any{"uid": cronHTTPUID(t), "actor": "operator", "ttl_seconds": 0}, map[string]any{"uid": cronHTTPUID(t), "actor": "operator", "ttl_seconds": 59}, map[string]any{"uid": cronHTTPUID(t), "actor": "operator", "ttl_seconds": 86401}, map[string]any{"uid": cronHTTPUID(t), "actor": "operator", "ttl_seconds": 60.5}, map[string]any{"uid": cronHTTPUID(t), "actor": "operator", "extra": true}} {
+		status, raw := cronHTTP(t, env, http.MethodPost, path, body)
+		require.Equal(t, 400, status, string(raw))
+	}
+	for _, clock := range []struct {
+		at     time.Time
+		status int
+	}{{time.Now().Add(-time.Minute), 410}, {time.Now().Add(time.Hour), 400}} {
+		id, e := uid.FromTime(clock.at)
+		require.NoError(t, e)
+		status, raw := cronHTTP(t, env, http.MethodPost, path, map[string]any{"uid": id, "actor": "operator"})
+		require.Equal(t, clock.status, status, string(raw))
+		require.Contains(t, string(raw), "clock")
+	}
+}

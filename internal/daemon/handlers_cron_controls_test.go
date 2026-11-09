@@ -87,13 +87,17 @@ func TestCronControlRouteBoundaries(t *testing.T) {
 	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Actor: "operator", Name: "Execute review", Definition: cronHTTPDefinition(t)})
 	require.NoError(t, err)
 	other := seedProject(t, env, "other-project")
+	// The denied project's own eligible job, so only authorization can refuse it.
+	otherJob, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: other.ID, Actor: "operator", Name: "Execute review", Definition: cronHTTPDefinition(t)})
+	require.NoError(t, err)
+	jobs := map[int64]string{project.ID: job.UID, other.ID: otherJob.UID}
 	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostAccess: closeEvidenceHostAccess{deniedProjectID: other.ID}})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	for _, pid := range []int64{project.ID, other.ID} {
 		base := fmt.Sprintf("/api/v1/projects/%d/cron", pid)
 		for _, route := range []struct{ method, path, body string }{
 			{http.MethodPut, base + "/pause", ""}, {http.MethodDelete, base + "/pause", ""},
-			{http.MethodPost, base + "/jobs/" + job.UID + "/requests", fmt.Sprintf(`{"uid":%q}`, cronHTTPUID(t))},
+			{http.MethodPost, base + "/jobs/" + jobs[pid] + "/requests", fmt.Sprintf(`{"uid":%q}`, cronHTTPUID(t))},
 			{http.MethodGet, base + "/requests", ""},
 		} {
 			req := httptest.NewRequestWithContext(t.Context(), route.method, route.path, strings.NewReader(route.body))
