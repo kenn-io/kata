@@ -164,7 +164,9 @@ version = 1
 name = "product"
 ```
 
-`kata init` writes the header, adds it above an existing binding that lacks the contract command without changing the rest of the file, and warns instead of failing when the file can't be written.
+`kata init` writes the header and adds it above an existing binding that lacks
+the contract command, preserving the rest of the file. If the header can't be
+written, init warns and continues setup.
 
 Do not put tokens or host-specific daemon URLs in `.kata.toml`.
 

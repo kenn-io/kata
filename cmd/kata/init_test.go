@@ -459,6 +459,7 @@ func TestInit_ReadOnlyKataTomlWarns(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Contains(t, stderr, ".kata.toml")
+	assert.Contains(t, stderr, "kata: warning: could not update .kata.toml header:")
 	content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, original, string(content))

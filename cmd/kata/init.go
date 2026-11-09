@@ -380,8 +380,8 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 		}
 	} else {
 		tomlChanged, err = config.EnsureProjectConfigHeader(dest)
-		if err != nil {
-			warnAgentsUpdate(fmt.Errorf("write .kata.toml: %w", err))
+		if err != nil && currentOutputMode() == outputHuman {
+			fmt.Fprintf(os.Stderr, "kata: warning: could not update .kata.toml header: %v\n", err)
 		}
 	}
 	gitignoreChanged, err := ensureGitignoreEntry(dest, ".kata.local.toml")
