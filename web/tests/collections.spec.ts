@@ -2,28 +2,6 @@ import { expect, test } from './fixtures'
 
 test.use({ trace: 'off' })
 
-test('keyboard selection opens detail when search hides its row', async ({ page, kata }) => {
-  const credentials = await kata.launch(page)
-  await kata.seedIssue(page, credentials, { title: 'Example second task' })
-  await kata.seedIssue(page, credentials, { title: 'Example first task' })
-  const first = page.getByRole('button', { name: /Example first task/ })
-  const second = page.getByRole('button', { name: /Example second task/ })
-  await expect(second).toBeVisible()
-  await first.focus()
-  await page.clock.install()
-  await page.clock.pauseAt(Date.now())
-  await first.press('ArrowDown')
-  await expect(second).toBeFocused()
-  await page.getByRole('searchbox', { name: 'Search tasks' }).fill('unmatched')
-  await expect(page).toHaveURL(/text=unmatched/)
-  await expect(second).toHaveCount(0)
-  await page.clock.runFor(50)
-  await expect(
-    page.getByRole('heading', { name: 'Example second task', exact: true }),
-  ).toBeVisible()
-  await expect(page).toHaveURL(/issue=.*text=unmatched/)
-})
-
 test('views, projects, filters, columns, hierarchy, and keyboard stay first-class', async ({
   page,
   kata,
@@ -35,17 +13,17 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
     labels: ['planning'],
     priority: 1,
   })
-  await kata.seedIssue(page, credentials, {
-    title: 'Example child task',
+  const child = await kata.seedIssue(page, credentials, {
+    title: 'Example second task',
     owner: 'user-b',
     labels: ['delivery'],
     links: [{ type: 'parent', to_ref: parent.uid }],
   })
 
   await expect(page.getByRole('button', { name: /Example parent task/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Example child task/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Example second task/ })).toHaveCount(0)
   await page.getByRole('button', { name: /Example parent task/ }).press('ArrowRight')
-  await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Example second task/ })).toBeVisible()
 
   await page.getByRole('button', { name: 'Columns' }).click()
   await expect(page.getByText('Shown when space allows')).toBeVisible()
@@ -62,41 +40,39 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   const snapshotRequested = new Promise<void>((resolve) => {
     reportSnapshot = resolve
   })
-  let intercepted = false
   await page.route('**/api/v1/ui/snapshot?*', async (request) => {
-    if (intercepted || new URL(request.request().url()).searchParams.get('text') !== 'c') {
+    if (new URL(request.request().url()).searchParams.get('selected_issue_uid') !== child.uid) {
       await request.continue()
       return
     }
-    intercepted = true
     const response = await request.fetch()
     reportSnapshot()
     await heldSnapshot
     await request.fulfill({ response }).catch(() => {})
   })
-  await page.clock.install()
-  await page.clock.pauseAt(Date.now())
   await parentRow.press('ArrowDown')
-  await expect(page.getByRole('button', { name: /Example child task/ })).toBeFocused()
+  await expect(page.getByRole('button', { name: /Example second task/ })).toBeFocused()
+  await snapshotRequested
 
   const search = page.getByRole('searchbox', { name: 'Search tasks' })
   await search.focus()
+  const original = await search.elementHandle()
   try {
-    await page.keyboard.type('c')
-    await snapshotRequested
-    await page.clock.runFor(50)
+    await page.keyboard.type('second')
+    releaseSnapshot()
     await expect(
-      page.getByRole('heading', { name: 'Example child task', exact: true }),
+      page.getByRole('heading', { name: 'Example second task', exact: true }),
     ).toBeVisible()
     await expect(search).toBeFocused()
-    await page.clock.resume()
-    await page.keyboard.type('hild')
+    expect(await search.evaluate((element, first) => element === first, original)).toBe(true)
+    await page.keyboard.type(' task')
   } finally {
     releaseSnapshot()
   }
-  await expect(search).toHaveValue('child')
-  await expect(page).toHaveURL(/issue=.*text=child/)
-  await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
+  await expect(search).toHaveValue('second task')
+  await expect.poll(() => new URL(page.url()).searchParams.get('issue')).toBe(child.uid)
+  await expect.poll(() => new URL(page.url()).searchParams.get('text')).toBe('second task')
+  await expect(page.getByRole('button', { name: /Example second task/ })).toBeVisible()
 
   for (const view of ['Inbox', 'Today', 'Delegated', 'Scheduled']) {
     await page.getByRole('button', { name: new RegExp(`^${view}( \\d+)?$`) }).click()

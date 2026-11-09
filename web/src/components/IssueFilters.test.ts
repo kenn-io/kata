@@ -108,6 +108,22 @@ describe('IssueFilters', () => {
       scope: { kind: 'project', project_uid: 'project-example' },
     })
   })
+
+  test('keeps a trailing space when the route acknowledges the query', async () => {
+    const onChange = vi.fn()
+    const { rerender } = render(IssueFilters, { props: { filters, projects, onChange } })
+    const input = screen.getByLabelText('Search tasks') as HTMLInputElement
+    await fireEvent.input(input, { target: { value: 'second ' } })
+    await rerender({ filters: { ...filters, query: 'second', status: 'ready' } })
+    expect(input.value).toBe('second ')
+    await fireEvent.input(input, { target: { value: 'second task' } })
+    expect(onChange).toHaveBeenLastCalledWith(
+      { ...filters, query: 'second task', status: 'ready' },
+      'query',
+    )
+    await rerender({ filters: { ...filters, query: 'other' } })
+    expect(input.value).toBe('other')
+  })
 })
 
 const projects: KataProjectSummary[] = [

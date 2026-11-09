@@ -21,7 +21,10 @@
   $effect(() => {
     if (filters !== lastFilters) {
       lastFilters = filters
-      draftOverride = null
+      draftOverride =
+        draftOverride && draftOverride.query.trim() === filters.query
+          ? { ...filters, query: draftOverride.query }
+          : null
     }
   })
 

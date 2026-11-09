@@ -563,6 +563,98 @@ describe('AppShell', () => {
     })
   })
 
+  test.each([
+    ['same', 'project-a', '01J00000000000000000000001'],
+    ['different', 'project-b', undefined],
+  ])(
+    'search uses the displayed workspace when the pending project is %s',
+    async (_name, projectUID, issueUID) => {
+      const onNavigate = vi.fn()
+      const route = {
+        kind: 'kata' as const,
+        view: 'all-open' as const,
+        projectUID: 'project-a',
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      }
+      render(AppShell, {
+        props: {
+          route,
+          requestedRoute: { ...route, projectUID, issueUID: '01J00000000000000000000001' },
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate,
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+      await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
+      expect(onNavigate).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          projectUID: 'project-a',
+          filters: expect.objectContaining({ text: 'example' }),
+        }),
+      )
+      expect(onNavigate.mock.lastCall?.[0].issueUID).toBe(issueUID)
+    },
+  )
+
+  test('keeps a pending selection when landing Inbox becomes explicit', async () => {
+    const onNavigate = vi.fn()
+    const route = {
+      kind: 'kata' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    render(AppShell, {
+      props: {
+        route,
+        requestedRoute: { ...route, view: 'inbox', issueUID: '01J00000000000000000000001' },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ view: 'inbox', issueUID: '01J00000000000000000000001' }),
+    )
+  })
+
+  test('keeps the requested query when an older snapshot arrives', async () => {
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const props = {
+      route,
+      requestedRoute: route,
+      snapshot: snapshot(),
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    const input = screen.getByLabelText('Search tasks') as HTMLInputElement
+    await fireEvent.input(input, { target: { value: 'second ' } })
+    await fireEvent.input(input, { target: { value: 'second t' } })
+    await rerender({
+      ...props,
+      route: { ...route, filters: { ...route.filters, text: 'second' } },
+      requestedRoute: { ...route, filters: { ...route.filters, text: 'second t' } },
+    })
+    expect(input.value).toBe('second t')
+    await fireEvent.input(input, { target: { value: 'second task' } })
+    expect(props.onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ filters: expect.objectContaining({ text: 'second task' }) }),
+    )
+  })
+
   test('stays in the landing Inbox while selecting, graphing, and narrowing', async () => {
     const onNavigate = vi.fn()
     const landing = {

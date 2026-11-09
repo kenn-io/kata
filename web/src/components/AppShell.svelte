@@ -270,6 +270,14 @@
   let hasInbox = $derived(inboxProject !== undefined)
   let viewName = $derived(viewNameForRoute(route))
   let searchFilters = $derived(searchFiltersForRoute(route, viewName))
+  let filterRoute = $derived(
+    requestedRoute &&
+      viewNameForRoute(requestedRoute) === viewName &&
+      requestedRoute.projectUID === route.projectUID
+      ? requestedRoute
+      : route,
+  )
+  let inputFilters = $derived({ ...searchFilters, query: filterRoute.filters.text ?? '' })
   let currentView = $derived(
     projectKataWorkspaceView({
       view: viewName,
@@ -344,11 +352,11 @@
       (scopedAuthority ? 'This credential cannot create projects.' : pendingReason),
   )
 
-  function navigate(next: AppRoute, preserveKeyboardSelection = false): void {
+  function navigate(next: AppRoute): void {
     const query = (next.filters.text ?? '').trim()
     if (query !== countedQuery) countedQuery = ''
     if (query !== pendingQuery) pendingQuery = ''
-    if (!preserveKeyboardSelection) navigationGeneration += 1
+    navigationGeneration += 1
     void onNavigate(next)
   }
 
@@ -414,30 +422,26 @@
     changed: keyof KataTaskSearchFilters,
   ): void {
     const shareable = shareableFilters(filters, viewName, changed)
-    const currentRoute = requestedRoute ?? route
+    const currentRoute = filterRoute
     if (filters.scope.kind === 'project') {
-      navigate(
-        {
-          ...withResolvedView(currentRoute),
-          projectUID: filters.scope.project_uid,
-          filters: shareable,
-        },
-        changed === 'query',
-      )
+      navigate({
+        ...withResolvedView(currentRoute),
+        projectUID: filters.scope.project_uid,
+        filters: shareable,
+      })
       return
     }
     const next = { ...currentRoute, filters: shareable }
     delete next.projectUID
-    navigate(next, changed === 'query')
+    navigate(next)
   }
 
   function selectIssue(issueUID: string): void {
-    const currentRoute = requestedRoute ?? route
     navigate({
-      ...withResolvedView(currentRoute),
+      ...withResolvedView(route),
       issueUID,
       graph: false,
-      filters: currentRoute.filters,
+      filters: route.filters,
     })
   }
 
@@ -854,7 +858,7 @@
       {/if}
     {:else}
       <IssueFilters
-        filters={searchFilters}
+        filters={inputFilters}
         projects={projection.projects}
         onChange={updateFilters}
         onSubmitSearch={submitSearch}

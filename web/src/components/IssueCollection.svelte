@@ -574,8 +574,6 @@
   const KEYBOARD_SELECT_DEBOUNCE_MS = 50
   let keyboardSelectTimer: ReturnType<typeof setTimeout> | undefined
   let pendingKeyboardSelectUID: string | null = null
-  let pendingKeyboardSelectIssue: KataTaskSummary | undefined
-  let pendingKeyboardSelectResultsKey = ''
   // Tracked by event.code (physical key), not event.key: "G" is Shift+g,
   // so releasing Shift before g would make keydown record "G" but keyup
   // report "g", stranding the entry and blocking selection until blur.
@@ -583,7 +581,6 @@
 
   function cancelPendingKeyboardSelect() {
     pendingKeyboardSelectUID = null
-    pendingKeyboardSelectIssue = undefined
     if (keyboardSelectTimer !== undefined) {
       clearTimeout(keyboardSelectTimer)
       keyboardSelectTimer = undefined
@@ -628,14 +625,12 @@
 
   function commitKeyboardSelect() {
     const uid = pendingKeyboardSelectUID
-    const fallback =
-      pendingKeyboardSelectResultsKey !== resultsKey ? pendingKeyboardSelectIssue : undefined
     pendingKeyboardSelectUID = null
-    pendingKeyboardSelectIssue = undefined
     if (!uid) return
-    // A changed search may hide the queued task; an ordinary refresh may
-    // have removed it, so only search changes retain the original task.
-    const issue = findIssueByUID(uid) ?? fallback
+    // Re-resolve at commit time: a live refresh inside the settle window
+    // can drop the row, and selecting a vanished issue would surface an
+    // error for something the user can no longer see.
+    const issue = findIssueByUID(uid)
     if (issue) onSelect(issue)
   }
 
@@ -643,11 +638,8 @@
     if (!target) return
     target.focus()
     const uid = target.dataset.uid
-    const issue = uid ? findIssueByUID(uid) : undefined
-    if (!uid || !issue) return
+    if (!uid || !findIssueByUID(uid)) return
     pendingKeyboardSelectUID = uid
-    pendingKeyboardSelectIssue = issue
-    pendingKeyboardSelectResultsKey = resultsKey
     restartKeyboardSelectTimer()
   }
 
