@@ -68,6 +68,7 @@ type cronCLIOptions struct {
 	file, identity, expectedEventUID string
 	parent                           string
 	includeDeleted                   bool
+	receipt                          bool
 	limit                            int64
 	beforeUID, jobUID                string
 }
@@ -121,6 +122,10 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		command.Flags().Int64Var(&options.limit, "limit", 100, "maximum results in one page (1-100)")
 		command.Flags().StringVar(&options.beforeUID, "before-uid", "", "run UID cursor from next_before_uid")
 		command.Flags().StringVar(&options.jobUID, "job-uid", "", "list only runs of this job")
+	}
+	if resource == "job" && (action == "create" || action == "update" || action == "restore") {
+		command.Flags().BoolVar(&options.receipt, "receipt", false, "return the saved response with bounded advisory schedule and runtime diagnostics")
+		command.Long += "\n--receipt returns versioned JSON. Saved changes survive failed or unsupported diagnostics; --quiet skips these reads."
 	}
 	return command
 }
@@ -288,6 +293,9 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	}
 	if flags.Quiet && currentOutputMode() != outputJSON {
 		return nil
+	}
+	if o.receipt {
+		return emitJSON(cmd.OutOrStdout(), buildCronReceipt(cmd.Context(), daemon, project.ID, o.action, raw, flags.Quiet))
 	}
 	return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
 }
