@@ -2,33 +2,36 @@ package sqlitestore
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json/v2"
 	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
 )
 
-// A deferred SQLite transaction keeps this history-sized preparation out of
-// the writer interval. A concurrent commit makes the first write fail with
-// BUSY_SNAPSHOT; the caller retries validation and preparation together, and
-// takes the project lock before preparing once optimistic attempts run out.
-// Request fences still run first and may themselves acquire the writer lock.
+// Scoped preparation uses an optimistic transaction. Full-history pulls fold
+// in a read-only snapshot and compare the event stamp under the writer lock.
+// Both paths fall back to preparation under the lock after retry attempts.
 type federationMaterialization struct {
-	fullReplay   bool
-	projection   db.FoldProjection
-	cronAffected bool
-	status       []federatedStatusIntentUpdate
-	binding      db.FederationBinding
-	linkProjects []int64
-	links        db.FoldProjection
-	issueRows    map[string]federatedIssueRow
-	issueIDs     map[string]int64
-	commentRows  map[string]federatedCommentRow
-	labelRows    map[federatedLabelKey]struct{}
-	staleIssues  map[string]int64
-	linkIDs      map[string]int64
-	linkRows     map[db.FoldLinkKey]federatedLinkRow
+	fullReplay    bool
+	fullHistory   bool
+	linksAffected bool
+	eventStamp    [32]byte
+	projection    db.FoldProjection
+	cronAffected  bool
+	status        []federatedStatusIntentUpdate
+	binding       db.FederationBinding
+	linkProjects  []int64
+	links         db.FoldProjection
+	issueRows     map[string]federatedIssueRow
+	issueIDs      map[string]int64
+	commentRows   map[string]federatedCommentRow
+	labelRows     map[federatedLabelKey]struct{}
+	staleIssues   map[string]int64
+	linkIDs       map[string]int64
+	linkRows      map[db.FoldLinkKey]federatedLinkRow
 }
 
 // Large issue sets keep the established complete queries. This bounds SQL
@@ -69,6 +72,10 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 // Cron-only pages fold cron history. Other pages reconcile the supplied issue
 // scope (nil is full); a scoped page with cron events adds complete cron history.
 func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string) (federationMaterialization, error) {
+	return foldFederationMaterialization(ctx, tx, projectID, prepared, alreadyStored, issueScope, false)
+}
+
+func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string, deferRows bool) (federationMaterialization, error) {
 	var fresh []db.FoldEvent
 	var accepted []string
 	linksAffected := false
@@ -138,6 +145,14 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		}
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
+	if deferRows && len(issueScope) == 0 {
+		m.fullHistory = true
+		m.linksAffected = linksAffected
+		m.eventStamp, err = federationEventStamp(events)
+		if err != nil {
+			return federationMaterialization{}, err
+		}
+	}
 	if len(issueScope) > 0 {
 		// Historical project events can affect issue authors, but an issue-only
 		// page must not reconcile unrelated project metadata.
@@ -151,33 +166,13 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 			return federationMaterialization{}, err
 		}
 	}
+	if m.fullHistory {
+		return m, nil
+	}
 	if linksAffected {
-		m.linkProjects, err = federationBindingGroupProjectIDs(ctx, tx, binding)
-		if err != nil {
+		if err := m.foldLinks(ctx, tx, fresh, alreadyStored); err != nil {
 			return federationMaterialization{}, err
 		}
-		var linkEvents []db.FoldEvent
-		for _, id := range m.linkProjects {
-			history, err := federationFoldEventsOfTypes(ctx, tx, id, db.FederationLinkAffectingEventTypes())
-			if err != nil {
-				return federationMaterialization{}, err
-			}
-			linkEvents = append(linkEvents, history...)
-		}
-		if !alreadyStored {
-			for _, event := range fresh {
-				if db.FederationEventAffectsLinks(event.Type) {
-					linkEvents = append(linkEvents, event)
-				}
-			}
-		}
-		// The incremental fold reads the same group link history as a full
-		// materialization, so it applies the same relay link boundary.
-		linkEvents, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, linkEvents)
-		if err != nil {
-			return federationMaterialization{}, err
-		}
-		m.links = db.FoldEvents(linkEvents)
 	}
 	if err := m.prepareRows(ctx, tx, projectID, issueScope); err != nil {
 		return federationMaterialization{}, err
@@ -188,6 +183,45 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		}
 	}
 	return m, nil
+}
+
+func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, fresh []db.FoldEvent, alreadyStored bool) error {
+	var err error
+	m.linkProjects, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
+	if err != nil {
+		return err
+	}
+	var events []db.FoldEvent
+	for _, id := range m.linkProjects {
+		history, err := federationFoldEventsOfTypes(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+		if err != nil {
+			return err
+		}
+		events = append(events, history...)
+	}
+	if !alreadyStored {
+		for _, event := range fresh {
+			if db.FederationEventAffectsLinks(event.Type) {
+				events = append(events, event)
+			}
+		}
+	}
+	events, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
+	if err != nil {
+		return err
+	}
+	m.links = db.FoldEvents(events)
+	return nil
+}
+
+func federationEventStamp(events []db.FoldEvent) ([32]byte, error) {
+	h := sha256.New()
+	for _, event := range events {
+		if err := json.MarshalWrite(h, event); err != nil {
+			return [32]byte{}, err
+		}
+	}
+	return [32]byte(h.Sum(nil)), nil
 }
 
 func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, projectID int64, validator *db.CronReplayValidator) error {

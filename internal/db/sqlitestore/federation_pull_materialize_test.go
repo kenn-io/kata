@@ -110,6 +110,95 @@ func TestPulledMaterializationRetriesPreparedSnapshot(t *testing.T) {
 	}
 }
 
+func TestFullPulledMaterializationReadsCurrentRows(t *testing.T) {
+	ctx := t.Context()
+	d, p, issue := incrementalTestStore(t)
+	ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	_, err := d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
+	require.NoError(t, err)
+	attempts := 0
+	d.federationIngestPrepared = func() {
+		attempts++
+		_, err := d.ExecContext(ctx, `UPDATE issues SET title='local edit' WHERE id=?`, issue.ID)
+		require.NoError(t, err)
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
+	require.Equal(t, 1, attempts)
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, "work", got.Title)
+}
+
+func TestFullPulledMaterializationValidatesHistory(t *testing.T) {
+	for _, change := range []string{"unrelated", "insert", "rewrite", "fallback"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := t.Context()
+			d, p, issue := incrementalTestStore(t)
+			other, err := d.CreateProject(ctx, "other-project")
+			require.NoError(t, err)
+			projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+			issueEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"first"}`, 9_000_000_000_001)
+			_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, issueEvent})
+			require.NoError(t, err)
+			attempts := 0
+			d.federationIngestPrepared = func() {
+				attempts++
+				if attempts > 1 && change != "fallback" {
+					return
+				}
+				switch change {
+				case "unrelated":
+					_, err = d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: other.ID, Actor: "tester", Patch: map[string]jsontext.Value{"write": []byte(`true`)}})
+				case "insert", "fallback":
+					ev := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"new"}`, 9_000_000_000_002+int64(attempts))
+					_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
+				case "rewrite":
+					_, err = d.ExecContext(ctx, `UPDATE events SET payload=? WHERE uid=?`, `{"issue_uid":"`+issue.UID+`","title":"new"}`, issueEvent.EventUID)
+				}
+				require.NoError(t, err)
+			}
+			require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{projectEvent.EventUID}))
+			if change == "unrelated" {
+				require.Equal(t, 1, attempts)
+			} else {
+				require.GreaterOrEqual(t, attempts, 2)
+			}
+			got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			want := "new"
+			if change == "unrelated" {
+				want = "first"
+			}
+			require.Equal(t, want, got.Title)
+		})
+	}
+}
+
+func TestFullPulledMaterializationRetainsSiblingLink(t *testing.T) {
+	ctx := t.Context()
+	d, p, issue := incrementalTestStore(t)
+	other, err := d.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	a, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "first", Author: "tester"})
+	require.NoError(t, err)
+	b, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "second", Author: "tester"})
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, other.ID, "tester")
+	require.NoError(t, err)
+	projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	linkEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, a.UID), 9_000_000_000_001)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, linkEvent})
+	require.NoError(t, err)
+	d.federationIngestPrepared = func() {
+		_, _, err := d.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: a.ID, ToIssueID: b.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: a.ID, FromShortID: a.ShortID, FromUID: a.UID, ToShortID: b.ShortID, ToUID: b.UID, Actor: "tester"})
+		require.NoError(t, err)
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{projectEvent.EventUID, linkEvent.EventUID}))
+	links, err := d.LinksByIssue(ctx, b.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+}
+
 // Group links include endpoints outside the page's touched issue scope.
 func TestPulledMaterializationRetainsUntouchedLinkEndpoints(t *testing.T) {
 	ctx := t.Context()
