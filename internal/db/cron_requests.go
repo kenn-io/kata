@@ -70,64 +70,39 @@ type RequestCronOut struct {
 }
 
 func decodeCronRequest(id string, raw jsontext.Value) (CronRequest, error) {
-	invalid := func() (CronRequest, error) {
-		return CronRequest{}, fmt.Errorf("%w: invalid cron request value", cron.ErrInvalid)
-	}
-	if !cronUID(id) {
-		return invalid()
-	}
-	var fields map[string]jsontext.Value
 	var value cronRequestValue
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return invalid()
+	members, err := decodeCronControl(raw, &value)
+	if err != nil || !cronUID(id) {
+		return CronRequest{}, errInvalidCronRequest
 	}
-	for _, key := range []string{"kind", "requested_by", "requested_at", "expires_at"} {
-		if fields[key].Kind() != jsontext.KindString {
-			return invalid()
-		}
-	}
-	if err := json.Unmarshal(raw, &value, json.RejectUnknownMembers(true)); err != nil {
-		return invalid()
-	}
+	// Explicit nulls are present members: a run names no run_uid, and a cancel
+	// either omits both job members or names both.
+	hasJob, hasDefinition := members["job_uid"] != nil, members["definition_event_uid"] != nil
+	valid := hasJob == hasDefinition && (!hasJob || cronUID(value.JobUID) && cronUID(value.DefinitionEventUID))
 	switch value.Kind {
 	case CronRequestKindRun:
-		if len(fields) != 6 || fields["job_uid"].Kind() != jsontext.KindString || fields["definition_event_uid"].Kind() != jsontext.KindString || !cronUID(value.JobUID) || !cronUID(value.DefinitionEventUID) {
-			return invalid()
-		}
+		valid = valid && hasJob && members["run_uid"] == nil
 	case CronRequestKindCancel:
-		if (len(fields) != 5 && len(fields) != 7) || fields["run_uid"].Kind() != jsontext.KindString || value.RunUID == nil || !cronUID(*value.RunUID) {
-			return invalid()
-		}
+		valid = valid && value.RunUID != nil && cronUID(*value.RunUID)
 	default:
-		return invalid()
-	}
-	_, hasJob := fields["job_uid"]
-	_, hasDefinition := fields["definition_event_uid"]
-	if hasJob != hasDefinition || (hasJob && (fields["job_uid"].Kind() != jsontext.KindString || fields["definition_event_uid"].Kind() != jsontext.KindString || !cronUID(value.JobUID) || !cronUID(value.DefinitionEventUID))) {
-		return invalid()
-	}
-	if strings.TrimSpace(value.RequestedBy) == "" || len(value.RequestedBy) > 256 {
-		return invalid()
+		valid = false
 	}
 	requested := uid.MustTime(id)
-	if requested.Year() > 9999 || !requested.Equal(value.RequestedAt) {
-		return invalid()
-	}
 	ttl := value.ExpiresAt.Sub(value.RequestedAt)
-	if value.ExpiresAt.Year() > 9999 || ttl < 60*time.Second || ttl > 86400*time.Second || ttl%time.Second != 0 {
-		return invalid()
+	if !valid || strings.TrimSpace(value.RequestedBy) == "" || len(value.RequestedBy) > 256 || requested.Year() > 9999 || !requested.Equal(value.RequestedAt) ||
+		value.ExpiresAt.Year() > 9999 || ttl < 60*time.Second || ttl > 86400*time.Second || ttl%time.Second != 0 {
+		return CronRequest{}, errInvalidCronRequest
 	}
 	return CronRequest{UID: id, Kind: value.Kind, JobUID: value.JobUID, DefinitionEventUID: value.DefinitionEventUID, RunUID: value.RunUID, RequestedBy: value.RequestedBy, RequestedAt: value.RequestedAt, ExpiresAt: value.ExpiresAt}, nil
 }
+
+var errInvalidCronRequest = fmt.Errorf("%w: invalid cron request value", cron.ErrInvalid)
 
 func encodeCronRequest(request CronRequest) (jsontext.Value, error) {
 	return json.Marshal(cronRequestValue{Kind: request.Kind, JobUID: request.JobUID, DefinitionEventUID: request.DefinitionEventUID, RunUID: request.RunUID, RequestedBy: request.RequestedBy, RequestedAt: request.RequestedAt, ExpiresAt: request.ExpiresAt})
 }
 
 func validateCronRequestFreshness(id string, now time.Time) error {
-	if !cronUID(id) {
-		return fmt.Errorf("%w: a canonical request UID is required", cron.ErrInvalid)
-	}
 	requested := uid.MustTime(id)
 	if requested.Year() > 9999 || requested.After(now.Add(5*time.Second)) {
 		return fmt.Errorf("%w: request UID is ahead of the daemon clock; check clocks and submit a fresh UID", cron.ErrInvalid)
@@ -141,9 +116,6 @@ func validateCronRequestFreshness(id string, now time.Time) error {
 func validateCronRequestEventChange(id string, from, to jsontext.Value) error {
 	if to.Kind() == jsontext.KindNull {
 		return nil
-	}
-	if !cronUID(id) {
-		return fmt.Errorf("%w: invalid cron request key", cron.ErrInvalid)
 	}
 	next, err := decodeCronRequest(id, to)
 	if err != nil {
@@ -163,10 +135,8 @@ func validateCronRequestEventChange(id string, from, to jsontext.Value) error {
 }
 
 func sameCronRequestValue(a, b CronRequest) bool {
-	return a.UID == b.UID && a.Kind == b.Kind && a.JobUID == b.JobUID && a.DefinitionEventUID == b.DefinitionEventUID && sameCronRequestRun(a.RunUID, b.RunUID) && a.RequestedBy == b.RequestedBy && a.RequestedAt.Equal(b.RequestedAt) && a.ExpiresAt.Equal(b.ExpiresAt)
-}
-func sameCronRequestRun(a, b *string) bool {
-	return a == nil && b == nil || a != nil && b != nil && *a == *b
+	return a.Kind == b.Kind && a.JobUID == b.JobUID && a.DefinitionEventUID == b.DefinitionEventUID && (a.RunUID == nil) == (b.RunUID == nil) && (a.RunUID == nil || *a.RunUID == *b.RunUID) &&
+		a.RequestedBy == b.RequestedBy && a.RequestedAt.Equal(b.RequestedAt) && a.ExpiresAt.Equal(b.ExpiresAt)
 }
 
 // CronRequestList filters retained values using one consistent evidence read.

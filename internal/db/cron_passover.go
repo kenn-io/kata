@@ -36,35 +36,19 @@ type CronPassoverState struct {
 func cronPassoverKey(key string) bool {
 	return key == CronPassoverMetadataKey || strings.HasPrefix(key, CronPassoverMetadataPrefix)
 }
+
+// validCronPassoverTime lets RFC3339 "+00:00" name UTC like "Z"; other offsets fail.
 func validCronPassoverTime(t time.Time) bool {
-	return !t.IsZero() && cronUTCOffset(t) == 0 && t.Year() >= 1 && t.Year() <= 9999
+	_, offset := t.Zone()
+	return !t.IsZero() && offset == 0 && t.Year() >= 1 && t.Year() <= 9999
 }
 
-// cronUTCOffset lets RFC3339 "+00:00" name UTC like "Z"; other offsets fail.
-func cronUTCOffset(t time.Time) int {
-	_, offset := t.Zone()
-	return offset
-}
 func decodeCronPassover(raw jsontext.Value) (CronPassover, error) {
-	invalid := func() (CronPassover, error) {
-		return CronPassover{}, fmt.Errorf("%w: invalid cron passover value", cron.ErrInvalid)
-	}
-	var fields map[string]jsontext.Value
 	var value CronPassover
-	if err := json.Unmarshal(raw, &fields); err != nil || (len(fields) != 3 && len(fields) != 4) {
-		return invalid()
-	}
-	if fields["version"].Kind() != jsontext.KindNumber || fields["through"].Kind() != jsontext.KindString || fields["by"].Kind() != jsontext.KindString {
-		return invalid()
-	}
-	if paused, ok := fields["paused_at"]; ok && paused.Kind() != jsontext.KindString {
-		return invalid()
-	}
-	if err := json.Unmarshal(raw, &value, json.RejectUnknownMembers(true)); err != nil {
-		return invalid()
-	}
-	if value.Version != 1 || !validCronPassoverTime(value.Through) || strings.TrimSpace(value.By) == "" || len(value.By) > 256 || (value.PausedAt != nil && !validCronPassoverTime(*value.PausedAt)) {
-		return invalid()
+	members, err := decodeCronControl(raw, &value)
+	// A typed nil PausedAt cannot tell an explicit null from an absent member.
+	if err != nil || (members["paused_at"] != nil && value.PausedAt == nil) || value.Version != 1 || !validCronPassoverTime(value.Through) || strings.TrimSpace(value.By) == "" || len(value.By) > 256 || (value.PausedAt != nil && !validCronPassoverTime(*value.PausedAt)) {
+		return CronPassover{}, fmt.Errorf("%w: invalid cron passover value", cron.ErrInvalid)
 	}
 	return value, nil
 }

@@ -29,22 +29,22 @@ type cronPauseValue struct {
 	Reason   string    `json:"reason"`
 }
 
+// decodeCronControl decodes one control object strictly: duplicate, unknown
+// and mistyped members fail. The returned members let callers tell an
+// explicit null from an absent member, which typed decoding cannot.
+func decodeCronControl(raw jsontext.Value, value any) (map[string]jsontext.Value, error) {
+	var members map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return nil, err
+	}
+	return members, json.Unmarshal(raw, value, json.RejectUnknownMembers(true))
+}
+
 func decodeCronProjectPause(raw jsontext.Value) (CronProjectPause, error) {
-	var fields map[string]jsontext.Value
 	var value cronPauseValue
-	if err := json.Unmarshal(raw, &fields); err != nil || len(fields) != 3 {
-		return CronProjectPause{}, fmt.Errorf("%w: invalid cron pause fields", cron.ErrInvalid)
-	}
-	for _, key := range []string{"paused_by", "paused_at", "reason"} {
-		if value, ok := fields[key]; !ok || value.Kind() != jsontext.KindString {
-			return CronProjectPause{}, fmt.Errorf("%w: missing cron pause %s", cron.ErrInvalid, key)
-		}
-	}
-	if err := json.Unmarshal(raw, &value, json.RejectUnknownMembers(true)); err != nil {
-		return CronProjectPause{}, fmt.Errorf("%w: invalid cron pause: %v", cron.ErrInvalid, err)
-	}
-	if strings.TrimSpace(value.PausedBy) == "" || len(value.PausedBy) > 256 || value.PausedAt.IsZero() || len(value.Reason) > 256 {
-		return CronProjectPause{}, fmt.Errorf("%w: invalid cron pause values", cron.ErrInvalid)
+	members, err := decodeCronControl(raw, &value)
+	if err != nil || members["reason"].Kind() != jsontext.KindString || strings.TrimSpace(value.PausedBy) == "" || len(value.PausedBy) > 256 || value.PausedAt.IsZero() || len(value.Reason) > 256 {
+		return CronProjectPause{}, fmt.Errorf("%w: invalid cron pause value", cron.ErrInvalid)
 	}
 	return CronProjectPause{PausedBy: value.PausedBy, PausedAt: value.PausedAt, Reason: value.Reason}, nil
 }
