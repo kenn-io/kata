@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -397,6 +398,37 @@ name     = "kata"
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
+}
+
+func TestInit_AddsHeaderToHeaderlessKataToml(t *testing.T) {
+	resetFlags(t)
+	flags.Mode = outputAgent
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	original := "# Keep this comment.\nversion = 1\n\n[project]\nname = \"spoke-project\"\n"
+	path := filepath.Join(dir, ".kata.toml")
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o644))                                         //nolint:gosec // test fixture matches production .kata.toml mode
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".kata.local.toml\n"), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	out, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
+	require.NoError(t, err)
+	content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "# This repository tracks its work in kata.\n# Coding agents: read `kata quickstart --format contract` before changing code here.\n"+original, string(content))
+	cfg, err := config.ReadProjectConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "spoke-project", cfg.Project.Name)
+	assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=true\n", out)
+
+	out, err = callInit(t.Context(), env.URL, dir, callInitOpts{})
+	require.NoError(t, err)
+	again, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, content, again)
+	assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=false\n", out)
 }
 
 func TestInit_AgentOutputQuotesProjectName(t *testing.T) {

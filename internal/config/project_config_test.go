@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -102,11 +103,37 @@ func TestWriteProjectConfig_WritesNameOnly(t *testing.T) {
 	bs, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Contains(t, string(bs), `name = "foo"`)
+	assert.True(t, strings.HasPrefix(string(bs), "# This repository tracks its work in kata.\n# Coding agents: read `kata quickstart --format contract` before changing code here.\n"))
 	assert.NotContains(t, string(bs), "identity")
 
 	cfg, err := config.ReadProjectConfig(dir)
 	require.NoError(t, err)
 	assert.Equal(t, "foo", cfg.Project.Name)
+}
+
+func TestEnsureProjectConfigHeader(t *testing.T) {
+	header := "# This repository tracks its work in kata.\n# Coding agents: read `kata quickstart --format contract` before changing code here.\n"
+	body := "# Keep this comment.\nversion = 1\n\n[project]\nname = \"spoke-project\"\n\n[server]\nurl = \"http://127.0.0.1:7777\"\n"
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    string
+		changed bool
+	}{
+		{"headerless", body, header + body, true},
+		{"headed", header + body, header + body, false},
+		{"CRLF", strings.ReplaceAll(header+body, "\n", "\r\n"), strings.ReplaceAll(header+body, "\n", "\r\n"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := setupKataProjectDir(t, tc.content)
+			changed, err := config.EnsureProjectConfigHeader(dir)
+			require.NoError(t, err)
+			assert.Equal(t, tc.changed, changed)
+			content, err := os.ReadFile(filepath.Join(dir, ".kata.toml")) //nolint:gosec // test fixture under TempDir
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(content))
+		})
+	}
 }
 
 func TestWriteProjectConfig_RejectsBlankName(t *testing.T) {

@@ -18,6 +18,9 @@ var ErrProjectConfigMissing = errors.New(".kata.toml not found")
 // ProjectConfigFilename is the canonical filename committed at workspace roots.
 const ProjectConfigFilename = ".kata.toml"
 
+const projectConfigHeader = "# This repository tracks its work in kata.\n" +
+	"# Coding agents: read `kata quickstart --format contract` before changing code here.\n"
+
 // ProjectConfig is the parsed contents of a workspace .kata.toml or
 // .kata.local.toml. The same struct serves both files; readers differ
 // only in which validations they enforce.
@@ -115,7 +118,23 @@ func WriteProjectConfig(workspaceRoot, name string) error {
 	}
 	body := fmt.Sprintf("version = 1\n\n[project]\nname = %q\n", name)
 	path := filepath.Join(workspaceRoot, ProjectConfigFilename)
-	return os.WriteFile(path, []byte(body), 0o644) //nolint:gosec // committed project file, world-readable by design
+	return os.WriteFile(path, []byte(projectConfigHeader+body), 0o644) //nolint:gosec // committed project file, world-readable by design
+}
+
+// EnsureProjectConfigHeader prepends agent guidance while preserving existing contents.
+func EnsureProjectConfigHeader(workspaceRoot string) (bool, error) {
+	path := filepath.Join(workspaceRoot, ProjectConfigFilename)
+	data, err := os.ReadFile(path) //nolint:gosec // workspace-supplied path is the documented input
+	if err != nil {
+		return false, err
+	}
+	if strings.HasPrefix(strings.ReplaceAll(string(data), "\r\n", "\n"), projectConfigHeader) {
+		return false, nil
+	}
+	if err := os.WriteFile(path, append([]byte(projectConfigHeader), data...), 0o644); err != nil { //nolint:gosec // committed project file, world-readable by design
+		return false, err
+	}
+	return true, nil
 }
 
 // ValidateProjectName rejects names that can spoof terminal output when echoed
