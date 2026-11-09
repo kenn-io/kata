@@ -36,7 +36,7 @@
     "@kenn-io/kit-ui": "github:kenn-io/kit-ui#91a19e58add5696a7370ec2ace738a888d449ba6"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "7.1.2",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@testing-library/svelte": "5.4.2",
     "@types/node": "24.10.0",
     "jsdom": "29.1.1",

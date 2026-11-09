@@ -34,7 +34,7 @@
     "@axe-core/playwright": "4.10.2",
     "@eslint/js": "9.39.2",
     "@playwright/test": "1.64.1",
-    "@sveltejs/vite-plugin-svelte": "7.1.2",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@testing-library/svelte": "5.4.2",
     "@types/node": "24.10.0",
     "es-module-lexer": "2.3.1",
