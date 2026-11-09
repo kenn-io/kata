@@ -25,35 +25,34 @@ func registerCronRequestTools(server *sdkmcp.Server, h toolHandlers) {
 	addCronTool(server, "kata.cron_run_request_cancel", "Request cron run cancellation", "Ask optional runtimes to cancel a currently running run. Root-only; allowed while cron is paused. Retain request_uid and TTL for retry. Admission does not itself terminate anything.", toolHints(false, false, false), h.cronRunRequestCancel)
 	addCronTool(server, "kata.cron_request_list", "List cron requests", "Read locally retained advisory requests and their current answer state. State may change with run evidence; expired requests disappear after collection.", toolHints(true, false, false), h.cronRequestList)
 }
-func (h toolHandlers) cronJobRequestRun(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRuntimeRequestInput) (*sdkmcp.CallToolResult, generated.RequestCronJobRunResponse, error) {
+
+// cronRuntimeRequest resolves the project, target UID, and request body shared
+// by run and cancel requests.
+func (h toolHandlers) cronRuntimeRequest(ctx context.Context, in CronRuntimeRequestInput) (int64, string, *generated.CronRequestBody, error) {
 	project, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, generated.RequestCronJobRunResponse{}, err
+		return 0, "", nil, err
 	}
 	target, err := cronUID(in.UID)
 	if err != nil {
-		return nil, generated.RequestCronJobRunResponse{}, err
+		return 0, "", nil, err
 	}
 	id, err := cronUID(in.RequestUID)
+	return project.ID, target, &generated.CronRequestBody{UID: id, Actor: &h.options.Actor, TTLSeconds: in.TTLSeconds}, err
+}
+func (h toolHandlers) cronJobRequestRun(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRuntimeRequestInput) (*sdkmcp.CallToolResult, generated.RequestCronJobRunResponse, error) {
+	projectID, target, body, err := h.cronRuntimeRequest(ctx, in)
 	if err != nil {
 		return nil, generated.RequestCronJobRunResponse{}, err
 	}
-	return cronResult(h.options.Client.RequestCronJobRun(ctx, &generated.RequestCronJobRunRequestOptions{PathParams: &generated.RequestCronJobRunPath{ProjectID: project.ID, CronUID: target}, Body: &generated.CronRequestBody{UID: id, Actor: &h.options.Actor, TTLSeconds: in.TTLSeconds}}))
+	return cronResult(h.options.Client.RequestCronJobRun(ctx, &generated.RequestCronJobRunRequestOptions{PathParams: &generated.RequestCronJobRunPath{ProjectID: projectID, CronUID: target}, Body: body}))
 }
 func (h toolHandlers) cronRunRequestCancel(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRuntimeRequestInput) (*sdkmcp.CallToolResult, generated.RequestCronRunCancelResponse, error) {
-	project, err := h.createTarget(ctx, in.Project)
+	projectID, target, body, err := h.cronRuntimeRequest(ctx, in)
 	if err != nil {
 		return nil, generated.RequestCronRunCancelResponse{}, err
 	}
-	target, err := cronUID(in.UID)
-	if err != nil {
-		return nil, generated.RequestCronRunCancelResponse{}, err
-	}
-	id, err := cronUID(in.RequestUID)
-	if err != nil {
-		return nil, generated.RequestCronRunCancelResponse{}, err
-	}
-	return cronResult(h.options.Client.RequestCronRunCancel(ctx, &generated.RequestCronRunCancelRequestOptions{PathParams: &generated.RequestCronRunCancelPath{ProjectID: project.ID, RunUID: target}, Body: &generated.CronRequestBody{UID: id, Actor: &h.options.Actor, TTLSeconds: in.TTLSeconds}}))
+	return cronResult(h.options.Client.RequestCronRunCancel(ctx, &generated.RequestCronRunCancelRequestOptions{PathParams: &generated.RequestCronRunCancelPath{ProjectID: projectID, RunUID: target}, Body: body}))
 }
 func (h toolHandlers) cronRequestList(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRequestListInput) (*sdkmcp.CallToolResult, generated.ListCronRequestsResponse, error) {
 	project, err := h.createTarget(ctx, in.Project)

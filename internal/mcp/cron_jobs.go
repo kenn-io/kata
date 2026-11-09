@@ -167,29 +167,26 @@ func (h toolHandlers) cronJobResume(ctx context.Context, _ *sdkmcp.CallToolReque
 	if err != nil {
 		return nil, generated.ResumeCronJobResponse{}, err
 	}
+	body := &generated.ResumeCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}
 	if in.DiscardMissed {
+		body.DiscardMissed = &in.DiscardMissed
 		if _, err = h.cronDiscardCapabilities(ctx, projectID, false); err != nil {
 			return nil, generated.ResumeCronJobResponse{}, err
 		}
+		// Retain one revision guard; an absent revision fails before the write.
 		if expected == nil {
-			shown, readErr := h.options.Client.ShowCronJob(ctx, &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: id}})
-			if readErr != nil {
-				return nil, generated.ResumeCronJobResponse{}, readErr
-			}
-			expected, err = cronOptionalExpected(shown.Job.DefinitionEventUID)
+			shown, err := h.options.Client.ShowCronJob(ctx, &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: id}})
 			if err != nil {
 				return nil, generated.ResumeCronJobResponse{}, err
 			}
-			if expected == nil {
-				return nil, generated.ResumeCronJobResponse{}, errors.New("job revision is unavailable")
+			guard, err := cronExpected(shown.Job.DefinitionEventUID)
+			if err != nil {
+				return nil, generated.ResumeCronJobResponse{}, err
 			}
+			body.ExpectedEventUID = &guard
 		}
 	}
-	var discardFlag *bool
-	if in.DiscardMissed {
-		discardFlag = &in.DiscardMissed
-	}
-	return cronResult(h.options.Client.ResumeCronJob(ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: projectID, CronUID: id}, Body: &generated.ResumeCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected, DiscardMissed: discardFlag}}))
+	return cronResult(h.options.Client.ResumeCronJob(ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: projectID, CronUID: id}, Body: body}))
 }
 func cronOptionalExpected(value string) (*string, error) {
 	if value == "" {

@@ -38,9 +38,8 @@ func (h toolHandlers) cronProjectResume(ctx context.Context, _ *sdkmcp.CallToolR
 		if capErr != nil {
 			return nil, generated.ResumeCronProjectResponse{}, capErr
 		}
-		match := fmt.Sprintf("rev-%d", revision)
 		options.Query = &generated.ResumeCronProjectQuery{DiscardMissed: &in.DiscardMissed}
-		options.Header = &generated.ResumeCronProjectHeaders{IfMatch: &match}
+		options.Header = &generated.ResumeCronProjectHeaders{IfMatch: new(fmt.Sprintf("rev-%d", revision))}
 	}
 	return cronResult(h.options.Client.ResumeCronProject(ctx, options))
 }
