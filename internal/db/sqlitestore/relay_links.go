@@ -143,20 +143,20 @@ func filterRelayCrossProjectLinkEvents(
 	tx *sql.Tx,
 	projectIDs []int64,
 	events []db.FoldEvent,
-) ([]db.FoldEvent, relayOriginClassifier, map[string]string, error) {
+) ([]db.FoldEvent, relayOriginClassifier, error) {
 	if len(projectIDs) == 0 {
-		return events, relayOriginClassifier{}, nil, nil
+		return events, relayOriginClassifier{}, nil
 	}
 	classifier, err := loadRelayOriginClassifier(ctx, tx, projectIDs)
 	if err != nil {
-		return nil, classifier, nil, err
+		return nil, classifier, err
 	}
 	if !slices.ContainsFunc(events, classifier.relaySourced) {
-		return events, classifier, nil, nil
+		return events, classifier, nil
 	}
 	issueProjects, err := relayLinkEndpointProjects(ctx, tx, projectIDs)
 	if err != nil {
-		return nil, classifier, nil, err
+		return nil, classifier, err
 	}
 	filtered := make([]db.FoldEvent, 0, len(events))
 	for _, event := range events {
@@ -170,13 +170,13 @@ func filterRelayCrossProjectLinkEvents(
 		}
 		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, crossProject)
 		if err != nil {
-			return nil, classifier, nil, err
+			return nil, classifier, err
 		}
 		if keep {
 			filtered = append(filtered, stripped)
 		}
 	}
-	return filtered, classifier, issueProjects, nil
+	return filtered, classifier, nil
 }
 
 func relayLinkEndpointProjects(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map[string]string, error) {

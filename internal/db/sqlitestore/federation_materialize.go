@@ -25,8 +25,8 @@ type federationMaterialization struct {
 	linkStamps       [][32]byte
 	linkReadProjects []int64
 	maxEventID       int64
+	moveIssueUIDs    map[string]struct{}
 	relayOrigins     relayOriginClassifier
-	relayEndpoints   map[string]string
 	projection       db.FoldProjection
 	cronAffected     bool
 	status           []federatedStatusIntentUpdate
@@ -151,6 +151,8 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
 	if deferRows && len(issueScope) == 0 {
 		m.fullHistory = true
+		m.moveIssueUIDs = map[string]struct{}{}
+		m.recordMoveIssueUIDs(events)
 		m.linksAffected = linksAffected
 		m.eventStamp, err = federationEventStamp(ctx, tx, projectID, nil)
 		if err != nil {
@@ -200,6 +202,11 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	if err := m.prepareRows(ctx, tx, projectID, issueScope); err != nil {
 		return federationMaterialization{}, err
 	}
+	if m.fullHistory {
+		for uid := range m.issueRows {
+			m.moveIssueUIDs[uid] = struct{}{}
+		}
+	}
 	if m.linkProjects != nil {
 		if err := m.prepareLinks(ctx, tx, projectID, issueScope); err != nil {
 			return federationMaterialization{}, err
@@ -223,6 +230,7 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 		events = append(events, history...)
 	}
 	if m.fullHistory {
+		m.recordMoveIssueUIDs(events)
 		m.linkReadProjects = slices.Clone(m.linkProjects)
 		seen := map[string]bool{}
 		for _, event := range events {
@@ -247,12 +255,24 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 			}
 		}
 	}
-	events, m.relayOrigins, m.relayEndpoints, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
+	events, m.relayOrigins, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
 	if err != nil {
 		return err
 	}
 	m.links = db.FoldEvents(events)
 	return nil
+}
+
+func (m *federationMaterialization) recordMoveIssueUIDs(events []db.FoldEvent) {
+	for _, event := range events {
+		uid := event.IssueUID
+		if uid == "" && strings.HasPrefix(event.Type, "issue.") {
+			uid = db.FederationEventIssueUID(nil, string(event.Payload))
+		}
+		if uid != "" {
+			m.moveIssueUIDs[uid] = struct{}{}
+		}
+	}
 }
 
 // federationRowStamp reads the persisted inputs used by row and link preparation.
@@ -265,7 +285,6 @@ func federationRowStamp(ctx context.Context, tx *sql.Tx, projectID int64, group 
 		{`SELECT json_array(uid,id,short_id,title,body,status,closed_reason,owner,CAST(assignment_expires_on AS TEXT),priority,author,CAST(created_at AS TEXT),CAST(updated_at AS TEXT),CAST(closed_at AS TEXT),CAST(deleted_at AS TEXT),metadata) FROM issues WHERE project_id=? ORDER BY id`, []any{projectID}},
 		{`SELECT json_array(c.uid,c.id,c.issue_id,c.author,CAST(c.created_at AS TEXT),c.body,c.teammate) FROM issues i JOIN comments c ON c.issue_id=i.id WHERE i.project_id=? ORDER BY c.id`, []any{projectID}},
 		{`SELECT json_array(l.issue_id,l.label) FROM issues i JOIN issue_labels l ON l.issue_id=i.id WHERE i.project_id=? ORDER BY l.issue_id,l.label`, []any{projectID}},
-		{`SELECT json_array(id,short_id) FROM purge_log WHERE project_id=? ORDER BY id`, []any{projectID}},
 	}
 	if len(group) > 0 {
 		placeholders, args := projectIDPlaceholders(group)

@@ -466,3 +466,75 @@ func TestFullPulledMaterializationRetriesSiblingLinkRewrite(t *testing.T) {
 	require.Len(t, links, 1)
 	require.Equal(t, first.UID, links[0].FromIssueUID)
 }
+
+func TestFullPulledMaterializationIgnoresUnrelatedMove(t *testing.T) {
+	ctx := t.Context()
+	d, p, _ := incrementalTestStore(t)
+	from, err := d.CreateProject(ctx, "local-source")
+	require.NoError(t, err)
+	to, err := d.CreateProject(ctx, "local-destination")
+	require.NoError(t, err)
+	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: from.ID, Title: "local issue", Author: "tester"})
+	require.NoError(t, err)
+	ev := incrementalRemoteEvent(t, p, "", "project.metadata_updated", `{"diff":{"area":{"from":null,"to":"docs"}}}`, 9_000_000_000_000)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
+	require.NoError(t, err)
+	attempts := 0
+	d.federationIngestPrepared = func() {
+		attempts++
+		if attempts == 1 {
+			_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: from.ID, ToProjectID: to.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
+	require.Equal(t, 1, attempts)
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, to.ID, got.ProjectID)
+	project, err := d.ProjectByID(ctx, p.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"area":"docs"}`, string(project.Metadata))
+}
+
+func TestFullPulledMaterializationRetriesMoveInGroupHistory(t *testing.T) {
+	ctx := t.Context()
+	d, p, source := incrementalTestStore(t)
+	sibling, err := d.CreateProject(ctx, "sibling")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, sibling.ID, "tester")
+	require.NoError(t, err)
+	from, err := d.CreateProject(ctx, "local-source")
+	require.NoError(t, err)
+	to, err := d.CreateProject(ctx, "local-destination")
+	require.NoError(t, err)
+	peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: from.ID, Title: "peer", Author: "tester"})
+	require.NoError(t, err)
+	projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	pageLink := incrementalRemoteEvent(t, p, source.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, source.UID, peer.UID), 9_000_000_000_001)
+	history := incrementalRemoteEvent(t, sibling, "", "issue.linked", fmt.Sprintf(`{"issue_uid":%q,"from_uid":%q,"to_uid":%q,"type":"related"}`, peer.UID, peer.UID, source.UID), 9_000_000_000_002)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, pageLink})
+	require.NoError(t, err)
+	_, err = d.InsertRemoteEvents(ctx, sibling.ID, []db.RemoteEvent{history})
+	require.NoError(t, err)
+	page := []string{projectEvent.EventUID, pageLink.EventUID}
+	prepared, err := d.prepareFullPull(ctx, p.ID, page)
+	require.NoError(t, err)
+	attempts := 0
+	d.federationIngestPrepared = func() {
+		attempts++
+		if attempts == 1 {
+			_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: peer.ID, FromProjectID: from.ID, ToProjectID: to.ID, IfMatchRev: peer.Revision, Actor: "tester"})
+			require.NoError(t, err)
+			require.ErrorIs(t, d.applyFullPull(ctx, p.ID, page, prepared), errStaleFederationPreparation)
+		}
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, page))
+	require.Equal(t, 2, attempts)
+	got, err := d.IssueByUID(ctx, peer.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, to.ID, got.ProjectID)
+	links, err := d.LinksByIssue(ctx, source.ID)
+	require.NoError(t, err)
+	require.Empty(t, links)
+}

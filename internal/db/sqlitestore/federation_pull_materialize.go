@@ -158,13 +158,29 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 		binding.Enabled != m.binding.Enabled || !reflect.DeepEqual(binding.RelayConfig, m.binding.RelayConfig) {
 		return errStaleFederationPreparation
 	}
-	// A move in another project can add history to the group link fold.
-	var moved bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id>? AND type='issue.moved')`, m.maxEventID).Scan(&moved); err != nil {
+	// A move can add history for an issue included in the prepared fold.
+	//nolint:gosec // The UID expression is fixed SQL; the event ID is bound.
+	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(`+db.FederationReadIssueUIDExpr(false)+`, '') FROM events e WHERE e.id>? AND e.type='issue.moved'`, m.maxEventID)
+	if err != nil {
 		return err
 	}
-	if moved {
-		return errStaleFederationPreparation
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if _, ok := m.moveIssueUIDs[uid]; ok {
+			_ = rows.Close()
+			return errStaleFederationPreparation
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
 	}
 	if m.linksAffected {
 		projects, err := federationBindingGroupProjectIDs(ctx, tx, binding)
@@ -180,15 +196,6 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 				return err
 			}
 			if !reflect.DeepEqual(origins, m.relayOrigins) {
-				return errStaleFederationPreparation
-			}
-		}
-		if m.relayEndpoints != nil {
-			endpoints, err := relayLinkEndpointProjects(ctx, tx, projects)
-			if err != nil {
-				return err
-			}
-			if !reflect.DeepEqual(endpoints, m.relayEndpoints) {
 				return errStaleFederationPreparation
 			}
 		}
