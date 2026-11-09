@@ -373,22 +373,30 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	}
 
 	dest := config.WriteDestination(in.Disc, in.StartPath)
+	guidanceWarning := ""
 	tomlChanged := needsTomlWrite(in.ExistingToml, resp.Project.Name)
 	if tomlChanged {
 		if err := config.WriteProjectConfig(dest, resp.Project.Name); err != nil {
 			return "", fmt.Errorf("write .kata.toml: %w", err)
 		}
+	} else if tomlChanged, err = config.EnsureProjectConfigHeader(dest); err != nil {
+		err = fmt.Errorf("write .kata.toml: %w", err)
+		warnAgentsUpdate(err)
+		guidanceWarning = err.Error()
 	}
 	gitignoreChanged, err := ensureGitignoreEntry(dest, ".kata.local.toml")
 	if err != nil {
 		warnGitignoreUpdate(err)
 	}
-	agentsChanged, guidanceWarning := false, ""
+	agentsChanged := false
 	if opts.WithAgents {
 		agentsChanged, err = applyAgentGuidance(dest, opts.AgentMode)
 		if err != nil {
 			warnAgentsUpdate(err)
-			guidanceWarning = err.Error()
+			if guidanceWarning != "" {
+				guidanceWarning += "; "
+			}
+			guidanceWarning += err.Error()
 		}
 	}
 	hooksChanged := false
