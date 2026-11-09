@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-07
+last_edited: 2026-11-09
 ---
 
 # Model Context Protocol server
@@ -49,7 +49,7 @@ The standalone HTTP listener and the daemon's enabled MCP mount also serve
 the same PNG at `/icon.png` and `/favicon.ico`. These public image routes
 accept GET and HEAD without a bearer token. Listener Host validation still
 applies, and `/mcp` still requires its configured MCP bearer or, for an
-identity-mode daemon mount on unreleased `main`, the caller's identity token.
+identity-mode daemon mount in Kata 0.23.0 and later, the caller's identity token.
 
 ### Discover running HTTP listeners
 
@@ -128,9 +128,9 @@ When `actor` is unset, it defaults to `KATA_AUTHOR`, `USER`, or Git `user.name`,
 With a TCP daemon `listen`, a gateway using a container hostname needs that authority in `[web].allowed_hosts`.
 With a Unix-socket daemon and `[web] listen`, the gateway's Host must match the web listener's bound address or `public_origin`.
 
-### Daemon mount with identity tokens (unreleased)
+### Daemon mount with identity tokens
 
-On unreleased `main`, a daemon with `[auth] require_token_identity = true`
+In Kata 0.23.0 and later, a daemon with `[auth] require_token_identity = true`
 accepts each caller's database identity token at `/mcp`. Create the token with
 [`kata tokens create`](../operations/remote-daemon.md#identity-tokens) and
 configure the MCP client to send it as `Authorization: Bearer <token>` on every
@@ -150,7 +150,7 @@ Missing, invalid, expired, revoked, and bootstrap tokens receive HTTP 401.
 Each session is bound to the exact token that initialized it. To switch tokens,
 initialize a new session, even when both tokens name the same actor. Token
 administration remains available only through the explicitly enabled sidecar
-tools. Kata 0.21.0 requires the sidecar in identity mode.
+tools. Kata 0.21.0 and 0.22.0 require the sidecar in identity mode.
 
 ### Separate HTTP process
 
@@ -311,7 +311,7 @@ or imported creation timestamps. Stop only when `complete` is true.
 
 ## Find tools for a task
 
-On unreleased `main`, call `kata.search_tools` to find an operation without
+In Kata 0.23.0 and later, call `kata.search_tools` to find an operation without
 knowing its section. For example:
 
 ```json
@@ -344,8 +344,8 @@ administration. Discovery does not grant permission to invoke a returned tool.
 
 ## Progressive tool catalog
 
-The initial catalog exposes read-only section loaders, `kata.skills`, and, on
-unreleased `main`, `kata.search_tools`. Call the applicable
+The initial catalog exposes read-only section loaders, `kata.skills`, and, in
+Kata 0.23.0 and later, `kata.search_tools`. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
 typed tools needed for the current task instead of placing every detailed tool in the
@@ -530,7 +530,7 @@ list the catalog, or pass a name:
 {"name":"workflow"}
 ```
 
-On unreleased `main`, the names are `setup`, `quickstart`, `workflow`, `issues`,
+In Kata 0.23.0 and later, the names are `setup`, `quickstart`, `workflow`, `issues`,
 `claiming`, `closing`, `teammates`, `scheduling`, and `events`. Read `workflow`
 at session start and before your first write. `quickstart` walks through search,
 creation, ownership, progress and completion using native JSON tool calls.
@@ -539,7 +539,7 @@ idempotency keys and typed close evidence. They require no shell commands.
 The Markdown body is returned once as text content; structured content holds
 the guide's name, title and summary. `setup` also returns `managed_block`.
 
-### Install MCP-only instructions (unreleased)
+### Install MCP-only instructions
 
 An assistant with a connected Kata server and its own local file editor can
 request the exact repository instruction block:

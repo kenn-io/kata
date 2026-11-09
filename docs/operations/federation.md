@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-07
+last_edited: 2026-11-09
 ---
 
 # Federation
@@ -2034,7 +2034,7 @@ A complete issue read on a spoke, including `kata show`, makes an optional
 lease-status refresh from the hub. That refresh gets a 500 ms budget; if it
 times out or the hub is unavailable, the read still returns the locally cached
 lease state.
-On main, local cache updates share an outer 600 ms optional-work budget,
+In Kata 0.23.0 and later, local cache updates share an outer 600 ms optional-work budget,
 including the 500 ms hub request. A busy local writer or a federation endpoint
 change therefore leaves the read using its committed local cache. Cache
 transactions already committed remain visible if a later update times out.

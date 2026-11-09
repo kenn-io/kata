@@ -78,11 +78,11 @@ calls per task. At 4ms each that costs half a second.
   hooks for Claude Code and Codex so the ledger knows which issues have an
   agent on them right now.
 
-In 0.21.0, attach files to issues, move whole issue subtrees between projects,
-repeat issues from the CLI, and manage planning dates and cron jobs in the
-terminal UI. See the
-[release notes](https://katatracker.com/docs/changelog/#0210) for setup links
-and the schema 43 upgrade requirements.
+In 0.23.0, turn on search by meaning with one command, move issues and manage
+repeating schedules and workflows in the terminal UI, and connect assistants
+that use MCP without a shell. See the
+[release notes](https://katatracker.com/docs/changelog/#0230) for setup links
+and the schema 50 upgrade requirements.
 
 ## 04 / Discipline: a close is a completion claim
 

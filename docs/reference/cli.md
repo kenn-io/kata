@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-08
+last_edited: 2026-11-09
 ---
 
 # CLI reference
@@ -109,7 +109,7 @@ discipline, and the `work.*` attention conventions (see
 command updates only kata's block and leaves other content untouched, so a
 repo initialized before the `work.*` section shipped gains it on the next run.
 
-On unreleased `main`, add `--agent-mode=mcp` with `--with-agents` to install
+In Kata 0.23.0 and later, add `--agent-mode=mcp` with `--with-agents` to install
 instructions for assistants that use Kata through MCP. The block directs them
 to native `kata.skills` workflow and quickstart guides without requiring a
 shell. The default is `cli`; explicitly selecting `--agent-mode=cli` restores
@@ -120,7 +120,7 @@ content and are idempotent. An invalid mode or a mode without `--with-agents`
 fails before project or file changes. Hook contracts keep their CLI guidance.
 
 Assistants with no shell can get the same managed text and a client-side edit
-plan from [`kata.skills` setup](mcp.md#install-mcp-only-instructions-unreleased).
+plan from [`kata.skills` setup](mcp.md#install-mcp-only-instructions).
 
 When migrating from Beads, an existing `AGENTS.md` or real `CLAUDE.md` may still
 carry a Beads integration block. kata leaves that file untouched and writes a
@@ -2172,7 +2172,7 @@ current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
 
-On main after 0.21.0, press `X` in the issue list or detail to soft-delete the
+In Kata 0.22.0 and later, press `X` in the issue list or detail to soft-delete the
 selected issue, including in Inbox and a detail opened from Attention. The form
 shows the issue's title and the header `DELETE <project>#<id>`, the string
 `kata delete --confirm` takes. Type `DELETE <project>#<id>` and press `Enter`.
@@ -2190,7 +2190,7 @@ the 20-entry undo limit and the history-clearing boundaries above. Use
 credentials cannot delete or restore, so `X` is not offered to them and does
 nothing.
 
-On main after 0.21.0, press `M` in the issue list to move the selected issue
+In Kata 0.23.0 and later, press `M` in the issue list to move the selected issue
 to another project. In split layout, focus the list first. Unlike `X`, `M` is
 not offered in the detail view, in Inbox, or while browsing from Attention; use
 `kata move` there:
