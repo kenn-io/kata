@@ -1,7 +1,7 @@
 ---
 title: Notion sync
 description: Mirror a Notion task data source into Kata with workflow groups, optional two-way status, and bounded polling.
-last_edited: 2026-09-29
+last_edited: 2026-11-09
 ---
 
 # Notion sync
@@ -10,6 +10,10 @@ Notion sync mirrors one task data source into one Kata project. The daemon reads
 Notion and imports native issues. Status sync defaults to one-way; opt into
 two-way status to send explicit Kata close and reopen actions back to the task.
 Other local edits remain local. Polling defaults to five minutes.
+
+For explicit account selection and qualified relay controls, see
+[Named tracker connections](tracker-connections.md). The default-account
+configuration below remains a separate workflow.
 
 ## Configure the daemon
 
@@ -24,7 +28,9 @@ token_env = "EXAMPLE_NOTION_TOKEN"
 ```
 
 Restart the daemon after changing its configuration or service environment.
-Tokens are resolved for each run, shared across bindings, and never stored in
+Default-account tokens are resolved for each run and shared across that daemon's
+default-account bindings. Named connections use their explicitly selected account.
+Tokens are never stored in
 binding config, JSONL, or command output. All upstream requests go to fixed
 `https://api.notion.com:443`, with `Notion-Version: 2026-03-11`; redirects are
 rejected. One-way sync requires read-content access. Two-way status also needs

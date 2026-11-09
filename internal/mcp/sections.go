@@ -176,8 +176,8 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		},
 		{
 			loader: "kata.load_sync", section: "sync", title: "Load synchronization tools",
-			description: "Load typed GitHub synchronization tools, then refresh the MCP tool list.",
-			tools:       []string{"kata.sync_once", "kata.sync_status", "kata.sync_update"}, available: true, register: registerSyncTools,
+			description: "Load typed tracker synchronization tools, then refresh the MCP tool list.",
+			tools:       []string{"kata.sync_once", "kata.sync_status", "kata.sync_update", "kata.tracker_connections", "kata.tracker_operation", "kata.tracker_receipt"}, available: true, register: registerSyncTools,
 		},
 		{
 			loader: "kata.load_system", section: "system", title: "Load system tools",

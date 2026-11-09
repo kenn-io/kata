@@ -204,11 +204,19 @@ func verifyTwentySyncSource(ctx context.Context, cfg ServerConfig, resolved twen
 }
 
 func twentySyncFetcher(cfg ServerConfig) twentysync.Fetcher {
-	if cfg.TwentySyncFetcher != nil {
-		return cfg.TwentySyncFetcher
+	fetcher := func() twentysync.Fetcher {
+		if cfg.TwentySyncFetcher != nil {
+			return cfg.TwentySyncFetcher
+		}
+		return twentysync.NewClient(twentysync.ClientConfig{Daemon: cfg.TwentySyncConfig})
+	}()
+	if cfg.TrackerRuntime != nil {
+		if _, wrapped := fetcher.(trackerTwentyFetcher); !wrapped {
+			return trackerTwentyFetcher{runtime: cfg.TrackerRuntime, legacy: fetcher}
+		}
 	}
-	return twentysync.NewClient(twentysync.ClientConfig{Daemon: cfg.TwentySyncConfig})
+	return fetcher
 }
 func twentySyncRunner(cfg ServerConfig) *issuesync.Runner {
-	return twentysync.NewRunner(twentysync.RunnerConfig{Store: cfg.DB, Fetcher: twentySyncFetcher(cfg), Progress: cfg.TwentySyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
+	return twentysync.NewRunner(twentysync.RunnerConfig{RouteBinding: trackerBindingRouter(cfg), Store: cfg.DB, Fetcher: twentySyncFetcher(cfg), Progress: cfg.TwentySyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
 }

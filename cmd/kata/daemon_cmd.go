@@ -1477,6 +1477,13 @@ func runDaemonProcess(
 		}
 	}()
 
+	trackerRuntime, err := daemon.NewTrackerRuntime(ctx, store, dcfg.TrackerConnections, dcfg.TrackerAccess, rootSigning)
+	if err != nil {
+		if trackerRuntime == nil {
+			return err
+		}
+		daemonLog.Printf("tracker account policy unavailable: %v; named connections suspended until a corrected configuration is reloaded", safeTrackerPolicyError(err))
+	}
 	captureDaemonStartedTelemetry(ctx, store, telemetryReporter)
 	startDaemonTelemetryHeartbeat(ctx, workers, store, telemetryReporter)
 	startSetupFinished(ctx, workers, store, telemetryReporter)
@@ -1487,6 +1494,9 @@ func runDaemonProcess(
 	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
 	workers.Go(func() {
 		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog, func() {
+			if err := reloadTrackerConnections(ctx, trackerRuntime, config.ReadDaemonConfig); err != nil {
+				daemonLog.Printf("tracker reload failed: %v", err)
+			}
 			if err := reloadEmbeddingCredentials(dcfg.Search.Embeddings, embedder, embeddingWake); err != nil {
 				daemonLog.Printf("embedding credential reload failed: %v", err)
 			}
@@ -1513,48 +1523,48 @@ func runDaemonProcess(
 			publisher.EventFrom(event.ProjectID, event, fork)
 		}, publisher.Reset, daemonLog,
 	)
-	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
+	gitHubSyncFetcher := trackerRuntime.GitHubFetcher(newConfiguredGitHubSyncFetcher(dcfg.GitHubSync))
 	gitHubSyncProgress := githubsync.NewProgressTracker()
 	gitHubSyncProgress.OnResult = syncOutcome
 	gitHubSyncWake := startGitHubSyncRunner(
-		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, publisher, daemonLog, gitHubSyncProgress,
+		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, publisher, daemonLog, gitHubSyncProgress, trackerRuntime.RouteBinding,
 	)
-	notionSyncFetcher := newConfiguredNotionSyncFetcher(dcfg.NotionSync)
+	notionSyncFetcher := trackerRuntime.NotionFetcher(newConfiguredNotionSyncFetcher(dcfg.NotionSync))
 	notionSyncProgress := issuesync.NewProgressTracker()
 	notionSyncProgress.OnResult = syncOutcome
 	notionSyncWake := startNotionSyncRunner(
-		ctx, workers, waitableDrainAdmission, store, notionSyncFetcher, publisher, daemonLog, notionSyncProgress,
+		ctx, workers, waitableDrainAdmission, store, notionSyncFetcher, publisher, daemonLog, notionSyncProgress, trackerRuntime.RouteBinding,
 	)
 
-	planeSyncFetcher := newConfiguredPlaneSyncFetcher(dcfg.PlaneSync)
+	planeSyncFetcher := trackerRuntime.PlaneFetcher(newConfiguredPlaneSyncFetcher(dcfg.PlaneSync))
 	planeSyncProgress := issuesync.NewProgressTracker()
 	planeSyncProgress.OnResult = syncOutcome
 	planeSyncWake := startPlaneSyncRunner(
-		ctx, workers, waitableDrainAdmission, store, planeSyncFetcher, publisher, daemonLog, planeSyncProgress,
+		ctx, workers, waitableDrainAdmission, store, planeSyncFetcher, publisher, daemonLog, planeSyncProgress, trackerRuntime.RouteBinding,
 	)
-	linearSyncFetcher := newConfiguredLinearSyncFetcher(dcfg.LinearSync)
+	linearSyncFetcher := trackerRuntime.LinearFetcher(newConfiguredLinearSyncFetcher(dcfg.LinearSync))
 	linearSyncProgress := issuesync.NewProgressTracker()
 	linearSyncProgress.OnResult = syncOutcome
 	linearSyncWake := startLinearSyncRunner(
-		ctx, workers, waitableDrainAdmission, store, linearSyncFetcher, publisher, daemonLog, linearSyncProgress,
+		ctx, workers, waitableDrainAdmission, store, linearSyncFetcher, publisher, daemonLog, linearSyncProgress, trackerRuntime.RouteBinding,
 	)
-	twentySyncFetcher := newConfiguredTwentySyncFetcher(dcfg.TwentySync)
+	twentySyncFetcher := trackerRuntime.TwentyFetcher(newConfiguredTwentySyncFetcher(dcfg.TwentySync))
 	twentySyncProgress := issuesync.NewProgressTracker()
 	twentySyncProgress.OnResult = syncOutcome
 	twentySyncWake := startTwentySyncRunner(
-		ctx, workers, waitableDrainAdmission, store, twentySyncFetcher, publisher, daemonLog, twentySyncProgress,
+		ctx, workers, waitableDrainAdmission, store, twentySyncFetcher, publisher, daemonLog, twentySyncProgress, trackerRuntime.RouteBinding,
 	)
-	todoistSyncFetcher := newConfiguredTodoistSyncFetcher(dcfg.TodoistSync)
+	todoistSyncFetcher := trackerRuntime.TodoistFetcher(newConfiguredTodoistSyncFetcher(dcfg.TodoistSync))
 	todoistSyncProgress := issuesync.NewProgressTracker()
 	todoistSyncProgress.OnResult = syncOutcome
 	todoistSyncWake := startTodoistSyncRunner(
-		ctx, workers, waitableDrainAdmission, store, todoistSyncFetcher, publisher, daemonLog, todoistSyncProgress,
+		ctx, workers, waitableDrainAdmission, store, todoistSyncFetcher, publisher, daemonLog, todoistSyncProgress, trackerRuntime.RouteBinding,
 	)
-	tickTickSyncFetcher := newConfiguredTickTickSyncFetcher(dcfg.TickTickSync)
+	tickTickSyncFetcher := trackerRuntime.TickTickFetcher(newConfiguredTickTickSyncFetcher(dcfg.TickTickSync))
 	tickTickSyncProgress := issuesync.NewProgressTracker()
 	tickTickSyncProgress.OnResult = syncOutcome
 	tickTickSyncWake := startTickTickSyncRunner(
-		ctx, workers, waitableDrainAdmission, store, tickTickSyncFetcher, publisher, daemonLog, tickTickSyncProgress,
+		ctx, workers, waitableDrainAdmission, store, tickTickSyncFetcher, publisher, daemonLog, tickTickSyncProgress, trackerRuntime.RouteBinding,
 	)
 
 	externalRootRegistry, err := rootbridge.NewRegistry(ctx, dcfg.Connectors, nil)
@@ -1640,6 +1650,7 @@ func runDaemonProcess(
 	// earlier failure cannot leave it running past the store closing.
 	mcpEvents, mcpEventsReason := startDaemonMCPEvents(ctx, workers, dcfg, ns.DBHash, store, broadcaster, daemonLog)
 	srv := daemon.NewServer(daemon.ServerConfig{
+		TrackerRuntime:            trackerRuntime,
 		LocalEmbeddings:           localSetup,
 		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
@@ -2255,12 +2266,14 @@ func startGitHubSyncRunner(
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
 	progress *githubsync.ProgressTracker,
+	route ...func(context.Context, db.IssueSyncBinding) (context.Context, error),
 ) func() {
 	if fetcher == nil {
 		fetcher = newConfiguredGitHubSyncFetcher(config.GitHubSyncConfig{})
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "github", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newGitHubSyncDaemonRunner(githubsync.RunnerConfig{
+			RouteBinding:   optionalTrackerRouter(route),
 			Progress:       progress,
 			Store:          store,
 			Fetcher:        fetcher,
@@ -2290,12 +2303,14 @@ func startNotionSyncRunner(
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
 	progress *issuesync.ProgressTracker,
+	route ...func(context.Context, db.IssueSyncBinding) (context.Context, error),
 ) func() {
 	if fetcher == nil {
 		fetcher = newConfiguredNotionSyncFetcher(config.NotionSyncConfig{})
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "notion", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newNotionSyncDaemonRunner(notionsync.RunnerConfig{
+			RouteBinding:   optionalTrackerRouter(route),
 			Store:          store,
 			Fetcher:        fetcher,
 			Progress:       progress,
@@ -2320,12 +2335,14 @@ func startPlaneSyncRunner(
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
 	progress *issuesync.ProgressTracker,
+	route ...func(context.Context, db.IssueSyncBinding) (context.Context, error),
 ) func() {
 	if fetcher == nil {
 		fetcher = newConfiguredPlaneSyncFetcher(config.PlaneSyncConfig{})
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "plane", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newPlaneSyncDaemonRunner(planesync.RunnerConfig{
+			RouteBinding:   optionalTrackerRouter(route),
 			Store:          store,
 			Fetcher:        fetcher,
 			Progress:       progress,
@@ -2349,12 +2366,14 @@ func startTwentySyncRunner(
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
 	progress *issuesync.ProgressTracker,
+	route ...func(context.Context, db.IssueSyncBinding) (context.Context, error),
 ) func() {
 	if fetcher == nil {
 		fetcher = newConfiguredTwentySyncFetcher(config.TwentySyncConfig{})
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "twenty", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newTwentySyncDaemonRunner(twentysync.RunnerConfig{
+			RouteBinding:   optionalTrackerRouter(route),
 			Store:          store,
 			Fetcher:        fetcher,
 			Progress:       progress,
@@ -2379,12 +2398,14 @@ func startLinearSyncRunner(
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
 	progress *issuesync.ProgressTracker,
+	route ...func(context.Context, db.IssueSyncBinding) (context.Context, error),
 ) func() {
 	if fetcher == nil {
 		fetcher = newConfiguredLinearSyncFetcher(config.LinearSyncConfig{})
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "linear", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newLinearSyncDaemonRunner(linearsync.RunnerConfig{
+			RouteBinding:   optionalTrackerRouter(route),
 			Store:          store,
 			Fetcher:        fetcher,
 			Progress:       progress,
@@ -2409,12 +2430,14 @@ func startTodoistSyncRunner(
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
 	progress *issuesync.ProgressTracker,
+	route ...func(context.Context, db.IssueSyncBinding) (context.Context, error),
 ) func() {
 	if fetcher == nil {
 		fetcher = newConfiguredTodoistSyncFetcher(config.TodoistSyncConfig{})
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "todoist", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newTodoistSyncDaemonRunner(todoistsync.RunnerConfig{
+			RouteBinding:   optionalTrackerRouter(route),
 			Store:          store,
 			Fetcher:        fetcher,
 			Progress:       progress,

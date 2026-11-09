@@ -229,12 +229,20 @@ func notionSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 }
 
 func notionSyncFetcher(cfg ServerConfig) notionsync.Fetcher {
-	if cfg.NotionSyncFetcher != nil {
-		return cfg.NotionSyncFetcher
+	fetcher := func() notionsync.Fetcher {
+		if cfg.NotionSyncFetcher != nil {
+			return cfg.NotionSyncFetcher
+		}
+		return notionsync.NewClient(notionsync.ClientConfig{TokenEnv: cfg.NotionSyncConfig.TokenEnv})
+	}()
+	if cfg.TrackerRuntime != nil {
+		if _, wrapped := fetcher.(trackerNotionFetcher); !wrapped {
+			return trackerNotionFetcher{runtime: cfg.TrackerRuntime, legacy: fetcher}
+		}
 	}
-	return notionsync.NewClient(notionsync.ClientConfig{TokenEnv: cfg.NotionSyncConfig.TokenEnv})
+	return fetcher
 }
 
 func notionSyncRunner(cfg ServerConfig) *issuesync.Runner {
-	return notionsync.NewRunner(notionsync.RunnerConfig{Store: cfg.DB, Fetcher: notionSyncFetcher(cfg), Progress: cfg.NotionSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
+	return notionsync.NewRunner(notionsync.RunnerConfig{RouteBinding: trackerBindingRouter(cfg), Store: cfg.DB, Fetcher: notionSyncFetcher(cfg), Progress: cfg.NotionSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
 }

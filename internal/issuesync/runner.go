@@ -460,7 +460,7 @@ func (r *Runner) recordError(ctx context.Context, binding db.IssueSyncBinding, s
 		Error:       storedErrorText(cause),
 	})
 	if recordErr != nil {
-		return RunResult{Binding: binding, Import: importResult}, recordErr
+		return RunResult{Binding: binding, Import: importResult}, errors.Join(cause, recordErr)
 	}
 	return RunResult{Binding: binding, Status: status, Import: importResult}, cause
 }

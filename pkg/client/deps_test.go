@@ -28,6 +28,7 @@ var (
 		"go.kenn.io/kata/internal/tokenactor",
 		"go.kenn.io/kata/internal/transcript",
 		"go.kenn.io/kata/internal/uid",
+		"go.kenn.io/kata/internal/tracker",
 		"go.kenn.io/kata/internal/version",
 		"go.kenn.io/kata/pkg/client",
 		"go.kenn.io/kata/pkg/client/generated",

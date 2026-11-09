@@ -353,6 +353,12 @@ func githubSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 	}
 	fetched, err := githubSyncFetcher(cfg).Repository(ctx, host, owner, repoName)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusGatewayTimeout, "github_timeout", "GitHub repository request timed out", "", nil)
+		}
+		if errors.Is(err, context.Canceled) {
+			return db.UpsertIssueSyncBindingParams{}, context.Canceled
+		}
 		return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
 	}
 	if strings.TrimSpace(fetched.NodeID) == "" {
@@ -440,14 +446,22 @@ func githubSyncIntervalSeconds(intervalSeconds int, interval string) (int, error
 }
 
 func githubSyncFetcher(cfg ServerConfig) githubsync.Fetcher {
-	if cfg.GitHubSyncFetcher != nil {
-		return cfg.GitHubSyncFetcher
+	fetcher := func() githubsync.Fetcher {
+		if cfg.GitHubSyncFetcher != nil {
+			return cfg.GitHubSyncFetcher
+		}
+		factory := cfg.GitHubSyncFetcherFactory
+		if factory == nil {
+			factory = defaultGitHubSyncHTTPFetcher
+		}
+		return factory(cfg.GitHubSyncConfig)
+	}()
+	if cfg.TrackerRuntime != nil {
+		if _, wrapped := fetcher.(trackerGitHubFetcher); !wrapped {
+			return trackerGitHubFetcher{runtime: cfg.TrackerRuntime, legacy: fetcher}
+		}
 	}
-	factory := cfg.GitHubSyncFetcherFactory
-	if factory == nil {
-		factory = defaultGitHubSyncHTTPFetcher
-	}
-	return factory(cfg.GitHubSyncConfig)
+	return fetcher
 }
 
 func defaultGitHubSyncHTTPFetcher(cfg config.GitHubSyncConfig) githubsync.Fetcher {
@@ -462,11 +476,12 @@ func githubSyncRunner(cfg ServerConfig) GitHubSyncRunner {
 		factory = NewDefaultGitHubSyncRunner
 	}
 	return factory(GitHubSyncRunnerConfig{
-		Progress:  cfg.GitHubSyncProgress,
-		Store:     cfg.DB,
-		Fetcher:   githubSyncFetcher(cfg),
-		EventSink: githubSyncEventSink(cfg),
-		Logger:    cfg.Logger,
+		RouteBinding: trackerBindingRouter(cfg),
+		Progress:     cfg.GitHubSyncProgress,
+		Store:        cfg.DB,
+		Fetcher:      githubSyncFetcher(cfg),
+		EventSink:    githubSyncEventSink(cfg),
+		Logger:       cfg.Logger,
 	})
 }
 

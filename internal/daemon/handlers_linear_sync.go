@@ -149,11 +149,19 @@ func linearSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 	return db.UpsertIssueSyncBindingParams{ProjectID: in.ProjectID, Provider: issueSyncProviderLinear, SourceKey: resolved.SourceKey(), RemoteID: resolved.RemoteID(), DisplayName: name, Config: raw, IntervalSeconds: interval, ExpectedBinding: expected}, nil
 }
 func linearSyncFetcher(cfg ServerConfig) linearsync.Fetcher {
-	if cfg.LinearSyncFetcher != nil {
-		return cfg.LinearSyncFetcher
+	fetcher := func() linearsync.Fetcher {
+		if cfg.LinearSyncFetcher != nil {
+			return cfg.LinearSyncFetcher
+		}
+		return linearsync.NewClient(linearsync.ClientConfig{Daemon: cfg.LinearSyncConfig})
+	}()
+	if cfg.TrackerRuntime != nil {
+		if _, wrapped := fetcher.(trackerLinearFetcher); !wrapped {
+			return trackerLinearFetcher{runtime: cfg.TrackerRuntime, legacy: fetcher}
+		}
 	}
-	return linearsync.NewClient(linearsync.ClientConfig{Daemon: cfg.LinearSyncConfig})
+	return fetcher
 }
 func linearSyncRunner(cfg ServerConfig) *issuesync.Runner {
-	return linearsync.NewRunner(linearsync.RunnerConfig{Store: cfg.DB, Fetcher: linearSyncFetcher(cfg), Progress: cfg.LinearSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
+	return linearsync.NewRunner(linearsync.RunnerConfig{RouteBinding: trackerBindingRouter(cfg), Store: cfg.DB, Fetcher: linearSyncFetcher(cfg), Progress: cfg.LinearSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
 }

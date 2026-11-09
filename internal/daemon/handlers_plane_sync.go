@@ -149,11 +149,19 @@ func planeSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enable
 	return db.UpsertIssueSyncBindingParams{ProjectID: in.ProjectID, Provider: issueSyncProviderPlane, SourceKey: resolved.SourceKey(), RemoteID: resolved.RemoteID(), DisplayName: name, Config: raw, IntervalSeconds: interval, ExpectedBinding: expected}, nil
 }
 func planeSyncFetcher(cfg ServerConfig) planesync.Fetcher {
-	if cfg.PlaneSyncFetcher != nil {
-		return cfg.PlaneSyncFetcher
+	fetcher := func() planesync.Fetcher {
+		if cfg.PlaneSyncFetcher != nil {
+			return cfg.PlaneSyncFetcher
+		}
+		return planesync.NewClient(planesync.ClientConfig{Daemon: cfg.PlaneSyncConfig})
+	}()
+	if cfg.TrackerRuntime != nil {
+		if _, wrapped := fetcher.(trackerPlaneFetcher); !wrapped {
+			return trackerPlaneFetcher{runtime: cfg.TrackerRuntime, legacy: fetcher}
+		}
 	}
-	return planesync.NewClient(planesync.ClientConfig{Daemon: cfg.PlaneSyncConfig})
+	return fetcher
 }
 func planeSyncRunner(cfg ServerConfig) *issuesync.Runner {
-	return planesync.NewRunner(planesync.RunnerConfig{Store: cfg.DB, Fetcher: planeSyncFetcher(cfg), Progress: cfg.PlaneSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
+	return planesync.NewRunner(planesync.RunnerConfig{RouteBinding: trackerBindingRouter(cfg), Store: cfg.DB, Fetcher: planeSyncFetcher(cfg), Progress: cfg.PlaneSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
 }

@@ -28,12 +28,14 @@ func startTickTickSyncRunner(
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
 	progress *issuesync.ProgressTracker,
+	route ...func(context.Context, db.IssueSyncBinding) (context.Context, error),
 ) func() {
 	if fetcher == nil {
 		fetcher = newConfiguredTickTickSyncFetcher(config.TickTickSyncConfig{})
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "ticktick", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newTickTickSyncDaemonRunner(tickticksync.RunnerConfig{
+			RouteBinding:   optionalTrackerRouter(route),
 			Store:          store,
 			Fetcher:        fetcher,
 			Progress:       progress,

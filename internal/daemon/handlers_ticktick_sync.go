@@ -126,11 +126,19 @@ func tickTickSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Ena
 	return db.UpsertIssueSyncBindingParams{ProjectID: in.ProjectID, Provider: issueSyncProviderTickTick, SourceKey: resolved.SourceKey(), RemoteID: resolved.RemoteID(), DisplayName: name, Config: raw, IntervalSeconds: interval, ExpectedBinding: expected}, nil
 }
 func tickTickSyncFetcher(cfg ServerConfig) tickticksync.Fetcher {
-	if cfg.TickTickSyncFetcher != nil {
-		return cfg.TickTickSyncFetcher
+	fetcher := func() tickticksync.Fetcher {
+		if cfg.TickTickSyncFetcher != nil {
+			return cfg.TickTickSyncFetcher
+		}
+		return tickticksync.NewClient(tickticksync.ClientConfig{TokenEnv: cfg.TickTickSyncConfig.TokenEnv})
+	}()
+	if cfg.TrackerRuntime != nil {
+		if _, wrapped := fetcher.(trackerTickTickFetcher); !wrapped {
+			return trackerTickTickFetcher{runtime: cfg.TrackerRuntime, legacy: fetcher}
+		}
 	}
-	return tickticksync.NewClient(tickticksync.ClientConfig{TokenEnv: cfg.TickTickSyncConfig.TokenEnv})
+	return fetcher
 }
 func tickTickSyncRunner(cfg ServerConfig) *issuesync.Runner {
-	return tickticksync.NewRunner(tickticksync.RunnerConfig{Store: cfg.DB, Fetcher: tickTickSyncFetcher(cfg), Progress: cfg.TickTickSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
+	return tickticksync.NewRunner(tickticksync.RunnerConfig{RouteBinding: trackerBindingRouter(cfg), Store: cfg.DB, Fetcher: tickTickSyncFetcher(cfg), Progress: cfg.TickTickSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
 }

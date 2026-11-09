@@ -18,6 +18,8 @@ import (
 // These operation IDs are the explicit restricted-ingress allowlist. Paths
 // come from native registration so ingress cannot drift from actual routes.
 var signingCapabilities = map[string][]string{
+	"readTrackerRelay":              {"pull"},
+	"executeTrackerRelay":           {"push"},
 	"createCronJob":                 {"push"},
 	"replaceCronJob":                {"push"},
 	"archiveCronJob":                {"push"},
@@ -88,7 +90,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		}
 		supplied := len(r.Header.Values("Signature")) != 0 || len(r.Header.Values("Signature-Input")) != 0 || len(r.Header.Values("Content-Digest")) != 0
 		if !ingress && !supplied {
-			if !s.cfg.FederationSigningRequired {
+			if !s.cfg.FederationSigningRequired && !isTrackerRelayOperation(route.operation) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -103,12 +105,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		}
 		// Bulk uploads retain their memory bound without occupying the slots
 		// used by metadata, event polls, and lease requests.
-		admission := s.federationControlAdmission
-		bodyLimit := int64(64 << 10)
-		if route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation) {
-			admission = s.federationIngestAdmission
-			bodyLimit = federationsigning.MaxBodyBytes
-		}
+		admission, bodyLimit := s.federationSigningAdmission(route.operation)
 		select {
 		case admission <- struct{}{}:
 			defer func() { <-admission }()
@@ -155,7 +152,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			api.WriteEnvelope(w, http.StatusForbidden, "auth_invalid", "project-scoped enrollment required")
 			return
 		}
-		if ingress || supplied || s.cfg.FederationSigningRequired {
+		if ingress || supplied || s.cfg.FederationSigningRequired || isTrackerRelayOperation(route.operation) {
 			if s.cfg.FederationSigning == nil {
 				api.WriteEnvelope(w, http.StatusServiceUnavailable, "signing_unavailable", "federation signing unavailable")
 				return
@@ -178,6 +175,9 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				api.WriteEnvelope(w, status, "signature_invalid", "federation signature rejected")
 				return
 			}
+			if isTrackerRelayOperation(route.operation) {
+				ctx = context.WithValue(ctx, signedTrackerHopKey{}, true)
+			}
 			// Revocation during body upload must also stop reads. Mutations retain
 			// their native transaction fence through the cached authorization.
 			if !relayCleanup {
@@ -194,6 +194,20 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		ctx = withFederationAuthorization(ctx, auth, route.projectID, strings.Join(route.capabilities, ","), operation, authorization)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// Waiting tracker relay calls have their own bounded pool. Dependent
+// project metadata negotiation retains the control pool; bulk bodies
+// retain the smaller ingest pool. Increasing a shared limit cannot ensure
+// progress when every caller is waiting for another request in that same pool.
+func (s *Server) federationSigningAdmission(operation string) (chan struct{}, int64) {
+	if operation == "readTrackerRelay" || operation == "executeTrackerRelay" {
+		return s.federationTrackerRelayAdmission, 64 << 10
+	}
+	if operation == "ingestFederationProjectEvents" || operation == "acceptRelayDeliveries" || isCronJobWriteOperation(operation) {
+		return s.federationIngestAdmission, federationsigning.MaxBodyBytes
+	}
+	return s.federationControlAdmission, 64 << 10
 }
 
 func evaluateRelaySelfRevocation(

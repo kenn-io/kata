@@ -62,7 +62,7 @@ type ControlResult struct {
 
 func (r ControlResult) Validate() error {
 	switch r.Code {
-	case "ok", "validation", "tracker_denied", "tracker_unavailable", "tracker_outcome_unknown", "tracker_activation_required", "tracker_binding_changed", "tracker_operation_unsupported", "tracker_restored_inactive", "tracker_binding_disabled", "tracker_running", "tracker_project_already_bound":
+	case "ok", "validation", "tracker_denied", "tracker_unavailable", "tracker_outcome_unknown", "tracker_activation_required", "tracker_binding_changed", "tracker_operation_unsupported", "tracker_restored_inactive", "tracker_binding_disabled", "tracker_running", "tracker_project_already_bound", "tracker_timeout", "not_found":
 	default:
 		return ErrInvalid
 	}
@@ -129,4 +129,17 @@ func (c ControlReceipt) Validate() error {
 }
 func SameControlRequest(a, b ControlReceipt) bool {
 	return a.Version == b.Version && a.RootInstanceUID == b.RootInstanceUID && a.ProjectUID == b.ProjectUID && a.UID == b.UID && a.Principal == b.Principal && a.Selection == b.Selection && a.Kind == b.Kind && a.SourceKey == b.SourceKey && a.RequestDigest == b.RequestDigest
+}
+
+// IsPublicErrorCode bounds error facts that a client may expose. Provider and
+// transport diagnostics, including arbitrary envelope codes, are not classes.
+func IsPublicErrorCode(code string) bool {
+	if code != "ok" && (ControlResult{Code: code}).Validate() == nil {
+		return true
+	}
+	switch code {
+	case "tracker_principal_unsupported", "tracker_capability_unavailable", "tracker_ambiguous", "tracker_selection_required", "tracker_operation_conflict", "tracker_operation_pending", "tracker_capacity":
+		return true
+	}
+	return false
 }

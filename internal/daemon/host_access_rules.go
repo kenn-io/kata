@@ -48,7 +48,7 @@ func buildHostAccessRules() map[string]hostAccessRule {
 	}, "disconnectRelayEnrollment")
 	registerHostAccessRules(rules, hostAccessRule{
 		SelfAuthenticated: true, AcceptsFederationBearer: true,
-	}, "getRelayReset", "offerRelayDeliveries", "acceptRelayDeliveries", "ackRelayDeliveries", "getFederationProjectMetadata", "pollFederationProjectEvents",
+	}, "readTrackerRelay", "executeTrackerRelay", "getRelayReset", "offerRelayDeliveries", "acceptRelayDeliveries", "ackRelayDeliveries", "getFederationProjectMetadata", "pollFederationProjectEvents",
 		"ingestFederationProjectEvents", "acquireIssueLease", "renewIssueLease",
 		"releaseIssueLease", "getIssueLeaseStatus", "claimIssue",
 		"createCronJob", "replaceCronJob", "archiveCronJob", "restoreCronJob")

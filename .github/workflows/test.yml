@@ -480,8 +480,28 @@ jobs:
       - name: Fetch OpenAPI client generator
         run: kit-retry 3 5 go run -n github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.76.5
 
+      - name: Regenerate OpenAPI artifacts
+        id: api-generated
+        run: make api-generate
+
+      - name: Save generated OpenAPI replacements
+        if: steps.api-generated.outcome == 'success'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: kata-api-artifacts-${{ github.sha }}
+          path: |
+            api/openapi.yaml
+            pkg/client/openapi.yaml
+            pkg/client/generated/*.go
+            !pkg/client/generated/generate.go
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Check generated OpenAPI artifacts
-        run: make api-check
+        run: |
+          make api-check
+          git diff --exit-code -- api/openapi.yaml pkg/client/openapi.yaml pkg/client/generated
+          test -z "$(git status --porcelain -- api/openapi.yaml pkg/client/openapi.yaml pkg/client/generated)"
 
   postgres:
     needs: changes

@@ -47,6 +47,9 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	// TrackerRuntime is an explicitly configured standalone account runtime.
+	// Nil leaves named execution unavailable; it never implies a default account.
+	TrackerRuntime            *TrackerRuntime
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage
@@ -278,14 +281,15 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 
 // Server bundles the http handler and lifecycle.
 type Server struct {
-	federationIngestAdmission  chan struct{}
-	federationControlAdmission chan struct{}
-	cfg                        ServerConfig
-	baseHandler                http.Handler
-	handler                    http.Handler
-	api                        huma.API
-	authPolicy                 authPolicy
-	noProjectDataRoutes        noProjectDataRouteMatcher
+	federationIngestAdmission       chan struct{}
+	federationControlAdmission      chan struct{}
+	federationTrackerRelayAdmission chan struct{}
+	cfg                             ServerConfig
+	baseHandler                     http.Handler
+	handler                         http.Handler
+	api                             huma.API
+	authPolicy                      authPolicy
+	noProjectDataRoutes             noProjectDataRouteMatcher
 
 	shutdownTimeout time.Duration
 }
@@ -389,8 +393,9 @@ func NewServer(cfg ServerConfig) *Server {
 
 	s := &Server{
 		cfg: cfg, api: humaAPI,
-		federationIngestAdmission:  make(chan struct{}, 2),
-		federationControlAdmission: make(chan struct{}, 16),
+		federationIngestAdmission:       make(chan struct{}, 2),
+		federationControlAdmission:      make(chan struct{}, 16),
+		federationTrackerRelayAdmission: make(chan struct{}, 16),
 	}
 	registerRoutes(humaAPI, mux, cfg)
 	if cfg.WebSessions != nil {
@@ -760,6 +765,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerMCPEventsHandlers(humaAPI, cfg)
 	registerFederationHandlers(humaAPI, cfg)
 	registerIssueSyncHandlers(humaAPI, cfg)
+	registerTrackerHandlers(humaAPI, cfg)
 	registerExternalRootHandlers(humaAPI, cfg)
 	registerClaimHandlers(humaAPI, cfg)
 	registerDigestHandlers(humaAPI, cfg)

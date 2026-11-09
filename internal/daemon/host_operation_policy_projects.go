@@ -1,6 +1,11 @@
 package daemon
 
 func registerProjectOperationPolicies(policies map[string]HostOperationPolicy) {
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage, Mutation: true, restricted: true}, "settleTrackerControl")
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage, restricted: true}, "inspectTrackerRecovery")
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationTaskMutation, Capability: hostCapabilityWrite, Mutation: true, restricted: true}, "executeTrackerOperation")
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationProjectRead, Capability: hostCapabilityRead, restricted: true}, "listTrackerConnections", "getTrackerOperation")
+
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationProjectRead, Capability: hostCapabilityRead,
 	}, "listProjects", "showProject")

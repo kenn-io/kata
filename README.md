@@ -237,7 +237,8 @@ The [docs site](docs/) is the definitive reference:
 - Workflows: [Agent workflows](docs/workflows/agents.md) ·
   [Gated workflows](docs/workflows/gated-workflows.md) ·
   [Sharing models](docs/workflows/sharing.md)
-- Operations: [GitHub sync](docs/operations/github-sync.md) ·
+- Operations: [Named tracker connections](docs/operations/tracker-connections.md) ·
+  [GitHub sync](docs/operations/github-sync.md) ·
   [Notion sync](docs/operations/notion-sync.md) ·
   [Plane sync](docs/operations/plane-sync.md) ·
   [Linear sync](docs/operations/linear-sync.md) ·

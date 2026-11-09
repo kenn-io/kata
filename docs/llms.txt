@@ -57,6 +57,8 @@ for machine readers.
   request contracts, project access, concurrent changes and relay enrollment
 - [Forgejo connector](https://katatracker.com/docs/operations/forgejo-connector.md):
   Bind Forgejo issues through the built-in Go connector.
+- [Named tracker connections](https://katatracker.com/docs/operations/tracker-connections.md):
+  select explicit accounts, authorize root/relay controls and inspect retained uncertainty
 - [GitHub sync](https://katatracker.com/docs/operations/github-sync.md):
   mirror upstream issues into kata
 - [Notion sync](https://katatracker.com/docs/operations/notion-sync.md):

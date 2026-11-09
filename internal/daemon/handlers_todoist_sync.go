@@ -199,11 +199,19 @@ func todoistSyncVerifySource(ctx context.Context, fetcher todoistsync.Fetcher, c
 	return raw, name, nil
 }
 func todoistSyncFetcher(cfg ServerConfig) todoistsync.Fetcher {
-	if cfg.TodoistSyncFetcher != nil {
-		return cfg.TodoistSyncFetcher
+	fetcher := func() todoistsync.Fetcher {
+		if cfg.TodoistSyncFetcher != nil {
+			return cfg.TodoistSyncFetcher
+		}
+		return todoistsync.NewClient(todoistsync.ClientConfig{Daemon: cfg.TodoistSyncConfig})
+	}()
+	if cfg.TrackerRuntime != nil {
+		if _, wrapped := fetcher.(trackerTodoistFetcher); !wrapped {
+			return trackerTodoistFetcher{runtime: cfg.TrackerRuntime, legacy: fetcher}
+		}
 	}
-	return todoistsync.NewClient(todoistsync.ClientConfig{Daemon: cfg.TodoistSyncConfig})
+	return fetcher
 }
 func todoistSyncRunner(cfg ServerConfig) *issuesync.Runner {
-	return todoistsync.NewRunner(todoistsync.RunnerConfig{Store: cfg.DB, Fetcher: todoistSyncFetcher(cfg), Progress: cfg.TodoistSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
+	return todoistsync.NewRunner(todoistsync.RunnerConfig{RouteBinding: trackerBindingRouter(cfg), Store: cfg.DB, Fetcher: todoistSyncFetcher(cfg), Progress: cfg.TodoistSyncProgress, EventSink: githubSyncEventSink(cfg), Logger: cfg.Logger})
 }
