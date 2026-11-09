@@ -564,8 +564,22 @@ describe('AppShell', () => {
   })
 
   test.each([
-    ['same project', 'all-open', 'all-open', '01J00000000000000000000002', '01J00000000000000000000002', '01J00000000000000000000001'],
-    ['different project', 'all-open', 'all-open', '01J00000000000000000000002', 'other-project', undefined],
+    [
+      'same project',
+      'all-open',
+      'all-open',
+      '01J00000000000000000000002',
+      '01J00000000000000000000002',
+      '01J00000000000000000000001',
+    ],
+    [
+      'different project',
+      'all-open',
+      'all-open',
+      '01J00000000000000000000002',
+      'other-project',
+      undefined,
+    ],
     ['implicit Inbox', undefined, 'inbox', undefined, undefined, '01J00000000000000000000001'],
   ] as const)(
     'search preserves the pending selection for %s',
@@ -581,7 +595,12 @@ describe('AppShell', () => {
       render(AppShell, {
         props: {
           route,
-          requestedRoute: { ...route, view: requestedView, ...(requestedProjectUID ? { projectUID: requestedProjectUID } : {}), issueUID: '01J00000000000000000000001' },
+          requestedRoute: {
+            ...route,
+            view: requestedView,
+            ...(requestedProjectUID ? { projectUID: requestedProjectUID } : {}),
+            issueUID: '01J00000000000000000000001',
+          },
           snapshot: snapshot(),
           loading: false,
           ...mutationProps(),
