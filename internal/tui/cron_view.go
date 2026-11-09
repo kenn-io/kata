@@ -63,8 +63,8 @@ func (p cronData) readError(kind int) error {
 }
 
 type cronState struct {
-	requestSeq      uint64
-	request         *cronRuntimeRequest
+	actionSeq       uint64
+	action          *cronPending
 	tab             int
 	lists           [4]cronList
 	filtering, help bool
@@ -75,14 +75,12 @@ type cronState struct {
 	conn, scope     uint64
 	form            *cronForm
 	editSeq         uint64
-	enabledSeq      uint64
-	enabled         *cronEnabledRequest
 }
 
 // Synchronize after every update and retain visible records during refresh.
 func (m Model) cronSync() (Model, tea.Cmd) {
 	if m.cron.conn != m.connGen || m.cron.scope != m.scopeGen {
-		if m.modal == modalDiscardCronJob || m.modal == modalCronResume || m.modal == modalCronRequest {
+		if m.modal == modalDiscardCronJob || m.modal == modalCronAction {
 			m.modal = modalNone
 		}
 		m.cron = cronState{tab: m.cron.tab, conn: m.connGen, scope: m.scopeGen}
@@ -104,7 +102,7 @@ func (m Model) fetchCron() tea.Cmd {
 		if slices.Contains(data.project.controls, "run_request") || slices.Contains(data.project.controls, "cancel_request") {
 			data.requests, data.requestsErr = cronRead(reader.ListCronRequests, id)
 		}
-		jobs, err := cronRead(reader.readCronJobs, id)
+		jobs, err := cronRead(reader.ListCronJobs, id)
 		data.jobs, data.passovers, data.jobsErr = jobs.Jobs, jobs.Passovers, err
 		data.workflows, data.workflowsErr = cronRead(reader.ListCronWorkflows, id)
 		data.runs, data.runsErr = cronRead(reader.ListCronRuns, id)
@@ -276,11 +274,11 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case m.keymap.PageDown.matches(msg):
 		*cursor += max(m.height-8, 1)
 	case key == "R":
-		return m.routeCronRuntimeKey(db.CronRequestKindRun, lines, *cursor)
+		return m.routeCronRuntimeKey(db.CronRequestKindRun)
 	case key == "X":
-		return m.routeCronRuntimeKey(db.CronRequestKindCancel, lines, *cursor)
+		return m.routeCronRuntimeKey(db.CronRequestKindCancel)
 	case key == "p":
-		return m.routeCronEnabledKey(lines, *cursor)
+		return m.routeCronEnabledKey()
 	case key == "n", key == "e":
 		next, cmd, handled := m.routeCronJobKey(key, lines, *cursor)
 		if handled {

@@ -100,8 +100,8 @@ func TestCronFormExecuteDateTriggerCreatesOnTheDaemon(t *testing.T) {
 	require.NoError(t, c.PutCronJob(t.Context(), project.ID, f.uid, kataapi.PutCronJobBody{Name: name, Definition: kataapi.CronJobDefinitionFrom(def), Actor: "alice"}))
 	shown, err := c.ShowCronJob(t.Context(), project.ID, f.uid)
 	require.NoError(t, err)
-	require.Equal(t, issue, shown.Definition.Trigger.IssueUID)
-	require.Equal(t, issue, shown.Definition.Issue.UID)
+	require.Equal(t, issue, shown.Job.Definition.Trigger.IssueUID)
+	require.Equal(t, issue, shown.Job.Definition.Issue.UID)
 	f.trigger = "manual"
 	require.True(t, f.shown(cfReport))
 }

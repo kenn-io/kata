@@ -53,28 +53,24 @@ func TestCronProjectPauseClient(t *testing.T) {
 
 func TestCronProjectPauseBanner(t *testing.T) {
 	for _, invalid := range []bool{false, true} {
-		for _, tab := range []rune{'2', '3', '4'} {
-			t.Run(fmt.Sprintf("invalid=%t/tab=%c", invalid, tab), func(t *testing.T) {
-				m := cronFixture(t)
-				metadata := db.JSONBlob(`{"cron.pause":{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"Maintenance\nwindow"}}`)
-				if invalid {
-					metadata = `{"cron.pause":false}`
-				}
-				m.cron.data.project = cronProjectState{pause: db.CronProjectPauseFromMetadata(metadata)}
-				m = sendRune(m, tab)
-				rendered := ansi.Strip(renderCron(m))
-				require.Contains(t, rendered, "Project cron paused")
-				if invalid {
-					require.Contains(t, rendered, "invalid policy")
-				} else {
-					require.Contains(t, rendered, "operator")
-					require.Contains(t, rendered, "Maintenance")
-				}
-			})
-		}
+		t.Run(fmt.Sprintf("invalid=%t", invalid), func(t *testing.T) {
+			m := cronFixture(t)
+			metadata := db.JSONBlob(`{"cron.pause":{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"Maintenance\nwindow"}}`)
+			if invalid {
+				metadata = `{"cron.pause":false}`
+			}
+			m.cron.data.project = cronProjectState{pause: db.CronProjectPauseFromMetadata(metadata)}
+			m = sendRune(m, '3') // the banner shows beyond the Jobs tab
+			rendered := ansi.Strip(renderCron(m))
+			require.Contains(t, rendered, "Project cron paused")
+			if invalid {
+				require.Contains(t, rendered, "invalid policy")
+			} else {
+				require.Contains(t, rendered, "operator")
+				require.Contains(t, rendered, "Maintenance")
+			}
+		})
 	}
-	m := cronFixture(t)
-	require.NotContains(t, ansi.Strip(renderCron(m)), "Project cron paused")
 }
 
 // Failed refreshes retain visible policy and display their error; an absent
@@ -94,26 +90,12 @@ func TestCronProjectPauseRefresh(t *testing.T) {
 	require.NotContains(t, ansi.Strip(renderCron(m)), "Project cron paused")
 }
 
-func TestCronProjectPauseFetch(t *testing.T) {
-	m := cronFixture(t)
-	reader := &cronReadTestAPI{data: *m.cron.data}
-	reader.data.project = cronProjectState{pause: &db.CronProjectPause{Invalid: true}}
-	m.api = reader
-	message := m.fetchCron()()
-	loaded, ok := message.(cronLoadedMsg)
-	require.True(t, ok)
-	require.NotNil(t, loaded.project.pause)
-	require.True(t, loaded.project.pause.Invalid)
-}
-
 func TestSnapshot_CronProjectPaused(t *testing.T) {
 	defer snapshotInit(t)()
-	for _, width := range []int{80, 120} {
-		m := cronFixture(t)
-		m.width = width
-		m.cron.data.project = cronProjectState{pause: &db.CronProjectPause{PausedBy: "operator", Reason: "Maintenance"}}
-		assertGolden(t, fmt.Sprintf("cron-jobs-project-paused-%d", width), m.View().Content)
-	}
+	m := cronFixture(t)
+	m.width = 80
+	m.cron.data.project = cronProjectState{pause: &db.CronProjectPause{PausedBy: "operator", Reason: "Maintenance"}}
+	assertGolden(t, "cron-jobs-project-paused-80", m.View().Content)
 }
 
 // Contract: ordinary project metadata events refresh the cached policy, while

@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,38 +18,43 @@ import (
 )
 
 type cronAPI interface {
-	ListCronRequests(context.Context, int64) ([]db.CronRequest, error)
-	ShowCronRun(context.Context, int64, string) (db.CronRun, error)
-	RequestCron(context.Context, int64, string, string, string, string) (db.RequestCronOut, error)
-	readCronJob(context.Context, int64, string) (cronJobRead, error)
-	readCronJobs(context.Context, int64) (cronJobsRead, error)
-	ResumeCronJobDiscard(context.Context, int64, string, string, string) (db.CronJob, error)
-	readCronProjectState(context.Context, int64) (cronProjectState, error)
-	CronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled bool) (db.CronJob, error)
-	ListCronJobs(context.Context, int64) ([]generated.CronJob, error)
-	ShowCronJob(ctx context.Context, projectID int64, uid string) (db.CronJob, error)
+	ListCronJobs(context.Context, int64) (CronJobsRead, error)
+	ShowCronJob(ctx context.Context, projectID int64, uid string) (CronJobRead, error)
 	PutCronJob(ctx context.Context, projectID int64, uid string, write kataapi.PutCronJobBody) error
+	CronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled, discard bool) (db.CronJob, error)
 	ListCronWorkflows(context.Context, int64) ([]generated.CronWorkflow, error)
 	ListCronRuns(context.Context, int64) ([]generated.CronRun, error)
+	ShowCronRun(context.Context, int64, string) (db.CronRun, error)
+	ListCronRequests(context.Context, int64) ([]db.CronRequest, error)
+	RequestCron(ctx context.Context, projectID int64, uid, kind, target, actor string) error
+	readCronProjectState(context.Context, int64) (cronProjectState, error)
 	readCronParent(ctx context.Context, projectID int64, parentUID string) (cronParent, error)
 }
 
-// ListCronJobs reads the selected project's current job definitions.
-func (c *Client) ListCronJobs(ctx context.Context, projectID int64) ([]generated.CronJob, error) {
+// CronJobsRead is a project's job list with the missed-run cutoffs that apply.
+type CronJobsRead struct {
+	Jobs      []generated.CronJob              `json:"jobs"`
+	Passovers map[string]*db.CronPassoverState `json:"passovers"`
+}
+
+// ListCronJobs reads the selected project's current job definitions and the
+// missed-run cutoffs that apply to them.
+func (c *Client) ListCronJobs(ctx context.Context, projectID int64) (CronJobsRead, error) {
 	client, err := c.generatedClient()
 	if err != nil {
-		return nil, err
+		return CronJobsRead{}, err
 	}
 	wire, callErr := client.ListCronJobsWithResponse(ctx, &generated.ListCronJobsRequestOptions{
 		PathParams: &generated.ListCronJobsPath{ProjectID: projectID},
 	})
 	if wire == nil {
-		return nil, callErr
+		return CronJobsRead{}, callErr
 	}
-	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-		return nil, err
+	var out CronJobsRead
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &out); err != nil {
+		return CronJobsRead{}, err
 	}
-	return wire.JSON200.Jobs, nil
+	return out, nil
 }
 
 // ListCronWorkflows reads the selected project's current workflow definitions.
@@ -137,15 +143,24 @@ func cronProgressFromMetadata(metadata map[string]any) map[string]cron.Recurring
 	return out
 }
 
-// decodeCronJobRecord reads the envelope without passing options through a generated map.
-func decodeCronJobRecord(body []byte) (db.CronJob, error) {
+// CronJobRead is one job with the missed-run cutoff that applies to it.
+type CronJobRead struct {
+	Job      db.CronJob
+	Passover *db.CronPassoverState
+}
+
+// decodeCronJobRecord reads the envelope without passing options through a
+// generated map, keeping the passover state beside the strict inner job.
+func decodeCronJobRecord(body []byte) (CronJobRead, error) {
 	var wire struct {
-		Job jsontext.Value `json:"job"`
+		Job      jsontext.Value        `json:"job"`
+		Passover *db.CronPassoverState `json:"passover"`
 	}
 	if err := json.Unmarshal(body, &wire); err != nil {
-		return db.CronJob{}, err
+		return CronJobRead{}, err
 	}
-	return decodeCronJob(wire.Job)
+	job, err := decodeCronJob(wire.Job)
+	return CronJobRead{job, wire.Passover}, err
 }
 
 func decodeCronJob(body []byte) (db.CronJob, error) {
@@ -156,20 +171,20 @@ func decodeCronJob(body []byte) (db.CronJob, error) {
 	return db.CronJob{CronDefinition: job.CronDefinition, Definition: job.Definition.Native()}, nil
 }
 
-// ShowCronJob reads one job, archived or not.
-func (c *Client) ShowCronJob(ctx context.Context, projectID int64, uid string) (db.CronJob, error) {
+// ShowCronJob reads one job, archived or not, with its missed-run cutoff.
+func (c *Client) ShowCronJob(ctx context.Context, projectID int64, uid string) (CronJobRead, error) {
 	client, err := c.generatedClient()
 	if err != nil {
-		return db.CronJob{}, err
+		return CronJobRead{}, err
 	}
 	wire, callErr := client.ShowCronJobWithResponse(ctx, &generated.ShowCronJobRequestOptions{
 		PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: uid},
 	})
 	if wire == nil {
-		return db.CronJob{}, callErr
+		return CronJobRead{}, callErr
 	}
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-		return db.CronJob{}, err
+		return CronJobRead{}, err
 	}
 	return decodeCronJobRecord(wire.Body)
 }
@@ -203,38 +218,38 @@ func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, wr
 // Allow the daemon's 15-second federation forward plus response overhead.
 const cronEnabledTimeout = 20 * time.Second
 
-// CronJobEnabled changes enabled under the revision counted or selected by the UI.
-func (c *Client) CronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled bool) (db.CronJob, error) {
-	return c.cronJobEnabled(ctx, projectID, uid, expected, actor, enabled, false)
-}
-func (c *Client) cronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled, discard bool) (db.CronJob, error) {
+// CronJobEnabled pauses or resumes a job under the revision counted or selected
+// by the UI. discard resumes and discards the job's scheduled backlog.
+func (c *Client) CronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled, discard bool) (db.CronJob, error) {
 	client, err := generated.NewDefaultClient(c.base, runtime.WithHTTPClient(tuiRequestDoer{client: c, timeout: cronEnabledTimeout}))
 	if err != nil {
 		return db.CronJob{}, err
 	}
-	body := generated.CronJobEnabledActionBody{Actor: &actor, ExpectedEventUID: &expected}
-	var discardFlag *bool
-	if discard {
-		discardFlag = &discard
-	}
+	var resp *http.Response
+	var body []byte
 	if enabled {
-		wire, callErr := client.ResumeCronJobWithResponse(ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: projectID, CronUID: uid}, Body: &generated.CronJobResumeBody{Actor: body.Actor, ExpectedEventUID: body.ExpectedEventUID, DiscardMissed: discardFlag}})
+		resume := generated.CronJobResumeBody{Actor: &actor, ExpectedEventUID: &expected}
+		if discard {
+			resume.DiscardMissed = &discard
+		}
+		wire, callErr := client.ResumeCronJobWithResponse(ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: projectID, CronUID: uid}, Body: &resume})
 		if wire == nil {
 			return db.CronJob{}, callErr
 		}
-		if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-			return db.CronJob{}, err
+		resp, body, err = wire.HTTPResponse, wire.Body, callErr
+	} else {
+		pause := generated.CronJobEnabledActionBody{Actor: &actor, ExpectedEventUID: &expected}
+		wire, callErr := client.PauseCronJobWithResponse(ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: projectID, CronUID: uid}, Body: &pause})
+		if wire == nil {
+			return db.CronJob{}, callErr
 		}
-		return decodeCronJobRecord(wire.Body)
+		resp, body, err = wire.HTTPResponse, wire.Body, callErr
 	}
-	wire, callErr := client.PauseCronJobWithResponse(ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: projectID, CronUID: uid}, Body: &body})
-	if wire == nil {
-		return db.CronJob{}, callErr
-	}
-	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
+	if err := decodeGeneratedResponse(resp, body, err, nil); err != nil {
 		return db.CronJob{}, err
 	}
-	return decodeCronJobRecord(wire.Body)
+	read, err := decodeCronJobRecord(body)
+	return read.Job, err
 }
 
 // cronProjectState is optional on older daemons. Keep it separate from the
@@ -298,85 +313,22 @@ func (c *Client) ListCronRequests(ctx context.Context, pid int64) ([]db.CronRequ
 }
 
 // RequestCron submits one caller-retained identity without implicit new retries.
-func (c *Client) RequestCron(ctx context.Context, pid int64, id, kind, target, actor string) (db.RequestCronOut, error) {
+func (c *Client) RequestCron(ctx context.Context, pid int64, id, kind, target, actor string) error {
 	client, err := c.generatedClient()
 	if err != nil {
-		return db.RequestCronOut{}, err
+		return err
 	}
 	body := generated.CronRequestBody{UID: id, Actor: &actor}
-	var out db.RequestCronOut
 	if kind == db.CronRequestKindRun {
 		wire, callErr := client.RequestCronJobRunWithResponse(ctx, &generated.RequestCronJobRunRequestOptions{PathParams: &generated.RequestCronJobRunPath{ProjectID: pid, CronUID: target}, Body: &body})
 		if wire == nil {
-			return out, callErr
+			return callErr
 		}
-		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &out)
-	} else {
-		wire, callErr := client.RequestCronRunCancelWithResponse(ctx, &generated.RequestCronRunCancelRequestOptions{PathParams: &generated.RequestCronRunCancelPath{ProjectID: pid, RunUID: target}, Body: &body})
-		if wire == nil {
-			return out, callErr
-		}
-		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &out)
+		return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
 	}
-	return out, err
-}
-
-type cronJobRead struct {
-	Job      db.CronJob
-	Passover *db.CronPassoverState
-}
-
-type cronJobsRead struct {
-	Jobs      []generated.CronJob
-	Passovers map[string]*db.CronPassoverState
-}
-
-// readCronJob retains envelope state alongside the strict, unchanged inner job.
-func (c *Client) readCronJob(ctx context.Context, pid int64, id string) (cronJobRead, error) {
-	client, err := c.generatedClient()
-	if err != nil {
-		return cronJobRead{}, err
-	}
-	wire, callErr := client.ShowCronJobWithResponse(ctx, &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: pid, CronUID: id}})
+	wire, callErr := client.RequestCronRunCancelWithResponse(ctx, &generated.RequestCronRunCancelRequestOptions{PathParams: &generated.RequestCronRunCancelPath{ProjectID: pid, RunUID: target}, Body: &body})
 	if wire == nil {
-		return cronJobRead{}, callErr
+		return callErr
 	}
-	if err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-		return cronJobRead{}, err
-	}
-	return decodeCronJobRead(wire.Body)
-}
-func decodeCronJobRead(raw []byte) (cronJobRead, error) {
-	var envelope struct {
-		Job      jsontext.Value        `json:"job"`
-		Passover *db.CronPassoverState `json:"passover"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return cronJobRead{}, err
-	}
-	job, err := decodeCronJob(envelope.Job)
-	return cronJobRead{job, envelope.Passover}, err
-}
-func (c *Client) readCronJobs(ctx context.Context, pid int64) (cronJobsRead, error) {
-	client, err := c.generatedClient()
-	if err != nil {
-		return cronJobsRead{}, err
-	}
-	wire, callErr := client.ListCronJobsWithResponse(ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: pid}})
-	if wire == nil {
-		return cronJobsRead{}, callErr
-	}
-	var envelope struct {
-		Jobs      []generated.CronJob              `json:"jobs"`
-		Passovers map[string]*db.CronPassoverState `json:"passovers"`
-	}
-	if err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &envelope); err != nil {
-		return cronJobsRead{}, err
-	}
-	return cronJobsRead{envelope.Jobs, envelope.Passovers}, nil
-}
-
-// ResumeCronJobDiscard enables a selected job and discards its scheduled backlog.
-func (c *Client) ResumeCronJobDiscard(ctx context.Context, pid int64, id, expected, actor string) (db.CronJob, error) {
-	return c.cronJobEnabled(ctx, pid, id, expected, actor, true, true)
+	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
 }

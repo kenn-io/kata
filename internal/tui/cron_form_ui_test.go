@@ -33,8 +33,8 @@ type cronWriteTestAPI struct {
 	issueUIDs map[string]string
 }
 
-func (a *cronWriteTestAPI) ShowCronJob(context.Context, int64, string) (db.CronJob, error) {
-	return a.shown, a.showErr
+func (a *cronWriteTestAPI) ShowCronJob(context.Context, int64, string) (CronJobRead, error) {
+	return CronJobRead{Job: a.shown}, a.showErr
 }
 
 func (a *cronWriteTestAPI) PutCronJob(_ context.Context, _ int64, uid string, w kataapi.PutCronJobBody) error {
@@ -145,8 +145,9 @@ func TestCronCtrlSSavesEditedJob(t *testing.T) {
 	require.NoError(t, err)
 	rec := executeRecord(`{}`)
 	require.NoError(t, c.PutCronJob(t.Context(), project.ID, rec.UID, kataapi.PutCronJobBody{Name: "Original", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(rec.Definition)}))
-	rec, err = c.ShowCronJob(t.Context(), project.ID, rec.UID)
+	read, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
 	require.NoError(t, err)
+	rec = read.Job
 	m := cronFixture(t)
 	m.api, m.scope.projectID, m.list.actor = c, project.ID, "alice"
 	m.cron.form, err = cronFormFor(rec, nil)
@@ -158,7 +159,7 @@ func TestCronCtrlSSavesEditedJob(t *testing.T) {
 	}
 	saved, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
 	require.NoError(t, err)
-	require.Equal(t, "Renamed", saved.Name)
+	require.Equal(t, "Renamed", saved.Job.Name)
 	require.Nil(t, m.cron.form)
 }
 
@@ -297,9 +298,9 @@ func TestCronEditDefinitionRoundTripsThroughDaemon(t *testing.T) {
 	m.api = c
 	m.list.actor = "alice"
 	m = sendRune(m, '2')
-	jobs, err := c.ListCronJobs(t.Context(), project.ID)
+	list, err := c.ListCronJobs(t.Context(), project.ID)
 	require.NoError(t, err)
-	m, _ = updateModel(m, cronLoadedMsg(cronData{conn: m.connGen, scope: m.scopeGen, jobs: jobs}))
+	m, _ = updateModel(m, cronLoadedMsg(cronData{conn: m.connGen, scope: m.scopeGen, jobs: list.Jobs}))
 
 	m, cmd := press(m, keyRune('e'))
 	m = settle(t, m, cmd)
@@ -309,8 +310,9 @@ func TestCronEditDefinitionRoundTripsThroughDaemon(t *testing.T) {
 	m = settle(t, m, cmd)
 	require.Nil(t, m.cron.form)
 
-	after, err := c.ShowCronJob(t.Context(), project.ID, jobUID)
+	read, err := c.ShowCronJob(t.Context(), project.ID, jobUID)
 	require.NoError(t, err)
+	after := read.Job
 	require.Equal(t, "Digest of the day", after.Definition.Issue.Title)
 	require.JSONEq(t, options, string(after.Definition.Options))
 	require.Contains(t, string(after.Definition.Options), "12345678901234567890123")
@@ -502,8 +504,9 @@ func TestCronNativeCreateRefreshesParentActivity(t *testing.T) {
 	require.NotNil(t, m.cron.form)
 	require.NotNil(t, m.cron.form.conflict)
 	require.Equal(t, f.uid, m.cron.form.conflict.UID)
-	jobs, err := c.ListCronJobs(t.Context(), project.ID)
+	list, err := c.ListCronJobs(t.Context(), project.ID)
 	require.NoError(t, err)
+	jobs := list.Jobs
 	require.Len(t, jobs, 1)
 	require.Equal(t, f.uid, jobs[0].UID)
 }
@@ -534,9 +537,4 @@ func TestCronEditorReturnKeepsDraftOnErrorAndIgnoresClosedForm(t *testing.T) {
 	m.cron.form.focusField(cfBody)
 	m, _ = updateModel(m, editorReturnedMsg{formGen: gen, content: "stale text"})
 	require.Empty(t, m.cron.form.val[cfBody])
-}
-
-func (a *cronWriteTestAPI) readCronJob(ctx context.Context, pid int64, id string) (cronJobRead, error) {
-	job, err := a.ShowCronJob(ctx, pid, id)
-	return cronJobRead{Job: job}, err
 }

@@ -53,8 +53,8 @@ func (c *Client) ReopenBacklog(ctx context.Context, projectID int64, ref string)
 		if json.Unmarshal(raw, &progress) != nil {
 			continue
 		}
-		job, err := recurringJob(ctx, apiClient, projectID, strings.TrimPrefix(key, cronProgressPrefix))
-		if err != nil {
+		job, err := c.ShowCronJob(ctx, projectID, strings.TrimPrefix(key, cronProgressPrefix))
+		if err != nil || job.Job.DeletedAt != nil {
 			continue
 		}
 		if job.Passover != nil {
@@ -77,25 +77,4 @@ func (c *Client) ReopenBacklog(ctx context.Context, projectID int64, ref string)
 		total += count
 	}
 	return total, nil
-}
-
-func recurringJob(ctx context.Context, apiClient *generated.Client, projectID int64, uid string) (cronJobRead, error) {
-	wire, callErr := apiClient.ShowCronJobWithResponse(ctx, &generated.ShowCronJobRequestOptions{
-		PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: uid},
-	})
-	if wire == nil {
-		return cronJobRead{}, callErr
-	}
-	var raw jsontext.Value
-	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &raw); err != nil {
-		return cronJobRead{}, err
-	}
-	body, err := decodeCronJobRead(raw)
-	if err != nil {
-		return cronJobRead{}, err
-	}
-	if body.Job.DeletedAt != nil {
-		return cronJobRead{}, errors.New("cron job is deleted")
-	}
-	return body, nil
 }

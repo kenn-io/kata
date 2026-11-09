@@ -335,12 +335,12 @@ type cronReadTestAPI struct {
 	calls int
 }
 
-func (a *cronReadTestAPI) ListCronJobs(_ context.Context, id int64) ([]generated.CronJob, error) {
+func (a *cronReadTestAPI) ListCronJobs(_ context.Context, id int64) (CronJobsRead, error) {
 	if id != 7 {
-		return nil, fmt.Errorf("unexpected project %d", id)
+		return CronJobsRead{}, fmt.Errorf("unexpected project %d", id)
 	}
 	a.calls++
-	return slices.Clone(a.data.jobs), a.data.jobsErr
+	return CronJobsRead{slices.Clone(a.data.jobs), a.data.passovers}, a.data.jobsErr
 }
 func (a *cronReadTestAPI) ListCronWorkflows(_ context.Context, id int64) ([]generated.CronWorkflow, error) {
 	if id != 7 {
@@ -687,15 +687,4 @@ func (a *cronReadTestAPI) readCronProjectState(_ context.Context, id int64) (cro
 
 func (a *cronReadTestAPI) ListCronRequests(context.Context, int64) ([]db.CronRequest, error) {
 	return a.data.requests, a.data.requestsErr
-}
-func (a *cronReadTestAPI) ShowCronRun(context.Context, int64, string) (db.CronRun, error) {
-	return db.CronRun{}, errors.New("run read unavailable")
-}
-func (a *cronReadTestAPI) RequestCron(context.Context, int64, string, string, string, string) (db.RequestCronOut, error) {
-	return db.RequestCronOut{}, errors.New("request write unavailable")
-}
-
-func (a *cronReadTestAPI) readCronJobs(ctx context.Context, id int64) (cronJobsRead, error) {
-	jobs, err := a.ListCronJobs(ctx, id)
-	return cronJobsRead{jobs, a.data.passovers}, err
 }

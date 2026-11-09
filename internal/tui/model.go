@@ -846,14 +846,8 @@ func projectIDFromMutation(m Model, mut mutationDoneMsg) int64 {
 // open/key. ok=true means the message was handled here.
 func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
-	case cronRuntimeDoneMsg:
-		next, cmd := m.cronRuntimeDone(msg)
-		return next, cmd, true
-	case cronEnabledReadyMsg:
-		next, cmd := m.cronEnabledReady(msg)
-		return next, cmd, true
-	case cronEnabledDoneMsg:
-		next, cmd := m.cronEnabledDone(msg)
+	case cronActionMsg:
+		next, cmd := m.cronActionAnswered(msg)
 		return next, cmd, true
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
@@ -2786,7 +2780,7 @@ func cacheKeysEqual(a, b cacheKey) bool {
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.eventAffectsView(msg) {
-		m = m.invalidateCronEnabled(msg)
+		m = m.invalidateCronAction(msg)
 		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.metadata_updated" || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
 			m.cron.events++
 		}
@@ -3089,7 +3083,7 @@ func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 // makes the SSE id: line on this frame the authoritative resume
 // cursor, so resetRequiredMsg deliberately carries no payload.
 func (m Model) handleResetRequired(_ resetRequiredMsg) (tea.Model, tea.Cmd) {
-	m = m.invalidateCronEnabled(eventReceivedMsg{eventType: "sync.reset_required"})
+	m = m.invalidateCronAction(eventReceivedMsg{eventType: "sync.reset_required"})
 	m.cron.events++
 	m.cache.drop()
 	m.pendingRefetch = false
@@ -3235,28 +3229,19 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.modal = modalNone
 			return m, nil
 		}
-	case modalCronRequest:
-		switch msg.String() {
-		case "y", "Y":
-			return m.confirmCronRuntimeRequest()
-		case "n", "N", "esc":
-			if m.cron.request == nil || !m.cron.request.inflight {
-				m.modal, m.cron.request = modalNone, nil
-			}
-			return m, nil
-		}
-	case modalCronResume:
+	case modalCronAction:
 		switch msg.String() {
 		case "d", "D":
-			if m.cron.enabled == nil || !m.cron.enabled.allowDiscard {
+			if !m.cron.action.allowDiscard {
 				return m, nil
 			}
-			m.cron.enabled.discard = true
-			return m.confirmCronResume()
+			return m.confirmCronAction(true)
 		case "y", "Y":
-			return m.confirmCronResume()
+			return m.confirmCronAction(false)
 		case "n", "N", "esc":
-			m.modal, m.cron.enabled = modalNone, nil
+			if !m.cron.action.inflight {
+				m = m.dropCronAction()
+			}
 			return m, nil
 		}
 	case modalReopenBacklog:
@@ -3715,7 +3700,7 @@ func (m Model) viewContent() string {
 		case viewCredentials:
 			body = renderCredentials(m)
 		default:
-			if m.modal == modalCronResume || m.modal == modalCronRequest {
+			if m.modal == modalCronAction {
 				footer := renderFooterHelpTable(m.activeModalHelpRows(), m.width)
 				bodyHeight := max(0, m.height-lipgloss.Height(footer))
 				body = renderTooNarrow(m.width, bodyHeight)

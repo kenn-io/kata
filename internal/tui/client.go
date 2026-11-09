@@ -75,14 +75,10 @@ type tuiRequestDoer struct {
 }
 
 func (d tuiRequestDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return d.client.sendRequestWithTimeout(ctx, req, d.timeout)
+	return d.client.sendRequest(ctx, req, d.timeout)
 }
 
-func (c *Client) sendRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return c.sendRequestWithTimeout(ctx, req, 0)
-}
-
-func (c *Client) sendRequestWithTimeout(ctx context.Context, req *http.Request, timeout time.Duration) (*http.Response, error) {
+func (c *Client) sendRequest(ctx context.Context, req *http.Request, timeout time.Duration) (*http.Response, error) {
 	hc := c.httpClient()
 	if hc == nil {
 		return nil, fmt.Errorf("%s %s: daemon client is not initialized", req.Method, req.URL.RequestURI())

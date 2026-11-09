@@ -12,7 +12,7 @@ import (
 
 func (m Model) helpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return m.activeModalHelpRows()
+		return modalHelpRows(m.modal)
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -33,7 +33,7 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 
 func (m Model) queueHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return m.activeModalHelpRows()
+		return modalHelpRows(m.modal)
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -43,7 +43,7 @@ func (m Model) queueHelpRows() [][]helplayout.HelpItem {
 
 func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return m.activeModalHelpRows()
+		return modalHelpRows(m.modal)
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -53,7 +53,7 @@ func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 
 func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return m.activeModalHelpRows()
+		return modalHelpRows(m.modal)
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -275,10 +275,6 @@ func modalHelpRows(kind modalKind) [][]helplayout.HelpItem {
 			{Key: "y", Description: "confirm"},
 			{Key: "n/esc", Description: "cancel"},
 		}}
-	case modalCronRequest:
-		return [][]helplayout.HelpItem{{{Key: "y", Description: "send/retry"}, {Key: "n/esc", Description: "cancel"}}}
-	case modalCronResume:
-		return [][]helplayout.HelpItem{{{Key: "y", Description: "resume"}, {Key: "n/esc", Description: "cancel"}}}
 	case modalReopenBacklog:
 		return [][]helplayout.HelpItem{{
 			{Key: "y", Description: "reopen"},
@@ -352,9 +348,14 @@ func convertAndReflowHelpRows(
 }
 
 func (m Model) activeModalHelpRows() [][]helplayout.HelpItem {
-	rows := modalHelpRows(m.modal)
-	if m.modal == modalCronResume && m.cron.enabled != nil && m.cron.enabled.allowDiscard {
+	if m.modal != modalCronAction {
+		return modalHelpRows(m.modal)
+	}
+	switch a := m.cron.action; {
+	case a.request():
+		return [][]helplayout.HelpItem{{{Key: "y", Description: "send/retry"}, {Key: "n/esc", Description: "cancel"}}}
+	case a.allowDiscard:
 		return [][]helplayout.HelpItem{{{Key: "y", Description: "resume"}, {Key: "d", Description: "discard missed"}, {Key: "n/esc", Description: "cancel"}}}
 	}
-	return rows
+	return [][]helplayout.HelpItem{{{Key: "y", Description: "resume"}, {Key: "n/esc", Description: "cancel"}}}
 }

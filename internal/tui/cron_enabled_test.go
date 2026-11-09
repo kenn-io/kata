@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -19,23 +18,26 @@ import (
 
 type enabledCall struct {
 	uid, expected, actor string
-	enabled              bool
+	enabled, discard     bool
 }
 type cronEnabledTestAPI struct {
 	*cronWriteTestAPI
 	parent                cronParent
 	parentErr, errorWrite error
+	passover              *db.CronPassoverState
 	enabledCalls          []enabledCall
 	mutationDeadline      time.Time
-	mutationHasDeadline   bool
 }
 
+func (a *cronEnabledTestAPI) ShowCronJob(context.Context, int64, string) (CronJobRead, error) {
+	return CronJobRead{Job: a.shown, Passover: a.passover}, a.showErr
+}
 func (a *cronEnabledTestAPI) readCronParent(context.Context, int64, string) (cronParent, error) {
 	return a.parent, a.parentErr
 }
-func (a *cronEnabledTestAPI) CronJobEnabled(ctx context.Context, _ int64, id, expected, actor string, enabled bool) (db.CronJob, error) {
-	a.mutationDeadline, a.mutationHasDeadline = ctx.Deadline()
-	a.enabledCalls = append(a.enabledCalls, enabledCall{id, expected, actor, enabled})
+func (a *cronEnabledTestAPI) CronJobEnabled(ctx context.Context, _ int64, id, expected, actor string, enabled, discard bool) (db.CronJob, error) {
+	a.mutationDeadline, _ = ctx.Deadline()
+	a.enabledCalls = append(a.enabledCalls, enabledCall{id, expected, actor, enabled, discard})
 	return a.shown, a.errorWrite
 }
 func enabledFixture(t *testing.T, record db.CronJob) (Model, *cronEnabledTestAPI) {
@@ -71,60 +73,88 @@ func withEnabledBacklog(api *cronEnabledTestAPI) {
 	api.parent = cronParent{open: true, progress: map[string]cron.RecurringProgress{api.shown.UID: {Version: 1, Anchor: anchor, Through: anchor}}}
 }
 
-func TestCronEnabledKeyListAndDetail(t *testing.T) {
-	for _, native := range []bool{false, true} {
-		for _, detail := range []bool{false, true} {
-			t.Run(map[bool]string{false: "list", true: "detail"}[detail], func(t *testing.T) {
-				record := executeRecord(`{"large":9007199254740993}`)
-				if native {
-					record = pausedNative()
-					record.Definition.Enabled = true
+func TestCronPauseWritesSelectedRevision(t *testing.T) {
+	for _, detail := range []bool{false, true} {
+		t.Run(map[bool]string{false: "list", true: "detail"}[detail], func(t *testing.T) {
+			m, api := enabledFixture(t, executeRecord(`{"large":9007199254740993}`))
+			if detail {
+				m = sendKey(m, tea.KeyEnter)
+			}
+			api.showErr = errors.New("unexpected job lookup")
+			m, cmd := press(m, keyRune('p'))
+			m, write := deliverEnabled(t, m, cmd)
+			_, _ = deliverEnabled(t, m, write)
+			require.Equal(t, []enabledCall{{uid: api.shown.UID, expected: api.shown.DefinitionEventUID, actor: "operator"}}, api.enabledCalls, "pause uses the selected revision without a lookup")
+			require.Greater(t, time.Until(api.mutationDeadline), 15*time.Second)
+		})
+	}
+}
+
+// y resumes and d, where the project advertises it, resumes discarding the
+// backlog; both recheck the same fences before writing.
+func TestCronResumeConfirmation(t *testing.T) {
+	for _, key := range []rune{'y', 'd'} {
+		for _, fence := range []string{"none", "revision", "selection", "read-only", "scope", "connection"} {
+			t.Run(string(key)+"/"+fence, func(t *testing.T) {
+				m, api := enabledFixture(t, pausedNative())
+				withEnabledBacklog(api)
+				m.cron.data.project.controls = []string{"resume_discard_missed"}
+				m, lookup := press(m, keyRune('p'))
+				m, cmd := deliverEnabled(t, m, lookup)
+				require.Nil(t, cmd)
+				require.Equal(t, modalCronAction, m.modal)
+				require.Equal(t, 5, m.cron.action.count, "confirm only the selected job's missed children")
+				switch fence {
+				case "revision":
+					m.cron.data.jobs[0].DefinitionEventUID = cronTestIssue
+				case "selection":
+					m.cron.data.jobs = nil
+				case "read-only":
+					m.issueScoped = true
+					m.scopedWritable = false
+				case "scope":
+					m.scopeGen++
+				case "connection":
+					m.connGen++
 				}
-				m, api := enabledFixture(t, record)
-				if native {
-					m.cron.data.passovers = map[string]*db.CronPassoverState{record.UID: {Invalid: true}}
+				m, write := m.routeModalKey(keyRune(key))
+				if fence != "none" {
+					require.Nil(t, write)
+					require.Empty(t, api.enabledCalls)
+					return
 				}
-				if detail {
-					m = sendKey(m, tea.KeyEnter)
-				}
-				api.showErr = errors.New("unexpected job lookup")
-				m, cmd := press(m, keyRune('p'))
-				require.NotNil(t, cmd)
-				reply, ok := cmd().(cronEnabledReadyMsg)
-				require.True(t, ok)
-				require.NoError(t, reply.err, "pause uses the selected revision without a lookup")
-				m, write := m.cronEnabledReady(reply)
 				_, _ = deliverEnabled(t, m, write)
-				require.Equal(t, []enabledCall{{uid: api.shown.UID, expected: api.shown.DefinitionEventUID, actor: "operator", enabled: false}}, api.enabledCalls)
-				require.True(t, api.mutationHasDeadline)
-				require.Greater(t, time.Until(api.mutationDeadline), 15*time.Second)
+				require.Equal(t, []enabledCall{{api.shown.UID, api.shown.DefinitionEventUID, "operator", true, key == 'd'}}, api.enabledCalls)
 			})
 		}
 	}
 }
 
-func TestCronResumeBacklogConfirmation(t *testing.T) {
+// Without the capability the dialog offers no discard and d does nothing; n
+// cancels.
+func TestCronResumeDiscardNeedsCapability(t *testing.T) {
 	m, api := enabledFixture(t, pausedNative())
 	withEnabledBacklog(api)
 	m, lookup := press(m, keyRune('p'))
-	m, cmd := deliverEnabled(t, m, lookup)
-	require.Nil(t, cmd)
-	require.Equal(t, modalCronResume, m.modal)
+	m, _ = deliverEnabled(t, m, lookup)
+	require.NotContains(t, stripANSI(m.overlayInputAndModal(m.viewBody())), "discard")
+	m, write := m.routeModalKey(keyRune('d'))
+	require.Nil(t, write)
+	require.Equal(t, modalCronAction, m.modal)
+	m, _ = m.routeModalKey(keyRune('n'))
+	require.Equal(t, modalNone, m.modal)
+	require.Nil(t, m.cron.action)
 	require.Empty(t, api.enabledCalls)
-	require.Equal(t, 5, m.cron.enabled.count, "confirm only the selected job's missed children")
-	m, write := m.routeModalKey(keyRune('y'))
-	require.NotNil(t, write)
-	_, _ = deliverEnabled(t, m, write)
-	require.Len(t, api.enabledCalls, 1)
-	require.Equal(t, api.shown.DefinitionEventUID, api.enabledCalls[0].expected)
-	require.True(t, api.enabledCalls[0].enabled)
 }
 
 func TestCronResumeLookupFences(t *testing.T) {
-	for _, kind := range []string{"selection", "scope", "connection", "new-definition", "filter", "help", "count-error", "missing-progress", "closed-parent", "read-only"} {
+	for _, kind := range []string{"selection", "scope", "connection", "new-definition", "filter", "help", "count-error", "missing-progress", "closed-parent", "read-only", "invalid-cutoff"} {
 		t.Run(kind, func(t *testing.T) {
 			m, api := enabledFixture(t, pausedNative())
 			withEnabledBacklog(api)
+			if kind == "invalid-cutoff" {
+				api.passover = &db.CronPassoverState{Through: time.Now().UTC().Add(time.Hour), Invalid: true}
+			}
 			m, lookup := press(m, keyRune('p'))
 			require.NotNil(t, lookup)
 			switch kind {
@@ -153,22 +183,33 @@ func TestCronResumeLookupFences(t *testing.T) {
 			m, cmd := deliverEnabled(t, m, lookup)
 			require.Equal(t, modalNone, m.modal)
 			require.Empty(t, api.enabledCalls)
-			if kind == "count-error" {
-				require.NotNil(t, m.toast)
+			switch kind {
+			case "count-error":
 				require.Contains(t, m.toast.text, "count unavailable")
-			}
-			if kind == "missing-progress" {
-				require.NotNil(t, m.toast)
+			case "missing-progress":
 				require.Contains(t, m.toast.text, "cannot count missed runs")
-			}
-			if kind == "closed-parent" {
+			case "invalid-cutoff":
+				require.Nil(t, m.cron.action)
+				require.Equal(t, "Could not change the job: invalid cutoff; repair with --discard-missed", m.toast.text)
+			case "closed-parent":
 				// Resume does not imply delivery while the parent gate is closed.
-				require.NotNil(t, cmd)
 				_, _ = deliverEnabled(t, m, cmd)
 				require.Len(t, api.enabledCalls, 1)
 			}
 		})
 	}
+}
+
+// A valid cutoff later than the stored progress leaves nothing to confirm.
+func TestCronResumeAppliesPassover(t *testing.T) {
+	m, api := enabledFixture(t, pausedNative())
+	withEnabledBacklog(api)
+	api.passover = &db.CronPassoverState{Through: time.Now().UTC().Add(time.Hour)}
+	m, lookup := press(m, keyRune('p'))
+	m, write := deliverEnabled(t, m, lookup)
+	require.Equal(t, modalNone, m.modal)
+	_, _ = deliverEnabled(t, m, write)
+	require.Len(t, api.enabledCalls, 1)
 }
 
 func TestCronEnabledAdmissionAndPending(t *testing.T) {
@@ -192,8 +233,7 @@ func TestCronEnabledAdmissionAndPending(t *testing.T) {
 			m, cmd := press(m, keyRune('p'))
 			if kind == "stale-permissions" {
 				require.NotNil(t, cmd, "stale permissions must schedule capability discovery")
-				require.Nil(t, m.cron.enabled, "permission discovery must not admit a pending enabled action")
-				require.NotNil(t, m.toast)
+				require.Nil(t, m.cron.action, "permission discovery must not admit a pending enabled action")
 				require.Contains(t, m.toast.text, "Checking daemon permissions")
 				require.Empty(t, api.enabledCalls)
 				return
@@ -215,49 +255,17 @@ func TestCronEnabledWriteErrorRefreshes(t *testing.T) {
 	m, _ = deliverEnabled(t, m, write)
 	require.Greater(t, m.cron.events, before)
 	require.Equal(t, modalNone, m.modal)
-	require.NotNil(t, m.toast)
 	require.Contains(t, m.toast.text, "changed")
 }
 
-func TestCronResumeConfirmationFences(t *testing.T) {
-	for _, kind := range []string{"cancel", "revision", "permissions", "scope", "connection"} {
-		t.Run(kind, func(t *testing.T) {
-			m, api := enabledFixture(t, pausedNative())
-			withEnabledBacklog(api)
-			m, lookup := press(m, keyRune('p'))
-			m, _ = deliverEnabled(t, m, lookup)
-			require.NotEqual(t, modalNone, m.modal)
-			switch kind {
-			case "cancel":
-				m, cmd := m.routeModalKey(keyRune('n'))
-				require.Nil(t, cmd)
-				require.Equal(t, modalNone, m.modal)
-				return
-			case "revision":
-				m.cron.data.jobs[0].DefinitionEventUID = cronTestIssue
-			case "permissions":
-				m.issueScoped = true
-				m.scopedWritable = false
-			case "scope":
-				m.scopeGen++
-			case "connection":
-				m.connGen++
-			}
-			_, cmd := m.routeModalKey(keyRune('y'))
-			require.Nil(t, cmd)
-			require.Empty(t, api.enabledCalls)
-		})
-	}
-}
-
-func TestSnapshot_CronResumeBacklog(t *testing.T) {
+func TestSnapshot_CronResumeDialogs(t *testing.T) {
 	defer snapshotInit(t)()
-	for _, width := range []int{60, 80, 120} {
+	for name, allowDiscard := range map[string]bool{"cron-resume-backlog-80": false, "cron-resume-discard-80": true} {
 		m, _ := enabledFixture(t, pausedNative())
-		m.width = width
-		m.modal = modalCronResume
-		m.cron.enabled = &cronEnabledRequest{name: "Weekly report", count: 5}
-		assertGolden(t, fmt.Sprintf("cron-resume-backlog-%d", width), m.View().Content)
+		m.width = 80
+		m.modal = modalCronAction
+		m.cron.action = &cronPending{kind: cronResume, name: "Weekly report", count: 5, allowDiscard: allowDiscard}
+		assertGolden(t, name, m.View().Content)
 	}
 }
 
@@ -282,14 +290,8 @@ func TestCronEditLookupCannotBypassEnabledPending(t *testing.T) {
 // Count 2 protects the singular/plural boundary; the count-5 snapshot cannot
 // detect an accidental <= 2 singular condition.
 func TestCronResumeModalCountGrammar(t *testing.T) {
-	for _, count := range []int{1, 2} {
-		view := stripANSI(renderCronResumeModal(&cronEnabledRequest{name: "Weekly report", count: count}))
-		word := "issues"
-		if count == 1 {
-			word = "issue"
-		}
-		require.Contains(t, view, word+" that came due")
-	}
+	require.Contains(t, stripANSI(renderCronActionModal(&cronPending{name: "Weekly report", count: 1})), "issue that came due")
+	require.Contains(t, stripANSI(renderCronActionModal(&cronPending{name: "Weekly report", count: 2})), "issues that came due")
 }
 
 // Pause and resume share a selection fence, but a pause-specific bypass must
@@ -300,6 +302,6 @@ func TestCronPauseRejectsChangedSelection(t *testing.T) {
 	m.cron.data.jobs[0].UID = cronTestIssue
 	m, write := deliverEnabled(t, m, ready)
 	require.Nil(t, write)
-	require.Nil(t, m.cron.enabled)
+	require.Nil(t, m.cron.action)
 	require.Empty(t, api.enabledCalls)
 }

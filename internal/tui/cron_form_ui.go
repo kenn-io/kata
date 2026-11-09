@@ -45,7 +45,7 @@ func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model,
 	if !m.cronJobsScope() || m.cron.data == nil {
 		return m, nil, false
 	}
-	if m.cron.enabled != nil || m.cron.request != nil {
+	if m.cron.action != nil {
 		return m, nil, true
 	}
 	if next, cmd, blocked := m.blockMutation(false); blocked {
@@ -107,8 +107,8 @@ func (m Model) cronOpenEdit(uid string, seq uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 		defer cancel()
-		rec, err := api.ShowCronJob(ctx, pid, uid)
-		return cronEditOpenedMsg{conn: conn, scope: scope, seq: seq, uid: uid, record: rec, err: err}
+		read, err := api.ShowCronJob(ctx, pid, uid)
+		return cronEditOpenedMsg{conn: conn, scope: scope, seq: seq, uid: uid, record: read.Job, err: err}
 	}
 }
 

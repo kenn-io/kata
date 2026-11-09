@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +28,7 @@ func TestCronClientEnabledTimeoutDoesNotChangeReadTimeout(t *testing.T) {
 		return nil, errors.New("request stopped after capturing its deadline")
 	})}
 	c := NewClient("https://daemon.example", hc)
-	_, err := c.CronJobEnabled(t.Context(), 42, "example-job", "example-event", "operator", false)
+	_, err := c.CronJobEnabled(t.Context(), 42, "example-job", "example-event", "operator", false, false)
 	require.Error(t, err)
 	_, err = c.ListCronJobs(t.Context(), 42)
 	require.Error(t, err)
@@ -93,8 +96,9 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, 200, run.HTTPResponse.StatusCode, string(run.Body))
-	jobs, err := c.ListCronJobs(ctx, project.ID)
+	list, err := c.ListCronJobs(ctx, project.ID)
 	require.NoError(t, err)
+	jobs := list.Jobs
 	require.Len(t, jobs, 1)
 	require.Equal(t, "Daily summary", jobs[0].Name)
 	require.Equal(t, project.ID, jobs[0].ProjectID)
@@ -118,8 +122,9 @@ func TestCronClientWriteGuardsEdits(t *testing.T) {
 	const uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
 	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, api.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: api.CronJobDefinitionFrom(manualExecuteJob(`{}`))}))
-	shown, err := c.ShowCronJob(ctx, project.ID, uid)
+	read, err := c.ShowCronJob(ctx, project.ID, uid)
 	require.NoError(t, err)
+	shown := read.Job
 
 	shown.Definition.Enabled = false
 	err = c.PutCronJob(ctx, project.ID, uid, api.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: api.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB9"})
@@ -131,7 +136,7 @@ func TestCronClientWriteGuardsEdits(t *testing.T) {
 	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, api.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: api.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: shown.DefinitionEventUID}))
 	updated, err := c.ShowCronJob(ctx, project.ID, uid)
 	require.NoError(t, err)
-	require.False(t, updated.Definition.Enabled)
+	require.False(t, updated.Job.Definition.Enabled)
 }
 
 func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {
@@ -141,25 +146,64 @@ func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {
 	require.ErrorContains(t, err, "newer kata")
 }
 
-func TestCronClientEnabledActionsKeepRevisionAndOptions(t *testing.T) {
-	env := testenv.New(t)
-	c := NewClient(env.URL, env.HTTP)
-	project, err := env.DB.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	definition := executeRecord(`{"large":9007199254740993}`).Definition
-	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "operator", Definition: definition})
-	require.NoError(t, err)
-	paused, err := c.CronJobEnabled(t.Context(), project.ID, job.UID, job.DefinitionEventUID, "operator", false)
-	require.NoError(t, err)
-	require.False(t, paused.Definition.Enabled)
-	require.Equal(t, job.Definition.Options, paused.Definition.Options)
-	_, err = c.CronJobEnabled(t.Context(), project.ID, job.UID, job.DefinitionEventUID, "operator", true)
-	require.Error(t, err)
-	resumed, err := c.CronJobEnabled(t.Context(), project.ID, job.UID, paused.DefinitionEventUID, "operator", true)
-	require.NoError(t, err)
-	require.Equal(t, definition, resumed.Definition)
+// Pause, resume, and discard choose their route and body, and the returned
+// job keeps options exact through the envelope that also carries a cutoff.
+func TestCronClientEnabledWire(t *testing.T) {
+	for _, tc := range []struct {
+		name, path       string
+		enabled, discard bool
+	}{
+		{name: "pause", path: "/pause"},
+		{name: "resume", path: "/resume", enabled: true},
+		{name: "discard", path: "/resume", enabled: true, discard: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			record := pausedNative()
+			record.Definition.Options = []byte(`{"large":9007199254740993}`)
+			client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, http.MethodPost, r.Method)
+				require.True(t, strings.HasSuffix(r.URL.Path, "/cron/jobs/"+record.UID+tc.path), r.URL.Path)
+				var body map[string]jsontext.Value
+				require.NoError(t, json.UnmarshalRead(r.Body, &body))
+				if tc.discard {
+					require.Equal(t, "true", string(body["discard_missed"]))
+				} else {
+					require.NotContains(t, body, "discard_missed")
+				}
+				require.JSONEq(t, fmt.Sprintf("%q", record.DefinitionEventUID), string(body["expected_event_uid"]))
+				respondJSON(t, w, map[string]any{"job": api.CronJobFrom(record), "passover": db.CronPassoverState{Through: time.Now().UTC(), Scope: "job"}})
+			})
+			got, err := client.CronJobEnabled(t.Context(), 7, record.UID, record.DefinitionEventUID, "operator", tc.enabled, tc.discard)
+			require.NoError(t, err)
+			require.Equal(t, string(record.Definition.Options), string(got.Definition.Options))
+		})
+	}
 }
 
+func TestCronClientPassoverEnvelope(t *testing.T) {
+	record := pausedNative()
+	record.Definition.Options = []byte(`{"large":9007199254740993}`)
+	cutoff := time.Now().UTC().Truncate(time.Second)
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		state := db.CronPassoverState{Through: cutoff, Scope: "job"}
+		if strings.HasSuffix(r.URL.Path, "/jobs") {
+			respondJSON(t, w, map[string]any{"jobs": []api.CronJob{api.CronJobFrom(record)}, "passovers": map[string]any{record.UID: state}})
+			return
+		}
+		respondJSON(t, w, map[string]any{"job": api.CronJobFrom(record), "passover": state})
+	})
+	one, err := client.ShowCronJob(t.Context(), 7, record.UID)
+	require.NoError(t, err)
+	require.Equal(t, cutoff, one.Passover.Through)
+	require.Equal(t, string(record.Definition.Options), string(one.Job.Definition.Options))
+	list, err := client.ListCronJobs(t.Context(), 7)
+	require.NoError(t, err)
+	require.Len(t, list.Jobs, 1)
+	require.Equal(t, one.Passover, list.Passovers[record.UID])
+}
+
+// Run requests target a job and cancellation requests a run; both are listed
+// with the caller's UID, and the run read returns the live observation.
 func TestCronClientRuntimeRequestsRoundTrip(t *testing.T) {
 	env := testenv.New(t)
 	c := NewClient(env.URL, env.HTTP)
@@ -168,23 +212,6 @@ func TestCronClientRuntimeRequestsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	job, _, err := env.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Summary", Actor: "operator", Definition: executeRecord(`{}`).Definition})
 	require.NoError(t, err)
-	id, err := uid.New()
-	require.NoError(t, err)
-	first, err := c.RequestCron(ctx, project.ID, id, db.CronRequestKindRun, job.UID, "operator")
-	require.NoError(t, err)
-	require.Equal(t, id, first.Request.UID)
-	require.Equal(t, job.DefinitionEventUID, first.Request.DefinitionEventUID)
-	require.NotNil(t, first.Event)
-	replay, err := c.RequestCron(ctx, project.ID, id, db.CronRequestKindRun, job.UID, "operator")
-	require.NoError(t, err)
-	require.True(t, replay.Replayed)
-	require.Equal(t, first.Request, replay.Request)
-	require.Nil(t, replay.Event)
-	requests, err := c.ListCronRequests(ctx, project.ID)
-	require.NoError(t, err)
-	require.Len(t, requests, 1)
-	require.Equal(t, id, requests[0].UID)
-	require.Equal(t, "pending", requests[0].State)
 	runID, err := uid.New()
 	require.NoError(t, err)
 	observed, err := env.DB.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runID, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "running", Summary: cron.Summary{Version: 1}})
@@ -192,11 +219,23 @@ func TestCronClientRuntimeRequestsRoundTrip(t *testing.T) {
 	shown, err := c.ShowCronRun(ctx, project.ID, runID)
 	require.NoError(t, err)
 	require.Equal(t, observed.Run, shown)
-	cancelID, err := uid.New()
+
+	runRequest, err := uid.New()
 	require.NoError(t, err)
-	canceled, err := c.RequestCron(ctx, project.ID, cancelID, db.CronRequestKindCancel, runID, "operator")
+	require.NoError(t, c.RequestCron(ctx, project.ID, runRequest, db.CronRequestKindRun, job.UID, "operator"))
+	cancelRequest, err := uid.New()
 	require.NoError(t, err)
-	require.Equal(t, cancelID, canceled.Request.UID)
-	require.Equal(t, runID, *canceled.Request.RunUID)
-	require.Equal(t, db.CronRequestKindCancel, canceled.Request.Kind)
+	require.NoError(t, c.RequestCron(ctx, project.ID, cancelRequest, db.CronRequestKindCancel, runID, "operator"))
+	requests, err := c.ListCronRequests(ctx, project.ID)
+	require.NoError(t, err)
+	byUID := map[string]db.CronRequest{}
+	for _, request := range requests {
+		byUID[request.UID] = request
+	}
+	require.Len(t, byUID, 2)
+	require.Equal(t, db.CronRequestKindRun, byUID[runRequest].Kind)
+	require.Equal(t, job.UID, byUID[runRequest].JobUID)
+	require.Equal(t, "pending", byUID[runRequest].State)
+	require.Equal(t, db.CronRequestKindCancel, byUID[cancelRequest].Kind)
+	require.Equal(t, runID, *byUID[cancelRequest].RunUID)
 }

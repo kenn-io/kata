@@ -274,8 +274,9 @@ func TestCronClientReportsClosedParent(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.Equal(t, 201, created.HTTPResponse.StatusCode, string(created.Body))
-			jobs, err := c.ListCronJobs(ctx, project.ID)
+			list, err := c.ListCronJobs(ctx, project.ID)
 			require.NoError(t, err)
+			jobs := list.Jobs
 			require.Len(t, jobs, 1)
 
 			state, err := c.readCronParent(ctx, project.ID, parent.Issue.UID)
