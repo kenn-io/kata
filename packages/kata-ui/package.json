@@ -38,10 +38,10 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.1.2",
     "@testing-library/svelte": "5.4.2",
-    "@types/node": "24.10.0",
+    "@types/node": "24.19.2",
     "jsdom": "29.1.1",
-    "svelte": "5.56.3",
-    "svelte-check": "4.6.0",
+    "svelte": "5.57.3",
+    "svelte-check": "4.7.8",
     "typescript": "5.9.3",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
     "vite-plus": "1.4.0",
