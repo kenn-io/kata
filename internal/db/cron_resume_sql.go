@@ -27,23 +27,13 @@ type ResumeCronJobOut struct {
 
 // cronPassoverPatch retains the complete later value. It repairs only the
 // selected scope; a malformed project cutoff requires project-level repair.
-func cronPassoverPatch(project Project, key, actor string, now time.Time, pausedAt *time.Time) (map[string]jsontext.Value, error) {
-	var values map[string]jsontext.Value
-	if project.Metadata != "" {
-		if err := json.Unmarshal([]byte(project.Metadata), &values); err != nil {
-			return nil, err
-		}
+// The patch is empty when a valid retained cutoff already covers now.
+func cronPassoverPatch(values map[string]jsontext.Value, key, actor string, now time.Time, pausedAt *time.Time) (map[string]jsontext.Value, error) {
+	if previous, err := decodeCronPassover(values[key]); err == nil && !previous.Through.Before(now) {
+		return map[string]jsontext.Value{}, nil
 	}
-	previous, err := decodeCronPassover(values[key])
-	if err == nil && !previous.Through.Before(now) {
-		return nil, nil
-	}
-	value := CronPassover{Version: 1, Through: now, By: actor, PausedAt: pausedAt}
-	raw, err := json.Marshal(value)
+	raw, err := json.Marshal(CronPassover{Version: 1, Through: now, By: actor, PausedAt: pausedAt})
 	if err != nil {
-		return nil, err
-	}
-	if _, err = decodeCronPassover(raw); err != nil {
 		return nil, err
 	}
 	return map[string]jsontext.Value{key: raw}, nil
@@ -57,15 +47,11 @@ func (a CronSQL) ResumeJob(ctx context.Context, in ResumeCronJobIn) (ResumeCronJ
 	}
 	err := a.transactProject(ctx, in.ProjectID, func(tx *sql.Tx) error {
 		out = ResumeCronJobOut{}
+		open := a.openCronProject
 		if in.DiscardMissed {
-			if err := LockCronProject(ctx, tx, in.ProjectID); err != nil {
-				return err
-			}
-			if err := requireCronRootTx(ctx, tx, in.ProjectID); err != nil {
-				return err
-			}
+			open = a.openCronRootProject
 		}
-		project, err := a.openCronProject(ctx, tx, in.ProjectID)
+		project, err := open(ctx, tx, in.ProjectID)
 		if err != nil {
 			return err
 		}
@@ -88,28 +74,22 @@ func (a CronSQL) ResumeJob(ctx context.Context, in ResumeCronJobIn) (ResumeCronJ
 		if in.DiscardMissed {
 			// An enabled job's valid cutoff makes a repeated selected-revision action
 			// event-free. Malformed state still has an explicit repair path.
-			var values map[string]jsontext.Value
-			if project.Metadata != "" {
-				if err := json.Unmarshal([]byte(project.Metadata), &values); err != nil {
-					return err
-				}
+			values, err := cronMetadataValues(project.Metadata)
+			if err != nil {
+				return err
 			}
-			_, validErr := decodeCronPassover(values[CronPassoverMetadataPrefix+current.UID])
-			raw, present := values[CronPassoverMetadataPrefix+current.UID]
-			present = present && raw.Kind() != jsontext.KindNull
-			if !current.Definition.Enabled || (present && validErr != nil) {
-				patch, err := cronPassoverPatch(project, CronPassoverMetadataPrefix+current.UID, actor, time.Now().UTC(), nil)
+			key := CronPassoverMetadataPrefix + current.UID
+			if !current.Definition.Enabled || cronPassoverMalformed(values, key) {
+				patch, err := cronPassoverPatch(values, key, actor, time.Now().UTC(), nil)
 				if err != nil {
 					return err
 				}
-				if len(patch) > 0 {
-					policy, err := a.writeCronProjectMetadataTx(ctx, tx, project, actor, patch)
-					if err != nil {
-						return err
-					}
-					if policy.Changed {
-						out.Events = append(out.Events, policy.Event)
-					}
+				policy, err := a.writeCronProjectMetadataTx(ctx, tx, project, actor, patch)
+				if err != nil {
+					return err
+				}
+				if policy.Changed {
+					out.Events = append(out.Events, policy.Event)
 				}
 			}
 		}

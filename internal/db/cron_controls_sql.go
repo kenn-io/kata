@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -22,14 +23,7 @@ func (a CronSQL) SetProjectPause(ctx context.Context, in SetCronProjectPauseIn) 
 		return out, fmt.Errorf("%w: actor required and reason limited to 256 bytes", cron.ErrInvalid)
 	}
 	err := a.transactProject(ctx, in.ProjectID, func(tx *sql.Tx) error {
-		out = PatchProjectMetadataOut{}
-		if err := LockCronProject(ctx, tx, in.ProjectID); err != nil {
-			return err
-		}
-		if err := requireCronRootTx(ctx, tx, in.ProjectID); err != nil {
-			return err
-		}
-		project, err := a.openCronProject(ctx, tx, in.ProjectID)
+		project, err := a.openCronRootProject(ctx, tx, in.ProjectID)
 		if err != nil {
 			return err
 		}
@@ -44,63 +38,77 @@ func (a CronSQL) SetProjectPause(ctx context.Context, in SetCronProjectPauseIn) 
 			return &RevisionConflictError{CurrentRevision: project.Revision}
 		}
 		pause := CronProjectPauseFromMetadata(project.Metadata)
-		if in.DiscardMissed {
-			var pausedAt *time.Time
-			if pause != nil && !pause.Invalid {
-				at := pause.PausedAt.UTC()
-				pausedAt = &at
-			}
+		patch := map[string]jsontext.Value{}
+		switch {
+		case in.DiscardMissed:
 			// An unpaused project is a selected-revision no-op, except that a
 			// malformed present cutoff can be repaired without a retained pause.
-			var values map[string]jsontext.Value
-			if project.Metadata != "" {
-				if err := json.Unmarshal([]byte(project.Metadata), &values); err != nil {
-					return err
-				}
-			}
-			_, validErr := decodeCronPassover(values[CronPassoverMetadataKey])
-			raw, present := values[CronPassoverMetadataKey]
-			present = present && raw.Kind() != jsontext.KindNull
-			if pause == nil && (!present || validErr == nil) {
-				out.Project = project
-				out.NewRevision = project.Revision
-				return nil
-			}
-			patch, err := cronPassoverPatch(project, CronPassoverMetadataKey, actor, time.Now().UTC(), pausedAt)
+			values, err := cronMetadataValues(project.Metadata)
 			if err != nil {
 				return err
 			}
-			if patch == nil {
-				patch = map[string]jsontext.Value{}
+			if pause == nil && !cronPassoverMalformed(values, CronPassoverMetadataKey) {
+				break
+			}
+			var pausedAt *time.Time
+			if pause != nil && !pause.Invalid {
+				pausedAt = new(pause.PausedAt.UTC())
+				// A legacy pause instant outside the cutoff domain cannot be retained.
+				if !validCronPassoverTime(*pausedAt) {
+					return fmt.Errorf("%w: invalid cron passover value", cron.ErrInvalid)
+				}
+			}
+			if patch, err = cronPassoverPatch(values, CronPassoverMetadataKey, actor, time.Now().UTC(), pausedAt); err != nil {
+				return err
 			}
 			if pause != nil {
 				patch[CronProjectPauseMetadataKey] = jsontext.Value("null")
 			}
-			out, err = a.writeCronProjectMetadataTx(ctx, tx, project, actor, patch)
-			return err
-		}
-		if (pause != nil) == in.Paused {
-			out.Project = project
-			out.NewRevision = project.Revision
-			return nil
-		}
-		raw := jsontext.Value("null")
-		if in.Paused {
-			raw, err = json.Marshal(cronPauseValue{PausedBy: actor, PausedAt: time.Now().UTC(), Reason: in.Reason})
+		case in.Paused && pause == nil:
+			patch[CronProjectPauseMetadataKey], err = json.Marshal(cronPauseValue{PausedBy: actor, PausedAt: time.Now().UTC(), Reason: in.Reason})
 			if err != nil {
 				return err
 			}
-			if _, err := decodeCronProjectPause(raw); err != nil {
-				return err
-			}
+		case !in.Paused && pause != nil:
+			patch[CronProjectPauseMetadataKey] = jsontext.Value("null")
 		}
-		out, err = a.writeCronProjectMetadataTx(ctx, tx, project, actor, map[string]jsontext.Value{CronProjectPauseMetadataKey: raw})
+		out, err = a.writeCronProjectMetadataTx(ctx, tx, project, actor, patch)
 		return err
 	})
 	if err != nil {
 		return PatchProjectMetadataOut{}, err
 	}
 	return out, nil
+}
+
+// openCronRootProject locks a live project whose cron policy this instance owns.
+func (a CronSQL) openCronRootProject(ctx context.Context, tx *sql.Tx, projectID int64) (Project, error) {
+	if err := LockCronProject(ctx, tx, projectID); err != nil {
+		return Project{}, err
+	}
+	if err := requireCronRootTx(ctx, tx, projectID); err != nil {
+		return Project{}, err
+	}
+	return a.openCronProject(ctx, tx, projectID)
+}
+
+// cronMetadataValues decodes project metadata. A null value is absent.
+func cronMetadataValues(raw JSONBlob) (map[string]jsontext.Value, error) {
+	values := map[string]jsontext.Value{}
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return nil, err
+		}
+	}
+	maps.DeleteFunc(values, func(_ string, value jsontext.Value) bool { return value.Kind() == jsontext.KindNull })
+	return values, nil
+}
+
+// cronPassoverMalformed reports a present cutoff that discard must repair.
+func cronPassoverMalformed(values map[string]jsontext.Value, key string) bool {
+	raw, present := values[key]
+	_, err := decodeCronPassover(raw)
+	return present && err != nil
 }
 
 func requireCronRootTx(ctx context.Context, tx *sql.Tx, projectID int64) error {

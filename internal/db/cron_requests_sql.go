@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"sort"
@@ -24,21 +23,13 @@ func (a CronSQL) Request(ctx context.Context, in RequestCronIn) (RequestCronOut,
 	if in.Kind != CronRequestKindRun && in.Kind != CronRequestKindCancel {
 		return result, fmt.Errorf("%w: unknown request kind", cron.ErrInvalid)
 	}
+	// The REST schema bounds a supplied TTL to 60..86400 seconds.
 	if in.TTLSeconds == 0 {
 		in.TTLSeconds = CronRequestDefaultTTL
 	}
-	if in.TTLSeconds < 60 || in.TTLSeconds > 86400 {
-		return result, fmt.Errorf("%w: ttl_seconds must be 60..86400", cron.ErrInvalid)
-	}
 	err := a.transactProject(ctx, in.ProjectID, func(tx *sql.Tx) error {
 		result = RequestCronOut{}
-		if err := LockCronProject(ctx, tx, in.ProjectID); err != nil {
-			return err
-		}
-		if err := requireCronRootTx(ctx, tx, in.ProjectID); err != nil {
-			return err
-		}
-		project, err := a.openCronProject(ctx, tx, in.ProjectID)
+		project, err := a.openCronRootProject(ctx, tx, in.ProjectID)
 		if err != nil {
 			return err
 		}
@@ -46,7 +37,7 @@ func (a CronSQL) Request(ctx context.Context, in RequestCronIn) (RequestCronOut,
 		if err != nil {
 			return err
 		}
-		values, err := cronRequestMetadataValues(string(project.Metadata))
+		values, err := cronMetadataValues(project.Metadata)
 		if err != nil {
 			return err
 		}
@@ -57,7 +48,7 @@ func (a CronSQL) Request(ctx context.Context, in RequestCronIn) (RequestCronOut,
 				return fmt.Errorf("%w: malformed retained request", ErrCronRequestConflict)
 			}
 			target := retained.JobUID
-			if retained.Kind == CronRequestKindCancel && retained.RunUID != nil {
+			if retained.RunUID != nil {
 				target = *retained.RunUID
 			}
 			if retained.Kind != in.Kind || target != in.TargetUID || retained.RequestedBy != actor || retained.ExpiresAt.Sub(retained.RequestedAt) != time.Duration(in.TTLSeconds)*time.Second {
@@ -130,10 +121,6 @@ func (a CronSQL) Request(ctx context.Context, in RequestCronIn) (RequestCronOut,
 		if err != nil {
 			return err
 		}
-		// Reuse strict ingest validation on every locally generated value.
-		if _, err := decodeCronRequest(in.UID, raw); err != nil {
-			return err
-		}
 		written, err := a.writeCronProjectMetadataTx(ctx, tx, project, actor, map[string]jsontext.Value{key: raw})
 		if err != nil {
 			return err
@@ -150,9 +137,6 @@ func (a CronSQL) Request(ctx context.Context, in RequestCronIn) (RequestCronOut,
 // Requests derives state from a consistent metadata/evidence snapshot. Replicas
 // may read their local snapshot without acquiring root mutation authority.
 func (a CronSQL) Requests(ctx context.Context, in CronRequestList) ([]CronRequest, error) {
-	if in.State != "" && in.State != "pending" && in.State != "answered" && in.State != "expired" {
-		return nil, fmt.Errorf("%w: unknown request state", cron.ErrInvalid)
-	}
 	if in.Now.IsZero() {
 		in.Now = time.Now().UTC()
 	}
@@ -165,7 +149,7 @@ func (a CronSQL) Requests(ctx context.Context, in CronRequestList) ([]CronReques
 		} else if err != nil {
 			return err
 		}
-		values, err := cronRequestMetadataValues(raw)
+		values, err := cronMetadataValues(JSONBlob(raw))
 		if err != nil {
 			return err
 		}
@@ -200,21 +184,6 @@ func (a CronSQL) Requests(ctx context.Context, in CronRequestList) ([]CronReques
 	return result, nil
 }
 
-func cronRequestMetadataValues(raw string) (map[string]jsontext.Value, error) {
-	values := map[string]jsontext.Value{}
-	if raw != "" {
-		if err := json.Unmarshal([]byte(raw), &values); err != nil {
-			return nil, err
-		}
-	}
-	for key, value := range values {
-		if strings.HasPrefix(key, CronRequestMetadataPrefix) && value.Kind() == jsontext.KindNull {
-			delete(values, key)
-		}
-	}
-	return values, nil
-}
-
 // RequestProjects finds candidates only. SweepRequests rechecks every decision
 // under the project lock so stale candidates never grant deletion authority.
 func (a CronSQL) RequestProjects(ctx context.Context) ([]int64, error) {
@@ -246,24 +215,15 @@ func (a CronSQL) SweepRequests(ctx context.Context, projectID int64, now time.Ti
 	err := a.transactProject(ctx, projectID, func(tx *sql.Tx) error {
 		event = nil
 		malformed = nil
-		if err := LockCronProject(ctx, tx, projectID); errors.Is(err, ErrNotFound) {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		if err := requireCronRootTx(ctx, tx, projectID); errors.Is(err, ErrFederatedSpokeUnsupported) {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		project, err := a.openCronProject(ctx, tx, projectID)
-		if errors.Is(err, ErrNotFound) {
+		// Stale candidates: removed projects and replicas have nothing to sweep.
+		project, err := a.openCronRootProject(ctx, tx, projectID)
+		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrFederatedSpokeUnsupported) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		values, err := cronRequestMetadataValues(string(project.Metadata))
+		values, err := cronMetadataValues(project.Metadata)
 		if err != nil {
 			return err
 		}
