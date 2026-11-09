@@ -1,7 +1,7 @@
 ---
 title: Issue attachments
 description: Attach files through Docbank and view images and videos in Kata.
-last_edited: 2026-11-07
+last_edited: 2026-11-08
 ---
 
 # Issue attachments
@@ -63,7 +63,9 @@ api_key_file = "/path/to/docbank-key"
 folder = "/kata"
 ```
 
-Protect the key file with mode `0600`. Restart after changing the section. Keys resolve on each request, so rotating the key needs no restart. HTTPS is required except on loopback. See the [configuration reference](../reference/configuration.md#docbank-attachments) for credential precedence and environment overrides.
+Make the key file private to the daemon user, following the [key file rules](../reference/configuration.md#credentials-and-batching). Restart after changing the section. Keys resolve on each request, so rotating the key needs no restart. HTTPS is required except on loopback. See the [configuration reference](../reference/configuration.md#docbank-attachments) for credential precedence and environment overrides.
+
+If the daemon cannot read its key, upload, content, and link requests return `docbank_key_unavailable` (daemon API 0.44.0 or newer) without contacting Docbank. Run `kata doctor` on the daemon host, or with a daemon-owner token, to see which key source failed and why.
 
 Without Docbank configured, references still appear in lists, and the web UI shows their names and details. Upload and content requests return `docbank_not_configured`. If a referenced version is absent from the configured Docbank, reads return `attachment_content_missing`.
 

@@ -2028,7 +2028,7 @@ func TestFederationLeaveUsesHubTokenEnv(t *testing.T) {
 			_, err := runCmdOutput(t, env, "federation", "leave",
 				"--project", "spoke-project", "--hub-token-env", "EXAMPLE_HUB_TOKEN", "--yes")
 			if value == "" {
-				require.ErrorContains(t, err, "EXAMPLE_HUB_TOKEN is unset or empty")
+				require.ErrorContains(t, err, "env:EXAMPLE_HUB_TOKEN: environment variable is unset or empty")
 				require.Empty(t, hub.revokedIDs)
 				_, err = env.DB.FederationBindingByProject(t.Context(), project.ID)
 				require.NoError(t, err)

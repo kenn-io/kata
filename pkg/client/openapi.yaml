@@ -1608,6 +1608,20 @@ components:
       required:
         - revoked
       type: object
+    DocbankHealth:
+      properties:
+        credential:
+          description: Docbank API key state, ok or missing; an advisory warning that does not change health.ok.
+          type: string
+        credential_reason:
+          description: Why the key source cannot supply a key.
+          type: string
+        credential_source:
+          description: "Key source that failed: file:<path> or env:<NAME>; never the key value."
+          type: string
+      required:
+        - credential
+      type: object
     DoctorResponseBody:
       properties:
         hooks:
@@ -2947,6 +2961,8 @@ components:
           type: string
         db_path:
           type: string
+        docbank:
+          $ref: "#/components/schemas/DocbankHealth"
         embeddings:
           $ref: "#/components/schemas/EmbeddingsHealth"
         federation_config:
@@ -7309,7 +7325,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.43.0
+  version: 0.44.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

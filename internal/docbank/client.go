@@ -11,6 +11,7 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -27,9 +28,25 @@ type Error struct{ Status int }
 
 func (e *Error) Error() string { return "docbank: HTTP " + strconv.Itoa(e.Status) }
 
+// KeyError reports that the daemon could not resolve its own Docbank key, so
+// no request was sent. Err may name the key source; keep it out of responses.
+type KeyError struct{ Err error }
+
+func (e *KeyError) Error() string {
+	if e.Err == nil {
+		return "docbank: API key is empty"
+	}
+	return e.Err.Error()
+}
+
+func (e *KeyError) Unwrap() error { return e.Err }
+
 // Client resolves its endpoint and key on every request.
 type Client struct {
 	target func(context.Context) (base, key string, hc *http.Client, err error)
+	// key resolves the configured API key; nil for the local Docbank, whose
+	// key comes from its runtime record.
+	key func() (string, error)
 }
 
 // New returns the client for cfg, or nil when Docbank is not configured.
@@ -48,13 +65,35 @@ func New(cfg config.DocbankConfig) *Client {
 // NewClient uses the normalized endpoint and resolves credentials on each request.
 func NewClient(base string, key func() (string, error)) *Client {
 	hc := noRedirectClient(nil)
-	return &Client{target: func(context.Context) (string, string, *http.Client, error) {
-		k, err := key()
-		if err != nil || k == "" {
-			return "", "", nil, &Error{Status: 401}
+	c := &Client{key: key}
+	c.target = func(ctx context.Context) (string, string, *http.Client, error) {
+		k, err := c.resolveKey()
+		if err != nil {
+			slog.WarnContext(ctx, "docbank request not sent", "err", err)
+			return "", "", nil, err
 		}
 		return base, k, hc, nil
-	}}
+	}
+	return c
+}
+
+// CheckKey resolves the configured key as a request would, without contacting
+// Docbank. A client for the local Docbank has no key source of its own, so
+// checked is false.
+func (c *Client) CheckKey() (checked bool, err error) {
+	if c.key == nil {
+		return false, nil
+	}
+	_, err = c.resolveKey()
+	return true, err
+}
+
+func (c *Client) resolveKey() (string, error) {
+	key, err := c.key()
+	if err != nil || key == "" {
+		return "", &KeyError{Err: err}
+	}
+	return key, nil
 }
 
 func noRedirectClient(rt http.RoundTripper) *http.Client {
@@ -70,6 +109,7 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body io.R
 	if err != nil {
 		return nil, &Error{}
 	}
+
 	req.Header = headers.Clone()
 	if req.Header == nil {
 		req.Header = make(http.Header)

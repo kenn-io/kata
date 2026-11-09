@@ -575,9 +575,9 @@ database path still apply.
 Daemon bearer credentials use `[auth].token` > `[auth].token_file` >
 `[auth].token_env` (the name of a variable containing the token). A nonempty
 `KATA_AUTH_TOKEN` overrides the inline token. Token files follow the
-[embedding credential file restrictions](#semantic-search): absolute or `~/`
-paths, regular files owned by the daemon user, no Unix group/world permissions
-or Windows access for other users, and at most 64 KiB. Whitespace and a
+[key file rules](#credentials-and-batching): absolute or `~/` paths, regular
+files owned by the daemon user, no Unix group/world permissions, no inherited
+Windows permissions or access for other users, and at most 64 KiB. Whitespace and a
 trailing newline are trimmed. An unusable
 selected file or named environment variable fails loudly without falling back.
 For example, mount a `0600` secret file owned by the daemon user and set
@@ -1160,10 +1160,14 @@ daemon user's home directory (not `KATA_HOME`). Other relative paths are
 rejected. Symlinks are accepted, and there is no parent-directory ownership or
 permission policy. Kata validates the opened file: it must be regular and
 owned by the daemon's effective user. On Unix, group/world permissions are
-rejected (`chmod 600`). On Windows, the file ACL must restrict access to the
-current user, SYSTEM, and Administrators. Files larger than 64 KiB are refused,
-and reads are bounded to enforce that limit. File contents are trimmed,
-including a trailing newline.
+rejected (`chmod 600`). On Windows, the file must not inherit permissions from
+its folder, and it may grant access only to the current user, SYSTEM, and
+Administrators. A file created in a user profile inherits its folder's
+permissions and is rejected even when they list only those accounts. To fix
+it, run this in PowerShell as the daemon user:
+`icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R"`. Files larger than
+64 KiB are refused, and reads are bounded to enforce that limit.
+File contents are trimmed, including a trailing newline.
 
 Kata resolves the selected credential once at startup and once per
 `kata daemon reload`. Reload wakes the embedding backlog; changes to provider
@@ -1560,14 +1564,16 @@ the shared-vault trust boundary.
 | --- | --- | --- |
 | `url` | empty (disabled) | Docbank base URL; HTTPS or loopback HTTP, without userinfo, query, or fragment. |
 | `api_key` | empty | Inline key, preferred over file and environment sources. |
-| `api_key_file` | empty | Mode-0600 key file, preferred over the environment source. |
+| `api_key_file` | empty | Key file, preferred over the environment source; it must follow the [key file rules](#credentials-and-batching). |
 | `api_key_env` | empty | Name of the environment variable containing the key. |
 | `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
 | `local` | `false` | Use the Docbank running on this machine, found through its runtime record. |
 
-A configured URL requires a key source. A broken selected credential
-source fails explicitly; Kata does not fall back to another source. Keys are
-resolved on each request.
+A configured URL requires a key source. If the selected source cannot supply a
+key, Kata does not fall back to another source and sends nothing to Docbank;
+attachment requests fail with `docbank_key_unavailable` (see
+[attachment endpoints](http-api.md#attachment-endpoints)). `kata doctor`
+(`daemon.docbank`) shows the failing source. Keys are resolved on each request.
 
 A `url` in the file or `KATA_DOCBANK_URL` wins over `local`. With `local`,
 `api_key`, `api_key_file`, and `api_key_env` are unused. `folder` still applies.

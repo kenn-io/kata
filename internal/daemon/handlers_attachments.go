@@ -22,6 +22,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/metadata"
@@ -66,6 +67,9 @@ var docbankContentErrors = map[int]error{
 }
 
 func docbankError(err error, statusErrors map[int]error) error {
+	if _, ok := errors.AsType[*docbank.KeyError](err); ok {
+		return docbankKeyUnavailable(err)
+	}
 	if e, ok := errors.AsType[*docbank.Error](err); ok {
 		if mapped := statusErrors[e.Status]; mapped != nil {
 			return mapped
@@ -75,6 +79,16 @@ func docbankError(err error, statusErrors map[int]error) error {
 		}
 	}
 	return attachmentError(502, "docbank_unreachable")
+}
+
+// docbankKeyUnavailable gives clients the reason but not the key source, which
+// names a daemon-host path or environment variable; health and the daemon log carry it.
+func docbankKeyUnavailable(err error) error {
+	message := "Docbank API key unavailable"
+	if e, ok := errors.AsType[*config.CredentialSourceError](err); ok {
+		message += ": " + e.Reason
+	}
+	return api.NewError(http.StatusServiceUnavailable, "docbank_key_unavailable", message, "Run kata doctor on the daemon host to see which [docbank] key source failed.", nil)
 }
 
 // The ten extension entries work even on hosts without a MIME database.
