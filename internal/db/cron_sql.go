@@ -384,12 +384,13 @@ func (a CronSQL) checkCronPutDependencies(ctx context.Context, tx *sql.Tx, req c
 			definition := req.definition.(cron.JobDefinition)
 			enabledChanged := old.Enabled != definition.Enabled
 			old.Enabled = definition.Enabled
-			if enabledChanged && (!definition.Enabled || cron.IsRecurringIssueJob(definition)) && reflect.DeepEqual(old, definition) {
-				// The locked native parent and progress were checked above.
+			if enabledChanged && reflect.DeepEqual(old, definition) {
 				if cron.IsRecurringIssueJob(definition) {
 					return nil
 				}
-				return checkCronDependenciesForEnabledChange(ctx, tx, req.projectID, definition)
+				if !definition.Enabled {
+					return checkCronDependencies(ctx, tx, req.projectID, definition, true)
+				}
 			}
 		}
 		return CheckCronDependencies(ctx, tx, req.projectID, req.definition.(cron.JobDefinition))

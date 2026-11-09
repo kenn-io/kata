@@ -3013,7 +3013,6 @@ func (d *Store) adoptProjectIntoFederation(
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
-
 	formerProjects, err := db.AdoptionFormerProjects(ctx, tx, project)
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err

@@ -99,7 +99,6 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err != nil {
 			return err
 		}
-
 		formerProjects, err := db.AdoptionFormerProjects(ctx, tx, project)
 		if err != nil {
 			return err

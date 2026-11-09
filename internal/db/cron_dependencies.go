@@ -19,15 +19,8 @@ func CheckCronDependencies(ctx context.Context, q interface {
 	return checkCronDependencies(ctx, q, projectID, definition, false)
 }
 
-// checkCronDependenciesForEnabledChange permits tombstoned dependencies for a
-// caller that already proved the definition is otherwise unchanged, while still
-// requiring each dependency to exist in this project.
-func checkCronDependenciesForEnabledChange(ctx context.Context, q interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, projectID int64, definition cron.JobDefinition) error {
-	return checkCronDependencies(ctx, q, projectID, definition, true)
-}
-
+// checkCronDependencies with allowDeleted still requires each dependency to
+// exist in this project, but permits tombstones for an enabled-only change.
 func checkCronDependencies(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, projectID int64, definition cron.JobDefinition, allowDeleted bool) error {
