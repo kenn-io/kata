@@ -32,6 +32,26 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
 
   const parentRow = page.getByRole('button', { name: /Example parent task/ })
   await parentRow.focus()
+  let releaseSnapshot = () => {}
+  const heldSnapshot = new Promise<void>((resolve) => {
+    releaseSnapshot = resolve
+  })
+  let reportSnapshot = () => {}
+  const snapshotRequested = new Promise<void>((resolve) => {
+    reportSnapshot = resolve
+  })
+  let intercepted = false
+  await page.route('**/api/v1/ui/snapshot?*', async (request) => {
+    if (intercepted || new URL(request.request().url()).searchParams.get('text') !== 'c') {
+      await request.continue()
+      return
+    }
+    intercepted = true
+    const response = await request.fetch()
+    reportSnapshot()
+    await heldSnapshot
+    await request.fulfill({ response }).catch(() => {})
+  })
   await page.clock.install()
   await page.clock.pauseAt(Date.now())
   await parentRow.press('ArrowDown')
@@ -39,13 +59,21 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
 
   const search = page.getByRole('searchbox', { name: 'Search tasks' })
   await search.focus()
-  await page.clock.runFor(50)
-  await expect(page.getByRole('heading', { name: 'Example child task', exact: true })).toBeVisible()
-  await expect(search).toBeFocused()
-  await page.clock.resume()
-  await page.keyboard.type('child')
+  try {
+    await page.keyboard.type('c')
+    await snapshotRequested
+    await page.clock.runFor(50)
+    await expect(
+      page.getByRole('heading', { name: 'Example child task', exact: true }),
+    ).toBeVisible()
+    await expect(search).toBeFocused()
+    await page.clock.resume()
+    await page.keyboard.type('hild')
+  } finally {
+    releaseSnapshot()
+  }
   await expect(search).toHaveValue('child')
-  await expect(page).toHaveURL(/text=child/)
+  await expect(page).toHaveURL(/issue=.*text=child/)
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
   for (const view of ['Inbox', 'Today', 'Delegated', 'Scheduled']) {

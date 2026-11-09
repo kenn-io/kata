@@ -1280,6 +1280,7 @@
       <AppShell
         {searchSettingsPostFetch}
         route={acceptedRoute ?? route}
+        requestedRoute={route !== acceptedRoute ? route : undefined}
         onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={shellSnapshot!}
         loading={authority.loading}

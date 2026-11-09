@@ -62,6 +62,7 @@
 
   interface Props {
     route: AppRoute
+    requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
     loading: boolean
     canMutate: boolean
@@ -133,6 +134,7 @@
 
   let {
     route,
+    requestedRoute = undefined,
     snapshot,
     loading,
     canMutate,
@@ -342,11 +344,11 @@
       (scopedAuthority ? 'This credential cannot create projects.' : pendingReason),
   )
 
-  function navigate(next: AppRoute): void {
+  function navigate(next: AppRoute, preserveKeyboardSelection = false): void {
     const query = (next.filters.text ?? '').trim()
     if (query !== countedQuery) countedQuery = ''
     if (query !== pendingQuery) pendingQuery = ''
-    navigationGeneration += 1
+    if (!preserveKeyboardSelection) navigationGeneration += 1
     void onNavigate(next)
   }
 
@@ -412,25 +414,30 @@
     changed: keyof KataTaskSearchFilters,
   ): void {
     const shareable = shareableFilters(filters, viewName, changed)
+    const currentRoute = requestedRoute ?? route
     if (filters.scope.kind === 'project') {
-      navigate({
-        ...withResolvedView(route),
-        projectUID: filters.scope.project_uid,
-        filters: shareable,
-      })
+      navigate(
+        {
+          ...withResolvedView(currentRoute),
+          projectUID: filters.scope.project_uid,
+          filters: shareable,
+        },
+        changed === 'query',
+      )
       return
     }
-    const next = { ...route, filters: shareable }
+    const next = { ...currentRoute, filters: shareable }
     delete next.projectUID
-    navigate(next)
+    navigate(next, changed === 'query')
   }
 
   function selectIssue(issueUID: string): void {
+    const currentRoute = requestedRoute ?? route
     navigate({
-      ...withResolvedView(route),
+      ...withResolvedView(currentRoute),
       issueUID,
       graph: false,
-      filters: route.filters,
+      filters: currentRoute.filters,
     })
   }
 

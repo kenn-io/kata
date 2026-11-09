@@ -14,7 +14,7 @@
     ariaLabel: string
     onResize: (size: number) => void
     primary: SnippetFunction
-    secondary?: SnippetFunction
+    secondary?: SnippetFunction | undefined
   }
 
   let {
