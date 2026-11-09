@@ -38,7 +38,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
       -ldflags "-s -w -X go.kenn.io/kata/internal/version.Version=${VERSION} -X go.kenn.io/kata/internal/version.Commit=${COMMIT} -X go.kenn.io/kata/internal/version.BuildDate=${BUILD_DATE}" \
       -o /out/kata ./cmd/kata
 
-FROM alpine:3.24.2
+FROM alpine:3.24.3
 
 RUN apk add --no-cache ca-certificates \
     && addgroup -g 1000 kata \
