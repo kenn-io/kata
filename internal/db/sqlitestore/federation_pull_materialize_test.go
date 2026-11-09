@@ -121,9 +121,64 @@ func TestFullPulledMaterializationReadsCurrentRows(t *testing.T) {
 		attempts++
 		_, err := d.ExecContext(ctx, `UPDATE issues SET title='local edit' WHERE id=?`, issue.ID)
 		require.NoError(t, err)
+		edited, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Equal(t, "local edit", edited.Title)
 	}
 	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
 	require.Equal(t, 1, attempts)
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, "work", got.Title)
+}
+
+func TestFullPulledMaterializationIgnoresPushCursorAdvance(t *testing.T) {
+	ctx := t.Context()
+	d, p, issue := incrementalTestStore(t)
+	ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	_, err := d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
+	require.NoError(t, err)
+	attempts := 0
+	d.federationIngestPrepared = func() {
+		attempts++
+		if attempts != 1 {
+			return
+		}
+		_, err := d.ExecContext(ctx, `UPDATE federation_bindings SET push_cursor_event_id=42, last_sync_at='2026-05-23T12:00:00Z', updated_at='2026-05-23T12:00:00Z' WHERE project_id=?`, p.ID)
+		require.NoError(t, err)
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
+	require.Equal(t, 1, attempts)
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, "work", got.Title)
+}
+
+func TestFullPulledMaterializationRetriesCronPayloadRebind(t *testing.T) {
+	ctx := t.Context()
+	d, p, issue := incrementalTestStore(t)
+	other, err := d.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	cronEvent := cronPullWorkflow(t, p, "workflow", 9_000_000_000_001)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, cronEvent})
+	require.NoError(t, err)
+	attempts := 0
+	d.federationIngestPrepared = func() {
+		attempts++
+		if attempts != 1 {
+			return
+		}
+		tx, err := d.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		require.NoError(t, db.MergeCronProjects(ctx, tx, p, other))
+		require.NoError(t, tx.Commit())
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{projectEvent.EventUID}))
+	require.Equal(t, 2, attempts)
+	var projectUID string
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT json_extract(payload,'$.project_uid') FROM events WHERE uid=?`, cronEvent.EventUID).Scan(&projectUID))
+	require.Equal(t, other.UID, projectUID)
 	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, "work", got.Title)
@@ -153,7 +208,10 @@ func TestFullPulledMaterializationValidatesHistory(t *testing.T) {
 					ev := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"new"}`, 9_000_000_000_002+int64(attempts))
 					_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
 				case "rewrite":
-					_, err = d.ExecContext(ctx, `UPDATE events SET payload=? WHERE uid=?`, `{"issue_uid":"`+issue.UID+`","title":"new"}`, issueEvent.EventUID)
+					payload := `{"issue_uid":"` + issue.UID + `","title":"new"}`
+					hash, hashErr := db.EventContentHash(db.EventHashInput{UID: issueEvent.EventUID, OriginInstanceUID: issueEvent.OriginInstanceUID, ProjectUID: p.UID, IssueUID: issueEvent.IssueUID, Type: issueEvent.Type, Actor: issueEvent.Actor, Payload: []byte(payload), HLCPhysicalMS: issueEvent.HLCPhysicalMS, HLCCounter: issueEvent.HLCCounter, CreatedAt: issueEvent.CreatedAt.Format(sqliteTimeFormat)})
+					require.NoError(t, hashErr)
+					_, err = d.ExecContext(ctx, `UPDATE events SET payload=?, content_hash=? WHERE uid=?`, payload, hash, issueEvent.EventUID)
 				}
 				require.NoError(t, err)
 			}
@@ -197,6 +255,30 @@ func TestFullPulledMaterializationRetainsSiblingLink(t *testing.T) {
 	links, err := d.LinksByIssue(ctx, b.ID)
 	require.NoError(t, err)
 	require.Len(t, links, 1)
+}
+
+func TestFullPulledMaterializationReplaysMoveHistory(t *testing.T) {
+	ctx := t.Context()
+	d, p, issue := incrementalTestStore(t)
+	other, err := d.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, other.ID, "tester")
+	require.NoError(t, err)
+	away, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: p.ID, ToProjectID: other.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: away.Issue.ID, FromProjectID: other.ID, ToProjectID: p.ID, IfMatchRev: away.Issue.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{ev})
+	require.NoError(t, err)
+	prepared, err := d.prepareFullPull(ctx, p.ID, []string{ev.EventUID})
+	require.NoError(t, err)
+	require.True(t, prepared.fullReplay)
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{ev.EventUID}))
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, p.ID, got.ProjectID)
+	require.Equal(t, "work", got.Title)
 }
 
 // Group links include endpoints outside the page's touched issue scope.

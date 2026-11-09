@@ -4,7 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/json/v2"
+	"encoding/binary"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -148,7 +149,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	if deferRows && len(issueScope) == 0 {
 		m.fullHistory = true
 		m.linksAffected = linksAffected
-		m.eventStamp, err = federationEventStamp(events)
+		m.eventStamp, err = federationEventStamp(ctx, tx, projectID)
 		if err != nil {
 			return federationMaterialization{}, err
 		}
@@ -214,12 +215,30 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 	return nil
 }
 
-func federationEventStamp(events []db.FoldEvent) ([32]byte, error) {
+// Project merges can rewrite cron payloads without updating their content hash.
+func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64) ([32]byte, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id, content_hash, payload FROM events WHERE project_id=? ORDER BY id`, projectID)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("list federation event stamps: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
 	h := sha256.New()
-	for _, event := range events {
-		if err := json.MarshalWrite(h, event); err != nil {
-			return [32]byte{}, err
+	for rows.Next() {
+		var id int64
+		var contentHash, payload string
+		if err := rows.Scan(&id, &contentHash, &payload); err != nil {
+			return [32]byte{}, fmt.Errorf("scan federation event stamp: %w", err)
 		}
+		var encoded [8]byte
+		binary.BigEndian.PutUint64(encoded[:], uint64(id)) //nolint:gosec // Preserve every bit of the SQLite row ID.
+		_, _ = h.Write(encoded[:])
+		_, _ = h.Write([]byte(contentHash))
+		binary.BigEndian.PutUint64(encoded[:], uint64(len(payload)))
+		_, _ = h.Write(encoded[:])
+		_, _ = h.Write([]byte(payload))
+	}
+	if err := rows.Err(); err != nil {
+		return [32]byte{}, err
 	}
 	return [32]byte(h.Sum(nil)), nil
 }

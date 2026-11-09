@@ -147,15 +147,13 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 	if err != nil {
 		return err
 	}
-	events, err := federationFoldEvents(ctx, tx, projectID)
+	stamp, err := federationEventStamp(ctx, tx, projectID)
 	if err != nil {
 		return err
 	}
-	stamp, err := federationEventStamp(events)
-	if err != nil {
-		return err
-	}
-	if stamp != m.eventStamp || !reflect.DeepEqual(binding, m.binding) {
+	if stamp != m.eventStamp || binding.ProjectID != m.binding.ProjectID || binding.Role != m.binding.Role ||
+		binding.HubURL != m.binding.HubURL || binding.HubProjectUID != m.binding.HubProjectUID ||
+		binding.Enabled != m.binding.Enabled || !reflect.DeepEqual(binding.RelayConfig, m.binding.RelayConfig) {
 		return errStaleFederationPreparation
 	}
 	if m.linksAffected {
