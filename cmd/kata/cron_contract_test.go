@@ -133,76 +133,65 @@ func TestCronRecurringChildrenContract(t *testing.T) {
 	require.Equal(t, "open", parent.Status)
 }
 
-// Contract: pause/resume work without a request file and optional CAS applies
-// to the selected revision. The response remains the ordinary job JSON.
-func TestCronJobEnabledCommands(t *testing.T) {
+// Contract: job and project controls and runtime requests need no request file,
+// attribute the configured actor, and print the daemon's JSON.
+func TestCronControlCommands(t *testing.T) {
 	t.Setenv("KATA_AUTHOR", "operator")
 	env := testenv.New(t)
-	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Inspect"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Result"}, Overlap: "forbid", Catchup: "skip"}
 	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "operator", Definition: definition})
 	require.NoError(t, err)
-	execute := func(action string, extra ...string) (api.CronJobResponse, error) {
+	run := func(out any, args ...string) error {
 		t.Helper()
-		resetFlags(t)
-		root := newRootCmd()
-		var out bytes.Buffer
-		root.SetOut(&out)
-		root.SetErr(&out)
-		root.SetContext(contextWithBaseURL(t.Context(), env.URL))
-		root.SetArgs(append([]string{"--project", "example-project", "--json", "cron", "job", action, job.UID}, extra...))
-		err := root.Execute()
-		var result api.CronJobResponse
+		raw, _, err := executeCronCLI(t, env.URL, nil, args...)
 		if err == nil {
-			require.NoError(t, json.Unmarshal(out.Bytes(), &result.Body))
+			require.NoError(t, json.Unmarshal([]byte(raw), out), raw)
 		}
-		return result, err
+		return err
 	}
-	paused, err := execute("pause")
-	require.NoError(t, err)
+
+	var paused, resumed api.CronJobResponse
+	require.NoError(t, run(&paused.Body, "job", "pause", job.UID))
 	require.False(t, paused.Body.Job.Definition.Enabled)
 	require.Equal(t, "operator", paused.Body.Events[0].Actor)
-	_, err = execute("resume", "--expected-event-uid", job.DefinitionEventUID)
-	require.Error(t, err)
-	resumed, err := execute("resume", "--expected-event-uid", paused.Body.Job.DefinitionEventUID)
-	require.NoError(t, err)
+	require.Error(t, run(&resumed.Body, "job", "resume", job.UID, "--expected-event-uid", job.DefinitionEventUID))
+	require.NoError(t, run(&resumed.Body, "job", "resume", job.UID, "--expected-event-uid", paused.Body.Job.DefinitionEventUID))
 	require.True(t, resumed.Body.Job.Definition.Enabled)
-}
 
-// Project controls are finite JSON commands, accept no request file, and retain
-// the original pause reason on retries.
-func TestCronProjectPauseCommands(t *testing.T) {
-	t.Setenv("KATA_AUTHOR", "operator")
-	env := testenv.New(t)
-	_, err := env.DB.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	for _, step := range []struct {
-		args            []string
-		changed, paused bool
-	}{
-		{[]string{"pause", "--reason", "Maintenance"}, true, true},
-		{[]string{"pause", "--reason", "Retry"}, false, true},
-		{[]string{"resume"}, true, false},
-	} {
-		resetFlags(t)
-		root := newRootCmd()
-		var out, diagnostics bytes.Buffer
-		root.SetOut(&out)
-		root.SetErr(&diagnostics)
-		root.SetContext(contextWithBaseURL(t.Context(), env.URL))
-		root.SetArgs(append([]string{"--project", "example-project", "--json", "cron"}, step.args...))
-		require.NoError(t, root.Execute(), diagnostics.String())
-		var response struct {
-			Pause   *db.CronProjectPause `json:"project_pause"`
-			Changed bool                 `json:"changed"`
-		}
-		require.NoError(t, json.Unmarshal(out.Bytes(), &response))
-		require.Equal(t, step.changed, response.Changed)
-		require.Equal(t, step.paused, response.Pause != nil)
-		if response.Pause != nil {
-			require.Equal(t, "operator", response.Pause.PausedBy)
-			require.Equal(t, "Maintenance", response.Pause.Reason)
-		}
+	var policy struct {
+		Pause   *db.CronProjectPause `json:"project_pause"`
+		Changed bool                 `json:"changed"`
 	}
+	require.NoError(t, run(&policy, "pause", "--reason", "Maintenance"))
+	require.True(t, policy.Changed)
+	require.Equal(t, "operator", policy.Pause.PausedBy)
+	require.Equal(t, "Maintenance", policy.Pause.Reason)
+	require.NoError(t, run(&policy, "resume"))
+	require.True(t, policy.Changed)
+	require.Nil(t, policy.Pause)
+
+	var fresh struct {
+		UID string `json:"uid"`
+	}
+	require.NoError(t, run(&fresh, "new-uid"))
+	var request, cancel db.RequestCronOut
+	require.NoError(t, run(&request, "job", "request-run", job.UID, "--request-uid", fresh.UID, "--ttl", "60"))
+	require.Equal(t, fresh.UID, request.Request.UID)
+	require.Equal(t, job.UID, request.Request.JobUID)
+	require.Equal(t, "operator", request.Request.RequestedBy)
+	require.Equal(t, time.Minute, request.Request.ExpiresAt.Sub(request.Request.RequestedAt))
+	require.ErrorContains(t, run(&request, "job", "request-run", job.UID), "request-uid")
+	runID := cronCLIUID(t)
+	_, err = env.DB.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: runID, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "running", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	require.NoError(t, run(&cancel, "run", "request-cancel", runID, "--request-uid", cronCLIUID(t)))
+	require.Equal(t, "cancel", cancel.Request.Kind)
+	require.Equal(t, runID, *cancel.Request.RunUID)
+	var list struct {
+		Requests []db.CronRequest `json:"requests"`
+	}
+	require.NoError(t, run(&list, "request", "list", "--state", "pending"))
+	require.Len(t, list.Requests, 2)
 }
