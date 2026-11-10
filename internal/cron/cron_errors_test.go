@@ -26,6 +26,14 @@ func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
 			require.ErrorContains(t, err, tc.hint)
 		})
 	}
+	for _, expression := range []string{"@daily 1 2 3 4 5", "TZ=UTC @daily 1 2 3 4 5", "@daily 1 L JAN *"} {
+		t.Run(expression, func(t *testing.T) {
+			_, err := ParseCron(expression)
+			require.ErrorContains(t, err, "unrecognized descriptor")
+			require.NotContains(t, err.Error(), "Kata uses five fields")
+			require.NotContains(t, err.Error(), "L, W, and # syntax is not supported")
+		})
+	}
 }
 
 func TestCronValidationPropagatesDiagnostic(t *testing.T) {
