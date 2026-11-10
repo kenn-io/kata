@@ -50,8 +50,8 @@ func (s *Selection) Normalize() error {
 	}
 	for _, list := range [][]string{s.Jobs, s.Workflows} {
 		for i := range list {
-			id := strings.ToUpper(strings.TrimSpace(list[i]))
-			if !uid.Valid(id) {
+			id, ok := uid.Normalize(list[i])
+			if !ok {
 				return validationError("cron identity must be a 26-character ULID")
 			}
 			list[i] = id

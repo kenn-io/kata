@@ -206,8 +206,8 @@ func cronCLIValidation(message string) error {
 	return &cliError{Message: message, Kind: kindValidation, ExitCode: ExitValidation}
 }
 func normalizedCronCLIUID(value string) (string, error) {
-	value = strings.ToUpper(strings.TrimSpace(value))
-	if !uid.Valid(value) {
+	value, ok := uid.Normalize(value)
+	if !ok {
 		return "", cronCLIValidation("cron identity must be a 26-character ULID")
 	}
 	return value, nil

@@ -70,7 +70,7 @@ func newCronImportCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		project, err := cronBundleProject(cmd.Context(), a)
+		project, err := cronBundleProject(a.ctx, a)
 		if err != nil {
 			return err
 		}
@@ -96,7 +96,7 @@ func newCronCopyCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		source, err := cronBundleProject(cmd.Context(), a)
+		source, err := cronBundleProject(a.ctx, a)
 		if err != nil {
 			return err
 		}

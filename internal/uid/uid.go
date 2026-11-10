@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +61,13 @@ func Length() int { return encodedLen }
 func Valid(s string) bool {
 	_, err := ulid.ParseStrict(s)
 	return err == nil
+}
+
+// Normalize trims surrounding whitespace, uppercases s, and reports whether the
+// result is a valid full ULID.
+func Normalize(s string) (string, bool) {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	return s, Valid(s)
 }
 
 // ValidPrefix reports whether s is a valid leftmost ULID prefix.

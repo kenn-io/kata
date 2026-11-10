@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/jsonutil"
@@ -78,8 +77,8 @@ func cronResult[T any](value *T, err error) (*sdkmcp.CallToolResult, T, error) {
 	return successResult(), *value, nil
 }
 func cronUID(value string) (string, error) {
-	value = strings.ToUpper(strings.TrimSpace(value))
-	if !uid.Valid(value) {
+	value, ok := uid.Normalize(value)
+	if !ok {
 		return "", errors.New("cron UID must be a full ULID")
 	}
 	return value, nil

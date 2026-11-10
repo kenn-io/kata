@@ -14,12 +14,15 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+// CronExportInput selects cron definitions to export from a project.
 type CronExportInput struct {
 	CronProjectInput
 	JobUIDs      []string `json:"job_uids,omitempty"`
 	WorkflowUIDs []string `json:"workflow_uids,omitempty"`
 	All          bool     `json:"all,omitempty"`
 }
+
+// CronImportInput configures independent copies of a cron bundle in a project.
 type CronImportInput struct {
 	CronProjectInput
 	Bundle        jsontext.Value    `json:"bundle"`
