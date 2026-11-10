@@ -526,3 +526,24 @@ func TestFoldSnapshotReplacesOlderLinks(t *testing.T) {
 		assert.False(t, p.Links[FoldLinkKey{FromUID: "in", ToUID: "issue-1", Type: "blocks"}].Present)
 	}
 }
+
+func TestFoldSnapshotLinksWhenPeerMoves(t *testing.T) {
+	for _, moveAt := range []int64{2, 4} {
+		for _, listed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("move=%d/listed=%t", moveAt, listed), func(t *testing.T) {
+				peer := testEvent("issue.created", 1, `{"uid":"peer","title":"peer","status":"open"}`)
+				peer.IssueUID = "peer"
+				move := testEvent("issue.moved", moveAt, `{"issue_uid":"peer","to_project_uid":"project-2","to_short_id":"peer"}`)
+				move.IssueUID = "peer"
+				old := testEvent("issue.linked", 1, `{"type":"related","from_uid":"peer","to_uid":"issue-1"}`)
+				links := ""
+				if listed {
+					links = `,"links":[{"type":"related","to_issue_uid":"peer"}]`
+				}
+				snapshot := testEvent("issue.snapshot", 3, `{"uid":"issue-1","links_scope":"all"`+links+`}`)
+				projection := FoldEvents([]FoldEvent{peer, old, move, snapshot})
+				require.Equal(t, listed, projection.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "peer", Type: "related"}].Present)
+			})
+		}
+	}
+}

@@ -14,7 +14,7 @@ import (
 // A late destination baseline must relocate an issue already held in the source,
 // even when the spoke never received the intervening issue.moved event.
 func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, _ db.Storage, backend Backend) error {
-	for _, lifecycle := range []string{"active replicas", "old baseline upgrade", "pausing the source retains discussion", "source paused before destination joins", "source leave retains discussion", "destination leave preserves standalone issue"} {
+	for _, lifecycle := range []string{"active replicas", "old baseline upgrade", "enrolled destination upgrade", "pausing the source retains discussion", "source paused before destination joins", "source leave retains discussion", "destination leave preserves standalone issue"} {
 		t.Run(lifecycle, func(t *testing.T) {
 			hub := backend.Open(t)
 			t.Cleanup(func() { require.NoError(t, hub.Close()) })
@@ -128,7 +128,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.NoError(t, err)
 	require.True(t, refreshed)
 	var legacyUID, legacyHash string
-	if lifecycle == "old baseline upgrade" {
+	if lifecycle == "old baseline upgrade" || lifecycle == "enrolled destination upgrade" {
 		legacyUID, legacyHash = seedLegacySnapshotBaseline(t, hub, target, baseline.ReplayHorizonEventID)
 	}
 	_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: before.ID, Author: "worker", Body: "source-only newer discussion"})
@@ -145,8 +145,24 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.NoError(t, err)
 	seen, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
-	pull(target, localTarget, baseline.ReplayHorizonEventID-1)
-	if lifecycle == "old baseline upgrade" {
+	afterBaseline := baseline.ReplayHorizonEventID - 1
+	if lifecycle == "enrolled destination upgrade" {
+		events, err := hub.EventsAfter(ctx, db.EventsAfterParams{ProjectID: target.ID, AfterID: afterBaseline, Limit: 100})
+		require.NoError(t, err)
+		var remote []db.RemoteEvent
+		for _, event := range events {
+			remote = append(remote, remoteMoveEvent(event))
+			afterBaseline = event.ID
+		}
+		_, err = spoke.InsertRemoteEvents(ctx, localTarget.ID, remote)
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, localTarget.ID))
+		beforeUpgrade, err := spoke.LinksByIssue(ctx, before.ID)
+		require.NoError(t, err)
+		require.Len(t, beforeUpgrade, 2, "an old partial baseline retains the removed link")
+	}
+	pull(target, localTarget, afterBaseline)
+	if lifecycle == "old baseline upgrade" || lifecycle == "enrolled destination upgrade" {
 		old, err := hub.EventsByUIDs(ctx, target.ID, []string{legacyUID})
 		require.NoError(t, err)
 		require.Equal(t, legacyHash, old[0].ContentHash)
