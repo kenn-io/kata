@@ -113,16 +113,16 @@ func TestInboxWatchOversizedHintsHaveReducedIdentity(t *testing.T) {
 }
 
 func generatedInboxWatchRequest(ht *inboxPropertyT) inboxWatchRequest {
-	request := inboxWatchRequest{
-		IssueUID:   fmt.Sprint(inboxDrawInt64(ht)),
-		ProjectUID: inboxDrawText(ht),
+	return inboxWatchRequest{
+		//nolint:modernize // Keep the embedded request explicit for this fixture.
+		inboxRequest: inboxRequest{Ref: "abcd", Title: "Finding"},
+		IssueUID:     fmt.Sprint(inboxDrawInt64(ht)),
+		ProjectUID:   inboxDrawText(ht),
 		value: notification.Value{
 			From: inboxDrawText(ht), Teammate: inboxDrawText(ht), Message: inboxDrawText(ht),
 			Re: inboxDrawText(ht), Kind: inboxDrawText(ht), Broadcast: inboxDrawBool(ht),
 		},
 	}
-	request.inboxRequest = inboxRequest{Ref: "abcd", Title: "Finding"}
-	return request
 }
 
 func TestInboxWatchStopsOnReadOrOutputFailure(t *testing.T) {

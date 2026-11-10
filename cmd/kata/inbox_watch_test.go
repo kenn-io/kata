@@ -328,9 +328,12 @@ func TestInboxWatchRendersOversizedHints(t *testing.T) {
 			cmd := newInboxCmd()
 			cmd.SetOut(&out)
 			request := inboxWatchRequest{
-				IssueUID: "issue", ProjectUID: "project", Oversized: true,
+				//nolint:modernize // Keep the embedded request explicit for this fixture.
+				inboxRequest: inboxRequest{Ref: "abcd"},
+				IssueUID:     "issue",
+				ProjectUID:   "project",
+				Oversized:    true,
 			}
-			request.inboxRequest = inboxRequest{Ref: "abcd"}
 			err := printInboxWatch(t.Context(), cmd, "reader", []inboxWatchRequest{request}, false)
 			require.NoError(t, err)
 			require.Contains(t, out.String(), "abcd")
