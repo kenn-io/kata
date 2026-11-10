@@ -1833,7 +1833,8 @@ Foreground daemons, including supervised launches, append diagnostics to
 retains fatal Go runtime diagnostics and goroutine dumps. Detached launches use
 the same file without duplicating entries. New log files are owner-only; Kata
 does not rotate them. If the log cannot be opened, the daemon warns on stderr
-and continues with stderr diagnostics.
+and continues with stderr diagnostics. A failed foreground start also appends
+its diagnostics to this file, including when another daemon is already running.
 
 `kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity. Each skipped record is printed on stderr with its PID and reason, for example `skipping daemon pid=54 (another PID namespace)`.
 

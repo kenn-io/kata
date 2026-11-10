@@ -1246,7 +1246,7 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // re-executes itself only after every listener and the runtime record have
 // been released.
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
-	diagnostics, closeLog := startDaemonLogging(ctx)
+	diagnostics, errorFile, closeLog := startDaemonLogging(ctx)
 	// Keep crash output alive during panic unwinding; close only on normal return.
 	restart := newDaemonRestart(diagnostics)
 	err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart, diagnostics)
@@ -1255,8 +1255,8 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, n
 	} else {
 		err = restart.exec(ctx)
 	}
-	if err != nil {
-		fmt.Fprintln(diagnostics, "kata daemon: "+err.Error())
+	if err != nil && errorFile != nil {
+		fmt.Fprintln(errorFile, err)
 	}
 	closeLog()
 	return err

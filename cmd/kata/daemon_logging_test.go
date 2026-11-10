@@ -38,6 +38,11 @@ func TestForegroundDaemonLoggingProcess(t *testing.T) {
 	if mode == "" {
 		return
 	}
+	if mode == "entrypoint" {
+		os.Args = []string{"kata", "daemon", "start", "--foreground", "--listen", "not-a-host-port"}
+		main()
+		return
+	}
 	if mode == "startup-panic" {
 		resolveDaemonExecutable = func() (string, error) { panic("fixture fatal diagnostic") }
 		_ = runDaemonWithListen(t.Context(), "not-a-host-port", false, true)
@@ -48,7 +53,7 @@ func TestForegroundDaemonLoggingProcess(t *testing.T) {
 		return
 	}
 	oldLogger, oldOutput, oldFlags, oldPrefix := slog.Default(), log.Writer(), log.Flags(), log.Prefix()
-	writer, closeLog := startDaemonLogging(t.Context())
+	writer, _, closeLog := startDaemonLogging(t.Context())
 	fmt.Fprintln(writer, "fixture plain diagnostic")
 	slog.Warn("fixture structured diagnostic")
 	log.Print("fixture standard diagnostic")
@@ -61,6 +66,56 @@ func TestForegroundDaemonLoggingProcess(t *testing.T) {
 	require.Equal(t, oldFlags, log.Flags())
 	require.Equal(t, oldPrefix, log.Prefix())
 	fmt.Fprintln(os.Stderr, "fixture stderr after cleanup")
+}
+
+func TestForegroundDaemonFailedStderrRetainsDiagnostics(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("fixture requires /dev/full")
+	}
+	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = full.Close() })
+	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
+	child.Env = append(os.Environ(), "KATA_LOGGING_HELPER=discarded")
+	child.Stderr = full
+	require.NoError(t, child.Run())
+	data, err := os.ReadFile(filepath.Join(ns.DataDir, "daemon.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "fixture plain diagnostic")
+}
+
+func TestForegroundDaemonEntrypointErrorOnce(t *testing.T) {
+	for _, sameFile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("same-file=%t", sameFile), func(t *testing.T) {
+			setupKataEnv(t)
+			t.Setenv("KATA_DSN", "")
+			t.Setenv("PORT", "")
+			ns, err := daemonruntime.NewNamespace()
+			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(ns.DataDir, 0o700))
+			logPath := filepath.Join(ns.DataDir, "daemon.log")
+			stderrPath := filepath.Join(t.TempDir(), "stderr")
+			if sameFile {
+				stderrPath = logPath
+			}
+			stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = stderr.Close() })
+			child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
+			child.Env = append(os.Environ(), "KATA_LOGGING_HELPER=entrypoint")
+			child.Stderr = stderr
+			require.Error(t, child.Run())
+			for _, path := range []string{stderrPath, logPath} {
+				data, err := os.ReadFile(path)
+				require.NoError(t, err)
+				assert.Equal(t, 1, strings.Count(string(data), "invalid --listen value"), "%s: %s", path, data)
+				assert.NotContains(t, string(data), "kata daemon: kata daemon:")
+			}
+		})
+	}
 }
 
 // Logging and crash configuration are process-global, so each mode runs in its
