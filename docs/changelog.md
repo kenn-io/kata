@@ -9,11 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Schedule issues consistently across hosts: API, CLI, MCP, TUI, and web writes
-  now require [portable timezone names](reference/metadata.md) for new issue
-  zones and civil dates. Stored dates and matching create retries keep working;
-  connector ingest retains its existing validation.
-
+- Schedule consistently across hosts with [portable zones](reference/metadata.md)
+  for new issue writes, preserving stored values, recurrences and create retries.
 - Keep search focus and text when keyboard selection opens task detail.
 - Keep local writes responsive while a federation pull updates projects with long histories.
 - See why Docbank attachments fail when the daemon cannot read its own key.

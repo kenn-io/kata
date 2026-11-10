@@ -66,24 +66,18 @@ offsets are rejected because they pin an instant while duplicating the named
 timezone. `deadline_on` accepts the same three forms and uses the same timezone
 rules. It is a deadline only; it does not control `ready` or `next`.
 
-Issue writes through the API, CLI, MCP, TUI, and web UI follow these rules.
-Connector ingest retains its existing validation and is outside this admission
-policy. New or changed issue `timezone` values must be `UTC`, `Etc/UTC`, or an exact,
-case-sensitive geographic name from Kata's bundled Go timezone inventory:
-`Africa/`, `America/`, `Antarctica/`, `Arctic/`, `Asia/`, `Atlantic/`,
-`Australia/`, `Europe/`, `Indian/`, or `Pacific/`. Geographic aliases such as
-`Asia/Calcutta` are accepted. `Local`, fixed offsets, non-geographic aliases
-such as `US/Eastern`, and wrong-case names are rejected.
-
-New or changed civil dates require a portable effective issue timezone or,
-when no issue zone is set, a portable daemon default. Removing an issue zone
-also checks any civil date newly exposed to the default. Recurrence-inherited
-`scheduled_on` zones retain their existing behavior. Set a portable issue
-`timezone` or fix the daemon's [top-level timezone](configuration.md) in
-`config.toml` if a write is rejected. Stored legacy zones and dates keep
-working for reads and replay; unchanged values, unrelated edits, clears, and
-UTC `Z` instants remain accepted. Matching idempotent create retries return
-the original receipt even when the zone would be rejected for a new create.
+New or changed issue `timezone` values from API, CLI, MCP, TUI and web writes
+must be `UTC`, `Etc/UTC`, or exact case-sensitive bundled names under `Africa/`,
+`America/`, `Antarctica/`, `Arctic/`, `Asia/`, `Atlantic/`, `Australia/`,
+`Europe/`, `Indian/` or `Pacific/`, including aliases such as `Asia/Calcutta`.
+`Local`, fixed offsets, non-geographic aliases such as `US/Eastern`, and wrong
+case are rejected. Connector ingest retains its existing validation.
+New civil dates and zone removals exposing civil dates require a portable issue
+zone or daemon default; recurrence-owned `scheduled_on` retains its behavior
+when the issue zone is absent or matches the recurrence zone. Set a portable
+issue `timezone` or change the [daemon default](configuration.md) and restart
+if rejected. Stored values, reads, replay, unchanged echoes, unrelated edits,
+clears, UTC `Z` instants and matching idempotent create retries keep working.
 
 ### Calendar dates on issue rows
 

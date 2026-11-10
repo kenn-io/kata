@@ -603,14 +603,12 @@ scheduled without a client present.
 
 The optional top-level `timezone` is the IANA timezone for date-only and local
 date-time `scheduled_on` and `deadline_on` values without an issue-level
-`timezone`. A recurrence's timezone takes precedence for `scheduled_on` only.
-If no zone is set, Kata uses UTC. RFC 3339 values ending in `Z` are UTC instants
-and do not use this setting.
+`timezone`. If no zone is set, Kata uses UTC. RFC 3339 values ending in `Z`
+are UTC instants and do not use this setting.
 
-New civil scheduling writes using this default require a [portable timezone name](metadata.md).
-If rejected, set `timezone` in `<KATA_HOME>/config.toml` to a portable name such as `UTC`,
-restart the daemon and retry, or set the issue's `timezone`.
-Existing configurations keep loading.
+New civil writes using this default require a [portable timezone](metadata.md).
+If rejected, set a portable issue `timezone`, or change this setting to `UTC`
+and restart the daemon. Existing configurations keep loading.
 
 The web UI's daemon selector lists URL entries and home-less local entries.
 Home-bearing profiles are omitted and cannot alias the serving daemon. A plain

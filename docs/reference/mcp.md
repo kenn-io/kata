@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-10
+last_edited: 2026-11-09
 ---
 
 # Model Context Protocol server
@@ -594,8 +594,7 @@ fields. Accepted `scheduled_on` forms are:
 - `YYYY-MM-DDTHH:MM:SS`
 - UTC RFC 3339, such as `2026-09-01T22:00:00Z`
 
-Civil date and time values use the supplied IANA timezone. New or changed
-civil dates require a [portable effective timezone](metadata.md). Numeric offsets are
+Civil date and time values use the supplied IANA timezone. Numeric offsets are
 rejected. Use `clear_scheduled_on` or `clear_timezone` when editing.
 
 `kata.set_schedule` writes the reserved `scheduled_on` metadata key. Pass

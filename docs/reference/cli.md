@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-10
+last_edited: 2026-11-09
 ---
 
 # CLI reference
@@ -1221,7 +1221,6 @@ time can use `YYYY-MM-DD`, local `YYYY-MM-DDTHH:MM[:SS]`, or an RFC 3339 UTC
 instant that ends in `Z`. A local value uses the issue timezone, then the daemon
 timezone, then UTC. Numeric offsets are not accepted. `--if-match` has the same
 revision behavior as the metadata commands.
-New or changed civil dates require a [portable effective timezone](metadata.md).
 
 Use `scheduled_on` to keep an issue out of `ready` and `next` until a date or
 time. Use `someday=true` to park it with no date. A deadline value is only a
