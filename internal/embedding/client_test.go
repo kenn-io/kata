@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -351,8 +352,17 @@ func TestEmbedTimeoutMessage(t *testing.T) {
 }
 
 func TestEmbedRetryUsesSmallerBatchAfterTimeout(t *testing.T) {
+	testEmbedRetryAfterTimeout(t, Config{Endpoint: func(context.Context) (string, error) { return "http://127.0.0.1:1234/v1", nil }, Model: "m", Dims: 2, BatchSize: 4}, []int{4, 2, 1, 1})
+}
+
+func TestConfiguredEmbedRetryKeepsBatchAfterTimeout(t *testing.T) {
+	testEmbedRetryAfterTimeout(t, Config{BaseURL: "http://127.0.0.1:1234/v1", Model: "m", Dims: 2, BatchSize: 4}, []int{4, 2, 1, 4, 2, 1})
+}
+
+func testEmbedRetryAfterTimeout(t *testing.T, cfg Config, want []int) {
+	t.Helper()
 	var sizes []int
-	c, err := New(Config{BaseURL: "http://127.0.0.1:1234/v1", Model: "m", Dims: 2, BatchSize: 4})
+	c, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,8 +382,8 @@ func TestEmbedRetryUsesSmallerBatchAfterTimeout(t *testing.T) {
 			t.Fatal("expected timeout")
 		}
 	}
-	if !slices.Equal(sizes, []int{4, 2, 1, 2, 1}) {
-		t.Fatalf("request sizes = %v", sizes)
+	if !slices.Equal(sizes, want) {
+		t.Fatalf("request sizes = %v, want %v", sizes, want)
 	}
 }
 
