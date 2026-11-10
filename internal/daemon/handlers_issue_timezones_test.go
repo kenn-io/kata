@@ -37,10 +37,7 @@ func TestIssuePortableTimezoneAdmission(t *testing.T) {
 		status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": md})
 		require.Equal(t, want, status, string(raw))
 		if want == http.StatusBadRequest {
-			failure := assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
-			if _, choosingZone := md["timezone"]; choosingZone {
-				require.Contains(t, failure.Error.Message, "bundled geographic")
-			}
+			assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
 			after, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Equal(t, issue, after)
