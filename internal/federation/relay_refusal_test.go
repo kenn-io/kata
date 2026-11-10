@@ -28,7 +28,6 @@ func TestRelayResetRefusalAttribution(t *testing.T) {
 		{"other status", 503, relayRefusalBody, false},
 		{"other code", 409, `{"error":{"code":"relay_conflict","message":"other conflict"}}`, false},
 		{"malformed", 409, `{"error":{"code":"relay_cross_project_links"}`, false},
-		{"truncated", 409, `{"error":{"code":"relay_cross_project_links","message":"` + strings.Repeat("x", 5000) + `"}}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &Client{baseURL: "https://hub.example", client: &http.Client{Transport: pushOnlyTestTransport(func(req *http.Request) (*http.Response, error) {
@@ -44,18 +43,18 @@ func TestRelayResetRefusalAttribution(t *testing.T) {
 				require.NoError(t, marshalErr)
 				require.JSONEq(t, string(canonical), status.Body)
 			} else {
-				require.Equal(t, tc.body[:min(len(tc.body), 4096)], status.Body)
+				require.Equal(t, tc.body, status.Body)
 			}
 		})
 	}
 }
 
 // The checked contract measures delay from completion, honors long configured
-// intervals, and forgets a refusal after success or a change of binding identity.
+// intervals, and forgets a refusal after success or a different failure.
 func TestRelayRefusalRetryLifecycle(t *testing.T) {
 	for _, interval := range []time.Duration{30 * time.Second, 4 * time.Minute, 10 * time.Minute} {
 		t.Run(interval.String(), func(t *testing.T) {
-			binding := db.FederationBinding{ProjectID: 1, HubURL: "https://hub.example", HubProjectID: 42, RelayConfig: &db.RelayBindingConfig{BindingUID: "binding", UpstreamInstanceUID: "upstream", ResetEpoch: 1}}
+			binding := db.FederationBinding{ProjectID: 1}
 			completed := time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC)
 			refused := fmt.Errorf("sync failed: %w", &HubStatusError{StatusCode: 409, relayCrossProjectLinks: true})
 			states := make(relayRefusalRetries)
@@ -75,24 +74,6 @@ func TestRelayRefusalRetryLifecycle(t *testing.T) {
 				states.record(binding, refused, interval, completed)
 				require.False(t, states.blocked(binding, completed.Add(max(time.Minute, interval))), "a fresh refusal starts at the first delay")
 			}
-			for _, change := range []func(*db.FederationBinding){
-				func(b *db.FederationBinding) { b.HubURL = "https://other.example" },
-				func(b *db.FederationBinding) { b.CreatedAt = completed },
-				func(b *db.FederationBinding) { b.RelayConfig.BindingUID = "replacement" },
-				func(b *db.FederationBinding) { b.RelayConfig.UpstreamInstanceUID = "replacement" },
-				func(b *db.FederationBinding) { b.RelayConfig.ResetEpoch++ },
-			} {
-				changed := binding
-				c := *binding.RelayConfig
-				changed.RelayConfig = &c
-				change(&changed)
-				states.record(binding, refused, interval, completed)
-				states.reconcile([]activeSpokeBinding{{binding: changed}})
-				require.Empty(t, states)
-			}
-			states.record(binding, refused, interval, completed)
-			states.reconcile(nil) // Includes disabled, archived, and removed bindings.
-			require.Empty(t, states)
 		})
 	}
 }

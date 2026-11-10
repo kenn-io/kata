@@ -253,13 +253,3 @@ func NewRelayCrossProjectLinksError(side string) *APIError {
 	return NewError(http.StatusConflict, "relay_cross_project_links",
 		message, "remove cross-project related, blocks, and parent links "+location+" before retrying; ask an operator on that side to remove links to projects you cannot access", nil)
 }
-
-// RelayCrossProjectLinksHubError recognizes the public hub refusal without
-// retaining upstream diagnostics. Callers own response reading and size limits.
-func RelayCrossProjectLinksHubError(status int, body []byte) *APIError {
-	var envelope ErrorEnvelope
-	if status != http.StatusConflict || json.Unmarshal(body, &envelope) != nil || envelope.Error.Code != "relay_cross_project_links" {
-		return nil
-	}
-	return NewRelayCrossProjectLinksError("hub")
-}

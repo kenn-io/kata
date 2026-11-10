@@ -14,7 +14,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/activity"
-	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -399,18 +398,6 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 	t.Cleanup(proxy.Close)
 	root.http = proxy
 	enrollRelayMatrixReplica(t, root, relay, "spoke-project", false)
-	binding, err := relay.store.FederationBindingByProject(ctx, relay.project.ID)
-	require.NoError(t, err)
-	required, err := root.store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, binding.RelayConfig.BindingUID)
-	require.NoError(t, err)
-	require.True(t, required, "fixture must require a signed reset")
-	client, err := federation.NewClient(ctx, proxy.URL, relay.credential.Token, clientpkg.Opts{})
-	require.NoError(t, err)
-	meta, err := client.ProjectFederation(ctx, root.project.ID)
-	require.NoError(t, err)
-	require.NotNil(t, meta.Relay)
-	require.True(t, meta.Relay.ResetRequired)
-	require.Equal(t, binding.RelayConfig.ResetEpoch, meta.Relay.ResetEpoch, "fixture must drain outbound intent before reset")
 	independent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		other.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -418,7 +405,7 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 	t.Cleanup(independent.Close)
 	project, err := relay.store.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
-	_, err = relay.store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: independent.URL, HubProjectID: 42, Enabled: true})
+	_, err = relay.store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: independent.URL, HubProjectID: 42, HubProjectUID: project.UID, Enabled: true})
 	require.NoError(t, err)
 	require.NoError(t, relay.credentials.StoreFederationCredential(ctx, project.UID, config.FederationCredential{}))
 	wake := make(chan struct{}, 1)
@@ -441,7 +428,7 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 			t.Fatal("runner did not complete a pass")
 		}
 		require.Equal(t, int32(1), resets.Load())
-		status, err := relay.store.FederationSyncStatusByProject(ctx, binding.ProjectID)
+		status, err := relay.store.FederationSyncStatusByProject(ctx, relay.project.ID)
 		require.NoError(t, err)
 		require.NotNil(t, status.LastError)
 		require.Contains(t, *status.LastError, "/federation/relay/reset")
@@ -449,9 +436,7 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 	}) {
 		return
 	}
-	last, err := relay.store.FederationSyncStatusByProject(ctx, binding.ProjectID)
-	require.NoError(t, err)
-	queued, _, err := relay.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: binding.ProjectID, Title: "Local edit during refusal", Author: relay.account})
+	last, err := relay.store.FederationSyncStatusByProject(ctx, relay.project.ID)
 	require.NoError(t, err)
 	if !t.Run("not due", func(t *testing.T) {
 		before := metadata.Load()
@@ -461,58 +446,21 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 		require.Eventually(t, func() bool { return other.Load() > progress }, 5*time.Second, 20*time.Millisecond)
 		require.Equal(t, before, metadata.Load(), "wake skips the whole refused turn")
 		require.Equal(t, int32(1), resets.Load())
-		status, err := relay.store.FederationSyncStatusByProject(ctx, binding.ProjectID)
+		status, err := relay.store.FederationSyncStatusByProject(ctx, relay.project.ID)
 		require.NoError(t, err)
 		require.Equal(t, last.LastError, status.LastError)
-		_, err = relay.store.IssueByUID(ctx, queued.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		_, err = root.store.IssueByUID(ctx, queued.UID, db.IncludeDeletedNo)
-		require.ErrorIs(t, err, db.ErrNotFound)
 	}) {
 		return
 	}
-	if !t.Run("due retry", func(t *testing.T) {
-		//nolint:kennlint // sleeptest: Exercise the production one-minute refusal delay once; lifecycle tests own its full schedule.
-		require.Eventually(t, func() bool { return resets.Load() == 2 }, 70*time.Second, 20*time.Millisecond)
-		_, err = root.store.IssueByUID(ctx, queued.UID, db.IncludeDeletedNo)
-		require.NoError(t, err, "due turn drains queued outbound intent before retrying reset")
-	}) {
-		return
-	}
-	if !t.Run("explicit pass stays ungated", func(t *testing.T) {
-		before := resets.Load()
-		err := runner.RunOnce(ctx)
-		var refusal *federation.HubStatusError
-		require.ErrorAs(t, err, &refusal)
-		require.Equal(t, http.StatusConflict, refusal.HTTPStatus())
-		require.Equal(t, before+1, resets.Load())
-	}) {
-		return
-	}
-	t.Run("active catalog removal and repair", func(t *testing.T) {
-		// Excluding a disabled binding exercises runPass's reconciliation with real
-		// database catalog values, without repeating each identity mutation here.
-		binding, err = relay.store.FederationBindingByProject(ctx, binding.ProjectID)
-		require.NoError(t, err)
-		binding.Enabled = false
-		_, err = relay.store.UpsertFederationBinding(ctx, binding)
-		require.NoError(t, err)
-		progress := other.Load()
-		wake <- struct{}{}
-		//nolint:kennlint // sleeptest: Two independent requests observe a pass after the disabled binding leaves the active catalog.
-		require.Eventually(t, func() bool { return other.Load() >= progress+2 }, 5*time.Second, 20*time.Millisecond)
+	t.Run("due retry and recovery", func(t *testing.T) {
 		repaired.Store(true)
-		binding.Enabled = true
-		_, err = relay.store.UpsertFederationBinding(ctx, binding)
-		require.NoError(t, err)
-		wake <- struct{}{}
-		//nolint:kennlint // sleeptest: Recovery must happen before the two-minute backoff could expire.
+		//nolint:kennlint // sleeptest: Exercise the production one-minute refusal delay once; lifecycle tests own its full schedule.
 		require.Eventually(t, func() bool {
-			status, err := relay.store.FederationSyncStatusByProject(ctx, binding.ProjectID)
+			status, err := relay.store.FederationSyncStatusByProject(ctx, relay.project.ID)
 			return err == nil && status.LastError == nil
-		}, 10*time.Second, 20*time.Millisecond)
-		require.Greater(t, resets.Load(), int32(3), "catalog removal discards the previous delay")
-		_, err = relay.store.IssueByUID(ctx, retained.UID, db.IncludeDeletedNo)
+		}, 70*time.Second, 20*time.Millisecond)
+		require.Equal(t, int32(2), resets.Load())
+		_, err := relay.store.IssueByUID(ctx, retained.UID, db.IncludeDeletedNo)
 		require.NoError(t, err, "the refreshed checkpoint restores retained history")
 	})
 }

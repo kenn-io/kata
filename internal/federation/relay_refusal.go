@@ -12,40 +12,8 @@ import (
 type relayRefusalRetries map[int64]relayRefusalRetry
 
 type relayRefusalRetry struct {
-	identity relayRefusalIdentity
-	delay    time.Duration
-	due      time.Time
-}
-
-type relayRefusalIdentity struct {
-	hubURL, projectUID      string
-	hubProjectID            int64
-	createdAt               time.Time
-	bindingUID, upstreamUID string
-	resetEpoch              int64
-}
-
-func refusalIdentity(b db.FederationBinding) relayRefusalIdentity {
-	identity := relayRefusalIdentity{hubURL: b.HubURL, projectUID: b.HubProjectUID, hubProjectID: b.HubProjectID, createdAt: b.CreatedAt}
-	if c := b.RelayConfig; c != nil {
-		identity.bindingUID, identity.upstreamUID, identity.resetEpoch = c.BindingUID, c.UpstreamInstanceUID, c.ResetEpoch
-	}
-	return identity
-}
-
-func (states relayRefusalRetries) reconcile(spokes []activeSpokeBinding) {
-	for id, state := range states {
-		found := false
-		for _, spoke := range spokes {
-			if spoke.binding.ProjectID == id && refusalIdentity(spoke.binding) == state.identity {
-				found = true
-				break
-			}
-		}
-		if !found {
-			delete(states, id)
-		}
-	}
+	delay time.Duration
+	due   time.Time
 }
 
 func (states relayRefusalRetries) blocked(binding db.FederationBinding, now time.Time) bool {
@@ -62,11 +30,10 @@ func (states relayRefusalRetries) record(binding db.FederationBinding, err error
 		return
 	}
 	delay := max(time.Minute, interval)
-	identity := refusalIdentity(binding)
 	if previous, ok := states[binding.ProjectID]; ok {
 		delay = max(interval, doubledDelay(previous.delay))
 	}
-	states[binding.ProjectID] = relayRefusalRetry{identity: identity, delay: delay, due: completed.Add(delay)}
+	states[binding.ProjectID] = relayRefusalRetry{delay: delay, due: completed.Add(delay)}
 }
 
 func (r *Runner) effectiveInterval() time.Duration {

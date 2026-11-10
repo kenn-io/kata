@@ -1103,7 +1103,7 @@ type activeSpokeBinding struct {
 // RunOnce executes one pull pass. With no spoke bindings it returns without
 // reading credentials or making network requests.
 func (r *Runner) RunOnce(ctx context.Context) error {
-	_, _, _, err := r.runOnce(ctx, nil, nil)
+	_, _, _, err := r.runOnce(ctx, nil, nil, nil)
 	return err
 }
 
@@ -1111,14 +1111,6 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 // when it is non-empty. It reports the projects whose relay turn stopped at
 // its budget with work remaining.
 func (r *Runner) runOnce(
-	ctx context.Context,
-	validateLease func(context.Context) error,
-	only map[int64]bool,
-) (retry <-chan struct{}, denied bool, remaining map[int64]bool, err error) {
-	return r.runPass(ctx, validateLease, only, nil)
-}
-
-func (r *Runner) runPass(
 	ctx context.Context,
 	validateLease func(context.Context) error,
 	only map[int64]bool,
@@ -1159,7 +1151,6 @@ func (r *Runner) runPass(
 	if err != nil {
 		return nil, false, nil, err
 	}
-	refusals.reconcile(spokes)
 	if len(spokes) == 0 {
 		return nil, false, nil, nil
 	}
@@ -1589,7 +1580,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 				return err
 			}
 		}
-		retry, denied, remaining, err := r.runPass(ctx, validateLease, pending, refusals)
+		retry, denied, remaining, err := r.runOnce(ctx, validateLease, pending, refusals)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
