@@ -46,7 +46,11 @@ func TestRecurringDefinition(t *testing.T) {
 			var j JobDefinition
 			require.NoError(t, json.Unmarshal([]byte(recurringJSON), &j))
 			change(&j)
-			require.ErrorIs(t, j.Validate(), ErrInvalid)
+			err := j.Validate()
+			require.ErrorIs(t, err, ErrInvalid)
+			if name == "every descriptor" {
+				require.EqualError(t, err, "invalid cron document: use an interval trigger instead of @every")
+			}
 		})
 	}
 	job.Issue.Title = strings.Repeat("é", 991)
@@ -67,12 +71,6 @@ func TestRecurringDefinition(t *testing.T) {
 	require.NoError(t, err)
 	legacy.Issue.ParentUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	require.ErrorIs(t, legacy.Validate(), ErrInvalid, "parent binding is native only")
-}
-
-func TestRecurringEveryPolicyMessage(t *testing.T) {
-	native := nativeJob(t)
-	native.Trigger = Trigger{Kind: "cron", Cron: "@every 90m"}
-	require.EqualError(t, native.Validate(), "invalid cron document: use an interval trigger instead of @every")
 }
 
 func at(t testing.TB, s string) time.Time {

@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/netresearch/go-cron"
@@ -10,7 +11,10 @@ import (
 func (t Trigger) Validate() error {
 	if t.Timezone != "" {
 		if _, err := time.LoadLocation(t.Timezone); err != nil {
-			return explainTimezone(t.Timezone, err)
+			// The dependency checks name characters before LoadLocation: syntax
+			// failures are invalid names, while lookup failures are unknown zones.
+			_, probeErr := cronParser.Parse("TZ=" + strconv.Quote(t.Timezone) + " @daily")
+			return explainTimezone(t.Timezone, probeErr)
 		}
 	}
 	if t.LeadSeconds < 0 {

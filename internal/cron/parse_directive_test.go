@@ -9,16 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCronDiagnosticOutputSafety(t *testing.T) {
-	for _, input := range []string{"x\x00y 9 * * *", "\x1b[31m 9 * * *", "x\x7fy 9 * * *", string([]byte{0xff}) + " 9 * * *", "bad\x00zone", strings.Repeat("\x00", 1000), strings.Repeat("x", 1000) + " 9 * * *", strings.Repeat("é", 1000)} {
-		t.Run(input, func(t *testing.T) {
-			_, err := ParseCron(input)
-			requireSafeCronError(t, err)
-			requireSafeCronError(t, (Trigger{Kind: "cron", Cron: "@daily", Timezone: input}).Validate())
-		})
-	}
-}
-
 func TestPlanRecurringRejectsDirectiveWithoutSchedule(t *testing.T) {
 	j := nativeJob(t)
 	j.Trigger = Trigger{Kind: "cron", Cron: "TZ=UTC"}
@@ -55,9 +45,35 @@ func TestCronCompatibilityTimezoneDirectives(t *testing.T) {
 	}
 }
 
-func FuzzParseCronDirectiveDoesNotPanic(f *testing.F) {
-	for _, expression := range []string{"TZ=UTC", "CRON_TZ=UTC", "TZ=UTC\t0 9 * * *", "TZ=UTC @daily"} {
-		f.Add(expression)
+// Every actual rejection has one safe diagnostic, irrespective of accepted grammar.
+func FuzzCronErrorSafety(f *testing.F) {
+	for _, input := range []string{
+		"TZ=UTC", "CRON_TZ=UTC", "TZ=UTC\t0 9 * * *", "TZ=UTC @daily",
+		"x\x00y 9 * * *", "\x1b[31m 9 * * *", "x\x7fy 9 * * *", string([]byte{0xff}) + " 9 * * *",
+		"bad\x00zone", strings.Repeat("\x00", 1000), strings.Repeat("x", 1000) + " 9 * * *", strings.Repeat("é", 1000),
+		"@invented", "@daily ", "@every 2x", " @daily", "0 9 * * 5#", "0 9 L-3 * *", "0 9 15W * *", "H * * * *",
+		"60 * * * *", "* */24 * * *", "0 9 * JAN-XYZ *", "0 9 * * MON/0", "0 9 * * MON,,FRI", "0 9 * * -1",
+		`TZ="bad!" @daily`, "CRON_TZ=bad! @daily", `TZ="UTC @daily`, "TZ=UTC\u00a0@daily", "TZ=UTC\t @daily",
+		"CRON_TZ=UTC\n@daily", "TZ=UTC TZ=UTC @daily", "0 9 * * * TZ=UTC", "../UTC", "/abs", `"UTC"`, "'UTC'",
+	} {
+		f.Add(input)
 	}
-	f.Fuzz(func(_ *testing.T, expression string) { _, _ = ParseCron(expression) })
+	for _, b := range []byte("\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f") {
+		f.Add("x" + string(b) + "y 9 * * *")
+		f.Add(strings.Repeat(string(b), 1000))
+	}
+	for _, value := range []string{"\xff", "\xc3", "\xc0\xaf", "\xed\xa0\x80", `"`, `\`, "\x00", "é", "界"} {
+		for _, n := range []int{37, 40, 327, 330, 1023, 1024, 1025} {
+			f.Add(strings.Repeat(value, n) + " 9 * * *")
+			f.Add("TZ=" + strings.Repeat("x", n) + value + " @daily")
+		}
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		if _, err := ParseCron(input); err != nil {
+			requireSafeCronError(t, err)
+		}
+		if err := (Trigger{Kind: "cron", Cron: "@daily", Timezone: input}).Validate(); err != nil {
+			requireSafeCronError(t, err)
+		}
+	})
 }

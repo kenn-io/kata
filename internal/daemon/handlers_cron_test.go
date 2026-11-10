@@ -298,5 +298,7 @@ func TestCronJobCreateExplainsUnsupportedCron(t *testing.T) {
 	var response api.ErrorEnvelope
 	require.NoError(t, json.Unmarshal(raw, &response))
 	require.Equal(t, "validation", response.Error.Code)
-	require.Contains(t, response.Error.Message, `day of month "L"`)
+	_, err := cron.ParseCron(definition.Trigger.Cron)
+	require.Error(t, err)
+	require.Equal(t, err.Error(), response.Error.Message)
 }

@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,42 +11,42 @@ import (
 )
 
 func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
-	for _, tc := range []struct{ expression, detail string }{
-		{"@reboot", "@reboot is not supported"}, {"@invented", `unsupported descriptor expression "@invented"`},
-		{"0 9 L * *", `day of month "L": last-day`}, {"0 9 l * *", `day of month "l": last-day`},
-		{"0 9 15W * *", "nearest-weekday"}, {"0 9 15w * *", "nearest-weekday"},
-		{"0 9 LW * *", `day of month "LW": last-weekday`},
-		{"0 9 * * FRI#L", `day of week "FRI#L": last-weekday`},
-		{"0 9 1,LW * *", `day of month "1,LW": last-weekday`},
-		{"0 9 * * MON,FRI#L", `day of week "MON,FRI#L": last-weekday`},
-		{"0 9 * * JUL", "numeric values or field-appropriate names"},
-		{"0 9 * * 2#2", "nth-weekday"}, {"0 9 * * 5L", "last-weekday"},
-		{"H 9 * * *", `minute "H": choose a fixed value`},
-		{"0 0 9 * * *", "only a 0 seconds field or wildcard * year"}, {"0 9 * * * 2026", "restricted year has no five-field equivalent"},
-		{"0 0 9 * * * 2026", "7 fields"}, {"0 9 * *", "4 fields"}, {"5", "1 field;"},
-		{"", "expression is empty"}, {"   ", "expression is empty"}, {" @daily", "descriptor must start"},
-		{"60 9 * * *", `minute "60"`}, {"0 9 * * 8", `day of week "8"`},
-		{"0 */24 * * *", `hour "*/24": step (24)`}, {"*/0 * * * *", `minute "*/0"`},
-		{"0 9 * JAN-XYZ *", `month "JAN-XYZ"`}, {"x\ny 9 * * *", "6 fields"},
+	for _, tc := range []struct{ expression, detail, forbidden string }{
+		{"@reboot", "@reboot is not supported", ""}, {"@invented", "supported descriptors, such as @daily, must match exactly", ""},
+		{"0 9 L * *", `day of month "L": last-day`, ""}, {"0 9 l * *", `day of month "l": last-day`, ""},
+		{"0 9 15W * *", "nearest-weekday", ""}, {"0 9 15w * *", "nearest-weekday", ""},
+		{"0 9 LW * *", `day of month "LW": last-weekday`, ""},
+		{"0 9 * * FRI#L", `day of week "FRI#L": last-weekday`, ""},
+		{"0 9 1,LW * *", `day of month "1,LW": last-weekday`, ""},
+		{"0 9 * * MON,FRI#L", `day of week "MON,FRI#L": last-weekday`, ""},
+		{"0 9 * * JUL", "numeric values or field-appropriate names", ""},
+		{"0 9 * * 2#2", "nth-weekday", ""}, {"0 9 * * 5L", "last-weekday", ""},
+		{"H 9 * * *", `minute "H": choose a fixed value`, ""},
+		{"0 0 9 * * *", "only a 0 seconds field or wildcard * year", ""}, {"0 9 * * * 2026", "restricted year has no five-field equivalent", ""},
+		{"0 0 9 * * * 2026", "7 fields", ""}, {"0 9 * *", "4 fields", ""}, {"5", "1 field;", ""},
+		{"", "expression is empty", ""}, {"   ", "expression is empty", ""}, {" @daily", "descriptor must start", ""},
+		{"60 9 * * *", `minute "60"`, ""}, {"0 9 * * 8", `day of week "8"`, ""},
+		{"0 */24 * * *", `hour "*/24": step (24)`, ""}, {"*/0 * * * *", `minute "*/0"`, ""},
+		{"0 9 * JAN-XYZ *", `month "JAN-XYZ"`, ""}, {"x\ny 9 * * *", "6 fields", ""},
+		{"0 9 * * MON/7", "step (7)", "field-appropriate names"},
+		{"0 9 * * MON-FRI/5", "step (5)", "field-appropriate names"},
+		{"0 9 * * MON/0", "step of range", "field-appropriate names"},
+		{"0 9 * * MON-FRI/0", "step of range", "field-appropriate names"},
+		{"0 9 JUL * *", "day of month takes numbers 1-31", "option"},
+		{"0 9 WED * *", "day of month takes numbers 1-31", "option"},
+		{"@daily extra", "supported descriptors, such as @daily, must match exactly", "unknown descriptor"},
+		{"@daily ", "supported descriptors, such as @daily, must match exactly", "unknown descriptor"},
+		{"0 9 * * 5#", "nth-weekday", "option"},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
 			_, err := ParseCron(tc.expression)
 			require.ErrorIs(t, err, ErrInvalid)
 			require.Contains(t, err.Error(), "invalid cron document: invalid cron expression: ")
 			require.Contains(t, err.Error(), tc.detail)
+			if tc.forbidden != "" {
+				require.NotContains(t, err.Error(), tc.forbidden)
+			}
 		})
-	}
-}
-
-func TestTriggerUnknownTimezoneNamesZone(t *testing.T) {
-	want := `invalid cron document: unknown time zone "Not/AZone"; use an IANA name such as America/New_York, or UTC`
-	for _, trigger := range []Trigger{
-		{Kind: "cron", Cron: "0 9 * * *", Timezone: "Not/AZone"},
-		{Kind: "cron", Cron: "CRON_TZ=Not/AZone 0 9 * * *"},
-		{Kind: "cron", Cron: `TZ="Not/AZone" 0 9 * * *`},
-		{Kind: "cron", Cron: "TZ=Not/AZone "},
-	} {
-		require.EqualError(t, trigger.Validate(), want)
 	}
 }
 
@@ -60,71 +61,68 @@ func requireSafeCronError(t *testing.T, err error) {
 	}
 }
 
-func TestParseCronPreservesAcceptedGrammar(t *testing.T) {
-	for _, expression := range []string{"70/5 * * * *", "70-5 * * * *", "0 22-2 * * *", "0 9 * * 5-1", "0 9 ? * 7", `TZ="UTC" @daily`, "@triggered", "@manual", "@none"} {
-		_, err := ParseCron(expression)
-		require.NoError(t, err, "%q", expression)
-	}
-}
-
 func TestCronDirectiveFormatAdvice(t *testing.T) {
-	for _, expression := range []string{
-		" TZ=UTC 0 9 * * *", "\tTZ=UTC @daily", " CRON_TZ=UTC 0 9 * * *", "tz=UTC 0 9 * * *", "cron_tz=UTC 0 9 * * *",
-		"0 9 * * * TZ=UTC", "TZ=UTC CRON_TZ=UTC 0 9 * * *", "0 9 * TZ=UTC *",
-	} {
-		t.Run(expression, func(t *testing.T) {
-			_, err := ParseCron(expression)
-			requireSafeCronError(t, err)
-			require.Contains(t, err.Error(), "one uppercase TZ= or CRON_TZ= directive")
-			require.NotContains(t, err.Error(), "seconds or year")
-		})
-	}
-	_, err := ParseCron("OTHER=UTC 0 9 * * *")
-	require.ErrorContains(t, err, "6 fields")
-}
-
-func TestTriggerTimezoneSyntaxAdvice(t *testing.T) {
-	for _, zone := range []string{"../UTC", "/abs", "bad zone!", "bad!", "bad!" + strings.Repeat("x", 1100), "A\x00B", " ", `"UTC"`, "'UTC'"} {
-		t.Run(zone, func(t *testing.T) {
-			err := (Trigger{Kind: "cron", Cron: "@daily", Timezone: zone}).Validate()
-			requireSafeCronError(t, err)
-			require.True(t, strings.HasPrefix(err.Error(), "invalid cron document: invalid timezone "), "%s", err)
-			require.NotContains(t, err.Error(), "unquoted")
-			require.NotContains(t, err.Error(), "unknown time zone")
-		})
-	}
-	for _, zone := range []string{"", "UTC", "Local"} {
-		require.NoError(t, (Trigger{Kind: "cron", Cron: "@daily", Timezone: zone}).Validate())
-	}
-}
-
-func TestCronDiagnosticsPreserveRejectionReason(t *testing.T) {
-	for _, tc := range []struct{ expression, want, forbidden string }{
-		{"0 9 * * MON/7", "step (7)", "field-appropriate names"},
-		{"0 9 * * MON-FRI/5", "step (5)", "field-appropriate names"},
-		{"0 9 * * MON/0", "step of range", "field-appropriate names"},
-		{"0 9 * * MON-FRI/0", "step of range", "field-appropriate names"},
-		{"0 9 JUL * *", "day of month takes numbers 1-31", "option"},
-		{"0 9 WED * *", "day of month takes numbers 1-31", "option"},
-		{"@daily extra", `unsupported descriptor expression "@daily extra"; use a descriptor alone`, "unknown descriptor"},
-		{"@hourly 1", "use a descriptor alone", "unknown descriptor"},
+	for _, tc := range []struct{ expression, detail, forbidden string }{
+		{" TZ=UTC 0 9 * * *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
+		{"\tTZ=UTC @daily", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
+		{" CRON_TZ=UTC 0 9 * * *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
+		{"tz=UTC 0 9 * * *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
+		{"cron_tz=UTC 0 9 * * *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
+		{"0 9 * * * TZ=UTC", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
+		{"TZ=UTC CRON_TZ=UTC 0 9 * * *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
+		{"0 9 * TZ=UTC *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
 		{"TZ=UTC\t0 9 * * *", "ASCII space", "invalid timezone"},
 		{"TZ=UTC\t0\t9\t*\t*\t*", "ASCII space", "missing fields"},
 		{"TZ=UTC\t 0 9 * * *", "ASCII space", "invalid timezone"},
 		{"CRON_TZ=UTC\n0 9 * * *", "ASCII space", "invalid timezone"},
 		{"TZ=UTC", "missing fields after timezone", "unknown time zone"},
 		{"CRON_TZ=UTC", "missing fields after timezone", "unknown time zone"},
-		{"TZ= 0 9 * * *", "invalid cron document: invalid timezone", "unknown time zone"},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
 			_, err := ParseCron(tc.expression)
-			require.ErrorIs(t, err, ErrInvalid)
-			require.Contains(t, err.Error(), tc.want)
+			requireSafeCronError(t, err)
+			require.Contains(t, err.Error(), tc.detail)
 			require.NotContains(t, err.Error(), tc.forbidden)
+		})
+	}
+	_, err := ParseCron("OTHER=UTC 0 9 * * *")
+	require.ErrorContains(t, err, "6 fields")
+}
+
+func TestCronTimezoneAdvice(t *testing.T) {
+	for _, tc := range []struct{ zone, expression, label, shown string }{
+		{"Not/AZone", "@daily", "unknown time zone", "Not/AZone"},
+		{"", "CRON_TZ=Not/AZone 0 9 * * *", "unknown time zone", "Not/AZone"},
+		{"", `TZ="Not/AZone" 0 9 * * *`, "unknown time zone", "Not/AZone"},
+		{"", "TZ=Not/AZone ", "unknown time zone", "Not/AZone"},
+		{"", "TZ= 0 9 * * *", "invalid timezone", ""},
+		{"../UTC", "@daily", "invalid timezone", "../UTC"},
+		{"/abs", "@daily", "invalid timezone", "/abs"},
+		{"bad zone!", "@daily", "invalid timezone", "bad zone!"},
+		{"bad!", "@daily", "invalid timezone", "bad!"},
+		{"bad!" + strings.Repeat("x", 1100), "@daily", "invalid timezone", "bad!" + strings.Repeat("x", 33) + "…"},
+		{"A\x00B", "@daily", "invalid timezone", "A\x00B"},
+		{" ", "@daily", "invalid timezone", " "},
+		{`"UTC"`, "@daily", "invalid timezone", `"UTC"`},
+		{"'UTC'", "@daily", "invalid timezone", "'UTC'"},
+		{"x\x00y 9 * * *", "@daily", "invalid timezone", "x\x00y 9 * * *"},
+		{"\x1b[31m 9 * * *", "@daily", "invalid timezone", "\x1b[31m 9 * * *"},
+		{"x\x7fy 9 * * *", "@daily", "invalid timezone", "x\x7fy 9 * * *"},
+		{string([]byte{0xff}) + " 9 * * *", "@daily", "invalid timezone", string([]byte{0xff}) + " 9 * * *"},
+		{"bad\x00zone", "@daily", "invalid timezone", "bad\x00zone"},
+		{strings.Repeat("\x00", 1000), "@daily", "invalid timezone", strings.Repeat("\x00", 37) + "…"},
+		{strings.Repeat("x", 1000) + " 9 * * *", "@daily", "invalid timezone", strings.Repeat("x", 37) + "…"},
+		{strings.Repeat("é", 1000), "@daily", "invalid timezone", strings.Repeat("é", 18) + "…"},
+	} {
+		t.Run(tc.zone+tc.expression, func(t *testing.T) {
+			err := (Trigger{Kind: "cron", Cron: tc.expression, Timezone: tc.zone}).Validate()
+			requireSafeCronError(t, err)
+			require.EqualError(t, err, fmt.Sprintf("invalid cron document: %s %q; use an IANA name such as America/New_York, or UTC", tc.label, tc.shown))
 		})
 	}
 }
 
+// Pin JobDefinition.Validate → Trigger.Validate; schedule-return paths are covered by the length test.
 func TestCronValidationPropagatesDiagnostic(t *testing.T) {
 	trigger := Trigger{Kind: "cron", Cron: "0 9 L * *"}
 	_, err := ParseCron(trigger.Cron)

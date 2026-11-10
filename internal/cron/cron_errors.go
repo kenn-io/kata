@@ -51,7 +51,7 @@ func explainCron(expression string, err error) error {
 		case expression == "@every" || strings.HasPrefix(expression, "@every "):
 			return reject("@every needs a duration such as 90m or 2h; native recurring jobs use an interval trigger instead; " + detail)
 		default:
-			return reject(fmt.Sprintf("unsupported descriptor expression %q; use a descriptor alone, such as @daily", clip(expression, 40)))
+			return reject(fmt.Sprintf("unsupported descriptor expression %q; supported descriptors, such as @daily, must match exactly", clip(expression, 40)))
 		}
 	}
 	if strings.HasPrefix(strings.TrimSpace(expression), "@") {
@@ -98,13 +98,9 @@ func explainCron(expression string, err error) error {
 	}
 }
 
-// Timezone diagnostics run only after the owning parser/LoadLocation rejects
-// the input. Probe the dependency's quoted name to distinguish syntax from lookup
-// failures without imposing its name rules on accepted Trigger.Timezone values.
 func explainTimezone(name string, err error) error {
-	_, probeErr := cronParser.Parse("TZ=" + strconv.Quote(name) + " @daily")
 	label := "invalid timezone"
-	if probeErr != nil && strings.HasPrefix(probeErr.Error(), "unknown time zone ") && !strings.Contains(err.Error(), "time: invalid location name") {
+	if err != nil && strings.HasPrefix(err.Error(), "unknown time zone ") && !strings.Contains(err.Error(), "time: invalid location name") {
 		label = "unknown time zone"
 	}
 	return invalid(fmt.Sprintf("%s %q; use an IANA name such as America/New_York, or UTC", label, clip(name, 40)))
@@ -123,10 +119,10 @@ func daySyntaxReason(field int, token string) string {
 		case field == 2 && part == "LW", field == 4 && weekdayToken.MatchString(part) && strings.HasSuffix(part, "L"):
 			return "last-weekday syntax is not supported and has no five-field equivalent"
 		case field == 2 && lastDayToken.MatchString(part):
-			return "last-day syntax (L) is not supported and has no five-field equivalent; 28-31 fires on each of those days that exists"
+			return "last-day syntax (L) is not supported and has no five-field equivalent"
 		case field == 2 && nearestDayToken.MatchString(part):
 			return "nearest-weekday syntax (W) is not supported and has no five-field equivalent"
-		case field == 4 && weekdayToken.MatchString(part):
+		case field == 4 && strings.Contains(part, "#"):
 			return "nth-weekday syntax (#) is not supported and has no five-field equivalent"
 		}
 	}

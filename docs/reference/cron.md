@@ -187,6 +187,18 @@ any timezone directive. Native jobs always add a timezone prefix (UTC by default
 Adapters add a prefix for a separate timezone when the expression has no directive.
 Kata keeps the stored expression exactly as written.
 
+- Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
+  `0 9 * * 7` runs on Sundays, `5-7` means Friday through Sunday, and `5-7/2`
+  means Friday and Sunday.
+- When both day of month and day of week are restricted, a day matching either
+  field runs. `0 9 15 * 1` runs on the 15th and on every Monday.
+- A range may wrap around. `0 22-2 * * *` runs at 22:00, 23:00, 00:00, 01:00,
+  and 02:00.
+- A step must be smaller than the span it steps over. Kata rejects `0 */24 * * *`
+  and `*/60 * * * *`; write `@daily` or `@hourly` instead.
+- A step that starts at one weekday continues through 7, which is Sunday.
+  `0 9 * * 5/2` runs on Fridays and Sundays.
+
 A rejected expression's error names the field and value, descriptor, timezone,
 or field count that failed, with advice for correcting it.
 
@@ -199,18 +211,6 @@ or field count that failed, with advice for correcting it.
   matches either field; it cannot express an nth weekday.
 - For hashed (`H`) schedules, choose a fixed value. `@reboot` is unsupported;
   use a supported descriptor, a five-field schedule, or an interval trigger.
-
-- Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
-  `0 9 * * 7` runs on Sundays, `5-7` means Friday through Sunday, and `5-7/2`
-  means Friday and Sunday.
-- When both day of month and day of week are restricted, a day matching either
-  field runs. `0 9 15 * 1` runs on the 15th and on every Monday.
-- A range may wrap around. `0 22-2 * * *` runs at 22:00, 23:00, 00:00, 01:00,
-  and 02:00.
-- A step must be smaller than the span it steps over. Kata rejects `0 */24 * * *`
-  and `*/60 * * * *`; write `@daily` or `@hourly` instead.
-- A step that starts at one weekday continues through 7, which is Sunday.
-  `0 9 * * 5/2` runs on Fridays and Sundays.
 
 Schedules follow the trigger timezone's daylight-saving transitions:
 
