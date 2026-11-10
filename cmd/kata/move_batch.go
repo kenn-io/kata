@@ -88,6 +88,24 @@ func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string,
 	return uid, targetErrors[item.TargetProject]
 }
 
+func advanceMoveBatchRevisions(body *generated.MoveIssuesBody, next int, results []api.MoveIssuesResult) {
+	revisions := map[[2]string]int64{}
+	for _, result := range results {
+		if result.Result == "moved" && result.UID != "" && result.Revision > 1 {
+			revisions[[2]string{strings.ToUpper(result.UID), result.ToProjectUID}] = result.Revision
+		}
+	}
+	for j := next; j < len(body.Items); j++ {
+		item := &body.Items[j]
+		if item.ToProjectUID == nil || item.ExpectedRevision == nil {
+			continue
+		}
+		if revision := revisions[[2]string{strings.ToUpper(item.Ref), *item.ToProjectUID}]; revision > 1 && *item.ExpectedRevision == revision-1 {
+			item.ExpectedRevision = new(revision)
+		}
+	}
+}
+
 func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel moveSelector, opts moveBatchOptions) error {
 	defaultTarget := ""
 	var items []moveBatchItem
@@ -406,6 +424,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 				return fmt.Errorf("invalid batch move result index")
 			}
 		}
+		advanceMoveBatchRevisions(&body, reply.NextIndex, reply.Results)
 		for _, r := range reply.Results {
 			r.Index = indexes[r.Index]
 			results = append(results, r)

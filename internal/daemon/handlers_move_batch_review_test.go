@@ -181,6 +181,7 @@ func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
 		require.Equal(t, 1, first.Body.NextIndex)
 		require.Equal(t, "moved", first.Body.Results[0].Result)
 		req.Body.StartIndex = first.Body.NextIndex
+		req.Body.Items[1].ExpectedRevision = first.Body.Results[0].Revision
 		second, err := handler(t.Context(), req)
 		require.NoError(t, err)
 		require.Len(t, second.Body.Results, 1)
@@ -199,4 +200,30 @@ func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
 		require.Equal(t, "refused", stale.Body.Results[0].Result)
 		require.Equal(t, "revision_conflict", stale.Body.Results[0].Code)
 	})
+}
+
+func TestMoveIssuesBatch_ContinuationAfterRefusedDuplicate(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	target, issue := createClaimGateHelperIssue(t, store)
+	owner := "changed"
+	_, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "agent"})
+	require.NoError(t, err)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
+	for range 49 {
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
+	}
+	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
+	//nolint:kennlint // deadlinetest: Force a yield after the first database chunk, as in TestMoveIssuesBatch_BudgetResume.
+	handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
+	first, err := handler(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, 50, first.Body.NextIndex)
+	require.Equal(t, "revision_conflict", first.Body.Results[0].Code)
+	req.Body.StartIndex = first.Body.NextIndex
+	second, err := handler(t.Context(), req)
+	require.NoError(t, err)
+	require.Len(t, second.Body.Results, 1)
+	require.Equal(t, "revision_conflict", second.Body.Results[0].Code)
 }

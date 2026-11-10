@@ -313,7 +313,7 @@ func (s *batchFirstPreviewRefusal) MoveIssuesBatch(ctx context.Context, in db.Mo
 	out, err := s.Storage.MoveIssuesBatch(ctx, in)
 	if err == nil && in.DryRun && !s.refused {
 		s.refused = true
-		out.Results[0].Err = &db.RevisionConflictError{CurrentRevision: in.Items[0].IfMatchRev + 1}
+		out.Results[0].Err = api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 	}
 	return out, err
 }
@@ -329,6 +329,7 @@ func TestMoveIssuesBatch_DuplicateAfterPreviewRefusal(t *testing.T) {
 	out, err := moveIssuesHandler(ServerConfig{DB: &batchFirstPreviewRefusal{Storage: store}})(t.Context(), req)
 	require.NoError(t, err)
 	require.Equal(t, "refused", out.Body.Results[0].Result)
+	require.Equal(t, "not_found", out.Body.Results[0].Code)
 	require.Equal(t, "moved", out.Body.Results[1].Result)
 	got, err := store.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
@@ -343,7 +344,7 @@ type batchFirstWriteRefusal struct {
 func (s *batchFirstWriteRefusal) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
 	if !in.DryRun && !s.refused {
 		s.refused = true
-		return db.MoveIssuesBatchOut{Results: []db.MoveIssueBatchResult{{Err: &db.RevisionConflictError{CurrentRevision: 1}}}}, nil
+		return db.MoveIssuesBatchOut{Results: []db.MoveIssueBatchResult{{Err: api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)}}}, nil
 	}
 	return s.Storage.MoveIssuesBatch(ctx, in)
 }
@@ -359,6 +360,7 @@ func TestMoveIssuesBatch_DuplicateAfterWriteRefusal(t *testing.T) {
 	out, err := moveIssuesHandler(ServerConfig{DB: &batchFirstWriteRefusal{Storage: store}})(t.Context(), req)
 	require.NoError(t, err)
 	require.Equal(t, "refused", out.Body.Results[0].Result)
+	require.Equal(t, "not_found", out.Body.Results[0].Code)
 	require.Equal(t, "moved", out.Body.Results[1].Result)
 	got, err := store.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)

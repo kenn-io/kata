@@ -15,9 +15,64 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type moveBatchCLIEditStore struct {
+	db.Storage
+	changed bool
+}
+
+func (s *moveBatchCLIEditStore) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
+	out, err := s.Storage.MoveIssuesBatch(ctx, in)
+	if err == nil && !in.DryRun && !s.changed && len(out.Results) > 0 && out.Results[0].Err == nil {
+		s.changed = true
+		owner := "changed"
+		_, _, _, err = s.EditIssue(ctx, db.EditIssueParams{IssueID: out.Results[0].Out.Issue.ID, Owner: &owner, Actor: "tester"})
+	}
+	return out, err
+}
+
+func TestMoveBatchCLI_ContinuationAfterCompletedDuplicate(t *testing.T) {
+	for _, edit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("edit=%t", edit), func(t *testing.T) {
+			resetFlags(t)
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+				cfg.MoveBatchBudget = time.Nanosecond //nolint:kennlint // deadlinetest: Force a yield after one completed database chunk.
+				if edit {
+					cfg.DB = &moveBatchCLIEditStore{Storage: cfg.DB}
+				}
+			})
+			dir, _ := initLocalBoundWorkspace(t, env, "kata")
+			source, err := env.DB.CreateProject(t.Context(), "source-project")
+			require.NoError(t, err)
+			target, err := env.DB.CreateProject(t.Context(), "target-project")
+			require.NoError(t, err)
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "selected issue", Author: "tester"})
+			require.NoError(t, err)
+			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, "", "--workspace", dir, "move", issue.UID, target.Name, "--from-project", source.Name, "--status", "all", "--json")
+			if edit {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			var reply struct {
+				Results []api.MoveIssuesResult `json:"results"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &reply))
+			require.Lenf(t, reply.Results, 2, "output: %s, error: %v", out, err)
+			require.Equal(t, "moved", reply.Results[0].Result)
+			if edit {
+				require.Equal(t, "refused", reply.Results[1].Result)
+				require.Equal(t, "revision_conflict", reply.Results[1].Code)
+			} else {
+				require.Equal(t, "unchanged", reply.Results[1].Result)
+			}
+		})
+	}
+}
 
 func TestParseRefsFrom(t *testing.T) {
 	for _, input := range []string{"abc4\n", "abc4\tdst\n", "# note\n\n abc4 \r\n", "\ufeffabc4\n"} {
