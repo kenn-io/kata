@@ -60,17 +60,22 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 // Configured remotes are not pinged before ordinary API requests. Discovery
 // and health commands use discoverDaemonResolved when liveness is the result.
 func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
+	var resolved client.ResolvedDaemon
+	var err error
 	if flags.Daemon != "" {
-		resolved, err := client.PrepareResolvedNamed(ctx, flags.Daemon)
-		if err != nil {
-			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
-		}
-		return resolved, nil
+		resolved, err = client.PrepareResolvedNamed(ctx, flags.Daemon)
+	} else {
+		resolved, err = client.PrepareResolvedInWorkspace(ctx, workspaceStartForRemote())
 	}
-	workspaceStart := workspaceStartForRemote()
-	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStart)
 	if err != nil {
-		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
+		if resolved.LocalProfile != nil && errors.Is(err, client.ErrLocalDaemonUnreachable) {
+			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
+			if diagnoseErr != nil {
+				return resolved, diagnoseErr
+			}
+			return resolved, diagnosisError(diagnosis)
+		}
+		return resolved, cliDaemonTargetError(err)
 	}
 	return resolved, nil
 }

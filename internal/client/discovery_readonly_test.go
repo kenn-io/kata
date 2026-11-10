@@ -1,11 +1,13 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -103,4 +105,43 @@ func TestReadRuntimeRecordsFindsKitRuntimeStoreRecord(t *testing.T) {
 	require.Equal(t, os.Getpid(), records[0].PID)
 	require.Equal(t, "127.0.0.1:7777", records[0].Address)
 	require.Equal(t, written, records[0].SourcePath)
+}
+
+// The issue contract is evidence capture and scoped recovery for a live process
+// whose listener cannot answer ping; this fixture does not infer the hang's cause.
+func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
+	t.Setenv(HTTPTimeoutEnvVar, "20ms")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(server.Close)
+	for _, origin := range []string{server.URL, ""} {
+		t.Run(origin, func(t *testing.T) {
+			dir := t.TempDir()
+			_, err := (kitdaemon.RuntimeStore{Dir: dir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": origin}})
+			require.NoError(t, err)
+			_, found, err := DiscoverResolvedReadOnly(t.Context(), dir)
+			require.False(t, found)
+			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+			message := err.Error()
+			require.Contains(t, message, fmt.Sprintf("daemon pid %d", os.Getpid()))
+			require.Contains(t, message, server.Listener.Addr().String())
+			require.Contains(t, message, filepath.Join(dir, "daemon.log"))
+			require.Contains(t, message, "supervisor stderr")
+			require.Contains(t, message, "kata daemon restart")
+			require.Contains(t, message, "original KATA_HOME and storage environment")
+			if origin != "" {
+				require.Contains(t, message, origin+"/debug/pprof/goroutine?debug=2")
+				require.Contains(t, message, "signed-in browser")
+				require.Contains(t, message, "if responsive")
+			} else {
+				require.NotContains(t, message, "/debug/pprof/")
+			}
+			if runtime.GOOS != "windows" {
+				require.Contains(t, message, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
+				require.Contains(t, message, "terminates the daemon")
+			} else {
+				require.NotContains(t, message, "kill -QUIT")
+			}
+			require.NotNil(t, errors.Unwrap(err), "preserve the probe cause")
+		})
+	}
 }
