@@ -8,23 +8,39 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// inPlaceUpgrades add canonical tables, then canonical indexes. A table is
-// added only when it starts empty, so no existing row needs converting.
+// federationLocalReplaysBackfill records local-origin events that an
+// interrupted reset restored: a reset recorded after the event was created
+// with no pull completed since. Pull cursor equality marks the unadvanced turn.
+const federationLocalReplaysBackfill = `
+INSERT INTO federation_local_replays(event_uid)
+SELECT e.uid
+  FROM events e
+  JOIN federation_bindings b ON b.project_id = e.project_id
+  JOIN federation_sync_status s ON s.project_id = e.project_id
+ WHERE e.origin_instance_uid = (SELECT value FROM meta WHERE key='instance_uid')
+   AND b.pull_cursor_event_id = b.replay_horizon_event_id - 1
+   AND s.last_reset_at IS NOT NULL
+   AND e.created_at < s.last_reset_at
+   AND (s.last_pull_success_at IS NULL OR s.last_pull_success_at < s.last_reset_at)`
+
+// inPlaceUpgrades add canonical tables, then canonical indexes, then run the
+// step's backfill. A table starts empty, so only its backfill converts rows.
 var inPlaceUpgrades = []struct {
 	From, To int
 	Tables   []string
 	Indexes  []string
+	Backfill string
 }{
-	{41, 42, nil, []string{"idx_issues_project_created", "idx_issues_created"}},
-	{42, 43, nil, []string{"idx_events_resolved_issue_uid"}},
-	{43, 44, nil, []string{"idx_events_reset_from"}},
-	{44, 45, nil, []string{"idx_issues_uid_prefix", "idx_issues_project_uid_prefix"}},
-	{45, 46, nil, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}},
-	{46, 47, nil, []string{"idx_issues_ready_updated"}},
-	{47, 48, nil, []string{"idx_events_moved_from_id"}},
-	{48, 49, nil, []string{"idx_events_cron_run_uid"}},
-	{49, 50, []string{"mcp_event_subscriptions"}, []string{"idx_mcp_event_subscriptions_due", "idx_mcp_event_subscriptions_principal_callback", "idx_mcp_event_subscriptions_ended"}},
-	{50, 51, []string{"federation_local_replays"}, nil},
+	{41, 42, nil, []string{"idx_issues_project_created", "idx_issues_created"}, ""},
+	{42, 43, nil, []string{"idx_events_resolved_issue_uid"}, ""},
+	{43, 44, nil, []string{"idx_events_reset_from"}, ""},
+	{44, 45, nil, []string{"idx_issues_uid_prefix", "idx_issues_project_uid_prefix"}, ""},
+	{45, 46, nil, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}, ""},
+	{46, 47, nil, []string{"idx_issues_ready_updated"}, ""},
+	{47, 48, nil, []string{"idx_events_moved_from_id"}, ""},
+	{48, 49, nil, []string{"idx_events_cron_run_uid"}, ""},
+	{49, 50, []string{"mcp_event_subscriptions"}, []string{"idx_mcp_event_subscriptions_due", "idx_mcp_event_subscriptions_principal_callback", "idx_mcp_event_subscriptions_ended"}, ""},
+	{50, 51, []string{"federation_local_replays"}, nil, federationLocalReplaysBackfill},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.
@@ -78,23 +94,8 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 			if step.From < version {
 				continue
 			}
-			for _, name := range step.Tables {
-				ddl, ok := tables[name]
-				if !ok {
-					return fmt.Errorf("canonical table %s is missing", name)
-				}
-				if _, err := tx.ExecContext(ctx, ddl); err != nil {
-					return fmt.Errorf("add table %s: %w", name, err)
-				}
-			}
-			for _, name := range step.Indexes {
-				ddl, ok := indexes[name]
-				if !ok {
-					return fmt.Errorf("canonical index %s is missing", name)
-				}
-				if _, err := tx.ExecContext(ctx, ddl); err != nil {
-					return fmt.Errorf("add index %s: %w", name, err)
-				}
+			if err := applyInPlaceStep(ctx, tx, step.Tables, step.Indexes, step.Backfill, tables, indexes); err != nil {
+				return err
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value=? WHERE key='schema_version'`, db.CurrentSchemaVersion()); err != nil {
@@ -102,6 +103,36 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 		}
 		return tx.Commit()
 	})
+}
+
+// applyInPlaceStep adds one step's canonical tables and indexes from the
+// canonical DDL maps, then runs its backfill when it has one.
+func applyInPlaceStep(ctx context.Context, tx *sql.Tx, stepTables, stepIndexes []string, backfill string, tables, indexes map[string]string) error {
+	for _, name := range stepTables {
+		ddl, ok := tables[name]
+		if !ok {
+			return fmt.Errorf("canonical table %s is missing", name)
+		}
+		if _, err := tx.ExecContext(ctx, ddl); err != nil {
+			return fmt.Errorf("add table %s: %w", name, err)
+		}
+	}
+	for _, name := range stepIndexes {
+		ddl, ok := indexes[name]
+		if !ok {
+			return fmt.Errorf("canonical index %s is missing", name)
+		}
+		if _, err := tx.ExecContext(ctx, ddl); err != nil {
+			return fmt.Errorf("add index %s: %w", name, err)
+		}
+	}
+	if backfill == "" {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, backfill); err != nil {
+		return fmt.Errorf("backfill in-place upgrade: %w", err)
+	}
+	return nil
 }
 
 // canonicalSQL reads the canonical schema's table and index DDL by name.
