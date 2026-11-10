@@ -113,7 +113,7 @@ func TestFederationStatusProjectFilter(t *testing.T) {
 	}
 	for _, mode := range []string{"json", "human", "agent"} {
 		out, err := runCmdOutput(t, env, "federation", "status", "--project", "missing-project", "--format", mode)
-		requireCLIError(t, err, ExitNotFound)
+		_ = requireCLIError(t, err, ExitNotFound)
 		assert.Empty(t, out)
 		assert.Contains(t, err.Error(), "missing-project")
 	}
