@@ -564,6 +564,37 @@ describe('AppShell', () => {
     })
   })
 
+  test.each([
+    ['Example issue', false],
+    ['Open reachable graph', true],
+  ])('keeps a pending search when opening %s', async (button, graph) => {
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      issueUID: '01J00000000000000000000001',
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const onNavigate = vi.fn()
+    const props = {
+      route,
+      snapshot: snapshot(),
+      loading: false,
+      ...mutationProps(),
+      onNavigate,
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
+    await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(button) }))
+    expect(onNavigate).toHaveBeenLastCalledWith({
+      ...route,
+      graph,
+      filters: { ...route.filters, text: 'example' },
+    })
+  })
+
   const project = '01J00000000000000000000002'
   const issue = '01J00000000000000000000001'
   test.each([

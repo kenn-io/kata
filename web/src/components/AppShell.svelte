@@ -437,19 +437,17 @@
 
   function selectIssue(issueUID: string): void {
     navigate({
-      ...withResolvedView(route),
+      ...withResolvedView(filterRoute),
       issueUID,
       graph: false,
-      filters: route.filters,
     })
   }
 
   function openGraph(issueUID: string): void {
     navigate({
-      ...withResolvedView(route),
+      ...withResolvedView(filterRoute),
       issueUID,
       graph: true,
-      filters: route.filters,
     })
   }
 
