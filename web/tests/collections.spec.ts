@@ -13,7 +13,7 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
     labels: ['planning'],
     priority: 1,
   })
-  await kata.seedIssue(page, credentials, {
+  const child = await kata.seedIssue(page, credentials, {
     title: 'Example child task',
     owner: 'user-b',
     labels: ['delivery'],
@@ -32,13 +32,40 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
 
   const parentRow = page.getByRole('button', { name: /Example parent task/ })
   await parentRow.focus()
+  let releaseSnapshot = () => {}
+  const heldSnapshot = new Promise<void>((resolve) => {
+    releaseSnapshot = resolve
+  })
+  let reportSnapshot = () => {}
+  const snapshotRequested = new Promise<void>((resolve) => {
+    reportSnapshot = resolve
+  })
+  await page.route('**/api/v1/ui/snapshot?*', async (request) => {
+    if (new URL(request.request().url()).searchParams.get('selected_issue_uid') !== child.uid) {
+      await request.continue()
+      return
+    }
+    const response = await request.fetch()
+    reportSnapshot()
+    await heldSnapshot
+    await request.fulfill({ response }).catch(() => {})
+  })
   await parentRow.press('ArrowDown')
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeFocused()
+  await snapshotRequested
 
-  // Selection opens a split pane and remounts the search field after focus moves.
+  const search = page.getByRole('searchbox', { name: 'Search tasks' })
+  await search.focus()
+  const original = await search.elementHandle()
+  await page.keyboard.type('child')
+  releaseSnapshot()
   await expect(page.getByRole('heading', { name: 'Example child task', exact: true })).toBeVisible()
-  await page.getByRole('searchbox', { name: 'Search tasks' }).fill('child')
-  await expect(page).toHaveURL(/text=child/)
+  await expect(search).toBeFocused()
+  expect(await search.evaluate((element, first) => element === first, original)).toBe(true)
+  await page.keyboard.type(' task')
+  await expect(search).toHaveValue('child task')
+  await expect.poll(() => new URL(page.url()).searchParams.get('issue')).toBe(child.uid)
+  await expect.poll(() => new URL(page.url()).searchParams.get('text')).toBe('child task')
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
   for (const view of ['Inbox', 'Today', 'Delegated', 'Scheduled']) {

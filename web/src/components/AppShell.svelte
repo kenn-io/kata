@@ -62,6 +62,7 @@
 
   interface Props {
     route: AppRoute
+    requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
     loading: boolean
     canMutate: boolean
@@ -133,6 +134,7 @@
 
   let {
     route,
+    requestedRoute = undefined,
     snapshot,
     loading,
     canMutate,
@@ -268,6 +270,16 @@
   let hasInbox = $derived(inboxProject !== undefined)
   let viewName = $derived(viewNameForRoute(route))
   let searchFilters = $derived(searchFiltersForRoute(route, viewName))
+  let filterRoute = $derived(
+    requestedRoute &&
+      requestedRoute.view !== 'settings' &&
+      requestedRoute.view !== 'credentials' &&
+      viewNameForRoute(requestedRoute) === viewName &&
+      requestedRoute.projectUID === route.projectUID
+      ? requestedRoute
+      : route,
+  )
+  let inputFilters = $derived(searchFiltersForRoute(filterRoute, viewName))
   let currentView = $derived(
     projectKataWorkspaceView({
       view: viewName,
@@ -414,32 +426,30 @@
     const shareable = shareableFilters(filters, viewName, changed)
     if (filters.scope.kind === 'project') {
       navigate({
-        ...withResolvedView(route),
+        ...withResolvedView(filterRoute),
         projectUID: filters.scope.project_uid,
         filters: shareable,
       })
       return
     }
-    const next = { ...route, filters: shareable }
+    const next = { ...filterRoute, filters: shareable }
     delete next.projectUID
     navigate(next)
   }
 
   function selectIssue(issueUID: string): void {
     navigate({
-      ...withResolvedView(route),
+      ...withResolvedView(filterRoute),
       issueUID,
       graph: false,
-      filters: route.filters,
     })
   }
 
   function openGraph(issueUID: string): void {
     navigate({
-      ...withResolvedView(route),
+      ...withResolvedView(filterRoute),
       issueUID,
       graph: true,
-      filters: route.filters,
     })
   }
 
@@ -559,19 +569,19 @@
           ? filters.status === defaultStatus
             ? []
             : [filters.status]
-          : [...route.filters.status],
+          : [...filterRoute.filters.status],
       owner:
         changed === 'owner'
           ? filters.owner.trim()
             ? [filters.owner.trim()]
             : []
-          : [...route.filters.owner],
+          : [...filterRoute.filters.owner],
       label:
         changed === 'label'
           ? filters.label.trim()
             ? [filters.label.trim()]
             : []
-          : [...route.filters.label],
+          : [...filterRoute.filters.label],
       relationship: [...(filters.relationships ?? [])],
     }
     if (filters.query.trim()) result.text = filters.query.trim()
@@ -800,21 +810,17 @@
         {#if mutationMessage}
           <p class="mutation-message" role="alert">{mutationMessage}</p>
         {/if}
-        {#if route.issueUID}
-          <SplitLayout
-            orientation={preferences.splitDirection}
-            primarySize={preferences.splitSize}
-            minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
-            minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
-            responsiveBreakpoint={700}
-            ariaLabel="Resize Kata panes"
-            onResize={resizeSplit}
-            primary={listPane}
-            secondary={detailPane}
-          />
-        {:else}
-          {@render listPane()}
-        {/if}
+        <SplitLayout
+          orientation={preferences.splitDirection}
+          primarySize={preferences.splitSize}
+          minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
+          minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
+          responsiveBreakpoint={700}
+          ariaLabel="Resize Kata panes"
+          onResize={resizeSplit}
+          primary={listPane}
+          secondary={route.issueUID ? detailPane : undefined}
+        />
       {/if}
     </div>
   </div>
@@ -851,7 +857,7 @@
       {/if}
     {:else}
       <IssueFilters
-        filters={searchFilters}
+        filters={inputFilters}
         projects={projection.projects}
         onChange={updateFilters}
         onSubmitSearch={submitSearch}

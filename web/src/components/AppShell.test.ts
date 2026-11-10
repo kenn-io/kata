@@ -9,6 +9,7 @@ vi.mock('../lib/kata/projection', async (importOriginal) => {
 import { setGeneratedFetch } from '../lib/api/client'
 import { normalizeKataUISnapshot } from '../lib/kata/projection'
 import type { MutationContext, MutationResult } from '../lib/mutations/controller'
+import type { ShareableFilters } from '../lib/router'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
 
@@ -561,6 +562,155 @@ describe('AppShell', () => {
       graph: false,
       filters: { status: [], owner: [], label: [], relationship: [] },
     })
+  })
+
+  test.each([
+    ['Example issue', false],
+    ['Open reachable graph', true],
+  ])('keeps a pending search when opening %s', async (button, graph) => {
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const onNavigate = vi.fn()
+    const props = {
+      route,
+      snapshot: snapshot(),
+      loading: false,
+      ...mutationProps(),
+      onNavigate,
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
+    await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(button) }))
+    expect(onNavigate).toHaveBeenLastCalledWith({
+      ...route,
+      issueUID: '01J00000000000000000000001',
+      graph,
+      filters: { ...route.filters, text: 'example' },
+    })
+  })
+
+  test.each(['Settings', 'Credentials'])('opens a task while %s is pending', async (screenName) => {
+    const current = snapshot()
+    current.capabilities.token_audit_read = true
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const onNavigate = vi.fn()
+    const props = {
+      route,
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate,
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    await fireEvent.click(screen.getByRole('button', { name: screenName }))
+    await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+    expect(onNavigate).toHaveBeenLastCalledWith({
+      ...route,
+      issueUID: '01J00000000000000000000001',
+    })
+  })
+
+  const project = '01J00000000000000000000002'
+  const issue = '01J00000000000000000000001'
+  const repeatedFilters = {
+    status: ['open', 'ready'],
+    owner: ['user-a', 'user-b'],
+    label: ['backend', 'frontend'],
+    relationship: ['blocks'],
+  }
+  test.each([
+    ['same project', 'all-open', project, project, issue, true, repeatedFilters],
+    ['different project', 'all-open', project, 'other-project', undefined, true, {}],
+    ['implicit Inbox', undefined, undefined, undefined, issue, true, {}],
+    ['accepted filters', 'all-open', undefined, undefined, undefined, false, repeatedFilters],
+  ] as const)(
+    'search preserves the %s',
+    async (_name, view, projectUID, requestedProjectUID, issueUID, hasRequest, pending) => {
+      const onNavigate = vi.fn()
+      const requestedView = view ?? 'inbox'
+      const filters = {
+        status: [],
+        owner: [],
+        label: [],
+        relationship: [],
+        ...pending,
+      } as ShareableFilters
+      const route = {
+        kind: 'kata' as const,
+        ...(view ? { view } : {}),
+        ...(projectUID ? { projectUID } : {}),
+        graph: false,
+        filters: hasRequest ? { status: [], owner: [], label: [], relationship: [] } : filters,
+      }
+      render(AppShell, {
+        props: {
+          route,
+          ...(hasRequest
+            ? {
+                requestedRoute: {
+                  ...route,
+                  view: requestedView,
+                  ...(requestedProjectUID ? { projectUID: requestedProjectUID } : {}),
+                  issueUID: issue,
+                  filters,
+                },
+              }
+            : {}),
+          snapshot: snapshot(),
+          loading: false,
+          ...mutationProps(),
+          onNavigate,
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+      await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
+      expect(onNavigate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ filters: { ...filters, text: 'example' } }),
+      )
+      expect(onNavigate.mock.lastCall?.[0].projectUID).toBe(projectUID)
+      expect(onNavigate.mock.lastCall?.[0].issueUID).toBe(issueUID)
+      expect(onNavigate.mock.lastCall?.[0].view).toBe(requestedView)
+    },
+  )
+
+  test('keeps the requested query when an older snapshot arrives', async () => {
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const props = {
+      route,
+      snapshot: snapshot(),
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    const input = screen.getByLabelText('Search tasks') as HTMLInputElement
+    await fireEvent.input(input, { target: { value: 'second ' } })
+    await fireEvent.input(input, { target: { value: 'second t' } })
+    await rerender({
+      ...props,
+      route: { ...route, filters: { ...route.filters, text: 'second' } },
+      requestedRoute: { ...route, filters: { ...route.filters, text: 'second t' } },
+    })
+    expect(input.value).toBe('second t')
   })
 
   test('stays in the landing Inbox while selecting, graphing, and narrowing', async () => {
@@ -1390,47 +1540,6 @@ describe('AppShell', () => {
       route: { ...props.route, filters: { ...props.route.filters, label: ['a', 'd'] } },
     })
     expect(container.querySelectorAll('button.row')).toHaveLength(150)
-  })
-
-  test('retains repeated route filters when another control changes', async () => {
-    const onNavigate = vi.fn()
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'all-open',
-          graph: false,
-          filters: {
-            status: ['open', 'ready'],
-            owner: ['user-a', 'user-b'],
-            label: ['backend', 'frontend'],
-            relationship: ['blocks'],
-          },
-        },
-        snapshot: snapshot(),
-        loading: false,
-        ...mutationProps(),
-        onNavigate,
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-
-    await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
-
-    await waitFor(() =>
-      expect(onNavigate).toHaveBeenCalledWith({
-        kind: 'kata',
-        view: 'all-open',
-        graph: false,
-        filters: {
-          status: ['open', 'ready'],
-          owner: ['user-a', 'user-b'],
-          label: ['backend', 'frontend'],
-          relationship: ['blocks'],
-          text: 'example',
-        },
-      }),
-    )
   })
 
   test('renders the routed source graph and returns to the same selected list context', async () => {
