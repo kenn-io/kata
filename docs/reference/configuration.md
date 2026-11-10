@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Configuration
@@ -602,9 +602,17 @@ GitHub/Notion/Plane/Linear/Twenty/TickTick sync, federation, or timed-claim main
 scheduled without a client present.
 
 The optional top-level `timezone` is the IANA timezone for date-only and local
-date-time `scheduled_on` values that do not have an issue-level `timezone`. If
-both are unset, Kata uses UTC. RFC 3339 `scheduled_on` values ending in `Z` are
-UTC instants and do not use this setting.
+date-time `scheduled_on` and `deadline_on` values without an issue-level
+`timezone`. A recurrence's timezone takes precedence for `scheduled_on` only.
+If no zone is set, Kata uses UTC. RFC 3339 values ending in `Z` are UTC instants
+and do not use this setting.
+
+New civil scheduling writes that rely on this default require a
+[portable timezone name](metadata.md). If rejected, set the
+top-level `timezone` in `<KATA_HOME>/config.toml` to a portable name such as
+`UTC` or `America/New_York`, restart the daemon, and retry; alternatively set
+the issue's `timezone`. Existing configurations and stored schedules continue
+to load and run with legacy names.
 
 The web UI's daemon selector lists URL entries and home-less local entries.
 Home-bearing profiles are omitted and cannot alias the serving daemon. A plain

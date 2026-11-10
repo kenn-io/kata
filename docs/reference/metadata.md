@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-11-06
+last_edited: 2026-11-10
 ---
 
 # Metadata
@@ -65,6 +65,20 @@ not exist, the gate opens at the first valid instant after the gap. Numeric
 offsets are rejected because they pin an instant while duplicating the named
 timezone. `deadline_on` accepts the same three forms and uses the same timezone
 rules. It is a deadline only; it does not control `ready` or `next`.
+
+New or changed issue `timezone` values must be `UTC`, `Etc/UTC`, or an exact,
+case-sensitive geographic name from Kata's bundled Go timezone inventory:
+`Africa/`, `America/`, `Antarctica/`, `Arctic/`, `Asia/`, `Atlantic/`,
+`Australia/`, `Europe/`, `Indian/`, or `Pacific/`. Geographic aliases such as
+`Asia/Calcutta` are accepted. `Local`, fixed offsets, non-geographic aliases
+such as `US/Eastern`, and wrong-case names are rejected.
+
+New or changed civil dates, and timezone removal that exposes a civil date,
+also require a portable daemon default when no issue or applicable recurrence
+timezone supplies the zone. Set an issue `timezone` or fix the daemon's
+[top-level timezone](configuration.md) in `config.toml` if the
+write is rejected. Stored legacy zones and defaults keep working; unchanged
+values, unrelated edits, clears, and UTC `Z` instants remain accepted.
 
 ### Calendar dates on issue rows
 
