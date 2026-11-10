@@ -31,7 +31,7 @@ func TestReadFederationWriteQueue(t *testing.T) {
 			defer func() { _ = writer.Rollback() }()
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
-			in := db.FederationReadParams{ProjectID: project.ID, Metadata: tt.metadata, AfterID: binding.ReplayHorizonEventID - 1, Limit: 100}
+			in := db.FederationReadParams{ProjectID: project.ID, Metadata: tt.metadata, AfterID: binding.ReplayHorizonEventID - 1, Limit: 100, Features: db.SupportedEventFeatures}
 			page, err := d.ReadFederation(ctx, in)
 			require.ErrorIs(t, err, tt.wantErr)
 			if tt.wantErr == nil {

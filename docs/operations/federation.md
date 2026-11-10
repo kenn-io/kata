@@ -102,6 +102,13 @@ labels. Pausing or leaving the source preserves its retained discussion. Leaving
 the destination makes the issue standalone, and the source can continue to sync.
 Kata does not author another move during this recovery.
 
+Upgrade both hub and spokes for snapshot-only recovery. Direct hub baselines
+carry the complete set of links for each issue. A snapshot replaces older link
+membership, and later link changes still apply. An upgraded hub automatically
+appends a complete baseline when a project with an older baseline is read.
+Spokes that lack the `issue_snapshot_links_v1` capability must upgrade before
+they can sync that project.
+
 Destination sync recovers retained source history even when its cursor has
 already passed those events. This preserves missed changes and comments without
 replacing newer edits. Once the move is received, leaving the source does not

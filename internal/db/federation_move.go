@@ -447,6 +447,42 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 
 type movedProjectPassKey struct{}
 
+// PruneFederatedLinkTombstones applies explicit removals across paused native
+// replicas without treating those replicas as active link reconciliation peers.
+func PruneFederatedLinkTombstones(ctx context.Context, tx *sql.Tx, projectID int64, snapshotGroup []int64, projection FoldProjection) error {
+	if len(snapshotGroup) < 2 {
+		return nil
+	}
+	var paused []int64
+	for _, peerID := range snapshotGroup {
+		if peerID == projectID {
+			continue
+		}
+		var enabled bool
+		if err := tx.QueryRowContext(ctx, `SELECT enabled FROM federation_bindings WHERE project_id=$1`, peerID).Scan(&enabled); err != nil {
+			return err
+		}
+		if !enabled {
+			paused = append(paused, peerID)
+		}
+	}
+	for key, state := range projection.Links {
+		if state.Present {
+			continue
+		}
+		for _, peerID := range paused {
+			_, err := tx.ExecContext(ctx, `DELETE FROM links WHERE type=$1 AND
+ ((from_issue_uid=$2 AND to_issue_uid=$3) OR ($1='related' AND from_issue_uid=$3 AND to_issue_uid=$2))
+ AND EXISTS (SELECT 1 FROM issues f JOIN issues t ON t.uid=$3 WHERE f.uid=$2 AND
+ ((f.project_id=$4 AND t.project_id=$5) OR (f.project_id=$5 AND t.project_id=$4)))`, key.Type, key.FromUID, key.ToUID, projectID, peerID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // FollowingMovedProjects reports whether a destination reconciliation pass is running.
 func FollowingMovedProjects(ctx context.Context) bool {
 	v, _ := ctx.Value(movedProjectPassKey{}).(bool)

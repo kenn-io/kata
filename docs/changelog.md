@@ -11,6 +11,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Keep moved issues and their discussion when a spoke joins the destination late,
   pauses or leaves the source, or leaves the destination.
+- Keep removed links removed after late destination enrollment. Upgrade hubs
+  and spokes together to use complete federation snapshots.
 
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and

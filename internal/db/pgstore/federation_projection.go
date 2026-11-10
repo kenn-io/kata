@@ -62,7 +62,7 @@ func (s *Store) enableProjectFederationTx(
 	if !errors.Is(err, db.ErrNotFound) {
 		return db.FederationBinding{}, err
 	}
-	enableEvent, err := s.insertFederationBaselineEventsTx(ctx, tx, project, actor)
+	enableEvent, err := s.insertFederationBaselineEventsTx(ctx, tx, project, actor, true)
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
@@ -113,7 +113,7 @@ func (s *Store) RefreshProjectFederationBaseline(
 		if existing.Role != db.FederationRoleHub || !existing.Enabled {
 			return nil
 		}
-		enableEvent, err := s.insertFederationBaselineEventsTx(ctx, tx, project, actor)
+		enableEvent, err := s.insertFederationBaselineEventsTx(ctx, tx, project, actor, true)
 		if err != nil {
 			return err
 		}
@@ -205,12 +205,14 @@ func (s *Store) insertFederationBaselineEventsTx(
 	tx *sql.Tx,
 	project db.Project,
 	actor string,
+	complete bool,
 ) (db.Event, error) {
 	payload, err := json.Marshal(struct {
 		ProjectUID  string      `json:"project_uid"`
 		ProjectName string      `json:"project_name"`
 		Metadata    db.JSONBlob `json:"metadata"`
-	}{ProjectUID: project.UID, ProjectName: project.Name, Metadata: project.Metadata})
+		LinksScope  string      `json:"links_scope,omitempty"`
+	}{ProjectUID: project.UID, ProjectName: project.Name, Metadata: project.Metadata, LinksScope: linkScope(complete)})
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal federation enable payload: %w", err)
 	}
@@ -231,7 +233,7 @@ func (s *Store) insertFederationBaselineEventsTx(
 		return db.Event{}, err
 	}
 	for _, issue := range issues {
-		snapshot, err := federationIssueSnapshotPayload(ctx, tx, issue)
+		snapshot, err := federationIssueSnapshotPayload(ctx, tx, issue, complete)
 		if err != nil {
 			return db.Event{}, err
 		}
@@ -273,12 +275,12 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 	return output, mapSQLError(rows.Err(), nil)
 }
 
-func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue, complete bool) (string, error) {
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
 	}
-	links, err := federationIssueLinks(ctx, tx, issue.ID)
+	links, err := federationIssueLinks(ctx, tx, issue.ID, complete)
 	if err != nil {
 		return "", err
 	}
@@ -299,7 +301,7 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 		Author: issue.Author, Owner: issue.Owner, AssignmentExpiresOn: optionalStoredTime(issue.AssignmentExpiresOn), Priority: issue.Priority, Status: issue.Status,
 		ClosedReason: issue.ClosedReason, ClosedAt: optionalStoredTime(issue.ClosedAt),
 		DeletedAt: optionalStoredTime(issue.DeletedAt), Metadata: jsontext.Value(issue.Metadata),
-		Labels: labels, Links: links, Comments: comments,
+		Labels: labels, Links: links, LinksScope: linkScope(complete), Comments: comments,
 		CreatedAt: formatStoredTime(issue.CreatedAt), UpdatedAt: formatStoredTime(issue.UpdatedAt),
 		Revision: issue.Revision, RecurrenceUID: recurrenceUID, OccurrenceKey: occurrenceKey,
 	})
@@ -335,14 +337,14 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 	return output, mapSQLError(rows.Err(), nil)
 }
 
-func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLink, error) {
+func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64, complete bool) ([]createdLink, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT l.type,peer.short_id,peer.uid,FALSE,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.to_issue_id WHERE l.from_issue_id=$1
 UNION ALL
 SELECT l.type,peer.short_id,peer.uid,CASE WHEN l.type='related' THEN FALSE ELSE TRUE END,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.from_issue_id WHERE l.to_issue_id=$1
-AND peer.project_id<>(SELECT project_id FROM issues WHERE id=$1)
-ORDER BY 1 ASC,3 ASC,4 ASC`, issueID)
+AND ($2 OR peer.project_id<>(SELECT project_id FROM issues WHERE id=$1))
+ORDER BY 1 ASC,3 ASC,4 ASC`, issueID, complete)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -1059,4 +1061,11 @@ func optionalFederationString(value *string) any {
 		return nil
 	}
 	return *value
+}
+
+func linkScope(complete bool) string {
+	if complete {
+		return "all"
+	}
+	return ""
 }

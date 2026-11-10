@@ -33,6 +33,7 @@ type federationMaterialization struct {
 	binding          db.FederationBinding
 	linkProjects     []int64
 	links            db.FoldProjection
+	linkRemovals     db.FoldProjection
 	issueRows        map[string]federatedIssueRow
 	issueIDs         map[string]int64
 	commentRows      map[string]federatedCommentRow
@@ -421,6 +422,13 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 		return err
 	}
 	if m.linkProjects != nil {
+		group, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
+		if err != nil {
+			return err
+		}
+		if err := db.PruneFederatedLinkTombstones(ctx, tx, projectID, group, m.linkRemovals); err != nil {
+			return err
+		}
 		if err := reconcileFederatedLinkRows(ctx, tx, m.links, m.linkIDs, m.linkRows); err != nil {
 			return err
 		}
@@ -543,7 +551,11 @@ func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx
 		byUID[canonicalFederatedLinkKey(key)] = key
 	}
 	graph := map[db.FoldLinkKey]federatedLinkRow{}
+	m.linkRemovals.Links = map[db.FoldLinkKey]db.FoldElementState{}
 	for key, state := range m.links.Links {
+		if !state.Present {
+			m.linkRemovals.Links[key] = state
+		}
 		_, from := ids[key.FromUID]
 		_, to := ids[key.ToUID]
 		if !state.Present || !from || !to {

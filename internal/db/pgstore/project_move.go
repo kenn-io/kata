@@ -173,7 +173,7 @@ SET project_id = $1 WHERE issue_id = $2`,
 			if err != nil {
 				return err
 			}
-			snapshot, err := federationIssueSnapshotPayload(ctx, tx, movedIssue)
+			snapshot, err := federationIssueSnapshotPayload(ctx, tx, movedIssue, false)
 			if err != nil {
 				return err
 			}

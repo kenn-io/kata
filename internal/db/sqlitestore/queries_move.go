@@ -225,7 +225,7 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		if err != nil {
 			return out, err
 		}
-		snapshot, err := d.federationIssueSnapshotPayload(ctx, tx, movedIssue)
+		snapshot, err := d.federationIssueSnapshotPayload(ctx, tx, movedIssue, false)
 		if err != nil {
 			return out, err
 		}

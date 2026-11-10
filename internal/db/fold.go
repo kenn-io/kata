@@ -151,6 +151,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		DeletedAt           *string        `json:"deleted_at"`
 		Metadata            jsontext.Value `json:"metadata"`
 		Labels              []string       `json:"labels"`
+		LinksScope          string         `json:"links_scope"`
 		Links               []struct {
 			Type       string `json:"type"`
 			ToIssueUID string `json:"to_issue_uid"`
@@ -223,6 +224,13 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	}
 	for _, label := range in.Labels {
 		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
+	}
+	if e.Type == "issue.snapshot" && in.LinksScope == "all" {
+		for key, state := range p.Links {
+			if (key.FromUID == uid || key.ToUID == uid) && compareClock(state.Clock, clockOf(e)) <= 0 {
+				p.Links[key] = FoldElementState{Present: false, Clock: clockOf(e), Author: state.Author}
+			}
+		}
 	}
 	for _, link := range in.Links {
 		if link.ToIssueUID == "" {

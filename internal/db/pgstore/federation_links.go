@@ -190,6 +190,15 @@ func reconcileFederatedLinkGroup(
 	if err != nil {
 		return err
 	}
+	if m.projectID != 0 {
+		group, err := federationSnapshotGroupProjectIDs(ctx, tx, m.projectID)
+		if err != nil {
+			return err
+		}
+		if err := db.PruneFederatedLinkTombstones(ctx, tx, m.projectID, group, projection); err != nil {
+			return err
+		}
+	}
 	issueIDs, err := federationGroupIssueIDs(ctx, tx, m.groupProjectIDs, m.projectID, currentIssueIDs)
 	if err != nil {
 		return err

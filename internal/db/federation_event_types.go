@@ -99,10 +99,20 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 	if payloadCarriesCommentReply(kind, payload) {
 		version = max(version, commentReplyWireVersion)
 	}
+	complete, err := snapshotLinksComplete(kind, payload)
+	if err != nil {
+		return 0, "", err
+	}
+	if complete {
+		feature = MergeEventFeatures(feature, SnapshotLinksEventFeature)
+	}
 	return version, feature, nil
 }
 
 func payloadCarriesCommentReply(kind string, payload jsontext.Value) bool {
+	if kind == "issue.moved" {
+		return payloadCarriesCommentReply("issue.snapshot", PayloadMap(payload)["snapshot"])
+	}
 	var document struct {
 		ReplyToUID string `json:"reply_to_uid"`
 		Comments   []struct {

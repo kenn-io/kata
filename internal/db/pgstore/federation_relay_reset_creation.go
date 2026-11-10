@@ -39,7 +39,7 @@ func (b relayResetBackend) LatestEventID(ctx context.Context, projectID int64) (
 }
 
 func (b relayResetBackend) InsertFederationBaselineEvents(ctx context.Context, project db.Project, actor string) (db.Event, error) {
-	return b.d.insertFederationBaselineEventsTx(ctx, b.tx, project, actor)
+	return b.d.insertFederationBaselineEventsTx(ctx, b.tx, project, actor, false)
 }
 
 func (b relayResetBackend) InsertRelayCheckpointStateEvent(ctx context.Context, state db.RelayCheckpointStateEvent) error {

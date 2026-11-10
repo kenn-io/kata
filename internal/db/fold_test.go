@@ -493,3 +493,36 @@ func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 		})
 	}
 }
+
+func TestFoldSnapshotReplacesOlderLinks(t *testing.T) {
+	old := []FoldEvent{
+		testEvent("issue.linked", 1, `{"type":"blocks","from_uid":"issue-1","to_uid":"out"}`),
+		testEvent("issue.linked", 2, `{"type":"blocks","from_uid":"in","to_uid":"issue-1"}`),
+		testEvent("issue.linked", 3, `{"type":"related","from_uid":"issue-1","to_uid":"related"}`),
+		testEvent("issue.linked", 4, `{"type":"blocks","from_uid":"other","to_uid":"peer"}`),
+	}
+	for _, scope := range []string{"", `,"links_scope":"all"`} {
+		t.Run(scope, func(t *testing.T) {
+			snapshot := testEvent("issue.snapshot", 5, `{"uid":"issue-1"`+scope+`,"links":[{"type":"blocks","to_issue_uid":"in","incoming":true,"author":"member","created_at":"2026-01-01T00:00:00Z"}]}`)
+			beforeDelta := FoldEvents(append(append([]FoldEvent{}, old...), snapshot))
+			incoming := beforeDelta.Links[FoldLinkKey{FromUID: "in", ToUID: "issue-1", Type: "blocks"}]
+			assert.True(t, incoming.Present)
+			assert.Equal(t, "member", incoming.Author)
+			assert.Equal(t, "2026-01-01T00:00:00Z", incoming.CreatedAt)
+			add := testEvent("issue.linked", 6, `{"type":"related","from_uid":"issue-1","to_uid":"later"}`)
+			remove := testEvent("issue.unlinked", 7, `{"type":"blocks","from_uid":"in","to_uid":"issue-1"}`)
+			p := FoldEvents(append(append([]FoldEvent{}, old...), snapshot, add, remove))
+			assert.Equal(t, scope == "", p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "out", Type: "blocks"}].Present)
+			assert.Equal(t, scope == "", p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "related", Type: "related"}].Present)
+			assert.True(t, p.Links[FoldLinkKey{FromUID: "other", ToUID: "peer", Type: "blocks"}].Present)
+			assert.True(t, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "later", Type: "related"}].Present)
+			assert.False(t, p.Links[FoldLinkKey{FromUID: "in", ToUID: "issue-1", Type: "blocks"}].Present)
+		})
+	}
+	for _, links := range []string{"", `,"links":[]`, `,"links":null`} {
+		snapshot := testEvent("issue.snapshot", 5, `{"uid":"issue-1","links_scope":"all"`+links+`}`)
+		p := FoldEvents(append(append([]FoldEvent{}, old...), snapshot))
+		assert.False(t, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "out", Type: "blocks"}].Present)
+		assert.False(t, p.Links[FoldLinkKey{FromUID: "in", ToUID: "issue-1", Type: "blocks"}].Present)
+	}
+}

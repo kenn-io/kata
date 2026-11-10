@@ -18,8 +18,11 @@ const CronEventFeature = "cron_v1"
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
+// SnapshotLinksEventFeature identifies complete incident-link snapshots.
+const SnapshotLinksEventFeature = "issue_snapshot_links_v1"
+
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + SnapshotLinksEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -47,6 +50,13 @@ func MergeEventFeatures(values ...string) string {
 // PayloadRequiredFeatures supplements type classification with native delivery state.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
+	complete, err := snapshotLinksComplete(kind, jsontext.Value(payload))
+	if err != nil {
+		return "", err
+	}
+	if complete {
+		required = MergeEventFeatures(required, SnapshotLinksEventFeature)
+	}
 	native, err := payloadHasNativeRecurringState(kind, payload)
 	if err != nil {
 		return "", err
@@ -55,6 +65,34 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
 	return required, nil
+}
+
+func snapshotLinksComplete(kind string, payload jsontext.Value) (bool, error) {
+	if kind != "issue.snapshot" && kind != "issue.moved" && kind != "project.federation_enabled" && kind != "issue.created" {
+		return false, nil
+	}
+	if len(payload) == 0 {
+		payload = jsontext.Value(`{}`)
+	}
+	var body map[string]jsontext.Value
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return false, err
+	}
+	if kind == "issue.moved" {
+		if len(body["snapshot"]) == 0 {
+			return false, nil
+		}
+		return snapshotLinksComplete("issue.snapshot", body["snapshot"])
+	}
+	raw, exists := body["links_scope"]
+	if !exists {
+		return false, nil
+	}
+	var scope string
+	if err := json.Unmarshal(raw, &scope); err != nil || scope != "all" || kind == "issue.created" {
+		return false, fmt.Errorf("%w: invalid links_scope", ErrFederationIngestValidation)
+	}
+	return true, nil
 }
 
 // payloadHasNativeRecurringState identifies hub-owned state independently of
@@ -296,6 +334,31 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	}
 	if err = RequireEventFeatures(in.Features, out.RequiredFeatures); err != nil {
 		return out, err
+	}
+	if binding.Role == FederationRoleHub && binding.Enabled {
+		if err = RequireEventFeatures(in.Features, SnapshotLinksEventFeature); err != nil {
+			return out, err
+		}
+		var payload string
+		err = tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE id=$1 AND project_id=$2 AND type='project.federation_enabled'`, binding.ReplayHorizonEventID, project.ID).Scan(&payload)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return out, err
+		}
+		complete := false
+		if err == nil {
+			complete, err = snapshotLinksComplete("project.federation_enabled", jsontext.Value(payload))
+			if err != nil {
+				return out, err
+			}
+		}
+		if !complete {
+			binding, err = refresh()
+			if err != nil {
+				return out, err
+			}
+			out.Binding = binding
+		}
+		out.RequiredFeatures = MergeEventFeatures(out.RequiredFeatures, SnapshotLinksEventFeature)
 	}
 	if in.IssueUID != "" {
 		var owned bool
