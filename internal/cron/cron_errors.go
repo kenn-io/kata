@@ -3,6 +3,7 @@ package cron
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -29,13 +30,8 @@ func explainCron(expression string, err error) error {
 		hint = "adapter jobs can use @every 1s or longer; native recurring jobs use an interval trigger"
 	case len(fields) == 5 && !strings.HasPrefix(spec, "@") && (dayOfMonthExtension.MatchString(fields[2]) || dayOfWeekExtension.MatchString(fields[4])):
 		hint = "L, W, and # syntax is not supported"
-	case len(fields) == 5 && !strings.HasPrefix(spec, "@"):
-		for _, field := range fields {
-			if hashExtension.MatchString(field) {
-				hint = "hashed schedules (H) are not supported; choose a fixed value"
-				break
-			}
-		}
+	case len(fields) == 5 && !strings.HasPrefix(spec, "@") && slices.ContainsFunc(fields, hashExtension.MatchString):
+		hint = "hashed schedules (H) are not supported; choose a fixed value"
 	}
 	detail := safeCronDetail(err.Error())
 	if hint != "" {
