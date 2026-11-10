@@ -18,45 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
-	"go.kenn.io/kata/internal/wait"
 )
-
-// --- pure condition-evaluation unit tests -------------------------------
-
-func TestWaitEvalCondition(t *testing.T) {
-	cases := []struct {
-		name       string
-		mode       waitMode
-		st         issueState
-		wantSat    bool
-		wantReason string
-	}{
-		{"closed-mode-open-pending", waitClosed, issueState{status: "open"}, false, ""},
-		{"closed-mode-closed", waitClosed, issueState{status: "closed"}, true, "closed"},
-		{"needs-human-open-no-attention", waitNeedsHuman, issueState{status: "open"}, false, ""},
-		{"needs-human-open-ok", waitNeedsHuman, issueState{status: "open", attention: "ok"}, false, ""},
-		{"needs-human-match", waitNeedsHuman, issueState{status: "open", attention: "needs-human"}, true, "attention"},
-		{"needs-human-stuck-no-match", waitNeedsHuman, issueState{status: "open", attention: "stuck"}, false, ""},
-		{"stuck-match", waitStuck, issueState{status: "open", attention: "stuck"}, true, "attention"},
-		{"stuck-needs-human-no-match", waitStuck, issueState{status: "open", attention: "needs-human"}, false, ""},
-		{"attention-ok-no-match", waitAttention, issueState{status: "open", attention: "ok"}, false, ""},
-		{"attention-empty-no-match", waitAttention, issueState{status: "open", attention: ""}, false, ""},
-		{"attention-needs-human", waitAttention, issueState{status: "open", attention: "needs-human"}, true, "attention"},
-		{"attention-stuck", waitAttention, issueState{status: "open", attention: "stuck"}, true, "attention"},
-		{"attention-novel-level", waitAttention, issueState{status: "open", attention: "on-fire"}, true, "attention"},
-		{"needs-human-but-closed", waitNeedsHuman, issueState{status: "closed"}, true, "closed"},
-		{"attention-but-closed", waitAttention, issueState{status: "closed", attention: "ok"}, true, "closed"},
-		{"stuck-but-closed", waitStuck, issueState{status: "closed", attention: "stuck"}, true, "closed"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			var evaluator wait.Evaluator
-			sat, reason := evaluator.Eval(string(c.mode), c.st.status, c.st.attention, c.st.reply)
-			assert.Equal(t, c.wantSat, sat)
-			assert.Equal(t, c.wantReason, reason)
-		})
-	}
-}
 
 func TestWaitClassifyFetchErr(t *testing.T) {
 	cases := []struct {

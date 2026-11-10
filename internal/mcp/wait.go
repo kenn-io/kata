@@ -31,9 +31,6 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		return nil, WaitOutput{}, fmt.Errorf("refs must contain between 1 and %d issue references", maximumResultLimit)
 	}
 	until, status := strings.TrimSpace(input.Until), strings.TrimSpace(input.Status)
-	if until != "" && status != "" {
-		return nil, WaitOutput{}, errors.New("until and status are mutually exclusive")
-	}
 	if until == "" {
 		if status == "" {
 			status = "closed"

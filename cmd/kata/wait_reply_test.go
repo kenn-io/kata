@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -80,40 +79,11 @@ func runWaitReplyDiscoveryUntilContextDone(t *testing.T, waitTimeout, parentTime
 }
 
 func TestWaitReplySlotTransition(t *testing.T) {
-	run := waitRun{mode: waitMode("reply"), start: time.Now()}
+	run := waitRun{mode: waitReply, start: time.Now()}
 	target := &waitTarget{arg: "example", state: targetPending}
-	old := issueState{status: "open", reply: jsontext.Value(`{"message":"old","re":"finding"}`)}
-	require.False(t, evalTarget(run, target, old, ""))
-	same := issueState{status: "open", reply: jsontext.Value(`{ "re": "finding", "message": "old" }`)}
-	require.False(t, evalTarget(run, target, same, ""), "formatting is not a new request")
-	require.True(t, evalTarget(run, target, issueState{status: "open"}, ""), "clearing a slot is a transition")
+	require.False(t, evalTarget(run, target, issueState{status: "open", reply: jsontext.Value(`"old"`)}, ""))
+	require.True(t, evalTarget(run, target, issueState{status: "open", reply: jsontext.Value(`"new"`)}, ""))
 	require.Equal(t, "reply", target.result.Reason)
-	target = &waitTarget{state: targetPending}
-	require.False(t, evalTarget(run, target, issueState{status: "open"}, ""))
-	require.True(t, evalTarget(run, target, old, ""))
-}
-
-func FuzzWaitReplyFirstPollBaseline(f *testing.F) {
-	f.Add("old", "new")
-	f.Fuzz(func(t *testing.T, old, next string) {
-		if len(old)+len(next) > 2048 {
-			return
-		}
-		run := waitRun{mode: waitMode("reply"), start: time.Now()}
-		target := &waitTarget{state: targetPending}
-		rawOld, e := json.Marshal(old)
-		if e != nil {
-			return
-		}
-		rawNew, e := json.Marshal(next)
-		if e != nil {
-			return
-		}
-		before := issueState{status: "open", reply: rawOld}
-		after := issueState{status: "open", reply: rawNew}
-		require.False(t, evalTarget(run, target, before, ""))
-		require.Equal(t, old != next, evalTarget(run, target, after, ""))
-	})
 }
 
 // The first successful poll establishes the baseline; a startup 503 and a

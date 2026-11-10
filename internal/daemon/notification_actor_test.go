@@ -15,7 +15,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestProjectNotificationActorMatchesNativeNotificationMutation(t *testing.T) {
+func TestProjectNotificationActorForBindingModes(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		binding    bool

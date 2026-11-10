@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # HTTP API schema
@@ -954,6 +954,15 @@ The block is absent when no mappings are configured. It never exposes tokens,
 hashes, headers, URLs, project names, actors, or raw remote response bodies.
 Reconciliation is fail-open: `ok` remains `true` while mappings are pending or
 conflicted, so hub availability does not control spoke readiness.
+
+## Notification actor
+
+`GET /api/v1/projects/{project_id}/notifications/actor` returns
+`effective_actor`, the actor used for notification writes in the project.
+When authentication does not bind an actor, `requested_actor` must supply one;
+a missing actor returns 400. An enabled direct push spoke uses its nonblank
+bound actor. Other projects use the authenticated or requested actor. The
+project must be readable.
 
 ## Comment Endpoints
 
