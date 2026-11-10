@@ -3,6 +3,9 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.3'
 workflows:
+    '.github/workflows/release-commands.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'kenn-io/actions@main'
     '.github/workflows/sibling-pins.yml':
         - 'kenn-io/actions@main'
     '.github/workflows/test-pr.yml': []

@@ -55,28 +55,12 @@ jobs:
               - 'README.md'
               - 'scripts/install.sh'
               - 'scripts/install.ps1'
+              - '.github/workflows/**'
 
   release-commands:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'release-commands')) }}
-    name: Released commands
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Check commands against the latest release
-        uses: kenn-io/actions/release-commands@main
-        with:
-          files: |
-            README.md
-            scripts/install.sh
-            scripts/install.ps1
-          binaries: kata
-          asset: kata_*[0-9]_linux_amd64.tar.gz
+    uses: ./.github/workflows/release-commands.yml
 
   web-static:
     needs: changes
