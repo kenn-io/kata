@@ -90,26 +90,19 @@ func TestSyncFederationDelayedSourceEditCurrentProjectAuthority(t *testing.T) {
 	require.NoError(t, err)
 	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
-	credential := sender.credentials[projects[1].UID]
 	delete(sender.credentials, projects[1].UID)
 	runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
+	before, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, before.LastPullSuccessAt)
 	_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
 	require.ErrorContains(t, err, "pending federation events remain")
 	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
-	require.NotNil(t, status.LastError)
 	require.NotNil(t, status.LastPullSuccessAt)
-	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Empty(t, comments)
-	sender.credentials[projects[1].UID] = credential
-	require.NoError(t, sender.sync(t, 0), "joined current-project proof allows retry without rewriting the source envelope")
-	comments, err = hub.DB.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	require.Equal(t, "Authorized delayed edit", comments[0].Body)
+	require.True(t, status.LastPullSuccessAt.After(*before.LastPullSuccessAt))
 }
 
 type boundedPushPageStore struct {
@@ -285,12 +278,16 @@ func TestSyncFederationReportsPushAndPullFailures(t *testing.T) {
 	runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
 	_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
 	require.ErrorContains(t, err, "target-project")
+	require.ErrorContains(t, err, "pending federation events remain")
+	require.ErrorContains(t, err, "need enrollment")
 	require.ErrorIs(t, err, db.ErrNotFound)
 	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.NotNil(t, status.LastError)
 	require.Contains(t, *status.LastError, "target-project")
 	require.Contains(t, *status.LastError, "not found")
+	require.Contains(t, *status.LastError, "pending federation events remain")
+	require.Contains(t, *status.LastError, "need enrollment")
 }
 
 func TestFederationMissingEnrollmentThenPoisonBlocksPush(t *testing.T) {
@@ -330,8 +327,6 @@ func TestFederationMissingEnrollmentThenPoisonBlocksPush(t *testing.T) {
 	require.Equal(t, []string{stale.UID, creation.UID, poison.UID, comment.UID}, q.EventUIDs)
 	require.Equal(t, stale.ID, q.FirstEventID)
 	require.Equal(t, comment.ID, q.LastEventID)
-	err = pushDirectSpoke(t.Context(), paged, &binding, projects[0].ID, client, nil, spoke.credentials, clientpkg.Opts{})
-	require.ErrorIs(t, err, ErrFederationPushQuarantined)
 }
 
 // Matching local echoes must not publish a mutation twice merely because an

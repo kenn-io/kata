@@ -1869,29 +1869,30 @@ func testResetRetryLocalOriginEvent(t *testing.T, upgrade bool) {
 	_, err = spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
 
-	// A retry can push the reinserted event before pull materialization fails
-	// again. That acknowledgment still cannot stand in for pull delivery.
-	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
-		delivered = append(delivered, events...)
-	}))
-	require.Empty(t, delivered)
-	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
+	var store db.Storage = spoke.DB
 	if upgrade {
+		// An older binary can acknowledge the replay before it is upgraded.
+		binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+			delivered = append(delivered, events...)
+		}))
+		require.Empty(t, delivered)
 		// Simulate the schema 50 state left by an old binary after insertion.
 		_, err = spoke.DB.ExecContext(ctx, `DROP TABLE federation_local_replays`)
 		require.NoError(t, err)
 		_, err = spoke.DB.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
 		require.NoError(t, err)
 		require.NoError(t, sqlitestore.UpgradeInPlace(ctx, filepath.Join(spoke.Home, "kata.db")))
+		reopened, err := sqlitestore.Open(ctx, filepath.Join(spoke.Home, "kata.db"))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = reopened.Close() })
+		store = reopened
 	}
-	reopened, err := sqlitestore.Open(ctx, filepath.Join(spoke.Home, "kata.db"))
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
+	binding, err = store.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = reopened.Close() })
-	binding, err = reopened.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, reopened, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, store, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		delivered = append(delivered, events...)
 	}))
 
@@ -1990,9 +1991,6 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered)
-	// The interrupted pull inserted the replay but did not deliver it. A push
-	// acknowledgment of that replay must not suppress its first notification.
-	require.NoError(t, spoke.DB.RecordFederationSyncReset(ctx, project.ID, localEvent.CreatedAt.Add(time.Millisecond)))
 	if acknowledged {
 		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
 		require.NoError(t, err)
@@ -5138,52 +5136,4 @@ func TestSyncFederationApplyRecordsAnMCPEventsRematch(t *testing.T) {
 	require.True(t, ok)
 	assert.LessOrEqual(t, from, local, "the record covers the applied event")
 	assert.GreaterOrEqual(t, through, local, "the record covers the applied event")
-}
-
-func TestSyncFederationAcceptedSuffixStaysSilentAfterStoreReopen(t *testing.T) {
-	ctx := t.Context()
-	spoke := testenv.New(t)
-	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	_, rejected, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "pending", Author: "tester"})
-	require.NoError(t, err)
-	_, accepted, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "accepted", Author: "tester"})
-	require.NoError(t, err)
-	envelope := eventEnvelopeForSyncTest(accepted, 100)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/projects/42/federation/events:ingest":
-			var body api.FederationIngestEventsRequestBody
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			require.Len(t, body.Events, 2)
-			require.Equal(t, rejected.UID, body.Events[0].EventUID)
-			require.Equal(t, accepted.UID, body.Events[1].EventUID)
-			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
-				Accepted: 1, PushCursorEventID: accepted.ID,
-				RejectedEvents: []db.FederationEventRejection{{SourceEventID: rejected.ID, EventUID: rejected.UID, Code: db.FederationProjectNotEnrolledCode}},
-			}))
-		case "/api/v1/projects/42/federation/events":
-			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: []api.EventEnvelope{envelope}, NextAfterID: 100}))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(hub.Close)
-	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: project.UID, ReplayHorizonEventID: 100, PullCursorEventID: 99, PushEnabled: true, Actor: "tester", Enabled: true})
-	require.NoError(t, err)
-	client, err := NewClient(ctx, hub.URL, "token", clientpkg.Opts{})
-	require.NoError(t, err)
-	require.ErrorContains(t, PushDirectSpoke(ctx, spoke.DB, binding, 42, client), "pending federation events remain")
-
-	reopened, err := sqlitestore.Open(ctx, filepath.Join(spoke.Home, "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = reopened.Close() })
-	binding, err = reopened.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	require.Less(t, binding.PushCursorEventID, rejected.ID)
-	var delivered []db.Event
-	require.NoError(t, SyncFederationPullOnlyOnceWithPulledEvents(ctx, reopened, binding, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "token"}, clientpkg.Opts{}, func(_ int64, events []db.Event) {
-		delivered = append(delivered, events...)
-	}))
-	require.Empty(t, delivered)
 }

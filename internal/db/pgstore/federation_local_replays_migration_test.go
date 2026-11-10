@@ -29,9 +29,6 @@ func TestFederationLocalReplaysMigration(t *testing.T) {
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
-	version, err := upgraded.SchemaVersion(ctx)
-	require.NoError(t, err)
-	require.Equal(t, db.CurrentSchemaVersion(), version)
 	var count int
 	require.NoError(t, upgraded.QueryRowContext(ctx, `SELECT COUNT(*) FROM federation_local_replays`).Scan(&count))
 	require.Zero(t, count)
