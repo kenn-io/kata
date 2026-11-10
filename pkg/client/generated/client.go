@@ -3727,6 +3727,7 @@ func (c *Client) ListCronJobs(ctx context.Context, options *ListCronJobsRequestO
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"include":         {Style: "form", Explode: &[]bool{false}[0]},
 		"include_deleted": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
@@ -3918,10 +3919,15 @@ func (c *Client) ArchiveCronJob(ctx context.Context, options *ArchiveCronJobRequ
 
 func (c *Client) ShowCronJob(ctx context.Context, options *ShowCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowCronJobResponse, error) {
 	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"include": {Style: "form", Explode: &[]bool{false}[0]},
+	}
 	reqParams := runtime.RequestOptionsParameters{
-		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}",
-		Method:     "GET",
-		Options:    options,
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)

@@ -4,4 +4,5 @@
 
 export type ListCronJobsParams = {
   include_deleted?: boolean
+  include?: string
 }

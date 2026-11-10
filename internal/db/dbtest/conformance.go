@@ -51,6 +51,12 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "recurring delivery durable scan", run: checkRecurringDeliveryDurableScan},
+	{name: "recurring delivery bare directive", run: checkRecurringDeliveryBareDirective},
+	{name: "recurring delivery status", methods: []string{"RecurringCronDelivery"}, run: checkRecurringDeliveryStatus},
+	{name: "recurring delivery last child", runWithBackend: checkRecurringDeliveryLastChild},
+	{name: "recurring delivery replica", runWithBackend: checkRecurringDeliveryReplica},
+	{name: "recurring delivery legacy jobs", run: checkRecurringDeliveryLegacyJobs},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},

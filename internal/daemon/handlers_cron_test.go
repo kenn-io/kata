@@ -1,6 +1,8 @@
 package daemon_test
 
 import (
+	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
@@ -286,4 +288,168 @@ func TestCronDefinitionWritePolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The status clock is explicit so the boundary is independent of wall time.
+func deliveryHTTPFixture(t *testing.T) (*testenv.Env, db.Project, db.Issue, db.CronJob, time.Time) {
+	t.Helper()
+	now := time.Now().UTC().Add(5 * time.Hour)
+	env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) { cfg.UIClock = func() time.Time { return now } })
+	p := seedProject(t, env, "delivery-example")
+	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Recurring parent", Author: "worker"})
+	require.NoError(t, err)
+	j, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Check service", Actor: "worker", Definition: cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Check service"}, Overlap: "allow", Catchup: "latest"}})
+	require.NoError(t, err)
+	parent, err = env.DB.IssueByID(t.Context(), parent.ID)
+	require.NoError(t, err)
+	return env, p, parent, j, now
+}
+
+func TestCronJobShowIncludesDelivery(t *testing.T) {
+	env, p, _, j, now := deliveryHTTPFixture(t)
+	status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s?include=unknown,delivery", p.ID, j.UID), nil)
+	require.Equalf(t, 200, status, "%s", raw)
+	t.Logf("job show delivery response: %s", raw)
+	var out struct {
+		Job struct {
+			Delivery struct {
+				State       string    `json:"state"`
+				Next        string    `json:"next_due_at"`
+				EvaluatedAt time.Time `json:"evaluated_at"`
+			} `json:"delivery"`
+		} `json:"job"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out))
+	require.Equal(t, "behind", out.Job.Delivery.State)
+	require.NotEmpty(t, out.Job.Delivery.Next)
+	require.Equal(t, now, out.Job.Delivery.EvaluatedAt)
+}
+
+func TestCronJobListDeliveryOnlyForNativeJobs(t *testing.T) {
+	env, p, _, j, _ := deliveryHTTPFixture(t)
+	_, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Adapter", Actor: "worker", Definition: cronHTTPDefinition(t)})
+	require.NoError(t, err)
+	status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs?include=delivery", p.ID), nil)
+	require.Equalf(t, 200, status, "%s", raw)
+	var out struct {
+		Jobs []map[string]jsontext.Value `json:"jobs"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out))
+	require.Len(t, out.Jobs, 2)
+	for _, job := range out.Jobs {
+		if string(job["uid"]) == `"`+j.UID+`"` {
+			require.Contains(t, job, "delivery")
+		} else {
+			require.NotContains(t, job, "delivery")
+		}
+	}
+}
+
+func TestCronDeliveryReadsDoNotWrite(t *testing.T) {
+	env, p, parent, j, _ := deliveryHTTPFixture(t)
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	children, err := env.DB.ChildrenOfIssue(t.Context(), parent.ID)
+	require.NoError(t, err)
+	for range 3 {
+		status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s?include=delivery", p.ID, j.UID), nil)
+		require.Equalf(t, 200, status, "%s", raw)
+		require.Contains(t, string(raw), `"delivery"`)
+	}
+	after, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	current, err := env.DB.IssueByID(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, parent.Metadata, current.Metadata)
+	require.Equal(t, parent.Revision, current.Revision)
+	currentChildren, err := env.DB.ChildrenOfIssue(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Len(t, currentChildren, len(children))
+}
+
+func TestCronJobResponsesOmitDeliveryByDefault(t *testing.T) {
+	env, p, _, j, _ := deliveryHTTPFixture(t)
+	base := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", p.ID)
+	path := base + "/" + j.UID
+	for _, url := range []string{base, path, path + "?include=unknown"} {
+		status, raw := cronHTTP(t, env, http.MethodGet, url, nil)
+		require.Equalf(t, 200, status, "%s", raw)
+		require.NotContains(t, string(raw), `"delivery"`)
+	}
+	body := map[string]any{"actor": "worker", "name": j.Name, "definition": j.Definition, "expected_event_uid": j.DefinitionEventUID}
+	status, raw := cronHTTP(t, env, http.MethodPut, path, body)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.NotContains(t, string(raw), `"delivery"`)
+	var updated struct {
+		Job db.CronJob `json:"job"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &updated))
+	body["name"] = "Stale change"
+	status, raw = cronHTTP(t, env, http.MethodPut, path, body)
+	require.Equal(t, 409, status)
+	require.NotContains(t, string(raw), `"delivery"`)
+	action := map[string]any{"actor": "worker", "expected_event_uid": updated.Job.DefinitionEventUID}
+	status, raw = cronHTTP(t, env, http.MethodDelete, path, action)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.NotContains(t, string(raw), `"delivery"`)
+	require.NoError(t, json.Unmarshal(raw, &updated))
+	action["expected_event_uid"] = updated.Job.DefinitionEventUID
+	status, raw = cronHTTP(t, env, http.MethodPost, path+"/restore", action)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.NotContains(t, string(raw), `"delivery"`)
+	status, raw = cronHTTP(t, env, http.MethodPost, base, map[string]any{"actor": "worker", "name": "Adapter", "definition": cronHTTPDefinition(t)})
+	require.Equalf(t, 201, status, "%s", raw)
+	require.NotContains(t, string(raw), `"delivery"`)
+}
+
+// Read the actual delivery projection before committing a child move; the
+// buffered response must recheck every issue that supplied delivery evidence.
+type deliveryAfterReadStore struct {
+	db.Storage
+	afterRead func() error
+	exposed   []int64
+}
+
+func (s *deliveryAfterReadStore) RecurringCronDelivery(ctx context.Context, projectID int64, jobs []db.CronJob, now time.Time) ([]*db.RecurringDelivery, error) {
+	out, err := s.Storage.RecurringCronDelivery(ctx, projectID, jobs, now)
+	s.exposed = db.ExposedIssues(ctx)
+	if err == nil && s.afterRead != nil {
+		after := s.afterRead
+		s.afterRead = nil
+		err = after()
+	}
+	return out, err
+}
+
+func TestCronDeliveryReleaseRejectsMovedChild(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		hidden := projectAccessHiddenProject(t, store, "hidden-project")
+		j, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.private.ID, Name: "Recurring work", Actor: "member", Definition: cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: f.issue.UID, Title: "Recurring work"}, Overlap: "allow", Catchup: "latest"}})
+		require.NoError(t, err)
+		_, err = store.DispatchRecurringCron(t.Context(), db.DispatchRecurringCronIn{ProjectID: f.private.ID, JobUID: j.UID, ExpectedEventUID: j.DefinitionEventUID, Now: time.Now().UTC().Add(5 * time.Hour)})
+		require.NoError(t, err)
+		children, err := store.ChildrenOfIssue(t.Context(), f.issue.ID)
+		require.NoError(t, err)
+		require.Len(t, children, 1)
+		child := children[0]
+		path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s?include=delivery", f.private.ID, j.UID)
+		status, _, raw := f.request(t, http.MethodGet, path, "member", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Contains(t, string(raw), child.UID)
+		moved := false
+		wrapped := &deliveryAfterReadStore{Storage: store, afterRead: func() error {
+			_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: child.ID, FromProjectID: f.private.ID, ToProjectID: hidden.ID, IfMatchRev: child.Revision, Actor: "member"})
+			moved = err == nil
+			return err
+		}}
+		f = projectAccessFixtureWithStorage(t, f, wrapped)
+		status, _, raw = f.request(t, http.MethodGet, path, "member", nil, nil)
+		require.True(t, moved)
+		require.Contains(t, wrapped.exposed, f.issue.ID, "parent evidence participates in response release")
+		require.Contains(t, wrapped.exposed, child.ID, "child evidence participates in response release")
+		require.Equal(t, http.StatusNotFound, status, string(raw))
+		require.NotContains(t, string(raw), child.UID)
+	})
 }
