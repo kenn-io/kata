@@ -30,9 +30,6 @@ func issueTimezoneWriteRelevant(patch map[string]jsontext.Value) bool {
 // validateIssueTimezoneWrite is admission policy, not stored-data validation.
 // In particular, an unchanged legacy timezone remains usable and echoable.
 func validateIssueTimezoneWrite(current jsontext.Value, patch map[string]jsontext.Value, defaultZone, recurrenceZone string) error {
-	if !issueTimezoneWriteRelevant(patch) {
-		return nil
-	}
 	effective, err := db.ApplyMetadataPatch(current, patch)
 	if err != nil {
 		return err

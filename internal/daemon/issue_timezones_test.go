@@ -23,7 +23,7 @@ func TestIssuePortableTimezoneInventory(t *testing.T) {
 	require.NoError(t, err)
 	root, goVersion, _ := strings.Cut(strings.TrimSpace(string(toolchain)), "\n")
 	bundle := filepath.Join(root, "lib", "time", "zoneinfo.zip")
-	data, err := os.ReadFile(bundle)
+	data, err := os.ReadFile(bundle) //nolint:gosec // G304: fixed bundle path under the active Go toolchain's GOROOT.
 	require.NoError(t, err, "toolchain timezone ZIP is required")
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	require.NoError(t, err)
@@ -48,7 +48,7 @@ func TestIssuePortableTimezoneInventory(t *testing.T) {
 	content.WriteString("}\n")
 	const target = "issue_timezones_gen.go"
 	if *updateIssueTimezones {
-		require.NoError(t, os.WriteFile(target, []byte(content.String()), 0644))
+		require.NoError(t, os.WriteFile(target, []byte(content.String()), 0600))
 	} else {
 		require.Equal(t, portableIssueTimezones[:], names, "refresh with go test ./internal/daemon -run '^TestIssuePortableTimezoneInventory$' -update-golden")
 	}
