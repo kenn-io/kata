@@ -248,7 +248,7 @@ func pushDirectSpoke(
 ) error {
 	if binding.PushEnabled {
 		scanCursor := binding.PushCursorEventID
-		excluded := map[string]bool{}
+		acknowledged := 0
 		var rejectedEvents []db.Event
 		var rejections []db.FederationEventRejection
 		var firstRejected int64
@@ -285,14 +285,7 @@ func pushDirectSpoke(
 			if len(pending) == 0 {
 				break
 			}
-			page := pending
-			pending = nil
-			for _, event := range page {
-				scanCursor = event.ID
-				if !excluded[event.UID] {
-					pending = append(pending, event)
-				}
-			}
+			scanCursor = pending[len(pending)-1].ID
 			for len(pending) > 0 {
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending)
 				if err != nil {
@@ -322,11 +315,11 @@ func pushDirectSpoke(
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
 				for _, event := range rejected {
-					excluded[event.UID] = true
 					if firstRejected == 0 || event.ID < firstRejected {
 						firstRejected = event.ID
 					}
 				}
+				acknowledged += ack.Accepted + ack.Duplicates
 				rejectedEvents = append(rejectedEvents, rejected...)
 				rejections = append(rejections, ack.RejectedEvents...)
 				durableCursor := ack.PushCursorEventID
@@ -350,7 +343,7 @@ func pushDirectSpoke(
 		}
 		if len(rejections) > 0 {
 			// Retain the diagnostic without aborting the subsequent pull.
-			return store.RecordFederationSyncError(ctx, binding.ProjectID, errors.New(federationEventRejectionMessage(rejections)), time.Now().UTC())
+			return store.RecordFederationSyncError(ctx, binding.ProjectID, errors.New(federationEventRejectionMessage(rejections, acknowledged)), time.Now().UTC())
 		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
@@ -388,12 +381,21 @@ func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIn
 	return rejected, nil
 }
 
-func federationEventRejectionMessage(rejected []db.FederationEventRejection) string {
-	messages := make([]string, 0, len(rejected))
+func federationEventRejectionMessage(rejected []db.FederationEventRejection, acknowledged int) string {
+	messages := make([]string, 0, 5)
+	seen := map[[2]string]bool{}
 	for _, rejection := range rejected {
-		messages = append(messages, rejection.Message)
+		key := [2]string{rejection.IssueUID, rejection.CurrentProjectUID}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		messages = append(messages, fmt.Sprintf("%.1024s", rejection.Message))
+		if len(messages) == 5 {
+			break
+		}
 	}
-	return strings.Join(messages, "; ")
+	return fmt.Sprintf("%d events need enrollment (showing up to five issues): %s; hub acknowledged %d other events; pending push includes accepted later events as replays until recovery", len(rejected), strings.Join(messages, "; "), acknowledged)
 }
 
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.

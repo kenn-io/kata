@@ -2262,15 +2262,19 @@ On newer main builds, a direct spoke continues independent pushes when an
 issue has moved into a project it has not joined. Both peers must support
 per-event rejections. The status error names the issue and its current project
 and says the spoke has no enrollment there. Other events in the batch and later
-pages still reach the hub, and normal pull continues.
+pages still reach the hub. Push rejection does not stop the pull phase, but
+a source-only spoke can still encounter the separate missing-destination pull
+limitation when it receives the move. Join that destination to resume that pull.
 
 Join the named project to recover the event automatically on the next sync.
 The event keeps its original UID and content hash. Until recovery, the durable
 push cursor stays before the earliest rejected event, so accepted later events
-can safely replay as duplicates. Missing enrollment alone does not create a
-quarantine. A later poisoned batch retains both the rejected events and the
-poison batch in blocking quarantine. Skip deliberately abandons that outbound
-range. Older peers keep atomic batch failure; an upgraded hub reports the
+can safely replay as duplicates. The status diagnostic counts the other events
+the hub acknowledged. Pending push includes accepted later events as replays
+until recovery, and each sync sends that growing tail again. Missing enrollment
+alone does not create a quarantine or offer a skip action. A later poisoned batch retains both the rejected events and the
+poison batch in blocking quarantine. Only that quarantined range can be skipped;
+skip deliberately abandons its outbound events. Older peers keep atomic batch failure; an upgraded hub reports the
 missing project separately from invalid-credential errors.
 
 Inspect the retained event range and error before choosing any disposition:
