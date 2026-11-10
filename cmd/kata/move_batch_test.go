@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -149,10 +151,10 @@ func TestMoveBatchCLI_SelectorPagingRevisionFence(t *testing.T) {
 	require.Equal(t, 5, cliErr.ExitCode)
 }
 
-// Contract: each body respects both limits and output indexes remain global.
+// Contract: oversized invocations refuse before any write, including previews.
 // A lost later response preserves rows already acknowledged and exits 7.
-func TestMoveBatchCLI_RequestSplittingAndTransportFailure(t *testing.T) {
-	for _, mode := range []string{"count", "bytes", "transport"} {
+func TestMoveBatchCLI_LimitsAndTransportFailure(t *testing.T) {
+	for _, mode := range []string{"count", "bytes", "count-dry", "bytes-dry", "bytes-escaped", "bytes-escaped-dry", "transport"} {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, _, dst, first := setupMoveCLIProjects(t)
 			origin, err := url.Parse(env.URL)
@@ -194,18 +196,42 @@ func TestMoveBatchCLI_RequestSplittingAndTransportFailure(t *testing.T) {
 			t.Cleanup(server.Close)
 			count := 5001
 			comment := ""
-			if mode == "bytes" {
-				comment = strings.Repeat("x", 700000)
+			if strings.HasPrefix(mode, "bytes") {
+				count = 4000
+				comment = strings.Repeat("x", 800000)
+			}
+			if strings.HasPrefix(mode, "bytes-escaped") {
+				count = 1
+				comment = strings.Repeat("<", 200000)
 			}
 			if mode == "transport" {
 				count = 120
 			}
 			input := strings.Repeat(first.UID+"\n", count)
 			args := []string{"--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json"}
+			if strings.HasSuffix(mode, "-dry") {
+				args = append(args, "--dry")
+			}
 			if comment != "" {
 				args = append(args, "--comment", comment)
 			}
 			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, args...)
+			if mode != "transport" {
+				var ce *cliError
+				require.ErrorAs(t, err, &ce)
+				require.Equal(t, ExitUsage, ce.ExitCode)
+				limit := "5,000"
+				if strings.HasPrefix(mode, "bytes") {
+					limit = "1 MiB"
+				}
+				require.Contains(t, ce.Message, limit)
+				require.Contains(t, ce.Message, "separate runs")
+				require.Zero(t, calls)
+				got, e := env.DB.IssueByID(t.Context(), first.ID)
+				require.NoError(t, e)
+				require.Equal(t, first.ProjectID, got.ProjectID)
+				return
+			}
 			var reply struct {
 				Results []api.MoveIssuesResult `json:"results"`
 			}
@@ -246,4 +272,69 @@ func TestMoveBatchCLI_OldDaemonGate(t *testing.T) {
 	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "move", "abc4", "def5", "target")
 	require.ErrorContains(t, err, "requires daemon API 0.45.0")
 	require.Zero(t, calls)
+}
+
+func TestParseRefsFromPreservesTSVFields(t *testing.T) {
+	for _, row := range []string{"abc4\t\n", "abc4\ttarget\t\n", "\tabc4\n"} {
+		_, err := parseRefsFrom(strings.NewReader("# routing\n"+row), "default-target")
+		require.ErrorContains(t, err, "line 2")
+	}
+}
+func TestMoveBatchCLI_SelectorFlagsRequireSource(t *testing.T) {
+	for _, flag := range [][]string{{"--status", "all"}, {"--query", "route"}, {"--label", "absent"}, {"--no-label", "skip"}, {"--owner", "worker"}, {"--unowned"}, {"--meta", "key=value"}} {
+		for _, refs := range [][]string{{"abc4", "target"}, {"abc4", "def5", "target"}} {
+			t.Run(strings.Join(append(refs, flag...), "_"), func(t *testing.T) {
+				args := append(append([]string{"move"}, refs...), flag...)
+				_, _, err := executeRootCapture(t, t.Context(), args...)
+				var ce *cliError
+				require.ErrorAs(t, err, &ce)
+				require.Equal(t, ExitUsage, ce.ExitCode)
+				require.Contains(t, ce.Message, "--from-project")
+			})
+		}
+	}
+}
+
+// A healthy mutation may exceed the standard five-second read budget, while
+// cancellation of its invocation must still stop it.
+func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
+	for _, cancelRequest := range []bool{false, true} {
+		t.Run(fmt.Sprint(cancelRequest), func(t *testing.T) {
+			env, dir, _, dst, first := setupMoveCLIProjects(t)
+			origin, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			proxy := httputil.NewSingleHostReverseProxy(origin)
+			ctx, cancel := context.WithCancel(contextWithBaseURL(t.Context(), env.URL))
+			defer cancel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/issues/actions/move" {
+					r.Host = origin.Host
+					proxy.ServeHTTP(w, r)
+					return
+				}
+				if cancelRequest {
+					cancel()
+					return
+				}
+				//nolint:kennlint // sleeptest: Exercise a healthy mutation beyond the normal HTTP client deadline.
+				timer := time.NewTimer(5200 * time.Millisecond)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+				case <-r.Context().Done():
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.MarshalWrite(w, map[string]any{"results": []api.MoveIssuesResult{{Index: 0, Ref: first.UID, Result: "moved"}}, "next_index": 1})
+			}))
+			defer server.Close()
+			_, _, err = executeRootCaptureWithInput(contextWithBaseURL(ctx, server.URL), t, first.UID+"\n", "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
+			if cancelRequest {
+				require.ErrorContains(t, err, "request canceled")
+				require.ErrorIs(t, ctx.Err(), context.Canceled)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }

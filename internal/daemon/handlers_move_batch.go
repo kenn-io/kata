@@ -25,7 +25,7 @@ type moveBatchItem struct {
 func moveBatchRefusal(result *api.MoveIssuesResult, err error) {
 	mapped, ok := errors.AsType[*api.APIError](err)
 	if !ok {
-		mapped = moveIssueRuleAPIError(err)
+		mapped = moveIssueAPIError(err).(*api.APIError)
 	}
 	result.Result = "refused"
 	result.Code = mapped.Code

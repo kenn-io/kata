@@ -3,10 +3,8 @@ package daemon_test
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,8 +16,8 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// This fixture also runs unmodified on the base branch. The timed region
-// excludes seeding and compilation and includes all HTTP and claim work.
+// The timed region excludes seeding and compilation and includes all HTTP
+// and claim work. Baseline measurements are retained in the external task report.
 func TestMoveIssuesBatchPerf2000(t *testing.T) {
 	if testing.Short() {
 		t.Skip("2000-issue throughput measurement")
@@ -56,53 +54,29 @@ func TestMoveIssuesBatchPerf2000(t *testing.T) {
 				issues = append(issues, issue)
 			}
 			started := time.Now()
-			if os.Getenv("KATA_MOVE_PERF_LEGACY") == "1" {
-				for n, issue := range issues {
-					// Model the legacy CLI's show, move and follow-up comment requests.
-					req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", env.URL, source.ID, issue.UID), nil)
-					require.NoError(t, err)
-					resp, err := env.HTTP.Do(req)
-					require.NoError(t, err)
-					_, _ = io.Copy(io.Discard, resp.Body)
-					_ = resp.Body.Close()
-					require.Equal(t, http.StatusOK, resp.StatusCode)
-					response := doPostWithIfMatch(t, env, moveURL(env, source.ID, issue.UID), fmt.Sprintf(`{"actor":"worker","single":true,"to_project_uid":%q}`, targets[n%2].UID), fmt.Sprintf(`"rev-%d"`, issue.Revision))
-					raw, err := io.ReadAll(response.Body)
-					_ = response.Body.Close()
-					require.NoError(t, err)
-					require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-					response = doPostWithIfMatch(t, env, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/comments", env.URL, targets[n%2].ID, issue.UID), `{"actor":"worker","body":"routed"}`, "")
-					raw, err = io.ReadAll(response.Body)
-					_ = response.Body.Close()
-					require.NoError(t, err)
-					require.Less(t, response.StatusCode, 300, string(raw))
-				}
-			} else {
-				var items []map[string]any
-				for n, issue := range issues {
-					items = append(items, map[string]any{"ref": issue.UID, "to_project_uid": targets[n%2].UID})
-				}
-				start := 0
-				for start < len(items) {
-					raw, err := json.Marshal(map[string]any{"actor": "worker", "comment": "routed", "items": items, "start_index": start})
-					require.NoError(t, err)
-					reply := postMoveBatch(t, env, string(raw))
-					require.Greater(t, reply.NextIndex, start)
-					for _, r := range reply.Results {
-						require.Equal(t, "moved", r.Result)
-					}
-					start = reply.NextIndex
-				}
+			var items []map[string]any
+			for n, issue := range issues {
+				items = append(items, map[string]any{"ref": issue.UID, "to_project_uid": targets[n%2].UID})
 			}
+			start := 0
+			for start < len(items) {
+				raw, err := json.Marshal(map[string]any{"actor": "worker", "comment": "routed", "items": items, "start_index": start})
+				require.NoError(t, err)
+				reply := postMoveBatch(t, env, string(raw))
+				require.Greater(t, reply.NextIndex, start)
+				for _, r := range reply.Results {
+					require.Equal(t, "moved", r.Result)
+				}
+				start = reply.NextIndex
+			}
+
 			elapsed := time.Since(started)
-			t.Logf("PERF legacy=%t spoke=%t issues=2000 elapsed=%s microseconds_per_issue=%d", os.Getenv("KATA_MOVE_PERF_LEGACY") == "1", spoke, elapsed, elapsed.Microseconds()/2000)
-			if os.Getenv("KATA_MOVE_PERF_LEGACY") != "1" {
-				limit := 15 * time.Second
-				if spoke {
-					limit = 60 * time.Second
-				}
-				require.Less(t, elapsed, limit)
+			t.Logf("PERF spoke=%t issues=2000 elapsed=%s microseconds_per_issue=%d", spoke, elapsed, elapsed.Microseconds()/2000)
+			limit := 15 * time.Second
+			if spoke {
+				limit = 60 * time.Second
 			}
+			require.Less(t, elapsed, limit)
 		})
 	}
 }

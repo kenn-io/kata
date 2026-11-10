@@ -11,7 +11,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Move many issues with `kata move <ref>... <project>`, `--refs-from`, or
   project filters. Batch moves default to single issues, report each refusal,
-  and continue automatically across request budgets. Comments commit with the
+  and continue automatically across request budgets. Inputs over 5,000 items or
+  1 MiB are refused before any write. Comments commit with the
   moves and are not repeated on safe reruns. Requires daemon API 0.45.0 or newer;
   [the CLI reference](reference/cli.md#move-many-issues) explains the formats
   and the unchanged same-hub federation limits.

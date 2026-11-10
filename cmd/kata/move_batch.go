@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	jsonv1 "encoding/json"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -48,8 +49,8 @@ func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
 		if line == 1 {
 			value = strings.TrimPrefix(value, "\ufeff")
 		}
-		value = strings.TrimSpace(value)
-		if value == "" || value == "#" || strings.HasPrefix(value, "# ") {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || trimmed == "#" || strings.HasPrefix(trimmed, "# ") {
 			continue
 		}
 		fields := strings.Split(value, "\t")
@@ -247,7 +248,11 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionMoveBatch, "batch move"); err != nil {
 		return err
 	}
-	client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	mutationClient, err := longRunningClientForResolved(a.ctx, a.resolved)
+	if err != nil {
+		return err
+	}
+	client, err := kataclient.NewWithHTTPClient(a.baseURL, mutationClient)
 	if err != nil {
 		return err
 	}
@@ -290,79 +295,66 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		}
 		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: item.Ref, ToProjectUID: uid, ExpectedRevision: item.ExpectedRevision})
 	}
+	if len(items) > 5000 {
+		return moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
+	}
+	// Match the generated transport's JSON escaping and reserve the largest
+	// continuation encoding before the first mutation.
+	request.Body.StartIndex = len(items)
+	raw, err := jsonv1.Marshal(request.Body)
+	if err != nil {
+		return err
+	}
+	if len(raw) > 1<<20 {
+		return moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
+	}
+	request.Body.StartIndex = 0
 	var results []api.MoveIssuesResult
 	requests := 0
-	for offset := 0; offset < len(items); {
-		end := min(offset+5000, len(items))
-		slice := request
-		slice.Body.Items = request.Body.Items[offset:end]
-		// Reserve overhead for the largest resume index, staying below the daemon's
-		// default body cap even when comments or qualified refs are large.
-		for {
-			slice.Body.StartIndex = len(slice.Body.Items)
-			raw, err := json.Marshal(slice.Body)
-			if err != nil {
-				return err
-			}
-			if len(raw) <= 1<<20 {
-				break
-			}
-			if end-offset == 1 {
-				return moveBatchUsage("one batch item and comment exceed the 1 MiB request limit")
-			}
-			end = offset + (end-offset)/2
-			slice.Body.Items = request.Body.Items[offset:end]
+	for request.Body.StartIndex < len(request.Body.Items) {
+		raw, err := json.Marshal(request.Body)
+		if err != nil {
+			return err
 		}
-		slice.Body.StartIndex = 0
-		for slice.Body.StartIndex < len(slice.Body.Items) {
-			raw, err := json.Marshal(slice.Body)
-			if err != nil {
+		var body generated.MoveIssuesBody
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return err
+		}
+		response, callErr := client.MoveIssuesWithResponse(a.ctx, &generated.MoveIssuesRequestOptions{Body: &body})
+		if response == nil {
+			if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
 				return err
 			}
-			var body generated.MoveIssuesBody
-			if err := json.Unmarshal(raw, &body); err != nil {
-				return err
+			message := "batch move transport failed; rerun the same input to continue"
+			if callErr != nil {
+				message += ": " + callErr.Error()
 			}
-			response, callErr := client.MoveIssuesWithResponse(a.ctx, &generated.MoveIssuesRequestOptions{Body: &body})
-			if response == nil {
-				if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
-					return err
-				}
-				message := "batch move transport failed; rerun the same input to continue"
-				if callErr != nil {
-					message += ": " + callErr.Error()
-				}
-				return &cliError{Message: message, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+			return &cliError{Message: message, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			if printErr := printMoveBatch(cmd, results, len(items), opts); printErr != nil {
+				return printErr
 			}
-			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-				if printErr := printMoveBatch(cmd, results, len(items), opts); printErr != nil {
-					return printErr
-				}
-				return err
-			}
-			var reply struct {
-				Results   []api.MoveIssuesResult `json:"results"`
-				NextIndex int                    `json:"next_index"`
-			}
-			if err := json.Unmarshal(response.Body, &reply); err != nil {
-				return err
-			}
-			if reply.NextIndex <= slice.Body.StartIndex || reply.NextIndex > len(slice.Body.Items) {
-				return fmt.Errorf("invalid move batch continuation index %d", reply.NextIndex)
-			}
-			for j := range reply.Results {
-				reply.Results[j].Index += offset
-			}
-			results = append(results, reply.Results...)
-			slice.Body.StartIndex = reply.NextIndex
-			requests++
-			if requests > 1 {
-				if file, ok := cmd.ErrOrStderr().(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-					_, _ = fmt.Fprintf(file, "moved %d/%d ...\n", len(results), len(items))
-				}
+			return err
+		}
+		var reply struct {
+			Results   []api.MoveIssuesResult `json:"results"`
+			NextIndex int                    `json:"next_index"`
+		}
+		if err := json.Unmarshal(response.Body, &reply); err != nil {
+			return err
+		}
+		if reply.NextIndex <= request.Body.StartIndex || reply.NextIndex > len(request.Body.Items) {
+			return fmt.Errorf("invalid move batch continuation index %d", reply.NextIndex)
+		}
+		results = append(results, reply.Results...)
+		request.Body.StartIndex = reply.NextIndex
+		requests++
+		if requests > 1 {
+			if file, ok := cmd.ErrOrStderr().(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+				_, _ = fmt.Fprintf(file, "moved %d/%d ...\n", len(results), len(items))
 			}
 		}
-		offset = end
 	}
 	if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
 		return err

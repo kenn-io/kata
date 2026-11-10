@@ -289,21 +289,17 @@ func authorizeHostProjectScope(
 	if state.authorized && state.request.Operation.AllProjects {
 		return ctx, nil
 	}
-	previousProjectIDs := len(state.request.Operation.ProjectIDs)
-	previousProjectUIDs := len(state.request.Operation.ProjectUIDs)
-	previousAllProjects := state.request.Operation.AllProjects
-	state.request.Operation.ProjectIDs = appendUniqueInt64(
-		state.request.Operation.ProjectIDs, projectIDs...)
-	state.request.Operation.ProjectUIDs = appendUniqueString(
-		state.request.Operation.ProjectUIDs, projectUIDs...)
-	state.request.Operation.AllProjects = state.request.Operation.AllProjects || allProjects
-	scopeChanged := previousProjectIDs != len(state.request.Operation.ProjectIDs) ||
-		previousProjectUIDs != len(state.request.Operation.ProjectUIDs) ||
-		previousAllProjects != state.request.Operation.AllProjects
+	candidate := state.request
+	candidate.Operation.ProjectIDs = appendUniqueInt64(slices.Clone(state.request.Operation.ProjectIDs), projectIDs...)
+	candidate.Operation.ProjectUIDs = appendUniqueString(slices.Clone(state.request.Operation.ProjectUIDs), projectUIDs...)
+	candidate.Operation.AllProjects = state.request.Operation.AllProjects || allProjects
+	scopeChanged := len(candidate.Operation.ProjectIDs) != len(state.request.Operation.ProjectIDs) ||
+		len(candidate.Operation.ProjectUIDs) != len(state.request.Operation.ProjectUIDs) ||
+		candidate.Operation.AllProjects != state.request.Operation.AllProjects
 	if state.authorized && !scopeChanged {
 		return ctx, nil
 	}
-	decision, err := state.controller.Authorize(ctx, state.request)
+	decision, err := state.controller.Authorize(ctx, candidate)
 	if errors.Is(err, ErrHostAccessDenied) {
 		return ctx, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 	}
@@ -311,6 +307,7 @@ func authorizeHostProjectScope(
 		return ctx, api.NewError(http.StatusServiceUnavailable,
 			"access_unavailable", "access decision unavailable", "", nil)
 	}
+	state.request = candidate
 	state.decision = decision
 	state.authorized = true
 	return ctx, nil

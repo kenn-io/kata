@@ -85,7 +85,8 @@ Route many issues with `kata move <ref>... <project>` or `--refs-from` on
 daemon API 0.45.0 or newer. Batch moves default to single issues; add
 `--subtree` to include descendants. Each source/target pair follows the same
 hub, actor, push, and relay rules above. A refused item leaves other successful
-moves committed. Batch comments travel after their issue's existing
+moves committed. Inputs over 5,000 items or a 1 MiB request body are refused
+before any write; split larger input into separate runs. Batch comments travel after their issue's existing
 `issue.moved` event; reruns do not add comments to unchanged issues. No new
 federation event feature is required. See the
 [batch CLI contract](../reference/cli.md#move-many-issues) for input formats,

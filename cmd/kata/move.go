@@ -18,7 +18,7 @@ import (
 
 func newMoveCmd() *cobra.Command {
 	var dryRun, single, subtree, verbose bool
-	var refsFrom, mode string
+	var refsFrom string
 	var selector moveSelector
 	cmd := &cobra.Command{
 		Use:   "move <issue-ref>... <project>",
@@ -40,14 +40,18 @@ assigned in the target project.`,
   kata move --from-project source-project --label triaged target-project`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if selector.Project == "" {
+				for _, name := range []string{"label", "no-label", "meta", "status", "owner", "unowned", "query"} {
+					if cmd.Flags().Changed(name) {
+						return moveBatchUsage("--" + name + " requires --from-project")
+					}
+				}
+			}
 			if len(args) == 2 && refsFrom == "" && selector.Project == "" && !subtree {
 				return runMove(cmd, args[0], args[1], dryRun, single)
 			}
 			if single && subtree {
 				return moveBatchUsage("--single and --subtree are mutually exclusive")
-			}
-			if mode != "lexical" {
-				return moveBatchUsage("batch move selectors require lexical search")
 			}
 			selector.StatusSet = cmd.Flags().Changed("status")
 			return runMoveBatchCommand(cmd, args, refsFrom, selector, moveBatchOptions{DryRun: dryRun, Subtree: subtree, Verbose: verbose})
@@ -66,7 +70,6 @@ assigned in the target project.`,
 	cmd.Flags().StringVar(&selector.Owner, "owner", "", "select owner's issues")
 	cmd.Flags().BoolVar(&selector.Unowned, "unowned", false, "select unowned issues")
 	cmd.Flags().StringVar(&selector.Query, "query", "", "select lexical search matches")
-	cmd.Flags().StringVar(&mode, "mode", "lexical", "selector search mode (lexical only)")
 	addCommentFlag(cmd)
 	return cmd
 }

@@ -998,7 +998,7 @@ are combined in that order.
 `--from-project` accepts `--label`, `--no-label`, `--status`, `--owner`,
 `--unowned`, and `--meta`, with the same filters as `kata list`. Status
 defaults to `all`, including closed history. `--query` adds lexical search;
-semantic and hybrid modes are refused. Supply at least one filter. To move
+these selector flags require `--from-project`. Supply at least one filter. To move
 a whole project, use `kata projects merge`.
 
 Each input returns `moved`, `unchanged`, or `refused`; previews return
@@ -1024,7 +1024,8 @@ teammate attribution, to each issue that moves in the same transaction.
 Unchanged issues receive no comment, so rerunning an old ref file is safe
 while its move-history aliases remain available.
 
-The CLI splits large inputs into requests of at most 5,000 items and 1 MiB.
+Inputs over 5,000 items or a 1 MiB request body are refused before any write,
+including with `--dry`. Split larger input into separate runs.
 The daemon commits chunks and returns a continuation after its soft four-second
 budget; the CLI continues automatically. Exit 0 means every item succeeded
 or was unchanged; exit 5 means at least one refusal; exit 2 means invalid input
