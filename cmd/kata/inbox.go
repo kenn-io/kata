@@ -60,8 +60,7 @@ and prints qualified refs. --context emits bounded context for a harness.
 --context conflicts with --agent, --json, or --format; omit output selectors.
 Reading does not clear a request; clear it with kata notify --clear.
 
-JSON batches are NDJSON wakeup hints, not acknowledgements; re-read current
-attention before acting.
+JSON output can be stale; check current attention before acting.
 Watch cannot be combined with --context.
 
 A row with re=<comment> asks you to answer that comment; answering it with

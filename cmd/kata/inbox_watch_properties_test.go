@@ -113,9 +113,7 @@ func TestInboxWatchOversizedHintsHaveReducedIdentity(t *testing.T) {
 }
 
 func generatedInboxWatchRequest(ht *inboxPropertyT) inboxWatchRequest {
-	return inboxWatchRequest{
-		Ref:        "abcd",
-		Title:      "Finding",
+	request := inboxWatchRequest{
 		IssueUID:   fmt.Sprint(inboxDrawInt64(ht)),
 		ProjectUID: inboxDrawText(ht),
 		value: notification.Value{
@@ -123,6 +121,8 @@ func generatedInboxWatchRequest(ht *inboxPropertyT) inboxWatchRequest {
 			Re: inboxDrawText(ht), Kind: inboxDrawText(ht), Broadcast: inboxDrawBool(ht),
 		},
 	}
+	request.inboxRequest = inboxRequest{Ref: "abcd", Title: "Finding"}
+	return request
 }
 
 func TestInboxWatchStopsOnReadOrOutputFailure(t *testing.T) {
