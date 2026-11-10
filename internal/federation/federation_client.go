@@ -313,8 +313,7 @@ func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Respo
 		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		failure := &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
-		var envelope api.ErrorEnvelope
-		if resp.StatusCode == http.StatusConflict && json.Unmarshal(body, &envelope) == nil && envelope.Error.Code == "relay_cross_project_links" {
+		if resp.StatusCode == http.StatusConflict && federationHubErrorCode(string(body)) == "relay_cross_project_links" {
 			canonical, _ := json.Marshal(api.NewRelayCrossProjectLinksError("hub").Envelope())
 			failure.Body = string(canonical)
 			failure.relayCrossProjectLinks = true
