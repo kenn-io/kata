@@ -11,7 +11,7 @@ import (
 )
 
 func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"mixed", "all-rejected", "payload-only", "moved-peer", "rejected-create", "dependent-on-rejected-create", "rejected-move"} {
+	for _, kind := range []string{"mixed", "all-rejected", "payload-only", "moved-peer", "rejected-create", "dependent-on-rejected-create", "rejected-move", "malformed-comment"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			source, target, moved, _ := federatedRehomeFixture(t, store, "partial-"+kind)
@@ -25,6 +25,13 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 			require.NoError(t, err)
 			at := time.Now().Add(time.Hour).UnixMilli()
 			bad := newRemoteEvent(t, source, &moved.UID, "issue.updated", "worker", origin, at, []byte(`{"uid":"`+moved.UID+`","title":"Forbidden"}`))
+			if kind == "malformed-comment" {
+				commentUID, err := uid.New()
+				require.NoError(t, err)
+				// Malformed actor attribution is atomic poison even when the same
+				// event also lacks authority for its issue's current project.
+				bad = newRemoteEvent(t, source, &moved.UID, "issue.commented", "worker", origin, at, []byte(`{"comment_uid":"`+commentUID+`","author":"worker","body":"Malformed","teammate":23}`))
+			}
 			if kind == "payload-only" {
 				bad.IssueUID = nil
 			}
@@ -70,8 +77,8 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				params.MoveSourceEnrollmentIDs = nil
 			}
 			result, err := store.IngestFederationEvents(ctx, params)
-			if kind == "dependent-on-rejected-create" {
-				require.ErrorIs(t, err, db.ErrFederationIngestValidation, "a rejected creation cannot prove a later primary issue")
+			if kind == "dependent-on-rejected-create" || kind == "malformed-comment" {
+				require.ErrorIs(t, err, db.ErrFederationIngestValidation, "independent payload validation remains atomic despite missing enrollment")
 				after, err := store.MaxEventID(ctx)
 				require.NoError(t, err)
 				require.Equal(t, before, after, "ordinary dependent validation still rolls back atomically")
