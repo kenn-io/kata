@@ -209,9 +209,11 @@ func TestMCPCoordinationWaitValidation(t *testing.T) {
 	for _, args := range []map[string]any{
 		{"refs": []string{"abc1"}, "until": "attention", "status": "closed"},
 		{"refs": []string{"abc1"}, "until": "unknown"},
+		{"refs": []string{"abc1"}, "status": "unknown"},
 		{"refs": []string{"abc1"}, "until": "attention", "for": "worker"},
 		{"refs": []string{"abc1"}, "until": "reply", "for": " "},
 		{"refs": []string{"abc1"}, "until": "attention", "timeout_seconds": 301},
+		{"refs": []string{"abc1"}, "until": "attention", "timeout_seconds": -1},
 		{"refs": []string{"other-project#abc1"}, "until": "attention"},
 	} {
 		callToolError(t, session, "kata.wait", args)
@@ -525,4 +527,50 @@ func TestMCPCoordinationWaitAnyAllMissing(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	require.Contains(t, string(mustJSON(t, result.Content)), "404")
+}
+
+func TestMCPCoordinationWaitUntilPollsPastStalledPeer(t *testing.T) {
+	for _, anyMode := range []bool{false, true} {
+		t.Run(fmt.Sprintf("any=%t", anyMode), func(t *testing.T) {
+			var reads atomic.Int64
+			session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
+				if strings.HasSuffix(r.URL.Path, "/abc1") {
+					<-r.Context().Done()
+					return nil
+				}
+				issue := issueJSON(1, "spoke-project", "def1")
+				if reads.Add(1) > 1 {
+					issue["metadata"] = map[string]any{"work.attention": "stuck"}
+				}
+				return issue
+			})
+			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "any": anyMode, "timeout_seconds": 1})
+			if anyMode {
+				require.Equal(t, "matched", out["reason"])
+			} else {
+				require.Equal(t, "timeout", out["reason"])
+			}
+			require.GreaterOrEqual(t, reads.Load(), int64(2))
+			var matched bool
+			for _, item := range out["states"].([]any) {
+				if item.(map[string]any)["matched"] == true {
+					matched = true
+				}
+			}
+			require.True(t, matched)
+		})
+	}
+}
+
+func TestMCPCoordinationWaitUntilAnySurvivesOutOfScopeRef(t *testing.T) {
+	var reads atomic.Int64
+	session := coordinationWaitSession(t, func(_ *http.Request) map[string]any {
+		issue := issueJSON(1, "spoke-project", "abc1")
+		if reads.Add(1) > 1 {
+			issue["metadata"] = map[string]any{"work.attention": "stuck"}
+		}
+		return issue
+	})
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"other-project#def1", "abc1"}, "until": "attention", "any": true, "timeout_seconds": 1})
+	require.Equal(t, "matched", out["reason"])
 }
