@@ -147,8 +147,9 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 	require.NoError(t, err)
 	spoke := NewClient(spokeSrv.URL, spokeHTTP)
 	hubAdmin, _, err := newHubAdminClient(ctx, daemonTarget{
-		Name: "hub",
-		URL:  hubSrv.URL,
+		Name:  "hub",
+		Token: "hub-admin-token",
+		URL:   hubSrv.URL,
 		resolved: clientpkg.ResolvedDaemon{
 			Source: clientpkg.DaemonSourceInjected, BaseURL: hubSrv.URL, Token: "hub-admin-token",
 		},
@@ -266,8 +267,9 @@ func TestClientListTokensDecodesRedactedAuditInventory(t *testing.T) {
 
 func TestTUIHubAdminClientRejectsPlainHTTPHostnameWithoutAllowInsecure(t *testing.T) {
 	_, _, err := newHubAdminClient(t.Context(), daemonTarget{
-		Name: "hub",
-		URL:  "http://hub.internal:7777",
+		Name:  "hub",
+		Token: "hub-admin-token",
+		URL:   "http://hub.internal:7777",
 		resolved: clientpkg.ResolvedDaemon{
 			Source: clientpkg.DaemonSourceInjected, BaseURL: "http://hub.internal:7777", Token: "hub-admin-token",
 		},

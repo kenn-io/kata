@@ -285,7 +285,7 @@ func TestCronDocumentContentAndCursor(t *testing.T) {
 	}
 	require.Contains(t, document, `"recipient": "reader"`)
 	require.Contains(t, document, "Weekly digest\nSecond line")
-	require.Contains(t, document, "Loaded runs (1) · newest 100")
+	require.Contains(t, document, "Loaded run links · newest 100")
 	p.jobs[0].Definition.Action = generated.ActionResponse{
 		Kind: "execute", Prompt: new("Summarize all changes\nInclude follow-up tasks."),
 	}

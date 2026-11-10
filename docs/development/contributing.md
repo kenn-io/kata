@@ -182,6 +182,12 @@ make docs-serve
 Zensical's preview server is for local preview only. Publish the generated
 static files from `site/` with a real static host, CDN, or web server.
 
+The release command check compares README and installer examples with the latest
+release. For a command that hasn't shipped, put a visible
+`Not in the latest release yet` paragraph before its README block. In an installer, put
+`# Not in the latest release yet` before the output lines and leave a blank
+source line after them. Remove the note once the command ships.
+
 ## Documentation standards
 
 Write for the person trying to use or maintain Kata:
@@ -282,6 +288,11 @@ last_edited: 2026-09-15
 
 Do not leave accepted repository changes uncommitted at the end of a task.
 Do not squash or amend history unless explicitly asked.
+
+End the pull request description with a `Model used:` line naming the model, such as
+`Model used: Opus 5.5` or `Model used: GPT-6.1 Sol`. Add a `Co-authored-by:`
+trailer for the tool to each commit it wrote and to the end of the description,
+because squash-merge keeps only the description.
 
 When closing kata issues, close with a substantive message and typed evidence:
 
