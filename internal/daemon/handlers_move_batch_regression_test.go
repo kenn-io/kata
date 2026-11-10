@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -16,10 +17,8 @@ import (
 type batchDenyProject struct{ denied int64 }
 
 func (a batchDenyProject) Authorize(_ context.Context, request HostAccessRequest) (HostAccessDecision, error) {
-	for _, id := range request.Operation.ProjectIDs {
-		if id == a.denied {
-			return HostAccessDecision{}, ErrHostAccessDenied
-		}
+	if slices.Contains(request.Operation.ProjectIDs, a.denied) {
+		return HostAccessDecision{}, ErrHostAccessDenied
 	}
 	return HostAccessDecision{TransactionFence: func(context.Context, db.Transaction) error { return nil }}, nil
 }
@@ -85,7 +84,7 @@ func TestMoveBatchHostDenialIsolationHTTP(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	response, err := httpServer.Client().Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, 200, response.StatusCode)
 	var reply api.MoveIssuesResponse
 	require.NoError(t, json.NewDecoder(response.Body).Decode(&reply.Body))
