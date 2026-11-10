@@ -1905,14 +1905,18 @@ func testResetRetryLocalOriginEvent(t *testing.T, upgrade bool) {
 }
 
 func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testing.T) {
-	testResetRetryLocalProjectEvent(t, false)
+	testResetRetryLocalProjectEvent(t, false, false)
 }
 
 func TestSyncFederationOnceResetRetryDeliversAcknowledgedLocalProjectEvent(t *testing.T) {
-	testResetRetryLocalProjectEvent(t, true)
+	testResetRetryLocalProjectEvent(t, true, false)
 }
 
-func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
+func TestSyncFederationOnceResetRetryDeliversProjectEventAfterInterruptedPush(t *testing.T) {
+	testResetRetryLocalProjectEvent(t, false, true)
+}
+
+func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush bool) {
 	t.Helper()
 	ctx := t.Context()
 	spoke := testenv.New(t)
@@ -1991,6 +1995,20 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered)
+	if interruptedPush {
+		binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+			delivered = append(delivered, events...)
+		}))
+		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
+		require.NoError(t, err)
+		require.Len(t, replayed, 1)
+		binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, replayed[0].ID, binding.PushCursorEventID)
+		require.Empty(t, delivered)
+	}
 	if acknowledged {
 		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
 		require.NoError(t, err)
