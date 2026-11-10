@@ -45,6 +45,10 @@ $8,COALESCE($9,(SELECT uid FROM issues WHERE id=$8)),$10,$11,$12,$13,$14,$15,$16
 		event.IssueID, event.IssueUID, event.RelatedIssueID, event.RelatedIssueUID,
 		event.Type, event.Actor, string(event.Payload), event.HLCPhysicalMS,
 		event.HLCCounter, event.ContentHash, event.CreatedAt)
+	if err != nil || event.LocalReplayDue == nil || opts.NewInstance || opts.MergeProject {
+		return pgReplayError(db.ImportKindEvent, err)
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1,$2)`, event.UID, *event.LocalReplayDue)
 	return pgReplayError(db.ImportKindEvent, err)
 }
 

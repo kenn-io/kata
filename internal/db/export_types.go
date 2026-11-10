@@ -504,6 +504,9 @@ type EventExport struct {
 	HLCCounter        int64          `json:"hlc_counter"`
 	ContentHash       string         `json:"content_hash"`
 	CreatedAt         string         `json:"created_at"`
+	// A nil value means this event has no local replay record. Zero retains a
+	// replay that may still need projection, without marking delivery as due.
+	LocalReplayDue *int `json:"local_replay_due,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.
