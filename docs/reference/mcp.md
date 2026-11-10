@@ -581,7 +581,6 @@ In multi-project scope, use `project#ref` for existing-issue calls and pass
 ## Attention requests and waits
 
 Load `kata.load_coordination` to send or clear requests with `kata.notify`.
-Sending requests requires a daemon with the typed notifications route.
 Send `{ref, to, message}` to one exact `actor` or `actor/teammate` inbox.
 Messages must be nonblank and at most 1024 UTF-8 bytes. Optional `re` links a
 comment handle or UID that needs an answer. The daemon resolves that reference
@@ -618,8 +617,10 @@ With `any: true`, an `until` wait returns after the first matching issue. A
 status wait reads the current snapshot before returning a match, or returns at
 the deadline if a completed read matched. Otherwise every issue must match;
 observed `until` completions are retained while the others finish. With
-`any: true`, unavailable issues are omitted from the result; if none remain,
-the wait returns a lookup error.
+`any: true`, issues with permanent lookup errors are omitted. An `until` wait
+also omits an issue after three consecutive transient errors. If no issues
+remain, the wait returns a lookup error. Before the deadline, a status wait
+returns a transient lookup error even if another issue matched.
 
 ## Scheduling and someday
 

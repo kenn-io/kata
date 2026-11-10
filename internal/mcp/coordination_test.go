@@ -123,11 +123,17 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 		{"from": "example-agent", "teammate": "planner", "message": "Second look"},
 		{"from": "", "message": "Malformed request"},
 	}
+	var linkedUID string
 	for i, value := range requests {
 		created := callAdministrationTool(t, session, "kata.create", map[string]any{
 			"title": "Attention issue " + string(rune('a'+i)), "idempotency_key": "attention-" + string(rune('a'+i)),
 		})
 		ref := created["issue"].(map[string]any)["ref"].(string)
+		if i == 0 {
+			comment := callAdministrationTool(t, session, "kata.comment", map[string]any{"ref": ref, "body": "Finding", "idempotency_key": "attention-finding"})
+			linkedUID = comment["comment"].(map[string]any)["uid"].(string)
+			value["re"], value["kind"], value["broadcast"] = linkedUID, "confirm", true
+		}
 		callAdministrationTool(t, session, "kata.set_metadata", map[string]any{"ref": ref, "patch": map[string]any{key: value}})
 	}
 	callAdministrationTool(t, session, "kata.create", map[string]any{"title": "Quiet issue", "idempotency_key": "quiet"})
@@ -145,6 +151,9 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 		require.NotEmpty(t, request["qualified_ref"])
 	}
 	require.Equal(t, "planner", messages["Second look"]["teammate"])
+	require.Equal(t, linkedUID, messages["Please review the plan"]["re"])
+	require.Equal(t, "confirm", messages["Please review the plan"]["kind"])
+	require.Equal(t, true, messages["Please review the plan"]["broadcast"])
 	require.NotContains(t, messages["Please review the plan"], "teammate")
 
 	limited := callAdministrationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer-agent", "limit": 1})

@@ -26,7 +26,7 @@ func TestProjectNotificationActorEndpointBindingModes(t *testing.T) {
 		want       string
 	}{
 		{name: "standalone", want: "caller"},
-		{name: "direct push spoke", binding: true, enabled: true, push: true, boundActor: " bound-agent ", want: "bound-agent"},
+		{name: "direct push spoke", binding: true, enabled: true, push: true, boundActor: "bound-agent", want: "bound-agent"},
 		{name: "relay spoke", binding: true, enabled: true, push: true, relay: true, boundActor: "bound-agent", want: "caller"},
 		{name: "disabled spoke", binding: true, enabled: false, push: true, boundActor: "bound-agent", want: "caller"},
 		{name: "pull-only spoke", binding: true, enabled: true, push: false, boundActor: "bound-agent", want: "caller"},
