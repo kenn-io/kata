@@ -55,8 +55,6 @@ jobs:
               - 'README.md'
               - 'scripts/install.sh'
               - 'scripts/install.ps1'
-              - '.github/workflows/test.yml'
-              - '.github/workflows/actions.lock'
 
   release-commands:
     needs: changes
@@ -64,8 +62,6 @@ jobs:
     name: Released commands
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
