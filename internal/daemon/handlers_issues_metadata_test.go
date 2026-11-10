@@ -37,7 +37,7 @@ func TestCreateIssue_AcceptsMetadata(t *testing.T) {
 	var m map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(got.Metadata), &m))
 	assert.JSONEq(t, `"feature/x"`, string(m["work.branch"]))
-	assert.JSONEq(t, `"2026-01-02"`, string(m["scheduled_on"]))
+	assert.JSONEq(t, `{"value":"2026-01-02","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}`, string(m["scheduled_on"]))
 }
 
 // TestCreateIssue_RejectsInvalidReservedMetadata pins the 400

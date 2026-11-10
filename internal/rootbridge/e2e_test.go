@@ -389,7 +389,7 @@ func testE2EPlanningFields(t *testing.T, executable string, backend e2eBackend) 
 	assert.Zero(t, first.FieldConflicts)
 	issue, err := h.database.store.IssueByID(t.Context(), h.issue.ID)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"scheduled_on":"2026-08-21T09:00:00","timezone":"Europe/Paris"}`, string(issue.Metadata))
+	assert.JSONEq(t, `{"scheduled_on":{"value":"2026-08-21T09:00:00","timezone":"Europe/Paris","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}`, string(issue.Metadata))
 
 	_, err = h.database.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 		IssueID: h.issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{
@@ -426,7 +426,7 @@ func testE2EPlanningFields(t *testing.T, executable string, backend e2eBackend) 
 	assert.False(t, resolved.Conflicted)
 	issue, err = h.database.store.IssueByID(t.Context(), h.issue.ID)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"scheduled_on":"2026-08-23T09:00:00","timezone":"Europe/Paris"}`, string(issue.Metadata))
+	assert.JSONEq(t, `{"scheduled_on":{"value":"2026-08-23T09:00:00","timezone":"Europe/Paris","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"},"timezone":"Europe/Paris"}`, string(issue.Metadata))
 }
 
 func testE2EPlanningFieldShapes(t *testing.T, executable string, backend e2eBackend) {
@@ -436,12 +436,12 @@ func testE2EPlanningFieldShapes(t *testing.T, executable string, backend e2eBack
 		external  connector.FieldValue
 		metadata  string
 	}{
-		{kataField: "scheduled_on", kind: "date", external: connector.FieldValue{Kind: "date", Value: "2026-08-24"}, metadata: `{"scheduled_on":"2026-08-24"}`},
-		{kataField: "scheduled_on", kind: "local", external: connector.FieldValue{Kind: "local_datetime", Value: "2026-08-24T09:30:00", Timezone: "Europe/Paris"}, metadata: `{"scheduled_on":"2026-08-24T09:30:00","timezone":"Europe/Paris"}`},
-		{kataField: "scheduled_on", kind: "instant", external: connector.FieldValue{Kind: "instant", Value: "2026-08-24T07:30:00.12Z"}, metadata: `{"scheduled_on":"2026-08-24T07:30:00.12Z"}`},
-		{kataField: "deadline_on", kind: "date", external: connector.FieldValue{Kind: "date", Value: "2026-08-25"}, metadata: `{"deadline_on":"2026-08-25"}`},
-		{kataField: "deadline_on", kind: "local", external: connector.FieldValue{Kind: "local_datetime", Value: "2026-08-25T10:45:00", Timezone: "Europe/Paris"}, metadata: `{"deadline_on":"2026-08-25T10:45:00","timezone":"Europe/Paris"}`},
-		{kataField: "deadline_on", kind: "instant", external: connector.FieldValue{Kind: "instant", Value: "2026-08-25T08:45:00.12Z"}, metadata: `{"deadline_on":"2026-08-25T08:45:00.12Z"}`},
+		{kataField: "scheduled_on", kind: "date", external: connector.FieldValue{Kind: "date", Value: "2026-08-24"}, metadata: `{"scheduled_on":{"value":"2026-08-24","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}`},
+		{kataField: "scheduled_on", kind: "local", external: connector.FieldValue{Kind: "local_datetime", Value: "2026-08-24T09:30:00", Timezone: "Europe/Paris"}, metadata: `{"scheduled_on":{"value":"2026-08-24T09:30:00","timezone":"Europe/Paris","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}`},
+		{kataField: "scheduled_on", kind: "instant", external: connector.FieldValue{Kind: "instant", Value: "2026-08-24T07:30:00.12Z"}, metadata: `{"scheduled_on":{"value":"2026-08-24T07:30:00.12Z","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}`},
+		{kataField: "deadline_on", kind: "date", external: connector.FieldValue{Kind: "date", Value: "2026-08-25"}, metadata: `{"deadline_on":{"value":"2026-08-25","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}`},
+		{kataField: "deadline_on", kind: "local", external: connector.FieldValue{Kind: "local_datetime", Value: "2026-08-25T10:45:00", Timezone: "Europe/Paris"}, metadata: `{"deadline_on":{"value":"2026-08-25T10:45:00","timezone":"Europe/Paris","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}`},
+		{kataField: "deadline_on", kind: "instant", external: connector.FieldValue{Kind: "instant", Value: "2026-08-25T08:45:00.12Z"}, metadata: `{"deadline_on":{"value":"2026-08-25T08:45:00.12Z","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}`},
 	} {
 		t.Run(test.kataField+" "+test.kind, func(t *testing.T) {
 			h := newE2EHarness(t, executable, backend, false)
