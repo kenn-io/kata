@@ -18,7 +18,9 @@ func TestAssociationValidatesCanonicalSessionAndRoute(t *testing.T) {
 	for _, change := range []func(*Association){
 		func(v *Association) { v.SessionID = "codex:other" },
 		func(v *Association) { v.SnapshotBytes = MaxSnapshotBytes + 1 },
-		func(v *Association) { v.Route = append(v.Route, v.Route[0]) },
+		func(v *Association) {
+			v.Route = append(v.Route, RouteObservation{InstanceUID: v.AuthorityUID, ProjectUID: v.ProjectUID, BindingUID: "01ARZ3NDEKTSV4RRFFQ69G5FAZ", UpstreamInstanceUID: v.AuthorityUID, ResetEpoch: 1})
+		},
 		func(v *Association) { v.LocatorBase = "https://user:secret@archive.example" },
 	} {
 		changed := a.Clone()

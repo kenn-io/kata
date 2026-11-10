@@ -25,6 +25,33 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
+func TestAgentsViewAssociationRequiresDiscoveryAdapter(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p, err := env.DB.CreateProject(t.Context(), "associated-project")
+	require.NoError(t, err)
+	i, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "completed work", Author: "tester"})
+	require.NoError(t, err)
+	a := agentsviewrelay.Association{Version: 1, IssueUID: i.UID, ProjectUID: p.UID, AuthorityUID: env.DB.InstanceUID(), ServiceID: strings.Repeat("a", 64), RootKeyID: strings.Repeat("c", 64), Agent: "pi", NativeSessionID: "selected", SessionID: "pi:selected", SnapshotSHA256: strings.Repeat("b", 64), SnapshotBytes: 123, LocatorBase: "https://archive.example", Route: []agentsviewrelay.RouteObservation{{InstanceUID: env.DB.InstanceUID(), ProjectUID: p.UID}}}
+	require.NoError(t, a.Validate())
+	body, err := json.Marshal(map[string]any{"actor": "tester", "reason": "done", "message": "Completed the scoped work and reviewed its expected behavior.", "evidence": []map[string]any{{"type": "reviewed-paths", "paths": []string{"example.go"}}}, "agentsview_protocol": "relay-v1", "agentsview_association": a, "agentsview_discovery": map[string]any{}, "transcript": map[string]any{"agent": "pi", "session_id": "selected"}})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, p.ID, i.ShortID), bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.HTTP.Do(req)
+	require.NoError(t, err)
+	raw := readClose(t, resp)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), "agentsview_unavailable")
+	current, err := env.DB.IssueByID(t.Context(), i.ID)
+	require.NoError(t, err)
+	require.Equal(t, "open", current.Status)
+	events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: p.ID, IssueUID: i.UID, Types: []string{"issue.closed"}, Limit: 10})
+	require.NoError(t, err)
+	require.Empty(t, events)
+}
+
 func TestAgentsViewUploadWithoutTransportDoesNotMutateIssue(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p, err := env.DB.CreateProject(t.Context(), "share-project")
@@ -35,6 +62,12 @@ func TestAgentsViewUploadWithoutTransportDoesNotMutateIssue(t *testing.T) {
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tok")
 	req.Header.Set("Content-Type", "application/octet-stream")
+	control := agentsviewrelay.Control{Version: 1, IssueUID: i.UID, ProjectUID: p.UID, AuthorityUID: env.DB.InstanceUID(), CloseEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FAZ", ServiceID: strings.Repeat("a", 64), Agent: "pi", NativeSessionID: "selected", SessionID: "pi:selected", SnapshotSHA256: strings.Repeat("b", 64), SnapshotBytes: 14, Route: []agentsviewrelay.RouteObservation{{InstanceUID: env.DB.InstanceUID(), ProjectUID: p.UID}}, ClientKind: "cli"}
+	rawControl, err := json.Marshal(control)
+	require.NoError(t, err)
+	_, err = agentsviewrelay.DecodeControl(rawControl)
+	require.NoError(t, err)
+	req.Header.Set(agentsviewrelay.ControlHeader, base64.RawURLEncoding.EncodeToString(rawControl))
 	resp, err := env.HTTP.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()

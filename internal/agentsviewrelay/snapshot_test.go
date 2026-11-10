@@ -22,7 +22,7 @@ func TestSnapshotIdentityBeforeForwarding(t *testing.T) {
 	if err := VerifySnapshot(t.Context(), bytes.NewReader(body), c); err == nil {
 		t.Fatal("accepted session B under session A controls")
 	}
-	for _, raw := range []string{`{"v":1,"v":1}`, string(body) + `{}`, `{"v":1,"session_id":"pi:selected","manifest":{"v":5,"native_session_id":"pi:selected","session":{"id":"pi:selected","agent":"other"}}}`} {
+	for _, raw := range []string{strings.Replace(string(body), `"v":1,`, `"v":1,"v":1,`, 1), string(body) + `{}`, strings.Replace(string(body), `"agent":"pi"`, `"agent":"other"`, 1)} {
 		b := []byte(raw)
 		h := sha256.Sum256(b)
 		c.SessionID = "pi:selected"
