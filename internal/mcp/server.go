@@ -3,6 +3,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/mcpicon"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/storageadmin"
@@ -232,9 +234,13 @@ func addTool[In, Out any](
 }
 
 func schemaFor[T any]() *jsonschema.Schema {
-	schema, err := jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{})
+	schema, err := jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[jsontext.Value](): {}}})
 	if err != nil {
 		panic(fmt.Errorf("infer MCP schema for %T: %w", *new(T), err))
+	}
+	if reflect.TypeFor[T]() == reflect.TypeFor[CronJobHistoryOutput]() {
+		// Raw changes preserve omission, null, arrays, and exact JSON literals.
+		schema.Properties["versions"].Items.Properties["changes"] = &jsonschema.Schema{Types: []string{"null", "array"}, Items: schemaFor[cron.Change]()}
 	}
 	schema.Schema = "https://json-schema.org/draft/2020-12/schema"
 	return schema

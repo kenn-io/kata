@@ -439,8 +439,16 @@ nullable actors, `current` markers, and any `skipped_event_uids` diagnostics.
 Definition numbers remain exact. History is local to the selected daemon;
 replicas may retain only a baseline and later edits. Paging is live rather
 than a frozen snapshot. See the definition history reference for ordering,
-retention, and current-marker semantics. Field diffs are CLI-only through
-`kata cron job history <uid> --diff`.
+retention, and current-marker semantics.
+
+Set `diff: true` to include each version's `changes` against the next older
+retained version. Comparisons use `name`, `definition`, and `deleted_at`;
+numbers compare lexically and stay exact. An unchanged comparison returns
+`changes: []`; the oldest available version returns `changes: null`. Omit
+`diff` to leave `changes` absent. A continuing page reads exactly one older
+version for comparison, keeps the first page's cursor, and merges skipped-event
+diagnostics. A failed or missing lookahead returns an error without partial
+history; retry the read.
 
 `kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
 and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`

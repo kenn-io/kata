@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/cronhistory"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -30,12 +32,29 @@ type CronJobUpdateInput struct {
 // CronJobHistoryInput selects a page of locally retained definition versions.
 type CronJobHistoryInput struct {
 	CronIdentityInput
+	Diff           bool   `json:"diff,omitempty" jsonschema:"Include exact field changes against each preceding retained version"`
 	Limit          *int64 `json:"limit,omitempty" jsonschema:"Results from 1 through 100; omit for 20"`
 	BeforeEventUID string `json:"before_event_uid,omitempty" jsonschema:"next_before_event_uid from the preceding page"`
 }
 
-func (h toolHandlers) cronJobHistory(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobHistoryInput) (*sdkmcp.CallToolResult, generated.ListCronJobVersionsResponse, error) {
-	var out generated.ListCronJobVersionsResponse
+// Drop generated decoding methods so JSON v2 can inline the read fields.
+type cronJobHistoryFields generated.CronDefinitionVersion
+
+// CronJobHistoryVersion adds optional changes to the generated read fields.
+type CronJobHistoryVersion struct {
+	cronJobHistoryFields
+	Changes jsontext.Value `json:"changes,omitzero"`
+}
+
+// CronJobHistoryOutput preserves route metadata with optional per-version diffs.
+type CronJobHistoryOutput struct {
+	Versions           []CronJobHistoryVersion `json:"versions"`
+	NextBeforeEventUID *string                 `json:"next_before_event_uid,omitempty"`
+	SkippedEventUIDs   []string                `json:"skipped_event_uids,omitempty"`
+}
+
+func (h toolHandlers) cronJobHistory(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobHistoryInput) (*sdkmcp.CallToolResult, CronJobHistoryOutput, error) {
+	var out CronJobHistoryOutput
 	id, err := cronUID(in.UID)
 	if err != nil {
 		return nil, out, err
@@ -60,7 +79,46 @@ func (h toolHandlers) cronJobHistory(ctx context.Context, _ *sdkmcp.CallToolRequ
 	if err != nil {
 		return nil, out, err
 	}
-	return successResult(), *response, nil
+	out.NextBeforeEventUID, out.SkippedEventUIDs = response.NextBeforeEventUID, response.SkippedEventUids
+	out.Versions = make([]CronJobHistoryVersion, len(response.Versions))
+	for i, version := range response.Versions {
+		out.Versions[i].cronJobHistoryFields = cronJobHistoryFields(version)
+	}
+	if in.Diff {
+		raw, err := json.Marshal(response)
+		if err != nil {
+			return nil, out, err
+		}
+		enriched, err := cronhistory.WithDiff(ctx, raw, func(ctx context.Context, cursor string) ([]byte, error) {
+			older, err := h.options.Client.ListCronJobVersions(ctx, &generated.ListCronJobVersionsRequestOptions{
+				PathParams: &generated.ListCronJobVersionsPath{ProjectID: p.ID, CronUID: id},
+				Query:      &generated.ListCronJobVersionsQuery{Limit: new(int64(1)), BeforeEventUID: &cursor},
+			})
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(older)
+		})
+		if err != nil {
+			return nil, out, err
+		}
+		// Decode only the added fields; retain generated definitions and their exact
+		// json.Number literals from the initial response.
+		var diff struct {
+			Versions []struct {
+				Changes jsontext.Value `json:"changes"`
+			} `json:"versions"`
+			Skipped []string `json:"skipped_event_uids"`
+		}
+		if err := json.Unmarshal(enriched, &diff); err != nil {
+			return nil, out, err
+		}
+		for i := range out.Versions {
+			out.Versions[i].Changes = diff.Versions[i].Changes
+		}
+		out.SkippedEventUIDs = diff.Skipped
+	}
+	return successResult(), out, nil
 }
 
 func (h toolHandlers) cronJobs(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronListInput) (*sdkmcp.CallToolResult, *generated.ListCronJobsResponse, error) {
