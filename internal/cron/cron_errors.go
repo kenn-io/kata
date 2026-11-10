@@ -5,11 +5,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	cronparser "github.com/netresearch/go-cron"
+	"go.kenn.io/kata/internal/textsafe"
 )
+
+const directiveRule = "a TZ= or CRON_TZ= zone name ends at the first ASCII space, and a schedule must follow it, such as TZ=UTC 0 9 * * *"
 
 // explainCron only describes a rejection; cronParser remains the grammar owner.
 func explainCron(expression string, err error) error {
@@ -22,18 +23,15 @@ func explainCron(expression string, err error) error {
 	}
 	if strings.HasPrefix(expression, "TZ=") || strings.HasPrefix(expression, "CRON_TZ=") {
 		directive, rest, _ := strings.Cut(expression, " ")
-		if strings.IndexFunc(directive, unicode.IsSpace) >= 0 {
-			return reject("timezone directive needs an ASCII space before its schedule; tabs and other whitespace do not separate it")
-		}
 		_, zone, _ := strings.Cut(directive, "=")
 		if len(zone) >= 2 && (zone[0] == '\'' && zone[len(zone)-1] == '\'' || zone[0] == '"' && zone[len(zone)-1] == '"') {
 			zone = zone[1 : len(zone)-1]
 		}
 		if strings.HasPrefix(detail, "unknown time zone ") || strings.HasPrefix(detail, "invalid timezone ") {
-			return explainTimezone(zone, err)
+			return explainTimezone(zone, err, "; "+directiveRule)
 		}
 		if strings.HasPrefix(detail, "missing fields after timezone") {
-			return reject(detail)
+			return reject(directiveRule + "; " + detail)
 		}
 		expression = strings.TrimSpace(rest)
 	}
@@ -98,12 +96,12 @@ func explainCron(expression string, err error) error {
 	}
 }
 
-func explainTimezone(name string, err error) error {
+func explainTimezone(name string, err error, advice string) error {
 	label := "invalid timezone"
 	if err != nil && strings.HasPrefix(err.Error(), "unknown time zone ") && !strings.Contains(err.Error(), "time: invalid location name") {
 		label = "unknown time zone"
 	}
-	return invalid(fmt.Sprintf("%s %q; use an IANA name such as America/New_York, or UTC", label, clip(name, 40)))
+	return invalid(fmt.Sprintf("%s %q; use an IANA name such as America/New_York, or UTC%s", label, clip(name, 40), advice))
 }
 
 var (
@@ -131,14 +129,8 @@ func daySyntaxReason(field int, token string) string {
 
 // clip bounds raw values before quoting, keeping complete UTF-8 runes.
 func clip(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	end := n - len("…")
-	for end > 0 && !utf8.RuneStart(s[end]) {
-		end--
-	}
-	return s[:end] + "…"
+	value, _ := textsafe.TruncateBytes(s, n)
+	return value
 }
 
 // Library errors already quote values. Escape raw controls, replace invalid
@@ -151,10 +143,7 @@ func safeCronDetail(s string, n int) string {
 			quoted := strconv.QuoteRune(r)
 			part = quoted[1 : len(quoted)-1]
 		}
-		if out.Len()+len(part) > n-len("…") {
-			return out.String() + "…"
-		}
 		out.WriteString(part)
 	}
-	return out.String()
+	return clip(out.String(), n)
 }

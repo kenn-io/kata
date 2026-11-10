@@ -50,6 +50,7 @@ func FuzzCronErrorSafety(f *testing.F) {
 	for _, input := range []string{
 		"TZ=UTC", "CRON_TZ=UTC", "TZ=UTC\t0 9 * * *", "TZ=UTC @daily",
 		"x\x00y 9 * * *", "\x1b[31m 9 * * *", "x\x7fy 9 * * *", string([]byte{0xff}) + " 9 * * *",
+		"TZ=" + strings.Repeat("\x00", 40) + " @daily", "TZ=" + strings.Repeat("\xff", 40) + " @daily",
 		"bad\x00zone", strings.Repeat("\x00", 1000), strings.Repeat("x", 1000) + " 9 * * *", strings.Repeat("é", 1000),
 		"@invented", "@daily ", "@every 2x", " @daily", "0 9 * * 5#", "0 9 L-3 * *", "0 9 15W * *", "H * * * *",
 		"60 * * * *", "* */24 * * *", "0 9 * JAN-XYZ *", "0 9 * * MON/0", "0 9 * * MON,,FRI", "0 9 * * -1",

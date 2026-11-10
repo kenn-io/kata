@@ -71,12 +71,10 @@ func TestCronDirectiveFormatAdvice(t *testing.T) {
 		{"0 9 * * * TZ=UTC", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
 		{"TZ=UTC CRON_TZ=UTC 0 9 * * *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
 		{"0 9 * TZ=UTC *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
-		{"TZ=UTC\t0 9 * * *", "ASCII space", "invalid timezone"},
-		{"TZ=UTC\t0\t9\t*\t*\t*", "ASCII space", "missing fields"},
-		{"TZ=UTC\t 0 9 * * *", "ASCII space", "invalid timezone"},
-		{"CRON_TZ=UTC\n0 9 * * *", "ASCII space", "invalid timezone"},
-		{"TZ=UTC", "missing fields after timezone", "unknown time zone"},
-		{"CRON_TZ=UTC", "missing fields after timezone", "unknown time zone"},
+		{"TZ=UTC\t0\t9\t*\t*\t*", "such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
+		{"TZ=UTC", "such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
+		{"TZ=UTC ", "such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
+		{"CRON_TZ=UTC", "such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
 			_, err := ParseCron(tc.expression)
@@ -96,6 +94,13 @@ func TestCronTimezoneAdvice(t *testing.T) {
 		{"", `TZ="Not/AZone" 0 9 * * *`, "unknown time zone", "Not/AZone"},
 		{"", "TZ=Not/AZone ", "unknown time zone", "Not/AZone"},
 		{"", "TZ= 0 9 * * *", "invalid timezone", ""},
+		{"", "TZ=Bad\tZone @daily", "invalid timezone", "Bad\tZone"},
+		{"", "CRON_TZ=Bad\u00a0Zone 0 9 * * *", "invalid timezone", "Bad\u00a0Zone"},
+		{"", "TZ=UTC\t0 9 * * *", "invalid timezone", "UTC\t0"},
+		{"", "TZ=UTC\t 0 9 * * *", "invalid timezone", "UTC\t"},
+		{"", "CRON_TZ=UTC\n0 9 * * *", "invalid timezone", "UTC\n0"},
+		{"", `TZ="America/New York" 0 9 * * *`, "invalid timezone", `"America/New`},
+		{"", "TZ=America/New York 0 9 * * *", "unknown time zone", "America/New"},
 		{"../UTC", "@daily", "invalid timezone", "../UTC"},
 		{"/abs", "@daily", "invalid timezone", "/abs"},
 		{"bad zone!", "@daily", "invalid timezone", "bad zone!"},
@@ -117,7 +122,11 @@ func TestCronTimezoneAdvice(t *testing.T) {
 		t.Run(tc.zone+tc.expression, func(t *testing.T) {
 			err := (Trigger{Kind: "cron", Cron: tc.expression, Timezone: tc.zone}).Validate()
 			requireSafeCronError(t, err)
-			require.EqualError(t, err, fmt.Sprintf("invalid cron document: %s %q; use an IANA name such as America/New_York, or UTC", tc.label, tc.shown))
+			want := fmt.Sprintf("invalid cron document: %s %q; use an IANA name such as America/New_York, or UTC", tc.label, tc.shown)
+			if tc.zone == "" {
+				want += "; a TZ= or CRON_TZ= zone name ends at the first ASCII space, and a schedule must follow it, such as TZ=UTC 0 9 * * *"
+			}
+			require.EqualError(t, err, want)
 		})
 	}
 }

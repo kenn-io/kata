@@ -185,6 +185,8 @@ of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
 or `H` syntax. The complete parser input is limited to 1024 bytes, including
 any timezone directive. Native jobs always add a timezone prefix (UTC by default).
 Adapters add a prefix for a separate timezone when the expression has no directive.
+That prefix can make an accepted adapter expression exceed the limit when its
+schedule is evaluated.
 Kata keeps the stored expression exactly as written.
 
 - Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
@@ -202,6 +204,8 @@ Kata keeps the stored expression exactly as written.
 A rejected expression's error names the field and value, descriptor, timezone,
 or field count that failed, with advice for correcting it.
 
+- A `TZ=` or `CRON_TZ=` zone name ends at the first ASCII space, even inside
+  quotes. A schedule must follow that space.
 - Removing an extra field preserves the schedule only for a `0` seconds field
   or a wildcard `*` year. Nonzero seconds and a restricted year have no
   five-field equivalent.

@@ -14,7 +14,7 @@ func (t Trigger) Validate() error {
 			// The dependency checks name characters before LoadLocation: syntax
 			// failures are invalid names, while lookup failures are unknown zones.
 			_, probeErr := cronParser.Parse("TZ=" + strconv.Quote(t.Timezone) + " @daily")
-			return explainTimezone(t.Timezone, probeErr)
+			return explainTimezone(t.Timezone, probeErr, "")
 		}
 	}
 	if t.LeadSeconds < 0 {
