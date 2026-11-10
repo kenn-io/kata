@@ -26,7 +26,7 @@ func explainCron(expression string, err error) error {
 	case spec == "@reboot":
 		hint = "@reboot is not supported; use a schedule or interval trigger"
 	case spec == "@every" || strings.HasPrefix(spec, "@every "):
-		hint = "for native recurring jobs, use an interval trigger"
+		hint = "adapter jobs can use @every 1s or longer; native recurring jobs use an interval trigger"
 	case len(fields) == 5 && (dayOfMonthExtension.MatchString(fields[2]) || dayOfWeekExtension.MatchString(fields[4])):
 		hint = "L, W, and # syntax is not supported"
 	case len(fields) == 5:

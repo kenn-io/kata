@@ -187,7 +187,7 @@ func TestWorkflowRoundTripProperty(t *testing.T) {
 }
 
 func TestCronCompatibility(t *testing.T) {
-	for _, expression := range []string{"0 9 * JAN MON-FRI", "@hourly", "@daily", "@weekly", "@monthly", "@yearly", "@every 90m"} {
+	for _, expression := range []string{"0 9 * JAN MON-FRI", "@hourly", "@daily", "@weekly", "@monthly", "@yearly", "@every 90m", "@every 1s"} {
 		t.Run(expression, func(t *testing.T) {
 			job, err := ParseJob([]byte(executeJSON))
 			require.NoError(t, err)
