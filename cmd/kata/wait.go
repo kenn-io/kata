@@ -38,9 +38,6 @@ const (
 	// defaultWaitPollInterval keeps the human default gentle; tests pass tiny
 	// values via --poll-interval.
 	defaultWaitPollInterval = 2 * time.Second
-	// maxWaitConsecutiveFails bounds transient GET retries per ref before the
-	// command gives up (daemon restart / network blip tolerance).
-	maxWaitConsecutiveFails = 3
 	// attentionKey / attentionMsgKey are the flat (dotted) metadata keys the
 	// attention convention writes; opaque to the daemon.
 	attentionKey    = "work.attention"
@@ -551,7 +548,7 @@ func waitPollLoop(
 					continue
 				}
 				t.fails++
-				if t.fails >= maxWaitConsecutiveFails {
+				if t.fails >= wait.MaxConsecutiveFailures {
 					return &cliError{
 						Message: fmt.Sprintf("wait: %s: %d consecutive failures fetching issue state: %v",
 							t.arg, t.fails, err),

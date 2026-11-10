@@ -151,7 +151,6 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 
 // waitUntil polls each candidate independently so a stalled read cannot delay another.
 func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, until, recipient string) (*sdkmcp.CallToolResult, WaitOutput, error) {
-	const maxConsecutiveFailures = 3 // Match the CLI wait retry limit.
 	type result struct {
 		index  int
 		target waitTarget
@@ -175,7 +174,7 @@ func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, un
 				} else if !permanentWaitError(err) {
 					failures++
 				}
-				if err == nil || permanentWaitError(err) || failures >= maxConsecutiveFailures {
+				if err == nil || permanentWaitError(err) || failures >= wait.MaxConsecutiveFailures {
 					select {
 					case results <- result{i, target, err}:
 					case <-pollCtx.Done():
@@ -304,9 +303,9 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 					}
 					return target, err
 				}
-				recipient, err = notification.NormalizeRecipient(notification.RecipientOf(notification.Identity{Actor: resolved.EffectiveActor, Teammate: h.options.Teammate}))
-				if err != nil {
-					return target, err
+				recipient = notification.RecipientOf(notification.Identity{Actor: resolved.EffectiveActor, Teammate: h.options.Teammate})
+				if recipient == "" {
+					return target, errors.New("recipient must not be blank")
 				}
 			}
 			target.recipient = recipient

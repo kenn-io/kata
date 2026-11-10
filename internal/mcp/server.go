@@ -500,7 +500,6 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setStringBounds("message", 1, notification.MessageMaxBytes)
 		forbidTrueWith("clear", "message")
 		forbidTrueWith("clear", "re")
-		forbidTrueWith("broadcast", "to")
 	case "kata.search_docs":
 		setStringBounds("query", 1, maximumQueryBytes)
 		setNumberBounds("limit", 1, maximumResultLimit)

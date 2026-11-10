@@ -53,6 +53,7 @@ func TestMCPNotifyValidationAndScope(t *testing.T) {
 		{"clear message", "not: validated against", "message", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "message": "x"}},
 		{"clear linked", "not: validated against", "re", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "re": "c:abcdef"}},
 		{"clear broadcast", "clear cannot", "", map[string]any{"ref": ref, "clear": true, "broadcast": true}},
+		{"broadcast recipient", "mutually exclusive", "", map[string]any{"ref": ref, "to": "reviewer", "broadcast": true, "message": "x"}},
 		{"clear invalid recipient", "recipient", "", map[string]any{"ref": ref, "to": "review\ner", "clear": true}},
 		{"forged sender", "additional properties", "", map[string]any{"ref": ref, "to": "reviewer", "message": "x", "from": "someone-else"}},
 	} {

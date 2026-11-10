@@ -8,6 +8,9 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
+// MaxConsecutiveFailures bounds transient retries for each issue.
+const MaxConsecutiveFailures = 3
+
 // Evaluator retains the initial reply slot for one issue and recipient.
 type Evaluator struct {
 	baseline jsontext.Value
