@@ -391,6 +391,47 @@ func seedLegacySnapshotBaseline(t *testing.T, store db.Storage, project db.Proje
 	return snapshotUID, snapshotHash
 }
 
+func checkFederatedSnapshotPendingDeletion(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	source, target, issue, move := federatedRehomeFixture(t, store, "pending-deletion")
+	prepareRehomePull(t, store, source, target, "pull")
+	_, deleted, changed, err := store.SoftDeleteIssue(ctx, issue.ID, "worker")
+	require.NoError(t, err)
+	require.True(t, changed)
+	binding, err := store.FederationBindingByProject(ctx, source.ID)
+	require.NoError(t, err)
+	require.Greater(t, deleted.ID, binding.PushCursorEventID)
+	var payload map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(move.Payload, &payload))
+	snapshot := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1, payload["snapshot"])
+	_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{snapshot})
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, target.ID))
+	got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.NotNil(t, got.DeletedAt)
+	return nil
+}
+
+func checkFederatedSnapshotLaterAcceptedEdit(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	source, _, issue, move := federatedRehomeFixture(t, store, "later-accepted-edit")
+	snapshot := newRemoteEvent(t, source, &issue.UID, "issue.snapshot", "worker", store.InstanceUID(), move.HLCPhysicalMS+1000, jsontext.Value(`{"uid":"`+issue.UID+`","title":"baseline","status":"open","links_scope":"all"}`))
+	_, err := store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{snapshot})
+	require.NoError(t, err)
+	edit := newRemoteEvent(t, source, &issue.UID, "issue.updated", "worker", move.OriginInstanceUID, move.HLCPhysicalMS, jsontext.Value(`{"title":"accepted edit"}`))
+	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: source.ID, SpokeInstanceUID: move.OriginInstanceUID, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: edit}}})
+	require.NoError(t, err)
+	got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "accepted edit", got.Title)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID))
+	got, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "accepted edit", got.Title)
+	return nil
+}
+
 // Snapshot relocation must retain the existing same-hub and recurrence gates.
 func checkFederatedSnapshotRelocationGuardsAndMoveReplay(t *testing.T, store db.Storage) error {
 	for _, kind := range []string{"different-hub", "recurrence", "retained-move-after-source-leave"} {

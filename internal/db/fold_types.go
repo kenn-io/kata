@@ -41,7 +41,13 @@ type FoldProjection struct {
 	ProjectMetadata map[string]jsontext.Value
 	Warnings        []string
 	cronAuthors     map[string]foldCronAuthorCandidate
-	pendingMetadata map[string]map[string]bool
+	metadataWriters map[string]map[string]foldScalarWriter
+}
+
+type foldScalarWriter struct {
+	projectUID string
+	position   int64
+	pending    bool
 }
 
 // FoldCronJob retains project identity alongside the winning job document.
@@ -82,7 +88,7 @@ type FoldIssue struct {
 	// restatements. Newly accepted intent must outrank the previous projection's
 	// writer; an older delayed event cannot manufacture a pending pointer.
 	StatusClock   FoldClock `json:"-"`
-	pendingScalar uint16
+	scalarWriters [6]foldScalarWriter
 }
 
 // FoldComment is the replayed comment state keyed by stable comment UID.

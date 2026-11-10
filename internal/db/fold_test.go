@@ -541,6 +541,30 @@ func TestFoldSnapshotRetainsPendingScalars(t *testing.T) {
 	require.JSONEq(t, `{"remote":"new"}`, string(projection.IssueMetadata["issue-1"]))
 }
 
+func TestFoldSnapshotRetainsPendingDeletion(t *testing.T) {
+	deleted := testEvent("issue.soft_deleted", 2, `{"deleted_at":"2026-01-01T00:00:00Z"}`)
+	deleted.Pending = true
+	projection := FoldEvents([]FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","status":"open"}`),
+		deleted,
+		testEvent("issue.snapshot", 3, `{"uid":"issue-1","status":"open"}`),
+	})
+	require.NotNil(t, projection.Issues["issue-1"].DeletedAt)
+}
+
+func TestFoldSnapshotPreservesLaterAcceptedEdit(t *testing.T) {
+	for _, localHub := range []bool{false, true} {
+		t.Run(fmt.Sprint(localHub), func(t *testing.T) {
+			edit := testEvent("issue.updated", 2, `{"title":"accepted edit"}`)
+			edit.Position = 2
+			snapshot := testEvent("issue.snapshot", 3, `{"uid":"issue-1","title":"older baseline","status":"open"}`)
+			snapshot.Position, snapshot.LocalHubSnapshot = 1, localHub
+			projection := FoldEvents([]FoldEvent{edit, snapshot})
+			require.Equal(t, "accepted edit", projection.Issues["issue-1"].Title)
+		})
+	}
+}
+
 func TestFoldSnapshotReplacesOlderLinks(t *testing.T) {
 	old := []FoldEvent{
 		testEvent("issue.linked", 1, `{"type":"blocks","from_uid":"issue-1","to_uid":"out"}`),

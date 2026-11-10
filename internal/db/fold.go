@@ -20,7 +20,7 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 		Links:           map[FoldLinkKey]FoldElementState{},
 		IssueMetadata:   map[string]jsontext.Value{},
 		ProjectMetadata: map[string]jsontext.Value{},
-		pendingMetadata: map[string]map[string]bool{},
+		metadataWriters: map[string]map[string]foldScalarWriter{},
 	}
 	ordered := append([]FoldEvent(nil), events...)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -158,11 +158,11 @@ func (p *FoldProjection) trackPendingScalars(e FoldEvent, payload map[string]jso
 		if e.Pending {
 			var metadata map[string]jsontext.Value
 			_ = json.Unmarshal(payload["metadata"], &metadata)
-			if p.pendingMetadata[uid] == nil {
-				p.pendingMetadata[uid] = map[string]bool{}
+			if p.metadataWriters[uid] == nil {
+				p.metadataWriters[uid] = map[string]foldScalarWriter{}
 			}
 			for key := range metadata {
-				p.pendingMetadata[uid][key] = true
+				p.metadataWriters[uid][key] = foldScalarWriter{projectUID: e.ProjectUID, position: e.Position, pending: true}
 			}
 		}
 	case "issue.updated":
@@ -199,31 +199,32 @@ func (p *FoldProjection) trackPendingScalars(e FoldEvent, payload map[string]jso
 		fields = pendingPriority
 	case "issue.closed", "issue.reopened":
 		fields = pendingStatus | pendingOwner
-	case "issue.deleted", "issue.restored":
+	case "issue.soft_deleted", "issue.restored":
 		fields = pendingDeleted
 	case "issue.metadata_updated":
 		var diff map[string]jsontext.Value
 		_ = json.Unmarshal(payload["diff"], &diff)
-		if p.pendingMetadata[uid] == nil {
-			p.pendingMetadata[uid] = map[string]bool{}
+		if p.metadataWriters[uid] == nil {
+			p.metadataWriters[uid] = map[string]foldScalarWriter{}
 		}
 		for key := range diff {
-			if e.Pending {
-				p.pendingMetadata[uid][key] = true
-			} else {
-				delete(p.pendingMetadata[uid], key)
-			}
+			p.metadataWriters[uid][key] = foldScalarWriter{projectUID: e.ProjectUID, position: e.Position, pending: e.Pending}
 		}
 	}
 	if fields == 0 {
 		return
 	}
 	issue := p.Issues[uid]
-	issue.pendingScalar &^= fields
-	if e.Pending {
-		issue.pendingScalar |= fields
+	for i := range issue.scalarWriters {
+		if fields&(1<<i) != 0 {
+			issue.scalarWriters[i] = foldScalarWriter{projectUID: e.ProjectUID, position: e.Position, pending: e.Pending}
+		}
 	}
 	p.Issues[uid] = issue
+}
+
+func scalarWriterAfterSnapshot(writer foldScalarWriter, snapshot FoldEvent) bool {
+	return writer.pending || (snapshot.Position > 0 && writer.projectUID == snapshot.ProjectUID && writer.position > snapshot.Position)
 }
 
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
@@ -303,22 +304,22 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
 	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
 	if e.Type == "issue.snapshot" {
-		if previous.pendingScalar&pendingTitle != 0 {
+		if scalarWriterAfterSnapshot(previous.scalarWriters[0], e) {
 			issue.Title = previous.Title
 		}
-		if previous.pendingScalar&pendingBody != 0 {
+		if scalarWriterAfterSnapshot(previous.scalarWriters[1], e) {
 			issue.Body = previous.Body
 		}
-		if previous.pendingScalar&pendingOwner != 0 {
+		if scalarWriterAfterSnapshot(previous.scalarWriters[2], e) {
 			issue.Owner, issue.AssignmentExpiresOn = previous.Owner, previous.AssignmentExpiresOn
 		}
-		if previous.pendingScalar&pendingPriority != 0 {
+		if scalarWriterAfterSnapshot(previous.scalarWriters[3], e) {
 			issue.Priority = previous.Priority
 		}
-		if previous.pendingScalar&pendingStatus != 0 {
+		if scalarWriterAfterSnapshot(previous.scalarWriters[4], e) {
 			issue.Status, issue.ClosedReason, issue.ClosedAt, issue.StatusIntentUID, issue.StatusClock = previous.Status, previous.ClosedReason, previous.ClosedAt, previous.StatusIntentUID, previous.StatusClock
 		}
-		if previous.pendingScalar&pendingDeleted != 0 {
+		if scalarWriterAfterSnapshot(previous.scalarWriters[5], e) {
 			issue.DeletedAt = previous.DeletedAt
 		}
 	}
@@ -326,14 +327,17 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	p.Issues[uid] = issue
 	if len(in.Metadata) > 0 && string(in.Metadata) != "null" {
 		metadata := canonicalJSON(in.Metadata)
-		if e.Type == "issue.snapshot" && len(p.pendingMetadata[uid]) > 0 {
+		if e.Type == "issue.snapshot" && len(p.metadataWriters[uid]) > 0 {
 			var old, current map[string]jsontext.Value
 			_ = json.Unmarshal(p.IssueMetadata[uid], &old)
 			_ = json.Unmarshal(metadata, &current)
 			if current == nil {
 				current = map[string]jsontext.Value{}
 			}
-			for key := range p.pendingMetadata[uid] {
+			for key, writer := range p.metadataWriters[uid] {
+				if !scalarWriterAfterSnapshot(writer, e) {
+					continue
+				}
 				if value, ok := old[key]; ok {
 					current[key] = value
 				} else {
