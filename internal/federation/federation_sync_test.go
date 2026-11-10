@@ -1883,11 +1883,11 @@ func TestSyncFederationOnceResetRetryDoesNotRedeliverAcknowledgedLocalProjectEve
 	testResetRetryLocalProjectEvent(t, true, false)
 }
 
-func TestSyncFederationOnceResetRetryDeliversProjectEventAfterInterruptedPush(t *testing.T) {
+func TestSyncFederationOnceResetRetryDeliversProjectEventAfterPushAndFailedPoll(t *testing.T) {
 	testResetRetryLocalProjectEvent(t, false, true)
 }
 
-func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush bool) {
+func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, failPollAfterPush bool) {
 	t.Helper()
 	ctx := t.Context()
 	spoke := testenv.New(t)
@@ -1920,6 +1920,7 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 		Enabled:              true,
 	})
 	require.NoError(t, err)
+	var failPoll atomic.Bool
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects/42/federation/events:ingest":
@@ -1931,6 +1932,10 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
 			}))
 		case "/api/v1/projects/42/federation/events":
+			if failPoll.Load() {
+				http.Error(w, "poll unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			switch r.URL.Query().Get("after_id") {
 			case "50":
 				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
@@ -1966,18 +1971,25 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered)
-	if interruptedPush {
+	if failPollAfterPush {
 		binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
-		require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
+		failPoll.Store(true)
+		err = SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
 			delivered = append(delivered, events...)
-		}))
+		})
+		var status *HubStatusError
+		require.ErrorAs(t, err, &status)
+		require.Equal(t, http.StatusServiceUnavailable, status.StatusCode)
+		failPoll.Store(false)
 		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
 		require.NoError(t, err)
 		require.Len(t, replayed, 1)
 		binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
-		require.Equal(t, replayed[0].ID, binding.PushCursorEventID)
+		require.Equal(t, replayed[0].ID, binding.PushCursorEventID, "the push acknowledged the replay before polling failed")
+		require.Equal(t, int64(99), binding.PullCursorEventID, "the failed poll left the replay page pending")
 		require.Empty(t, delivered)
 	}
 	if acknowledged {
@@ -2001,13 +2013,22 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 	if acknowledged {
 		require.Empty(t, delivered, "acknowledged replay repairs must not repeat notifications")
 	} else {
-		require.NotEmpty(t, delivered)
+		require.Len(t, delivered, 1, "the successful pull must notify once for the pending replay")
 		assert.Equal(t, localEvent.UID, delivered[0].UID)
 		assert.Greater(t, delivered[0].ID, localEvent.ID)
 	}
 	repaired, err := spoke.DB.ProjectByID(ctx, project.ID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"area":"ops"}`, string(repaired.Metadata))
+	if failPollAfterPush {
+		binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, int64(100), binding.PullCursorEventID)
+		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+			delivered = append(delivered, events...)
+		}))
+		require.Len(t, delivered, 1, "a completed replay must stay silent")
+	}
 }
 
 func TestSyncFederationOnceRecoveredResetDoesNotDeliverLocalProjectPushEcho(t *testing.T) {
