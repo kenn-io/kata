@@ -28,7 +28,10 @@ func TestNotifyCommentAndBroadcastWritePath(t *testing.T) {
 	_, _, _, e = h.DB().UpdateOwner(t.Context(), id, new("owner"), "worker")
 	require.NoError(t, e)
 	path := issueURL(pid, id, "notifications")
-	resp, body := postJSON(t, ts, path, map[string]any{"actor": "worker", "to": "reader/review", "re": c.UID, "message": "inspect finding"})
+	resp, body := postJSON(t, ts, path, map[string]any{"actor": "worker", "to": "reader", "broadcast": true, "message": "inspect"})
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+	require.Contains(t, string(body), "mutually exclusive")
+	resp, body = postJSON(t, ts, path, map[string]any{"actor": "worker", "to": "reader/review", "re": c.UID, "message": "inspect finding"})
 	require.Equal(t, 200, resp.StatusCode, string(body))
 	require.Contains(t, string(body), c.UID)
 	// Explicit broadcast overwrites a prior no-re human request.

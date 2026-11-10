@@ -43,7 +43,6 @@ func TestMCPNotifyValidation(t *testing.T) {
 		{"clear message", "not: validated against", "message", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "message": "x"}},
 		{"clear linked", "not: validated against", "re", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "re": "c:abcdef"}},
 		{"clear broadcast", "clear cannot", "", map[string]any{"ref": ref, "clear": true, "broadcast": true}},
-		{"broadcast recipient", "mutually exclusive", "", map[string]any{"ref": ref, "to": "reviewer", "broadcast": true, "message": "x"}},
 		{"clear invalid recipient", "recipient", "", map[string]any{"ref": ref, "to": "review\ner", "clear": true}},
 		{"forged sender", "additional properties", "", map[string]any{"ref": ref, "to": "reviewer", "message": "x", "from": "someone-else"}},
 	} {
@@ -81,34 +80,25 @@ func TestMCPNotifyTeammateDefaults(t *testing.T) {
 	})
 	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Teammate: "default-worker", Version: "test"})
 	for _, tc := range []struct {
-		name     string
-		teammate *string
-		want     string
+		name  string
+		args  map[string]any
+		field string
+		want  any
 	}{
-		{"startup", nil, "default-worker"}, {"override", new("reviewer"), "reviewer"}, {"suppressed", new(""), ""},
+		{"startup", map[string]any{"to": "recipient"}, "teammate", "default-worker"},
+		{"override", map[string]any{"to": "recipient", "teammate": "reviewer"}, "teammate", "reviewer"},
+		{"suppressed", map[string]any{"to": "recipient", "teammate": ""}, "teammate", ""},
+		{"linked", map[string]any{"to": "recipient", "re": "c:abcdef"}, "re", "c:abcdef"},
+		{"broadcast", map[string]any{"broadcast": true}, "broadcast", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			args := map[string]any{"ref": "abc1", "to": "recipient", "message": tc.name}
-			if tc.teammate != nil {
-				args["teammate"] = *tc.teammate
+			args := map[string]any{"ref": "abc1", "message": tc.name}
+			for key, value := range tc.args {
+				args[key] = value
 			}
 			callAdministrationTool(t, session, "kata.notify", args)
 			body := <-requests
-			require.Equal(t, tc.want, body["teammate"])
+			require.Equal(t, tc.want, body[tc.field])
 		})
 	}
-	for _, args := range []map[string]any{
-		{"ref": "abc1", "to": "recipient", "message": "linked", "re": "c:abcdef"},
-		{"ref": "abc1", "broadcast": true, "message": "broadcast"},
-	} {
-		callAdministrationTool(t, session, "kata.notify", args)
-		body := <-requests
-		if re, ok := args["re"]; ok {
-			require.Equal(t, re, body["re"])
-		}
-		if broadcast, ok := args["broadcast"]; ok {
-			require.Equal(t, broadcast, body["broadcast"])
-		}
-	}
-
 }

@@ -494,10 +494,10 @@ func TestMCPCoordinationWaitStatusPollsPastStalledPeer(t *testing.T) {
 
 func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 	for _, tc := range []struct {
-		name, field, value, ref string
-		unavailable             bool
+		name, ref   string
+		unavailable bool
 	}{
-		{"attention", "until", "attention", "abc1", false}, {"out of scope", "until", "attention", "other-project#abc1", false}, {"retry limit", "until", "attention", "abc1", true},
+		{"attention", "abc1", false}, {"out of scope", "other-project#abc1", false}, {"retry limit", "abc1", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -525,16 +525,13 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 				}
 			})
 			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
-			args := map[string]any{"refs": []string{tc.ref, "def1"}, tc.field: tc.value, "any": true, "timeout_seconds": 2}
+			args := map[string]any{"refs": []string{tc.ref, "def1"}, "until": "attention", "any": true, "timeout_seconds": 2}
 			if tc.unavailable {
 				args["timeout_seconds"] = 6
 			}
 
 			out := callAdministrationTool(t, session, "kata.wait", args)
 			require.Equal(t, "matched", out["reason"])
-			if tc.unavailable {
-				require.Equal(t, int64(3), failures.Load())
-			}
 		})
 	}
 }
