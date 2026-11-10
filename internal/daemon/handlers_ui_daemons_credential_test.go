@@ -18,7 +18,7 @@ import (
 
 func TestWebGatewayMissingCatalogFileStopsBeforeRequest(t *testing.T) {
 	var calls atomic.Int64
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"contract_version":%q,"cursor":7,"capabilities":{"writable":false,"updates":"poll","actor_policy":"request"}}`, api.UISnapshotContractVersion)

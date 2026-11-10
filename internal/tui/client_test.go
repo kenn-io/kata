@@ -1544,7 +1544,7 @@ func TestTUIHubAdminClientResolvesCatalogTokenFile(t *testing.T) {
 	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.view = viewList
-	m.daemonTargets = []daemonTarget{{Name: "hub", URL: "https://hub.example", TokenFile: "~/hub-token"}}
+	m.daemonTargets = []daemonTarget{{Name: "hub", URL: "https://hub.example", TokenFile: filepath.Join(t.TempDir(), "missing-credential")}}
 	m.activeDaemon = m.daemonTargets[0]
 	m, _ = updateModel(m, keyRune('D'))
 	require.Equal(t, viewDaemons, m.view)
