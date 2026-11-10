@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -97,17 +98,22 @@ func explainCron(expression string, err error) error {
 }
 
 func explainTimezone(name string, err error, advice string) error {
+	const timezoneNameLimit = 64 // go-cron validateTimezone's function-local limit; boundary tests pin it.
 	label := "invalid timezone"
 	if err != nil && strings.HasPrefix(err.Error(), "unknown time zone ") && !strings.Contains(err.Error(), "time: invalid location name") {
 		label = "unknown time zone"
 	}
-	return invalid(fmt.Sprintf("%s %q; use an IANA name such as America/New_York, or UTC%s", label, clip(name, 40), advice))
+	rule := "use an IANA name such as America/New_York, or UTC"
+	if cause := errors.Unwrap(err); label == "invalid timezone" && cause != nil && strings.HasPrefix(cause.Error(), "timezone string too long") && len(name) > timezoneNameLimit {
+		rule = cause.Error()
+	}
+	return invalid(fmt.Sprintf("%s %q; %s%s", label, clip(name, 40), rule, advice))
 }
 
 var (
-	lastDayToken    = regexp.MustCompile(`(?i)^L(-[0-9]+)?$`)
-	nearestDayToken = regexp.MustCompile(`(?i)^[0-9]+W$`)
-	weekdayToken    = regexp.MustCompile(`(?i)^([0-9]+|SUN|MON|TUE|WED|THU|FRI|SAT)(L|#(L|[0-9]+))$`)
+	lastDayToken    = regexp.MustCompile(`^L(-[0-9]+)?$`)
+	nearestDayToken = regexp.MustCompile(`^[0-9]+W$`)
+	weekdayToken    = regexp.MustCompile(`^([0-9]+|SUN|MON|TUE|WED|THU|FRI|SAT)(L|#(L|[0-9]+))$`)
 )
 
 // Recognize unsupported constructs, including list components, solely for advice.

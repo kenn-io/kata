@@ -183,7 +183,8 @@ A `cron` expression has five fields: minute, hour, day of month, month, and day
 of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
 `@monthly`, or `@yearly`. Kata does not accept seconds, years, `L`, `W`, `#`,
 or `H` syntax. The complete parser input is limited to 1024 bytes, including
-any timezone directive. Native jobs always add a timezone prefix (UTC by default).
+any timezone directive, and a timezone name to 64 bytes. Native jobs always add
+a timezone prefix (UTC by default).
 Adapters add a prefix for a separate timezone when the expression has no directive.
 That prefix can make an accepted adapter expression exceed the limit when its
 schedule is evaluated.

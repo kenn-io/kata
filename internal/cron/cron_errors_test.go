@@ -88,41 +88,53 @@ func TestCronDirectiveFormatAdvice(t *testing.T) {
 }
 
 func TestCronTimezoneAdvice(t *testing.T) {
-	for _, tc := range []struct{ zone, expression, label, shown string }{
-		{"Not/AZone", "@daily", "unknown time zone", "Not/AZone"},
-		{"", "CRON_TZ=Not/AZone 0 9 * * *", "unknown time zone", "Not/AZone"},
-		{"", `TZ="Not/AZone" 0 9 * * *`, "unknown time zone", "Not/AZone"},
-		{"", "TZ=Not/AZone ", "unknown time zone", "Not/AZone"},
-		{"", "TZ= 0 9 * * *", "invalid timezone", ""},
-		{"", "TZ=Bad\tZone @daily", "invalid timezone", "Bad\tZone"},
-		{"", "CRON_TZ=Bad\u00a0Zone 0 9 * * *", "invalid timezone", "Bad\u00a0Zone"},
-		{"", "TZ=UTC\t0 9 * * *", "invalid timezone", "UTC\t0"},
-		{"", "TZ=UTC\t 0 9 * * *", "invalid timezone", "UTC\t"},
-		{"", "CRON_TZ=UTC\n0 9 * * *", "invalid timezone", "UTC\n0"},
-		{"", `TZ="America/New York" 0 9 * * *`, "invalid timezone", `"America/New`},
-		{"", "TZ=America/New York 0 9 * * *", "unknown time zone", "America/New"},
-		{"../UTC", "@daily", "invalid timezone", "../UTC"},
-		{"/abs", "@daily", "invalid timezone", "/abs"},
-		{"bad zone!", "@daily", "invalid timezone", "bad zone!"},
-		{"bad!", "@daily", "invalid timezone", "bad!"},
-		{"bad!" + strings.Repeat("x", 1100), "@daily", "invalid timezone", "bad!" + strings.Repeat("x", 33) + "…"},
-		{"A\x00B", "@daily", "invalid timezone", "A\x00B"},
-		{" ", "@daily", "invalid timezone", " "},
-		{`"UTC"`, "@daily", "invalid timezone", `"UTC"`},
-		{"'UTC'", "@daily", "invalid timezone", "'UTC'"},
-		{"x\x00y 9 * * *", "@daily", "invalid timezone", "x\x00y 9 * * *"},
-		{"\x1b[31m 9 * * *", "@daily", "invalid timezone", "\x1b[31m 9 * * *"},
-		{"x\x7fy 9 * * *", "@daily", "invalid timezone", "x\x7fy 9 * * *"},
-		{string([]byte{0xff}) + " 9 * * *", "@daily", "invalid timezone", string([]byte{0xff}) + " 9 * * *"},
-		{"bad\x00zone", "@daily", "invalid timezone", "bad\x00zone"},
-		{strings.Repeat("\x00", 1000), "@daily", "invalid timezone", strings.Repeat("\x00", 37) + "…"},
-		{strings.Repeat("x", 1000) + " 9 * * *", "@daily", "invalid timezone", strings.Repeat("x", 37) + "…"},
-		{strings.Repeat("é", 1000), "@daily", "invalid timezone", strings.Repeat("é", 18) + "…"},
+	for _, tc := range []struct{ zone, expression, label, shown, reason string }{
+		{"Not/AZone", "@daily", "unknown time zone", "Not/AZone", ""},
+		{strings.Repeat("A", 64), "@daily", "unknown time zone", strings.Repeat("A", 37) + "…", ""},
+		{"", "TZ=" + strings.Repeat("A", 64) + " @daily", "unknown time zone", strings.Repeat("A", 37) + "…", ""},
+		{strings.Repeat("A", 65), "@daily", "invalid timezone", strings.Repeat("A", 37) + "…", "timezone string too long (max 64 chars)"},
+		{"", "TZ=" + strings.Repeat("A", 65) + " @daily", "invalid timezone", strings.Repeat("A", 37) + "…", "timezone string too long (max 64 chars)"},
+		{strings.Repeat("A", 60) + "\x00\x00", "@daily", "invalid timezone", strings.Repeat("A", 37) + "…", ""},
+		{strings.Repeat("A", 63) + "\x00", "@daily", "invalid timezone", strings.Repeat("A", 37) + "…", ""},
+		{strings.Repeat("A", 64) + "\x00", "@daily", "invalid timezone", strings.Repeat("A", 37) + "…", "timezone string too long (max 64 chars)"},
+		{strings.Repeat("A", 65) + "\x00", "@daily", "invalid timezone", strings.Repeat("A", 37) + "…", "timezone string too long (max 64 chars)"},
+		{"", "CRON_TZ=Not/AZone 0 9 * * *", "unknown time zone", "Not/AZone", ""},
+		{"", `TZ="Not/AZone" 0 9 * * *`, "unknown time zone", "Not/AZone", ""},
+		{"", "TZ=Not/AZone ", "unknown time zone", "Not/AZone", ""},
+		{"", "TZ= 0 9 * * *", "invalid timezone", "", ""},
+		{"", "TZ=Bad\tZone @daily", "invalid timezone", "Bad\tZone", ""},
+		{"", "CRON_TZ=Bad\u00a0Zone 0 9 * * *", "invalid timezone", "Bad\u00a0Zone", ""},
+		{"", "TZ=UTC\t0 9 * * *", "invalid timezone", "UTC\t0", ""},
+		{"", "TZ=UTC\t 0 9 * * *", "invalid timezone", "UTC\t", ""},
+		{"", "CRON_TZ=UTC\n0 9 * * *", "invalid timezone", "UTC\n0", ""},
+		{"", `TZ="America/New York" 0 9 * * *`, "invalid timezone", `"America/New`, ""},
+		{"", "TZ=America/New York 0 9 * * *", "unknown time zone", "America/New", ""},
+		{"../UTC", "@daily", "invalid timezone", "../UTC", ""},
+		{"/abs", "@daily", "invalid timezone", "/abs", ""},
+		{"bad zone!", "@daily", "invalid timezone", "bad zone!", ""},
+		{"bad!", "@daily", "invalid timezone", "bad!", ""},
+		{"bad!" + strings.Repeat("x", 1100), "@daily", "invalid timezone", "bad!" + strings.Repeat("x", 33) + "…", ""},
+		{"A\x00B", "@daily", "invalid timezone", "A\x00B", ""},
+		{" ", "@daily", "invalid timezone", " ", ""},
+		{`"UTC"`, "@daily", "invalid timezone", `"UTC"`, ""},
+		{"'UTC'", "@daily", "invalid timezone", "'UTC'", ""},
+		{"x\x00y 9 * * *", "@daily", "invalid timezone", "x\x00y 9 * * *", ""},
+		{"\x1b[31m 9 * * *", "@daily", "invalid timezone", "\x1b[31m 9 * * *", ""},
+		{"x\x7fy 9 * * *", "@daily", "invalid timezone", "x\x7fy 9 * * *", ""},
+		{string([]byte{0xff}) + " 9 * * *", "@daily", "invalid timezone", string([]byte{0xff}) + " 9 * * *", ""},
+		{"bad\x00zone", "@daily", "invalid timezone", "bad\x00zone", ""},
+		{strings.Repeat("\x00", 1000), "@daily", "invalid timezone", strings.Repeat("\x00", 37) + "…", ""},
+		{strings.Repeat("x", 1000) + " 9 * * *", "@daily", "invalid timezone", strings.Repeat("x", 37) + "…", "timezone string too long (max 64 chars)"},
+		{strings.Repeat("é", 1000), "@daily", "invalid timezone", strings.Repeat("é", 18) + "…", ""},
 	} {
 		t.Run(tc.zone+tc.expression, func(t *testing.T) {
 			err := (Trigger{Kind: "cron", Cron: tc.expression, Timezone: tc.zone}).Validate()
 			requireSafeCronError(t, err)
-			want := fmt.Sprintf("invalid cron document: %s %q; use an IANA name such as America/New_York, or UTC", tc.label, tc.shown)
+			reason := tc.reason
+			if reason == "" {
+				reason = "use an IANA name such as America/New_York, or UTC"
+			}
+			want := fmt.Sprintf("invalid cron document: %s %q; %s", tc.label, tc.shown, reason)
 			if tc.zone == "" {
 				want += "; a TZ= or CRON_TZ= zone name ends at the first ASCII space, and a schedule must follow it, such as TZ=UTC 0 9 * * *"
 			}
