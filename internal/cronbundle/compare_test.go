@@ -9,20 +9,6 @@ import (
 	"pgregory.net/rapid"
 )
 
-func TestCronBundleDefinitionEqualityPreservesNumbersProperty(t *testing.T) {
-	rapid.Check(t, func(ht *rapid.T) {
-		n := rapid.Uint64().Draw(ht, "integer")
-		left := jsontext.Value(fmt.Sprintf(`{"a":%d,"b":[1,2]}`, n))
-		reordered := jsontext.Value(fmt.Sprintf("{ \"b\": [1, 2], \"a\": %d }", n))
-		equal, err := DefinitionEqual(left, reordered)
-		require.NoError(ht, err)
-		require.True(ht, equal)
-		changed := jsontext.Value(fmt.Sprintf(`{"a":%d,"b":[1,2]}`, n+1))
-		equal, err = DefinitionEqual(left, changed)
-		require.NoError(ht, err)
-		require.False(ht, equal)
-	})
-}
 func TestCronBundleDefinitionEqualityTokenSpellingAndArrayOrder(t *testing.T) {
 	for _, pair := range [][2]string{{`{"n":1}`, `{"n":1.0}`}, {`{"n":1e0}`, `{"n":1E+0}`}, {`{"n":9007199254740992}`, `{"n":9007199254740993}`}, {`{"a":[1,2]}`, `{"a":[2,1]}`}} {
 		equal, err := DefinitionEqual([]byte(pair[0]), []byte(pair[1]))
@@ -64,6 +50,11 @@ func TestCronBundleNestedNumericDistinctionProperty(t *testing.T) {
 	rapid.Check(t, func(ht *rapid.T) {
 		left, _, different := drawBundleComparison(ht)
 		equal, err := DefinitionEqual(left, different)
+		require.NoError(ht, err)
+		require.False(ht, equal)
+		// Adjacent integers catch float rounding independently of token extension.
+		n := rapid.Uint64().Draw(ht, "adjacent integer")
+		equal, err = DefinitionEqual(jsontext.Value(fmt.Sprintf(`{"a":%d,"b":[1,2]}`, n)), jsontext.Value(fmt.Sprintf(`{"a":%d,"b":[1,2]}`, n+1)))
 		require.NoError(ht, err)
 		require.False(ht, equal)
 	})

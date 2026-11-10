@@ -505,15 +505,19 @@ preserved. Typed definitions and opaque option objects retain exact JSON numbers
 
 Export selected `job_uids`, `workflow_uids`, or `all: true` with
 `kata.cron_export`, then pass its bundle object to `kata.cron_import` with the
-target `project`. Jobs include their workflows. Copies receive deterministic UIDs
-and start disabled unless `keep_enabled` is true. Cross-project issue references
+target `project`. The target must be in the server's startup scope; use
+`--projects source-project,target-project` or `--all` for copies between projects.
+Across hubs, export through the source daemon's MCP server and import through
+the target daemon's MCP server. Jobs include their workflows. Copies receive
+deterministic UIDs and start disabled unless `keep_enabled` is true. Cross-project issue references
 require `issue_mappings` from source issue UIDs to destination issue references.
 Use `dry_run` to predict outcomes without writes. With `replace`, import reads
 the authoritative conflict revision and attempts one guarded replacement.
 A stopped import returns an error with its partial per-item report intact.
-The bundle archive limit is 16 MiB; MCP messages are limited to 8 MiB including
-the envelope. Use [CLI export and import](cron.md#copy-jobs-and-workflows) for
-bundles too large for MCP.
+The bundle archive limit is 16 MiB; MCP messages are limited to 8 MiB. An export
+response includes both the structured bundle and its JSON text representation,
+plus the envelope; all of these count toward that limit. Use
+[CLI export and import](cron.md#copy-jobs-and-workflows) for bundles too large for MCP.
 
 `kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
 and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`

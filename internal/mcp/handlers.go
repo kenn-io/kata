@@ -1088,7 +1088,7 @@ func (h toolHandlers) readProjects(ctx context.Context, selector string) ([]Proj
 func (h toolHandlers) createTarget(ctx context.Context, selector string) (ProjectIdentity, error) {
 	selector = strings.TrimSpace(selector)
 	if h.options.Scope.Mode() != ScopeBound && selector == "" {
-		return ProjectIdentity{}, errors.New("multi-project creates require project")
+		return ProjectIdentity{}, errors.New("multi-project operations require project")
 	}
 	return h.options.Scope.Project(ctx, h.options.Client, selector, false)
 }
