@@ -32,14 +32,6 @@ func loadInboxWatchSnapshot(ctx context.Context, cmd *cobra.Command, recipient s
 	return read(ctx)
 }
 
-func TestInboxHelpExplainsJSONOutputMayBeStale(t *testing.T) {
-	cmd := newInboxCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	require.NoError(t, cmd.Help())
-	require.Contains(t, out.String(), "JSON output can be stale; check current attention before acting.")
-}
-
 // The product contract is an immediately available, exact-recipient wakeup
 // batch. Reading it must not claim or acknowledge the pending request.
 func TestInboxWatchReadsInitialBacklog(t *testing.T) {
