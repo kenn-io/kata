@@ -23,13 +23,17 @@ func TestFederationLocalReplaysMigrationBackfillsInterruptedReset(t *testing.T) 
 	pulledProject, err := source.CreateProject(ctx, "pulled-project")
 	require.NoError(t, err)
 	events := map[string]string{}
+	var acknowledgedID int64
 	for _, c := range []struct {
 		name    string
 		project db.Project
-	}{{"before", resetProject}, {"after", resetProject}, {"pulled", pulledProject}} {
+	}{{"acknowledged", resetProject}, {"before", resetProject}, {"after", resetProject}, {"pulled", pulledProject}} {
 		_, event, createErr := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: c.project.ID, Title: c.name, Author: "tester"})
 		require.NoError(t, createErr)
 		events[c.name] = event.UID
+		if c.name == "acknowledged" {
+			acknowledgedID = event.ID
+		}
 	}
 	for _, project := range []db.Project{resetProject, pulledProject} {
 		_, err = source.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -40,6 +44,7 @@ func TestFederationLocalReplaysMigrationBackfillsInterruptedReset(t *testing.T) 
 		require.NoError(t, err)
 		require.NoError(t, source.RecordFederationSyncReset(ctx, project.ID, time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)))
 	}
+	require.NoError(t, source.AdvanceFederationPushCursor(ctx, resetProject.ID, acknowledgedID))
 	require.NoError(t, source.Close())
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
@@ -49,6 +54,7 @@ func TestFederationLocalReplaysMigrationBackfillsInterruptedReset(t *testing.T) 
 		require.NoError(t, execErr)
 	}
 	stamp("before", "2026-01-01T00:00:00.000Z")
+	stamp("acknowledged", "2026-01-01T00:00:00.000Z")
 	stamp("after", "2026-01-03T00:00:00.000Z")
 	stamp("pulled", "2026-01-01T00:00:00.000Z")
 	_, err = admin.ExecContext(ctx, `UPDATE federation_replays_backfill.federation_sync_status SET last_pull_success_at='2026-01-02T12:00:00.000Z' WHERE project_id=$1`, pulledProject.ID)
@@ -60,7 +66,7 @@ func TestFederationLocalReplaysMigrationBackfillsInterruptedReset(t *testing.T) 
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
-	for name, want := range map[string]bool{"before": true, "after": false, "pulled": false} {
+	for name, want := range map[string]bool{"acknowledged": false, "before": true, "after": false, "pulled": false} {
 		got, replayErr := upgraded.FederationLocalReplayDue(ctx, events[name], false)
 		require.NoError(t, replayErr)
 		require.Equal(t, want, got, name)
