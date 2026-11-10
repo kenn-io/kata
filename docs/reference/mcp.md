@@ -606,9 +606,11 @@ available `attention_msg`.
 
 `until: "reply"` watches the exact notification slot named by optional `for`.
 It defaults to the daemon's effective actor plus the startup teammate and
-keeps that recipient if the issue moves. The first successful poll establishes
-the baseline; a later change or clear returns `reason: "reply"`. Existing requests, JSON property order changes,
-and absent versus null values do not wake it. Waiting never clears a request.
+keeps that recipient if the issue moves. The MCP server does not read the CLI's
+`KATA_INBOX_USER`; use `for` to select a different recipient. The first
+successful poll establishes the baseline; a later change or clear returns
+`reason: "reply"`. Existing requests, JSON property order changes, and absent
+versus null values do not wake it. Waiting never clears a request.
 
 The default timeout is 30 seconds; `timeout_seconds` accepts 1–300 and covers
 setup as well as polling. Top-level `reason` remains `matched` or `timeout`.

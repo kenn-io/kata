@@ -9,6 +9,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Request and clear attention through `kata.notify`, and wait for attention or
+  replies with `kata.wait` in MCP. See [attention requests and waits](reference/mcp.md#attention-requests-and-waits).
+
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
   stop on a failed selected source without fallback. See
