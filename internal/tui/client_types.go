@@ -78,6 +78,23 @@ func (i Issue) deadlineOn() string {
 }
 func (i Issue) timezone() string { return rawString(i.Metadata.Timezone) }
 
+// scheduledText and deadlineText are the dates the detail strip shows: the
+// saved text when it carries the daemon's resolved date (keeping a saved clock
+// time), else the resolved date, so a saved instant reads in its zone.
+func (i Issue) scheduledText() string {
+	return savedOrResolved(i.Metadata.ScheduledOn, i.ScheduledOnDate)
+}
+func (i Issue) deadlineText() string {
+	return savedOrResolved(i.Metadata.DeadlineOn, i.DeadlineOnDate)
+}
+
+func savedOrResolved(raw jsontext.Value, resolved string) string {
+	if saved := metadata.ScheduleClockText(raw); strings.HasPrefix(saved, resolved) {
+		return saved
+	}
+	return resolved
+}
+
 func rawString(v jsontext.Value) string {
 	var s string
 	if len(v) == 0 || json.Unmarshal(v, &s) != nil {

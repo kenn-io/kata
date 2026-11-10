@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kit/tui/termtext"
 )
@@ -48,7 +49,7 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 		rule, start, zone = rec.RRule, rec.DTStart, rec.Timezone
 	} else {
 		start = cmp.Or(issue.ScheduledOnDate, issue.scheduledOn())
-		zone, _ = recurrenceclient.ResolveZone("", "", issue.timezone(), localZone)
+		zone, s.err = savedFormZone(issue)
 	}
 	s.recurrence, s.target.projectID = state, issue.ProjectID
 	for i := range s.fields {
@@ -63,6 +64,18 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 	}
 	_ = s.fields[0].focus()
 	return s
+}
+
+// savedFormZone is the zone a new Repeat form starts in: the one the saved
+// schedule carries, else the issue's timezone, else this host's. It returns the
+// error text, and no zone, when the saved rules are unreadable here.
+func savedFormZone(issue Issue) (string, string) {
+	zone, err := metadata.SavedScheduleZone(issue.Metadata.ScheduledOn)
+	if err != nil {
+		return "", err.Error()
+	}
+	zone, _ = recurrenceclient.ResolveZone("", "", cmp.Or(zone, issue.timezone()), localZone)
+	return zone, ""
 }
 
 func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {

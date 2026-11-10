@@ -76,6 +76,17 @@ func TestValidateImportRecordsAcceptsEveryPayloadType(t *testing.T) {
 	assert.NoError(t, db.ValidateImportRecords(records))
 }
 
+func TestImportPreservesOpaqueLegacySchedule(t *testing.T) {
+	for _, value := range []string{`{"legacy":"opaque"}`, `{"value":"opaque"}`, `{"timezone":"opaque"}`} {
+		t.Run(value, func(t *testing.T) {
+			issue := &db.IssueExport{Metadata: jsontext.Value(`{"scheduled_on":` + value + `}`)}
+			require.NoError(t, db.ValidateImportRecords([]db.ImportRecord{issue}))
+			_, err := db.PayloadRequiredFeatures("issue.created", `{"metadata":{"scheduled_on":`+value+`}}`)
+			require.NoError(t, err)
+		})
+	}
+}
+
 // TestOrderImportRecordsPlacesDependenciesFirst pins the replay order the
 // backends rely on: meta and project rows must land before the issue rows
 // that reference them, and events after both.

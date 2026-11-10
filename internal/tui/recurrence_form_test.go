@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -111,6 +113,23 @@ func (h *recurrenceHarness) send(cmd tea.Cmd) {
 func (h *recurrenceHarness) save() {
 	h.t.Helper()
 	h.send(h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}))
+}
+
+func TestRecurrenceFormUsesSavedScheduleZone(t *testing.T) {
+	t.Setenv("TZ", "Asia/Tokyo")
+	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+	require.NoError(t, err)
+	issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: "2025-12-31"}
+	form := newRecurrenceForm(formTarget{}, issue, nil)
+	assert.Equal(t, "America/New_York", form.fieldValue(fieldZone))
+}
+
+func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
+	t.Setenv("TZ", "Asia/Tokyo")
+	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`)}}
+	form := newRecurrenceForm(formTarget{}, issue, nil)
+	assert.Contains(t, form.err, "unknown")
+	assert.Empty(t, form.fieldValue(fieldZone))
 }
 
 func TestRecurrenceDetailScheduleFieldsAt80Columns(t *testing.T) {

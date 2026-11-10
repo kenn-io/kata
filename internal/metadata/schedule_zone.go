@@ -123,6 +123,29 @@ func decodeScheduleValue(raw jsontext.Value) (*string, *time.Location, error) {
 	return &obj.Value, loc, nil
 }
 
+// SavedScheduleZone returns the zone a saved schedule was written in, "" for
+// a plain or absent value, and an error for rules this build cannot read.
+func SavedScheduleZone(raw jsontext.Value) (string, error) {
+	obj, err := DecodeSavedSchedule(raw)
+	if obj == nil {
+		return "", err
+	}
+	return obj.Timezone, nil
+}
+
+// ScheduleClockText is the stored text of a schedule, with a saved UTC instant
+// read as the clock time of its saved zone; "" when the value is unreadable.
+func ScheduleClockText(raw jsontext.Value) string {
+	value, loc, err := decodeScheduleValue(raw)
+	if err != nil || value == nil {
+		return ""
+	}
+	if kind, _, instant, _ := classifyScheduledOn(*value); kind == scheduledOnInstant && loc != nil {
+		return instant.In(loc).Format("2006-01-02T15:04:05.999999999")
+	}
+	return *value
+}
+
 // ScheduleValueText returns the editable text of a stored schedule.
 func ScheduleValueText(raw jsontext.Value) (string, error) {
 	value, _, err := decodeScheduleValue(raw)

@@ -369,7 +369,7 @@ func TestMaterializeNext_ReplacesLegacyGeneratedMetadataBeforeValidation(t *test
 		SELECT metadata FROM issues WHERE recurrence_id = ? AND occurrence_key = ?`,
 		rec.ID, "2026-05-22").Scan(&rawMetadata))
 	assert.JSONEq(t, `{
-		"scheduled_on":"2026-05-22",
+		"scheduled_on":{"value":"2026-05-22","timezone":"America/New_York","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"},
 		"timezone":"America/New_York",
 		"kind":"weekly"
 	}`, rawMetadata)

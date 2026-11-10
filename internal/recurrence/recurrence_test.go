@@ -1,6 +1,11 @@
 package recurrence
 
 import (
+	"archive/zip"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	// Embed zones as the kata binary does: trimmed test binaries cannot
 	// fall back to the Go installation's copy.
@@ -57,6 +62,30 @@ func TestWalk_HonorsTimezoneForBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, next)
 	assert.Equal(t, "2026-05-18", *next)
+}
+
+func TestWalkUsesBundledRules(t *testing.T) {
+	if os.Getenv("KATA_RULES_CHILD") == "1" {
+		next, err := Walk("FREQ=DAILY;UNTIL=20261115T065500Z", "2026-11-14", "America/Inuvik", "2026-11-14")
+		require.NoError(t, err)
+		assert.Nil(t, next, "the bundled 2026c rules place midnight after UNTIL")
+		return
+	}
+	z, err := zip.OpenReader("../metadata/testdata/zoneinfo-2026e-inuvik.zip")
+	require.NoError(t, err)
+	defer z.Close()
+	file, err := z.Open("America/Inuvik")
+	require.NoError(t, err)
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	require.NoError(t, err)
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "America"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "America", "Inuvik"), data, 0o600))
+	cmd := exec.Command(os.Args[0], "-test.run=^TestWalkUsesBundledRules$")
+	cmd.Env = append(os.Environ(), "KATA_RULES_CHILD=1", "ZONEINFO="+dir)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
 }
 
 func TestWalk_StripsSubDailyOccurrences(t *testing.T) {

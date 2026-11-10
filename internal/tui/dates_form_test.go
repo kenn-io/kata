@@ -468,3 +468,27 @@ func TestDatesFormReadsSavedSchedule(t *testing.T) {
 	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-06-01","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}`)}}
 	require.Equal(t, "2026-06-01", issue.scheduledOn())
 }
+
+func TestDetailStripShowsSavedScheduleDate(t *testing.T) {
+	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+	require.NoError(t, err)
+	issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: "2025-12-31"}
+	got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
+	assert.Contains(t, got, "scheduled: 2025-12-31")
+}
+
+func TestDetailStripRetainsSavedCivilTime(t *testing.T) {
+	saved, err := metadata.NewScheduleValue("2026-01-01T09:30", "America/New_York")
+	require.NoError(t, err)
+	issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: "2026-01-01"}
+	got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
+	assert.Contains(t, got, "scheduled: 2026-01-01T09:30")
+}
+
+func TestDetailStripShowsInstantInSavedZone(t *testing.T) {
+	saved, err := metadata.NewScheduleValue("2026-01-01T15:00:42Z", "America/New_York")
+	require.NoError(t, err)
+	issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: "2026-01-01"}
+	got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
+	assert.Contains(t, got, "scheduled: 2026-01-01T10:00:42")
+}

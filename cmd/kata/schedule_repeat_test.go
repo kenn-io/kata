@@ -183,6 +183,20 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 	}
 }
 
+func TestRepeatZoneUsesSavedSchedule(t *testing.T) {
+	t.Setenv("TZ", "Asia/Tokyo")
+	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+	require.NoError(t, err)
+	zone, err := repeatZone("", "", map[string]jsontext.Value{"scheduled_on": saved})
+	require.NoError(t, err)
+	assert.Equal(t, "America/New_York", zone)
+}
+
+func TestRepeatZoneRejectsUnknownScheduleRules(t *testing.T) {
+	_, err := repeatZone("", "", map[string]jsontext.Value{"scheduled_on": jsontext.Value(`{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`)})
+	require.Error(t, err)
+}
+
 func setIssueTimezoneMeta(t *testing.T, env *testenv.Env, dir, ref, zone string) {
 	t.Helper()
 	runCLI(t, env, dir, "meta", "set", ref, "timezone", zone)

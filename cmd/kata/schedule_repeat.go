@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -199,6 +200,21 @@ func metadataString(md map[string]jsontext.Value, key string) string {
 	return ""
 }
 
+// scheduleZone is the zone the issue's saved scheduled_on carries, else its
+// timezone metadata. A saved schedule this build cannot read is an error.
+func scheduleZone(md map[string]jsontext.Value) (string, error) {
+	zone, err := metadata.SavedScheduleZone(md["scheduled_on"])
+	return cmp.Or(zone, metadataString(md, "timezone")), err
+}
+
+func resolveRepeatZone(flagZone, recurrenceZone string, md map[string]jsontext.Value) (string, error) {
+	saved, err := scheduleZone(md)
+	if err != nil {
+		return "", err
+	}
+	return recurrenceclient.ResolveZone(flagZone, recurrenceZone, saved, localTimeZoneName)
+}
+
 // checkIssueIfMatch applies --if-match to the issue revision before anything
 // is written, the way the metadata patch behind plain `kata schedule` does.
 func checkIssueIfMatch(raw string, revision int64) error {
@@ -219,7 +235,7 @@ func checkIssueIfMatch(raw string, revision int64) error {
 // recurrence already has, then the issue's timezone metadata, then the
 // caller's own zone.
 func repeatZone(flagZone, recurrenceZone string, metadata map[string]jsontext.Value) (string, error) {
-	zone, err := recurrenceclient.ResolveZone(flagZone, recurrenceZone, metadataString(metadata, "timezone"), localTimeZoneName)
+	zone, err := resolveRepeatZone(flagZone, recurrenceZone, metadata)
 	switch {
 	case errors.Is(err, recurrenceclient.ErrLocalZone):
 		return "", &cliError{Message: `"Local" is not an IANA zone; pass --timezone with a name like Europe/Paris`, Kind: kindValidation, ExitCode: ExitValidation}
