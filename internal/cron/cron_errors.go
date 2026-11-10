@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	cronparser "github.com/netresearch/go-cron"
@@ -17,10 +18,13 @@ func explainCron(expression string, err error) error {
 		return invalid("invalid cron expression: " + safeCronDetail(reason, 330))
 	}
 	if len(expression) > cronparser.MaxSpecLength {
-		return reject(detail)
+		return reject(fmt.Sprintf("complete parser input is %d bytes; limit is %d bytes, including any timezone directive", len(expression), cronparser.MaxSpecLength))
 	}
 	if strings.HasPrefix(expression, "TZ=") || strings.HasPrefix(expression, "CRON_TZ=") {
 		directive, rest, _ := strings.Cut(expression, " ")
+		if strings.IndexFunc(directive, unicode.IsSpace) >= 0 {
+			return reject("timezone directive needs an ASCII space before its schedule; tabs and other whitespace do not separate it")
+		}
 		_, zone, _ := strings.Cut(directive, "=")
 		if len(zone) >= 2 && (zone[0] == '\'' && zone[len(zone)-1] == '\'' || zone[0] == '"' && zone[len(zone)-1] == '"') {
 			zone = zone[1 : len(zone)-1]
@@ -47,7 +51,7 @@ func explainCron(expression string, err error) error {
 		case expression == "@every" || strings.HasPrefix(expression, "@every "):
 			return reject("@every needs a duration such as 90m or 2h; native recurring jobs use an interval trigger instead; " + detail)
 		default:
-			return reject(fmt.Sprintf("unknown descriptor %q; use a descriptor such as @daily", clip(expression, 40)))
+			return reject(fmt.Sprintf("unsupported descriptor expression %q; use a descriptor alone, such as @daily", clip(expression, 40)))
 		}
 	}
 	if strings.HasPrefix(strings.TrimSpace(expression), "@") {
@@ -70,8 +74,11 @@ func explainCron(expression string, err error) error {
 					reason = daySyntaxReason(i, token)
 					if reason == "" {
 						reason = fieldErr.Error()
-						if strings.ContainsAny(strings.ToUpper(token), "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
-							reason = "use numeric values or field-appropriate names"
+						if strings.HasPrefix(reason, "failed to parse int from") {
+							reason = "use numeric values or field-appropriate names; " + reason
+						}
+						if i == 2 && strings.ContainsAny(strings.ToUpper(token), "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+							reason = "day of month takes numbers 1-31"
 						}
 					}
 				}
@@ -96,12 +103,11 @@ func explainCron(expression string, err error) error {
 // failures without imposing its name rules on accepted Trigger.Timezone values.
 func explainTimezone(name string, err error) error {
 	_, probeErr := cronParser.Parse("TZ=" + strconv.Quote(name) + " @daily")
-	if strings.Contains(err.Error(), "time: invalid location name") ||
-		strings.HasPrefix(err.Error(), "invalid timezone ") ||
-		probeErr != nil && strings.HasPrefix(probeErr.Error(), "invalid timezone ") {
-		return invalid(fmt.Sprintf("invalid cron expression: invalid timezone %q; use an unquoted timezone name such as America/New_York or UTC", clip(name, 40)))
+	label := "invalid timezone"
+	if probeErr != nil && strings.HasPrefix(probeErr.Error(), "unknown time zone ") && !strings.Contains(err.Error(), "time: invalid location name") {
+		label = "unknown time zone"
 	}
-	return invalid(fmt.Sprintf("unknown time zone %q; use an IANA name such as America/New_York, or UTC", clip(name, 40)))
+	return invalid(fmt.Sprintf("%s %q; use an IANA name such as America/New_York, or UTC", label, clip(name, 40)))
 }
 
 var (

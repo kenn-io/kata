@@ -3,6 +3,7 @@ package cron
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
@@ -10,17 +11,13 @@ import (
 
 func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
 	for _, tc := range []struct{ expression, detail string }{
-		{"@reboot", "@reboot is not supported"}, {"@invented", `unknown descriptor "@invented"`},
-		{"@every", "native recurring jobs use an interval trigger"}, {"@every 2x", "native recurring jobs use an interval trigger"},
-		{"@every 1ms", "at least 1s"},
+		{"@reboot", "@reboot is not supported"}, {"@invented", `unsupported descriptor expression "@invented"`},
 		{"0 9 L * *", `day of month "L": last-day`}, {"0 9 l * *", `day of month "l": last-day`},
 		{"0 9 15W * *", "nearest-weekday"}, {"0 9 15w * *", "nearest-weekday"},
 		{"0 9 LW * *", `day of month "LW": last-weekday`},
 		{"0 9 * * FRI#L", `day of week "FRI#L": last-weekday`},
 		{"0 9 1,LW * *", `day of month "1,LW": last-weekday`},
 		{"0 9 * * MON,FRI#L", `day of week "MON,FRI#L": last-weekday`},
-		{"0 9 WED * *", "numeric values or field-appropriate names"},
-		{"0 9 JUL * *", "numeric values or field-appropriate names"},
 		{"0 9 * * JUL", "numeric values or field-appropriate names"},
 		{"0 9 * * 2#2", "nth-weekday"}, {"0 9 * * 5L", "last-weekday"},
 		{"H 9 * * *", `minute "H": choose a fixed value`},
@@ -36,13 +33,6 @@ func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
 			require.ErrorIs(t, err, ErrInvalid)
 			require.Contains(t, err.Error(), "invalid cron document: invalid cron expression: ")
 			require.Contains(t, err.Error(), tc.detail)
-			adapter, parseErr := ParseJob([]byte(executeJSON))
-			require.NoError(t, parseErr)
-			adapter.Trigger = Trigger{Kind: "cron", Cron: tc.expression}
-			native := nativeJob(t)
-			native.Trigger = adapter.Trigger
-			require.EqualError(t, adapter.Validate(), err.Error())
-			require.EqualError(t, native.Validate(), err.Error())
 		})
 	}
 }
@@ -56,9 +46,6 @@ func TestTriggerUnknownTimezoneNamesZone(t *testing.T) {
 		{Kind: "cron", Cron: "TZ=Not/AZone "},
 	} {
 		require.EqualError(t, trigger.Validate(), want)
-	}
-	for _, zone := range []string{strings.Repeat("é", 1000), strings.Repeat("\x00", 1000), "bad\x00zone", string([]byte{0xff})} {
-		requireSafeCronError(t, (Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: zone}).Validate())
 	}
 }
 
@@ -78,14 +65,11 @@ func TestParseCronPreservesAcceptedGrammar(t *testing.T) {
 		_, err := ParseCron(expression)
 		require.NoError(t, err, "%q", expression)
 	}
-	native := nativeJob(t)
-	native.Trigger = Trigger{Kind: "cron", Cron: "@every 90m"}
-	require.EqualError(t, native.Validate(), "invalid cron document: use an interval trigger instead of @every")
 }
 
 func TestCronDirectiveFormatAdvice(t *testing.T) {
 	for _, expression := range []string{
-		" TZ=UTC 0 9 * * *", " CRON_TZ=UTC 0 9 * * *", "tz=UTC 0 9 * * *", "cron_tz=UTC 0 9 * * *",
+		" TZ=UTC 0 9 * * *", "\tTZ=UTC @daily", " CRON_TZ=UTC 0 9 * * *", "tz=UTC 0 9 * * *", "cron_tz=UTC 0 9 * * *",
 		"0 9 * * * TZ=UTC", "TZ=UTC CRON_TZ=UTC 0 9 * * *", "0 9 * TZ=UTC *",
 	} {
 		t.Run(expression, func(t *testing.T) {
@@ -100,15 +84,84 @@ func TestCronDirectiveFormatAdvice(t *testing.T) {
 }
 
 func TestTriggerTimezoneSyntaxAdvice(t *testing.T) {
-	for _, zone := range []string{"../UTC", "/abs", "bad zone!", "bad!", "A\x00B", " ", `"UTC"`, "'UTC'"} {
+	for _, zone := range []string{"../UTC", "/abs", "bad zone!", "bad!", "bad!" + strings.Repeat("x", 1100), "A\x00B", " ", `"UTC"`, "'UTC'"} {
 		t.Run(zone, func(t *testing.T) {
 			err := (Trigger{Kind: "cron", Cron: "@daily", Timezone: zone}).Validate()
 			requireSafeCronError(t, err)
-			require.Contains(t, err.Error(), "invalid timezone")
+			require.True(t, strings.HasPrefix(err.Error(), "invalid cron document: invalid timezone "), "%s", err)
+			require.NotContains(t, err.Error(), "unquoted")
 			require.NotContains(t, err.Error(), "unknown time zone")
 		})
 	}
 	for _, zone := range []string{"", "UTC", "Local"} {
 		require.NoError(t, (Trigger{Kind: "cron", Cron: "@daily", Timezone: zone}).Validate())
+	}
+}
+
+func TestCronDiagnosticsPreserveRejectionReason(t *testing.T) {
+	for _, tc := range []struct{ expression, want, forbidden string }{
+		{"0 9 * * MON/7", "step (7)", "field-appropriate names"},
+		{"0 9 * * MON-FRI/5", "step (5)", "field-appropriate names"},
+		{"0 9 * * MON/0", "step of range", "field-appropriate names"},
+		{"0 9 * * MON-FRI/0", "step of range", "field-appropriate names"},
+		{"0 9 JUL * *", "day of month takes numbers 1-31", "option"},
+		{"0 9 WED * *", "day of month takes numbers 1-31", "option"},
+		{"@daily extra", `unsupported descriptor expression "@daily extra"; use a descriptor alone`, "unknown descriptor"},
+		{"@hourly 1", "use a descriptor alone", "unknown descriptor"},
+		{"TZ=UTC\t0 9 * * *", "ASCII space", "invalid timezone"},
+		{"TZ=UTC\t0\t9\t*\t*\t*", "ASCII space", "missing fields"},
+		{"TZ=UTC\t 0 9 * * *", "ASCII space", "invalid timezone"},
+		{"CRON_TZ=UTC\n0 9 * * *", "ASCII space", "invalid timezone"},
+		{"TZ=UTC", "missing fields after timezone", "unknown time zone"},
+		{"CRON_TZ=UTC", "missing fields after timezone", "unknown time zone"},
+		{"TZ= 0 9 * * *", "invalid cron document: invalid timezone", "unknown time zone"},
+	} {
+		t.Run(tc.expression, func(t *testing.T) {
+			_, err := ParseCron(tc.expression)
+			require.ErrorIs(t, err, ErrInvalid)
+			require.Contains(t, err.Error(), tc.want)
+			require.NotContains(t, err.Error(), tc.forbidden)
+		})
+	}
+}
+
+func TestCronValidationPropagatesDiagnostic(t *testing.T) {
+	trigger := Trigger{Kind: "cron", Cron: "0 9 L * *"}
+	_, err := ParseCron(trigger.Cron)
+	adapter, decodeErr := ParseJob([]byte(executeJSON))
+	require.NoError(t, decodeErr)
+	native := nativeJob(t)
+	for _, job := range []JobDefinition{adapter, native} {
+		job.Trigger = trigger
+		require.EqualError(t, job.Validate(), err.Error())
+	}
+}
+
+func TestCronScheduleLengthIncludesTimezonePrefix(t *testing.T) {
+	expression := "0" + strings.Repeat(" ", 1011) + "9 * * *"
+	trigger := Trigger{Kind: "cron", Cron: expression}
+	require.NoError(t, trigger.Validate())
+	_, want := ParseCron("CRON_TZ=UTC " + expression)
+	require.ErrorContains(t, want, "complete parser input")
+	require.ErrorContains(t, want, "1031 bytes")
+	require.ErrorContains(t, want, "1024 bytes")
+	_, err := recurringNext(trigger, time.Time{})
+	require.EqualError(t, err, want.Error())
+	trigger.Timezone = "UTC"
+	_, err = adapterCronSchedule(trigger)
+	require.EqualError(t, err, want.Error())
+}
+
+func TestCronEveryDurationDiagnostics(t *testing.T) {
+	for _, tc := range []struct{ expression, detail string }{
+		{"@every", `unrecognized descriptor: "@every"`},
+		{"@every 2x", `failed to parse duration "@every 2x"`},
+		{"@every 1ms", "@every duration must be at least 1s"},
+	} {
+		t.Run(tc.expression, func(t *testing.T) {
+			_, err := ParseCron(tc.expression)
+			require.ErrorContains(t, err, tc.detail)
+			require.ErrorContains(t, err, "native recurring jobs use an interval trigger instead")
+		})
 	}
 }

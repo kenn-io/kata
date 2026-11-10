@@ -182,8 +182,10 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 A `cron` expression has five fields: minute, hour, day of month, month, and day
 of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
 `@monthly`, or `@yearly`. Kata does not accept seconds, years, `L`, `W`, `#`,
-or `H` syntax. Expressions are limited to 1024 bytes. Kata keeps the expression
-exactly as written.
+or `H` syntax. The complete parser input is limited to 1024 bytes, including
+any timezone directive. Native jobs always add a timezone prefix (UTC by default).
+Adapters add a prefix for a separate timezone when the expression has no directive.
+Kata keeps the stored expression exactly as written.
 
 A rejected expression's error names the field and value, descriptor, timezone,
 or field count that failed, with advice for correcting it.

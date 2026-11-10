@@ -69,6 +69,12 @@ func TestRecurringDefinition(t *testing.T) {
 	require.ErrorIs(t, legacy.Validate(), ErrInvalid, "parent binding is native only")
 }
 
+func TestRecurringEveryPolicyMessage(t *testing.T) {
+	native := nativeJob(t)
+	native.Trigger = Trigger{Kind: "cron", Cron: "@every 90m"}
+	require.EqualError(t, native.Validate(), "invalid cron document: use an interval trigger instead of @every")
+}
+
 func at(t testing.TB, s string) time.Time {
 	t.Helper()
 	v, e := time.Parse(time.RFC3339Nano, s)

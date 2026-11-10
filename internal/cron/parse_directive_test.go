@@ -9,20 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseCronDirectiveDiagnostics(t *testing.T) {
-	for _, expression := range []string{"TZ=UTC", "CRON_TZ=UTC", "TZ=UTC\t0\t9\t*\t*\t*", "TZ= 0 9 * * *", "TZ=bad! 0 9 * * *", "x\x00y 9 * * *", "\x1b[31m 9 * * *", "x\x7fy 9 * * *", string([]byte{0xff}) + " 9 * * *", strings.Repeat("x", 1000) + " 9 * * *", strings.Repeat("é", 1000) + " 9 * * *"} {
-		t.Run(expression, func(t *testing.T) {
-			require.NotPanics(t, func() {
-				_, err := ParseCron(expression)
-				requireSafeCronError(t, err)
-				require.NotContains(t, err.Error(), "unknown time zone")
-			})
-			require.NotPanics(t, func() {
-				require.ErrorIs(t, (Trigger{Kind: "cron", Cron: expression}).Validate(), ErrInvalid)
-			})
-			j := nativeJob(t)
-			j.Trigger = Trigger{Kind: "cron", Cron: expression}
-			require.NotPanics(t, func() { require.ErrorIs(t, j.Validate(), ErrInvalid) })
+func TestCronDiagnosticOutputSafety(t *testing.T) {
+	for _, input := range []string{"x\x00y 9 * * *", "\x1b[31m 9 * * *", "x\x7fy 9 * * *", string([]byte{0xff}) + " 9 * * *", "bad\x00zone", strings.Repeat("\x00", 1000), strings.Repeat("x", 1000) + " 9 * * *", strings.Repeat("é", 1000)} {
+		t.Run(input, func(t *testing.T) {
+			_, err := ParseCron(input)
+			requireSafeCronError(t, err)
+			requireSafeCronError(t, (Trigger{Kind: "cron", Cron: "@daily", Timezone: input}).Validate())
 		})
 	}
 }
@@ -36,12 +28,10 @@ func TestPlanRecurringRejectsDirectiveWithoutSchedule(t *testing.T) {
 	require.NoError(t, err)
 	anchor := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
-	require.NotPanics(t, func() {
-		batch, err := PlanRecurring(stored, definitionUID, p, anchor.Add(time.Hour))
-		require.ErrorIs(t, err, ErrInvalid)
-		require.Empty(t, batch.Due)
-		require.Equal(t, p, batch.Progress)
-	})
+	batch, err := PlanRecurring(stored, definitionUID, p, anchor.Add(time.Hour))
+	require.ErrorIs(t, err, ErrInvalid)
+	require.Empty(t, batch.Due)
+	require.Equal(t, p, batch.Progress)
 }
 
 // Valid directives retain the shared grammar for adapter and native jobs.
@@ -70,11 +60,4 @@ func FuzzParseCronDirectiveDoesNotPanic(f *testing.F) {
 		f.Add(expression)
 	}
 	f.Fuzz(func(_ *testing.T, expression string) { _, _ = ParseCron(expression) })
-}
-
-func TestCronDirectiveGuardPreservesLeadingWhitespaceRejection(t *testing.T) {
-	for _, expression := range []string{" @daily", "\tTZ=UTC @daily"} {
-		_, err := ParseCron(expression)
-		require.Error(t, err)
-	}
 }
