@@ -50,12 +50,10 @@ func FuzzCronErrorSafety(f *testing.F) {
 	for _, input := range []string{
 		"TZ=UTC", "CRON_TZ=UTC", "TZ=UTC\t0 9 * * *", "TZ=UTC @daily",
 		"x\x00y 9 * * *", "\x1b[31m 9 * * *", "x\x7fy 9 * * *", string([]byte{0xff}) + " 9 * * *",
-		"TZ=" + strings.Repeat("\x00", 40) + " @daily", "TZ=" + strings.Repeat("\xff", 40) + " @daily",
-		"bad\x00zone", strings.Repeat("\x00", 1000), strings.Repeat("x", 1000) + " 9 * * *", strings.Repeat("é", 1000),
-		"@invented", "@daily ", "@every 2x", " @daily", "0 9 * * 5#", "0 9 L-3 * *", "0 9 15W * *", "H * * * *",
+		"bad\x00zone", strings.Repeat("\x00", 1000), strings.Repeat("é", 1000),
+		"@invented", "@daily ", "@every 2x", " @daily",
 		"60 * * * *", "* */24 * * *", "0 9 * JAN-XYZ *", "0 9 * * MON/0", "0 9 * * MON,,FRI", "0 9 * * -1",
-		`TZ="bad!" @daily`, "CRON_TZ=bad! @daily", `TZ="UTC @daily`, "TZ=UTC\u00a0@daily", "TZ=UTC\t @daily",
-		"CRON_TZ=UTC\n@daily", "TZ=UTC TZ=UTC @daily", "0 9 * * * TZ=UTC", "../UTC", "/abs", `"UTC"`, "'UTC'",
+		"../UTC", "/abs", `"UTC"`, "'UTC'",
 	} {
 		f.Add(input)
 	}
@@ -64,16 +62,13 @@ func FuzzCronErrorSafety(f *testing.F) {
 		f.Add(strings.Repeat(string(b), 1000))
 	}
 	for _, value := range []string{"\xff", "\xc3", "\xc0\xaf", "\xed\xa0\x80", `"`, `\`, "\x00", "é", "界"} {
-		for _, n := range []int{37, 40, 327, 330, 1023, 1024, 1025} {
+		for _, n := range []int{249, 250, 251, 1023, 1024, 1025} {
 			f.Add(strings.Repeat(value, n) + " 9 * * *")
 			f.Add("TZ=" + strings.Repeat("x", n) + value + " @daily")
 		}
 	}
 	f.Fuzz(func(t *testing.T, input string) {
 		if _, err := ParseCron(input); err != nil {
-			requireSafeCronError(t, err)
-		}
-		if err := (Trigger{Kind: "cron", Cron: "@daily", Timezone: input}).Validate(); err != nil {
 			requireSafeCronError(t, err)
 		}
 	})

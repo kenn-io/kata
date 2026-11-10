@@ -204,7 +204,7 @@ the stored expression exactly as written.
 Rejected expressions include the parser's error. For common unsupported syntax,
 the error also describes Kata's five-field format or the unsupported feature.
 `@reboot`, `L`, `W`, `#`, and hashed (`H`) schedules are unsupported. Use an
-interval trigger for native recurring jobs that need `@every`.
+interval trigger for native recurring jobs; adapter jobs accept `@every`.
 
 Schedules follow the trigger timezone's daylight-saving transitions:
 

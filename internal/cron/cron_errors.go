@@ -52,7 +52,7 @@ func safeCronDetail(s string, n int) string {
 	var out strings.Builder
 	for _, r := range s {
 		part := string(r)
-		if r < 0x20 || r == 0x7f {
+		if r < 0x20 || textsafe.IsUnsafeTerminalRune(r) {
 			quoted := strconv.QuoteRune(r)
 			part = quoted[1 : len(quoted)-1]
 		}

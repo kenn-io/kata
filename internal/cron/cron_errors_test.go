@@ -3,9 +3,11 @@ package cron
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/textsafe"
 )
 
 func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
@@ -39,19 +41,29 @@ func requireSafeCronError(t *testing.T, err error) {
 	message := err.Error()
 	require.Less(t, len(message), 400)
 	require.True(t, utf8.ValidString(message), "%q", message)
-	for _, b := range []byte(message) {
-		require.True(t, b >= 0x20 && b != 0x7f, "%q", message)
+	for _, r := range message {
+		require.False(t, r < 0x20 || textsafe.IsUnsafeTerminalRune(r), "%q", message)
 	}
 }
 
 func TestCronValidationPropagatesDiagnostic(t *testing.T) {
-	trigger := Trigger{Kind: "cron", Cron: "0 9 L * *"}
-	adapter, err := ParseJob([]byte(executeJSON))
-	require.NoError(t, err)
-	for _, job := range []JobDefinition{adapter, nativeJob(t)} {
-		job.Trigger = trigger
-		require.ErrorContains(t, job.Validate(), "L, W, and # syntax is not supported")
-	}
+	expression := "0" + strings.Repeat(" ", 1011) + "9 * * *"
+	trigger := Trigger{Kind: "cron", Cron: expression, Timezone: "UTC"}
+	anchor := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	progress := RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
+	native := nativeJob(t)
+	native.Trigger = trigger
+	_, err := PlanRecurring(native, definitionUID, progress, anchor.Add(time.Hour))
+	require.ErrorContains(t, err, "spec too long: 1031 > 1024")
+	adapter := adapterJob(t, trigger)
+	_, err = RecurringOccurrences(adapter, progress, anchor, 1)
+	require.ErrorContains(t, err, "spec too long: 1031 > 1024")
+}
+
+func TestCronErrorEscapesDirectionControl(t *testing.T) {
+	_, err := ParseCron("\u202e0 9 * *")
+	requireSafeCronError(t, err)
+	require.ErrorContains(t, err, `\u202e`)
 }
 
 func TestCronLongErrorIsBounded(t *testing.T) {

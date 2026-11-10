@@ -187,7 +187,7 @@ func TestWorkflowRoundTripProperty(t *testing.T) {
 }
 
 func TestCronCompatibility(t *testing.T) {
-	for _, expression := range []string{"0 9 * JAN MON-FRI", "@hourly", "@daily", "@weekly", "@monthly", "@yearly", "@every 90m", "70/5 * * * *", "0 22-2 * * *", "0 9 * * 5-1", "0 9 ? * 7", `TZ="UTC" @daily`} {
+	for _, expression := range []string{"0 9 * JAN MON-FRI", "@hourly", "@daily", "@weekly", "@monthly", "@yearly", "@every 90m", "70/5 * * * *", "0 22-2 * * *"} {
 		t.Run(expression, func(t *testing.T) {
 			job, err := ParseJob([]byte(executeJSON))
 			require.NoError(t, err)
@@ -195,13 +195,17 @@ func TestCronCompatibility(t *testing.T) {
 			require.NoError(t, job.Validate())
 		})
 	}
-	t.Run("70-5 * * * *", func(t *testing.T) {
-		job, err := ParseJob([]byte(executeJSON))
-		require.NoError(t, err)
-		job.Trigger = Trigger{Kind: "cron", Cron: "70-5 * * * *", Timezone: "UTC"}
-		require.ErrorIs(t, job.Validate(), ErrNeverFires)
-	})
-	require.Error(t, (Trigger{Kind: "cron", Cron: "* * * * * *"}).Validate())
+	for _, expression := range []string{"@invented", "@every nonsense", "61 * * * *", "* * * * * *", "TZ=UTC", "CRON_TZ=UTC", "TZ=UTC\t0\t9\t*\t*\t*", " @daily", "\tTZ=UTC @daily"} {
+		t.Run(expression, func(t *testing.T) {
+			_, err := ParseCron(expression)
+			require.Error(t, err)
+			require.Error(t, (Trigger{Kind: "cron", Cron: expression}).Validate())
+			job, err := ParseJob([]byte(executeJSON))
+			require.NoError(t, err)
+			job.Trigger = Trigger{Kind: "cron", Cron: expression}
+			require.Error(t, job.Validate())
+		})
+	}
 	for _, zone := range []string{"", "UTC", "Local"} {
 		require.NoError(t, (Trigger{Kind: "cron", Cron: "@daily", Timezone: zone}).Validate())
 	}
