@@ -1,8 +1,9 @@
 package db_test
 
 import (
-	"go.kenn.io/kata/internal/db"
 	"testing"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 // Contract: selection identity and an active boolean from an older process or

@@ -2,11 +2,12 @@ package dbtest
 
 import (
 	"encoding/json/v2"
+	"testing"
+	"time"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/tracker"
-	"testing"
-	"time"
 )
 
 // Contract: current binding, claim, exact event and activation are checked in

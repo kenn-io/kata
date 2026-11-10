@@ -2,9 +2,10 @@ package db_test
 
 import (
 	"encoding/json/v2"
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"testing"
 )
 
 func TestTrackerRemoteAttemptBindsIndependentOwnerLane(t *testing.T) {

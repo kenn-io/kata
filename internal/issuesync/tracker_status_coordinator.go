@@ -2,9 +2,11 @@ package issuesync
 
 import (
 	"context"
+
 	"go.kenn.io/kata/internal/db"
 )
 
+// NamedStatusSend invokes a provider with a callback that admits the paced write.
 type NamedStatusSend func(context.Context, func() error) (StatusObservation, error)
 
 // NamedStatusCoordinator retains durable attempt/result state around one
@@ -21,6 +23,7 @@ type NamedStatusRecovery interface {
 }
 type namedStatusCoordinatorKey struct{}
 
+// WithNamedStatusCoordinator attaches the coordinator for this invocation.
 func WithNamedStatusCoordinator(ctx context.Context, coordinator NamedStatusCoordinator) context.Context {
 	return context.WithValue(ctx, namedStatusCoordinatorKey{}, coordinator)
 }

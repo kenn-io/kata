@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
@@ -36,7 +37,11 @@ func newImportCmd() *cobra.Command {
 			}
 			switch strings.TrimSpace(format) {
 			case "", "kata":
-				return runKataJSONLImport(cmd, input, target, force, newInstance, merge, asStandalone)
+				err := runKataJSONLImport(cmd, input, target, force, newInstance, merge, asStandalone)
+				if errors.Is(err, db.ErrTrackerFenceInvalid) {
+					return &cliError{Message: "Invalid tracker history", Kind: kindValidation, ExitCode: ExitValidation}
+				}
+				return err
 			case "beads":
 				if err := validateBeadsImportFlags(cmd); err != nil {
 					return err

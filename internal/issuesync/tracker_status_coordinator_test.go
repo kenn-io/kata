@@ -2,10 +2,11 @@ package issuesync
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/db"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 type denyNamedCoordinator struct {

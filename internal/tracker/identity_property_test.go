@@ -1,8 +1,9 @@
 package tracker
 
 import (
-	"hegel.dev/go/hegel"
 	"testing"
+
+	"hegel.dev/go/hegel"
 )
 
 // An independent equality oracle checks the full qualified subject and resource

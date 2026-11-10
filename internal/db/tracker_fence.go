@@ -20,14 +20,17 @@ const TrackerMetadataPrefix = "tracker_fence_v1."
 
 var (
 	// ErrTrackerFenceChanged means the retained fence no longer matches.
-	ErrTrackerFenceChanged   = errors.New("tracker execution fence changed")
+	ErrTrackerFenceChanged = errors.New("tracker execution fence changed")
+	// ErrTrackerOutcomeUnknown blocks dispatch when provider history is uncertain.
 	ErrTrackerOutcomeUnknown = errors.New("tracker provider outcome is unknown; automatic dispatch is blocked")
-	ErrTrackerFenceInvalid   = errors.New("invalid tracker execution fence")
+	// ErrTrackerFenceInvalid means execution metadata violates its contract.
+	ErrTrackerFenceInvalid = errors.New("invalid tracker execution fence")
 )
 
 // TrackerWritePhase identifies a durable provider-write state.
 type TrackerWritePhase string
 
+// Execution phases retain whether a write may dispatch or has settled.
 const (
 	// TrackerWritePrepared starts the write phase sequence.
 	TrackerWritePrepared         TrackerWritePhase = "prepared"

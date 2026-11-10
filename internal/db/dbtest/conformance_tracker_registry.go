@@ -1,10 +1,11 @@
 package dbtest
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/tracker"
-	"testing"
 )
 
 func checkTrackerRegistry(t *testing.T, store db.Storage) error {

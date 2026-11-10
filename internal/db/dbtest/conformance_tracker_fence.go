@@ -14,7 +14,7 @@ import (
 
 // Both native backends must retain the same conditional execution head in their
 // existing meta store. This is a behavioral fixture, not a DDL-content assertion.
-func checkTrackerExecutionFence(t *testing.T, store db.Storage, backend Backend) error {
+func checkTrackerExecutionFence(t *testing.T, store db.Storage, _ Backend) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "tracker-project")
 	require.NoError(t, err)
@@ -135,7 +135,7 @@ func checkTrackerExecutionFence(t *testing.T, store db.Storage, backend Backend)
 	require.True(t, keep)
 	tx, err := beginner.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	require.ErrorIs(t, db.CheckTrackerMetadataRestoreSQL(ctx, tx, conflictRecord, backend.Name == "postgres"), db.ErrTrackerOutcomeUnknown, "conflicting cross-key evidence cannot be combined")
+	require.ErrorIs(t, db.ValidateTrackerMetadataRestoreSQL(ctx, tx, []db.ImportRecord{&conflictRecord}, db.ImportOptions{}), db.ErrTrackerOutcomeUnknown, "conflicting cross-key evidence cannot be combined")
 	require.NoError(t, tx.Rollback())
 	require.Error(t, fences.StoreTrackerExecutionFence(ctx, &notSent, retry, retry.ProcessEpoch), "retirement cannot authorize two successors")
 	readmitted := retry

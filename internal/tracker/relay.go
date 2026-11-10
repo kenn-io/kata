@@ -1,8 +1,9 @@
 package tracker
 
 import (
-	"go.kenn.io/kata/internal/uid"
 	"time"
+
+	"go.kenn.io/kata/internal/uid"
 )
 
 // ControlProtocolVersion identifies the relay assertion format.

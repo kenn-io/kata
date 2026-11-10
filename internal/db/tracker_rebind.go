@@ -10,11 +10,14 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+// TrackerRebindParams fences a connection replacement to an exact binding revision.
 type TrackerRebindParams struct {
 	Binding           UpsertIssueSyncBindingParams
 	ExpectedUpdatedAt time.Time
 	ProcessEpoch      string
 }
+
+// TrackerRebindStore replaces connections at a settled execution boundary.
 type TrackerRebindStore interface {
 	RebindTrackerConnection(context.Context, TrackerRebindParams) (IssueSyncBinding, error)
 }

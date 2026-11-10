@@ -2,11 +2,12 @@ package issuesync
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/tracker"
-	"testing"
-	"time"
 )
 
 // Contract: every named binding is routed before status or content code can

@@ -530,3 +530,18 @@ func TestInstallImportedTargetDoesNotReplaceTargetCreatedAfterCheck(t *testing.T
 	require.NoError(t, readErr)
 	assert.Equal(t, "new-db", string(gotTmp))
 }
+
+// Invalid tracker metadata must be described in terms of the imported history.
+func TestImportInvalidTrackerHistory(t *testing.T) {
+	_, input, target := setupImportTest(t)
+	raw, err := os.ReadFile(input) //nolint:gosec // input is a synthetic export inside the temporary test home.
+	require.NoError(t, err)
+	malformed := `{"kind":"meta","data":{"key":"tracker_fence_v1.invalid","value":"{}"}}` + "\n"
+	// Keep the stream's kind ordering valid so it reaches tracker validation.
+	contents := strings.Replace(string(raw), "\n", "\n"+malformed, 1)
+	require.NoError(t, os.WriteFile(input, []byte(contents), 0o600)) //nolint:gosec // input is a synthetic export inside the temporary test home.
+	_, err = runCmdOutput(t, nil, "import", "--input", input, "--target", target)
+	ce := requireCLIError(t, err, ExitValidation)
+	require.Equal(t, kindValidation, ce.Kind)
+	require.Equal(t, "Invalid tracker history", ce.Message)
+}

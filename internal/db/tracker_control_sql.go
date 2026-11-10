@@ -11,12 +11,14 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+// TrackerControlStore retains idempotent named control receipts.
 type TrackerControlStore interface {
 	BeginTrackerControl(context.Context, tracker.ControlReceipt) (tracker.ControlReceipt, bool, error)
 	CompleteTrackerControl(context.Context, tracker.ControlReceipt, tracker.ControlReceipt) error
 	ReadTrackerControl(context.Context, string, string) (tracker.ControlReceipt, error)
 }
 
+// TrackerControlKey returns the local metadata key for a control receipt.
 func TrackerControlKey(root, project, operation string) string {
 	return TrackerMetadataPrefix + "control." + project + "." + root + "." + operation
 }
@@ -30,6 +32,8 @@ func decodeTrackerControl(key, raw string) (tracker.ControlReceipt, error) {
 	}
 	return c, nil
 }
+
+// ReadControl reads an authorized project control receipt.
 func (a TrackerFenceSQL) ReadControl(ctx context.Context, project, operation string) (tracker.ControlReceipt, error) {
 	if !uid.Valid(project) || !uid.Valid(operation) {
 		return tracker.ControlReceipt{}, tracker.ErrInvalid
@@ -55,6 +59,7 @@ func (a TrackerFenceSQL) ReadControl(ctx context.Context, project, operation str
 	return result, err
 }
 
+// BeginControl retains a pending receipt or returns its existing result.
 func (a TrackerFenceSQL) BeginControl(ctx context.Context, p tracker.ControlReceipt) (tracker.ControlReceipt, bool, error) {
 	if !a.controlLocal(p) || p.State != tracker.ControlPending {
 		return tracker.ControlReceipt{}, false, tracker.ErrInvalid
@@ -155,6 +160,8 @@ func trackerControlCapacity(ctx context.Context, tx *sql.Tx, p tracker.ControlRe
 	}
 	return nil
 }
+
+// CompleteControl atomically replaces a matching pending receipt.
 func (a TrackerFenceSQL) CompleteControl(ctx context.Context, previous, next tracker.ControlReceipt) error {
 	if !a.controlLocal(previous) || !a.controlLocal(next) || previous.State != tracker.ControlPending || previous.ProcessEpoch != next.ProcessEpoch || (next.State != tracker.ControlComplete && next.State != tracker.ControlFailed) || !tracker.SameControlRequest(previous, next) {
 		return tracker.ErrInvalid

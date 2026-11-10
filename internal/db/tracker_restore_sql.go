@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
-	"errors"
 	"strings"
 )
 
@@ -68,83 +67,119 @@ func CheckTrackerMetadataRestoreConflict(previous string, next MetaKV) error {
 	return nil
 }
 
-// CheckTrackerMetadataRestoreSQL rejects conflicts with retained tracker evidence.
-func CheckTrackerMetadataRestoreSQL(ctx context.Context, tx *sql.Tx, record MetaKV, postgres bool) error {
-	if !strings.HasPrefix(record.Key, TrackerMetadataPrefix) {
+// ValidateTrackerMetadataRestoreSQL checks a whole import against retained target
+// evidence. One lane/sequence index replaces per-record scans of growing lanes.
+// Call it inside the replay transaction, after retaining target metadata and
+// before writing incoming records, in the same order those records will replay.
+func ValidateTrackerMetadataRestoreSQL(ctx context.Context, tx *sql.Tx, records []ImportRecord, opts ImportOptions) error {
+	if opts.MergeProject || opts.NewInstance {
 		return nil
 	}
-	var previous string
-	err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, record.Key).Scan(&previous)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if err == nil {
-		if err := CheckTrackerMetadataRestoreConflict(previous, record); err != nil {
-			return err
-		}
-	}
-	// A head, terminal history and archived non-send occupy different keys.
-	// A restore cannot combine incompatible facts for the same lane/sequence.
-	var incoming TrackerExecutionFence
-	if json.Unmarshal([]byte(record.Value), &incoming, json.RejectUnknownMembers(true)) != nil || incoming.Validate() != nil || !trackerImportKeyMatches(record.Key, incoming) {
-		return nil // Other tracker metadata has its own strict import validator.
-	}
-	base, err := TrackerExecutionFenceKey(incoming.RootInstanceUID, incoming.ProjectUID, incoming.Role)
+	retained, err := RetainTrackerMetadataSQL(ctx, tx)
 	if err != nil {
 		return err
 	}
-	order := "key COLLATE BINARY"
-	if postgres {
-		order = `key COLLATE "C"`
+	index := trackerRestoreIndex{
+		byKey: make(map[string]MetaKV),
+		lanes: make(map[string]map[uint64]map[string]TrackerExecutionFence),
 	}
-	// The canonical lane consists of its head and keys under base+'.'. The
-	// exclusive upper bound '/' is the next byte after '.', on both backends.
-	rows, err := tx.QueryContext(ctx, `SELECT key,value FROM meta WHERE key=$1 OR (`+order+` >= $2 AND `+order+` < $3)`, base, base+".", base+"/")
-	if err != nil {
-		return err
+	for _, record := range retained {
+		index.add(record)
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var key, value string
-		if err := rows.Scan(&key, &value); err != nil {
-			return err
-		}
-		if key == record.Key {
+	for _, record := range records {
+		meta, ok := record.(*MetaKV)
+		if !ok || !strings.HasPrefix(meta.Key, TrackerMetadataPrefix) {
 			continue
 		}
-		normalized, keep, err := TrackerMetadataForImport(MetaKV{Key: key, Value: value}, ImportOptions{})
-		if err != nil || !keep {
-			return ErrTrackerFenceInvalid
+		normalized, keep, err := TrackerMetadataForImport(*meta, opts)
+		if err != nil {
+			return err
 		}
-		var existing TrackerExecutionFence
-		if err := json.Unmarshal([]byte(normalized.Value), &existing, json.RejectUnknownMembers(true)); err != nil || existing.Validate() != nil || !trackerImportKeyMatches(key, existing) {
-			return ErrTrackerFenceInvalid
+		if !keep {
+			continue
 		}
-		if existing.Sequence == incoming.Sequence {
-			// Activation can refresh only a settled local head's process epoch;
-			// its terminal history intentionally retains the original epoch.
-			if (key == base || record.Key == base) && existing.Remote == nil && incoming.Remote == nil && trackerFenceSettled(existing) && existing.Phase == incoming.Phase {
-				existing.ProcessEpoch = incoming.ProcessEpoch
+		if err := index.check(normalized); err != nil {
+			return err
+		}
+		index.add(normalized)
+	}
+	return nil
+}
+
+type trackerRestoreIndex struct {
+	byKey map[string]MetaKV
+	lanes map[string]map[uint64]map[string]TrackerExecutionFence
+}
+
+func trackerRestoreFence(record MetaKV) (TrackerExecutionFence, string, bool) {
+	var fence TrackerExecutionFence
+	if json.Unmarshal([]byte(record.Value), &fence, json.RejectUnknownMembers(true)) != nil || fence.Validate() != nil || !trackerImportKeyMatches(record.Key, fence) {
+		return fence, "", false // Other tracker metadata has its own strict validator.
+	}
+	base, _ := TrackerExecutionFenceKey(fence.RootInstanceUID, fence.ProjectUID, fence.Role)
+	return fence, base, true
+}
+
+func (index *trackerRestoreIndex) add(record MetaKV) {
+	// A head key can be replaced; keep only its current sequence in the lookup.
+	if previous, ok := index.byKey[record.Key]; ok {
+		if fence, base, ok := trackerRestoreFence(previous); ok {
+			delete(index.lanes[base][fence.Sequence], record.Key)
+		}
+	}
+	index.byKey[record.Key] = record
+	fence, base, ok := trackerRestoreFence(record)
+	if !ok {
+		return
+	}
+	if index.lanes[base] == nil {
+		index.lanes[base] = make(map[uint64]map[string]TrackerExecutionFence)
+	}
+	if index.lanes[base][fence.Sequence] == nil {
+		index.lanes[base][fence.Sequence] = make(map[string]TrackerExecutionFence)
+	}
+	index.lanes[base][fence.Sequence][record.Key] = fence
+}
+
+func (index *trackerRestoreIndex) check(record MetaKV) error {
+	if previous, ok := index.byKey[record.Key]; ok {
+		if err := CheckTrackerMetadataRestoreConflict(previous.Value, record); err != nil {
+			return err
+		}
+	}
+	incoming, base, ok := trackerRestoreFence(record)
+	if !ok {
+		return nil
+	}
+	lane := index.lanes[base]
+	for _, sequence := range []uint64{incoming.Sequence - 1, incoming.Sequence, incoming.Sequence + 1} {
+		for key, existing := range lane[sequence] {
+			if key == record.Key {
+				continue
 			}
-			left, err := json.Marshal(existing, json.Deterministic(true))
-			if err != nil {
-				return err
-			}
-			right, err := json.Marshal(incoming, json.Deterministic(true))
-			if err != nil {
-				return err
-			}
-			if string(left) != string(right) {
+			if existing.Sequence == incoming.Sequence {
+				// Activation can refresh only a settled local head's process epoch;
+				// its terminal history intentionally retains the original epoch.
+				if (key == base || record.Key == base) && existing.Remote == nil && incoming.Remote == nil && trackerFenceSettled(existing) && existing.Phase == incoming.Phase {
+					existing.ProcessEpoch = incoming.ProcessEpoch
+				}
+				left, err := json.Marshal(existing, json.Deterministic(true))
+				if err != nil {
+					return err
+				}
+				right, err := json.Marshal(incoming, json.Deterministic(true))
+				if err != nil {
+					return err
+				}
+				if string(left) != string(right) {
+					return ErrTrackerOutcomeUnknown
+				}
+			} else if incoming.Sequence == existing.Sequence+1 && incoming.PreviousHead != TrackerFenceHead(existing) {
+				return ErrTrackerOutcomeUnknown
+			} else if existing.Sequence == incoming.Sequence+1 && existing.PreviousHead != TrackerFenceHead(incoming) {
 				return ErrTrackerOutcomeUnknown
 			}
-		} else if incoming.Sequence == existing.Sequence+1 && incoming.PreviousHead != TrackerFenceHead(existing) {
-			return ErrTrackerOutcomeUnknown
-		} else if existing.Sequence == incoming.Sequence+1 && existing.PreviousHead != TrackerFenceHead(incoming) {
-			return ErrTrackerOutcomeUnknown
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return rows.Close()
+	return nil
 }

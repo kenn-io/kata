@@ -2,10 +2,11 @@ package db_test
 
 import (
 	"encoding/json/v2"
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/tracker"
-	"testing"
 )
 
 func TestRegistryBackupCannotRestoreActiveAuthority(t *testing.T) {

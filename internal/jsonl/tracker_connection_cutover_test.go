@@ -2,12 +2,13 @@ package jsonl_test
 
 import (
 	"database/sql"
+	"path/filepath"
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
-	"path/filepath"
-	"testing"
 )
 
 func TestTrackerConnectionSQLiteCutoverFromSchema50(t *testing.T) {

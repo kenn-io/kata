@@ -2,11 +2,12 @@ package pgstore_test
 
 import (
 	"database/sql"
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
-	"testing"
 )
 
 // Exercise the production forward path from the actual prior physical shape.

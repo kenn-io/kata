@@ -8,6 +8,7 @@ import (
 
 var _ db.TrackerStatusStore = (*Store)(nil)
 
+// AdmitTrackerStatusWrite atomically validates and admits a named status write.
 func (s *Store) AdmitTrackerStatusWrite(ctx context.Context, p db.TrackerStatusAdmission) (db.TrackerExecutionFence, error) {
 	return retryWrite1(ctx, s, func() (db.TrackerExecutionFence, error) {
 		tx, err := s.BeginTx(ctx, nil)
@@ -61,6 +62,7 @@ func (s *Store) PrepareTrackerStatusRetry(ctx context.Context, p db.TrackerStatu
 	})
 }
 
+// AcknowledgeRetainedTrackerStatus applies a retained status receipt under the import guard.
 func (s *Store) AcknowledgeRetainedTrackerStatus(ctx context.Context, guard db.IssueSyncImportGuard) error {
 	return s.RetryTransient(ctx, func() error {
 		tx, err := s.BeginTx(ctx, nil)

@@ -3,13 +3,14 @@ package daemon
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/githubsync"
-	"path/filepath"
-	"testing"
 )
 
 // Contract: ordinary enable cannot turn a named re-enable into legacy-account

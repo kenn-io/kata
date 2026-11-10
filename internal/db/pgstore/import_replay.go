@@ -74,6 +74,10 @@ func (s *Store) importReplayTx(
 		}
 	}
 
+	if err := db.ValidateTrackerMetadataRestoreSQL(ctx, tx, records, opts); err != nil {
+		return err
+	}
+
 	var missingPeers, duplicates, skippedMappings int
 	skippedLinkIDs := make(map[int64]struct{})
 	sequenceFloors := make(map[string]int64)

@@ -2,9 +2,11 @@ package sqlitestore
 
 import (
 	"context"
+
 	"go.kenn.io/kata/internal/db"
 )
 
+// RebindTrackerConnection replaces a named connection at a settled execution boundary.
 func (s *Store) RebindTrackerConnection(ctx context.Context, p db.TrackerRebindParams) (db.IssueSyncBinding, error) {
 	if err := validateIssueSyncBindingParams(p.Binding); err != nil {
 		return db.IssueSyncBinding{}, err

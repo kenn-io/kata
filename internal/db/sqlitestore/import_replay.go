@@ -128,9 +128,14 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		}
 	}
 
+	recs = db.OrderImportRecords(recs)
+	if err := db.ValidateTrackerMetadataRestoreSQL(ctx, tx, recs, opts); err != nil {
+		return err
+	}
+
 	var skippedMissingPeer, skippedDup, skippedMappings int
 	skippedLinkIDs := make(map[int64]struct{})
-	for _, r := range db.OrderImportRecords(recs) {
+	for _, r := range recs {
 		skip, err := importRecord(ctx, tx, r, opts, skippedLinkIDs)
 		if err != nil {
 			return err
@@ -573,9 +578,6 @@ func importMeta(ctx context.Context, tx *sql.Tx, m *db.MetaKV, opts db.ImportOpt
 		return err
 	}
 	m = &normalized
-	if err := db.CheckTrackerMetadataRestoreSQL(ctx, tx, *m, false); err != nil {
-		return err
-	}
 	// Always ignore the source's export_version/schema_version; ImportReplay
 	// stamps the current schema_version after the loop (recordImportSchemaVersion).
 	if m.Key == "export_version" || m.Key == "schema_version" {

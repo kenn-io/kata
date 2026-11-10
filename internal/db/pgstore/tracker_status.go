@@ -9,6 +9,7 @@ import (
 
 var _ db.TrackerStatusStore = (*Store)(nil)
 
+// AdmitTrackerStatusWrite atomically validates and admits a named status write.
 func (s *Store) AdmitTrackerStatusWrite(ctx context.Context, p db.TrackerStatusAdmission) (db.TrackerExecutionFence, error) {
 	var fence db.TrackerExecutionFence
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
@@ -46,6 +47,7 @@ func (s *Store) PrepareTrackerStatusRetry(ctx context.Context, p db.TrackerStatu
 	return fence, err
 }
 
+// AcknowledgeRetainedTrackerStatus applies a retained status receipt under the import guard.
 func (s *Store) AcknowledgeRetainedTrackerStatus(ctx context.Context, guard db.IssueSyncImportGuard) error {
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		binding, err := statusReadBindingTx(ctx, tx, guard)

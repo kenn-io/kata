@@ -19,9 +19,6 @@ func pgReplayMeta(ctx context.Context, tx *sql.Tx, meta *db.MetaKV, opts db.Impo
 		return err
 	}
 	meta = &normalized
-	if err := db.CheckTrackerMetadataRestoreSQL(ctx, tx, *meta, true); err != nil {
-		return err
-	}
 	if meta.Key == "export_version" || meta.Key == "schema_version" {
 		return nil
 	}

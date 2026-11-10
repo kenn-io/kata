@@ -1,9 +1,10 @@
 package tracker
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Contract: reverse worker identity comes from live negotiated enrollment, not

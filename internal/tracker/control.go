@@ -2,8 +2,9 @@ package tracker
 
 import (
 	"errors"
-	"go.kenn.io/kata/internal/uid"
 	"time"
+
+	"go.kenn.io/kata/internal/uid"
 )
 
 // ControlKind identifies a tracker control operation.

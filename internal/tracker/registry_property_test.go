@@ -2,8 +2,9 @@ package tracker
 
 import (
 	"fmt"
-	"hegel.dev/go/hegel"
 	"testing"
+
+	"hegel.dev/go/hegel"
 )
 
 func TestRegistryNeverReusesRetiredGenerationProperty(t *testing.T) {

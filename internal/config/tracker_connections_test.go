@@ -1,8 +1,9 @@
 package config
 
 import (
-	"go.kenn.io/kata/internal/tracker"
 	"testing"
+
+	"go.kenn.io/kata/internal/tracker"
 )
 
 func trackerFixture() TrackerConnectionConfig {

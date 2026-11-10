@@ -1,8 +1,9 @@
 package tracker
 
 import (
-	"go.kenn.io/kata/internal/uid"
 	"time"
+
+	"go.kenn.io/kata/internal/uid"
 )
 
 // WorkerPresence is credential-free reachability, never provider permission.
