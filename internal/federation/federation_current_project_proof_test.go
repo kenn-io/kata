@@ -154,6 +154,11 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.Less(t, binding.PushCursorEventID, commentEvent.ID, "retain the original rejected event for retry")
+	// Cron forwarding uses the exported drain contract, while ordinary sync
+	// continues through retained per-event rejections via the private phase.
+	client, err := NewClient(t.Context(), hub.URL, sender.credentials[projects[0].UID].Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	require.ErrorContains(t, PushDirectSpoke(t.Context(), sender.env.DB, binding, projects[0].ID, client), "pending federation events remain", "a partial push is not a fully drained cron prerequisite")
 	later, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent later turn", Author: "worker"})
 	require.NoError(t, err)
 	push()
