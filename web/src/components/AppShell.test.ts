@@ -694,7 +694,7 @@ describe('AppShell', () => {
     expect(input.value).toBe('second t')
   })
 
-  test('keeps typed owner while its search is pending', async () => {
+  test.each(['Owner', 'Label'])('keeps typed %s while its search is pending', async (name) => {
     const route = {
       kind: 'kata' as const,
       view: 'all-open' as const,
@@ -711,12 +711,18 @@ describe('AppShell', () => {
       onCreateProject: vi.fn(async () => ({ changed: true })),
     }
     const { rerender } = render(AppShell, { props })
-    const input = screen.getByRole('textbox', { name: 'Owner' }) as HTMLInputElement
-    for (const char of 'alice') {
+    const input = screen.getByRole('textbox', { name }) as HTMLInputElement
+    for (const char of 'Alice Smith') {
       await fireEvent.input(input, { target: { value: input.value + char } })
       await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
     }
-    expect(input.value).toBe('alice')
+    expect(input.value).toBe('Alice Smith')
+    await rerender({
+      ...props,
+      route: { ...route, filters: { ...route.filters, [name.toLowerCase()]: ['other'] } },
+      requestedRoute: undefined,
+    })
+    expect(input.value).toBe('other')
   })
 
   test('stays in the landing Inbox while selecting, graphing, and narrowing', async () => {

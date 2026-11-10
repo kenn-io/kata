@@ -21,10 +21,12 @@
   $effect(() => {
     if (filters !== lastFilters) {
       lastFilters = filters
-      draftOverride =
-        draftOverride && draftOverride.query.trim() === filters.query
-          ? { ...filters, query: draftOverride.query }
-          : null
+      draftOverride = draftOverride && {
+        ...filters,
+        query: draftOverride.query.trim() === filters.query ? draftOverride.query : filters.query,
+        owner: draftOverride.owner.trim() === filters.owner ? draftOverride.owner : filters.owner,
+        label: draftOverride.label.trim() === filters.label ? draftOverride.label : filters.label,
+      }
     }
   })
 
