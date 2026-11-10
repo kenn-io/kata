@@ -104,10 +104,9 @@ Kata does not author another move during this recovery.
 
 Upgrade both hub and spokes for snapshot-only recovery. Direct hub baselines
 carry the complete set of links for each issue. A snapshot replaces older link
-membership, and later link changes still apply. An upgraded hub automatically
-appends a complete baseline when a project with an older baseline is read.
-Spokes that lack the `issue_snapshot_links_v1` capability must upgrade before
-they can sync that project.
+membership, while pending local label and link changes remain until acknowledged.
+Later changes still apply. An upgraded hub automatically appends a complete
+baseline when a project with an older baseline is read. Older spokes can keep syncing.
 
 Destination sync recovers retained source history even when its cursor has
 already passed those events. This preserves missed changes and comments without

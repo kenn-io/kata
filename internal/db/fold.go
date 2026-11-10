@@ -216,18 +216,21 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		p.IssueMetadata[uid] = canonicalJSON(in.Metadata)
 	}
 	if e.Type == "issue.snapshot" {
-		for key := range p.Labels {
-			if key.IssueUID == uid {
+		for key, state := range p.Labels {
+			if key.IssueUID == uid && !state.Pending {
 				delete(p.Labels, key)
 			}
 		}
 	}
 	for _, label := range in.Labels {
-		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
+		key := FoldLabelKey{IssueUID: uid, Label: label}
+		if e.Type != "issue.snapshot" || !p.Labels[key].Pending {
+			p.Labels[key] = FoldElementState{Present: true, Clock: clockOf(e), Pending: e.Pending}
+		}
 	}
 	if e.Type == "issue.snapshot" && in.LinksScope == "all" {
 		for key, state := range p.Links {
-			if (key.FromUID == uid || key.ToUID == uid) && compareClock(state.Clock, clockOf(e)) <= 0 {
+			if (key.FromUID == uid || key.ToUID == uid) && !state.Pending && compareClock(state.Clock, clockOf(e)) <= 0 {
 				p.Links[key] = FoldElementState{Present: false, Clock: clockOf(e), Author: state.Author}
 			}
 		}
@@ -244,7 +247,10 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		if author == "" {
 			author = e.Actor
 		}
-		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt)
+		if e.Type == "issue.snapshot" && p.pendingLink(from, to, link.Type) {
+			continue
+		}
+		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt, e.Pending)
 	}
 	for _, comment := range in.Comments {
 		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
@@ -553,7 +559,7 @@ func (p *FoldProjection) applyLabel(e FoldEvent, payload map[string]jsontext.Val
 	if !ok || uid == "" {
 		return
 	}
-	p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: present, Clock: clockOf(e)}
+	p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: present, Clock: clockOf(e), Pending: e.Pending}
 	p.touchIssue(uid, issueUpdatedAt(e, payload))
 }
 
@@ -574,7 +580,7 @@ func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]jsontext
 			from, to = linkFrom, linkTo
 		}
 	}
-	p.setLink(from, to, typ, present, clockOf(e), e.Actor, "")
+	p.setLink(from, to, typ, present, clockOf(e), e.Actor, "", e.Pending)
 	p.touchIssue(issueUID(e, payload), issueUpdatedAt(e, payload))
 }
 
@@ -584,25 +590,25 @@ func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsont
 		return
 	}
 	defer p.touchIssue(base, issueUpdatedAt(e, payload))
-	p.applyUIDList(base, payload["parent_set_uid"], "parent", true, false, clockOf(e), e.Actor)
-	p.applyUIDList(base, payload["parent_removed_uid"], "parent", false, false, clockOf(e), e.Actor)
+	p.applyUIDList(base, payload["parent_set_uid"], "parent", true, false, clockOf(e), e.Actor, e.Pending)
+	p.applyUIDList(base, payload["parent_removed_uid"], "parent", false, false, clockOf(e), e.Actor, e.Pending)
 	for _, uid := range stringSlice(payload["blocks_added_uids"]) {
-		p.setLink(base, uid, "blocks", true, clockOf(e), e.Actor, "")
+		p.setLink(base, uid, "blocks", true, clockOf(e), e.Actor, "", e.Pending)
 	}
 	for _, uid := range stringSlice(payload["blocks_removed_uids"]) {
-		p.setLink(base, uid, "blocks", false, clockOf(e), e.Actor, "")
+		p.setLink(base, uid, "blocks", false, clockOf(e), e.Actor, "", e.Pending)
 	}
 	for _, uid := range stringSlice(payload["blocked_by_added_uids"]) {
-		p.setLink(uid, base, "blocks", true, clockOf(e), e.Actor, "")
+		p.setLink(uid, base, "blocks", true, clockOf(e), e.Actor, "", e.Pending)
 	}
 	for _, uid := range stringSlice(payload["blocked_by_removed_uids"]) {
-		p.setLink(uid, base, "blocks", false, clockOf(e), e.Actor, "")
+		p.setLink(uid, base, "blocks", false, clockOf(e), e.Actor, "", e.Pending)
 	}
 	for _, uid := range stringSlice(payload["related_added_uids"]) {
-		p.setLink(base, uid, "related", true, clockOf(e), e.Actor, "")
+		p.setLink(base, uid, "related", true, clockOf(e), e.Actor, "", e.Pending)
 	}
 	for _, uid := range stringSlice(payload["related_removed_uids"]) {
-		p.setLink(base, uid, "related", false, clockOf(e), e.Actor, "")
+		p.setLink(base, uid, "related", false, clockOf(e), e.Actor, "", e.Pending)
 	}
 }
 
@@ -675,7 +681,7 @@ func (p *FoldProjection) applyAuthorRewritten(e FoldEvent, payload map[string]js
 	}
 }
 
-func (p *FoldProjection) applyUIDList(base string, raw jsontext.Value, typ string, present, incoming bool, clock FoldClock, author string) {
+func (p *FoldProjection) applyUIDList(base string, raw jsontext.Value, typ string, present, incoming bool, clock FoldClock, author string, pending bool) {
 	uid, ok := stringValue(raw)
 	if !ok || uid == "" {
 		return
@@ -684,20 +690,34 @@ func (p *FoldProjection) applyUIDList(base string, raw jsontext.Value, typ strin
 	if incoming {
 		from, to = to, from
 	}
-	p.setLink(from, to, typ, present, clock, author, "")
+	p.setLink(from, to, typ, present, clock, author, "", pending)
 }
 
-func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldClock, author, createdAt string) {
+func (p *FoldProjection) pendingLink(from, to, typ string) bool {
+	if typ == "related" && from > to {
+		from, to = to, from
+	}
+	if typ == "parent" {
+		for key, state := range p.Links {
+			if key.Type == "parent" && key.FromUID == from && state.Pending {
+				return true
+			}
+		}
+	}
+	return p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}].Pending
+}
+
+func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldClock, author, createdAt string, pending bool) {
 	if typ == "related" && from > to {
 		from, to = to, from
 	}
 	if typ == "parent" && present {
-		p.clearOlderParents(from, to, clock)
+		p.clearOlderParents(from, to, clock, pending)
 	}
-	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock, Author: author, CreatedAt: createdAt}
+	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock, Author: author, CreatedAt: createdAt, Pending: pending}
 }
 
-func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock FoldClock) {
+func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock FoldClock, pending bool) {
 	for key, state := range p.Links {
 		if key.Type != "parent" || key.FromUID != childUID || key.ToUID == keepParentUID || !state.Present {
 			continue
@@ -705,7 +725,7 @@ func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock
 		if compareClock(state.Clock, clock) > 0 {
 			continue
 		}
-		p.Links[key] = FoldElementState{Present: false, Clock: clock, Author: state.Author}
+		p.Links[key] = FoldElementState{Present: false, Clock: clock, Author: state.Author, Pending: pending}
 	}
 }
 

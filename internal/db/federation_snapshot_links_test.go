@@ -13,9 +13,9 @@ func TestSnapshotLinksFeature(t *testing.T) {
 		invalid             bool
 	}{
 		{"issue.snapshot", `{"uid":"a"}`, "", false},
-		{"issue.snapshot", `{"uid":"a","links_scope":"all"}`, SnapshotLinksEventFeature, false},
-		{"project.federation_enabled", `{"links_scope":"all"}`, SnapshotLinksEventFeature, false},
-		{"issue.moved", `{"snapshot":{"links_scope":"all"}}`, MergeEventFeatures(IssueMoveEventFeature, SnapshotLinksEventFeature), false},
+		{"issue.snapshot", `{"uid":"a","links_scope":"all"}`, "", false},
+		{"project.federation_enabled", `{"links_scope":"all"}`, "", false},
+		{"issue.moved", `{"snapshot":{"links_scope":"all"}}`, IssueMoveEventFeature, false},
 		{"issue.snapshot", `{"links_scope":null}`, "", true},
 		{"issue.snapshot", `{"links_scope":"partial"}`, "", true},
 		{"issue.snapshot", `{"links_scope":1}`, "", true},
@@ -38,8 +38,8 @@ func TestSnapshotLinksFeature(t *testing.T) {
 		feature string
 	}{
 		{`{"uid":"a"}`, 30, ""},
-		{`{"uid":"a","links_scope":"all"}`, 30, SnapshotLinksEventFeature},
-		{`{"uid":"a","links_scope":"all","comments":[{"reply_to_uid":"b"}]}`, 32, SnapshotLinksEventFeature},
+		{`{"uid":"a","links_scope":"all"}`, 30, ""},
+		{`{"uid":"a","links_scope":"all","comments":[{"reply_to_uid":"b"}]}`, 32, ""},
 	} {
 		version, feature, err := FederationEventPayloadWireVersion("issue.snapshot", jsontext.Value(tc.payload))
 		require.NoError(t, err)

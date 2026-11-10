@@ -61,9 +61,6 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 			defer func() { _ = tx.Rollback() }()
 			if err := run(tx); err != nil {
 				if errors.Is(err, errBaselineRefreshRequired) {
-					if rollbackErr := tx.Rollback(); rollbackErr != nil {
-						return rollbackErr
-					}
 					writable = true
 					return errBaselineRefreshRequired
 				}

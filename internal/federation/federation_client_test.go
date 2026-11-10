@@ -256,19 +256,3 @@ func TestFederationClientIngestDeclaresCommentReplyWireVersion(t *testing.T) {
 		})
 	}
 }
-
-func TestFederationClientRejectsCompleteSnapshotsOnOldHub(t *testing.T) {
-	var posts int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			posts++
-		}
-		require.NoError(t, json.NewEncoder(w).Encode(api.ProjectFederationBody{ProjectID: 42, ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}))
-	}))
-	t.Cleanup(srv.Close)
-	client, err := NewClient(t.Context(), srv.URL, "hub-token", clientpkg.Opts{})
-	require.NoError(t, err)
-	_, err = client.IngestProjectEvents(t.Context(), 42, []api.FederationIngestEventEnvelope{{EventID: 1, EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EY", Type: "issue.snapshot", Payload: jsontext.Value(`{"uid":"01HZNQ7VFPK1XGD8R5MABCD4EZ","links_scope":"all"}`)}})
-	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	require.Zero(t, posts)
-}

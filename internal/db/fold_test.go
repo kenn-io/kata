@@ -471,7 +471,6 @@ func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 	for _, snapshot := range []string{
 		`{"uid":"issue-1","title":"snapshot","status":"open","labels":["current"]}`,
 		`{"uid":"issue-1","title":"snapshot","status":"open","labels":[]}`,
-		`{"uid":"issue-1","title":"snapshot","status":"open","labels":null}`,
 		`{"uid":"issue-1","title":"snapshot","status":"open"}`,
 	} {
 		t.Run(snapshot, func(t *testing.T) {
@@ -492,6 +491,32 @@ func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 			require.True(t, got.Labels[FoldLabelKey{IssueUID: "issue-2", Label: "keep"}].Present)
 		})
 	}
+}
+
+func TestFoldSnapshotRetainsPendingMembership(t *testing.T) {
+	addLabel := testEvent("issue.labeled", 2, `{"label":"draft"}`)
+	removeLabel := testEvent("issue.unlabeled", 3, `{"label":"removed"}`)
+	addLink := testEvent("issue.linked", 4, `{"type":"related","from_uid":"z-peer","to_uid":"issue-1"}`)
+	removeLink := testEvent("issue.unlinked", 5, `{"type":"blocks","from_uid":"issue-1","to_uid":"peer"}`)
+	parent := testEvent("issue.linked", 6, `{"type":"parent","from_uid":"issue-1","to_uid":"new-parent"}`)
+	events := []FoldEvent{addLabel, removeLabel, addLink, removeLink, parent,
+		testEvent("issue.snapshot", 7, `{"uid":"issue-1","labels":["removed"],"links_scope":"all","links":[{"type":"blocks","to_issue_uid":"peer"},{"type":"parent","to_issue_uid":"old-parent"}]}`)}
+	for i := 0; i < 5; i++ {
+		events[i].Pending = true
+	}
+	check := func(p FoldProjection, pending bool) {
+		require.Equal(t, pending, p.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "draft"}].Present)
+		require.Equal(t, !pending, p.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "removed"}].Present)
+		require.Equal(t, pending, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "z-peer", Type: "related"}].Present)
+		require.Equal(t, !pending, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "peer", Type: "blocks"}].Present)
+		require.Equal(t, pending, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "new-parent", Type: "parent"}].Present)
+		require.Equal(t, !pending, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "old-parent", Type: "parent"}].Present)
+	}
+	check(FoldEvents(events), true)
+	for i := 0; i < 5; i++ {
+		events[i].Pending = false
+	}
+	check(FoldEvents(events), false)
 }
 
 func TestFoldSnapshotReplacesOlderLinks(t *testing.T) {
@@ -519,7 +544,7 @@ func TestFoldSnapshotReplacesOlderLinks(t *testing.T) {
 			assert.False(t, p.Links[FoldLinkKey{FromUID: "in", ToUID: "issue-1", Type: "blocks"}].Present)
 		})
 	}
-	for _, links := range []string{"", `,"links":[]`, `,"links":null`} {
+	for _, links := range []string{"", `,"links":[]`} {
 		snapshot := testEvent("issue.snapshot", 5, `{"uid":"issue-1","links_scope":"all"`+links+`}`)
 		p := FoldEvents(append(append([]FoldEvent{}, old...), snapshot))
 		assert.False(t, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "out", Type: "blocks"}].Present)

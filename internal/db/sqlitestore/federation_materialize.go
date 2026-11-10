@@ -140,7 +140,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		events = append(events, fresh...)
 	}
 	for _, event := range events {
-		if event.Type == "issue.moved" {
+		if event.Type == "issue.moved" || event.Pending {
 			return federationMaterialization{fullReplay: true}, nil
 		}
 	}
@@ -195,6 +195,9 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	if linksAffected {
 		if err := m.foldLinks(ctx, tx, fresh, alreadyStored); err != nil {
 			return federationMaterialization{}, err
+		}
+		if m.fullReplay {
+			return m, nil
 		}
 	}
 	if m.fullHistory {
@@ -264,6 +267,10 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 		history, err := federationFoldEventsOfTypes(ctx, tx, id, db.FederationLinkAffectingEventTypes())
 		if err != nil {
 			return err
+		}
+		if slices.ContainsFunc(history, func(event db.FoldEvent) bool { return event.Pending }) {
+			m.fullReplay = true
+			return nil
 		}
 		events = append(events, history...)
 	}

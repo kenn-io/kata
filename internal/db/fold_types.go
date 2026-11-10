@@ -16,6 +16,7 @@ type FoldEvent struct {
 	HLCCounter        int64
 	CreatedAt         string
 	Payload           jsontext.Value
+	Pending           bool `json:"-"`
 }
 
 // FoldClock is an event's deterministic last-writer timestamp.
@@ -111,6 +112,7 @@ type FoldLinkKey struct {
 // FoldElementState stores an add/remove edge's current tombstone state.
 type FoldElementState struct {
 	Present bool
+	Pending bool `json:"-"`
 	Clock   FoldClock
 	Author  string
 	// CreatedAt is the original link date when supplied by a snapshot.

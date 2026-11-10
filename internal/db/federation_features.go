@@ -18,11 +18,8 @@ const CronEventFeature = "cron_v1"
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
-// SnapshotLinksEventFeature identifies complete incident-link snapshots.
-const SnapshotLinksEventFeature = "issue_snapshot_links_v1"
-
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + SnapshotLinksEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -50,12 +47,9 @@ func MergeEventFeatures(values ...string) string {
 // PayloadRequiredFeatures supplements type classification with native delivery state.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
-	complete, err := snapshotLinksComplete(kind, jsontext.Value(payload))
+	_, err := snapshotLinksComplete(kind, jsontext.Value(payload))
 	if err != nil {
 		return "", err
-	}
-	if complete {
-		required = MergeEventFeatures(required, SnapshotLinksEventFeature)
 	}
 	native, err := payloadHasNativeRecurringState(kind, payload)
 	if err != nil {
@@ -336,9 +330,6 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		return out, err
 	}
 	if binding.Role == FederationRoleHub && binding.Enabled {
-		if err = RequireEventFeatures(in.Features, SnapshotLinksEventFeature); err != nil {
-			return out, err
-		}
 		var payload string
 		err = tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE id=$1 AND project_id=$2 AND type='project.federation_enabled'`, binding.ReplayHorizonEventID, project.ID).Scan(&payload)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -358,7 +349,6 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 			}
 			out.Binding = binding
 		}
-		out.RequiredFeatures = MergeEventFeatures(out.RequiredFeatures, SnapshotLinksEventFeature)
 	}
 	if in.IssueUID != "" {
 		var owned bool

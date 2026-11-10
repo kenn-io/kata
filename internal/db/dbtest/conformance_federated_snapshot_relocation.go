@@ -35,7 +35,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.NoError(t, err)
 	other, _, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "retained peer", Author: "worker"})
 	require.NoError(t, err)
-	issue, _, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Title: "late destination join", Author: "worker", Labels: []string{"retained"}, Links: []db.InitialLink{{Type: "related", ToNumber: peer.ID}, {Type: "blocks", ToNumber: other.ID}}})
+	issue, _, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Title: "late destination join", Author: "worker", Labels: []string{"retained", "remove-locally"}, Links: []db.InitialLink{{Type: "related", ToNumber: peer.ID}, {Type: "blocks", ToNumber: other.ID}}})
 	require.NoError(t, err)
 	_, _, err = hub.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "source discussion"})
 	require.NoError(t, err)
@@ -104,6 +104,27 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	before, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, localSource.ID, before.ProjectID)
+	_, pendingLabel, err := spoke.AddLabelAndEvent(ctx, before.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "draft", Actor: "worker"})
+	require.NoError(t, err)
+	_, err = spoke.RemoveLabelAndEvent(ctx, before.ID, db.LabelEventParams{EventType: "issue.unlabeled", Label: "remove-locally", Actor: "worker"})
+	require.NoError(t, err)
+	sourceBinding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
+	require.NoError(t, err)
+	require.Greater(t, pendingLabel.ID, sourceBinding.PushCursorEventID)
+	if lifecycle == "active replicas" {
+		localOther, err := spoke.IssueByUID(ctx, other.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		localLinks, err := spoke.LinksByIssue(ctx, before.ID)
+		require.NoError(t, err)
+		for _, link := range localLinks {
+			if link.Type == "blocks" {
+				_, err = spoke.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: before.ID, Actor: "worker", FromUID: before.UID, ToUID: localOther.UID, FromShortID: before.ShortID, ToShortID: localOther.ShortID})
+				require.NoError(t, err)
+			}
+		}
+		_, _, err = spoke.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: localOther.ID, ToIssueID: before.ID, Type: "related", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: before.ID, Actor: "worker", FromUID: localOther.UID, ToUID: before.UID, FromShortID: localOther.ShortID, ToShortID: before.ShortID})
+		require.NoError(t, err)
+	}
 	linksBefore, err := hub.LinksByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	for _, link := range linksBefore {
@@ -185,11 +206,16 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.Equal(t, "source-only newer discussion", comments[1].Body)
 	labels, err := spoke.LabelsByIssue(ctx, got.ID)
 	require.NoError(t, err)
-	require.Empty(t, labels)
+	require.Len(t, labels, 1)
+	require.Equal(t, "draft", labels[0].Label)
 	links, err := spoke.LinksByIssue(ctx, got.ID)
 	require.NoError(t, err)
 	require.Len(t, links, 1)
-	require.Equal(t, "blocks", links[0].Type)
+	if lifecycle == "active replicas" {
+		require.Equal(t, "related", links[0].Type)
+	} else {
+		require.Equal(t, "blocks", links[0].Type)
+	}
 	cursor, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	for range 2 {
@@ -204,6 +230,18 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	after, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, cursor, after, "repeated pulls must not create synthetic moves or reset controls")
+	if lifecycle == "active replicas" {
+		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, localTarget.ID))
+		labels, err := spoke.LabelsByIssue(ctx, got.ID)
+		require.NoError(t, err)
+		require.Len(t, labels, 1)
+		require.Equal(t, "remove-locally", labels[0].Label)
+		links, err := spoke.LinksByIssue(ctx, got.ID)
+		require.NoError(t, err)
+		require.Len(t, links, 1)
+		require.Equal(t, "blocks", links[0].Type)
+	}
 	switch lifecycle {
 	case "pausing the source retains discussion":
 		binding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
@@ -404,21 +442,21 @@ func checkFederatedSnapshotBaselineUpgrade(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	before, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
-	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true})
-	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	unchanged, err := store.MaxEventID(ctx)
-	require.NoError(t, err)
-	require.Equal(t, before, unchanged)
+	oldFeatures := db.CronEventFeature + "," + db.IssueMoveEventFeature
 	type readResult struct {
 		result db.FederationReadResult
 		err    error
 	}
 	results := make(chan readResult, 4)
 	start := make(chan struct{})
-	for range 4 {
+	for i := range 4 {
 		go func() {
 			<-start
-			result, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures})
+			features := db.SupportedEventFeatures
+			if i%2 == 0 {
+				features = oldFeatures
+			}
+			result, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: features})
 			results <- readResult{result, err}
 		}()
 	}
@@ -433,9 +471,16 @@ func checkFederatedSnapshotBaselineUpgrade(t *testing.T, store db.Storage) error
 		}
 		require.Equal(t, horizon, result.result.Binding.ReplayHorizonEventID)
 	}
+	oldMetadata, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: oldFeatures})
+	require.NoError(t, err)
+	require.Equal(t, horizon, oldMetadata.Binding.ReplayHorizonEventID)
+	oldPage, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Features: oldFeatures, Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, oldPage.Events, 1)
+	require.Greater(t, oldPage.NextAfterID, int64(0))
 	after, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
-	page, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Features: db.SupportedEventFeatures, AfterID: before, Limit: 100})
+	page, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Features: oldFeatures, AfterID: before, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, page.Events, 2)
 	require.Equal(t, "issue.snapshot", page.Events[1].Type)
