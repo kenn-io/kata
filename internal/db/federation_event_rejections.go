@@ -44,7 +44,7 @@ func (e *FederationProjectNotEnrolledError) Rejection(sourceID int64, eventUID s
 	return FederationEventRejection{SourceEventID: sourceID, EventUID: eventUID, IssueUID: e.IssueUID, CurrentProjectUID: e.ProjectUID, CurrentProjectName: e.ProjectName, Code: FederationProjectNotEnrolledCode, Message: e.Error()}
 }
 
-// FederationRejectedCreations tracks unavailable issues within one push batch.
+// FederationRejectedCreations tracks unavailable issues during ingestion or a push drain.
 type FederationRejectedCreations map[string]FederationEventRejection
 
 // ValidationUIDs lets validation recognize retained creations without treating

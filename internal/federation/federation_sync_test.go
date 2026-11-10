@@ -1819,7 +1819,6 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing
 			require.NotEmpty(t, body.Events)
 			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
 				Accepted:          len(body.Events),
-				Duplicates:        len(body.Events),
 				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
 			}))
 		case "/api/v1/projects/42/federation/events":
@@ -1936,7 +1935,6 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
 			require.NotEmpty(t, body.Events)
 			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
 				Accepted:          len(body.Events),
-				Duplicates:        len(body.Events),
 				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
 			}))
 		case "/api/v1/projects/42/federation/events":
@@ -1975,8 +1973,6 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered)
-	// Replay delivery needs the reset to land after the event at millisecond precision, and Windows clocks can tick slower than that.
-	require.NoError(t, spoke.DB.RecordFederationSyncReset(ctx, project.ID, localEvent.CreatedAt.Add(time.Millisecond)))
 	if acknowledged {
 		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
 		require.NoError(t, err)

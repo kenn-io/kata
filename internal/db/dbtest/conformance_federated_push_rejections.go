@@ -141,13 +141,12 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 			}
 		})
 	}
-	t.Run("adoption-baseline-atomic", func(t *testing.T) { checkRejectedAdoptionBaseline(t, store) })
 	return nil
 }
 
 // The adoption author grant is one-shot: missing enrollment cannot consume its
 // marker while retaining a fresh snapshot that must be deliverable after join.
-func checkRejectedAdoptionBaseline(t *testing.T, store db.Storage) {
+func checkRejectedAdoptionBaseline(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	source, target, moved, _ := federatedRehomeFixture(t, store, "baseline-rejection")
 	_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: moved.Revision, Actor: "worker"})
@@ -179,4 +178,5 @@ func checkRejectedAdoptionBaseline(t *testing.T, store db.Storage) {
 	retained, err := store.IssueByUID(ctx, snapshotUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "historical-author", retained.Author)
+	return nil
 }

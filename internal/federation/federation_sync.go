@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -256,6 +258,7 @@ func pushDirectSpoke(
 		var rejectedEvents []db.Event
 		var rejections []db.FederationEventRejection
 		var firstRejected int64
+		retained := db.FederationRejectedCreations{}
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
@@ -295,6 +298,34 @@ func pushDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
+				pending = pending[len(batch):]
+				var send []db.Event
+				var deferred []db.Event
+				var baselineRejection db.FederationEventRejection
+				for _, event := range batch {
+					remote := db.RemoteEvent{Type: event.Type, IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID, Payload: jsontext.Value(event.Payload)}
+					rejection, dependent, parseErr := retained.Dependent(remote, db.FederationPayloadIssueUID, db.FederationPayloadReferencedIssueUIDs)
+					if parseErr == nil && dependent {
+						baselineRejection = rejection
+						retained.Remember(remote, rejection, db.FederationPayloadIssueUID)
+						deferred = append(deferred, event)
+					} else {
+						send = append(send, event)
+					}
+				}
+				if adoptionBaseline != "" && len(deferred) > 0 {
+					deferred = batch
+					send = nil
+					for _, event := range batch {
+						remote := db.RemoteEvent{Type: event.Type, IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID, Payload: jsontext.Value(event.Payload)}
+						retained.Remember(remote, baselineRejection, db.FederationPayloadIssueUID)
+					}
+				}
+				rejectedEvents = append(rejectedEvents, deferred...)
+				if len(send) == 0 {
+					continue
+				}
+				batch = send
 				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
@@ -308,7 +339,9 @@ func pushDirectSpoke(
 					})
 				if err != nil {
 					if isPoisonedFederationPushError(err) {
-						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, append(rejectedEvents, batch...), err); qErr != nil {
+						quarantined := append(rejectedEvents, batch...)
+						slices.SortFunc(quarantined, func(a, b db.Event) int { return cmp.Compare(a.ID, b.ID) })
+						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, quarantined, err); qErr != nil {
 							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, qErr))
 						}
 					}
@@ -321,6 +354,12 @@ func pushDirectSpoke(
 				for _, event := range rejected {
 					if firstRejected == 0 || event.ID < firstRejected {
 						firstRejected = event.ID
+					}
+					for _, rejection := range ack.RejectedEvents {
+						if rejection.EventUID == event.UID {
+							remote := db.RemoteEvent{Type: event.Type, IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID, Payload: jsontext.Value(event.Payload)}
+							retained.Remember(remote, rejection, db.FederationPayloadIssueUID)
+						}
 					}
 				}
 				acknowledged += ack.Accepted + ack.Duplicates
@@ -342,7 +381,7 @@ func pushDirectSpoke(
 					}
 					binding.PushCursorEventID = durableCursor
 				}
-				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
+				pending = append(pendingFederationEventsAfterCursor(batch, ack.PushCursorEventID), pending...)
 			}
 		}
 		if len(rejections) > 0 {

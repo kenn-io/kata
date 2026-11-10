@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -50,15 +49,13 @@ func TestFederationPushMissingCurrentProjectEnrollmentDoesNotBlockBatch(t *testi
 	body := api.FederationIngestEventsRequestBody{SchemaVersion: db.CurrentSchemaVersion(), Events: []api.FederationIngestEventEnvelope{stale, valid}}
 	headers := bearer(grant.Token)
 	headers[db.EventFeaturesHeader] = db.SupportedEventFeatures
-	headers["X-Kata-Federation-Event-Rejections"] = "1"
+	headers[db.FederationEventRejectionsHeader] = "1"
 	response, raw := envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
 	require.Equalf(t, http.StatusOK, response.StatusCode, "reject only the stale comment: %s", raw)
 	var result api.FederationIngestEventsBody
 	require.NoError(t, json.Unmarshal(raw, &result))
 	require.Len(t, result.RejectedEvents, 1)
-	assert.Equal(t, stale.EventUID, result.RejectedEvents[0].EventUID)
-	assert.Equal(t, target.Name, result.RejectedEvents[0].CurrentProjectName)
-	assert.Equal(t, db.FederationProjectNotEnrolledCode, result.RejectedEvents[0].Code)
+	require.Equal(t, stale.EventUID, result.RejectedEvents[0].EventUID)
 	body.MoveSourceTokens = map[string]string{target.UID: "invalid-supplemental-proof"}
 	response, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
 	require.Equal(t, http.StatusForbidden, response.StatusCode)

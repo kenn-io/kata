@@ -62,7 +62,6 @@ func TestMCPEventSubscriptionsMigrationMatchesFreshSchema(t *testing.T) {
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 51, version)
 	assert.Equal(t, db.CurrentSchemaVersion(), version)
 
 	fresh, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "mcp_events_fresh", SchemaMode: pgstore.SchemaModeBootstrap})

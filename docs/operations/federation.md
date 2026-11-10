@@ -81,9 +81,12 @@ checks the whole tree without changing issues, claims, or cursors. Use `--single
 to move only the selected issue. The [CLI reference](../reference/cli.md) owns
 the per-issue restrictions.
 
-Spokes must join both projects before applying a move. Sync refuses the batch
-without partial writes when a project is missing; join it and retry sync. Upgrade
-both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+Spokes must join both projects before applying a move. Upgrade the hub before
+the spokes to allow a push to send independent events while missing enrollment
+holds affected events and their dependents, even across pages. Join the missing
+project to retry retained work. A destination pull can still stop when it needs
+history from a project the spoke has not joined. Adoption baselines remain atomic.
+Upgrade both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
 teammate attribution must match trusted history, and a spoke cannot change
