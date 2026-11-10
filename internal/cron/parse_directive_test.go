@@ -2,18 +2,20 @@ package cron
 
 import (
 	"encoding/json/v2"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseCronDirectiveWithoutScheduleDoesNotPanic(t *testing.T) {
-	for _, expression := range []string{"TZ=UTC", "CRON_TZ=UTC", "TZ=UTC\t0\t9\t*\t*\t*"} {
+func TestParseCronDirectiveDiagnostics(t *testing.T) {
+	for _, expression := range []string{"TZ=UTC", "CRON_TZ=UTC", "TZ=UTC\t0\t9\t*\t*\t*", "TZ= 0 9 * * *", "TZ=bad! 0 9 * * *", "x\x00y 9 * * *", "\x1b[31m 9 * * *", "x\x7fy 9 * * *", string([]byte{0xff}) + " 9 * * *", strings.Repeat("x", 1000) + " 9 * * *", strings.Repeat("é", 1000) + " 9 * * *"} {
 		t.Run(expression, func(t *testing.T) {
 			require.NotPanics(t, func() {
 				_, err := ParseCron(expression)
-				require.Error(t, err)
+				requireSafeCronError(t, err)
+				require.NotContains(t, err.Error(), "unknown time zone")
 			})
 			require.NotPanics(t, func() {
 				require.ErrorIs(t, (Trigger{Kind: "cron", Cron: expression}).Validate(), ErrInvalid)
