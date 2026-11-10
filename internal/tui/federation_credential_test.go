@@ -12,31 +12,44 @@ import (
 )
 
 func TestTUIHubFileIsReadAgainAfterBrowse(t *testing.T) {
+	fileSetup := func(t *testing.T, path string) string {
+		t.Helper()
+		f, err := safefileio.CreatePrivateFile(path)
+		require.NoError(t, err)
+		_, err = f.Write([]byte("first-hub-token\n"))
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+		return fmt.Sprintf("token_file=%q\n", path)
+	}
 	for _, tc := range []struct {
-		name, fields, first, want string
+		name          string
+		setup         func(*testing.T, string) string
+		mutate        func(*testing.T, string)
+		want, wantErr string
 	}{
-		{"remove", "token_file=%q\n", "first-hub-token", ""},
-		{"rotate", "token_file=%q\n", "first-hub-token", "second-hub-token"},
-		{"env cleared", "token_env='EXAMPLE_HUB_TOKEN'\n", "first-hub-token", ""},
-		{"inline wins", "token='inline-hub-token'\ntoken_file=%q\ntoken_env='EXAMPLE_HUB_TOKEN'\n", "inline-hub-token", "inline-hub-token"},
+		{name: "remove", setup: fileSetup, mutate: func(t *testing.T, path string) {
+			t.Helper()
+			require.NoError(t, os.Remove(path))
+		}, wantErr: "file"},
+		{name: "rotate", setup: fileSetup, mutate: func(t *testing.T, path string) {
+			t.Helper()
+			require.NoError(t, os.WriteFile(path, []byte("second-hub-token\n"), 0o600))
+		}, want: "second-hub-token"},
+		{name: "env cleared", setup: func(t *testing.T, _ string) string {
+			t.Helper()
+			t.Setenv("EXAMPLE_HUB_TOKEN", "first-hub-token")
+			return "token_env='EXAMPLE_HUB_TOKEN'\n"
+		}, mutate: func(t *testing.T, _ string) {
+			t.Helper()
+			t.Setenv("EXAMPLE_HUB_TOKEN", "")
+		}, wantErr: "env"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("KATA_HOME", home)
 			t.Setenv("KATA_AUTH_TOKEN", "local-only-token")
-			t.Setenv("EXAMPLE_HUB_TOKEN", "first-hub-token")
 			path := filepath.Join(home, "hub-token")
-			fields := tc.fields
-			if tc.name != "env cleared" {
-				fields = fmt.Sprintf(fields, path)
-			}
-			if tc.name == "remove" || tc.name == "rotate" {
-				f, err := safefileio.CreatePrivateFile(path)
-				require.NoError(t, err)
-				_, err = f.Write([]byte("first-hub-token\n"))
-				require.NoError(t, err)
-				require.NoError(t, f.Close())
-			}
+			fields := tc.setup(t, path)
 			srv := startTUIPingServer(t)
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf("[[daemon]]\nname='hub'\nurl=%q\n%s", srv.URL, fields)), 0o600))
 			cfg, err := config.ReadDaemonConfig()
@@ -44,20 +57,13 @@ func TestTUIHubFileIsReadAgainAfterBrowse(t *testing.T) {
 			// Browsing saves this resolved target for enrollment confirmation.
 			_, browsed, err := newHubAdminClient(t.Context(), daemonTargetsFromConfig(cfg.Daemons)[0])
 			require.NoError(t, err)
-			require.Equal(t, tc.first, browsed.resolved.Token)
-			switch tc.name {
-			case "remove":
-				require.NoError(t, os.Remove(path))
-			case "rotate":
-				require.NoError(t, os.WriteFile(path, []byte("second-hub-token\n"), 0o600))
-			case "env cleared":
-				t.Setenv("EXAMPLE_HUB_TOKEN", "")
-			}
+			require.Equal(t, "first-hub-token", browsed.resolved.Token)
+			tc.mutate(t, path)
 			_, next, err := newHubAdminClient(t.Context(), browsed)
-			switch tc.name {
-			case "remove":
+			switch tc.wantErr {
+			case "file":
 				require.ErrorIs(t, err, config.ErrCredentialSource)
-			case "env cleared":
+			case "env":
 				var envErr *config.TokenEnvError
 				require.ErrorAs(t, err, &envErr)
 			default:

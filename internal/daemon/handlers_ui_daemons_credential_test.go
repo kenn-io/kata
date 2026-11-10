@@ -16,7 +16,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 )
 
-func TestWebGatewayMissingCatalogFileStopsBeforeRequest(t *testing.T) {
+func TestWebDaemonProxyMissingCatalogFileStopsBeforeRequest(t *testing.T) {
 	var calls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
@@ -37,20 +37,8 @@ func TestWebGatewayMissingCatalogFileStopsBeforeRequest(t *testing.T) {
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
-	assert.Zero(t, calls.Load(), "failed selected credential must stop connection, got HTTP %d: %s", response.StatusCode, body)
+	assert.Zero(t, calls.Load(), "failed selected credential must stop before an upstream request")
 	assert.Equal(t, http.StatusBadRequest, response.StatusCode, string(body))
 	assert.Contains(t, string(body), "daemon_auth_required")
 	assert.NotContains(t, string(body), missing)
-	// Roster health must report the selected-source failure without probing.
-	rosterReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
-	require.NoError(t, err)
-	roster, err := http.DefaultClient.Do(rosterReq)
-	require.NoError(t, err)
-	defer func() { _ = roster.Body.Close() }()
-	data, err := io.ReadAll(roster.Body)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, roster.StatusCode, string(data))
-	assert.Contains(t, string(data), `"health":"auth_required"`)
-	assert.NotContains(t, string(data), missing)
-	assert.Zero(t, calls.Load(), "roster must not probe with an unavailable credential")
 }

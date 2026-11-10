@@ -23,30 +23,29 @@ func TestCatalogClientTokenSources(t *testing.T) {
 	writePrivateCredentialFixture(t, path, []byte(" file-token \n"))
 	for _, tt := range []struct {
 		name, fields, want string
-		fail               bool
-		envError           bool
+		wantErr            string
 	}{
-		{"file", `token_file = "~/token"`, "file-token", false, false},
-		{"file before env", `token_file = "~/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "file-token", false, false},
-		{"inline before file and env", `token = " inline-token "` + "\n" + `token_file = "/missing/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "inline-token", false, false},
-		{"missing file", `token_file = "/missing/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "", true, false},
-		{"unset env", `token_env = "EXAMPLE_CATALOG_EMPTY"`, "", false, true},
-		{"none", "", "", false, false},
+		{"file before env", `token_file = "~/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "file-token", ""},
+		{"inline before file and env", `token = " inline-token "` + "\n" + `token_file = "/missing/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "inline-token", ""},
+		{"missing file", `token_file = "/missing/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "", "file"},
+		{"unset env", `token_env = "EXAMPLE_CATALOG_EMPTY"`, "", "env"},
+		{"none", "", "", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[[daemon]]\nname = 'hub'\nurl = 'https://hub.example'\n"+tt.fields), 0o600))
 			cfg, err := config.ReadDaemonConfig()
 			require.NoError(t, err, "loading a catalog must not read credentials")
 			got, err := cfg.Daemons[0].ClientToken()
-			if tt.envError {
+			switch tt.wantErr {
+			case "env":
 				var envErr *config.TokenEnvError
 				require.ErrorAs(t, err, &envErr)
 				assert.Equal(t, config.TokenEnvError{Daemon: "hub", Env: "EXAMPLE_CATALOG_EMPTY"}, *envErr)
-			} else if tt.fail {
+			case "file":
 				require.ErrorIs(t, err, config.ErrCredentialSource)
 				assert.Contains(t, err.Error(), `daemon "hub"`)
 				assert.Empty(t, got)
-			} else {
+			default:
 				require.NoError(t, err)
 				assert.Equal(t, tt.want, got)
 			}

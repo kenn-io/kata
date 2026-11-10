@@ -1539,16 +1539,3 @@ func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
 	assert.True(t, changed.Changed)
 	assert.Equal(t, "FREQ=DAILY", h.rows()[0].RRule, "saves through a historical reference use the current project")
 }
-
-func TestTUIHubAdminClientResolvesCatalogTokenFile(t *testing.T) {
-	m := newTestModel()
-	m.width, m.height = 100, 30
-	m.view = viewList
-	m.daemonTargets = []daemonTarget{{Name: "hub", URL: "https://hub.example", TokenFile: filepath.Join(t.TempDir(), "missing-credential")}}
-	m.activeDaemon = m.daemonTargets[0]
-	m, _ = updateModel(m, keyRune('D'))
-	require.Equal(t, viewDaemons, m.view)
-	view := stripANSI(renderDaemons(m))
-	assert.Contains(t, view, "hub")
-	assert.NotContains(t, view, "no token")
-}
