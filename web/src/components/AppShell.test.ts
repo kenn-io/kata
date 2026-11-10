@@ -2183,3 +2183,119 @@ async function executeAccessMutation(
   const response = await mutate({ headers: new Headers(), body: (value) => value })
   return response.status === 200
 }
+
+describe('AppShell task selection', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  const listRoute = {
+    kind: 'kata' as const,
+    view: 'all-open' as const,
+    graph: false,
+    filters: { status: [], owner: [], label: [], relationship: [] },
+  }
+  const firstUID = '01J00000000000000000000001'
+  const secondUID = '01J00000000000000000000003'
+
+  function shownTitle(): string | null {
+    return within(screen.getByRole('region', { name: 'Kata issue detail' })).getByRole('heading', {
+      level: 2,
+    }).textContent
+  }
+
+  function twoTaskSnapshot(): UISnapshot {
+    const current = snapshot()
+    current.collection = [
+      ...current.collection!,
+      {
+        ...current.collection![0]!,
+        id: 2,
+        uid: secondUID,
+        short_id: 'a2',
+        qualified_id: 'example-project#a2',
+        title: 'Second issue',
+        body: 'Second body',
+      },
+    ]
+    current.selected = {
+      state: 'available',
+      issue: { ...current.collection[0]!, body: 'First body' },
+      comments: [
+        {
+          id: 1,
+          uid: '01J00000000000000000000004',
+          issue_id: 1,
+          author: 'user-a',
+          body: 'First comment',
+          created_at: '2026-08-01T12:00:00.000Z',
+        },
+      ],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    return current
+  }
+
+  test('shows a clicked task in the same frame, before its snapshot arrives', async () => {
+    const onNavigate = vi.fn()
+    const props = {
+      route: { ...listRoute, issueUID: firstUID },
+      snapshot: twoTaskSnapshot(),
+      loading: false,
+      ...mutationProps(),
+      onNavigate,
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    expect(shownTitle()).toContain('Example issue')
+
+    await fireEvent.click(screen.getByRole('button', { name: /Second issue/ }))
+    expect(onNavigate).toHaveBeenLastCalledWith({ ...listRoute, issueUID: secondUID })
+    // App keeps the accepted route and snapshot until the new snapshot lands.
+    await rerender({ ...props, loading: true, requestedRoute: onNavigate.mock.lastCall![0] })
+
+    expect(shownTitle()).toContain('Second issue')
+    expect(await screen.findAllByText('Second body')).not.toHaveLength(0)
+    expect(screen.queryAllByText('First comment')).toHaveLength(0)
+    expect(screen.queryByText('No comments.')).toBeNull()
+    expect(screen.queryByText('No events')).toBeNull()
+    expect(screen.getByRole('status', { name: 'Loading comments' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Edit issue' })).toHaveProperty('disabled', true)
+
+    const arrived = twoTaskSnapshot()
+    arrived.selected = {
+      ...arrived.selected!,
+      issue: { ...arrived.collection![1]!, body: 'Second body' },
+      comments: [{ ...arrived.selected!.comments[0]!, body: 'Second comment' }],
+    }
+    await rerender({
+      ...props,
+      route: { ...listRoute, issueUID: secondUID },
+      snapshot: arrived,
+      requestedRoute: undefined,
+    })
+    expect(await screen.findAllByText('Second comment')).not.toHaveLength(0)
+    expect(screen.queryByRole('status', { name: 'Loading comments' })).toBeNull()
+  })
+
+  test('keeps the accepted task when the clicked task is not in the loaded list', async () => {
+    const props = {
+      route: { ...listRoute, issueUID: firstUID },
+      snapshot: twoTaskSnapshot(),
+      loading: true,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    await rerender({
+      ...props,
+      requestedRoute: { ...listRoute, issueUID: '01J00000000000000000000009' },
+    })
+    expect(shownTitle()).toContain('Example issue')
+    expect(await screen.findAllByText('First comment')).not.toHaveLength(0)
+  })
+})
