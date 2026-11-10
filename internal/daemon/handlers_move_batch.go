@@ -35,6 +35,19 @@ func moveBatchRefusal(result *api.MoveIssuesResult, err error) {
 	result.Hint = mapped.Hint
 }
 
+func moveBatchShouldPreview(result *api.MoveIssuesResult, item moveBatchItem, subtree bool) bool {
+	if result.Result != "" {
+		return false
+	}
+	if item.issue.ProjectID != item.target.ID {
+		return true
+	}
+	if subtree {
+		moveBatchRefusal(result, api.NewError(400, "same_project", "to_project_uid resolves to the issue's current project", "", nil))
+	}
+	return false
+}
+
 func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
 	return func(ctx context.Context, in *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
 		started := time.Now()
@@ -130,7 +143,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			var moves []db.MoveIssueProjectIn
 			var indexes []int
 			for j := start; j < end; j++ {
-				if results[j].Result == "" && items[j].issue.ProjectID != items[j].target.ID {
+				if moveBatchShouldPreview(&results[j], items[j], in.Body.Subtree) {
 					moves = append(moves, items[j].move)
 					indexes = append(indexes, j)
 				}
@@ -148,7 +161,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					continue
 				}
 				items[j].tree = preview.Results[k].Out.Issues
-				items[j].move.ExpectedIssueIDs = preview.Results[k].Out.TreeIssueIDs
+				db.FenceIssueMove(&items[j].move, preview.Results[k].Out)
 			}
 		}
 		seen := map[int64][]int{}

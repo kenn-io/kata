@@ -98,7 +98,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			}
 			if !in.Body.DryRun {
 				move.DryRun = false
-				move.ExpectedIssueIDs = res.TreeIssueIDs
+				db.FenceIssueMove(&move, res)
 				res, err = cfg.DB.MoveIssueProject(ctx, move)
 			}
 		}

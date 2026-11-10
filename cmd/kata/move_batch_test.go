@@ -27,8 +27,33 @@ func TestParseRefsFrom(t *testing.T) {
 		require.Equal(t, "abc4", items[0].Ref)
 		require.Equal(t, "dst", items[0].TargetProject)
 	}
-	_, err := parseRefsFrom(strings.NewReader("abc4\n"), "")
-	require.ErrorContains(t, err, "line 1")
+	items, err := parseRefsFrom(strings.NewReader("abc4\n"), "")
+	require.NoError(t, err)
+	require.Contains(t, items[0].ParseError, "line 1")
+}
+
+func TestMoveBatchCLI_InvalidFileRowsDoNotBlockValid(t *testing.T) {
+	for _, bad := range []string{"\tdst", "abc4\t", "abc4\tdst\textra"} {
+		t.Run(bad, func(t *testing.T) {
+			env, dir, _, dst, issue := setupMoveCLIProjects(t)
+			input := bad + "\n" + issue.UID + "\t" + dst.Name + "\n"
+			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
+			require.Error(t, err)
+			var reply struct {
+				Results []api.MoveIssuesResult `json:"results"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &reply))
+			require.Len(t, reply.Results, 2)
+			require.Equal(t, 0, reply.Results[0].Index)
+			require.Equal(t, "validation", reply.Results[0].Code)
+			require.Equal(t, "refused", reply.Results[0].Result)
+			require.Equal(t, 1, reply.Results[1].Index)
+			require.Equal(t, "moved", reply.Results[1].Result)
+			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, dst.ID, got.ProjectID)
+		})
+	}
 }
 func TestMoveBatchCLI_PositionalRerun(t *testing.T) {
 	env, dir, src, dst, first := setupMoveCLIProjects(t)
@@ -276,8 +301,9 @@ func TestMoveBatchCLI_OldDaemonGate(t *testing.T) {
 
 func TestParseRefsFromPreservesTSVFields(t *testing.T) {
 	for _, row := range []string{"abc4\t\n", "abc4\ttarget\t\n", "\tabc4\n"} {
-		_, err := parseRefsFrom(strings.NewReader("# routing\n"+row), "default-target")
-		require.ErrorContains(t, err, "line 2")
+		items, err := parseRefsFrom(strings.NewReader("# routing\n"+row), "default-target")
+		require.NoError(t, err)
+		require.Contains(t, items[0].ParseError, "line 2")
 	}
 }
 func TestMoveBatchCLI_SelectorFlagsRequireSource(t *testing.T) {

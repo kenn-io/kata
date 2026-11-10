@@ -554,6 +554,8 @@ type MoveIssueProjectIn struct {
 	AuthorizeProjects func([]string) error
 	// ExpectedIssueIDs fences externally validated subtree membership.
 	ExpectedIssueIDs []int64
+	// ExpectedMovingIssueIDs fences the issues whose claims were checked.
+	ExpectedMovingIssueIDs []int64
 	// DryRun validates inside the move transaction, then rolls back without moving.
 	DryRun bool
 	// Single moves only the selected issue; the default includes descendants.

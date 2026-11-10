@@ -24,6 +24,7 @@ import (
 
 type moveBatchItem struct {
 	Ref, TargetProject string
+	ParseError         string
 	ExpectedRevision   int64
 }
 type moveBatchOptions struct {
@@ -52,19 +53,16 @@ func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
 			value = strings.TrimPrefix(value, "\ufeff")
 		}
 		trimmed := strings.TrimSpace(value)
-		if trimmed == "" || trimmed == "#" || strings.HasPrefix(trimmed, "# ") {
+		if (trimmed == "" && !strings.Contains(value, "\t")) || trimmed == "#" || strings.HasPrefix(trimmed, "# ") {
 			continue
 		}
 		fields := strings.Split(value, "\t")
-		if len(fields) > 2 {
-			return nil, moveBatchUsage(fmt.Sprintf("line %d: expected ref or ref<TAB>project", line))
-		}
 		item := moveBatchItem{Ref: strings.TrimSpace(fields[0]), TargetProject: defaultTarget}
-		if len(fields) == 2 {
+		if len(fields) >= 2 {
 			item.TargetProject = strings.TrimSpace(fields[1])
 		}
-		if item.Ref == "" || item.TargetProject == "" {
-			return nil, moveBatchUsage(fmt.Sprintf("line %d: ref and target project are required", line))
+		if len(fields) > 2 || item.Ref == "" || item.TargetProject == "" {
+			item.ParseError = fmt.Sprintf("line %d: expected ref and target project", line)
 		}
 		items = append(items, item)
 	}
@@ -72,6 +70,23 @@ func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
 		return nil, moveBatchUsage(err.Error())
 	}
 	return items, nil
+}
+
+func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string, targetErrors map[string]error) (string, error) {
+	if item.ParseError != "" {
+		return "", &cliError{Message: item.ParseError, Code: "validation", Kind: kindUsage, ExitCode: ExitUsage}
+	}
+	uid := targets[item.TargetProject]
+	if uid == "" && targetErrors[item.TargetProject] == nil {
+		project, err := resolveProjectSelector(a, item.TargetProject)
+		if err != nil {
+			targetErrors[item.TargetProject] = err
+		} else {
+			uid = project.UID
+			targets[item.TargetProject] = uid
+		}
+	}
+	return uid, targetErrors[item.TargetProject]
 }
 
 func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel moveSelector, opts moveBatchOptions) error {
@@ -306,17 +321,8 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	var indexes []int
 	var results []api.MoveIssuesResult
 	for i, item := range items {
-		uid := targets[item.TargetProject]
-		if uid == "" && targetErrors[item.TargetProject] == nil {
-			project, err := resolveProjectSelector(a, item.TargetProject)
-			if err != nil {
-				targetErrors[item.TargetProject] = err
-			} else {
-				uid = project.UID
-				targets[item.TargetProject] = uid
-			}
-		}
-		if err := targetErrors[item.TargetProject]; err != nil {
+		uid, err := moveBatchTarget(a, item, targets, targetErrors)
+		if err != nil {
 			r := api.MoveIssuesResult{Index: i, Ref: item.Ref, Result: "refused", Message: err.Error()}
 			if ce, ok := errors.AsType[*cliError](err); ok {
 				r.Code, r.Message, r.Hint = ce.Code, ce.Message, ce.Hint

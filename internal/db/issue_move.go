@@ -59,7 +59,7 @@ var ErrIssueMoveTreeChanged = errors.New("issue move tree changed during validat
 func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn) ([]IssueMoveTreeItem, error) {
 	if in.Single {
 		inputs := []IssueMoveTreeItem{{In: in}}
-		if err := validateIssueMoveMembership(in.ExpectedIssueIDs, inputs); err != nil {
+		if err := validateIssueMoveMembership(in, inputs); err != nil {
 			return nil, err
 		}
 		if in.AuthorizeProjects != nil {
@@ -107,7 +107,7 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 	if len(items) == 0 || items[0].In.IssueID != in.IssueID {
 		return nil, fmt.Errorf("issue %d not in project %d: %w", in.IssueID, in.FromProjectID, ErrNotFound)
 	}
-	if err := validateIssueMoveMembership(in.ExpectedIssueIDs, items); err != nil {
+	if err := validateIssueMoveMembership(in, items); err != nil {
 		return nil, err
 	}
 	if in.AuthorizeProjects != nil {
@@ -129,23 +129,40 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 	return items, nil
 }
 
-func validateIssueMoveMembership(expected []int64, inputs []IssueMoveTreeItem) error {
+// FenceIssueMove records both logical membership and the set requiring claims.
+func FenceIssueMove(in *MoveIssueProjectIn, out MoveIssueProjectOut) {
+	in.ExpectedIssueIDs = out.TreeIssueIDs
+	in.ExpectedMovingIssueIDs = make([]int64, 0, len(out.Issues))
+	for _, issue := range out.Issues {
+		in.ExpectedMovingIssueIDs = append(in.ExpectedMovingIssueIDs, issue.ID)
+	}
+}
+
+func validateIssueMoveMembership(in MoveIssueProjectIn, inputs []IssueMoveTreeItem) error {
+	if !matchesIssueMoveMembership(in.ExpectedIssueIDs, inputs, 0) || !matchesIssueMoveMembership(in.ExpectedMovingIssueIDs, inputs, in.ToProjectID) {
+		return ErrIssueMoveTreeChanged
+	}
+	return nil
+}
+
+func matchesIssueMoveMembership(expected []int64, inputs []IssueMoveTreeItem, excludeProject int64) bool {
 	if expected == nil {
-		return nil
+		return true
 	}
 	want := make(map[int64]struct{}, len(expected))
 	for _, id := range expected {
 		want[id] = struct{}{}
 	}
-	if len(want) != len(inputs) {
-		return ErrIssueMoveTreeChanged
-	}
 	for _, item := range inputs {
-		if _, ok := want[item.In.IssueID]; !ok {
-			return ErrIssueMoveTreeChanged
+		if excludeProject != 0 && item.In.FromProjectID == excludeProject {
+			continue
 		}
+		if _, ok := want[item.In.IssueID]; !ok {
+			return false
+		}
+		delete(want, item.In.IssueID)
 	}
-	return nil
+	return len(want) == 0
 }
 
 // Validate the complete proposed mapping set before previews or writes. Checking

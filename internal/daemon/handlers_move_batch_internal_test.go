@@ -179,6 +179,50 @@ func TestMoveIssuesBatch_SubtreeMembershipFence(t *testing.T) {
 	require.Equal(t, child.Revision, got.Revision)
 }
 
+func TestMoveIssuesBatch_DestinationChildMovesAfterPreview(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	source, root := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "fenced-target")
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "child", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	wrapped := &batchMoveRaceStore{Storage: store, beforeWrite: func() {
+		_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: child.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: child.Revision, Actor: "agent", Single: true})
+		require.NoError(t, err)
+	}}
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.Subtree, req.Body.ToProjectUID = "agent", true, target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: root.UID}}
+	out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, "issue_move_tree_changed", out.Body.Results[0].Code)
+	got, err := store.IssueByID(t.Context(), root.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, got.ProjectID)
+}
+
+func TestMoveIssuesBatch_SubtreeRootAlreadyAtTarget(t *testing.T) {
+	for _, dry := range []bool{false, true} {
+		store := openClaimGateHelperDB(t)
+		source, child := createClaimGateHelperIssue(t, store)
+		target, err := store.CreateProject(t.Context(), "target")
+		require.NoError(t, err)
+		root, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "root", Author: "agent"})
+		require.NoError(t, err)
+		_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: root.ID, Type: "parent", Author: "agent"})
+		require.NoError(t, err)
+		req := &api.MoveIssuesRequest{}
+		req.Body.Actor, req.Body.Subtree, req.Body.DryRun, req.Body.ToProjectUID = "agent", true, dry, target.UID
+		req.Body.Items = []api.MoveIssuesItem{{Ref: root.UID}}
+		out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
+		require.NoError(t, err)
+		require.Equal(t, "same_project", out.Body.Results[0].Code)
+		got, err := store.IssueByID(t.Context(), child.ID)
+		require.NoError(t, err)
+		require.Equal(t, source.ID, got.ProjectID)
+	}
+}
+
 func TestMoveIssuesBatch_UnsupportedPairRefusesEachItem(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	source, first := createClaimGateHelperIssue(t, store)
