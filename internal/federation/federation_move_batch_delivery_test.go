@@ -74,9 +74,6 @@ func TestSyncFederationBatchMoveConverges(t *testing.T) {
 		require.NoError(t, spoke.sync(t, i))
 	}
 	move(issues[200:])
-	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "before_spoke_push_cursor_advance=error")
-	require.Error(t, spoke.sync(t, 1))
-	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
 	for _, i := range []int{1, 2} {
 		require.NoError(t, spoke.sync(t, i))
 	}

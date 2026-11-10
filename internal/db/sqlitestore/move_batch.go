@@ -17,10 +17,6 @@ func (d *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 	}
 	var out db.MoveIssuesBatchOut
 	run := func(tx *sql.Tx) error {
-		out = db.MoveIssuesBatchOut{Results: make([]db.MoveIssueBatchResult, len(in.Items))}
-		if err := lockProjectAccess(ctx, tx); err != nil {
-			return err
-		}
 		var moved bool
 		var err error
 		out, moved, err = db.RunMoveBatchTx(ctx, tx, in, d.moveTreeTx, d.createCommentTx, IsTransient)
@@ -37,17 +33,7 @@ func (d *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 		}
 		return nil
 	}
-	err := d.RetryTransient(ctx, func() error {
-		tx, err := d.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := run(tx); err != nil {
-			return err
-		}
-		return tx.Commit()
-	})
+	err := d.withProjectAccessTx(ctx, run)
 	if errors.Is(err, errBatchMovePreview) {
 		err = nil
 	}

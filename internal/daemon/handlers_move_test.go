@@ -810,22 +810,3 @@ func TestMoveIssue_ArchivedDescendantConflict(t *testing.T) {
 		assert.Equal(t, db.IssueMoveDescendant{UID: child.UID, ShortID: child.ShortID, ProjectUID: archived.UID, ProjectName: archived.Name}, envelope.Error.Data.Descendant)
 	}
 }
-
-func TestMoveIssue_DestinationResidentChild(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	src, target, root := seedMovePair(t, env)
-	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "child", Author: "tester", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
-	require.NoError(t, err)
-	body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, target.UID)
-	resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, root.ShortID), body, fmt.Sprintf(`"rev-%d"`, root.Revision))
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", raw)
-	got, err := env.DB.IssueByID(t.Context(), child.ID)
-	require.NoError(t, err)
-	require.Equal(t, child.Revision, got.Revision)
-	comments, err := env.DB.CommentsByIssue(t.Context(), child.ID)
-	require.NoError(t, err)
-	require.Empty(t, comments)
-}

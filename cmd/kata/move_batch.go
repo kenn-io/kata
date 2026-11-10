@@ -19,7 +19,6 @@ import (
 	"go.kenn.io/kata/internal/shortid"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
-	"golang.org/x/term"
 )
 
 type moveBatchItem struct {
@@ -302,20 +301,6 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			}
 		}
 	}
-	// Account for every original row before dropping locally refused targets.
-	for _, item := range items {
-		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: item.Ref, ToProjectUID: item.TargetProject, ExpectedRevision: item.ExpectedRevision})
-	}
-	request.Body.StartIndex = len(items)
-	original, err := json.Marshal(request.Body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
-	if err != nil {
-		return err
-	}
-	if len(original) > 1<<20 {
-		return moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
-	}
-	request.Body.Items = nil
-	request.Body.StartIndex = 0
 	targets := map[string]string{}
 	targetErrors := map[string]error{}
 	var indexes []int
@@ -338,7 +323,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			return err
 		}
 		if len(results) > 0 {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict}
 		}
 		return nil
 	}
@@ -365,7 +350,6 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
 		return printMoveBatch(cmd, results, len(items), opts)
 	}
-	requests := 0
 	for request.Body.StartIndex < len(request.Body.Items) {
 		body.StartIndex = new(int64(request.Body.StartIndex))
 		response, callErr := client.MoveIssuesWithResponse(a.ctx, &generated.MoveIssuesRequestOptions{Body: &body})
@@ -427,19 +411,13 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			results = append(results, r)
 		}
 		request.Body.StartIndex = reply.NextIndex
-		requests++
-		if requests > 1 {
-			if file, ok := cmd.ErrOrStderr().(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-				_, _ = fmt.Fprintf(file, "moved %d/%d ...\n", len(results), len(items))
-			}
-		}
 	}
 	if err := printResults(); err != nil {
 		return err
 	}
 	for _, r := range results {
 		if r.Result == "refused" {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict}
 		}
 	}
 	return nil

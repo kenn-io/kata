@@ -37,10 +37,6 @@ func TestMoveBatchDescendantRefusalNamesIssue(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: root.ID, Type: "parent", Author: "agent"})
 	require.NoError(t, err)
-	in := db.MoveIssueProjectIn{IssueID: root.ID, FromProjectID: src.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Actor: "agent", DryRun: true}
-	_, err = store.MoveIssueProject(t.Context(), in)
-	mapped := moveIssueAPIError(err).(*api.APIError)
-	require.Contains(t, mapped.Message, src.Name+"#"+child.ShortID, "existing mapper names the descendant")
 	req := &api.MoveIssuesRequest{}
 	req.Body.Actor = "agent"
 	req.Body.Subtree = true

@@ -38,13 +38,13 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	pinned, err := store.IssueByID(ctx, mat.NewIssueID)
 	require.NoError(t, err)
 	issues = append(issues[:1], append([]db.Issue{pinned}, issues[1:]...)...)
-	in := db.MoveIssuesBatchIn{Actor: "worker", Comment: "routed", DryRun: true}
+	in := db.MoveIssuesBatchIn{Comment: "routed", DryRun: true}
 	for n, i := range issues {
 		target := a.ID
 		if n == 3 {
 			target = b.ID
 		}
-		in.Items = append(in.Items, db.MoveIssueProjectIn{IssueID: i.ID, FromProjectID: src.ID, ToProjectID: target, IfMatchRev: i.Revision, Single: true})
+		in.Items = append(in.Items, db.MoveIssueProjectIn{IssueID: i.ID, FromProjectID: src.ID, ToProjectID: target, IfMatchRev: i.Revision, Single: true, Actor: "worker"})
 	}
 	cursor, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
@@ -79,8 +79,8 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 		require.Equal(t, in.Items[n].ToProjectID, got.ProjectID)
 		require.Len(t, comments, 1)
 		require.Equal(t, "routed", comments[0].Body)
-		require.NotNil(t, out.Results[n].CommentEvent)
-		require.Greater(t, out.Results[n].CommentEvent.ID, out.Results[n].Out.EventID)
+		require.Len(t, out.Results[n].Out.Events, 2)
+		require.Greater(t, out.Results[n].Out.Events[1].ID, out.Results[n].Out.EventID)
 	}
 	access, err = store.ProjectAccessRevision(ctx)
 	require.NoError(t, err)
@@ -93,17 +93,17 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	allowed, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: src.ID, Title: "allowed", Author: "worker"})
 	require.NoError(t, err)
+	authorize := func(uids []string) error {
+		if slices.Contains(uids, deniedSource.UID) {
+			return db.ErrNotFound
+		}
+		return nil
+	}
 	isolated, err := store.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{
-		Actor: "worker", Comment: "routed with authorization",
+		Comment: "routed with authorization",
 		Items: []db.MoveIssueProjectIn{
-			{IssueID: denied.ID, FromProjectID: deniedSource.ID, ToProjectID: a.ID, IfMatchRev: denied.Revision, Single: true},
-			{IssueID: allowed.ID, FromProjectID: src.ID, ToProjectID: a.ID, IfMatchRev: allowed.Revision, Single: true},
-		},
-		AuthorizeProjects: func(uids []string) error {
-			if slices.Contains(uids, deniedSource.UID) {
-				return db.ErrNotFound
-			}
-			return nil
+			{IssueID: denied.ID, FromProjectID: deniedSource.ID, ToProjectID: a.ID, IfMatchRev: denied.Revision, Single: true, Actor: "worker", AuthorizeProjects: authorize},
+			{IssueID: allowed.ID, FromProjectID: src.ID, ToProjectID: a.ID, IfMatchRev: allowed.Revision, Single: true, Actor: "worker", AuthorizeProjects: authorize},
 		},
 	})
 	require.NoError(t, err)
@@ -128,10 +128,7 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	retryB, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: deniedSource.ID, Title: "retry b", Author: "worker"})
 	require.NoError(t, err)
 	injected := false
-	retried, err := store.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Actor: "worker", Comment: "exactly once", Items: []db.MoveIssueProjectIn{
-		{IssueID: retryA.ID, FromProjectID: src.ID, ToProjectID: a.ID, IfMatchRev: retryA.Revision, Single: true},
-		{IssueID: retryB.ID, FromProjectID: deniedSource.ID, ToProjectID: a.ID, IfMatchRev: retryB.Revision, Single: true},
-	}, AuthorizeProjects: func(uids []string) error {
+	retryAuthorize := func(uids []string) error {
 		for _, uid := range uids {
 			if uid == deniedSource.UID && !injected {
 				injected = true
@@ -139,6 +136,10 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 			}
 		}
 		return nil
+	}
+	retried, err := store.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Comment: "exactly once", Items: []db.MoveIssueProjectIn{
+		{IssueID: retryA.ID, FromProjectID: src.ID, ToProjectID: a.ID, IfMatchRev: retryA.Revision, Single: true, Actor: "worker", AuthorizeProjects: retryAuthorize},
+		{IssueID: retryB.ID, FromProjectID: deniedSource.ID, ToProjectID: a.ID, IfMatchRev: retryB.Revision, Single: true, Actor: "worker", AuthorizeProjects: retryAuthorize},
 	}})
 	require.NoError(t, err)
 	require.True(t, injected)
@@ -172,15 +173,15 @@ func checkMoveBatchCollision(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	second, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: b.ID, Title: "second", Author: "worker", UID: "01K0000000000000000021ABCD"})
 	require.NoError(t, err)
-	out, err := store.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Actor: "worker", Items: []db.MoveIssueProjectIn{
-		{IssueID: first.ID, FromProjectID: a.ID, ToProjectID: target.ID, IfMatchRev: first.Revision, Single: true},
-		{IssueID: second.ID, FromProjectID: b.ID, ToProjectID: target.ID, IfMatchRev: second.Revision, Single: true},
+	out, err := store.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: []db.MoveIssueProjectIn{
+		{IssueID: first.ID, FromProjectID: a.ID, ToProjectID: target.ID, IfMatchRev: first.Revision, Single: true, Actor: "worker"},
+		{IssueID: second.ID, FromProjectID: b.ID, ToProjectID: target.ID, IfMatchRev: second.Revision, Single: true, Actor: "worker"},
 	}})
 	require.NoError(t, err)
 	require.Len(t, out.Results, 2)
-	for _, r := range out.Results {
+	for n, r := range out.Results {
 		require.NoError(t, r.Err)
-		require.True(t, r.ShortIDExtended)
+		require.Greater(t, len(r.Out.NewShortID), len([]db.Issue{first, second}[n].ShortID))
 	}
 	require.NotEqual(t, out.Results[0].Out.NewShortID, out.Results[1].Out.NewShortID)
 	require.Greater(t, len(out.Results[1].Out.NewShortID), len(out.Results[0].Out.NewShortID))
@@ -198,7 +199,7 @@ func checkMoveBatchSelectedRevisions(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 	require.NoError(t, err)
-	in := db.MoveIssuesBatchIn{Actor: "worker", Comment: "routed", Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Single: true}, {IssueID: child.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: child.Revision, Single: true}}}
+	in := db.MoveIssuesBatchIn{Comment: "routed", Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Single: true, Actor: "worker"}, {IssueID: child.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: child.Revision, Single: true, Actor: "worker"}}}
 	owner := "new-owner"
 	changed, _, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: child.ID, Owner: &owner, Actor: "worker"})
 	require.NoError(t, err)
@@ -235,7 +236,7 @@ func checkMoveBatchLogicalMembership(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "already at target", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 	require.NoError(t, err)
-	in := db.MoveIssuesBatchIn{Actor: "worker", Comment: "routed", DryRun: true, Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision}}}
+	in := db.MoveIssuesBatchIn{Comment: "routed", DryRun: true, Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Actor: "worker"}}}
 	preview, err := store.MoveIssuesBatch(ctx, in)
 	require.NoError(t, err)
 	require.NoError(t, preview.Results[0].Err)
@@ -264,6 +265,12 @@ func checkMoveBatchLogicalMembership(t *testing.T, store db.Storage) error {
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: child2.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: child2.Revision, Actor: "worker", Single: true})
 	require.NoError(t, err)
 	move.DryRun = false
+	_, err = store.MoveIssueProject(ctx, move)
+	require.ErrorIs(t, err, db.ErrIssueMoveTreeChanged)
+	links, err := store.LinksByIssue(ctx, child2.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.NoError(t, store.DeleteLinkByID(ctx, links[0].ID))
 	_, err = store.MoveIssueProject(ctx, move)
 	require.ErrorIs(t, err, db.ErrIssueMoveTreeChanged)
 	return nil

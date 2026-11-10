@@ -25,10 +25,7 @@ func moveBatchRefusal(result *api.MoveIssuesResult, err error) {
 	if errors.Is(err, db.ErrTransactionFinalizationFailed) {
 		err = internalAPIError(err)
 	}
-	mapped, ok := errors.AsType[*api.APIError](err)
-	if !ok {
-		mapped = moveIssueAPIError(err).(*api.APIError)
-	}
+	mapped := moveIssueAPIError(err).(*api.APIError)
 	result.Result = "refused"
 	result.Code = mapped.Code
 	result.Message = mapped.Message
@@ -103,8 +100,9 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				continue
 			}
 			issue, err := resolveLinkTargetRef(ctx, cfg.DB, in.Body.DefaultProjectID, input.Ref, db.IncludeDeletedNo)
+			var source db.Project
 			if err == nil {
-				_, err = activeProjectByID(ctx, cfg.DB, issue.ProjectID)
+				source, err = activeProjectByID(ctx, cfg.DB, issue.ProjectID)
 			}
 			if err == nil {
 				_, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
@@ -115,10 +113,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			if err != nil {
 				moveBatchRefusal(r, err)
 				continue
-			}
-			source, err := cfg.DB.ProjectByID(ctx, issue.ProjectID)
-			if err != nil {
-				return nil, internalAPIError(err)
 			}
 			r.UID = issue.UID
 			r.OldShortID = issue.ShortID
@@ -151,7 +145,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			if len(moves) == 0 {
 				continue
 			}
-			preview, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: moves, DryRun: true, Actor: actor, AuthorizeProjects: authorize})
+			preview, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: moves, DryRun: true})
 			if err != nil {
 				return nil, moveBatchError(err, nil, in.Body.StartIndex)
 			}
@@ -246,7 +240,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				written = append(written, j)
 			}
 			if len(write) > 0 {
-				committed, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: write, Actor: actor, Comment: in.Body.Comment, Teammate: in.Body.Teammate, AuthorizeProjects: authorize})
+				committed, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: write, Comment: in.Body.Comment, Teammate: in.Body.Teammate})
 				if err != nil {
 					return nil, moveBatchError(err, out.Body.Results, start)
 				}
@@ -258,7 +252,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 						continue
 					}
 					r := &results[j]
-					r.Result, r.NewShortID, r.ShortIDExtended = "moved", item.Out.NewShortID, item.ShortIDExtended
+					r.Result, r.NewShortID, r.ShortIDExtended = "moved", item.Out.NewShortID, len(item.Out.NewShortID) > len(items[j].issue.ShortID)
 					r.EventID, r.Revision = item.Out.EventID, item.Out.NewRevision
 					r.To, r.Descendants = items[j].target.Name+"#"+item.Out.NewShortID, item.Out.Issues[1:]
 					succeeded[items[j].issue.ID] = *r

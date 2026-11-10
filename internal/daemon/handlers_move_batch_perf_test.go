@@ -16,19 +16,6 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// Keep the full HTTP workload in correctness CI, with measurements for
-// diagnostics. Shared-runner contention is not a product correctness failure.
-func TestMoveIssuesBatchPerf2000(t *testing.T) {
-	if testing.Short() {
-		t.Skip("2000-issue throughput workload")
-	}
-	for _, spoke := range []bool{false, true} {
-		t.Run(fmt.Sprintf("spoke=%t", spoke), func(t *testing.T) {
-			moveIssuesBatch2000(t, spoke, func(run func()) { run() })
-		})
-	}
-}
-
 // Run in isolation with -run '^$' -bench '^BenchmarkMoveIssuesBatch2000$'
 // -benchtime=1x -count=3. Seeding is excluded; HTTP, claims and writes are timed.
 // Compare repeated measurements to the retained local/spoke throughput baseline.

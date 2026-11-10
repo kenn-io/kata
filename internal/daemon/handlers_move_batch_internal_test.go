@@ -202,49 +202,23 @@ func TestMoveIssuesBatch_DestinationChildMovesAfterPreview(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_SubtreeRootAlreadyAtTarget(t *testing.T) {
-	for _, dry := range []bool{false, true} {
-		store := openClaimGateHelperDB(t)
-		source, child := createClaimGateHelperIssue(t, store)
-		target, err := store.CreateProject(t.Context(), "target")
-		require.NoError(t, err)
-		root, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "root", Author: "agent"})
-		require.NoError(t, err)
-		_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: root.ID, Type: "parent", Author: "agent"})
-		require.NoError(t, err)
-		req := &api.MoveIssuesRequest{}
-		req.Body.Actor, req.Body.Subtree, req.Body.DryRun, req.Body.ToProjectUID = "agent", true, dry, target.UID
-		req.Body.Items = []api.MoveIssuesItem{{Ref: root.UID}}
-		out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
-		require.NoError(t, err)
-		require.Equal(t, "same_project", out.Body.Results[0].Code)
-		got, err := store.IssueByID(t.Context(), child.ID)
-		require.NoError(t, err)
-		require.Equal(t, source.ID, got.ProjectID)
-	}
-}
-
-func TestMoveIssuesBatch_UnsupportedPairRefusesEachItem(t *testing.T) {
 	store := openClaimGateHelperDB(t)
-	source, first := createClaimGateHelperIssue(t, store)
-	target, err := store.CreateProject(t.Context(), "different-hub")
+	source, child := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "target")
 	require.NoError(t, err)
-	enableClaimGateHelperSpoke(t, store, source, "https://hub-one.example", 99)
-	enableClaimGateHelperSpoke(t, store, target, "https://hub-two.example", 100)
+	root, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "root", Author: "agent"})
+	require.NoError(t, err)
+	_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: root.ID, Type: "parent", Author: "agent"})
+	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
-	req.Body.Actor = "agent"
-	req.Body.ToProjectUID = target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID}}
-	for range 19 {
-		i, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "route", Author: "agent"})
-		require.NoError(t, err)
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: i.UID})
-	}
+	req.Body.Actor, req.Body.Subtree, req.Body.ToProjectUID = "agent", true, target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: root.UID}}
 	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
 	require.NoError(t, err)
-	require.Equal(t, 20, out.Body.Summary.Refused)
-	for _, r := range out.Body.Results {
-		require.Equal(t, "federated_move_unsupported", r.Code)
-	}
+	require.Equal(t, "same_project", out.Body.Results[0].Code)
+	got, err := store.IssueByID(t.Context(), child.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, got.ProjectID)
 }
 
 type batchFailureStore struct {

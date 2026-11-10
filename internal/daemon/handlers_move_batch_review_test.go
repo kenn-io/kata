@@ -58,7 +58,7 @@ func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {
 	}
 }
 
-func TestMoveIssuesBatch_UnsupportedPairStillConflicts(t *testing.T) {
+func TestMoveIssuesBatch_UnsupportedPairLeavesValidMoves(t *testing.T) {
 	for _, dry := range []bool{false, true} {
 		t.Run(map[bool]string{false: "write", true: "preview"}[dry], func(t *testing.T) {
 			store := openClaimGateHelperDB(t)
@@ -146,59 +146,23 @@ func TestClaimClientCache_ReplacementBinding(t *testing.T) {
 	}
 }
 
-func TestMoveIssuesBatch_DuplicateAfterRefusal(t *testing.T) {
+func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
 	store := openClaimGateHelperDB(t)
-	_, issue := createClaimGateHelperIssue(t, store)
+	source, issue := createClaimGateHelperIssue(t, store)
 	target, err := store.CreateProject(t.Context(), "target")
 	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
 	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision + 1}, {Ref: issue.UID}}
+	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
+	for range 49 {
+		other, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "other", Author: "agent"})
+		require.NoError(t, err)
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: other.UID})
+	}
+	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
 	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
 	require.NoError(t, err)
-	require.Equal(t, "refused", out.Body.Results[0].Result)
-	require.Equal(t, "moved", out.Body.Results[1].Result)
-	got, err := store.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, target.ID, got.ProjectID)
-}
-
-func TestMoveIssuesBatch_DuplicateRevisionsAndPreview(t *testing.T) {
-	for _, mode := range []string{"stale duplicate", "preview", "across chunks"} {
-		t.Run(mode, func(t *testing.T) {
-			store := openClaimGateHelperDB(t)
-			source, issue := createClaimGateHelperIssue(t, store)
-			target, err := store.CreateProject(t.Context(), "target")
-			require.NoError(t, err)
-			req := &api.MoveIssuesRequest{}
-			req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-			req.Body.DryRun = mode == "preview"
-			req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
-			if mode == "across chunks" {
-				for range 49 {
-					other, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "other", Author: "agent"})
-					require.NoError(t, err)
-					req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: other.UID})
-				}
-			}
-			duplicate := api.MoveIssuesItem{Ref: issue.UID}
-			if mode == "stale duplicate" {
-				duplicate.ExpectedRevision = issue.Revision + 1
-			}
-			req.Body.Items = append(req.Body.Items, duplicate)
-			out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
-			require.NoError(t, err)
-			last := out.Body.Results[len(out.Body.Results)-1]
-			switch mode {
-			case "stale duplicate":
-				require.Equal(t, "refused", last.Result)
-				require.Equal(t, "revision_conflict", last.Code)
-			case "preview":
-				require.Equal(t, "would_move", last.Result)
-			case "across chunks":
-				require.Equal(t, "unchanged", last.Result)
-				require.Equal(t, "duplicate_item", last.Code)
-			}
-		})
-	}
+	last := out.Body.Results[len(out.Body.Results)-1]
+	require.Equal(t, "unchanged", last.Result)
+	require.Equal(t, "duplicate_item", last.Code)
 }

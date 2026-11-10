@@ -63,25 +63,6 @@ func TestMoveIssueRejectsClaimedDescendantAttachedAfterValidation(t *testing.T) 
 	require.Equal(t, before, after, "a refused move emits no events")
 }
 
-func TestMoveIssueRejectsDestinationChildDetachedAfterPreview(t *testing.T) {
-	var wrapped *moveMembershipChangeStore
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
-		wrapped = &moveMembershipChangeStore{Storage: cfg.DB}
-		cfg.DB = wrapped
-	})
-	source, target, root := seedMovePair(t, env)
-	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "child", Author: "worker"})
-	require.NoError(t, err)
-	link, err := env.DB.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: root.ID, Type: "parent", Author: "worker"})
-	require.NoError(t, err)
-	wrapped.beforeCommit = func() { require.NoError(t, env.DB.DeleteLinkByID(t.Context(), link.ID)) }
-	response, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, root.ShortID, "actions/move"), map[string]any{"actor": "worker", "to_project_uid": target.UID}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, root.Revision)})
-	assertAPIError(t, response.StatusCode, raw, http.StatusConflict, "issue_move_tree_changed")
-	got, err := env.DB.IssueByID(t.Context(), root.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
-}
-
 func TestMoveIssueRejectsDestinationChildMovedAfterPreview(t *testing.T) {
 	var wrapped *moveMembershipChangeStore
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {

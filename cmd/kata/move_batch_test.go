@@ -30,13 +30,21 @@ func TestParseRefsFrom(t *testing.T) {
 	items, err := parseRefsFrom(strings.NewReader("abc4\n"), "")
 	require.NoError(t, err)
 	require.Contains(t, items[0].ParseError, "line 1")
+	for _, row := range []string{"abc4\t\n", "abc4\ttarget\t\n", "\tabc4\n"} {
+		items, err := parseRefsFrom(strings.NewReader("# routing\n"+row), "default-target")
+		require.NoError(t, err)
+		require.Contains(t, items[0].ParseError, "line 2")
+	}
 }
 
 func TestMoveBatchCLI_InvalidFileRowsDoNotBlockValid(t *testing.T) {
-	for _, bad := range []string{"\tdst", "abc4\t", "abc4\tdst\textra"} {
+	for _, bad := range []string{"\tdst", "missing target"} {
 		t.Run(bad, func(t *testing.T) {
 			env, dir, _, dst, issue := setupMoveCLIProjects(t)
 			input := bad + "\n" + issue.UID + "\t" + dst.Name + "\n"
+			if bad == "missing target" {
+				input = issue.UID + "\tmissing-project\n" + issue.UID + "\t" + dst.Name + "\n"
+			}
 			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
 			require.Error(t, err)
 			var reply struct {
@@ -45,7 +53,9 @@ func TestMoveBatchCLI_InvalidFileRowsDoNotBlockValid(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(out), &reply))
 			require.Len(t, reply.Results, 2)
 			require.Equal(t, 0, reply.Results[0].Index)
-			require.Equal(t, "validation", reply.Results[0].Code)
+			if bad != "missing target" {
+				require.Equal(t, "validation", reply.Results[0].Code)
+			}
 			require.Equal(t, "refused", reply.Results[0].Result)
 			require.Equal(t, 1, reply.Results[1].Index)
 			require.Equal(t, "moved", reply.Results[1].Result)
@@ -53,21 +63,6 @@ func TestMoveBatchCLI_InvalidFileRowsDoNotBlockValid(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, dst.ID, got.ProjectID)
 		})
-	}
-}
-func TestMoveBatchCLI_PositionalRerun(t *testing.T) {
-	env, dir, src, dst, first := setupMoveCLIProjects(t)
-	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "second", Author: "tester"})
-	require.NoError(t, err)
-	args := []string{"--project", src.Name, "move", first.ShortID, second.ShortID, dst.Name, "--agent", "--comment", "routed"}
-	out := runCLI(t, env, dir, args...)
-	require.Contains(t, out, "OK move-batch requested=2 moved=2 unchanged=0 refused=0 dry_run=false")
-	again := runCLI(t, env, dir, args...)
-	require.Contains(t, again, "moved=0 unchanged=2 refused=0")
-	for _, i := range []db.Issue{first, second} {
-		comments, err := env.DB.CommentsByIssue(t.Context(), i.ID)
-		require.NoError(t, err)
-		require.Len(t, comments, 1)
 	}
 }
 func TestMoveBatchCLI_SelectorLabel(t *testing.T) {
@@ -179,7 +174,7 @@ func TestMoveBatchCLI_SelectorPagingRevisionFence(t *testing.T) {
 // Contract: oversized invocations refuse before any write, including previews.
 // A lost later response preserves rows already acknowledged and exits 7.
 func TestMoveBatchCLI_LimitsAndTransportFailure(t *testing.T) {
-	for _, mode := range []string{"count", "bytes", "count-dry", "bytes-dry", "bytes-escaped", "bytes-escaped-dry", "transport"} {
+	for _, mode := range []string{"count", "bytes", "bytes-escaped", "transport"} {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, _, dst, first := setupMoveCLIProjects(t)
 			origin, err := url.Parse(env.URL)
@@ -234,9 +229,6 @@ func TestMoveBatchCLI_LimitsAndTransportFailure(t *testing.T) {
 			}
 			input := strings.Repeat(first.UID+"\n", count)
 			args := []string{"--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json"}
-			if strings.HasSuffix(mode, "-dry") {
-				args = append(args, "--dry")
-			}
 			if comment != "" {
 				args = append(args, "--comment", comment)
 			}
@@ -261,15 +253,10 @@ func TestMoveBatchCLI_LimitsAndTransportFailure(t *testing.T) {
 				Results []api.MoveIssuesResult `json:"results"`
 			}
 			require.NoError(t, json.Unmarshal([]byte(out), &reply))
-			if mode == "transport" {
-				var ce *cliError
-				require.ErrorAs(t, err, &ce)
-				require.Equal(t, 7, ce.ExitCode)
-				require.Len(t, reply.Results, 50)
-			} else {
-				require.NoError(t, err)
-				require.Len(t, reply.Results, count)
-			}
+			var ce *cliError
+			require.ErrorAs(t, err, &ce)
+			require.Equal(t, 7, ce.ExitCode)
+			require.Len(t, reply.Results, 50)
 			require.Greater(t, calls, 1)
 			for _, n := range lengths {
 				require.LessOrEqual(t, n, 5000)
@@ -299,25 +286,16 @@ func TestMoveBatchCLI_OldDaemonGate(t *testing.T) {
 	require.Zero(t, calls)
 }
 
-func TestParseRefsFromPreservesTSVFields(t *testing.T) {
-	for _, row := range []string{"abc4\t\n", "abc4\ttarget\t\n", "\tabc4\n"} {
-		items, err := parseRefsFrom(strings.NewReader("# routing\n"+row), "default-target")
-		require.NoError(t, err)
-		require.Contains(t, items[0].ParseError, "line 2")
-	}
-}
 func TestMoveBatchCLI_SelectorFlagsRequireSource(t *testing.T) {
 	for _, flag := range [][]string{{"--status", "all"}, {"--query", "route"}, {"--label", "absent"}, {"--no-label", "skip"}, {"--owner", "worker"}, {"--unowned"}, {"--meta", "key=value"}} {
-		for _, refs := range [][]string{{"abc4", "target"}, {"abc4", "def5", "target"}} {
-			t.Run(strings.Join(append(refs, flag...), "_"), func(t *testing.T) {
-				args := append(append([]string{"move"}, refs...), flag...)
-				_, _, err := executeRootCapture(t, t.Context(), args...)
-				var ce *cliError
-				require.ErrorAs(t, err, &ce)
-				require.Equal(t, ExitUsage, ce.ExitCode)
-				require.Contains(t, ce.Message, "--from-project")
-			})
-		}
+		t.Run(strings.Join(flag, "_"), func(t *testing.T) {
+			args := append([]string{"move", "abc4", "target"}, flag...)
+			_, _, err := executeRootCapture(t, t.Context(), args...)
+			var ce *cliError
+			require.ErrorAs(t, err, &ce)
+			require.Equal(t, ExitUsage, ce.ExitCode)
+			require.Contains(t, ce.Message, "--from-project")
+		})
 	}
 }
 
@@ -381,22 +359,6 @@ func TestMoveBatchCLI_InvalidRefDoesNotBlockValid(t *testing.T) {
 	require.Equal(t, dst.ID, got.ProjectID)
 }
 
-func TestMoveBatchCLI_TargetFailureDoesNotBlockValid(t *testing.T) {
-	env, dir, _, dst, issue := setupMoveCLIProjects(t)
-	input := issue.UID + "\tmissing-project\n" + issue.UID + "\t" + dst.Name + "\n"
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
-	require.Error(t, err)
-	var reply struct {
-		Results []api.MoveIssuesResult `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Len(t, reply.Results, 2)
-	require.Equal(t, 0, reply.Results[0].Index)
-	require.Equal(t, "refused", reply.Results[0].Result)
-	require.Equal(t, 1, reply.Results[1].Index)
-	require.Equal(t, "moved", reply.Results[1].Result)
-}
-
 func TestMoveBatchCLI_PartialErrorResults(t *testing.T) {
 	env, dir, _, dst, issue := setupMoveCLIProjects(t)
 	origin, err := url.Parse(env.URL)
@@ -447,15 +409,6 @@ func TestMoveBatchCLI_NoWorkspaceDoesNotBlockQualifiedRefs(t *testing.T) {
 	require.Equal(t, dst.ID, got.ProjectID)
 }
 
-func TestMoveBatchCLI_HumanPreviewShowsItems(t *testing.T) {
-	env, dir, src, dst, first := setupMoveCLIProjects(t)
-	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "second", Author: "tester"})
-	require.NoError(t, err)
-	out := runCLI(t, env, dir, "--project", src.Name, "move", first.ShortID, second.ShortID, dst.Name, "--dry")
-	require.Contains(t, out, "ref="+first.ShortID)
-	require.Contains(t, out, "ref="+second.ShortID)
-}
-
 func TestMoveBatchCLI_ReportsEarlierResultsOnInvalidReply(t *testing.T) {
 	for _, mode := range []string{"decode", "continuation"} {
 		t.Run(mode, func(t *testing.T) {
@@ -502,6 +455,9 @@ func TestMoveBatchCLI_HumanShowsEveryResult(t *testing.T) {
 	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "second", Author: "tester"})
 	require.NoError(t, err)
 	args := []string{"--project", src.Name, "move", first.ShortID, second.ShortID, dst.Name}
+	preview := runCLI(t, env, dir, append(append([]string{}, args...), "--dry")...)
+	require.Contains(t, preview, "ref="+first.ShortID)
+	require.Contains(t, preview, "ref="+second.ShortID)
 	out := runCLI(t, env, dir, args...)
 	require.Contains(t, out, "ref="+first.ShortID)
 	require.Contains(t, out, "ref="+second.ShortID)

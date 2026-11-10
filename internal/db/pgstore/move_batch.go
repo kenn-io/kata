@@ -17,10 +17,6 @@ func (s *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 	}
 	var out db.MoveIssuesBatchOut
 	run := func(tx *sql.Tx) error {
-		out = db.MoveIssuesBatchOut{Results: make([]db.MoveIssueBatchResult, len(in.Items))}
-		if err := lockProjectAccessExclusive(ctx, tx); err != nil {
-			return err
-		}
 		var moved bool
 		var err error
 		out, moved, err = db.RunMoveBatchTx(ctx, tx, in, s.moveTreeTx, s.createCommentTx, IsTransient)
@@ -33,12 +29,12 @@ func (s *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 			}
 		}
 		if in.DryRun {
-			return errBatchMovePreview
+			return errMovePreview
 		}
 		return nil
 	}
-	err := s.withSerializableTx(ctx, run)
-	if errors.Is(err, errBatchMovePreview) {
+	err := s.withProjectAccessTx(ctx, run)
+	if errors.Is(err, errMovePreview) {
 		err = nil
 	}
 	if err != nil {
@@ -52,5 +48,3 @@ func (s *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 	}
 	return out, nil
 }
-
-var errBatchMovePreview = errors.New("batch move preview complete")
