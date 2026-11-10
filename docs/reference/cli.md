@@ -1005,8 +1005,8 @@ Each input returns `moved`, `unchanged`, or `refused`; previews return
 `would_move`. Agent output prints every result in input order. JSON output
 contains `dry_run`, `summary`, and `results`, including each input's `index`,
 `ref`, result code, new short ID, collision extension flag, and event ID.
-Human output summarizes the batch and lists refusals and extended short IDs;
-use `-v` for every row. Descendants are listed under their selected root.
+Human output summarizes the batch and lists previews, refusals, and extended
+short IDs; use `-v` for every row. Descendants are listed under their selected root.
 
 | Result code | Meaning |
 | --- | --- |

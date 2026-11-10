@@ -147,10 +147,10 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					results[j].Result = "refused"
 					results[j].Code = "conflicting_target"
 					results[j].Message = "issue requested for different targets"
-				} else if j >= in.Body.StartIndex {
+				} else if j >= in.Body.StartIndex && results[j].Result == "" {
 					if owner < 0 {
 						owner = j
-					} else if results[j].Result == "" {
+					} else {
 						items[j].owner = owner
 					}
 				}
@@ -172,7 +172,24 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			budget = moveBatchBudget
 		}
 		for start := in.Body.StartIndex; start < n; {
+			// A duplicate may proceed when its earlier attempt was refused.
+			if owner := items[start].owner; owner >= 0 && results[owner].Result == "refused" {
+				for j := start + 1; j < n; j++ {
+					if items[j].owner == owner {
+						items[j].owner = start
+					}
+				}
+				items[start].owner = -1
+			}
 			end := min(start+moveBatchChunkIssues, n)
+			// Finish the owner's chunk before deciding the duplicate's outcome.
+			for j := start + 1; j < end; j++ {
+				owner := items[j].owner
+				if owner >= 0 && results[j].Result == "" && (owner >= start || results[owner].Result == "refused") {
+					end = j
+					break
+				}
+			}
 			var moves []db.MoveIssueProjectIn
 			var indexes []int
 			for j := start; j < end; j++ {

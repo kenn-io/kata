@@ -402,3 +402,30 @@ func TestMoveBatchCLI_PartialErrorResults(t *testing.T) {
 	require.Equal(t, 1, reply.Results[1].Index)
 	require.Equal(t, "moved", reply.Results[1].Result)
 }
+
+func TestMoveBatchCLI_NoWorkspaceDoesNotBlockQualifiedRefs(t *testing.T) {
+	env, _, _, dst, issue := setupMoveCLIProjects(t)
+	dir := t.TempDir()
+	input := "abcd\t" + dst.Name + "\n" + issue.UID + "\t" + dst.Name + "\n"
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
+	require.Error(t, err)
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 2)
+	require.Equal(t, "refused", reply.Results[0].Result)
+	require.Equal(t, "moved", reply.Results[1].Result)
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, dst.ID, got.ProjectID)
+}
+
+func TestMoveBatchCLI_HumanPreviewShowsItems(t *testing.T) {
+	env, dir, src, dst, first := setupMoveCLIProjects(t)
+	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "second", Author: "tester"})
+	require.NoError(t, err)
+	out := runCLI(t, env, dir, "--project", src.Name, "move", first.ShortID, second.ShortID, dst.Name, "--dry")
+	require.Contains(t, out, "ref="+first.ShortID)
+	require.Contains(t, out, "ref="+second.ShortID)
+}

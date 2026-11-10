@@ -280,14 +280,12 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	}
 	if needsDefault {
 		start, err := resolveStartPath(flags.Workspace)
-		if err != nil {
-			return err
+		if err == nil {
+			pid, _, err := resolveProjectIDAndNameWithClient(a, start)
+			if err == nil {
+				request.Body.DefaultProjectID = pid
+			}
 		}
-		pid, _, err := resolveProjectIDAndNameWithClient(a, start)
-		if err != nil {
-			return err
-		}
-		request.Body.DefaultProjectID = pid
 	}
 	// Account for every original row before dropping locally refused targets.
 	for _, item := range items {
@@ -468,7 +466,7 @@ func printMoveBatch(cmd *cobra.Command, results []api.MoveIssuesResult, requeste
 		out.WriteByte('\n')
 	}
 	for _, r := range results {
-		if currentOutputMode() != outputAgent && !opts.Verbose && r.Result != "refused" && !r.ShortIDExtended {
+		if currentOutputMode() != outputAgent && !opts.Verbose && r.Result != "refused" && r.Result != "would_move" && !r.ShortIDExtended {
 			continue
 		}
 		fmt.Fprintf(&out, "- ref=%s result=%s", agentValue(r.Ref), r.Result)

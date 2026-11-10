@@ -289,3 +289,34 @@ func TestMoveIssuesBatch_DestinationResidentChild(t *testing.T) {
 	require.Empty(t, comments)
 	require.NotEqual(t, source.ID, got.ProjectID)
 }
+
+type batchFirstPreviewRefusal struct {
+	db.Storage
+	refused bool
+}
+
+func (s *batchFirstPreviewRefusal) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
+	out, err := s.Storage.MoveIssuesBatch(ctx, in)
+	if err == nil && in.DryRun && !s.refused {
+		s.refused = true
+		out.Results[0].Err = &db.RevisionConflictError{CurrentRevision: in.Items[0].IfMatchRev + 1}
+	}
+	return out, err
+}
+
+func TestMoveIssuesBatch_DuplicateAfterPreviewRefusal(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	_, issue := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}, {Ref: issue.UID}}
+	out, err := moveIssuesHandler(ServerConfig{DB: &batchFirstPreviewRefusal{Storage: store}})(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, "refused", out.Body.Results[0].Result)
+	require.Equal(t, "moved", out.Body.Results[1].Result)
+	got, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, got.ProjectID)
+}

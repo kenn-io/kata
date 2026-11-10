@@ -137,7 +137,7 @@ func TestClaimClientCache_ReplacementBinding(t *testing.T) {
 
 func TestMoveIssuesBatch_DuplicateAfterRefusal(t *testing.T) {
 	store := openClaimGateHelperDB(t)
-	source, issue := createClaimGateHelperIssue(t, store)
+	_, issue := createClaimGateHelperIssue(t, store)
 	target, err := store.CreateProject(t.Context(), "target")
 	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
@@ -146,10 +146,10 @@ func TestMoveIssuesBatch_DuplicateAfterRefusal(t *testing.T) {
 	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
 	require.NoError(t, err)
 	require.Equal(t, "refused", out.Body.Results[0].Result)
-	require.Equal(t, "refused", out.Body.Results[1].Result)
+	require.Equal(t, "moved", out.Body.Results[1].Result)
 	got, err := store.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
+	require.Equal(t, target.ID, got.ProjectID)
 }
 
 func TestMoveIssuesBatch_DuplicateRevisionsAndPreview(t *testing.T) {
