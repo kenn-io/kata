@@ -12,7 +12,7 @@ import (
 
 var (
 	dayOfMonthExtension = regexp.MustCompile(`(?i)(^|,)(L(-[0-9]+)?|LW|[0-9]+W)($|,)`)
-	dayOfWeekExtension  = regexp.MustCompile(`(?i)(^|,)([0-9]+|SUN|MON|TUE|WED|THU|FRI|SAT)(L|#(L|[0-9]*))($|,)`)
+	dayOfWeekExtension  = regexp.MustCompile(`(?i)(^|,)(L|([0-9]+|SUN|MON|TUE|WED|THU|FRI|SAT)(L|#(L|[0-9]*)))($|,)`)
 	hashExtension       = regexp.MustCompile(`(?i)(^|,)H($|[(/,])`)
 )
 

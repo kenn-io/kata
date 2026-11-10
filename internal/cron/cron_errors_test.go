@@ -14,10 +14,10 @@ func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
 		{"0 0 9 * * * 2026", "Kata uses five fields"},
 		{"@reboot", "@reboot is not supported"},
 		{"@every 1ms", "adapter jobs can use @every 1s or longer; native recurring jobs use an interval trigger"},
-		{"@every nonsense", "adapter jobs can use @every 1s or longer; native recurring jobs use an interval trigger"},
 		{"0 9 L JAN *", "L, W, and # syntax is not supported"},
 		{"0 9 15W * *", "L, W, and # syntax is not supported"},
 		{"0 9 * * 5#2", "L, W, and # syntax is not supported"},
+		{"0 9 * * L", "L, W, and # syntax is not supported"},
 		{"H 9 * * *", "hashed schedules (H) are not supported"},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {

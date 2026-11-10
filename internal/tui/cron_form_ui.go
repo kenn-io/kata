@@ -460,8 +460,8 @@ func renderCronForm(m Model) string {
 	}
 	footerBudget := max(m.height-len(body)-helpLines(help, m.width)-cronNoticeRows(m)-1, 1)
 	if len(footer) > footerBudget {
-		footer = footer[:footerBudget]
-		footer[footerBudget-1] = ansi.Truncate(footer[footerBudget-1], max(m.width-1, 0), "") + "…"
+		footer = append(footer[:max(footerBudget-2, 0)], footer[len(footer)-min(footerBudget, 2):]...)
+		footer[max(footerBudget-3, 0)] = ansi.Truncate(footer[max(footerBudget-3, 0)], max(m.width-1, 0), "") + "…"
 	}
 	budget := max(m.height-len(body)-max(len(footer), 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
 	start, end := windowBounds(len(lines), cursor, budget)

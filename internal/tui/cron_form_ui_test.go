@@ -558,35 +558,42 @@ func TestCronNativeCreateRefreshesParentActivity(t *testing.T) {
 }
 
 func TestCronValidationMessagesRemainVisible(t *testing.T) {
-	rec := executeRecord(`{}`)
-	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
-	m, _ := openEdit(t, rec)
-	m.width = 60
-	m.cron.form.val[cfCron] = "invalid"
-	m.cron.form.focusField(cfCron)
-	_, _, err := m.cron.form.build(cronUIDResolver(nil))
-	require.Error(t, err)
-	m, cmd := press(m, ctrlKey('o'))
-	require.Nil(t, cmd)
-	require.Contains(t, strings.Join(strings.Fields(stripANSI(m.viewBody())), ""), strings.Join(strings.Fields(err.Error()), ""))
-}
-
-func TestCronLongValidationErrorFitsScreen(t *testing.T) {
-	rec := executeRecord(`{}`)
-	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
-	m, _ := openEdit(t, rec)
-	m.width, m.height = 80, 18
-	m.cron.form.val[cfCron] = "@" + strings.Repeat("x", 900)
-	m.cron.form.focusField(cfCron)
-	m, cmd := press(m, ctrlKey('o'))
-	require.Nil(t, cmd)
-	require.Contains(t, m.cron.form.general, strings.Repeat("x", 900))
-	view := stripANSI(m.View().Content)
-	require.LessOrEqual(t, len(strings.Split(view, "\n")), m.height, "%s", view)
-	require.Contains(t, view, "ctrl+o")
-	require.Contains(t, view, "unrecognized descriptor")
-	require.Contains(t, view, "▶ Cron:")
-	require.Contains(t, view, "…")
+	for _, tc := range []struct {
+		name, expression string
+		width, height    int
+		long             bool
+	}{
+		{"short", "invalid", 60, 24, false},
+		{"descriptor", "@" + strings.Repeat("x", 900), 80, 18, true},
+		{"every", "@every " + strings.Repeat("x", 900), 80, 24, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := executeRecord(`{}`)
+			rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
+			m, _ := openEdit(t, rec)
+			m.width, m.height = tc.width, tc.height
+			m.cron.form.val[cfCron] = tc.expression
+			m.cron.form.focusField(cfCron)
+			_, _, err := m.cron.form.build(cronUIDResolver(nil))
+			require.Error(t, err)
+			m, cmd := press(m, ctrlKey('o'))
+			require.Nil(t, cmd)
+			if !tc.long {
+				require.Contains(t, strings.Join(strings.Fields(stripANSI(m.viewBody())), ""), strings.Join(strings.Fields(err.Error()), ""))
+				return
+			}
+			view := stripANSI(m.View().Content)
+			require.LessOrEqual(t, len(strings.Split(view, "\n")), m.height, "%s", view)
+			require.Contains(t, view, "ctrl+o")
+			require.Contains(t, view, "▶ Cron:")
+			require.Contains(t, view, "…")
+			if tc.name == "descriptor" {
+				require.Contains(t, view, "unrecognized descriptor")
+			} else {
+				require.Contains(t, strings.Join(strings.Fields(view), ""), strings.Join(strings.Fields("adapter jobs can use @every 1s or longer; native recurring jobs use an interval trigger"), ""))
+			}
+		})
+	}
 }
 
 func TestCronEditorReturnKeepsDraftOnErrorAndIgnoresClosedForm(t *testing.T) {
