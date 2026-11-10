@@ -30,8 +30,8 @@ type NotifyOutput struct {
 }
 
 func (h toolHandlers) notify(ctx context.Context, _ *sdkmcp.CallToolRequest, input NotifyInput) (*sdkmcp.CallToolResult, NotifyOutput, error) {
-	if input.Clear && (input.Message != nil || input.Re != "" || input.Broadcast || input.Teammates) {
-		return nil, NotifyOutput{}, errors.New("clear cannot be combined with message, re, broadcast, or teammates")
+	if input.Clear && (input.Broadcast || input.Teammates) {
+		return nil, NotifyOutput{}, errors.New("clear cannot be combined with broadcast or teammates")
 	}
 	to := input.To
 	if input.Clear {

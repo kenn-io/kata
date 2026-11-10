@@ -13,7 +13,6 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"go.kenn.io/kata/internal/notification"
-	"go.kenn.io/kata/internal/textsafe"
 	"go.kenn.io/kata/internal/wait"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -203,9 +202,8 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 		}
 		state.Matched, state.Reason = target.evaluator.Eval(until, state.Status, attention, reply)
 		if state.Reason == "attention" {
-			state.Attention = textsafe.Line(attention)
-			msg, _ := shown.Issue.Metadata["work.attention_msg"].(string)
-			state.AttentionMsg = textsafe.Line(msg)
+			state.Attention = attention
+			state.AttentionMsg, _ = shown.Issue.Metadata["work.attention_msg"].(string)
 		}
 	}
 	target.state = state

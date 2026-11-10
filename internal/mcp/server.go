@@ -242,7 +242,7 @@ func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.purge", "Purge issue", "Irreversibly purge a soft-deleted issue after exact confirmation.", mutating, handlers.purgeIssue)
 	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
 	addTool(server, "kata.restore", "Restore issue", "Restore a soft-deleted issue.", additive, handlers.restoreIssue)
-	addTool(server, "kata.wait", "Wait for issues", "Wait up to 300 seconds for status, delegated work.attention, or an exact recipient's notification change after the first poll. until modes also finish on closure; requests are never consumed. Reply waits re-baseline each call; check kata.inbox before waiting and after a timeout. Use any to return after one match.", read, handlers.wait)
+	addTool(server, "kata.wait", "Wait for issues", "Wait up to 300 seconds for status, delegated work.attention, or an exact recipient's notification change after the first poll. until modes also finish on closure; requests are never consumed. Use any to return after one match.", read, handlers.wait)
 }
 
 func addTool[In, Out any](
