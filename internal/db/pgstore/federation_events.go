@@ -261,16 +261,9 @@ func (s *Store) ReconcileLocalFederationEcho(
 	return found, err
 }
 
-// FederationLocalReplayDue reports whether a pulled local-origin event still
-// owes its consumers a notification. A turn that finds the replay
-// unacknowledged records the debt, so a later push acknowledgment cannot erase it.
-func (s *Store) FederationLocalReplayDue(ctx context.Context, eventUID string, unacknowledged bool) (bool, error) {
-	var due int
-	err := s.QueryRowContext(ctx, `
-		UPDATE federation_local_replays SET delivery_due = GREATEST(delivery_due, $2::int)
-		 WHERE event_uid=$1 RETURNING delivery_due`, eventUID, boolInt(unacknowledged)).Scan(&due)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return due == 1, err
+// FederationLocalReplay reports whether this local event was restored by a pull.
+func (s *Store) FederationLocalReplay(ctx context.Context, eventUID string) (bool, error) {
+	var exists bool
+	err := s.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_local_replays WHERE event_uid=$1)`, eventUID).Scan(&exists)
+	return exists, err
 }

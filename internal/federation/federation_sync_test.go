@@ -1928,7 +1928,7 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 	testResetRetryLocalProjectEvent(t, false, false)
 }
 
-func TestSyncFederationOnceResetRetryDoesNotRedeliverAcknowledgedLocalProjectEvent(t *testing.T) {
+func TestSyncFederationOnceResetRetryDeliversAcknowledgedLocalProjectEvent(t *testing.T) {
 	testResetRetryLocalProjectEvent(t, true, false)
 }
 
@@ -1969,6 +1969,7 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 		Enabled:              true,
 	})
 	require.NoError(t, err)
+	failPoll := false
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects/42/federation/events:ingest":
@@ -1980,6 +1981,10 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
 			}))
 		case "/api/v1/projects/42/federation/events":
+			if failPoll {
+				http.Error(w, "poll unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			switch r.URL.Query().Get("after_id") {
 			case "50":
 				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
@@ -2016,6 +2021,7 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 	}))
 	assert.Empty(t, delivered)
 	if interruptedPush {
+		failPoll = true
 		binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
 		require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
@@ -2028,6 +2034,7 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 		require.NoError(t, err)
 		require.Equal(t, replayed[0].ID, binding.PushCursorEventID)
 		require.Empty(t, delivered)
+		failPoll = false
 	}
 	if acknowledged {
 		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
@@ -2047,13 +2054,9 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 		delivered = append(delivered, events...)
 	}))
 
-	if acknowledged {
-		require.Empty(t, delivered, "acknowledged replay repairs must not repeat notifications")
-	} else {
-		require.NotEmpty(t, delivered)
-		assert.Equal(t, localEvent.UID, delivered[0].UID)
-		assert.Greater(t, delivered[0].ID, localEvent.ID)
-	}
+	require.Len(t, delivered, 1)
+	assert.Equal(t, localEvent.UID, delivered[0].UID)
+	assert.Greater(t, delivered[0].ID, localEvent.ID)
 	repaired, err := spoke.DB.ProjectByID(ctx, project.ID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"area":"ops"}`, string(repaired.Metadata))

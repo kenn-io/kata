@@ -828,15 +828,15 @@ func (s *Store) ExportEvents(ctx context.Context, filter db.ExportFilter) iter.S
 		subjectLive = `((events.issue_id IS NULL AND subject_issue.id IS NULL)
 OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 	}
-	replayDue := `NULL`
+	localReplay := `NULL`
 	if filter.ProjectID == nil {
-		replayDue = `(SELECT delivery_due FROM federation_local_replays WHERE event_uid=events.uid)`
+		localReplay = `(SELECT 1 FROM federation_local_replays WHERE event_uid=events.uid)`
 	}
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id,
        export_project.uid, events.project_name, ` + issueIDExpression + `, events.issue_uid,
        ` + relatedIDExpression + `, ` + relatedUIDExpression + `,
        events.type, events.actor, events.payload, events.hlc_physical_ms,
-       events.hlc_counter, events.content_hash, events.created_at, ` + replayDue + `
+       events.hlc_counter, events.content_hash, events.created_at, ` + localReplay + `
   FROM events
   JOIN projects export_project ON export_project.id = events.project_id
   LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
@@ -867,7 +867,7 @@ AND (events.related_issue_uid IS NULL OR NOT EXISTS (
 				&record.ProjectID, &record.ProjectUID, &record.ProjectName, &record.IssueID,
 				&record.IssueUID, &record.RelatedIssueID, &record.RelatedIssueUID,
 				&record.Type, &record.Actor, &payload, &record.HLCPhysicalMS,
-				&record.HLCCounter, &record.ContentHash, &record.CreatedAt, &record.LocalReplayDue); err != nil {
+				&record.HLCCounter, &record.ContentHash, &record.CreatedAt, &record.LocalReplay); err != nil {
 				return db.EventExport{}, pgExportScanError("event", err)
 			}
 			if !jsontext.Value([]byte(payload)).IsValid() {

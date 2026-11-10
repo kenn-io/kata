@@ -71,8 +71,8 @@ func TestFederationLocalReplaysMigrationBackfillsInterruptedReset(t *testing.T) 
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
-	for name, want := range map[string]bool{"unprojected": true, "acknowledged": false, "before": true, "after": false, "pulled": false} {
-		got, replayErr := upgraded.FederationLocalReplayDue(ctx, events[name], false)
+	for name, want := range map[string]bool{"unprojected": true, "acknowledged": true, "before": true, "after": false, "pulled": false} {
+		got, replayErr := upgraded.FederationLocalReplay(ctx, events[name])
 		require.NoError(t, replayErr)
 		require.Equal(t, want, got, name)
 	}

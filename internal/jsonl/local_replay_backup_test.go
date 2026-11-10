@@ -16,7 +16,7 @@ import (
 	"go.kenn.io/kata/internal/jsonl"
 )
 
-func TestBackupPreservesLocalReplayDebt(t *testing.T) {
+func TestBackupPreservesLocalReplays(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
@@ -53,29 +53,26 @@ func TestBackupPreservesLocalReplayDebt(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, inserted)
 			}
-			due, err := source.FederationLocalReplayDue(ctx, events[0].UID, true)
-			require.NoError(t, err)
-			require.True(t, due)
 			var backup bytes.Buffer
 			require.NoError(t, jsonl.Export(ctx, source, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
 			data := bytes.Clone(backup.Bytes())
 			target := open()
 			require.NoError(t, jsonl.Import(ctx, &backup, target))
-			due, err = target.FederationLocalReplayDue(ctx, events[0].UID, false)
+			replay, err := target.FederationLocalReplay(ctx, events[0].UID)
 			require.NoError(t, err)
-			require.True(t, due, "an acknowledged replay retains its pending notification")
-			due, err = target.FederationLocalReplayDue(ctx, events[1].UID, true)
+			require.True(t, replay, "a restored replay remains eligible for notification")
+			replay, err = target.FederationLocalReplay(ctx, events[1].UID)
 			require.NoError(t, err)
-			require.True(t, due, "an unprojected replay remains eligible for recovery")
-			due, err = target.FederationLocalReplayDue(ctx, events[2].UID, true)
+			require.True(t, replay, "an unprojected replay remains eligible for recovery")
+			replay, err = target.FederationLocalReplay(ctx, events[2].UID)
 			require.NoError(t, err)
-			require.False(t, due, "ordinary echoes stay silent")
+			require.False(t, replay, "ordinary echoes stay silent")
 
 			clone := open()
 			require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(data), clone, jsonl.ImportOptions{NewInstance: true}))
-			due, err = clone.FederationLocalReplayDue(ctx, events[0].UID, true)
+			replay, err = clone.FederationLocalReplay(ctx, events[0].UID)
 			require.NoError(t, err)
-			require.False(t, due, "a new instance does not inherit another instance's replay debt")
+			require.False(t, replay, "a new instance does not inherit another instance's replay markers")
 		})
 	}
 }

@@ -509,7 +509,6 @@ func syncDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) (resultErr error) {
-	startPushCursor := binding.PushCursorEventID
 	var pushErr error
 	if pushThisTurn {
 		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
@@ -672,7 +671,7 @@ func syncDirectSpoke(
 			if duplicate[i] && shouldDeliverPage {
 				var err error
 				if ev.OriginInstanceUID == localInstanceUID {
-					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, startPushCursor, eventProjects[i], ev)
+					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, eventProjects[i], ev)
 				} else if insertedThisPull[ev.EventUID] {
 					deliver[i] = true
 				} else {
@@ -801,7 +800,7 @@ func shouldDeliverDuplicateLocalEcho(
 	ctx context.Context,
 	store db.Storage,
 	binding db.FederationBinding,
-	pushCursor, projectID int64,
+	projectID int64,
 	ev api.EventEnvelope,
 ) (bool, error) {
 	if projectID != binding.ProjectID {
@@ -814,18 +813,8 @@ func shouldDeliverDuplicateLocalEcho(
 		if err != nil || source.PullCursorEventID >= ev.EventID {
 			return false, err
 		}
-		pushCursor = source.PushCursorEventID
 	}
-	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
-	if err != nil || len(events) != 1 {
-		return false, err
-	}
-	// This turn's push can acknowledge the replay before the pull applies it, so
-	// the cursor from before the turn decides. A replay found unacknowledged stays
-	// owed after a later push acknowledges it. Other acknowledged replays stay
-	// silent unless their issue is unprojected, which proves they never reached consumers.
-	event := events[0]
-	return store.FederationLocalReplayDue(ctx, ev.EventUID, event.ID > pushCursor || event.IssueID == nil && event.IssueUID != nil)
+	return store.FederationLocalReplay(ctx, ev.EventUID)
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {

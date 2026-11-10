@@ -821,14 +821,14 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 	if !f.IncludeDeleted {
 		subjectLiveClause = `((events.issue_id IS NULL AND subject_issue.id IS NULL) OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 	}
-	replayDue := `NULL`
+	localReplay := `NULL`
 	if f.ProjectID == nil {
-		replayDue = `(SELECT delivery_due FROM federation_local_replays WHERE event_uid=events.uid)`
+		localReplay = `(SELECT 1 FROM federation_local_replays WHERE event_uid=events.uid)`
 	}
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, events.project_name, ` + issueIDExpr + `, events.issue_uid,
 	                 ` + relatedIDExpr + `, ` + relatedUIDExpr + `,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
-	                 CAST(events.created_at AS TEXT), ` + replayDue + `
+	                 CAST(events.created_at AS TEXT), ` + localReplay + `
 	          FROM events
 	          JOIN projects export_project ON export_project.id = events.project_id
 	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
@@ -866,7 +866,7 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 			var payload string
 			if err := rows.Scan(&rec.ID, &rec.UID, &rec.OriginInstanceUID, &rec.ProjectID, &rec.ProjectUID, &rec.ProjectName, &rec.IssueID,
 				&rec.IssueUID, &rec.RelatedIssueID, &rec.RelatedIssueUID,
-				&rec.Type, &rec.Actor, &payload, &rec.HLCPhysicalMS, &rec.HLCCounter, &rec.ContentHash, &rec.CreatedAt, &rec.LocalReplayDue); err != nil {
+				&rec.Type, &rec.Actor, &payload, &rec.HLCPhysicalMS, &rec.HLCCounter, &rec.ContentHash, &rec.CreatedAt, &rec.LocalReplay); err != nil {
 				return db.EventExport{}, scanError("event", err)
 			}
 			if !jsontext.Value([]byte(payload)).IsValid() {

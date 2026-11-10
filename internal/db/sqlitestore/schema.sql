@@ -233,8 +233,7 @@ CREATE TABLE events (
   CHECK (length(content_hash) = 64)
 );
 CREATE TABLE federation_local_replays (
-  event_uid    TEXT PRIMARY KEY REFERENCES events(uid) ON DELETE CASCADE,
-  delivery_due INTEGER NOT NULL DEFAULT 0
+  event_uid TEXT PRIMARY KEY REFERENCES events(uid) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_events_project ON events(project_id, id);
