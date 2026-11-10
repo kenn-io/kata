@@ -2195,6 +2195,10 @@ daemon can sign root receipts for each hub project it roots. Use
 list and error. The TUI shows the same retained errors in a spoke row's detail
 view.
 
+Pass `--project <name>` to show only that project's status. The command exits
+with a not-found error if the project has no federation status entry. This
+filter applies to human, agent, and JSON output.
+
 ## Compatibility and rolling upgrades
 
 For ordinary issue synchronization, upgrade the hub first and let spokes
