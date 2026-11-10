@@ -114,7 +114,8 @@ func TestInboxWatchOversizedHintsHaveReducedIdentity(t *testing.T) {
 
 func generatedInboxWatchRequest(ht *inboxPropertyT) inboxWatchRequest {
 	return inboxWatchRequest{
-		inboxRequest: inboxRequest{Ref: "abcd", Title: "Finding"},
+		Ref:        "abcd",
+		Title:      "Finding",
 		IssueUID:   fmt.Sprint(inboxDrawInt64(ht)),
 		ProjectUID: inboxDrawText(ht),
 		value: notification.Value{

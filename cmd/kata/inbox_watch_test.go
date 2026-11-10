@@ -328,7 +328,7 @@ func TestInboxWatchRendersOversizedHints(t *testing.T) {
 			cmd := newInboxCmd()
 			cmd.SetOut(&out)
 			err := printInboxWatch(t.Context(), cmd, "reader", []inboxWatchRequest{{
-				inboxRequest: inboxRequest{Ref: "abcd"}, IssueUID: "issue", ProjectUID: "project", Oversized: true,
+				Ref: "abcd", IssueUID: "issue", ProjectUID: "project", Oversized: true,
 			}}, false)
 			require.NoError(t, err)
 			require.Contains(t, out.String(), "abcd")
