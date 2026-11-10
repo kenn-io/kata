@@ -209,6 +209,13 @@ func (a CronSQL) RecurringJobs(ctx context.Context, after string, limit int) ([]
 	return result, rows.Err()
 }
 
+// recurringOccurrence is the supported delivery evidence in cron.occurrence.
+// Dispatch adds provenance identifiers; status reads validate only these fields.
+type recurringOccurrence struct {
+	Version     int       `json:"version"`
+	ScheduledAt time.Time `json:"scheduled_at"`
+}
+
 // DispatchRecurring composes ordinary issue writes and progress in one fenced transaction.
 func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCronIn) (DispatchRecurringCronOut, error) {
 	var out DispatchRecurringCronOut
@@ -276,11 +283,10 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		for _, due := range batch.Due {
 			stamp := due.UTC().Format(time.RFC3339Nano)
 			occurrence, err := json.Marshal(struct {
-				Version            int       `json:"version"`
-				JobUID             string    `json:"job_uid"`
-				DefinitionEventUID string    `json:"definition_event_uid"`
-				ScheduledAt        time.Time `json:"scheduled_at"`
-			}{1, job.UID, job.DefinitionEventUID, due.UTC()})
+				recurringOccurrence
+				JobUID             string `json:"job_uid"`
+				DefinitionEventUID string `json:"definition_event_uid"`
+			}{recurringOccurrence{Version: 1, ScheduledAt: due.UTC()}, job.UID, job.DefinitionEventUID})
 			if err != nil {
 				return err
 			}

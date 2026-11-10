@@ -384,7 +384,9 @@ and issue date offsets.
 native recurring jobs. Native delivery records no run observation; this view
 shows how far delivery has reached and whether it has caught up. API clients
 opt in with `?include=delivery` on job show/list. Adapter jobs omit the object
-and keep using their run evidence. Reads change no progress, revisions or events.
+and keep using their run evidence. MCP and TUI clients remain unchanged and do
+not request or display delivery status. Reads change no progress, revisions or
+events.
 
 | State | Meaning |
 | --- | --- |
@@ -421,6 +423,8 @@ first require fixing a definition rejected by current write rules.
 linked to this parent with this job's provenance. It considers only readable,
 non-archived child projects. It orders by occurrence time, then UID for ties,
 so moved children, restore and replication do not change the ordering.
+Finding `last_child` scans matching authorized child history, so the cost of a
+delivery read grows with that history.
 
 `authority` is `local`, `hub`, `hub_disabled` or `spoke`; `delivers_here` is true
 only for local projects and enabled hubs. On a spoke, status is evaluated locally

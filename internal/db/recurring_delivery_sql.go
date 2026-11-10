@@ -59,10 +59,7 @@ func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, e
 		if err := rows.Scan(&id, &uid, &occurrence); err != nil {
 			return nil, err
 		}
-		var value struct {
-			Version     int       `json:"version"`
-			ScheduledAt time.Time `json:"scheduled_at"`
-		}
+		var value recurringOccurrence
 		// Unknown versions and corrupt provenance are not delivery evidence.
 		if err := json.Unmarshal([]byte(occurrence), &value); err != nil || value.Version != 1 || value.ScheduledAt.IsZero() {
 			continue
