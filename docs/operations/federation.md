@@ -1337,7 +1337,7 @@ The spoke daemon requires the entry to be remote HTTPS,
 then deliberately sends the existing enrollment token to that configured
 origin and fetches the same hub project's federation metadata. It updates
 local state only if both the numeric project ID and stable project UID match.
-The catalog administration token and `token_env` are not used.
+Catalog credentials are not used.
 
 Rebind keeps the old binding and credential expectations through the update;
 a changed principal, catalog target, binding revision, or project identity
