@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-03
+last_edited: 2026-11-10
 ---
 
 # Model Context Protocol server
@@ -290,7 +290,7 @@ model context at startup.
 | `kata.load_issue_discovery` | `kata.search`, `kata.list`, `kata.show`, `kata.ready`, `kata.next`, `kata.labels`, `kata.graph` |
 | `kata.load_issue_mutation` | `kata.create`, `kata.edit`, `kata.comment`, `kata.edit_comment`, `kata.claim`, `kata.set_label`, `kata.set_metadata`, `kata.set_schedule`, `kata.set_deadline`, `kata.move` |
 | `kata.load_coordination` | `kata.assign`, `kata.unassign`, `kata.inbox`, `kata.status` |
-| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
+| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_runtimes`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 | `kata.load_issue_lifecycle` | `kata.close`, `kata.reopen`, `kata.delete`, `kata.restore`, `kata.purge`, `kata.wait`, `kata.audit_closes` |
 | `kata.load_leases` | `kata.lease_status`, `kata.lease`, `kata.lease_force_release`, `kata.lease_steal` |
 | `kata.load_projects` | `kata.projects`, `kata.project_show`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
@@ -402,12 +402,12 @@ loading.
 ## Native cron through MCP
 
 Load `kata.load_cron` for job and workflow lifecycle tools, live capability
-discovery, and attributed run evidence. This interface uses cron job definitions;
-the separate `kata.load_recurrence` tools manage RRULE issue templates.
+discovery, runtime inventory and warnings, and attributed run evidence. This
+interface uses cron job definitions; the separate `kata.load_recurrence` tools manage RRULE issue templates.
 
 | Purpose | Tools |
 | --- | --- |
-| Discovery and identity | `kata.cron_capabilities`, `kata.cron_new_uid` |
+| Discovery and identity | `kata.cron_capabilities`, `kata.cron_runtimes`, `kata.cron_new_uid` |
 | Jobs | `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore` |
 | Workflows | `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore` |
 | Run evidence | `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
@@ -417,6 +417,12 @@ scope, and accountable actor. Select `project` explicitly in multi-project modes
 Run observations accept the usual per-call `teammate` override; an empty value
 suppresses the startup default without changing the actor. Issue-scoped tokens
 do not gain project-level cron authority.
+
+`kata.cron_runtimes` returns the selected daemon's retained runtime advertisements,
+its inventory state (`unknown`, `warming`, or `ready`), and advisory `warnings` in
+one read-only response. Unknown inventory does not prove that no eligible runtime
+exists. Advertisements do not grant execution authority. MCP does not expose
+heartbeat writes; adapters continue to advertise through the runtime API or CLI.
 
 Call `kata.cron_new_uid` before creation and retain its returned `uid`. The helper
 creates and reserves nothing and does not bind the UID to a project. Creates use

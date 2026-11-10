@@ -77,6 +77,8 @@ func TestCronProgressiveDiscovery(t *testing.T) {
 	after, err := s.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(after.Tools), "kata.cron_job_create")
+	require.Contains(t, toolNames(after.Tools), "kata.cron_runtimes")
+	require.Contains(t, loaded["tools"], "kata.cron_runtimes")
 	require.NotContains(t, toolNames(after.Tools), "kata.create")
 	require.Equal(t, loaded, cronOK(t, s, "load_cron", map[string]any{}))
 }
@@ -280,6 +282,7 @@ func TestCronAuthorityAndCapabilities(t *testing.T) {
 				args map[string]any
 			}{
 				{"cron_capabilities", map[string]any{}},
+				{"cron_runtimes", map[string]any{}},
 				{"cron_job_create", map[string]any{"uid": cronNewUID(t, s), "name": "Denied", "definition": cronDefinition()}},
 			} {
 				result := cronCall(t, s, call.name, call.args)
