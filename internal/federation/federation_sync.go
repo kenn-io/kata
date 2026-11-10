@@ -403,8 +403,27 @@ func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIn
 	if ack.PushCursorEventID > batch[len(batch)-1].ID {
 		return nil, errors.New("federation push cursor advanced beyond submitted batch")
 	}
+	submitted := make(map[string]int64, len(batch))
+	count := 0
+	for _, event := range batch {
+		if event.ID <= ack.PushCursorEventID {
+			submitted[event.UID] = event.ID
+			count++
+		}
+	}
+	if batch[count-1].ID != ack.PushCursorEventID {
+		return nil, errors.New("hub returned invalid rejection details")
+	}
+	if ack.Accepted < 0 || ack.Duplicates < 0 || ack.Accepted > count || ack.Duplicates > count-ack.Accepted || len(ack.RejectedEvents) != count-ack.Accepted-ack.Duplicates {
+		return nil, errors.New("hub returned invalid rejection details")
+	}
 	byUID := make(map[string]db.FederationEventRejection, len(ack.RejectedEvents))
 	for _, rejection := range ack.RejectedEvents {
+		id, ok := submitted[rejection.EventUID]
+		_, duplicate := byUID[rejection.EventUID]
+		if !ok || id != rejection.SourceEventID || duplicate {
+			return nil, errors.New("hub returned invalid rejection details")
+		}
 		byUID[rejection.EventUID] = rejection
 	}
 	var rejected []rejectedFederationEvent
@@ -447,7 +466,7 @@ func federationEventRejectionMessage(rejected []db.FederationEventRejection, ack
 	if unknown {
 		return fmt.Sprintf("%d events rejected, including unknown reasons (showing up to five): %s; hub acknowledged %d other events", len(rejected), strings.Join(messages, "; "), acknowledged)
 	}
-	return fmt.Sprintf("%d events need enrollment (showing up to five issues): %s; hub acknowledged %d other events; pending push includes accepted later events as replays until recovery", len(rejected), strings.Join(messages, "; "), acknowledged)
+	return fmt.Sprintf("%d events need project access (showing up to five issues): %s; hub acknowledged %d other events; pending push includes accepted later events as replays until recovery", len(rejected), strings.Join(messages, "; "), acknowledged)
 }
 
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.

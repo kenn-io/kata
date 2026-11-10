@@ -1875,6 +1875,48 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing
 	assert.Greater(t, delivered[0].ID, localEvent.ID)
 }
 
+func TestSyncFederationDeliversReplayAfterSameMillisecondUpgrade(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	store, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	issue, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Recovered", Author: "tester"})
+	require.NoError(t, err)
+	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:1", HubProjectID: 42, HubProjectUID: project.UID, ReplayHorizonEventID: 100, PullCursorEventID: 99, PushCursorEventID: event.ID, Enabled: true, Actor: "tester"})
+	require.NoError(t, err)
+	resetAt := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	require.NoError(t, store.RecordFederationSyncReset(ctx, project.ID, resetAt))
+	_, err = store.ExecContext(ctx, `UPDATE events SET created_at='2026-01-02T00:00:00.000Z', issue_id=NULL WHERE uid=?`, event.UID)
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `DELETE FROM issues WHERE uid=?`, issue.UID)
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `DROP TABLE federation_local_replays`)
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	require.NoError(t, sqlitestore.UpgradeInPlace(ctx, path))
+	store, err = sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	envelope := eventEnvelopeForSyncTest(event, 100)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: []api.EventEnvelope{envelope}, NextAfterID: 100}))
+	}))
+	t.Cleanup(hub.Close)
+	var delivered []db.Event
+	err = SyncFederationOnceWithPulledEvents(ctx, store, binding, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "token"}, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		delivered = append(delivered, events...)
+	})
+	require.NoError(t, err)
+	require.Len(t, delivered, 1)
+	require.Equal(t, event.UID, delivered[0].UID)
+	_, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+}
+
 func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testing.T) {
 	testResetRetryLocalProjectEvent(t, false, false)
 }

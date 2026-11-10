@@ -33,7 +33,7 @@ type FederationProjectNotEnrolledError struct {
 }
 
 func (e *FederationProjectNotEnrolledError) Error() string {
-	return fmt.Sprintf("issue %s currently belongs to project %s (%s); the spoke has no enrollment there; join that project to retry", e.IssueUID, e.ProjectName, e.ProjectUID)
+	return fmt.Sprintf("issue %s currently belongs to project %s (%s); configure matching push access and actor for that project to retry", e.IssueUID, e.ProjectName, e.ProjectUID)
 }
 func (e *FederationProjectNotEnrolledError) Unwrap() error {
 	return ErrFederationMoveSourceUnauthorized

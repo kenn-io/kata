@@ -14,5 +14,5 @@ SELECT e.uid, CASE WHEN e.id > b.push_cursor_event_id OR (e.issue_id IS NULL AND
  WHERE e.origin_instance_uid = (SELECT value FROM meta WHERE key='instance_uid')
    AND b.pull_cursor_event_id = b.replay_horizon_event_id - 1
    AND s.last_reset_at IS NOT NULL
-   AND e.created_at < s.last_reset_at
+   AND e.created_at <= s.last_reset_at
    AND (s.last_pull_success_at IS NULL OR s.last_pull_success_at < s.last_reset_at);

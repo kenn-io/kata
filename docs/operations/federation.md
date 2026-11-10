@@ -2260,14 +2260,13 @@ batch. Quarantine blocks further push and can block reset.
 A direct spoke continues independent pushes when an
 issue has moved into a project it has not joined. Both peers must support
 per-event rejections. Upgrade the hub first so it understands partial acknowledgments.
-The status error names the issue and its current project and says the spoke
-has no enrollment there. Independent events reach the hub across later pages,
+The status error names the issue and its current project and asks for matching
+push access and actor. Independent events reach the hub across later pages,
 while events that depend on a rejected creation wait for enrollment. Push rejection
-does not stop the pull phase, but
-a source-only spoke can still encounter the separate missing-destination pull
-limitation when it receives the move.
+does not stop the pull phase, but a source-only spoke's pull remains blocked
+when it receives the move until the destination is available.
 
-Join the named project. Once the join completes, the next sync retries the push.
+Join the named project or update its binding to allow push with the same actor as the source. The next sync retries the push.
 If the spoke already holds a moved issue in the source project, joining the
 destination can leave pulls for both projects failing on a duplicate issue UID.
 The pull fix is tracked in [kata#1049](https://github.com/kenn-io/kata/issues/1049).

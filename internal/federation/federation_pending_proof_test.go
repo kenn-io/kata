@@ -51,7 +51,7 @@ func TestSyncFederationPendingProofCannotAuthorizeCurrentOwner(t *testing.T) {
 	spoke.credentials[projects[1].UID] = credential
 	err = spoke.sync(t, 0)
 	require.ErrorContains(t, err, "pending federation events remain")
-	require.ErrorContains(t, err, "no enrollment", "a suppressed pending proof reports missing enrollment")
+	require.ErrorContains(t, err, "matching push access", "a suppressed pending proof reports the required access")
 	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Empty(t, comments)

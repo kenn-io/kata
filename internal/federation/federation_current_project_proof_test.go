@@ -262,20 +262,21 @@ func TestSyncFederationPartialPushAndPull(t *testing.T) {
 			runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
 			_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
 			require.ErrorContains(t, err, "pending federation events remain")
+			require.ErrorContains(t, err, "matching push access")
 			if destinationBound {
 				after, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 				require.NoError(t, err)
 				require.Greater(t, after.PullCursorEventID, binding.PullCursorEventID)
 				return
 			}
-			require.ErrorContains(t, err, "need enrollment")
+			require.ErrorContains(t, err, "need project access")
 			require.ErrorIs(t, err, db.ErrNotFound)
 			status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
 			require.NoError(t, err)
 			require.NotNil(t, status.LastError)
 			require.Contains(t, *status.LastError, "not found")
 			require.Contains(t, *status.LastError, "pending federation events remain")
-			require.Contains(t, *status.LastError, "need enrollment")
+			require.Contains(t, *status.LastError, "need project access")
 		})
 	}
 }

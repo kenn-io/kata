@@ -48,7 +48,7 @@ func TestFederationLocalReplaysUpgradeBackfillsInterruptedReset(t *testing.T) {
 		require.NoError(t, execErr)
 	}
 	stamp("before", "2026-01-01T00:00:00.000Z")
-	stamp("unprojected", "2026-01-01T00:00:00.000Z")
+	stamp("unprojected", "2026-01-02T00:00:00.000Z")
 	stamp("acknowledged", "2026-01-01T00:00:00.000Z")
 	stamp("after", "2026-01-03T00:00:00.000Z")
 	stamp("pulled", "2026-01-01T00:00:00.000Z")
