@@ -185,8 +185,7 @@ func (s *Store) IngestFederationEvents(
 					return err
 				}
 				if err := s.authorizeFederationMoveTx(ctx, tx, params, moveFrom, moveTo, event); err != nil {
-					var missing *db.FederationProjectNotEnrolledError
-					if errors.As(err, &missing) {
+					if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
 						missing.IssueUID = *event.IssueUID
 						if params.AllowEventRejections {
 							result.RejectedEvents = append(result.RejectedEvents, missing.Rejection(input.SourceEventID, event.EventUID))
@@ -199,8 +198,7 @@ func (s *Store) IngestFederationEvents(
 			if params.AllowEventRejections {
 				candidate := preparedFederationIngestEvent{sourceEventID: input.SourceEventID, event: event}
 				if err := s.authorizeFederationCurrentIssueTx(ctx, tx, params, candidate, moveSnapshots, authorityProjects, authorityChecked); err != nil {
-					var missing *db.FederationProjectNotEnrolledError
-					if errors.As(err, &missing) {
+					if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
 						result.RejectedEvents = append(result.RejectedEvents, missing.Rejection(input.SourceEventID, event.EventUID))
 						continue
 					}
@@ -1025,8 +1023,7 @@ func (s *Store) authorizeFederationCurrentIssueTx(ctx context.Context, tx *sql.T
 			return err
 		}
 		if err := s.authorizeFederationAffectedProjectTx(ctx, tx, p, current, project.UID); err != nil {
-			var missing *db.FederationProjectNotEnrolledError
-			if errors.As(err, &missing) {
+			if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
 				missing.IssueUID = issueUID
 			}
 			return err

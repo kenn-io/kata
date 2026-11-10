@@ -212,8 +212,7 @@ func (d *Store) ingestFederationEventsOnce(
 				return db.FederationIngestResult{}, err
 			}
 			if err := d.authorizeFederationMoveTx(ctx, tx, p, moveFrom, moveTo, ev); err != nil {
-				var missing *db.FederationProjectNotEnrolledError
-				if errors.As(err, &missing) {
+				if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
 					missing.IssueUID = *ev.IssueUID
 					if p.AllowEventRejections {
 						result.RejectedEvents = append(result.RejectedEvents, missing.Rejection(in.SourceEventID, ev.EventUID))
@@ -226,8 +225,7 @@ func (d *Store) ingestFederationEventsOnce(
 		if p.AllowEventRejections {
 			candidate := preparedFederationIngestEvent{SourceEventID: in.SourceEventID, Event: ev}
 			if err := d.authorizeFederationCurrentIssueTx(ctx, tx, p, candidate, moveSnapshots, authorityProjects, authorityChecked); err != nil {
-				var missing *db.FederationProjectNotEnrolledError
-				if errors.As(err, &missing) {
+				if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
 					result.RejectedEvents = append(result.RejectedEvents, missing.Rejection(in.SourceEventID, ev.EventUID))
 					continue
 				}
@@ -332,8 +330,8 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 	}
 	if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, prepared, moveSnapshots); err != nil {
-		var missing *db.FederationProjectNotEnrolledError
-		if p.AllowEventRejections && !lockBeforePreparation && errors.As(err, &missing) {
+		_, missingEnrollment := errors.AsType[*db.FederationProjectNotEnrolledError](err)
+		if p.AllowEventRejections && !lockBeforePreparation && missingEnrollment {
 			// Rebuild all accepted-only witnesses from the original input while the
 			// writer is held; no rejected preparation state survives this retry.
 			return db.FederationIngestResult{}, errStaleFederationPreparation
@@ -1612,8 +1610,7 @@ func (d *Store) authorizeFederationCurrentIssueTx(ctx context.Context, tx *sql.T
 			return err
 		}
 		if err := d.authorizeFederationAffectedProjectTx(ctx, tx, p, current, project.UID); err != nil {
-			var missing *db.FederationProjectNotEnrolledError
-			if errors.As(err, &missing) {
+			if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
 				missing.IssueUID = issueUID
 			}
 			return err

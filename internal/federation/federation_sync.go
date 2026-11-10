@@ -375,7 +375,7 @@ func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIn
 	for _, rejection := range ack.RejectedEvents {
 		event, found := submitted[rejection.EventUID]
 		if !found || event.ID != rejection.SourceEventID || event.ID > ack.PushCursorEventID {
-			return nil, errors.New("invalid federation event rejection acknowledgment")
+			return nil, errors.New("hub returned invalid rejection details")
 		}
 		seen[event.UID] = true
 	}

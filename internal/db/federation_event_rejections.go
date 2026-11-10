@@ -4,7 +4,10 @@ import (
 	"fmt"
 )
 
+// FederationProjectNotEnrolledCode identifies a missing current-project enrollment.
 const FederationProjectNotEnrolledCode = "federation_project_not_enrolled"
+
+// FederationEventRejectionsHeader opts a sender into per-event rejection responses.
 const FederationEventRejectionsHeader = "X-Kata-Federation-Event-Rejections"
 
 // FederationEventRejection identifies retained source work that needs another
@@ -33,6 +36,8 @@ func (e *FederationProjectNotEnrolledError) Error() string {
 func (e *FederationProjectNotEnrolledError) Unwrap() error {
 	return ErrFederationMoveSourceUnauthorized
 }
+
+// Rejection describes the source event retained until its project is enrolled.
 func (e *FederationProjectNotEnrolledError) Rejection(sourceID int64, eventUID string) FederationEventRejection {
 	return FederationEventRejection{SourceEventID: sourceID, EventUID: eventUID, IssueUID: e.IssueUID, CurrentProjectUID: e.ProjectUID, CurrentProjectName: e.ProjectName, Code: FederationProjectNotEnrolledCode, Message: e.Error()}
 }
