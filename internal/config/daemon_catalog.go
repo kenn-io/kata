@@ -17,8 +17,8 @@ func (e *TokenEnvError) Error() string {
 	return fmt.Sprintf("daemon %q: token_env %q is unset or empty", e.Daemon, e.Env)
 }
 
-// ClientToken resolves token > token_file > token_env only when the entry is
-// used. A failed selected source never falls back to another credential.
+// ClientToken resolves token > token_file > token_env. A failed selected
+// source never falls back to another credential.
 // An unset or empty selected token_env retains the *TokenEnvError contract.
 func (d CatalogDaemonConfig) ClientToken() (string, error) {
 	token, source, err := ResolveSecret(d.Token, d.TokenFile, d.TokenEnv)

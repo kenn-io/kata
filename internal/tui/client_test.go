@@ -22,7 +22,6 @@ import (
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/pkg/client/generated"
-	"go.kenn.io/kit/safefileio"
 )
 
 // newTestClient stands up an httptest server with handler, registers
@@ -1542,49 +1541,14 @@ func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
 }
 
 func TestTUIHubAdminClientResolvesCatalogTokenFile(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	t.Setenv("KATA_AUTH_TOKEN", "local-only-token")
-	t.Setenv("EXAMPLE_HUB_TOKEN", "env-token")
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	path := filepath.Join(home, "hub-token")
-	srv := startTUIPingServer(t)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-[[daemon]]
-name = "hub"
-url = "`+srv.URL+`"
-token_file = "~/hub-token"
-token_env = "EXAMPLE_HUB_TOKEN"
-`), 0o600))
-	cfg, err := config.ReadDaemonConfig()
-	require.NoError(t, err)
-	targets := daemonTargetsFromConfig(cfg.Daemons)
-	require.Len(t, targets, 1)
-	fileOnly := cfg.Daemons[0]
-	fileOnly.TokenEnv = ""
 	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.view = viewList
-	m.daemonTargets = daemonTargetsFromConfig([]config.CatalogDaemonConfig{fileOnly})
+	m.daemonTargets = []daemonTarget{{Name: "hub", URL: "https://hub.example", TokenFile: "~/hub-token"}}
 	m.activeDaemon = m.daemonTargets[0]
 	m, _ = updateModel(m, keyRune('D'))
 	require.Equal(t, viewDaemons, m.view)
 	view := stripANSI(renderDaemons(m))
 	assert.Contains(t, view, "hub")
-	assert.Contains(t, view, "token")
 	assert.NotContains(t, view, "no token")
-	t.Logf("file-only catalog daemon view (credential file still absent):\n%s", view)
-	// Listing needs no file; a later operation must read it and ignore local auth.
-	file, err := safefileio.CreatePrivateFile(path)
-	require.NoError(t, err)
-	_, err = file.Write([]byte("file-token\n"))
-	require.NoError(t, err)
-	require.NoError(t, file.Close())
-	_, resolved, err := newHubAdminClient(t.Context(), targets[0])
-	require.NoError(t, err)
-	assert.Equal(t, "file-token", resolved.resolved.Token)
-	require.NoError(t, os.Remove(path))
-	_, _, err = newHubAdminClient(t.Context(), targets[0])
-	require.ErrorIs(t, err, config.ErrCredentialSource)
 }

@@ -373,10 +373,11 @@ Windows it must be a private current-user file. The file must be at most
 64 KiB; its trimmed contents must be nonempty. Use `token_env` for containers or service
 managers that already inject secrets.
 
-Credentials are read only when connecting to the selected entry. A failed
-selected file or an unset or empty selected environment variable fails the
-connection without falling back to another credential. Catalog listing and
-`kata daemon locate` for a remote or plain local entry do not read credentials.
+Loading or listing the catalog does not read its credentials. Selection,
+including `kata daemon locate`, may inspect a selected credential. Remote and
+plain local entries defer source errors until connection. A failed selected
+file or an unset or empty selected environment variable stops the connection
+without fallback.
 `KATA_AUTH_TOKEN` replaces a remote entry's credential, so its file or variable
 is not read then. Hub administration uses only the hub's catalog credential;
 the local daemon's global token never replaces it.

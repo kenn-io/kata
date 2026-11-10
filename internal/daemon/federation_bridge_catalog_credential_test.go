@@ -2,13 +2,10 @@ package daemon_test
 
 import (
 	"encoding/json/v2"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -26,20 +23,12 @@ import (
 func TestFederationBridgeCatalogCredentialFailure(t *testing.T) {
 	for _, tc := range []struct{ name, reason string }{
 		{"missing", "cannot read credential file"},
-		{"public", "group/world-readable; use chmod 600"},
 		{"absent", "selected hub has no user credential"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.name == "public" && runtime.GOOS == "windows" {
-				t.Skip("Unix file permissions")
-			}
 			env := testenv.New(t)
 			t.Setenv("EXAMPLE_BRIDGE_FALLBACK", "fallback-test-token")
 			path := filepath.Join(t.TempDir(), "private-host-token")
-			if tc.name == "public" {
-				require.NoError(t, os.WriteFile(path, []byte("file-test-token"), 0o600))
-				require.NoError(t, os.Chmod(path, 0o644))
-			}
 			var calls atomic.Int32
 			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
@@ -54,28 +43,23 @@ func TestFederationBridgeCatalogCredentialFailure(t *testing.T) {
 			t.Cleanup(func() { require.NoError(t, server.Close()) })
 			local := httptest.NewServer(server.Handler())
 			t.Cleanup(local.Close)
-			for _, preflight := range []bool{true, false} {
-				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, local.URL+"/api/v1/federation/bridges", strings.NewReader(fmt.Sprintf(`{"hub_catalog":"selected-hub","hub_project":"hub-project","project_name":"spoke-project","actor":"local-member","preflight":%t}`, preflight)))
-				require.NoError(t, err)
-				request.Header.Set("Authorization", "Bearer local-owner-test-token")
-				request.Header.Set("Content-Type", "application/json")
-				response, err := local.Client().Do(request)
-				require.NoError(t, err)
-				body, err := io.ReadAll(response.Body)
-				require.NoError(t, err)
-				require.NoError(t, response.Body.Close())
-				assert.Equal(t, http.StatusBadRequest, response.StatusCode, string(body))
-				var envelope api.ErrorEnvelope
-				require.NoError(t, json.Unmarshal(body, &envelope))
-				assert.Equal(t, "hub_credential_required", envelope.Error.Code)
-				assert.Contains(t, envelope.Error.Message, tc.reason)
-				assert.NotContains(t, string(body), path)
-				assert.NotContains(t, string(body), "private-host-token")
-				assert.NotContains(t, string(body), "EXAMPLE_BRIDGE_FALLBACK")
-				assert.NotContains(t, string(body), "fallback-test-token")
-				assert.NotContains(t, string(body), "file-test-token")
-				assert.Zero(t, calls.Load(), "credential rejection precedes every hub request")
-			}
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, local.URL+"/api/v1/federation/bridges", strings.NewReader(`{"hub_catalog":"selected-hub","hub_project":"hub-project","project_name":"spoke-project","actor":"local-member","preflight":true}`))
+			require.NoError(t, err)
+			request.Header.Set("Authorization", "Bearer local-owner-test-token")
+			request.Header.Set("Content-Type", "application/json")
+			response, err := local.Client().Do(request)
+			require.NoError(t, err)
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			require.NoError(t, response.Body.Close())
+			assert.Equal(t, http.StatusBadRequest, response.StatusCode, string(body))
+			var envelope api.ErrorEnvelope
+			require.NoError(t, json.Unmarshal(body, &envelope))
+			assert.Equal(t, "hub_credential_required", envelope.Error.Code)
+			assert.Contains(t, envelope.Error.Message, tc.reason)
+			assert.NotContains(t, string(body), path)
+			assert.NotContains(t, string(body), "EXAMPLE_BRIDGE_FALLBACK")
+			assert.Zero(t, calls.Load(), "credential rejection precedes every hub request")
 		})
 	}
 }

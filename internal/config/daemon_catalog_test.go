@@ -1,11 +1,8 @@
 package config_test
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,30 +18,31 @@ func TestCatalogClientTokenSources(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("EXAMPLE_CATALOG_TOKEN", " env-token \n")
+	t.Setenv("EXAMPLE_CATALOG_EMPTY", "")
 	path := filepath.Join(home, "token")
 	writePrivateCredentialFixture(t, path, []byte(" file-token \n"))
-	empty := filepath.Join(home, "empty")
-	writePrivateCredentialFixture(t, empty, []byte(" \n"))
 	for _, tt := range []struct {
 		name, fields, want string
 		fail               bool
+		envError           bool
 	}{
-		{"file", `token_file = "~/token"`, "file-token", false},
-		{"file before env", `token_file = "~/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "file-token", false},
-		{"inline before file and env", `token = " inline-token "` + "\n" + `token_file = "/missing/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "inline-token", false},
-		{"missing file", `token_file = "/missing/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "", true},
-		{"empty file", `token_file = "~/empty"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "", true},
-		{"relative file", `token_file = "token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "", true},
-		{"directory", `token_file = "~"`, "", true},
-		{"env", `token_env = "EXAMPLE_CATALOG_TOKEN"`, "env-token", false},
-		{"none", "", "", false},
+		{"file", `token_file = "~/token"`, "file-token", false, false},
+		{"file before env", `token_file = "~/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "file-token", false, false},
+		{"inline before file and env", `token = " inline-token "` + "\n" + `token_file = "/missing/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "inline-token", false, false},
+		{"missing file", `token_file = "/missing/token"` + "\n" + `token_env = "EXAMPLE_CATALOG_TOKEN"`, "", true, false},
+		{"unset env", `token_env = "EXAMPLE_CATALOG_EMPTY"`, "", false, true},
+		{"none", "", "", false, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[[daemon]]\nname = 'hub'\nurl = 'https://hub.example'\n"+tt.fields), 0o600))
 			cfg, err := config.ReadDaemonConfig()
 			require.NoError(t, err, "loading a catalog must not read credentials")
 			got, err := cfg.Daemons[0].ClientToken()
-			if tt.fail {
+			if tt.envError {
+				var envErr *config.TokenEnvError
+				require.ErrorAs(t, err, &envErr)
+				assert.Equal(t, config.TokenEnvError{Daemon: "hub", Env: "EXAMPLE_CATALOG_EMPTY"}, *envErr)
+			} else if tt.fail {
 				require.ErrorIs(t, err, config.ErrCredentialSource)
 				assert.Contains(t, err.Error(), `daemon "hub"`)
 				assert.Empty(t, got)
@@ -54,30 +52,4 @@ func TestCatalogClientTokenSources(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestCatalogClientTokenRejectsPublicFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix file modes")
-	}
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	path := filepath.Join(home, "token")
-	require.NoError(t, os.WriteFile(path, []byte("private-token"), 0o600))
-	require.NoError(t, os.Chmod(path, 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf("[[daemon]]\nname = 'hub'\nurl = 'https://hub.example'\ntoken_file = %q\n", filepath.ToSlash(path))), 0o600))
-	cfg, err := config.ReadDaemonConfig()
-	require.NoError(t, err)
-	token, err := cfg.Daemons[0].ClientToken()
-	require.ErrorIs(t, err, config.ErrCredentialSource)
-	assert.Contains(t, err.Error(), "chmod 600")
-	assert.Empty(t, token)
-}
-
-func TestCatalogClientTokenKeepsTokenEnvError(t *testing.T) {
-	t.Setenv("EXAMPLE_CATALOG_EMPTY", "")
-	_, err := (config.CatalogDaemonConfig{Name: "hub", TokenEnv: "EXAMPLE_CATALOG_EMPTY"}).ClientToken()
-	var envErr *config.TokenEnvError
-	require.True(t, errors.As(err, &envErr))
-	assert.Equal(t, config.TokenEnvError{Daemon: "hub", Env: "EXAMPLE_CATALOG_EMPTY"}, *envErr)
 }

@@ -329,7 +329,7 @@ type CatalogDaemonConfig struct {
 	InstanceUID string `toml:"instance_uid"`
 	// Token is the inline bearer token; it wins over TokenFile and TokenEnv.
 	Token string `toml:"token"`
-	// TokenFile names an owner-only credential file, read only on use.
+	// TokenFile names an owner-only credential file.
 	TokenFile string `toml:"token_file"`
 	// TokenEnv names an environment variable holding the bearer token, so
 	// the secret stays out of the config file. Resolved by clients only when

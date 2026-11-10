@@ -1270,8 +1270,9 @@ credential_provider = ["access-helper", "credentials", "--profile", "work"]
 ```
 
 Use the helper command supplied by your hub operator. Kata runs the listed
-program directly, without a shell. Do not set `actor`, `token`, or `token_env`
-for this mapping; the provider supplies the approved identity and permissions.
+program directly, without a shell. Do not set `actor` for this mapping, or
+`token`, `token_file` or `token_env` on its catalog entry. The provider supplies
+the approved identity and permissions.
 
 - `read_only` starts an empty local replica that can pull tasks.
 - `collaborate` starts an empty replica that can also push work. The hub may
