@@ -56,7 +56,7 @@ func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPCo
 	if err != nil {
 		return nil, err
 	}
-	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved, false)
 	// Token administration remains an explicit sidecar-only capability.
 	admission := mcpserver.NewToolAdmission()
 	newServer := func(events bool) (*sdkmcp.Server, error) {

@@ -24,7 +24,7 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 	// Each legacy session or modern request owns its clients and reporter.
 	// The daemon's Unix listener never times out idle connections, so a
 	// session that kept its pool would hold them forever.
-	newServer := func(reqCtx context.Context, bearer, actor string, events bool, admission *mcpserver.ToolAdmission, loaded *mcpserver.LoadedSections) (*sdkmcp.Server, func(), error) {
+	newServer := func(reqCtx context.Context, bearer, actor string, modern bool, admission *mcpserver.ToolAdmission, loaded *mcpserver.LoadedSections) (*sdkmcp.Server, func(), error) {
 		resolved := client.ResolvedDaemon{
 			Address: endpoint.Address, Network: endpoint.Network, BaseURL: endpoint.BaseURL(),
 			Token: bearer, TrustPrivateNetwork: auth.TrustPrivateNetwork, Direct: true,
@@ -49,8 +49,9 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 		if err != nil {
 			return nil, nil, err
 		}
-		// The reporter outlives the initialize request, so it uses the mount's context.
-		observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+		// Reporting outlives initialize and modern request cleanup, so it uses
+		// the mount context, which still cancels all reporting on shutdown.
+		observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved, modern)
 		release := func() {
 			stopReporting()
 			httpClient.CloseIdleConnections()
@@ -60,7 +61,7 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 			Client: apiClient, LongRunningClient: longRunningClient,
 			Scope: scope, Actor: actor, Version: version.Version,
 			StartupSections: cfg.StartupSections,
-			ObserveToolCall: observe, Events: events, Admission: admission, LoadedSections: loaded,
+			ObserveToolCall: observe, Events: modern, Admission: admission, LoadedSections: loaded,
 		})
 		if err != nil {
 			release()
@@ -132,7 +133,8 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 				return
 			}
 			if modern {
-				defer release()
+				// Finish queued reports within their bound before closing request-owned clients.
+				defer func() { go release() }()
 			}
 			stream.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), serverKey{}, server)))
 			if !modern {
