@@ -94,7 +94,7 @@ func TestCronBundleSelectionAndStrictInput(t *testing.T) {
 	f := newCronFixture(t)
 	selection := cronCall(t, f.session, "cron_export", map[string]any{})
 	require.True(t, selection.IsError)
-	require.Equal(t, "select jobs and/or workflows, or all alone", selection.Content[0].(*sdkmcp.TextContent).Text)
+	require.Equal(t, "select jobs and/or workflows (CLI: --job/--workflow; MCP: job_uids/workflow_uids), or all alone (CLI: --all; MCP: all)", selection.Content[0].(*sdkmcp.TextContent).Text)
 	workflow := cronRecord(t, f.session, "cron_workflow_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Strict fixture", "definition": cronWorkflowDefinition()}, "workflow")
 	bundle := cronOK(t, f.session, "cron_export", map[string]any{"workflow_uids": []any{workflow["uid"]}})
 	before, err := f.store.MaxEventID(t.Context())

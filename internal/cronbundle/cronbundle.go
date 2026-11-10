@@ -46,7 +46,7 @@ type Selection struct {
 // Normalize validates and canonicalizes full UID selectors in place.
 func (s *Selection) Normalize() error {
 	if s.All && len(s.Jobs)+len(s.Workflows) > 0 || !s.All && len(s.Jobs)+len(s.Workflows) == 0 {
-		return validationError("select jobs and/or workflows, or all alone")
+		return validationError("select jobs and/or workflows (CLI: --job/--workflow; MCP: job_uids/workflow_uids), or all alone (CLI: --all; MCP: all)")
 	}
 	for _, list := range [][]string{s.Jobs, s.Workflows} {
 		for i := range list {
@@ -349,7 +349,7 @@ func (o ImportOptions) importItem(ctx context.Context, a Daemon, project Project
 		return "unchanged", nil
 	}
 	if !o.Replace {
-		return "conflict", validationError("target " + kind + " differs; rerun with replace to update it")
+		return "conflict", validationError("target " + kind + " differs; rerun with CLI --replace or MCP replace: true to update it")
 	}
 	if o.DryRun {
 		return "replaced", nil
