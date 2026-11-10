@@ -21,11 +21,11 @@ func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 			return err
 		}
 		refresh := func() (db.FederationBinding, error) {
-			event, err := s.insertFederationBaselineEventsTx(ctx, tx, project, "federation", true)
+			event, err := s.insertFederationBaselineEventsTx(ctx, tx, project, "federation")
 			if err != nil {
 				return binding, err
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE federation_bindings SET replay_horizon_event_id=$1 WHERE project_id=$2`, event.ID, project.ID)
+			_, err = tx.ExecContext(ctx, `UPDATE federation_bindings SET replay_horizon_event_id=$1,pull_cursor_event_id=$2 WHERE project_id=$3`, event.ID, event.ID-1, project.ID)
 			if err != nil {
 				return binding, err
 			}

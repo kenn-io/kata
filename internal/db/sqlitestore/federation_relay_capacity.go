@@ -98,7 +98,7 @@ func (d *Store) relayCheckpointIssuesTx(ctx context.Context, tx *sql.Tx, project
 	}
 	out := make([]db.RelayCheckpointIssue, 0, len(issues))
 	for _, issue := range issues {
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue, false)
+		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
 		if err != nil {
 			return nil, err
 		}

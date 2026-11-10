@@ -103,9 +103,6 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 }
 
 func payloadCarriesCommentReply(kind string, payload jsontext.Value) bool {
-	if kind == "issue.moved" {
-		return payloadCarriesCommentReply("issue.snapshot", PayloadMap(payload)["snapshot"])
-	}
 	var document struct {
 		ReplyToUID string `json:"reply_to_uid"`
 		Comments   []struct {

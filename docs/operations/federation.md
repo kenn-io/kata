@@ -97,16 +97,10 @@ also remains reserved while its move history remains.
 When a direct spoke joins the destination after the hub moved an issue, a
 destination baseline can relocate the existing source row without retained
 move history. Both replicas must use the same hub origin. The local issue ID,
-discussion, and links survive, while the destination baseline sets the current
-labels. Pausing or leaving the source preserves its retained discussion. Leaving
+discussion, and links survive, while the destination baseline sets the issue's
+current fields and labels. Pausing or leaving the source preserves its retained discussion. Leaving
 the destination makes the issue standalone, and the source can continue to sync.
 Kata does not author another move during this recovery.
-
-Upgrade both hub and spokes for snapshot-only recovery. Direct hub baselines
-carry the complete set of links for each issue. A snapshot replaces older link
-membership, while pending local edits remain until acknowledged.
-Later changes still apply. An upgraded hub automatically appends a complete
-baseline when a project with an older baseline is read. Older spokes can keep syncing.
 
 Destination sync recovers retained source history even when its cursor has
 already passed those events. This preserves missed changes and comments without

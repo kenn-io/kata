@@ -470,10 +470,12 @@ func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
 func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 	for _, snapshot := range []string{
 		`{"uid":"issue-1","title":"snapshot","status":"open","labels":["current"]}`,
+		`{"uid":"issue-1","title":"snapshot","status":"open","labels":[]}`,
+		`{"uid":"issue-1","title":"snapshot","status":"open","labels":null}`,
 		`{"uid":"issue-1","title":"snapshot","status":"open"}`,
 	} {
 		t.Run(snapshot, func(t *testing.T) {
-			other := testEvent("issue.snapshot", 0, `{"uid":"issue-2","title":"other","status":"open","labels":["keep"]}`)
+			other := testEvent("issue.snapshot", 1, `{"uid":"issue-2","title":"other","status":"open","labels":["keep"]}`)
 			other.IssueUID = "issue-2"
 			got := FoldEvents([]FoldEvent{
 				other,
@@ -490,121 +492,4 @@ func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 			require.True(t, got.Labels[FoldLabelKey{IssueUID: "issue-2", Label: "keep"}].Present)
 		})
 	}
-}
-
-func TestFoldSnapshotRetainsPendingMembership(t *testing.T) {
-	addLabel := testEvent("issue.labeled", 2, `{"label":"draft"}`)
-	removeLabel := testEvent("issue.unlabeled", 3, `{"label":"removed"}`)
-	addLink := testEvent("issue.linked", 4, `{"type":"related","from_uid":"z-peer","to_uid":"issue-1"}`)
-	removeLink := testEvent("issue.unlinked", 5, `{"type":"blocks","from_uid":"issue-1","to_uid":"peer"}`)
-	parent := testEvent("issue.linked", 6, `{"type":"parent","from_uid":"issue-1","to_uid":"new-parent"}`)
-	events := []FoldEvent{addLabel, removeLabel, addLink, removeLink, parent,
-		testEvent("issue.snapshot", 7, `{"uid":"issue-1","labels":["removed"],"links_scope":"all","links":[{"type":"blocks","to_issue_uid":"peer"},{"type":"parent","to_issue_uid":"old-parent"}]}`)}
-	for i := 0; i < 5; i++ {
-		events[i].Pending = true
-	}
-	check := func(p FoldProjection, pending bool) {
-		require.Equal(t, pending, p.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "draft"}].Present)
-		require.Equal(t, !pending, p.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "removed"}].Present)
-		require.Equal(t, pending, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "z-peer", Type: "related"}].Present)
-		require.Equal(t, !pending, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "peer", Type: "blocks"}].Present)
-		require.Equal(t, pending, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "new-parent", Type: "parent"}].Present)
-		require.Equal(t, !pending, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "old-parent", Type: "parent"}].Present)
-	}
-	check(FoldEvents(events), true)
-	for i := 0; i < 5; i++ {
-		events[i].Pending = false
-	}
-	check(FoldEvents(events), false)
-}
-
-func TestFoldSnapshotRetainsPendingScalars(t *testing.T) {
-	edit := testEvent("issue.updated", 2, `{"title":"local","body":"local body"}`)
-	closed := testEvent("issue.closed", 3, `{"reason":"done"}`)
-	metadata := testEvent("issue.metadata_updated", 4, `{"diff":{"local":{"from":null,"to":"draft"}}}`)
-	edit.Pending, closed.Pending, metadata.Pending = true, true, true
-	events := []FoldEvent{
-		testEvent("issue.created", 1, `{"uid":"issue-1","title":"old","status":"open"}`), edit, closed, metadata,
-		testEvent("issue.snapshot", 5, `{"uid":"issue-1","title":"hub","body":"hub body","status":"open","metadata":{"remote":"new"}}`),
-	}
-	projection := FoldEvents(events)
-	require.Equal(t, "local", projection.Issues["issue-1"].Title)
-	require.Equal(t, "local body", projection.Issues["issue-1"].Body)
-	require.Equal(t, "closed", projection.Issues["issue-1"].Status)
-	require.JSONEq(t, `{"local":"draft","remote":"new"}`, string(projection.IssueMetadata["issue-1"]))
-	for i := 1; i <= 3; i++ {
-		events[i].Pending = false
-	}
-	projection = FoldEvents(events)
-	require.Equal(t, "hub", projection.Issues["issue-1"].Title)
-	require.Equal(t, "open", projection.Issues["issue-1"].Status)
-	require.JSONEq(t, `{"remote":"new"}`, string(projection.IssueMetadata["issue-1"]))
-}
-
-func TestFoldSnapshotRetainsPendingDeletion(t *testing.T) {
-	deleted := testEvent("issue.soft_deleted", 2, `{"deleted_at":"2026-01-01T00:00:00Z"}`)
-	deleted.Pending = true
-	projection := FoldEvents([]FoldEvent{
-		testEvent("issue.created", 1, `{"uid":"issue-1","status":"open"}`),
-		deleted,
-		testEvent("issue.snapshot", 3, `{"uid":"issue-1","status":"open"}`),
-	})
-	require.NotNil(t, projection.Issues["issue-1"].DeletedAt)
-}
-
-func TestFoldSnapshotPreservesLaterAcceptedEdit(t *testing.T) {
-	for _, localHub := range []bool{false, true} {
-		t.Run(fmt.Sprint(localHub), func(t *testing.T) {
-			edit := testEvent("issue.updated", 2, `{"title":"accepted edit"}`)
-			edit.Position = 2
-			snapshot := testEvent("issue.snapshot", 3, `{"uid":"issue-1","title":"older baseline","status":"open"}`)
-			snapshot.Position, snapshot.LocalHubSnapshot = 1, localHub
-			projection := FoldEvents([]FoldEvent{edit, snapshot})
-			require.Equal(t, "accepted edit", projection.Issues["issue-1"].Title)
-		})
-	}
-}
-
-func TestFoldSnapshotReplacesOlderLinks(t *testing.T) {
-	old := []FoldEvent{
-		testEvent("issue.linked", 1, `{"type":"blocks","from_uid":"issue-1","to_uid":"out"}`),
-		testEvent("issue.linked", 2, `{"type":"blocks","from_uid":"in","to_uid":"issue-1"}`),
-		testEvent("issue.linked", 3, `{"type":"related","from_uid":"issue-1","to_uid":"related"}`),
-		testEvent("issue.linked", 4, `{"type":"blocks","from_uid":"other","to_uid":"peer"}`),
-	}
-	for _, scope := range []string{"", `,"links_scope":"all"`} {
-		t.Run(scope, func(t *testing.T) {
-			snapshot := testEvent("issue.snapshot", 5, `{"uid":"issue-1"`+scope+`,"links":[{"type":"blocks","to_issue_uid":"in","incoming":true,"author":"member","created_at":"2026-01-01T00:00:00Z"}]}`)
-			beforeDelta := FoldEvents(append(append([]FoldEvent{}, old...), snapshot))
-			incoming := beforeDelta.Links[FoldLinkKey{FromUID: "in", ToUID: "issue-1", Type: "blocks"}]
-			assert.True(t, incoming.Present)
-			assert.Equal(t, "member", incoming.Author)
-			assert.Equal(t, "2026-01-01T00:00:00Z", incoming.CreatedAt)
-			add := testEvent("issue.linked", 6, `{"type":"related","from_uid":"issue-1","to_uid":"later"}`)
-			remove := testEvent("issue.unlinked", 7, `{"type":"blocks","from_uid":"in","to_uid":"issue-1"}`)
-			p := FoldEvents(append(append([]FoldEvent{}, old...), snapshot, add, remove))
-			assert.Equal(t, scope == "", p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "out", Type: "blocks"}].Present)
-			assert.Equal(t, scope == "", p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "related", Type: "related"}].Present)
-			assert.True(t, p.Links[FoldLinkKey{FromUID: "other", ToUID: "peer", Type: "blocks"}].Present)
-			assert.True(t, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "later", Type: "related"}].Present)
-			assert.False(t, p.Links[FoldLinkKey{FromUID: "in", ToUID: "issue-1", Type: "blocks"}].Present)
-		})
-	}
-	for _, links := range []string{"", `,"links":[]`} {
-		snapshot := testEvent("issue.snapshot", 5, `{"uid":"issue-1","links_scope":"all"`+links+`}`)
-		p := FoldEvents(append(append([]FoldEvent{}, old...), snapshot))
-		assert.False(t, p.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "out", Type: "blocks"}].Present)
-		assert.False(t, p.Links[FoldLinkKey{FromUID: "in", ToUID: "issue-1", Type: "blocks"}].Present)
-	}
-}
-
-func TestFoldSnapshotKeepsLaterReceivedLink(t *testing.T) {
-	link := testEvent("issue.linked", 1, `{"type":"blocks","from_uid":"issue-1","to_uid":"peer"}`)
-	link.Position = 2
-	snapshot := testEvent("issue.snapshot", 2, `{"uid":"issue-1","links_scope":"all"}`)
-	snapshot.Position = 1
-	key := FoldLinkKey{FromUID: "issue-1", ToUID: "peer", Type: "blocks"}
-	require.True(t, FoldEvents([]FoldEvent{link, snapshot}).Links[key].Present)
-	snapshot.Position = 3
-	require.False(t, FoldEvents([]FoldEvent{link, snapshot}).Links[key].Present)
 }

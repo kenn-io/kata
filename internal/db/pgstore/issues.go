@@ -44,7 +44,6 @@ type issueCreatedPayload struct {
 	Metadata               jsontext.Value         `json:"metadata"`
 	Labels                 []string               `json:"labels,omitempty"`
 	Links                  []createdLink          `json:"links,omitempty"`
-	LinksScope             string                 `json:"links_scope,omitempty"`
 	Comments               []issueSnapshotComment `json:"comments,omitempty"`
 	CreatedAt              string                 `json:"created_at"`
 	UpdatedAt              string                 `json:"updated_at,omitempty"`

@@ -32,7 +32,7 @@ func federationCronFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) 
 	// Match the existing partial cron index, without the cross-project issue
 	// history lookup: cron definitions and observations belong to one project.
 	rows, err := tx.QueryContext(ctx, `SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
- e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at, 0, 0, 0
+ e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at
  FROM events e JOIN projects p ON p.id=e.project_id
  WHERE e.project_id=$1 AND e.type LIKE 'cron.%' ORDER BY e.id`, projectID)
 	if err != nil {
@@ -69,7 +69,7 @@ func prepareCronPullMaterialization(ctx context.Context, tx *sql.Tx, projectID i
 	source := ` FROM events e JOIN projects p ON p.id=e.project_id WHERE e.project_id=$1 AND `
 	//nolint:gosec // Only fixed SQL and registered event types are concatenated; values are bound.
 	query := `SELECT uid, origin_instance_uid, project_uid, issue_uid, related_issue_uid,
- type, actor, payload, hlc_physical_ms, hlc_counter, created_at, 0, 0, 0 FROM (
+ type, actor, payload, hlc_physical_ms, hlc_counter, created_at FROM (
  SELECT e.id, ` + columns + source + `e.type LIKE 'cron.%' AND e.type IN (` + db.CronDefinitionEventTypesSQL() + `)
  UNION ALL
  SELECT e.id, ` + columns + source + db.CronRunHistoryPredicateSQL(false) + `) ORDER BY +id`

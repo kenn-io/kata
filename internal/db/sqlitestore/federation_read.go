@@ -3,19 +3,15 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kit/search/sqlquery"
 )
 
-var errBaselineRefreshRequired = errors.New("federation baseline refresh requires writer")
-
 // ReadFederation reads a consistent federation projection and cursor.
 func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) (db.FederationReadResult, error) {
 	var out db.FederationReadResult
-	writable := in.Metadata
 	run := func(tx *sql.Tx) error {
 		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, in.ProjectID))
 		if err != nil {
@@ -26,14 +22,11 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 			return err
 		}
 		refresh := func() (db.FederationBinding, error) {
-			if !writable {
-				return binding, errBaselineRefreshRequired
-			}
-			event, err := d.insertFederationBaselineEventsTx(ctx, tx, project, "federation", true)
+			event, err := d.insertFederationBaselineEventsTx(ctx, tx, project, "federation")
 			if err != nil {
 				return binding, err
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE federation_bindings SET replay_horizon_event_id=$1 WHERE project_id=$2`, event.ID, project.ID)
+			_, err = tx.ExecContext(ctx, `UPDATE federation_bindings SET replay_horizon_event_id=$1,pull_cursor_event_id=$2 WHERE project_id=$3`, event.ID, event.ID-1, project.ID)
 			if err != nil {
 				return binding, err
 			}
@@ -52,26 +45,16 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, refresh, readEvents)
 		return err
 	}
-	read := func() error {
-		return d.RetryTransient(ctx, func() error {
-			tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: !writable})
-			if err != nil {
-				return err
-			}
-			defer func() { _ = tx.Rollback() }()
-			if err := run(tx); err != nil {
-				if errors.Is(err, errBaselineRefreshRequired) {
-					writable = true
-					return errBaselineRefreshRequired
-				}
-				return err
-			}
-			return tx.Commit()
-		})
-	}
-	err := read()
-	if errors.Is(err, errBaselineRefreshRequired) {
-		err = read()
-	}
+	err := d.RetryTransient(ctx, func() error {
+		tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: !in.Metadata})
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := run(tx); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
 	return out, err
 }

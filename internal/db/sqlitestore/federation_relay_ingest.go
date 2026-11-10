@@ -82,7 +82,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				if err != nil {
 					return err
 				}
-				if _, err := d.insertFederationBaselineEventsTx(db.WithRelayStateCapture(ctx), tx, project, grant.Actor, false); err != nil {
+				if _, err := d.insertFederationBaselineEventsTx(db.WithRelayStateCapture(ctx), tx, project, grant.Actor); err != nil {
 					return err
 				}
 			}

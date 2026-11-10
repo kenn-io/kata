@@ -999,7 +999,7 @@ func (d *Store) enableProjectFederationTx(
 		return db.FederationBinding{}, err
 	}
 
-	enableEvent, err := d.insertFederationBaselineEventsTx(ctx, tx, project, actor, true)
+	enableEvent, err := d.insertFederationBaselineEventsTx(ctx, tx, project, actor)
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
@@ -1072,7 +1072,7 @@ func (d *Store) refreshProjectFederationBaseline(
 		return existing, false, nil
 	}
 
-	enableEvent, err := d.insertFederationBaselineEventsTx(ctx, tx, project, actor, true)
+	enableEvent, err := d.insertFederationBaselineEventsTx(ctx, tx, project, actor)
 	if err != nil {
 		return db.FederationBinding{}, false, err
 	}
@@ -1101,18 +1101,15 @@ func (d *Store) insertFederationBaselineEventsTx(
 	tx *sql.Tx,
 	project db.Project,
 	actor string,
-	complete bool,
 ) (db.Event, error) {
 	enablePayload, err := json.Marshal(struct {
 		ProjectUID  string      `json:"project_uid"`
 		ProjectName string      `json:"project_name"`
 		Metadata    db.JSONBlob `json:"metadata"`
-		LinksScope  string      `json:"links_scope,omitempty"`
 	}{
 		ProjectUID:  project.UID,
 		ProjectName: project.Name,
 		Metadata:    project.Metadata,
-		LinksScope:  linkScope(complete),
 	})
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal federation enable payload: %w", err)
@@ -1139,7 +1136,7 @@ func (d *Store) insertFederationBaselineEventsTx(
 		return db.Event{}, err
 	}
 	for _, issue := range issues {
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue, complete)
+		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
 		if err != nil {
 			return db.Event{}, err
 		}
@@ -1674,12 +1671,12 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 	return out, nil
 }
 
-func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue, complete bool) (string, error) {
+func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
 	}
-	links, err := federationIssueLinks(ctx, tx, issue.ID, complete)
+	links, err := federationIssueLinks(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
 	}
@@ -1710,7 +1707,6 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 		DeletedAt:           formatOptionalSQLiteTime(issue.DeletedAt),
 		Metadata:            jsontext.Value(issue.Metadata),
 		Labels:              labels,
-		LinksScope:          linkScope(complete),
 		Links:               links,
 		Comments:            comments,
 		CreatedAt:           issue.CreatedAt.UTC().Format(sqliteTimeFormat),
@@ -1739,7 +1735,7 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 	return out, rows.Err()
 }
 
-func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64, complete bool) ([]createdLinkOut, error) {
+func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLinkOut, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT l.type, peer.short_id, peer.uid, 0 AS incoming, l.author, l.created_at
 		  FROM links l
@@ -1752,8 +1748,8 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64, comple
 		  FROM links l
 		  JOIN issues peer ON peer.id = l.from_issue_id
 		 WHERE l.to_issue_id = ?
-		   AND (? OR peer.project_id <> (SELECT project_id FROM issues WHERE id = ?))
-		 ORDER BY type ASC, uid ASC, incoming ASC`, issueID, issueID, complete, issueID)
+		   AND peer.project_id <> (SELECT project_id FROM issues WHERE id = ?)
+		 ORDER BY type ASC, uid ASC, incoming ASC`, issueID, issueID, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("list federation snapshot links: %w", err)
 	}
@@ -1847,8 +1843,7 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),json_extract(m.payload,'$.issue_uid'),json_extract(m.payload,'$.uid'))`
 	query := `
 		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
-		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at,
-		       EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id AND e.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid')), e.id, EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.role='hub' AND e.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid'))
+		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at
 		  FROM events e JOIN projects p ON p.id=e.project_id
  WHERE (e.project_id=$1 OR (` + eventIssueUID + ` IN (
    SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
@@ -1916,7 +1911,7 @@ func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEve
 		)
 		if err := rows.Scan(&e.UID, &e.OriginInstanceUID, &projectUID, &issueUID,
 			&relatedIssueUID, &e.Type, &e.Actor, &payload, &e.HLCPhysicalMS,
-			&e.HLCCounter, &createdAt, &e.Pending, &e.Position, &e.LocalHubSnapshot); err != nil {
+			&e.HLCCounter, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan federated event: %w", err)
 		}
 		e.ProjectUID = projectUID
@@ -2424,15 +2419,6 @@ func reconcileFederatedLinkGroup(
 	projection, err := federationGroupFoldProjection(ctx, tx, desiredProjectIDs)
 	if err != nil {
 		return err
-	}
-	if currentProjectID != 0 {
-		group, err := federationSnapshotGroupProjectIDs(ctx, tx, currentProjectID)
-		if err != nil {
-			return err
-		}
-		if err := db.PruneFederatedLinkTombstones(ctx, tx, currentProjectID, group, projection); err != nil {
-			return err
-		}
 	}
 	return reconcileFederatedLinkProjection(ctx, tx, projection, desiredProjectIDs, ownedProjectIDs, currentProjectID, currentIssueIDs)
 }
@@ -3169,7 +3155,7 @@ func (d *Store) adoptProjectIntoFederation(
 
 	var snapshotCount int64
 	for _, issue := range issues {
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue, false)
+		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
 		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
 		}
@@ -3383,11 +3369,4 @@ func (d *Store) quarantineRelayBindingTx(ctx context.Context, tx *sql.Tx, projec
 		return false, nil
 	}
 	return binding.RelayConfig != nil, err
-}
-
-func linkScope(complete bool) string {
-	if complete {
-		return "all"
-	}
-	return ""
 }

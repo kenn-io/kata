@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 
@@ -34,7 +33,6 @@ type federationMaterialization struct {
 	binding          db.FederationBinding
 	linkProjects     []int64
 	links            db.FoldProjection
-	linkRemovals     db.FoldProjection
 	issueRows        map[string]federatedIssueRow
 	issueIDs         map[string]int64
 	commentRows      map[string]federatedCommentRow
@@ -92,7 +90,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 		ev := in.Event
 		event := db.FoldEvent{UID: ev.EventUID, OriginInstanceUID: ev.OriginInstanceUID, ProjectUID: ev.ProjectUID,
-			Type: ev.Type, Actor: ev.Actor, Payload: ev.Payload, Position: math.MaxInt64 - int64(len(prepared)) + int64(len(fresh)), HLCPhysicalMS: ev.HLCPhysicalMS, HLCCounter: ev.HLCCounter,
+			Type: ev.Type, Actor: ev.Actor, Payload: ev.Payload, HLCPhysicalMS: ev.HLCPhysicalMS, HLCCounter: ev.HLCCounter,
 			CreatedAt: ev.CreatedAt.UTC().Format(sqliteTimeFormat)}
 		if ev.IssueUID != nil {
 			event.IssueUID = *ev.IssueUID
@@ -141,7 +139,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		events = append(events, fresh...)
 	}
 	for _, event := range events {
-		if event.Type == "issue.moved" || event.Pending {
+		if event.Type == "issue.moved" {
 			return federationMaterialization{fullReplay: true}, nil
 		}
 	}
@@ -196,9 +194,6 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	if linksAffected {
 		if err := m.foldLinks(ctx, tx, fresh, alreadyStored); err != nil {
 			return federationMaterialization{}, err
-		}
-		if m.fullReplay {
-			return m, nil
 		}
 	}
 	if m.fullHistory {
@@ -268,10 +263,6 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 		history, err := federationFoldEventsOfTypes(ctx, tx, id, db.FederationLinkAffectingEventTypes())
 		if err != nil {
 			return err
-		}
-		if slices.ContainsFunc(history, func(event db.FoldEvent) bool { return event.Pending }) {
-			m.fullReplay = true
-			return nil
 		}
 		events = append(events, history...)
 	}
@@ -430,13 +421,6 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 		return err
 	}
 	if m.linkProjects != nil {
-		group, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
-		if err != nil {
-			return err
-		}
-		if err := db.PruneFederatedLinkTombstones(ctx, tx, projectID, group, m.linkRemovals); err != nil {
-			return err
-		}
 		if err := reconcileFederatedLinkRows(ctx, tx, m.links, m.linkIDs, m.linkRows); err != nil {
 			return err
 		}
@@ -559,11 +543,7 @@ func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx
 		byUID[canonicalFederatedLinkKey(key)] = key
 	}
 	graph := map[db.FoldLinkKey]federatedLinkRow{}
-	m.linkRemovals.Links = map[db.FoldLinkKey]db.FoldElementState{}
 	for key, state := range m.links.Links {
-		if !state.Present {
-			m.linkRemovals.Links[key] = state
-		}
 		_, from := ids[key.FromUID]
 		_, to := ids[key.ToUID]
 		if !state.Present || !from || !to {

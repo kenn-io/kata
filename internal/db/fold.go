@@ -20,7 +20,6 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 		Links:           map[FoldLinkKey]FoldElementState{},
 		IssueMetadata:   map[string]jsontext.Value{},
 		ProjectMetadata: map[string]jsontext.Value{},
-		metadataWriters: map[string]map[string]foldScalarWriter{},
 	}
 	ordered := append([]FoldEvent(nil), events...)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -70,7 +69,6 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		return
 	}
 	payload := PayloadMap(e.Payload)
-	defer p.trackPendingScalars(e, payload)
 	switch e.Type {
 	case "issue.created", "issue.snapshot":
 		p.applyIssueCreated(e)
@@ -137,96 +135,6 @@ func (p *FoldProjection) apply(e FoldEvent) {
 	}
 }
 
-const (
-	pendingTitle uint16 = 1 << iota
-	pendingBody
-	pendingOwner
-	pendingPriority
-	pendingStatus
-	pendingDeleted
-)
-
-func (p *FoldProjection) trackPendingScalars(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
-	if uid == "" {
-		return
-	}
-	var fields uint16
-	switch e.Type {
-	case "issue.created":
-		fields = pendingTitle | pendingBody | pendingOwner | pendingPriority | pendingStatus | pendingDeleted
-		if e.Pending {
-			var metadata map[string]jsontext.Value
-			_ = json.Unmarshal(payload["metadata"], &metadata)
-			if p.metadataWriters[uid] == nil {
-				p.metadataWriters[uid] = map[string]foldScalarWriter{}
-			}
-			for key := range metadata {
-				p.metadataWriters[uid][key] = foldScalarWriter{projectUID: e.ProjectUID, position: e.Position, pending: true}
-			}
-		}
-	case "issue.updated":
-		if _, ok := payload["title"]; ok {
-			fields |= pendingTitle
-		}
-		if _, ok := payload["body"]; ok {
-			fields |= pendingBody
-		}
-		if _, ok := payload["owner"]; ok {
-			fields |= pendingOwner
-		}
-		if _, ok := payload["assignment_expires_on"]; ok {
-			fields |= pendingOwner
-		}
-		if _, ok := payload["priority"]; ok {
-			fields |= pendingPriority
-		}
-		if _, ok := payload["status"]; ok {
-			fields |= pendingStatus
-		}
-		if _, ok := payload["closed_reason"]; ok {
-			fields |= pendingStatus
-		}
-		if _, ok := payload["closed_at"]; ok {
-			fields |= pendingStatus
-		}
-		if _, ok := payload["deleted_at"]; ok {
-			fields |= pendingDeleted
-		}
-	case "issue.assigned", "issue.unassigned", "issue.assignment_renewed", "issue.assignment_expired":
-		fields = pendingOwner
-	case "issue.priority_set", "issue.priority_cleared":
-		fields = pendingPriority
-	case "issue.closed", "issue.reopened":
-		fields = pendingStatus | pendingOwner
-	case "issue.soft_deleted", "issue.restored":
-		fields = pendingDeleted
-	case "issue.metadata_updated":
-		var diff map[string]jsontext.Value
-		_ = json.Unmarshal(payload["diff"], &diff)
-		if p.metadataWriters[uid] == nil {
-			p.metadataWriters[uid] = map[string]foldScalarWriter{}
-		}
-		for key := range diff {
-			p.metadataWriters[uid][key] = foldScalarWriter{projectUID: e.ProjectUID, position: e.Position, pending: e.Pending}
-		}
-	}
-	if fields == 0 {
-		return
-	}
-	issue := p.Issues[uid]
-	for i := range issue.scalarWriters {
-		if fields&(1<<i) != 0 {
-			issue.scalarWriters[i] = foldScalarWriter{projectUID: e.ProjectUID, position: e.Position, pending: e.Pending}
-		}
-	}
-	p.Issues[uid] = issue
-}
-
-func scalarWriterAfterSnapshot(writer foldScalarWriter, snapshot FoldEvent) bool {
-	return writer.pending || (snapshot.Position > 0 && writer.projectUID == snapshot.ProjectUID && writer.position > snapshot.Position)
-}
-
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	var in struct {
 		UID                 string         `json:"uid"`
@@ -243,7 +151,6 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		DeletedAt           *string        `json:"deleted_at"`
 		Metadata            jsontext.Value `json:"metadata"`
 		Labels              []string       `json:"labels"`
-		LinksScope          string         `json:"links_scope"`
 		Links               []struct {
 			Type       string `json:"type"`
 			ToIssueUID string `json:"to_issue_uid"`
@@ -273,7 +180,6 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		return
 	}
 	issue := p.ensureIssue(uid)
-	previous := issue
 	if issue.UID == "" {
 		issue.UID = uid
 	}
@@ -303,71 +209,20 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	issue.ClosedReason = cloneStringPtr(in.ClosedReason)
 	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
 	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
-	if e.Type == "issue.snapshot" {
-		if scalarWriterAfterSnapshot(previous.scalarWriters[0], e) {
-			issue.Title = previous.Title
-		}
-		if scalarWriterAfterSnapshot(previous.scalarWriters[1], e) {
-			issue.Body = previous.Body
-		}
-		if scalarWriterAfterSnapshot(previous.scalarWriters[2], e) {
-			issue.Owner, issue.AssignmentExpiresOn = previous.Owner, previous.AssignmentExpiresOn
-		}
-		if scalarWriterAfterSnapshot(previous.scalarWriters[3], e) {
-			issue.Priority = previous.Priority
-		}
-		if scalarWriterAfterSnapshot(previous.scalarWriters[4], e) {
-			issue.Status, issue.ClosedReason, issue.ClosedAt, issue.StatusIntentUID, issue.StatusClock = previous.Status, previous.ClosedReason, previous.ClosedAt, previous.StatusIntentUID, previous.StatusClock
-		}
-		if scalarWriterAfterSnapshot(previous.scalarWriters[5], e) {
-			issue.DeletedAt = previous.DeletedAt
-		}
-	}
 	issue.ProjectUID = e.ProjectUID
 	p.Issues[uid] = issue
 	if len(in.Metadata) > 0 && string(in.Metadata) != "null" {
-		metadata := canonicalJSON(in.Metadata)
-		if e.Type == "issue.snapshot" && len(p.metadataWriters[uid]) > 0 {
-			var old, current map[string]jsontext.Value
-			_ = json.Unmarshal(p.IssueMetadata[uid], &old)
-			_ = json.Unmarshal(metadata, &current)
-			if current == nil {
-				current = map[string]jsontext.Value{}
-			}
-			for key, writer := range p.metadataWriters[uid] {
-				if !scalarWriterAfterSnapshot(writer, e) {
-					continue
-				}
-				if value, ok := old[key]; ok {
-					current[key] = value
-				} else {
-					delete(current, key)
-				}
-			}
-			metadata, _ = json.Marshal(current)
-			metadata = canonicalJSON(metadata)
-		}
-		p.IssueMetadata[uid] = metadata
+		p.IssueMetadata[uid] = canonicalJSON(in.Metadata)
 	}
 	if e.Type == "issue.snapshot" {
-		for key, state := range p.Labels {
-			if key.IssueUID == uid && !state.Pending {
+		for key := range p.Labels {
+			if key.IssueUID == uid {
 				delete(p.Labels, key)
 			}
 		}
 	}
 	for _, label := range in.Labels {
-		key := FoldLabelKey{IssueUID: uid, Label: label}
-		if e.Type != "issue.snapshot" || !p.Labels[key].Pending {
-			p.Labels[key] = FoldElementState{Present: true, Clock: clockOf(e), Pending: e.Pending}
-		}
-	}
-	if e.Type == "issue.snapshot" && in.LinksScope == "all" && !e.LocalHubSnapshot {
-		for key, state := range p.Links {
-			if (key.FromUID == uid || key.ToUID == uid) && !state.Pending && !(state.ProjectUID == e.ProjectUID && state.Position > e.Position && e.Position > 0) && compareClock(state.Clock, clockOf(e)) <= 0 {
-				p.Links[key] = FoldElementState{Present: false, Clock: clockOf(e), Author: state.Author}
-			}
-		}
+		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
 	}
 	for _, link := range in.Links {
 		if link.ToIssueUID == "" {
@@ -381,10 +236,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		if author == "" {
 			author = e.Actor
 		}
-		if e.Type == "issue.snapshot" && (p.pendingLink(from, to, link.Type) || p.linkAfterSnapshot(from, to, link.Type, e)) {
-			continue
-		}
-		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt, e.Pending, e.Position, e.ProjectUID)
+		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt)
 	}
 	for _, comment := range in.Comments {
 		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
@@ -693,7 +545,7 @@ func (p *FoldProjection) applyLabel(e FoldEvent, payload map[string]jsontext.Val
 	if !ok || uid == "" {
 		return
 	}
-	p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: present, Clock: clockOf(e), Pending: e.Pending}
+	p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: present, Clock: clockOf(e)}
 	p.touchIssue(uid, issueUpdatedAt(e, payload))
 }
 
@@ -714,7 +566,7 @@ func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]jsontext
 			from, to = linkFrom, linkTo
 		}
 	}
-	p.setLink(from, to, typ, present, clockOf(e), e.Actor, "", e.Pending, e.Position, e.ProjectUID)
+	p.setLink(from, to, typ, present, clockOf(e), e.Actor, "")
 	p.touchIssue(issueUID(e, payload), issueUpdatedAt(e, payload))
 }
 
@@ -724,25 +576,25 @@ func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsont
 		return
 	}
 	defer p.touchIssue(base, issueUpdatedAt(e, payload))
-	p.applyUIDList(base, payload["parent_set_uid"], "parent", true, false, clockOf(e), e.Actor, e.Pending, e.Position, e.ProjectUID)
-	p.applyUIDList(base, payload["parent_removed_uid"], "parent", false, false, clockOf(e), e.Actor, e.Pending, e.Position, e.ProjectUID)
+	p.applyUIDList(base, payload["parent_set_uid"], "parent", true, false, clockOf(e), e.Actor)
+	p.applyUIDList(base, payload["parent_removed_uid"], "parent", false, false, clockOf(e), e.Actor)
 	for _, uid := range stringSlice(payload["blocks_added_uids"]) {
-		p.setLink(base, uid, "blocks", true, clockOf(e), e.Actor, "", e.Pending, e.Position, e.ProjectUID)
+		p.setLink(base, uid, "blocks", true, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["blocks_removed_uids"]) {
-		p.setLink(base, uid, "blocks", false, clockOf(e), e.Actor, "", e.Pending, e.Position, e.ProjectUID)
+		p.setLink(base, uid, "blocks", false, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["blocked_by_added_uids"]) {
-		p.setLink(uid, base, "blocks", true, clockOf(e), e.Actor, "", e.Pending, e.Position, e.ProjectUID)
+		p.setLink(uid, base, "blocks", true, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["blocked_by_removed_uids"]) {
-		p.setLink(uid, base, "blocks", false, clockOf(e), e.Actor, "", e.Pending, e.Position, e.ProjectUID)
+		p.setLink(uid, base, "blocks", false, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["related_added_uids"]) {
-		p.setLink(base, uid, "related", true, clockOf(e), e.Actor, "", e.Pending, e.Position, e.ProjectUID)
+		p.setLink(base, uid, "related", true, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["related_removed_uids"]) {
-		p.setLink(base, uid, "related", false, clockOf(e), e.Actor, "", e.Pending, e.Position, e.ProjectUID)
+		p.setLink(base, uid, "related", false, clockOf(e), e.Actor, "")
 	}
 }
 
@@ -815,7 +667,7 @@ func (p *FoldProjection) applyAuthorRewritten(e FoldEvent, payload map[string]js
 	}
 }
 
-func (p *FoldProjection) applyUIDList(base string, raw jsontext.Value, typ string, present, incoming bool, clock FoldClock, author string, pending bool, position int64, projectUID string) {
+func (p *FoldProjection) applyUIDList(base string, raw jsontext.Value, typ string, present, incoming bool, clock FoldClock, author string) {
 	uid, ok := stringValue(raw)
 	if !ok || uid == "" {
 		return
@@ -824,52 +676,20 @@ func (p *FoldProjection) applyUIDList(base string, raw jsontext.Value, typ strin
 	if incoming {
 		from, to = to, from
 	}
-	p.setLink(from, to, typ, present, clock, author, "", pending, position, projectUID)
+	p.setLink(from, to, typ, present, clock, author, "")
 }
 
-func (p *FoldProjection) pendingLink(from, to, typ string) bool {
-	if typ == "related" && from > to {
-		from, to = to, from
-	}
-	if typ == "parent" {
-		for key, state := range p.Links {
-			if key.Type == "parent" && key.FromUID == from && state.Pending {
-				return true
-			}
-		}
-	}
-	return p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}].Pending
-}
-
-func (p *FoldProjection) linkAfterSnapshot(from, to, typ string, snapshot FoldEvent) bool {
-	if snapshot.Position == 0 {
-		return false
-	}
-	if typ == "related" && from > to {
-		from, to = to, from
-	}
-	if typ == "parent" {
-		for key, state := range p.Links {
-			if key.Type == "parent" && key.FromUID == from && state.ProjectUID == snapshot.ProjectUID && state.Position > snapshot.Position {
-				return true
-			}
-		}
-	}
-	state := p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}]
-	return state.ProjectUID == snapshot.ProjectUID && state.Position > snapshot.Position
-}
-
-func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldClock, author, createdAt string, pending bool, position int64, projectUID string) {
+func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldClock, author, createdAt string) {
 	if typ == "related" && from > to {
 		from, to = to, from
 	}
 	if typ == "parent" && present {
-		p.clearOlderParents(from, to, clock, pending, position, projectUID)
+		p.clearOlderParents(from, to, clock)
 	}
-	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock, Author: author, CreatedAt: createdAt, Pending: pending, Position: position, ProjectUID: projectUID}
+	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock, Author: author, CreatedAt: createdAt}
 }
 
-func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock FoldClock, pending bool, position int64, projectUID string) {
+func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock FoldClock) {
 	for key, state := range p.Links {
 		if key.Type != "parent" || key.FromUID != childUID || key.ToUID == keepParentUID || !state.Present {
 			continue
@@ -877,7 +697,7 @@ func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock
 		if compareClock(state.Clock, clock) > 0 {
 			continue
 		}
-		p.Links[key] = FoldElementState{Present: false, Clock: clock, Author: state.Author, Pending: pending, Position: position, ProjectUID: projectUID}
+		p.Links[key] = FoldElementState{Present: false, Clock: clock, Author: state.Author}
 	}
 }
 

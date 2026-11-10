@@ -43,9 +43,7 @@ func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 		if exists && compareClock(clockOf(event), clockOf(baseline)) < 0 {
 			switch event.Type {
 			case "issue.created", "issue.snapshot":
-				if !event.Pending {
-					continue
-				}
+				continue
 			case "issue.commented", "issue.comment_edited":
 				uid, body, version := federationCommentEditVersion(event)
 				comment, covered := comments[federationBaselineCommentKey{event.IssueUID, uid}]

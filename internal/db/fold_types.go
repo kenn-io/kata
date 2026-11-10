@@ -2,7 +2,8 @@ package db
 
 import "encoding/json/jsontext"
 
-// FoldEvent carries event content and backend-local replay context.
+// FoldEvent is the portable event shape consumed by the fold engine. It excludes
+// backend-local row IDs by design.
 type FoldEvent struct {
 	UID               string
 	OriginInstanceUID string
@@ -15,9 +16,6 @@ type FoldEvent struct {
 	HLCCounter        int64
 	CreatedAt         string
 	Payload           jsontext.Value
-	Pending           bool  `json:"-"`
-	LocalHubSnapshot  bool  `json:"-"`
-	Position          int64 `json:"-"`
 }
 
 // FoldClock is an event's deterministic last-writer timestamp.
@@ -41,13 +39,6 @@ type FoldProjection struct {
 	ProjectMetadata map[string]jsontext.Value
 	Warnings        []string
 	cronAuthors     map[string]foldCronAuthorCandidate
-	metadataWriters map[string]map[string]foldScalarWriter
-}
-
-type foldScalarWriter struct {
-	projectUID string
-	position   int64
-	pending    bool
 }
 
 // FoldCronJob retains project identity alongside the winning job document.
@@ -87,8 +78,7 @@ type FoldIssue struct {
 	// StatusClock is the latest status-bearing writer, including same-state
 	// restatements. Newly accepted intent must outrank the previous projection's
 	// writer; an older delayed event cannot manufacture a pending pointer.
-	StatusClock   FoldClock `json:"-"`
-	scalarWriters [6]foldScalarWriter
+	StatusClock FoldClock `json:"-"`
 }
 
 // FoldComment is the replayed comment state keyed by stable comment UID.
@@ -120,12 +110,9 @@ type FoldLinkKey struct {
 
 // FoldElementState stores an add/remove edge's current tombstone state.
 type FoldElementState struct {
-	Present    bool
-	Pending    bool   `json:"-"`
-	Position   int64  `json:"-"`
-	ProjectUID string `json:"-"`
-	Clock      FoldClock
-	Author     string
+	Present bool
+	Clock   FoldClock
+	Author  string
 	// CreatedAt is the original link date when supplied by a snapshot.
 	// Empty means the event did not record it; labels do not use this field.
 	CreatedAt string
