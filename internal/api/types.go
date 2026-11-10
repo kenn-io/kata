@@ -1901,6 +1901,8 @@ type MoveIssuesSummary struct {
 }
 
 // MoveIssuesResponse contains batch outcomes and a continuation index.
+// Error results can include completed items at or after next_index; callers
+// should reconcile those indexes before retrying.
 type MoveIssuesResponse struct {
 	Body struct {
 		Results   []MoveIssuesResult `json:"results"`

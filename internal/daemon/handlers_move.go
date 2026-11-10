@@ -14,7 +14,7 @@ import (
 
 // registerMoveHandlers installs POST /api/v1/projects/{project_id}/issues/{ref}/actions/move.
 func registerMoveHandlers(humaAPI huma.API, cfg ServerConfig) {
-	huma.Register(humaAPI, huma.Operation{OperationID: "moveIssues", Method: "POST", Path: "/api/v1/issues/actions/move", Description: "Move independent issues in chunks. On a later chunk error, error.data contains results for completed chunks and next_index for the failed chunk."}, moveIssuesHandler(cfg))
+	huma.Register(humaAPI, huma.Operation{OperationID: "moveIssues", Method: "POST", Path: "/api/v1/issues/actions/move", Description: "Move independent issues in chunks. On a batch execution error, error.data contains completed results and next_index, where retry can begin. Results may include completed items at or after next_index; reconcile them by index before retrying."}, moveIssuesHandler(cfg))
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "moveIssue",
 		Method:      "POST",
