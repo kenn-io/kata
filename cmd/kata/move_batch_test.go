@@ -63,7 +63,7 @@ func TestParseRefsFrom(t *testing.T) {
 }
 
 func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
-	for _, mode := range []string{"parse", "missing target", "invalid ref", "no workspace"} {
+	for _, mode := range []string{"parse", "missing target", "invalid ref", "no workspace", "oversized"} {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, src, dst, issue := setupMoveCLIProjects(t)
 			input := "\tdst\n" + issue.UID + "\t" + dst.Name + "\n"
@@ -74,6 +74,8 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 			case "invalid ref":
 				input = ""
 				args = []string{"--workspace", dir, "--project", src.Name, "move", "invalid!", issue.ShortID, dst.Name, "--json"}
+			case "oversized":
+				input = strings.Repeat("x", 1<<20) + "\n" + issue.UID + "\t" + dst.Name + "\n"
 			case "no workspace":
 				args[1] = t.TempDir()
 				input = "abcd\t" + dst.Name + "\n" + issue.UID + "\t" + dst.Name + "\n"
@@ -86,7 +88,7 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(out), &reply))
 			require.Len(t, reply.Results, 2)
 			require.Equal(t, 0, reply.Results[0].Index)
-			if mode == "parse" {
+			if mode == "parse" || mode == "oversized" {
 				require.Equal(t, "validation", reply.Results[0].Code)
 			}
 			require.Equal(t, "refused", reply.Results[0].Result)

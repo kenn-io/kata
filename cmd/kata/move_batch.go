@@ -41,34 +41,58 @@ func moveBatchUsage(message string) error {
 	return &cliError{Message: message, Kind: kindUsage, ExitCode: ExitUsage}
 }
 func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 4096), 1<<20)
+	reader := bufio.NewReader(r)
 	var items []moveBatchItem
-	line := 0
-	for scanner.Scan() {
-		line++
-		value := scanner.Text()
-		if line == 1 {
-			value = strings.TrimPrefix(value, "\ufeff")
+	for line := 1; ; line++ {
+		value, oversized, err := readMoveBatchLine(reader)
+		if err != nil && err != io.EOF {
+			return nil, moveBatchUsage(err.Error())
 		}
-		trimmed := strings.TrimSpace(value)
-		if (trimmed == "" && !strings.Contains(value, "\t")) || trimmed == "#" || strings.HasPrefix(trimmed, "# ") {
-			continue
+		if err == io.EOF && value == "" && !oversized {
+			break
 		}
-		fields := strings.Split(value, "\t")
-		item := moveBatchItem{Ref: strings.TrimSpace(fields[0]), TargetProject: defaultTarget}
-		if len(fields) >= 2 {
-			item.TargetProject = strings.TrimSpace(fields[1])
+		if oversized {
+			items = append(items, moveBatchItem{ParseError: fmt.Sprintf("line %d: exceeds 1 MiB", line)})
+		} else {
+			if line == 1 {
+				value = strings.TrimPrefix(value, "\ufeff")
+			}
+			trimmed := strings.TrimSpace(value)
+			if (trimmed != "" || strings.Contains(value, "\t")) && trimmed != "#" && !strings.HasPrefix(trimmed, "# ") {
+				fields := strings.Split(value, "\t")
+				item := moveBatchItem{Ref: strings.TrimSpace(fields[0]), TargetProject: defaultTarget}
+				if len(fields) >= 2 {
+					item.TargetProject = strings.TrimSpace(fields[1])
+				}
+				if len(fields) > 2 || item.Ref == "" || item.TargetProject == "" {
+					item.ParseError = fmt.Sprintf("line %d: expected ref and target project", line)
+				}
+				items = append(items, item)
+			}
 		}
-		if len(fields) > 2 || item.Ref == "" || item.TargetProject == "" {
-			item.ParseError = fmt.Sprintf("line %d: expected ref and target project", line)
+		if err == io.EOF {
+			break
 		}
-		items = append(items, item)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, moveBatchUsage(err.Error())
 	}
 	return items, nil
+}
+
+func readMoveBatchLine(reader *bufio.Reader) (string, bool, error) {
+	var line []byte
+	oversized := false
+	for {
+		part, err := reader.ReadSlice('\n')
+		if !oversized {
+			if len(line)+len(part) >= 1<<20 {
+				line, oversized = nil, true
+			} else {
+				line = append(line, part...)
+			}
+		}
+		if err != bufio.ErrBufferFull {
+			return strings.TrimSuffix(string(line), "\n"), oversized, err
+		}
+	}
 }
 
 func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string, targetErrors map[string]error) (string, error) {
