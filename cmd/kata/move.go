@@ -27,7 +27,7 @@ func newMoveCmd() *cobra.Command {
 Use --single to move only the selected issue.
 
 Multiple refs, --refs-from or --from-project select a batch. Batches move
-single issues by default; --subtree includes descendants. Each result reports
+single issues by default; --subtree includes descendants for one input. Each result reports
 success, an unchanged issue, or a refusal without undoing other successful moves.
 
 The issue keeps its UID, comments, history, and all of its links
@@ -59,7 +59,7 @@ assigned in the target project.`,
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry", false, "validate and preview without mutating")
 	cmd.Flags().BoolVar(&single, "single", false, "move only the selected issue")
-	cmd.Flags().BoolVar(&subtree, "subtree", false, "move each selected issue with its descendants")
+	cmd.Flags().BoolVar(&subtree, "subtree", false, "move one selected issue with its descendants")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "print every batch result")
 	cmd.Flags().StringVar(&refsFrom, "refs-from", "", "read ref or ref<TAB>project per line from file or -")
 	cmd.Flags().StringVar(&selector.Project, "from-project", "", "select issues from this project")

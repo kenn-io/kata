@@ -338,3 +338,67 @@ func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
 		})
 	}
 }
+
+func TestMoveBatchCLI_InvalidRefDoesNotBlockValid(t *testing.T) {
+	env, dir, src, dst, issue := setupMoveCLIProjects(t)
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, "", "--workspace", dir, "--project", src.Name, "move", "invalid!", issue.ShortID, dst.Name, "--json")
+	require.Error(t, err)
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 2)
+	require.Equal(t, "refused", reply.Results[0].Result)
+	require.Equal(t, "moved", reply.Results[1].Result)
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, dst.ID, got.ProjectID)
+}
+
+func TestMoveBatchCLI_TargetFailureDoesNotBlockValid(t *testing.T) {
+	env, dir, _, dst, issue := setupMoveCLIProjects(t)
+	input := issue.UID + "\tmissing-project\n" + issue.UID + "\t" + dst.Name + "\n"
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
+	require.Error(t, err)
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 2)
+	require.Equal(t, 0, reply.Results[0].Index)
+	require.Equal(t, "refused", reply.Results[0].Result)
+	require.Equal(t, 1, reply.Results[1].Index)
+	require.Equal(t, "moved", reply.Results[1].Result)
+}
+
+func TestMoveBatchCLI_PartialErrorResults(t *testing.T) {
+	env, dir, _, dst, issue := setupMoveCLIProjects(t)
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/issues/actions/move" {
+			r.Host = origin.Host
+			proxy.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		require.NoError(t, json.MarshalWrite(w, map[string]any{"status": 500, "error": map[string]any{"code": "internal", "message": "database unavailable", "data": map[string]any{"results": []api.MoveIssuesResult{{Index: 0, Ref: issue.UID, Result: "moved"}}, "next_index": 1}}}))
+	}))
+	t.Cleanup(server.Close)
+	input := issue.UID + "\tmissing-project\n" + issue.UID + "\t" + dst.Name + "\n" + issue.UID + "\t" + dst.Name + "\n"
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
+	var ce *cliError
+	require.ErrorAs(t, err, &ce)
+	require.Equal(t, 500, ce.HTTPStatus)
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 2)
+	require.Equal(t, 0, reply.Results[0].Index)
+	require.Equal(t, "refused", reply.Results[0].Result)
+	require.Equal(t, 1, reply.Results[1].Index)
+	require.Equal(t, "moved", reply.Results[1].Result)
+}

@@ -4821,6 +4821,7 @@ components:
           minimum: 0
           type: integer
         subtree:
+          description: Include descendants; requires exactly one item.
           type: boolean
         teammate:
           type: string
@@ -8603,6 +8604,7 @@ paths:
           description: Error
   /api/v1/issues/actions/move:
     post:
+      description: Move independent issues in chunks. On a later chunk error, error.data contains results for completed chunks and next_index for the failed chunk.
       operationId: moveIssues
       requestBody:
         content:

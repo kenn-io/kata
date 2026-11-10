@@ -100,58 +100,20 @@ func TestMoveIssuesBatch_DuplicateConflictDryRun(t *testing.T) {
 	}
 }
 
-func TestMoveIssuesBatch_SubtreeCoveredAndConflict(t *testing.T) {
-	for _, conflict := range []bool{false, true} {
-		t.Run(fmt.Sprint(conflict), func(t *testing.T) {
-			env := testenv.New(t, testenv.WithAuthToken("tok"))
-			src, a, root := seedMovePair(t, env)
-			b, err := env.DB.CreateProject(t.Context(), "other-target")
-			require.NoError(t, err)
-			child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "child", Author: "tester", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
-			require.NoError(t, err)
-			target := a.UID
-			if conflict {
-				target = b.UID
-			}
-			body := fmt.Sprintf(`{"actor":"tester","subtree":true,"items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, child.UID, target, root.UID, a.UID)
-			out := postMoveBatch(t, env, body)
-			require.Len(t, out.Results, 2)
-			if conflict {
-				for _, r := range out.Results {
-					require.Equal(t, "conflicting_target", r.Code)
-				}
-			} else {
-				require.Equal(t, "covered_by_subtree", out.Results[0].Code)
-				require.Equal(t, "moved", out.Results[0].Result)
-				require.NotZero(t, out.Results[0].EventID, "every moved input retains its own event ID")
-				require.NotEqual(t, out.Results[1].EventID, out.Results[0].EventID)
-			}
-			for _, i := range []db.Issue{root, child} {
-				got, err := env.DB.IssueByID(t.Context(), i.ID)
-				require.NoError(t, err)
-				want := a.ID
-				if conflict {
-					want = src.ID
-				}
-				require.Equal(t, want, got.ProjectID)
-			}
-		})
-	}
-}
-
-// Dry previews cannot promise an allocation, including explicitly selected
-// children covered by a selected ancestor.
-func TestMoveIssuesBatch_CoveredPreviewOmitsAllocatedRef(t *testing.T) {
+func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	src, target, root := seedMovePair(t, env)
 	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "child", Author: "tester", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 	require.NoError(t, err)
-	body := fmt.Sprintf(`{"actor":"tester","dry_run":true,"subtree":true,"to_project_uid":%q,"items":[{"ref":%q},{"ref":%q}]}`, target.UID, child.UID, root.UID)
-	out := postMoveBatch(t, env, body)
-	require.Len(t, out.Results, 2)
-	require.Equal(t, "would_move", out.Results[0].Result)
-	require.Equal(t, "covered_by_subtree", out.Results[0].Code)
-	require.Empty(t, out.Results[0].NewShortID)
-	require.Empty(t, out.Results[0].To)
-	require.Zero(t, out.Results[0].EventID)
+	for _, dry := range []bool{false, true} {
+		body := fmt.Sprintf(`{"actor":"tester","dry_run":%t,"subtree":true,"to_project_uid":%q,"items":[{"ref":%q},{"ref":%q}]}`, dry, target.UID, root.UID, child.UID)
+		resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
+	}
+	for _, issue := range []db.Issue{root, child} {
+		got, err := env.DB.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, src.ID, got.ProjectID)
+	}
 }

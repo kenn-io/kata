@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -154,6 +156,8 @@ func TestMoveIssuesBatch_SubtreeMembershipFence(t *testing.T) {
 	source, root := createClaimGateHelperIssue(t, store)
 	target, err := store.CreateProject(t.Context(), "fenced-target")
 	require.NoError(t, err)
+	child, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "destination child", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
 	wrapped := &batchMoveRaceStore{Storage: store, beforeWrite: func() {
 		_, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "new child", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 		require.NoError(t, err)
@@ -170,6 +174,9 @@ func TestMoveIssuesBatch_SubtreeMembershipFence(t *testing.T) {
 	got, err := store.IssueByID(t.Context(), root.ID)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, got.ProjectID)
+	got, err = store.IssueByID(t.Context(), child.ID)
+	require.NoError(t, err)
+	require.Equal(t, child.Revision, got.Revision)
 }
 
 type batchPairCountingStore struct {
@@ -207,32 +214,78 @@ func TestMoveIssuesBatch_PairGateOncePerPair(t *testing.T) {
 	}
 }
 
-// Contract: the chunk budget counts moved issues, including descendants, and
-// keeps each complete subtree together.
-func TestMoveIssuesBatch_SubtreeChunkBudgetCountsMembers(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	source, root := createClaimGateHelperIssue(t, store)
-	target, err := store.CreateProject(t.Context(), "tree-budget-target")
-	require.NoError(t, err)
-	second, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second root", Author: "agent"})
-	require.NoError(t, err)
-	for _, parent := range []db.Issue{root, second} {
-		for range 29 {
-			_, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: parent.ID}}})
-			require.NoError(t, err)
+type batchFailureStore struct {
+	db.Storage
+	calls       int
+	failPreview bool
+}
+
+func (s *batchFailureStore) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
+	if in.DryRun == s.failPreview {
+		s.calls++
+		if s.calls == 2 {
+			return db.MoveIssuesBatchOut{}, errors.New("database unavailable")
 		}
 	}
+	return s.Storage.MoveIssuesBatch(ctx, in)
+}
+
+func TestMoveIssuesBatch_ReportsCommittedChunksOnError(t *testing.T) {
+	for _, failPreview := range []bool{true, false} {
+		t.Run(fmt.Sprint(failPreview), func(t *testing.T) {
+			store := openClaimGateHelperDB(t)
+			source, first := createClaimGateHelperIssue(t, store)
+			target, err := store.CreateProject(t.Context(), "target")
+			require.NoError(t, err)
+			req := &api.MoveIssuesRequest{}
+			req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed", target.UID
+			req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: first.UID})
+			for range 50 {
+				issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "issue", Author: "agent"})
+				require.NoError(t, err)
+				req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
+			}
+			_, err = moveIssuesHandler(ServerConfig{DB: &batchFailureStore{Storage: store, failPreview: failPreview}})(t.Context(), req)
+			var apiErr *api.APIError
+			require.ErrorAs(t, err, &apiErr)
+			require.Equal(t, 500, apiErr.Status)
+			require.Equal(t, 50, apiErr.Data["next_index"])
+			rows, ok := apiErr.Data["results"].([]api.MoveIssuesResult)
+			require.True(t, ok)
+			require.Len(t, rows, 50)
+			require.Equal(t, "moved", rows[0].Result)
+			got, err := store.IssueByID(t.Context(), first.ID)
+			require.NoError(t, err)
+			require.Equal(t, target.ID, got.ProjectID)
+			comments, err := store.CommentsByIssue(t.Context(), first.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+		})
+	}
+}
+
+func TestMoveIssuesBatch_DestinationResidentChild(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	source, root := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "child", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
-	req.Body.Actor = "agent"
-	req.Body.Subtree = true
-	req.Body.ToProjectUID = target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: root.UID}, {Ref: second.UID}}
-	//nolint:kennlint // deadlinetest: A nanosecond forces a completed native database chunk to yield; no asynchronous timeout races an assertion.
-	out, err := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})(t.Context(), req)
+	req.Body.Actor, req.Body.Comment, req.Body.Subtree, req.Body.ToProjectUID = "agent", "routed", true, target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: root.UID}}
+	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
 	require.NoError(t, err)
-	require.Equal(t, 1, out.Body.NextIndex)
-	require.Len(t, out.Body.Results, 1)
-	got, err := store.IssueByID(t.Context(), second.ID)
+	require.Equal(t, "moved", out.Body.Results[0].Result)
+	require.Empty(t, out.Body.Results[0].Descendants)
+	got, err := store.IssueByID(t.Context(), root.ID)
 	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
+	require.Equal(t, target.ID, got.ProjectID)
+	got, err = store.IssueByID(t.Context(), child.ID)
+	require.NoError(t, err)
+	require.Equal(t, child.Revision, got.Revision)
+	comments, err := store.CommentsByIssue(t.Context(), child.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments)
+	require.NotEqual(t, source.ID, got.ProjectID)
 }

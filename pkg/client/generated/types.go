@@ -4925,9 +4925,11 @@ type MoveIssuesRequestBody struct {
 	DryRun           *bool            `json:"dry_run,omitempty"`
 	Items            []MoveIssuesItem `json:"items" validate:"required"`
 	StartIndex       *int64           `json:"start_index,omitempty" validate:"omitempty,gte=0"`
-	Subtree          *bool            `json:"subtree,omitempty"`
-	Teammate         *string          `json:"teammate,omitempty"`
-	ToProjectUID     *string          `json:"to_project_uid,omitempty"`
+
+	// Subtree Include descendants; requires exactly one item.
+	Subtree      *bool   `json:"subtree,omitempty"`
+	Teammate     *string `json:"teammate,omitempty"`
+	ToProjectUID *string `json:"to_project_uid,omitempty"`
 }
 
 func (m MoveIssuesRequestBody) Validate() error {

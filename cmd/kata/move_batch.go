@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -241,6 +243,12 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 }
 
 func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptions) error {
+	if len(items) > 5000 {
+		return moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
+	}
+	if opts.Subtree && len(items) > 1 {
+		return moveBatchUsage("--subtree accepts one issue")
+	}
 	a, err := dialDaemon(cmd.Context())
 	if err != nil {
 		return err
@@ -266,10 +274,9 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	needsDefault := false
 	for _, item := range items {
 		parsed, err := shortid.Parse(item.Ref)
-		if err != nil {
-			return moveBatchUsage(err.Error())
+		if err == nil {
+			needsDefault = needsDefault || (parsed.ULID == "" && parsed.Project == "")
 		}
-		needsDefault = needsDefault || (parsed.ULID == "" && parsed.Project == "")
 	}
 	if needsDefault {
 		start, err := resolveStartPath(flags.Workspace)
@@ -282,25 +289,58 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		}
 		request.Body.DefaultProjectID = pid
 	}
-	targets := map[string]string{}
+	// Account for every original row before dropping locally refused targets.
 	for _, item := range items {
+		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: item.Ref, ToProjectUID: item.TargetProject, ExpectedRevision: item.ExpectedRevision})
+	}
+	request.Body.StartIndex = len(items)
+	original, err := json.Marshal(request.Body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+	if err != nil {
+		return err
+	}
+	if len(original) > 1<<20 {
+		return moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
+	}
+	request.Body.Items = nil
+	request.Body.StartIndex = 0
+	targets := map[string]string{}
+	targetErrors := map[string]error{}
+	var indexes []int
+	var results []api.MoveIssuesResult
+	for i, item := range items {
 		uid := targets[item.TargetProject]
-		if uid == "" {
+		if uid == "" && targetErrors[item.TargetProject] == nil {
 			project, err := resolveProjectSelector(a, item.TargetProject)
 			if err != nil {
-				return err
+				targetErrors[item.TargetProject] = err
+			} else {
+				uid = project.UID
+				targets[item.TargetProject] = uid
 			}
-			uid = project.UID
-			targets[item.TargetProject] = uid
 		}
+		if err := targetErrors[item.TargetProject]; err != nil {
+			r := api.MoveIssuesResult{Index: i, Ref: item.Ref, Result: "refused", Message: err.Error()}
+			if ce, ok := errors.AsType[*cliError](err); ok {
+				r.Code, r.Message, r.Hint = ce.Code, ce.Message, ce.Hint
+			}
+			results = append(results, r)
+			continue
+		}
+		indexes = append(indexes, i)
 		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: item.Ref, ToProjectUID: uid, ExpectedRevision: item.ExpectedRevision})
 	}
-	if len(items) > 5000 {
-		return moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
+	if len(request.Body.Items) == 0 {
+		if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
+			return err
+		}
+		if len(results) > 0 {
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
+		}
+		return nil
 	}
 	// Match the generated transport's JSON escaping and reserve the largest
 	// continuation encoding before the first mutation.
-	request.Body.StartIndex = len(items)
+	request.Body.StartIndex = len(request.Body.Items)
 	raw, err := json.Marshal(request.Body)
 	if err != nil {
 		return err
@@ -317,12 +357,12 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		return moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
 	}
 	request.Body.StartIndex = 0
-	var results []api.MoveIssuesResult
 	requests := 0
 	for request.Body.StartIndex < len(request.Body.Items) {
 		body.StartIndex = new(int64(request.Body.StartIndex))
 		response, callErr := client.MoveIssuesWithResponse(a.ctx, &generated.MoveIssuesRequestOptions{Body: &body})
 		if response == nil {
+			slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
 			if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
 				return err
 			}
@@ -333,6 +373,20 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			return &cliError{Message: message, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			if ce, ok := errors.AsType[*cliError](err); ok && len(ce.Data) > 0 {
+				var partial struct {
+					Results []api.MoveIssuesResult `json:"results"`
+				}
+				if json.Unmarshal(ce.Data, &partial) == nil {
+					for _, r := range partial.Results {
+						if r.Index >= 0 && r.Index < len(indexes) {
+							r.Index = indexes[r.Index]
+							results = append(results, r)
+						}
+					}
+				}
+			}
+			slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
 			if printErr := printMoveBatch(cmd, results, len(items), opts); printErr != nil {
 				return printErr
 			}
@@ -348,7 +402,13 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		if reply.NextIndex <= request.Body.StartIndex || reply.NextIndex > len(request.Body.Items) {
 			return fmt.Errorf("could not continue batch move")
 		}
-		results = append(results, reply.Results...)
+		for _, r := range reply.Results {
+			if r.Index < 0 || r.Index >= len(indexes) {
+				return fmt.Errorf("invalid batch move result index")
+			}
+			r.Index = indexes[r.Index]
+			results = append(results, r)
+		}
 		request.Body.StartIndex = reply.NextIndex
 		requests++
 		if requests > 1 {
@@ -357,6 +417,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			}
 		}
 	}
+	slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
 	if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
 		return err
 	}

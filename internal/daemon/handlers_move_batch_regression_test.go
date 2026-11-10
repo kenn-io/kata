@@ -120,16 +120,24 @@ func TestMoveBatchContinuationPreservesAliasConflicts(t *testing.T) {
 		out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
 		require.NoError(t, err)
 		require.Len(t, out.Body.Results, 1)
-		want := "conflicting_target"
 		if same {
-			want = "duplicate_item"
+			require.Equal(t, "moved", out.Body.Results[0].Result)
+		} else {
+			require.Equal(t, "conflicting_target", out.Body.Results[0].Code)
 		}
-		require.Equal(t, want, out.Body.Results[0].Code)
 		got, err := store.IssueByID(t.Context(), first.ID)
 		require.NoError(t, err)
-		require.Equal(t, source.ID, got.ProjectID)
+		if same {
+			require.Equal(t, target.ID, got.ProjectID)
+		} else {
+			require.Equal(t, source.ID, got.ProjectID)
+		}
 		comments, err := store.CommentsByIssue(t.Context(), first.ID)
 		require.NoError(t, err)
-		require.Empty(t, comments)
+		if same {
+			require.Len(t, comments, 1)
+		} else {
+			require.Empty(t, comments)
+		}
 	}
 }

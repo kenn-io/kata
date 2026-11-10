@@ -1721,6 +1721,9 @@ export const getMoveIssuesUrl = () => {
   return `/api/v1/issues/actions/move`
 }
 
+/**
+ * Move independent issues in chunks. On a later chunk error, error.data contains results for completed chunks and next_index for the failed chunk.
+ */
 export const moveIssues = async (
   moveIssuesRequestBody: MoveIssuesRequestBody,
   options?: Parameters<typeof orvalFetch>[1],

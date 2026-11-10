@@ -15,11 +15,11 @@ const moveBatchChunkIssues = 50
 const moveBatchClaimConcurrency = 16
 
 type moveBatchItem struct {
-	move    db.MoveIssueProjectIn
-	issue   db.Issue
-	target  db.Project
-	tree    []db.Issue
-	covered int
+	move   db.MoveIssueProjectIn
+	issue  db.Issue
+	target db.Project
+	tree   []db.Issue
+	owner  int
 }
 
 func moveBatchRefusal(result *api.MoveIssuesResult, err error) {
@@ -46,6 +46,9 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		if in.Body.StartIndex > len(in.Body.Items) {
 			return nil, api.NewError(400, "validation", "start_index exceeds item count", "", nil)
 		}
+		if in.Body.Subtree && len(in.Body.Items) > 1 {
+			return nil, api.NewError(400, "validation", "subtree move accepts one item", "", nil)
+		}
 		if err := teammate.Validate(in.Body.Teammate); err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
@@ -56,13 +59,12 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		pairs := map[[2]int64]error{}
 		targetErrors := map[string]error{}
 		seen := map[int64][]int{}
-		selectedRevisions := map[int64]int64{}
 		authorize := func(uids []string) error { _, err := authorizeHostProjectScope(ctx, nil, uids, false); return err }
 		for j, input := range in.Body.Items {
 			r := &results[j]
 			r.Index = j
 			r.Ref = input.Ref
-			items[j].covered = -1
+			items[j].owner = -1
 			uid := input.ToProjectUID
 			if uid == "" {
 				uid = in.Body.ToProjectUID
@@ -119,11 +121,8 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			items[j].target = target
 			items[j].move = db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: target.ID, IfMatchRev: rev, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: authorize}
 			seen[issue.ID] = append(seen[issue.ID], j)
-			if previous, selected := selectedRevisions[issue.ID]; selected && previous != rev {
-				// No revision can satisfy incompatible duplicate preconditions.
-				selectedRevisions[issue.ID] = -1
-			} else {
-				selectedRevisions[issue.ID] = rev
+			if input.ExpectedRevision != 0 && input.ExpectedRevision != issue.Revision {
+				moveBatchRefusal(r, &db.RevisionConflictError{CurrentRevision: issue.Revision})
 			}
 			pair := [2]int64{issue.ProjectID, target.ID}
 			if issue.ProjectID != target.ID {
@@ -142,72 +141,28 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			for _, j := range indexes {
 				conflict = conflict || items[j].target.UID != target
 			}
-			for k, j := range indexes {
+			owner := -1
+			for _, j := range indexes {
 				if conflict {
 					results[j].Result = "refused"
 					results[j].Code = "conflicting_target"
 					results[j].Message = "issue requested for different targets"
-				} else if k > 0 && results[j].Result == "" {
-					results[j].Result = "unchanged"
-					results[j].Code = "duplicate_item"
+				} else if j >= in.Body.StartIndex {
+					if owner < 0 {
+						owner = j
+					} else if results[j].Result == "" {
+						items[j].owner = owner
+					}
 				}
 			}
 		}
-		// Whole-input subtree discovery is required before any write: an explicitly
-		// selected child can conflict with a later parent even across chunk boundaries.
 		for j := range items {
-			if results[j].Result != "" {
-				continue
-			}
 			item := &items[j]
-			if item.issue.ProjectID == item.target.ID {
+			if results[j].Result == "" && item.owner < 0 && item.issue.ProjectID == item.target.ID {
 				results[j].Result = "unchanged"
 				results[j].Code = "already_in_target"
 				results[j].NewShortID = item.issue.ShortID
 				results[j].To = item.target.Name + "#" + item.issue.ShortID
-				continue
-			}
-			if !in.Body.Subtree {
-				continue
-			}
-			item.move.ExpectedRevisions = selectedRevisions
-			preview := item.move
-			preview.DryRun = true
-			out, err := cfg.DB.MoveIssueProject(ctx, preview)
-			if err != nil {
-				moveBatchRefusal(&results[j], err)
-				continue
-			}
-			item.tree = out.Issues
-			item.move.ExpectedIssueIDs = out.TreeIssueIDs
-		}
-		if in.Body.Subtree {
-			for j := range items {
-				if items[j].tree == nil {
-					continue
-				}
-				for _, memberID := range items[j].move.ExpectedIssueIDs {
-					if memberID == items[j].issue.ID {
-						continue
-					}
-					for _, k := range seen[memberID] {
-						if items[k].target.UID != items[j].target.UID {
-							for _, idx := range []int{j, k} {
-								results[idx].Result = "refused"
-								results[idx].Code = "conflicting_target"
-								results[idx].Message = "subtree requested for different targets"
-							}
-						} else if results[k].Result == "" {
-							items[k].covered = j
-						}
-					}
-				}
-			}
-			// Prefer the outermost selected ancestor as owner of every overlapping tree.
-			for j := range items {
-				for steps := 0; items[j].covered >= 0 && items[items[j].covered].covered >= 0 && steps < n; steps++ {
-					items[j].covered = items[items[j].covered].covered
-				}
 			}
 		}
 		out := &api.MoveIssuesResponse{}
@@ -217,35 +172,11 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			budget = moveBatchBudget
 		}
 		for start := in.Body.StartIndex; start < n; {
-			end, members := start, 0
-			for end < n {
-				count := 1
-				if items[end].covered >= 0 {
-					count = 0
-				} else if len(items[end].tree) > 0 {
-					count = len(items[end].tree)
-				}
-				if end > start && members+count > moveBatchChunkIssues {
-					break
-				}
-				members += count
-				end++
-			}
-			for changed := true; changed; {
-				changed = false
-				for j := range items {
-					owner := items[j].covered
-					if owner >= 0 && ((j < end && j >= start) || (owner < end && owner >= start)) && max(j, owner) >= end {
-						end = max(j, owner) + 1
-						changed = true
-					}
-				}
-			}
-			moveEventIDs := map[string]int64{}
+			end := min(start+moveBatchChunkIssues, n)
 			var moves []db.MoveIssueProjectIn
 			var indexes []int
 			for j := start; j < end; j++ {
-				if results[j].Result == "" && items[j].covered < 0 {
+				if results[j].Result == "" && items[j].owner < 0 {
 					moves = append(moves, items[j].move)
 					indexes = append(indexes, j)
 				}
@@ -253,7 +184,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			if len(moves) > 0 {
 				preview, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: moves, DryRun: true, Actor: actor, AuthorizeProjects: authorize})
 				if err != nil {
-					return nil, internalAPIError(err)
+					return nil, moveBatchError(err, out.Body.Results, start)
 				}
 				var claimed []db.Issue
 				for k, j := range indexes {
@@ -262,6 +193,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 						continue
 					}
 					items[j].tree = preview.Results[k].Out.Issues
+					items[j].move.ExpectedIssueIDs = preview.Results[k].Out.TreeIssueIDs
 					claimed = append(claimed, items[j].tree...)
 				}
 				refusals := requireFederatedIssueClaimsConcurrently(ctx, cfg, claimed, actor, cache, moveBatchClaimConcurrency, !in.Body.DryRun)
@@ -291,7 +223,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				if len(write) > 0 {
 					committed, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: write, Actor: actor, Comment: in.Body.Comment, Teammate: in.Body.Teammate, AuthorizeProjects: authorize})
 					if err != nil {
-						return nil, internalAPIError(err)
+						return nil, moveBatchError(err, out.Body.Results, start)
 					}
 					var events []db.Event
 					for k, j := range written {
@@ -308,37 +240,22 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 						r.Revision = item.Out.NewRevision
 						r.To = items[j].target.Name + "#" + item.Out.NewShortID
 						r.Descendants = item.Out.Issues[1:]
-						for _, event := range item.Out.Events {
-							if event.Type == "issue.moved" && event.IssueUID != nil {
-								moveEventIDs[*event.IssueUID] = event.ID
-							}
-						}
 						events = append(events, item.Out.Events...)
 					}
 					cfg.Publish().EventsByProject(events)
 				}
 			}
 			for j := start; j < end; j++ {
-				if owner := items[j].covered; owner >= 0 && results[j].Result == "" {
-					root := results[owner]
+				if owner := items[j].owner; owner >= 0 && results[j].Result == "" {
+					first := results[owner]
 					r := &results[j]
-					r.Result = root.Result
-					r.Code = "covered_by_subtree"
-					switch root.Result {
-					case "refused":
-						r.Code = root.Code
-						r.Message = root.Message
-						r.Hint = root.Hint
-					case "moved":
-						for _, issue := range root.Descendants {
-							if issue.UID == r.UID {
-								r.NewShortID = issue.ShortID
-								r.To = items[j].target.Name + "#" + issue.ShortID
-								r.Revision = issue.Revision
-								r.EventID = moveEventIDs[issue.UID]
-								r.ShortIDExtended = len(issue.ShortID) > len(r.OldShortID)
-							}
-						}
+					r.Result, r.Code, r.Message, r.Hint = first.Result, first.Code, first.Message, first.Hint
+					switch first.Result {
+					case "moved", "unchanged":
+						r.Result, r.Code = "unchanged", "duplicate_item"
+						r.NewShortID, r.To = first.NewShortID, first.To
+					case "would_move":
+						r.Code = "duplicate_item"
 					}
 				}
 			}
@@ -363,4 +280,10 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		}
 		return out, nil
 	}
+}
+
+func moveBatchError(err error, results []api.MoveIssuesResult, next int) error {
+	mapped := internalAPIError(err).(*api.APIError)
+	mapped.Data = map[string]any{"results": results, "next_index": next}
+	return mapped
 }

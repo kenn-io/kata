@@ -14,7 +14,7 @@ import (
 
 // registerMoveHandlers installs POST /api/v1/projects/{project_id}/issues/{ref}/actions/move.
 func registerMoveHandlers(humaAPI huma.API, cfg ServerConfig) {
-	huma.Register(humaAPI, huma.Operation{OperationID: "moveIssues", Method: "POST", Path: "/api/v1/issues/actions/move"}, moveIssuesHandler(cfg))
+	huma.Register(humaAPI, huma.Operation{OperationID: "moveIssues", Method: "POST", Path: "/api/v1/issues/actions/move", Description: "Move independent issues in chunks. On a later chunk error, error.data contains results for completed chunks and next_index for the failed chunk."}, moveIssuesHandler(cfg))
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "moveIssue",
 		Method:      "POST",
@@ -98,10 +98,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			}
 			if !in.Body.DryRun {
 				move.DryRun = false
-				move.ExpectedIssueIDs = make([]int64, len(res.Issues))
-				for i, issue := range res.Issues {
-					move.ExpectedIssueIDs[i] = issue.ID
-				}
+				move.ExpectedIssueIDs = res.TreeIssueIDs
 				res, err = cfg.DB.MoveIssueProject(ctx, move)
 			}
 		}

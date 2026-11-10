@@ -984,7 +984,7 @@ kata move --from-project source-project --query "installer" target-project --dry
 
 Batch mode starts with multiple refs, `--refs-from`, `--from-project`, or
 `--subtree`. Its default is to move only each selected issue. Add `--subtree`
-to include descendants. `--single` is also accepted. A single positional ref
+to include descendants when selecting one issue. `--single` is also accepted. A single positional ref
 without a batch flag keeps the existing subtree default and output.
 
 A ref file contains one `ref` or `ref<TAB>project` per line. A line's target
@@ -1012,8 +1012,7 @@ use `-v` for every row. Descendants are listed under their selected root.
 | --- | --- |
 | `already_in_target` | The issue is already in its requested target. |
 | `duplicate_item` | An earlier input names the same issue and target. |
-| `conflicting_target` | An issue, or overlapping subtree, names different targets. Nothing in that conflict moves. |
-| `covered_by_subtree` | Another selected root moves this issue to the same target. |
+| `conflicting_target` | An issue names different targets. Nothing in that conflict moves. |
 | `revision_conflict` | A selected issue changed after selection. Rerun to select its current revision. |
 | `issue_move_tree_changed` | Subtree membership changed after validation. Retry to validate every member. |
 
@@ -1029,7 +1028,7 @@ including with `--dry`. Split larger input into separate runs.
 The daemon commits chunks and returns a continuation after its soft four-second
 budget; the CLI continues automatically. Exit 0 means every item succeeded
 or was unchanged; exit 5 means at least one refusal; exit 2 means invalid input
-before a move request. A transport failure prints received results and exits 7.
+before a move request. An interrupted request prints confirmed results, including committed chunks returned in an error response. A transport failure exits 7.
 Rerun the same input to finish any remaining items. Batch commands fail closed
 with `daemon_api_too_old` against older daemons.
 

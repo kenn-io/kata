@@ -9,14 +9,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Move many issues with `kata move <ref>... <project>`, `--refs-from`, or
-  project filters. Batch moves default to single issues, report each refusal,
-  and continue automatically across request budgets. Inputs over 5,000 items or
-  1 MiB are refused before any write. Comments commit with the
-  moves and are not repeated on safe reruns. Requires daemon API 0.45.0 or newer;
-  [the CLI reference](reference/cli.md#move-many-issues) explains the formats
-  and the unchanged same-hub federation limits.
-
 - Keep search focus and text when keyboard selection opens task detail.
 - Keep local writes responsive while a federation pull updates projects with long histories.
 - See why Docbank attachments fail when the daemon cannot read its own key.
@@ -34,6 +26,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `[search.embeddings]`, `token_env` for `[auth]` or `[mcp]`, or
   `--hub-token-env` or `kata mcp --http-token-env` variable now reports
   `env:<NAME>: environment variable is unset or empty`.
+
+- Move many issues with `kata move <ref>... <project>`, `--refs-from`, or
+  project filters. Batch moves default to single issues, report each refusal,
+  and continue automatically across request budgets. Inputs over 5,000 items or
+  1 MiB are refused before any write. A subtree move accepts one input.
+  Comments commit with the
+  moves and are not repeated on safe reruns. Requires daemon API 0.45.0 or newer;
+  [the CLI reference](reference/cli.md#move-many-issues) explains the formats
+  and the unchanged same-hub federation limits.
 
 ## 0.23.0
 <small>2026-11-09</small>

@@ -83,7 +83,7 @@ the per-issue restrictions.
 
 Route many issues with `kata move <ref>... <project>` or `--refs-from` on
 daemon API 0.45.0 or newer. Batch moves default to single issues; add
-`--subtree` to include descendants. Each source/target pair follows the same
+`--subtree` to include descendants when selecting one issue. Each source/target pair follows the same
 hub, actor, push, and relay rules above. A refused item leaves other successful
 moves committed. Inputs over 5,000 items or a 1 MiB request body are refused
 before any write; split larger input into separate runs. Batch comments travel after their issue's existing

@@ -1854,7 +1854,7 @@ type MoveIssuesRequest struct {
 		Actor            string           `json:"actor,omitempty"`
 		Teammate         string           `json:"teammate,omitempty"`
 		DryRun           bool             `json:"dry_run,omitempty"`
-		Subtree          bool             `json:"subtree,omitempty"`
+		Subtree          bool             `json:"subtree,omitempty" doc:"Include descendants; requires exactly one item."`
 		Comment          string           `json:"comment,omitempty"`
 		DefaultProjectID int64            `json:"default_project_id,omitempty"`
 		ToProjectUID     string           `json:"to_project_uid,omitempty"`

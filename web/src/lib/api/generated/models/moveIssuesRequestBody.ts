@@ -15,6 +15,7 @@ export interface MoveIssuesRequestBody {
   items: MoveIssuesItem[]
   /** @minimum 0 */
   start_index?: number
+  /** Include descendants; requires exactly one item. */
   subtree?: boolean
   teammate?: string
   to_project_uid?: string

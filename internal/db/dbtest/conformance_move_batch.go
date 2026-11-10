@@ -188,8 +188,7 @@ func checkMoveBatchCollision(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-// Contract: selected descendant revisions survive preview and are checked in
-// the same transaction as the enclosing move and routing comments, on both stores.
+// Each selected issue keeps its own revision precondition.
 func checkMoveBatchSelectedRevisions(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	source, err := store.CreateProject(ctx, "selected-source")
@@ -200,24 +199,25 @@ func checkMoveBatchSelectedRevisions(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 	require.NoError(t, err)
-	in := db.MoveIssuesBatchIn{Actor: "worker", Comment: "routed", DryRun: true, Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, ExpectedRevisions: map[int64]int64{child.ID: child.Revision}}}}
-	preview, err := store.MoveIssuesBatch(ctx, in)
+	in := db.MoveIssuesBatchIn{Actor: "worker", Comment: "routed", Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Single: true}, {IssueID: child.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: child.Revision, Single: true}}}
+	owner := "new-owner"
+	changed, _, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: child.ID, Owner: &owner, Actor: "worker"})
 	require.NoError(t, err)
-	require.NoError(t, preview.Results[0].Err)
-	title := "changed child"
-	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: child.ID, Title: &title, Actor: "worker"})
+	require.Greater(t, changed.Revision, child.Revision)
+	out, err := store.MoveIssuesBatch(ctx, in)
 	require.NoError(t, err)
-	for _, dry := range []bool{true, false} {
-		in.DryRun = dry
-		out, err := store.MoveIssuesBatch(ctx, in)
+	require.NoError(t, out.Results[0].Err)
+	require.ErrorAs(t, out.Results[1].Err, new(*db.RevisionConflictError))
+	for i, issue := range []db.Issue{root, child} {
+		got, err := store.IssueByID(ctx, issue.ID)
 		require.NoError(t, err)
-		require.ErrorAs(t, out.Results[0].Err, new(*db.RevisionConflictError))
-		for _, issue := range []db.Issue{root, child} {
-			got, err := store.IssueByID(ctx, issue.ID)
-			require.NoError(t, err)
+		comments, err := store.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		if i == 0 {
+			require.Equal(t, target.ID, got.ProjectID)
+			require.Len(t, comments, 1)
+		} else {
 			require.Equal(t, source.ID, got.ProjectID)
-			comments, err := store.CommentsByIssue(ctx, issue.ID)
-			require.NoError(t, err)
 			require.Empty(t, comments)
 		}
 	}
