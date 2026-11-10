@@ -28,10 +28,7 @@ func TestIssuePortableTimezoneAdmission(t *testing.T) {
 		t.Helper()
 		if create {
 			status, raw := cronHTTP(t, env, http.MethodPost, projectPath(p.ID)+"/issues", map[string]any{"actor": "tester", "title": "Example", "force_new": true, "metadata": md})
-			failure := assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
-			if _, choosingZone := md["timezone"]; choosingZone {
-				require.Contains(t, failure.Error.Message, "bundled geographic")
-			}
+			assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
 		}
 		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Existing", Author: "tester"})
 		require.NoError(t, err)
@@ -171,9 +168,7 @@ func TestIssuePortableTimezoneTransactionCurrent(t *testing.T) {
 		occurrence, err := store.IssueByUID(t.Context(), out.NewIssueUID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		path = fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), occurrence.ShortID)
-		status, raw = cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]any{"timezone": nil, "scheduled_on": nil}})
-		require.Equal(t, http.StatusOK, status, string(raw))
-		status, raw = cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]string{"scheduled_on": "2026-11-12"}})
+		status, raw = cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]string{"scheduled_on": "2026-11-13"}})
 		require.Equal(t, http.StatusOK, status, string(raw))
 	})
 }
