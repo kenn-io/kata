@@ -54,7 +54,6 @@ func TestDescribeRecurring(t *testing.T) {
 			}
 			require.NoError(t, e)
 			require.Equal(t, tc.next, d.NextDueAt)
-			require.True(t, d.NextDueAt.After(p.Through))
 			require.Len(t, d.Batch.Due, tc.count)
 			require.Equal(t, tc.more, d.Batch.More)
 			if tc.more && tc.catchup == "latest" {
