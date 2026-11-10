@@ -97,8 +97,10 @@ also remains reserved while its move history remains.
 When a direct spoke joins the destination after the hub moved an issue, a
 destination baseline can relocate the existing source row without retained
 move history. Both replicas must use the same hub origin. The local issue ID,
-comments, labels, and links survive; later pulls of either project keep the
-destination ownership. Kata does not author another move during this recovery.
+discussion, and links survive, while the destination baseline sets the current
+labels. Pausing or leaving the source preserves its retained discussion. Leaving
+the destination makes the issue standalone, and the source can continue to sync.
+Kata does not author another move during this recovery.
 
 Destination sync recovers retained source history even when its cursor has
 already passed those events. This preserves missed changes and comments without

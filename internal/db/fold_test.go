@@ -475,7 +475,10 @@ func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 		`{"uid":"issue-1","title":"snapshot","status":"open"}`,
 	} {
 		t.Run(snapshot, func(t *testing.T) {
+			other := testEvent("issue.snapshot", 1, `{"uid":"issue-2","title":"other","status":"open","labels":["keep"]}`)
+			other.IssueUID = "issue-2"
 			got := FoldEvents([]FoldEvent{
+				other,
 				testEvent("issue.snapshot", 1, `{"uid":"issue-1","title":"source","status":"open","labels":["old"]}`),
 				testEvent("issue.labeled", 2, `{"label":"before"}`),
 				testEvent("issue.snapshot", 3, snapshot),
@@ -486,6 +489,7 @@ func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 			require.False(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "before"}].Present)
 			require.True(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "after"}].Present)
 			require.False(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "current"}].Present)
+			require.True(t, got.Labels[FoldLabelKey{IssueUID: "issue-2", Label: "keep"}].Present)
 		})
 	}
 }

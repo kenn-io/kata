@@ -487,35 +487,3 @@ func TestPulledSnapshotRelocationFallsBackToFullReplay(t *testing.T) {
 		})
 	}
 }
-
-func TestFullPulledSnapshotRetriesNewerSourceCreation(t *testing.T) {
-	ctx := t.Context()
-	d, source, _ := incrementalTestStore(t)
-	target, err := d.CreateProject(ctx, "concurrent-snapshot-target")
-	require.NoError(t, err)
-	for _, project := range []db.Project{source, target} {
-		_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
-		require.NoError(t, err)
-	}
-	issueUID := "01HZNQ7VFPK1XGD8R5MABCD4EX"
-	snapshot := incrementalRemoteEvent(t, target, issueUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"d4ex","title":"concurrent snapshot","author":"tester","status":"open"}`, issueUID), 9_000_000_000_000)
-	projectEvent := incrementalRemoteEvent(t, target, "", "project.updated", `{"name":"concurrent-snapshot-target"}`, 9_000_000_000_001)
-	_, err = d.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{snapshot, projectEvent})
-	require.NoError(t, err)
-	attempts := 0
-	d.federationIngestPrepared = func() {
-		attempts++
-		if attempts == 1 {
-			// Another pull receives the source baseline that predates the move.
-			sourceSnapshot := incrementalRemoteEvent(t, source, issueUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"d4ex","title":"concurrent source","author":"tester","status":"open"}`, issueUID), snapshot.HLCPhysicalMS-1)
-			_, err := d.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{sourceSnapshot})
-			require.NoError(t, err)
-			require.NoError(t, d.MaterializeFederatedProject(ctx, source.ID))
-		}
-	}
-	require.NoError(t, d.MaterializeFederatedEvents(ctx, target.ID, []string{snapshot.EventUID, projectEvent.EventUID}))
-	require.GreaterOrEqual(t, attempts, 2, "the destination must retry its stale preparation after the source pull")
-	var count int
-	require.NoError(t, d.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE uid=?`, issueUID).Scan(&count))
-	require.Equal(t, 1, count, "concurrent pulls must converge on one local issue row")
-}

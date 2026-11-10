@@ -214,6 +214,13 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	if len(in.Metadata) > 0 && string(in.Metadata) != "null" {
 		p.IssueMetadata[uid] = canonicalJSON(in.Metadata)
 	}
+	if e.Type == "issue.snapshot" {
+		for key := range p.Labels {
+			if key.IssueUID == uid {
+				delete(p.Labels, key)
+			}
+		}
+	}
 	for _, label := range in.Labels {
 		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
 	}

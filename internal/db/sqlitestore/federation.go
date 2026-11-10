@@ -1849,7 +1849,10 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
    SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
    UNION SELECT uid FROM issues WHERE project_id=$1)
  AND (EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
-   ` + moveIssueUID + ` = ` + eventIssueUID + `)`
+   ` + moveIssueUID + ` = ` + eventIssueUID + `)
+ OR ` + eventIssueUID + ` IN (SELECT ` + moveIssueUID + ` FROM events m
+ JOIN issues owner ON owner.uid = ` + moveIssueUID + ` AND owner.project_id = m.project_id
+ WHERE m.type='issue.snapshot')`
 	args := []any{projectID}
 	group, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
 	if err != nil {
@@ -1864,8 +1867,8 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 		groupSQL := strings.Join(placeholders, ",")
 		//nolint:gosec // Only generated placeholders enter SQL; project IDs are bound.
 		query += ` OR (e.project_id IN (` + groupSQL + `)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.snapshot'
- AND m.project_id IN (` + groupSQL + `) AND ` + moveIssueUID + ` = ` + eventIssueUID + `))`
+ AND ` + eventIssueUID + ` IN (SELECT ` + moveIssueUID + ` FROM events m WHERE m.type='issue.snapshot'
+ AND m.project_id IN (` + groupSQL + `)))`
 	}
 	query += `)))`
 	if len(eventTypes) > 0 {
@@ -2703,13 +2706,13 @@ func federationBindingGroupProjectIDs(
 	return federationBindingGroupProjectIDsScoped(ctx, tx, current, false)
 }
 
-// Snapshot ownership is shared only by active native replicas of one hub.
+// Snapshot ownership is shared by native replicas of one hub, including paused replicas.
 func federationSnapshotGroupProjectIDs(ctx context.Context, tx *sql.Tx, projectID int64) ([]int64, error) {
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, projectID))
 	if err != nil {
 		return nil, err
 	}
-	if binding.Role != db.FederationRoleSpoke || !binding.Enabled || binding.RelayConfig != nil {
+	if binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
 		return nil, nil
 	}
 	return federationBindingGroupProjectIDsScoped(ctx, tx, binding, true)
@@ -2730,9 +2733,12 @@ func federationBindingGroupProjectIDsScoped(ctx context.Context, tx *sql.Tx, cur
 			return nil, err
 		}
 	}
-	rows, err := tx.QueryContext(ctx,
-		federationBindingSelect+` WHERE role = ? AND enabled = 1 ORDER BY project_id ASC`,
-		string(current.Role))
+	query := federationBindingSelect + ` WHERE role = ?`
+	if !nativeSnapshots {
+		query += ` AND enabled = 1`
+	}
+	query += ` ORDER BY project_id ASC`
+	rows, err := tx.QueryContext(ctx, query, string(current.Role))
 	if err != nil {
 		return nil, fmt.Errorf("list federation group bindings: %w", err)
 	}
