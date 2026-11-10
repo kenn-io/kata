@@ -93,9 +93,7 @@ func TestMCPNotifyTeammateDefaults(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := map[string]any{"ref": "abc1", "message": tc.name}
-			for key, value := range tc.args {
-				args[key] = value
-			}
+			maps.Copy(args, tc.args)
 			callAdministrationTool(t, session, "kata.notify", args)
 			body := <-requests
 			require.Equal(t, tc.want, body[tc.field])
