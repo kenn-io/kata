@@ -1089,7 +1089,7 @@ func TestFieldReconcilePreservesConnectorErrorsWithoutAdvancingBaseline(t *testi
 	})
 }
 
-func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *testing.T) {
+func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 	t.Run("date instant and clear preserve issue timezone", func(t *testing.T) {
 		for _, value := range []connector.FieldValue{
 			date("2026-08-21"),

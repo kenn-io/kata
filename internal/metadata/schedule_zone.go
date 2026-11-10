@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sync"
@@ -18,6 +19,10 @@ var scheduleZoneBundle []byte
 const scheduleTZData2026c = "sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"
 
 const ScheduleTZDataVersion = scheduleTZData2026c
+
+// ErrUnsupportedScheduleTZData marks a saved schedule whose tzdata version this
+// build does not ship.
+var ErrUnsupportedScheduleTZData = errors.New("unsupported schedule tzdata version")
 
 type SavedSchedule struct {
 	Value         string `json:"value"`
@@ -46,7 +51,7 @@ func ScheduleLocation(zone, version string) (*time.Location, error) {
 func scheduleLocationFromBundles(bundles map[string][]byte, zone, version string) (*time.Location, error) {
 	bundle, ok := bundles[version]
 	if !ok {
-		return nil, fmt.Errorf("unsupported schedule tzdata version %q", version)
+		return nil, fmt.Errorf("%w %q", ErrUnsupportedScheduleTZData, version)
 	}
 	z, err := zip.NewReader(bytes.NewReader(bundle), int64(len(bundle)))
 	if err != nil {
@@ -134,16 +139,24 @@ func SavedScheduleZone(raw jsontext.Value) (string, error) {
 }
 
 // ScheduleClockText is the stored text of a schedule, with a saved UTC instant
-// read as the clock time of its saved zone; "" when the value is unreadable.
+// read as the clock time of its saved zone; the error's text when its rules
+// are unreadable, so the detail strip says why, and "" when absent.
 func ScheduleClockText(raw jsontext.Value) string {
 	value, loc, err := decodeScheduleValue(raw)
-	if err != nil || value == nil {
-		return ""
+	if value == nil {
+		return errorText(err)
 	}
 	if kind, _, instant, _ := classifyScheduledOn(*value); kind == scheduledOnInstant && loc != nil {
 		return instant.In(loc).Format("2006-01-02T15:04:05.999999999")
 	}
 	return *value
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // ScheduleValueText returns the editable text of a stored schedule.

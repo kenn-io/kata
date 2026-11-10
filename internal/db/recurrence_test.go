@@ -2,7 +2,6 @@ package db
 
 import (
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"os"
 	"os/exec"
 	"testing"
@@ -27,14 +26,15 @@ func TestValidateRecurrenceTemplateValidatesReservedMetadata(t *testing.T) {
 
 func TestComposeRecurrenceIssueMetadataStampsScheduleTimezone(t *testing.T) {
 	value, err := ComposeRecurrenceIssueMetadata(
-		jsontext.Value(`{"kind":"weekly","timezone":"Not/AZone","scheduled_on":"not-a-date"}`),
+		jsontext.Value(`{"kind":"weekly","timezone":"Not/AZone","scheduled_on":"not-a-date","deadline_on":"2026-05-19T09:00"}`),
 		"2026-05-18",
 		"America/New_York",
 	)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{
 		"kind":"weekly",
-		"scheduled_on":{"value":"2026-05-18","timezone":"America/New_York","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"},
+		"scheduled_on":{"value":"2026-05-18","timezone":"America/New_York","tzdata_version":"`+metadata.ScheduleTZDataVersion+`"},
+		"deadline_on":{"value":"2026-05-19T09:00","timezone":"America/New_York","tzdata_version":"`+metadata.ScheduleTZDataVersion+`"},
 		"timezone":"America/New_York"
 	}`, string(value))
 }
@@ -47,20 +47,6 @@ func TestComposeRecurrenceIssueMetadataDefensivelyRejectsInvalidReservedValue(t 
 	)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidRecurrence)
-}
-
-func TestRecurrenceMaterializesSavedRules(t *testing.T) {
-	value, err := ComposeRecurrenceIssueMetadata(jsontext.Value(`{"deadline_on":"2026-05-19T09:00"}`), "2026-05-18", "America/New_York")
-	require.NoError(t, err)
-	var values map[string]jsontext.Value
-	require.NoError(t, json.Unmarshal(value, &values))
-	for _, field := range []string{"scheduled_on", "deadline_on"} {
-		require.Equal(t, byte('{'), values[field][0])
-		_, zone, _, present, err := metadata.ScheduleFieldInstant(string(value), field, "UTC")
-		require.NoError(t, err)
-		require.True(t, present)
-		require.Equal(t, "America/New_York", zone)
-	}
 }
 
 func TestRecurrenceLocalMaterializesInNamedZone(t *testing.T) {

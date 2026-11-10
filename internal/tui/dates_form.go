@@ -32,6 +32,15 @@ type datesFormState struct {
 	revision  int64
 	scheduled string
 	deadline  string
+	// unreadable is why a stored date cannot be edited; a save is refused.
+	unreadable string
+}
+
+func (d datesFormState) refusal() error {
+	if d.unreadable == "" {
+		return nil
+	}
+	return errors.New(d.unreadable)
 }
 
 const datesChangedMessage = "The issue changed since the form opened; nothing was written. The form now shows the current dates."
@@ -60,8 +69,8 @@ func newDatesForm(target formTarget, issue Issue) inputState {
 // loadDates fills the form from issue and records the revision a save is
 // guarded on.
 func (s inputState) loadDates(issue Issue) inputState {
-	s.dates.revision = issue.Revision
-	s.dates.scheduled, s.dates.deadline = issue.scheduledOn(), issue.deadlineOn()
+	s.dates = issue.datesState()
+	s.err = s.dates.unreadable
 	for i := range s.fields {
 		switch s.fields[i].id {
 		case fieldScheduled:
@@ -103,7 +112,7 @@ func datesInputFromForm(s inputState, now time.Time, actor string) (DatesInput, 
 			in.Set[f.key] = &value
 		}
 	}
-	return in, nil
+	return in, s.dates.refusal()
 }
 
 func (m Model) routeDatesKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {

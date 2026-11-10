@@ -345,14 +345,7 @@ func validateImportRecord(record ImportRecord) error {
 	case *RecurrenceExport:
 		return requireImportPayload(rec, ImportKindRecurrence)
 	case *IssueExport:
-		if err := requireImportPayload(rec, ImportKindIssue); err != nil {
-			return err
-		}
-		if len(rec.Metadata) == 0 || string(rec.Metadata) == "null" {
-			return nil
-		}
-		_, err := PayloadRequiredFeatures("projection.issue", `{"metadata":`+string(rec.Metadata)+`}`)
-		return err
+		return requireImportPayload(rec, ImportKindIssue)
 	case *IssueEmbeddingExport:
 		return requireImportPayload(rec, ImportKindIssueEmbedding)
 	case *CommentExport:
@@ -413,11 +406,6 @@ func validateImportRecord(record ImportRecord) error {
 		}
 		if strings.HasPrefix(rec.Type, "cron.") {
 			if _, _, err := FederationEventWireVersion(rec.Type); err != nil {
-				return err
-			}
-		}
-		if strings.HasPrefix(rec.Type, "issue.") && len(rec.Payload) > 0 {
-			if _, err := PayloadRequiredFeatures(rec.Type, string(rec.Payload)); err != nil {
 				return err
 			}
 		}

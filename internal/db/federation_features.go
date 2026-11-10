@@ -238,32 +238,11 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	 EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%'))),
  EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND p.name<>$2 AND EXISTS(
   SELECT 1 FROM events e WHERE e.project_id=p.id AND e.type='issue.moved'))`, projectUID, SystemProjectName).Scan(&cronPresent, &issueMoved)
-	if err != nil {
-		return "", err
-	}
 	required := ""
-	rows, err := q.QueryContext(ctx, `SELECT i.metadata FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=$1 AND (i.metadata LIKE '%"scheduled_on"%' OR i.metadata LIKE '%"deadline_on"%' OR i.metadata LIKE '%\u%' ESCAPE '!')`, projectUID)
+	if err == nil {
+		required, err = issueScheduleFeatures(ctx, q, projectUID)
+	}
 	if err != nil {
-		return "", err
-	}
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			_ = rows.Close()
-			return "", err
-		}
-		feature, err := PayloadRequiredFeatures("projection.issue", `{"metadata":`+raw+`}`)
-		if err != nil {
-			_ = rows.Close()
-			return "", err
-		}
-		required = MergeEventFeatures(required, feature)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return "", err
-	}
-	if err := rows.Close(); err != nil {
 		return "", err
 	}
 	if issueMoved {
@@ -303,6 +282,31 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		}
 	}
 	return required, nil
+}
+
+// issueScheduleFeatures requires issue_schedule_v1 when any issue in the
+// project stores a saved schedule.
+func issueScheduleFeatures(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectUID string) (string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT i.metadata FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=$1 AND (i.metadata LIKE '%"scheduled_on"%' OR i.metadata LIKE '%"deadline_on"%' OR i.metadata LIKE '%\u%' ESCAPE '!')`, projectUID)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	required := ""
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return "", err
+		}
+		feature, err := PayloadRequiredFeatures("projection.issue", `{"metadata":`+raw+`}`)
+		if err != nil {
+			return "", err
+		}
+		required = MergeEventFeatures(required, feature)
+	}
+	return required, rows.Err()
 }
 
 const nativeCronJobsQuery = `SELECT 'projection.job',j.definition_json FROM cron_jobs j JOIN projects p ON p.id=j.project_id WHERE p.uid=$1 AND ((j.definition_json LIKE '%"notify"%' AND j.definition_json LIKE '%"per-run"%') OR j.definition_json LIKE '%\u%' ESCAPE '!')`

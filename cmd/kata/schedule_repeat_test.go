@@ -16,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -133,6 +134,7 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 		setup func(t *testing.T, env *testenv.Env, dir, ref string)
 		args  []string
 		want  string
+		saved bool
 	}{
 		{
 			name: "flag wins over everything",
@@ -150,6 +152,12 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 				t.Setenv("TZ", "Asia/Tokyo")
 			},
 			want: "America/Chicago",
+		},
+		{
+			name:  "saved schedule wins over caller zone",
+			setup: func(t *testing.T, _ *testenv.Env, _, _ string) { t.Setenv("TZ", "Asia/Tokyo") },
+			want:  "America/New_York",
+			saved: true,
 		},
 		{
 			name:  "TZ environment",
@@ -172,6 +180,14 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 			env, dir, pid := setupCLIWorkspace(t)
 			ref := createIssue(t, env, pid, "zone source")
 			tc.setup(t, env, dir, ref)
+			if tc.saved {
+				issue, err := env.DB.IssueByShortID(t.Context(), pid, ref, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				value, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+				require.NoError(t, err)
+				_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"scheduled_on": value}})
+				require.NoError(t, err)
+			}
 
 			args := append([]string{"schedule", ref, "2026-11-02", "--repeat", "FREQ=DAILY"}, tc.args...)
 			runCLI(t, env, dir, args...)
@@ -181,15 +197,6 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 			assert.Equal(t, tc.want, recs[0].Timezone)
 		})
 	}
-}
-
-func TestRepeatZoneUsesSavedSchedule(t *testing.T) {
-	t.Setenv("TZ", "Asia/Tokyo")
-	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
-	require.NoError(t, err)
-	zone, err := repeatZone("", "", map[string]jsontext.Value{"scheduled_on": saved})
-	require.NoError(t, err)
-	assert.Equal(t, "America/New_York", zone)
 }
 
 func TestRepeatZoneRejectsUnknownScheduleRules(t *testing.T) {

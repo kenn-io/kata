@@ -337,66 +337,34 @@ func TestScheduleDueCutoffCoversEveryZone(t *testing.T) {
 	}
 }
 
-func TestSavedScheduleUsesItsOwnZone(t *testing.T) {
-	raw, err := NewScheduleValue("2026-11-12T09:00", "Europe/Paris")
-	require.NoError(t, err)
-	metadata := `{"scheduled_on":` + string(raw) + `,"deadline_on":false}`
-	value, zone, at, present, err := ScheduleFieldInstant(metadata, "scheduled_on", "UTC")
-	require.NoError(t, err)
-	require.True(t, present)
-	require.Equal(t, "2026-11-12T09:00", value)
-	require.Equal(t, "Europe/Paris", zone)
-	require.Equal(t, "2026-11-12T08:00:00Z", at.Format(time.RFC3339))
-	date, present, err := CalendarDate(metadata, "scheduled_on", nil, "America/Los_Angeles")
-	require.NoError(t, err)
-	require.True(t, present)
-	require.Equal(t, "2026-11-12", date)
-}
-
-func TestSavedScheduleErrorsAndProjection(t *testing.T) {
-	raw, err := NewScheduleValue("2026-11-12T00:30", "Europe/Paris")
-	require.NoError(t, err)
-	doc := `{"scheduled_on":` + string(raw) + `,"deadline_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`
-	viewer := "America/Los_Angeles"
-	date, present, err := CalendarDate(doc, "scheduled_on", &viewer, "UTC")
-	require.NoError(t, err)
-	require.True(t, present)
-	require.Equal(t, "2026-11-12", date)
-	_, _, err = CalendarDate(doc, "deadline_on", nil, "UTC")
-	require.ErrorContains(t, err, "unsupported schedule tzdata version")
-	dateOnly, err := NewScheduleValue("2026-11-12", "Europe/Paris")
-	require.NoError(t, err)
-	date, _, err = CalendarDate(`{"scheduled_on":`+string(dateOnly)+`}`, "scheduled_on", &viewer, "UTC")
-	require.NoError(t, err)
-	require.Equal(t, "2026-11-12", date)
-}
-
-func TestSavedScheduleTransitions(t *testing.T) {
-	for _, tc := range []struct{ value, want string }{
-		{"2026-03-08T02:30", "2026-03-08T07:00:00Z"},
-		{"2026-11-01T01:30", "2026-11-01T05:30:00Z"},
+func TestSavedScheduleRulesAndProjection(t *testing.T) {
+	for _, tc := range []struct {
+		name, value, zone, instant, date string
+	}{
+		{"civil", "2026-11-12T09:00", "Europe/Paris", "2026-11-12T08:00:00Z", "2026-11-12"},
+		{"viewer date", "2026-11-12T00:30", "Europe/Paris", "2026-11-11T23:30:00Z", "2026-11-12"},
+		{"gap", "2026-03-08T02:30", "America/New_York", "2026-03-08T07:00:00Z", "2026-03-08"},
+		{"overlap", "2026-11-01T01:30", "America/New_York", "2026-11-01T05:30:00Z", "2026-11-01"},
+		{"instant", "2026-01-01T02:00:00Z", "America/New_York", "2026-01-01T02:00:00Z", "2025-12-31"},
+		{"date only", "2026-11-12", "Europe/Paris", "2026-11-11T23:00:00Z", "2026-11-12"},
 	} {
-		raw, err := NewScheduleValue(tc.value, "America/New_York")
-		require.NoError(t, err)
-		_, _, at, present, err := ScheduleFieldInstant(`{"scheduled_on":`+string(raw)+`}`, "scheduled_on", "UTC")
-		require.NoError(t, err)
-		require.True(t, present)
-		require.Equal(t, tc.want, at.Format(time.RFC3339))
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := NewScheduleValue(tc.value, tc.zone)
+			require.NoError(t, err)
+			doc := `{"scheduled_on":` + string(raw) + `,"deadline_on":false}`
+			value, zone, at, present, err := ScheduleFieldInstant(doc, "scheduled_on", "UTC")
+			require.NoError(t, err)
+			require.True(t, present)
+			require.Equal(t, tc.value, value)
+			require.Equal(t, tc.zone, zone)
+			require.Equal(t, tc.instant, at.Format(time.RFC3339))
+			viewer := "Asia/Tokyo"
+			date, present, err := CalendarDate(doc, "scheduled_on", &viewer, "UTC")
+			require.NoError(t, err)
+			require.True(t, present)
+			require.Equal(t, tc.date, date)
+		})
 	}
-}
-
-func TestSavedInstantUsesSelectedZone(t *testing.T) {
-	raw, err := NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
-	require.NoError(t, err)
-	doc := `{"scheduled_on":` + string(raw) + `}`
-	value, zone, at, present, err := ScheduleFieldInstant(doc, "scheduled_on", "UTC")
-	require.NoError(t, err)
-	require.True(t, present)
-	require.Equal(t, "2026-01-01T02:00:00Z", value)
-	require.Equal(t, "America/New_York", zone)
-	require.Equal(t, "2026-01-01T02:00:00Z", at.Format(time.RFC3339))
-	viewer := "Asia/Tokyo"
-	date, _, err := CalendarDate(doc, "scheduled_on", &viewer, "UTC")
-	require.NoError(t, err)
-	require.Equal(t, "2025-12-31", date)
+	_, _, err := CalendarDate(`{"deadline_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`, "deadline_on", nil, "UTC")
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }

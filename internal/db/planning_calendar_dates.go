@@ -1,6 +1,10 @@
 package db
 
-import "go.kenn.io/kata/internal/metadata"
+import (
+	"errors"
+
+	"go.kenn.io/kata/internal/metadata"
+)
 
 // planningCalendarDates holds both planning fields' calendar dates. Each field
 // resolves independently, so one unreadable value leaves the other usable.
@@ -15,6 +19,17 @@ func (d planningCalendarDates) err() error {
 		return d.scheduledErr
 	}
 	return d.deadlineErr
+}
+
+// unsupported returns the error of a field saved with tzdata rules this build
+// cannot read, which a row must surface instead of omitting the date.
+func (d planningCalendarDates) unsupported() error {
+	for _, err := range []error{d.scheduledErr, d.deadlineErr} {
+		if errors.Is(err, metadata.ErrUnsupportedScheduleTZData) {
+			return err
+		}
+	}
+	return nil
 }
 
 // resolvePlanningCalendarDates is the one rule that turns scheduled_on and
@@ -40,16 +55,10 @@ func resolvePlanningCalendarDates(
 // carried by list and show rows. A value is read in its issue's timezone, then
 // the field's default timezone, then UTC, so a request needs no zone. A field
 // is empty when its key is absent or its stored value cannot be resolved, so
-// one unreadable value never fails a whole response. scheduledDefaultTimezone
-// can include the legacy recurrence fallback; deadlines use the daemon
-// timezone.
-func RowPlanningDates(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string) (scheduledOn, deadlineOn string) {
+// one malformed value never fails a whole response; only a saved schedule with
+// an unsupported tzdata version returns an error. scheduledDefaultTimezone can
+// include the legacy recurrence fallback; deadlines use the daemon timezone.
+func RowPlanningDates(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string) (scheduledOn, deadlineOn string, err error) {
 	dates := resolvePlanningCalendarDates(raw, nil, scheduledDefaultTimezone, deadlineDefaultTimezone)
-	if dates.scheduledErr == nil {
-		scheduledOn = dates.scheduledOn
-	}
-	if dates.deadlineErr == nil {
-		deadlineOn = dates.deadlineOn
-	}
-	return scheduledOn, deadlineOn
+	return dates.scheduledOn, dates.deadlineOn, dates.unsupported()
 }

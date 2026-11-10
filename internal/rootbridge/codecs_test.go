@@ -90,101 +90,30 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 	}
 }
 
-func TestScheduleCodecKataPatchKeepsOtherLocalTimezone(t *testing.T) {
-	issue := db.Issue{Metadata: db.JSONBlob(`{"deadline_on":"2026-08-20T09:30","timezone":"America/New_York"}`)}
-	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"})
-	require.NoError(t, err)
-	assert.NotContains(t, patch, "deadline_on")
-	assert.NotContains(t, patch, "timezone")
-}
-
-func TestScheduleCodecKataPatchKeepsOtherDateTimezone(t *testing.T) {
-	cases := []struct {
-		name     string
-		codec    string
-		metadata string
+func TestScheduleCodecKataPatchKeepsOtherSchedule(t *testing.T) {
+	for _, tc := range []struct {
+		name, codec, metadata string
 	}{
-		{
-			name:     "scheduled date pins deadline local timezone",
-			codec:    "deadline_on",
-			metadata: `{"scheduled_on":"2026-08-20","timezone":"America/New_York"}`,
-		},
-		{
-			name:     "deadline date pins scheduled local timezone",
-			codec:    "scheduled_on",
-			metadata: `{"deadline_on":"2026-08-20","timezone":"America/New_York"}`,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			patch, err := fieldCodecs[tc.codec].KataPatch(
-				db.Issue{Metadata: db.JSONBlob(tc.metadata)},
-				connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"},
-			)
-			require.NoError(t, err)
-			assert.NotContains(t, patch, "timezone")
-		})
-	}
-}
-
-func TestScheduleCodecKataPatchAdoptsTimezoneWithOtherDateWithoutTimezone(t *testing.T) {
-	cases := []struct {
-		name     string
-		codec    string
-		metadata string
-	}{
-		{
-			name:     "scheduled date permits first deadline local timezone",
-			codec:    "deadline_on",
-			metadata: `{"scheduled_on":"2026-08-20"}`,
-		},
-		{
-			name:     "deadline date permits first scheduled local timezone",
-			codec:    "scheduled_on",
-			metadata: `{"deadline_on":"2026-08-20"}`,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			patch, err := fieldCodecs[tc.codec].KataPatch(
-				db.Issue{Metadata: db.JSONBlob(tc.metadata)},
-				connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"},
-			)
-			require.NoError(t, err)
-			saved, err := metadata.DecodeSavedSchedule(patch[tc.codec])
-			require.NoError(t, err)
-			assert.Equal(t, "2026-08-20T09:30", saved.Value)
-			assert.Equal(t, "America/Los_Angeles", saved.Timezone)
-			assert.NotContains(t, patch, "timezone")
-		})
-	}
-}
-
-func TestScheduleCodecKataPatchKeepsOtherLegacyLocal(t *testing.T) {
-	cases := []struct {
-		name     string
-		codec    string
-		metadata string
-	}{
-		{
-			name:     "scheduled local blocks deadline local timezone",
-			codec:    "deadline_on",
-			metadata: `{"scheduled_on":"2026-08-20T09:30"}`,
-		},
-		{
-			name:     "deadline local blocks scheduled local timezone",
-			codec:    "scheduled_on",
-			metadata: `{"deadline_on":"2026-08-20T09:30"}`,
-		},
-	}
-	for _, tc := range cases {
+		{"other local with zone", "scheduled_on", `{"deadline_on":"2026-08-20T09:30","timezone":"America/New_York"}`},
+		{"scheduled date with zone", "deadline_on", `{"scheduled_on":"2026-08-20","timezone":"America/New_York"}`},
+		{"deadline date with zone", "scheduled_on", `{"deadline_on":"2026-08-20","timezone":"America/New_York"}`},
+		{"scheduled date without zone", "deadline_on", `{"scheduled_on":"2026-08-20"}`},
+		{"deadline date without zone", "scheduled_on", `{"deadline_on":"2026-08-20"}`},
+		{"scheduled local without zone", "deadline_on", `{"scheduled_on":"2026-08-20T09:30"}`},
+		{"deadline local without zone", "scheduled_on", `{"deadline_on":"2026-08-20T09:30"}`},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			patch, err := fieldCodecs[tc.codec].KataPatch(
 				db.Issue{Metadata: db.JSONBlob(tc.metadata)},
 				connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T10:30", Timezone: "America/Los_Angeles"},
 			)
 			require.NoError(t, err)
-			assert.NotContains(t, patch, "timezone")
+			require.Len(t, patch, 1)
+			saved, err := metadata.DecodeSavedSchedule(patch[tc.codec])
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+			assert.Equal(t, "2026-08-20T10:30", saved.Value)
+			assert.Equal(t, "America/Los_Angeles", saved.Timezone)
 		})
 	}
 }

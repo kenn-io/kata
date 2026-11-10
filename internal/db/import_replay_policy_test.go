@@ -76,13 +76,11 @@ func TestValidateImportRecordsAcceptsEveryPayloadType(t *testing.T) {
 	assert.NoError(t, db.ValidateImportRecords(records))
 }
 
-func TestImportPreservesOpaqueLegacySchedule(t *testing.T) {
-	for _, value := range []string{`{"legacy":"opaque"}`, `{"value":"opaque"}`, `{"timezone":"opaque"}`} {
+func TestImportAcceptsOpaqueScheduleMetadata(t *testing.T) {
+	for _, value := range []string{`{"legacy":"opaque"}`, `{"value":"opaque"}`, `{"timezone":"opaque"}`, `{"value":"2026-05-18","timezone":"UTC","tzdata_version":"unknown"}`} {
 		t.Run(value, func(t *testing.T) {
 			issue := &db.IssueExport{Metadata: jsontext.Value(`{"scheduled_on":` + value + `}`)}
 			require.NoError(t, db.ValidateImportRecords([]db.ImportRecord{issue}))
-			_, err := db.PayloadRequiredFeatures("issue.created", `{"metadata":{"scheduled_on":`+value+`}}`)
-			require.NoError(t, err)
 		})
 	}
 }
@@ -102,10 +100,4 @@ func TestOrderImportRecordsPlacesDependenciesFirst(t *testing.T) {
 		db.ImportKindMeta, db.ImportKindProject,
 		db.ImportKindIssue, db.ImportKindEvent,
 	}, kinds)
-}
-
-func TestValidateImportRejectsUnknownScheduleRules(t *testing.T) {
-	issue := &db.IssueExport{Metadata: jsontext.Value(`{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"unknown"}}`)}
-	err := db.ValidateImportRecords([]db.ImportRecord{issue})
-	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }

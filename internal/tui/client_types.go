@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -76,6 +77,19 @@ func (i Issue) deadlineOn() string {
 	value, _ := metadata.ScheduleValueText(i.Metadata.DeadlineOn)
 	return value
 }
+
+// datesState is what the Dates form opens with; unreadable says why a stored
+// date cannot be edited safely.
+func (i Issue) datesState() datesFormState {
+	scheduled, serr := metadata.ScheduleValueText(i.Metadata.ScheduledOn)
+	deadline, derr := metadata.ScheduleValueText(i.Metadata.DeadlineOn)
+	d := datesFormState{revision: i.Revision, scheduled: scheduled, deadline: deadline}
+	if err := errors.Join(serr, derr); err != nil {
+		d.unreadable = err.Error()
+	}
+	return d
+}
+
 func (i Issue) timezone() string { return rawString(i.Metadata.Timezone) }
 
 // scheduledText and deadlineText are the dates the detail strip shows: the

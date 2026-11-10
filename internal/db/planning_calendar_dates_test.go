@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRowPlanningDatesResolveInIssueThenDefaultThenUTC(t *testing.T) {
@@ -101,7 +102,8 @@ func TestRowPlanningDatesResolveInIssueThenDefaultThenUTC(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scheduledOn, deadlineOn := RowPlanningDates(tt.raw, tt.scheduledZone, tt.deadlineZone)
+			scheduledOn, deadlineOn, err := RowPlanningDates(tt.raw, tt.scheduledZone, tt.deadlineZone)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantScheduledOn, scheduledOn)
 			assert.Equal(t, tt.wantDeadlineOn, deadlineOn)
 		})
@@ -109,21 +111,31 @@ func TestRowPlanningDatesResolveInIssueThenDefaultThenUTC(t *testing.T) {
 }
 
 func TestRowPlanningDatesOmitsOnlyTheUnreadableField(t *testing.T) {
-	scheduledOn, deadlineOn := RowPlanningDates(`{"scheduled_on":"next tuesday","deadline_on":"2026-11-02"}`, "", "")
+	scheduledOn, deadlineOn, err := RowPlanningDates(`{"scheduled_on":"next tuesday","deadline_on":"2026-11-02"}`, "", "")
+	require.NoError(t, err)
 	assert.Empty(t, scheduledOn)
 	assert.Equal(t, "2026-11-02", deadlineOn)
 
-	scheduledOn, deadlineOn = RowPlanningDates(`{"scheduled_on":"2026-10-29","timezone":"Mars/Base","deadline_on":"2026-10-29T23:30:00Z"}`, "", "")
+	scheduledOn, deadlineOn, err = RowPlanningDates(`{"scheduled_on":"2026-10-29","timezone":"Mars/Base","deadline_on":"2026-10-29T23:30:00Z"}`, "", "")
+	require.NoError(t, err)
 	assert.Equal(t, "2026-10-29", scheduledOn)
 	assert.Empty(t, deadlineOn, "an unknown issue zone cannot place an instant")
 }
 
 func TestRowPlanningDatesKeepsAValidDateBesideANonStringOne(t *testing.T) {
-	scheduledOn, deadlineOn := RowPlanningDates(`{"scheduled_on":42,"deadline_on":"2026-11-02"}`, "", "")
+	scheduledOn, deadlineOn, err := RowPlanningDates(`{"scheduled_on":42,"deadline_on":"2026-11-02"}`, "", "")
+	require.NoError(t, err)
 	assert.Empty(t, scheduledOn)
 	assert.Equal(t, "2026-11-02", deadlineOn)
 
-	scheduledOn, deadlineOn = RowPlanningDates(`{"scheduled_on":"2026-10-29","deadline_on":["x"]}`, "", "")
+	scheduledOn, deadlineOn, err = RowPlanningDates(`{"scheduled_on":"2026-10-29","deadline_on":["x"]}`, "", "")
+	require.NoError(t, err)
 	assert.Equal(t, "2026-10-29", scheduledOn)
 	assert.Empty(t, deadlineOn)
+}
+
+func TestRowPlanningDatesFailsOnUnsupportedTZDataVersion(t *testing.T) {
+	raw := `{"scheduled_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"},"deadline_on":"2026-11-02"}`
+	_, _, err := RowPlanningDates(raw, "", "")
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }

@@ -17,6 +17,7 @@ import (
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -186,7 +187,7 @@ func TestPatchMetadata_HappyPath_200(t *testing.T) {
 		patch   string // value inside `"patch": {...}`
 		expect  string // substring required in the decoded metadata blob
 	}{
-		{metadataSubjects()[0], `{"scheduled_on":"2026-05-20"}`, `"scheduled_on":{"value":"2026-05-20","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}`},
+		{metadataSubjects()[0], `{"scheduled_on":"2026-05-20"}`, `"scheduled_on":{"value":"2026-05-20","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}`},
 		{metadataSubjects()[1], `{"area":"Personal"}`, `"area":"Personal"`},
 	}
 	for _, c := range cases {

@@ -465,30 +465,39 @@ func TestDetailStripShowsBothDates(t *testing.T) {
 }
 
 func TestDatesFormReadsSavedSchedule(t *testing.T) {
-	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-06-01","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}`)}}
-	require.Equal(t, "2026-06-01", issue.scheduledOn())
+	h := newDatesHarness(t, nil, viewDetail)
+	scheduled, err := metadata.NewScheduleValue("2026-06-01", "America/New_York")
+	require.NoError(t, err)
+	deadline, err := metadata.NewScheduleValue("2026-06-02", "Europe/Paris")
+	require.NoError(t, err)
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": scheduled, "deadline_on": deadline}})
+	require.NoError(t, err)
+	h.reload()
+	h.openForm()
+	assert.Equal(t, "2026-06-01", h.m.input.fieldValue(fieldScheduled))
+	assert.Equal(t, "2026-06-02", h.m.input.fieldValue(fieldDeadline))
 }
 
-func TestDetailStripShowsSavedScheduleDate(t *testing.T) {
-	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
-	require.NoError(t, err)
-	issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: "2025-12-31"}
-	got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
-	assert.Contains(t, got, "scheduled: 2025-12-31")
+func TestDetailStripShowsSavedSchedule(t *testing.T) {
+	for _, tc := range []struct {
+		name, value, resolved, want string
+	}{
+		{"instant across date boundary", "2026-01-01T02:00:00Z", "2025-12-31", "scheduled: 2025-12-31T21:00:00"},
+		{"civil time", "2026-01-01T09:30", "2026-01-01", "scheduled: 2026-01-01T09:30"},
+		{"instant with seconds", "2026-01-01T15:00:42Z", "2026-01-01", "scheduled: 2026-01-01T10:00:42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			saved, err := metadata.NewScheduleValue(tc.value, "America/New_York")
+			require.NoError(t, err)
+			issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: tc.resolved}
+			got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
+			assert.Contains(t, got, tc.want)
+		})
+	}
 }
 
-func TestDetailStripRetainsSavedCivilTime(t *testing.T) {
-	saved, err := metadata.NewScheduleValue("2026-01-01T09:30", "America/New_York")
-	require.NoError(t, err)
-	issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: "2026-01-01"}
+func TestDetailStripReportsUnknownScheduleRules(t *testing.T) {
+	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-01-01","timezone":"UTC","tzdata_version":"unknown"}`)}}
 	got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
-	assert.Contains(t, got, "scheduled: 2026-01-01T09:30")
-}
-
-func TestDetailStripShowsInstantInSavedZone(t *testing.T) {
-	saved, err := metadata.NewScheduleValue("2026-01-01T15:00:42Z", "America/New_York")
-	require.NoError(t, err)
-	issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: "2026-01-01"}
-	got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
-	assert.Contains(t, got, "scheduled: 2026-01-01T10:00:42")
+	assert.Contains(t, got, "unsupported schedule tzdata version")
 }

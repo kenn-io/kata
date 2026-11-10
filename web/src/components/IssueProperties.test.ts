@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { KataTaskDetail } from '../lib/kata/types'
@@ -219,10 +222,12 @@ describe('IssueProperties', () => {
   })
 
   it('shows an object-backed schedule in its editor', async () => {
+    const bundle = readFileSync(resolve(process.cwd(), '../internal/metadata/tzdata/zoneinfo-2026c.zip'))
+    const tzdataVersion = `sha256:${createHash('sha256').update(bundle).digest('hex')}`
     renderProperties({
       issue: makeIssue({
         scheduled_on_date: '2026-06-01',
-        metadata: { scheduled_on: { value: '2026-06-01', timezone: 'UTC', tzdata_version: 'v' } },
+        metadata: { scheduled_on: { value: '2026-06-01', timezone: 'UTC', tzdata_version: tzdataVersion } },
       }),
     })
     expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('Jun 1')
