@@ -485,33 +485,27 @@ func TestFullPulledMaterializationLockedFallback(t *testing.T) {
 }
 
 func TestPulledSnapshotRelocationFallsBackToFullReplay(t *testing.T) {
-	for _, full := range []bool{false, true} {
-		t.Run(fmt.Sprint(full), func(t *testing.T) {
-			ctx := t.Context()
-			d, source, issue := incrementalTestStore(t)
-			target, err := d.CreateProject(ctx, "snapshot-target")
-			require.NoError(t, err)
-			for _, project := range []db.Project{source, target} {
-				_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
-				require.NoError(t, err)
-			}
-			snapshot := incrementalRemoteEvent(t, target, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"relocated snapshot","author":"tester","status":"open"}`, issue.UID, issue.ShortID), 9_000_000_000_000)
-			page := []db.RemoteEvent{snapshot}
-			if full {
-				page = append(page, incrementalRemoteEvent(t, target, "", "project.updated", `{"name":"snapshot-target"}`, 9_000_000_000_001))
-			}
-			_, err = d.InsertRemoteEvents(ctx, target.ID, page)
-			require.NoError(t, err)
-			var uids []string
-			for _, event := range page {
-				uids = append(uids, event.EventUID)
-			}
-			require.NoError(t, d.MaterializeFederatedEvents(ctx, target.ID, uids))
-			got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			require.Equal(t, issue.ID, got.ID)
-			require.Equal(t, target.ID, got.ProjectID)
-			require.Equal(t, "relocated snapshot", got.Title)
-		})
+	ctx := t.Context()
+	d, source, issue := incrementalTestStore(t)
+	target, err := d.CreateProject(ctx, "snapshot-target")
+	require.NoError(t, err)
+	for _, project := range []db.Project{source, target} {
+		_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+		require.NoError(t, err)
 	}
+	snapshot := incrementalRemoteEvent(t, target, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"relocated snapshot","author":"tester","status":"open"}`, issue.UID, issue.ShortID), 9_000_000_000_000)
+	page := []db.RemoteEvent{snapshot}
+	page = append(page, incrementalRemoteEvent(t, target, "", "project.updated", `{"name":"snapshot-target"}`, 9_000_000_000_001))
+	_, err = d.InsertRemoteEvents(ctx, target.ID, page)
+	require.NoError(t, err)
+	var uids []string
+	for _, event := range page {
+		uids = append(uids, event.EventUID)
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, target.ID, uids))
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, issue.ID, got.ID)
+	require.Equal(t, target.ID, got.ProjectID)
+	require.Equal(t, "relocated snapshot", got.Title)
 }

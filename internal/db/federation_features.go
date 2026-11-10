@@ -83,7 +83,7 @@ func snapshotLinksComplete(kind string, payload jsontext.Value) (bool, error) {
 		return false, nil
 	}
 	var scope string
-	if err := json.Unmarshal(raw, &scope); err != nil || scope != "all" || kind == "issue.created" {
+	if err := json.Unmarshal(raw, &scope); err != nil || scope != "all" {
 		return false, fmt.Errorf("%w: invalid links_scope", ErrFederationIngestValidation)
 	}
 	return true, nil

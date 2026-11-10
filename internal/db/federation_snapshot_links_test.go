@@ -19,7 +19,7 @@ func TestSnapshotLinksFeature(t *testing.T) {
 		{"issue.snapshot", `{"links_scope":null}`, "", true},
 		{"issue.snapshot", `{"links_scope":"partial"}`, "", true},
 		{"issue.snapshot", `{"links_scope":1}`, "", true},
-		{"issue.created", `{"links_scope":"all"}`, "", true},
+		{"issue.created", `{"links_scope":"all"}`, "", false},
 	} {
 		t.Run(tc.kind+tc.payload, func(t *testing.T) {
 			got, err := PayloadRequiredFeatures(tc.kind, tc.payload)

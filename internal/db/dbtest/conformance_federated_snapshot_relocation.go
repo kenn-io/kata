@@ -37,6 +37,10 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.NoError(t, err)
 	issue, _, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Title: "late destination join", Author: "worker", Labels: []string{"retained", "remove-locally"}, Links: []db.InitialLink{{Type: "related", ToNumber: peer.ID}, {Type: "blocks", ToNumber: other.ID}}})
 	require.NoError(t, err)
+	if lifecycle == "active replicas" {
+		_, _, err = hub.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "parent", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "worker"})
+		require.NoError(t, err)
+	}
 	_, _, err = hub.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "source discussion"})
 	require.NoError(t, err)
 	for _, project := range []db.Project{source, target} {
@@ -114,11 +118,23 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	if lifecycle == "active replicas" {
 		localOther, err := spoke.IssueByUID(ctx, other.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
+		localPeer, err := spoke.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
 		localLinks, err := spoke.LinksByIssue(ctx, before.ID)
 		require.NoError(t, err)
 		for _, link := range localLinks {
 			if link.Type == "blocks" {
 				_, err = spoke.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: before.ID, Actor: "worker", FromUID: before.UID, ToUID: localOther.UID, FromShortID: before.ShortID, ToShortID: localOther.ShortID})
+				require.NoError(t, err)
+			}
+			if link.Type == "parent" {
+				replacement := spoke.(db.ParentLinkReplacementStorage)
+				_, err = replacement.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{
+					ExpectedParentLinkID: link.ID, ExpectedParentIssueID: localPeer.ID,
+					Link:        db.CreateLinkParams{FromIssueID: before.ID, ToIssueID: localOther.ID, Type: "parent", Author: "worker"},
+					UnlinkEvent: db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: before.ID, FromShortID: before.ShortID, FromUID: before.UID, ToShortID: localPeer.ShortID, ToUID: localPeer.UID, Actor: "worker"},
+					LinkEvent:   db.LinkEventParams{EventType: "issue.linked", EventIssueID: before.ID, FromShortID: before.ShortID, FromUID: before.UID, ToShortID: localOther.ShortID, ToUID: localOther.UID, Actor: "worker"},
+				})
 				require.NoError(t, err)
 			}
 		}
@@ -210,10 +226,20 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.Equal(t, "draft", labels[0].Label)
 	links, err := spoke.LinksByIssue(ctx, got.ID)
 	require.NoError(t, err)
-	require.Len(t, links, 1)
 	if lifecycle == "active replicas" {
-		require.Equal(t, "related", links[0].Type)
+		require.Len(t, links, 2)
+		foundParent := false
+		for _, link := range links {
+			if link.Type == "parent" {
+				foundParent = true
+				require.Equal(t, other.UID, link.ToIssueUID)
+			} else {
+				require.Equal(t, "related", link.Type)
+			}
+		}
+		require.True(t, foundParent)
 	} else {
+		require.Len(t, links, 1)
 		require.Equal(t, "blocks", links[0].Type)
 	}
 	cursor, err := spoke.MaxEventID(ctx)
@@ -239,8 +265,17 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		require.Equal(t, "remove-locally", labels[0].Label)
 		links, err := spoke.LinksByIssue(ctx, got.ID)
 		require.NoError(t, err)
-		require.Len(t, links, 1)
-		require.Equal(t, "blocks", links[0].Type)
+		require.Len(t, links, 2)
+		foundParent := false
+		for _, link := range links {
+			if link.Type == "parent" {
+				foundParent = true
+				require.Equal(t, peer.UID, link.ToIssueUID)
+			} else {
+				require.Equal(t, "blocks", link.Type)
+			}
+		}
+		require.True(t, foundParent)
 	}
 	switch lifecycle {
 	case "pausing the source retains discussion":
@@ -413,33 +448,15 @@ func checkFederatedSnapshotBaselineUpgrade(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	binding, err := store.EnableProjectFederation(ctx, project.ID, "worker")
 	require.NoError(t, err)
+	snapshotUID, snapshotHash := seedLegacySnapshotBaseline(t, store, project, binding.ReplayHorizonEventID)
 	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, AfterID: binding.ReplayHorizonEventID - 1, Limit: 10})
 	require.NoError(t, err)
-	require.NotEmpty(t, events)
+	require.Len(t, events, 2)
 	marker := events[0]
-	var payload map[string]jsontext.Value
-	require.NoError(t, json.Unmarshal([]byte(marker.Payload), &payload))
-	delete(payload, "links_scope")
-	legacy, err := json.Marshal(payload)
-	require.NoError(t, err)
-	hash, err := db.EventContentHash(db.EventHashInput{UID: marker.UID, OriginInstanceUID: marker.OriginInstanceUID, ProjectUID: marker.ProjectUID, Type: marker.Type, Actor: marker.Actor, HLCPhysicalMS: marker.HLCPhysicalMS, HLCCounter: marker.HLCCounter, CreatedAt: marker.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: legacy})
-	require.NoError(t, err)
+	hash := marker.ContentHash
 	executor := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	_, err = executor.ExecContext(ctx, `UPDATE events SET payload=$1,content_hash=$2 WHERE id=$3`, string(legacy), hash, marker.ID)
-	require.NoError(t, err)
-	require.Len(t, events, 2)
-	oldSnapshot := events[1]
-	var snapshot map[string]jsontext.Value
-	require.NoError(t, json.Unmarshal([]byte(oldSnapshot.Payload), &snapshot))
-	delete(snapshot, "links_scope")
-	legacySnapshot, err := json.Marshal(snapshot)
-	require.NoError(t, err)
-	snapshotHash, err := db.EventContentHash(db.EventHashInput{UID: oldSnapshot.UID, OriginInstanceUID: oldSnapshot.OriginInstanceUID, ProjectUID: oldSnapshot.ProjectUID, IssueUID: oldSnapshot.IssueUID, Type: oldSnapshot.Type, Actor: oldSnapshot.Actor, HLCPhysicalMS: oldSnapshot.HLCPhysicalMS, HLCCounter: oldSnapshot.HLCCounter, CreatedAt: oldSnapshot.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: legacySnapshot})
-	require.NoError(t, err)
-	_, err = executor.ExecContext(ctx, `UPDATE events SET payload=$1,content_hash=$2 WHERE id=$3`, string(legacySnapshot), snapshotHash, oldSnapshot.ID)
-	require.NoError(t, err)
 	before, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
 	oldFeatures := db.CronEventFeature + "," + db.IssueMoveEventFeature
@@ -491,7 +508,7 @@ func checkFederatedSnapshotBaselineUpgrade(t *testing.T, store db.Storage) error
 	old, err := store.EventsByUIDs(ctx, project.ID, []string{marker.UID})
 	require.NoError(t, err)
 	require.Equal(t, hash, old[0].ContentHash)
-	old, err = store.EventsByUIDs(ctx, project.ID, []string{oldSnapshot.UID})
+	old, err = store.EventsByUIDs(ctx, project.ID, []string{snapshotUID})
 	require.NoError(t, err)
 	require.Equal(t, snapshotHash, old[0].ContentHash)
 	empty, err := store.CreateProject(ctx, "empty-baseline-upgrade")
@@ -503,5 +520,20 @@ func checkFederatedSnapshotBaselineUpgrade(t *testing.T, store db.Storage) error
 	emptyRead, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: empty.ID, Metadata: true, Features: db.SupportedEventFeatures})
 	require.NoError(t, err)
 	require.Greater(t, emptyRead.Binding.ReplayHorizonEventID, emptyBinding.ReplayHorizonEventID)
+	paged, err := store.CreateProject(ctx, "paged-baseline-upgrade")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: paged.ID, Title: "paged issue", Author: "worker"})
+	require.NoError(t, err)
+	pagedBinding, err := store.EnableProjectFederation(ctx, paged.ID, "worker")
+	require.NoError(t, err)
+	seedLegacySnapshotBaseline(t, store, paged, pagedBinding.ReplayHorizonEventID)
+	firstPage, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: paged.ID, Features: oldFeatures, Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, firstPage.Events, 1)
+	require.Greater(t, firstPage.Binding.ReplayHorizonEventID, pagedBinding.ReplayHorizonEventID)
+	nextPage, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: paged.ID, Features: oldFeatures, AfterID: firstPage.NextAfterID, Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, nextPage.Events, 1)
+	require.Greater(t, nextPage.NextAfterID, firstPage.NextAfterID)
 	return nil
 }
