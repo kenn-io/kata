@@ -111,6 +111,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		for uid := range m.issueRows {
 			m.moveIssueUIDs[uid] = struct{}{}
 		}
+		movedIssueIDs := map[int64]struct{}{}
 		for uid, decision := range result.moved {
 			if !decision.Joined {
 				continue
@@ -118,19 +119,20 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			delete(m.staleIssues, uid)
 			delete(m.issueRows, uid)
 			if decision.Exists && decision.SourceID == p.id {
-				for key, row := range m.commentRows {
-					if row.issueID == decision.IssueID {
-						delete(m.commentRows, key)
-					}
-				}
-				for key := range m.labelRows {
-					if key.issueID == decision.IssueID {
-						delete(m.labelRows, key)
-					}
-				}
+				movedIssueIDs[decision.IssueID] = struct{}{}
 			}
 			if decision.Active && slices.Contains(m.linkProjects, decision.TargetID) {
 				m.issueIDs[uid] = decision.IssueID
+			}
+		}
+		for key, row := range m.commentRows {
+			if _, ok := movedIssueIDs[row.issueID]; ok {
+				delete(m.commentRows, key)
+			}
+		}
+		for key := range m.labelRows {
+			if _, ok := movedIssueIDs[key.issueID]; ok {
+				delete(m.labelRows, key)
 			}
 		}
 		p.materialization = m
