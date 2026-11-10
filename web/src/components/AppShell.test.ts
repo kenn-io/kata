@@ -9,6 +9,7 @@ vi.mock('../lib/kata/projection', async (importOriginal) => {
 import { setGeneratedFetch } from '../lib/api/client'
 import { normalizeKataUISnapshot } from '../lib/kata/projection'
 import type { MutationContext, MutationResult } from '../lib/mutations/controller'
+import type { ShareableFilters } from '../lib/router'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
 
@@ -563,105 +564,20 @@ describe('AppShell', () => {
     })
   })
 
+  const project = '01J00000000000000000000002'
+  const issue = '01J00000000000000000000001'
   test.each([
-    [
-      'same project',
-      'all-open',
-      '01J00000000000000000000002',
-      'all-open',
-      '01J00000000000000000000002',
-      '01J00000000000000000000001',
-      'all-open',
-      '01J00000000000000000000002',
-      '01J00000000000000000000001',
-      { status: [], owner: [], label: [], relationship: [] },
-    ],
-    [
-      'different project',
-      'all-open',
-      '01J00000000000000000000002',
-      'all-open',
-      'other-project',
-      '01J00000000000000000000001',
-      'all-open',
-      '01J00000000000000000000002',
-      undefined,
-      { status: [], owner: [], label: [], relationship: [] },
-    ],
-    [
-      'implicit Inbox',
-      undefined,
-      undefined,
-      'inbox',
-      undefined,
-      '01J00000000000000000000001',
-      'inbox',
-      undefined,
-      '01J00000000000000000000001',
-      { status: [], owner: [], label: [], relationship: [] },
-    ],
-    [
-      'status',
-      'all-open',
-      undefined,
-      'all-open',
-      undefined,
-      undefined,
-      'all-open',
-      undefined,
-      undefined,
-      { status: ['closed'], owner: [], label: [], relationship: [] },
-    ],
-    [
-      'owners',
-      'all-open',
-      undefined,
-      'all-open',
-      undefined,
-      undefined,
-      'all-open',
-      undefined,
-      undefined,
-      { status: [], owner: ['alice', 'bob'], label: [], relationship: [] },
-    ],
-    [
-      'labels',
-      'all-open',
-      undefined,
-      'all-open',
-      undefined,
-      undefined,
-      'all-open',
-      undefined,
-      undefined,
-      { status: [], owner: [], label: ['bug', 'ui'], relationship: [] },
-    ],
-    [
-      'relationship',
-      'all-open',
-      undefined,
-      'all-open',
-      undefined,
-      undefined,
-      'all-open',
-      undefined,
-      undefined,
-      { status: [], owner: [], label: [], relationship: ['blocks'] },
-    ],
+    ['same project', 'all-open', 'all-open', project, project, issue, {}],
+    ['different project', 'all-open', 'all-open', project, 'other-project', undefined, {}],
+    ['implicit Inbox', undefined, 'inbox', undefined, undefined, issue, {}],
+    ['status', 'all-open', 'all-open', undefined, undefined, issue, { status: ['closed'] }],
+    ['owners', 'all-open', 'all-open', undefined, undefined, issue, { owner: ['alice', 'bob'] }],
+    ['labels', 'all-open', 'all-open', undefined, undefined, issue, { label: ['bug', 'ui'] }],
+    ['relation', 'all-open', 'all-open', undefined, undefined, issue, { relationship: ['blocks'] }],
   ] as const)(
-    'keeps pending %s when searching',
-    async (
-      _name,
-      view,
-      projectUID,
-      requestedView,
-      requestedProjectUID,
-      requestedIssueUID,
-      expectedView,
-      expectedProjectUID,
-      expectedIssueUID,
-      filters,
-    ) => {
+    'search preserves the pending %s',
+    async (_name, view, requestedView, projectUID, requestedProjectUID, issueUID, pending) => {
+      const onNavigate = vi.fn()
       const route = {
         kind: 'kata' as const,
         ...(view ? { view } : {}),
@@ -669,7 +585,7 @@ describe('AppShell', () => {
         graph: false,
         filters: { status: [], owner: [], label: [], relationship: [] },
       }
-      const onNavigate = vi.fn()
+      const filters = { ...route.filters, ...pending } as ShareableFilters
       render(AppShell, {
         props: {
           route,
@@ -677,13 +593,8 @@ describe('AppShell', () => {
             ...route,
             view: requestedView,
             ...(requestedProjectUID ? { projectUID: requestedProjectUID } : {}),
-            ...(requestedIssueUID ? { issueUID: requestedIssueUID } : {}),
-            filters: {
-              status: [...filters.status],
-              owner: [...filters.owner],
-              label: [...filters.label],
-              relationship: [...filters.relationship],
-            },
+            issueUID: issue,
+            filters,
           },
           snapshot: snapshot(),
           loading: false,
@@ -692,23 +603,45 @@ describe('AppShell', () => {
           onCreateProject: vi.fn(async () => ({ changed: true })),
         },
       })
-      await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'a' } })
+      await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
       expect(onNavigate).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          filters: { ...filters, text: 'a' },
-        }),
+        expect.objectContaining({ filters: { ...filters, text: 'example' } }),
       )
-      expect(onNavigate.mock.lastCall?.[0].view).toBe(expectedView)
-      expect(onNavigate.mock.lastCall?.[0].projectUID).toBe(expectedProjectUID)
-      expect(onNavigate.mock.lastCall?.[0].issueUID).toBe(expectedIssueUID)
+      expect(onNavigate.mock.lastCall?.[0].projectUID).toBe(projectUID)
+      expect(onNavigate.mock.lastCall?.[0].issueUID).toBe(issueUID)
+      expect(onNavigate.mock.lastCall?.[0].view).toBe(issueUID ? requestedView : view)
     },
   )
 
-  test.each([
-    ['Search tasks', 'second t'],
-    ['Owner', 'alice'],
-    ['Label', 'alice'],
-  ])('keeps the requested %s when an older snapshot arrives', async (name, expected) => {
+  test('keeps the requested query when an older snapshot arrives', async () => {
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const props = {
+      route,
+      requestedRoute: route,
+      snapshot: snapshot(),
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    const input = screen.getByLabelText('Search tasks') as HTMLInputElement
+    await fireEvent.input(input, { target: { value: 'second ' } })
+    await fireEvent.input(input, { target: { value: 'second t' } })
+    await rerender({
+      ...props,
+      route: { ...route, filters: { ...route.filters, text: 'second' } },
+      requestedRoute: { ...route, filters: { ...route.filters, text: 'second t' } },
+    })
+    expect(input.value).toBe('second t')
+  })
+
+  test.each(['Owner', 'Label'])('keeps typed %s while its search is pending', async (name) => {
     const route = {
       kind: 'kata' as const,
       view: 'all-open' as const,
@@ -725,25 +658,13 @@ describe('AppShell', () => {
       onCreateProject: vi.fn(async () => ({ changed: true })),
     }
     const { rerender } = render(AppShell, { props })
-    const input = screen.getByRole(name === 'Search tasks' ? 'searchbox' : 'textbox', {
-      name,
-    }) as HTMLInputElement
-    if (name === 'Search tasks') {
-      await fireEvent.input(input, { target: { value: 'second ' } })
-      await fireEvent.input(input, { target: { value: 'second t' } })
-      await rerender({
-        ...props,
-        route: { ...route, filters: { ...route.filters, text: 'second' } },
-        requestedRoute: { ...route, filters: { ...route.filters, text: 'second t' } },
-      })
-    } else {
-      for (const char of 'alice') {
-        await fireEvent.input(input, { target: { value: input.value + char } })
-        await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
-      }
-      expect(onNavigate.mock.lastCall?.[0].filters[name.toLowerCase()]).toEqual(['alice'])
+    const input = screen.getByRole('textbox', { name }) as HTMLInputElement
+    for (const char of 'alice') {
+      await fireEvent.input(input, { target: { value: input.value + char } })
+      await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
     }
-    expect(input.value).toBe(expected)
+    expect(input.value).toBe('alice')
+    expect(onNavigate.mock.lastCall?.[0].filters[name.toLowerCase()]).toEqual(['alice'])
   })
 
   test('stays in the landing Inbox while selecting, graphing, and narrowing', async () => {
