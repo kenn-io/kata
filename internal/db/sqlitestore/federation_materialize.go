@@ -426,10 +426,38 @@ type federatedShortIDCheck struct {
 	row                      federatedIssueRow
 }
 
+func loadFederatedScope[K comparable, V any](scope []string, load func([]string) (map[K]V, error)) (map[K]V, error) {
+	if len(scope) <= federationIngestIssueScopeLimit {
+		return load(scope)
+	}
+	result := map[K]V{}
+	for batch := range slices.Chunk(scope, federationIngestIssueScopeLimit) {
+		rows, err := load(batch)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(result, rows)
+	}
+	return result, nil
+}
+
 // prepareRows compares against persisted values, rather than a previous fold:
 // local writes and imports can leave values that a full rebuild would repair.
 func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {
-	existing, err := federatedIssueRowsByUID(ctx, tx, m.rowFingerprint, projectID, issueScope...)
+	if len(issueScope) > federationIngestIssueScopeLimit {
+		seen := make(map[string]struct{}, len(issueScope))
+		unique := make([]string, 0, len(issueScope))
+		for _, uid := range issueScope {
+			if _, ok := seen[uid]; !ok {
+				seen[uid] = struct{}{}
+				unique = append(unique, uid)
+			}
+		}
+		issueScope = unique
+	}
+	existing, err := loadFederatedScope(issueScope, func(scope []string) (map[string]federatedIssueRow, error) {
+		return federatedIssueRowsByUID(ctx, tx, m.rowFingerprint, projectID, scope...)
+	})
 	if err != nil {
 		return err
 	}
@@ -463,7 +491,9 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 			delete(m.projection.Issues, issue.UID)
 		}
 	}
-	comments, err := federatedCommentRowsByUID(ctx, tx, m.rowFingerprint, projectID, issueScope...)
+	comments, err := loadFederatedScope(issueScope, func(scope []string) (map[string]federatedCommentRow, error) {
+		return federatedCommentRowsByUID(ctx, tx, m.rowFingerprint, projectID, scope...)
+	})
 	if err != nil {
 		return err
 	}
@@ -480,7 +510,9 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 			delete(comments, uid)
 		}
 	}
-	labels, err := federatedLabelKeys(ctx, tx, m.rowFingerprint, projectID, issueScope...)
+	labels, err := loadFederatedScope(issueScope, func(scope []string) (map[federatedLabelKey]struct{}, error) {
+		return federatedLabelKeys(ctx, tx, m.rowFingerprint, projectID, scope...)
+	})
 	if err != nil {
 		return err
 	}

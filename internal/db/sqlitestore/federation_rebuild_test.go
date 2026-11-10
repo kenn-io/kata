@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,6 +10,50 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
+
+func TestMoveRebuildPreparesLargeIssueScope(t *testing.T) {
+	ctx := t.Context()
+	d, project, first := incrementalTestStore(t)
+	second, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second", Author: "tester"})
+	require.NoError(t, err)
+	third, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "third", Author: "tester"})
+	require.NoError(t, err)
+	outside, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "outside", Author: "tester"})
+	require.NoError(t, err)
+	for _, issue := range []db.Issue{first, second, third, outside} {
+		_, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: issue.Title})
+		require.NoError(t, err)
+		_, _, err = d.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: issue.Title, Actor: "tester"})
+		require.NoError(t, err)
+	}
+	scope := make([]string, 40_001)
+	for i := range scope {
+		scope[i] = fmt.Sprintf("absent-%05d", i)
+	}
+	scope[0], scope[500], scope[len(scope)-1] = first.UID, second.UID, third.UID
+	scope[501] = first.UID
+	tx, err := d.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	m := federationMaterialization{rowFingerprint: &federationRowsFingerprint{}}
+	require.NoError(t, m.prepareRows(ctx, tx, project.ID, scope))
+	small := federationMaterialization{rowFingerprint: &federationRowsFingerprint{}}
+	require.NoError(t, small.prepareRows(ctx, tx, project.ID, []string{first.UID, second.UID, third.UID}))
+	require.Equal(t, small.rowFingerprint.sum(), m.rowFingerprint.sum())
+	require.Len(t, m.issueRows, 3)
+	require.Len(t, m.commentRows, 3)
+	require.Len(t, m.labelRows, 3)
+	comments := make(map[int64]string, len(m.commentRows))
+	for _, comment := range m.commentRows {
+		comments[comment.issueID] = comment.body
+	}
+	for _, issue := range []db.Issue{first, second, third} {
+		require.Equal(t, issue.ID, m.issueRows[issue.UID].id)
+		require.Equal(t, issue.Title, comments[issue.ID])
+		require.Contains(t, m.labelRows, federatedLabelKey{issueID: issue.ID, label: issue.Title})
+	}
+	require.NotContains(t, m.issueRows, outside.UID)
+}
 
 func TestMoveRebuildLeavesWriterAvailableDuringPreparation(t *testing.T) {
 	for _, name := range []string{"move-free", "moved"} {
