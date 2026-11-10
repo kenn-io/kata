@@ -28,6 +28,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -1786,18 +1787,27 @@ func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
 }
 
 func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing.T) {
+	testResetRetryLocalOriginEvent(t, false)
+}
+
+func TestSyncFederationOnceResetRetryRestoresUnprojectedLocalIssueFromBackup(t *testing.T) {
+	testResetRetryLocalOriginEvent(t, true)
+}
+
+func testResetRetryLocalOriginEvent(t *testing.T, restore bool) {
+	t.Helper()
 	ctx := t.Context()
-	spoke := testenv.New(t)
-	project, err := spoke.DB.CreateProject(ctx, "hub")
+	spoke := testenv.New(t).DB
+	project, err := spoke.CreateProject(ctx, "hub")
 	require.NoError(t, err)
-	issue, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+	issue, localEvent, err := spoke.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "acked before reset",
 		Author:    "tester",
 	})
 	require.NoError(t, err)
 	envelope := eventEnvelopeForSyncTest(localEvent, 100)
-	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+	binding, err := spoke.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            project.ID,
 		Role:                 db.FederationRoleSpoke,
 		HubURL:               "http://127.0.0.1:1",
@@ -1853,22 +1863,34 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing
 	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "token"}
 	var delivered []db.Event
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
-	require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+	require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered)
-	_, err = spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	_, err = spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
 
+	if restore {
+		var backup bytes.Buffer
+		require.NoError(t, jsonl.Export(ctx, spoke, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
+		restored, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "restored.db"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, restored.Close()) })
+		require.NoError(t, jsonl.Import(ctx, &backup, restored))
+		spoke = restored
+		_, err = spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.ErrorIs(t, err, db.ErrNotFound, "restore preserves the interrupted projection")
+	}
+
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
-	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+	binding, err = spoke.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		delivered = append(delivered, events...)
 	}))
 
-	mirrored, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
+	mirrored, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err, "retry must project the retained issue creation")
 	assert.Equal(t, "acked before reset", mirrored.Title)
 	require.NotEmpty(t, delivered)
 	assert.Equal(t, localEvent.UID, delivered[0].UID)
