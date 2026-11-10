@@ -117,6 +117,7 @@ func TestMoveBatchContinuationPreservesAliasConflicts(t *testing.T) {
 	require.Equal(t, 50, firstPage.Body.NextIndex)
 	require.Equal(t, "conflicting_target", firstPage.Body.Results[49].Code)
 	req.Body.StartIndex = firstPage.Body.NextIndex
+	req.Body.Completed = completedMoveResults(firstPage.Body.Results)
 	out, err := handler(t.Context(), req)
 	require.NoError(t, err)
 	require.Len(t, out.Body.Results, 1)

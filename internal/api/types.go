@@ -1851,16 +1851,26 @@ type LocalEmbeddingsResponse struct{ Body LocalEmbeddingsStatus }
 // MoveIssuesRequest moves independent refs to one or more target projects.
 type MoveIssuesRequest struct {
 	Body struct {
-		Actor            string           `json:"actor,omitempty"`
-		Teammate         string           `json:"teammate,omitempty"`
-		DryRun           bool             `json:"dry_run,omitempty"`
-		Subtree          bool             `json:"subtree,omitempty" doc:"Include descendants; requires exactly one item."`
-		Comment          string           `json:"comment,omitempty"`
-		DefaultProjectID int64            `json:"default_project_id,omitempty"`
-		ToProjectUID     string           `json:"to_project_uid,omitempty"`
-		Items            []MoveIssuesItem `json:"items" minItems:"1" maxItems:"5000"`
-		StartIndex       int              `json:"start_index,omitempty" minimum:"0"`
+		Actor            string                `json:"actor,omitempty"`
+		Teammate         string                `json:"teammate,omitempty"`
+		DryRun           bool                  `json:"dry_run,omitempty"`
+		Subtree          bool                  `json:"subtree,omitempty" doc:"Include descendants; requires exactly one item."`
+		Comment          string                `json:"comment,omitempty"`
+		DefaultProjectID int64                 `json:"default_project_id,omitempty"`
+		ToProjectUID     string                `json:"to_project_uid,omitempty"`
+		Items            []MoveIssuesItem      `json:"items" minItems:"1" maxItems:"5000"`
+		Completed        []MoveIssuesCompleted `json:"completed,omitempty" maxItems:"5000" doc:"Outcomes for every item before start_index, copied from earlier results."`
+		StartIndex       int                   `json:"start_index,omitempty" minimum:"0"`
 	}
+}
+
+// MoveIssuesCompleted carries an outcome acknowledged from an earlier page.
+type MoveIssuesCompleted struct {
+	Result   string `json:"result"`
+	Code     string `json:"code,omitempty"`
+	UID      string `json:"uid,omitempty"`
+	Revision int64  `json:"revision,omitempty"`
+	EventID  int64  `json:"event_id,omitempty"`
 }
 
 // MoveIssuesItem selects an issue and its destination project.
@@ -1901,6 +1911,7 @@ type MoveIssuesSummary struct {
 }
 
 // MoveIssuesResponse contains batch outcomes and a continuation index.
+// Continue with start_index set to next_index and completed outcomes for every earlier item.
 // Error results can include completed items at or after next_index; callers
 // should reconcile those indexes before retrying.
 type MoveIssuesResponse struct {

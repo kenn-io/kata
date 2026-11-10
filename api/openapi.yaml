@@ -4783,6 +4783,24 @@ components:
         - event_id
         - changed
       type: object
+    MoveIssuesCompleted:
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        event_id:
+          format: int64
+          type: integer
+        result:
+          type: string
+        revision:
+          format: int64
+          type: integer
+        uid:
+          type: string
+      required:
+        - result
+      type: object
     MoveIssuesItem:
       additionalProperties: false
       properties:
@@ -4801,6 +4819,12 @@ components:
           type: string
         comment:
           type: string
+        completed:
+          description: Outcomes for every item before start_index, copied from earlier results.
+          items:
+            $ref: "#/components/schemas/MoveIssuesCompleted"
+          maxItems: 5000
+          type: array
         default_project_id:
           format: int64
           type: integer

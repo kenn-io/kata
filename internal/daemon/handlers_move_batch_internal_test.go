@@ -134,6 +134,7 @@ func TestMoveIssuesBatch_BudgetResume(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, end, out.Body.NextIndex)
 		require.Equal(t, end-req.Body.StartIndex, out.Body.Summary.Moved)
+		req.Body.Completed = append(req.Body.Completed, completedMoveResults(out.Body.Results)...)
 		req.Body.StartIndex = end
 	}
 }
@@ -476,4 +477,12 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func completedMoveResults(results []api.MoveIssuesResult) []api.MoveIssuesCompleted {
+	completed := make([]api.MoveIssuesCompleted, 0, len(results))
+	for _, result := range results {
+		completed = append(completed, api.MoveIssuesCompleted{Result: result.Result, Code: result.Code, UID: result.UID, Revision: result.Revision, EventID: result.EventID})
+	}
+	return completed
 }

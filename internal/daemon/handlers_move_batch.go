@@ -109,6 +109,9 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		if in.Body.StartIndex > len(in.Body.Items) {
 			return nil, api.NewError(400, "validation", "start_index exceeds item count", "", nil)
 		}
+		if len(in.Body.Completed) != in.Body.StartIndex {
+			return nil, api.NewError(400, "validation", "completed must contain one outcome for each prior item", "", nil)
+		}
 		if in.Body.Subtree && len(in.Body.Items) > 1 {
 			return nil, api.NewError(400, "validation", "subtree move accepts one item", "", nil)
 		}
@@ -121,7 +124,8 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		targets := map[string]db.Project{}
 		targetErrors := map[string]error{}
 		authorize := func(uids []string) error { _, err := authorizeHostProjectScope(ctx, nil, uids, false); return err }
-		for j, input := range in.Body.Items {
+		for j := in.Body.StartIndex; j < n; j++ {
+			input := in.Body.Items[j]
 			r := &results[j]
 			r.Index = j
 			r.Ref = input.Ref
@@ -171,8 +175,20 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			items[j].issue = issue
 			items[j].target = target
 			items[j].move = db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: target.ID, IfMatchRev: rev, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: authorize}
-			if input.ExpectedRevision != 0 && input.ExpectedRevision != issue.Revision {
-				moveBatchRefusal(r, &db.RevisionConflictError{CurrentRevision: issue.Revision})
+		}
+		cache := &claimClientCache{}
+		succeeded, priorMoves, conflicts, err := seedMoveBatchContinuations(ctx, cfg, in, items, results, actor, cache)
+		if err != nil {
+			return nil, moveBatchError(err, nil, in.Body.StartIndex)
+		}
+		for j := in.Body.StartIndex; j < n; j++ {
+			if results[j].Result != "" {
+				continue
+			}
+			item, expected := items[j], in.Body.Items[j].ExpectedRevision
+			prior := priorMoves[item.issue.ID]
+			if expected != 0 && expected != item.issue.Revision && !(prior.targetID == item.target.ID && prior.revision == item.issue.Revision && expected == prior.revision-1) {
+				moveBatchRefusal(&results[j], &db.RevisionConflictError{CurrentRevision: item.issue.Revision})
 			}
 		}
 		seen := map[int64][]int{}
@@ -220,13 +236,25 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				}
 			}
 		}
+		var conflictedPreviews []int
+		for j := in.Body.StartIndex; j < n; j++ {
+			if results[j].Result == "" && conflicts[items[j].issue.ID] && len(items[j].tree) == 0 && moveBatchShouldPreview(&results[j], items[j], in.Body.Subtree) {
+				conflictedPreviews = append(conflictedPreviews, j)
+			}
+		}
+		if err := previewMoveBatch(ctx, cfg.DB, items, results, conflictedPreviews); err != nil {
+			return nil, moveBatchError(err, moveBatchCompleted(nil, results[in.Body.StartIndex:min(in.Body.StartIndex+moveBatchChunkIssues, n)]), in.Body.StartIndex)
+		}
+		for j := in.Body.StartIndex; j < n; j++ {
+			if results[j].Result == "" && conflicts[items[j].issue.ID] {
+				results[j].Result, results[j].Code, results[j].Message = "refused", "conflicting_target", "issue requested for different targets"
+			}
+		}
 		out := &api.MoveIssuesResponse{}
-		cache := &claimClientCache{}
 		budget := cfg.MoveBatchBudget
 		if budget <= 0 {
 			budget = moveBatchBudget
 		}
-		succeeded := map[int64]api.MoveIssuesResult{}
 		for start := in.Body.StartIndex; start < n; {
 			end := min(start+moveBatchChunkIssues, n)
 			pending := map[int64]bool{}

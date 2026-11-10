@@ -23,7 +23,7 @@ import (
 
 func TestMoveBatchCLI_ContinuationAfterCompletedDuplicate(t *testing.T) {
 	resetFlags(t)
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+	env := testenv.New(t, testenv.WithAuthToken("synthetic-continuation-token"), func(cfg *daemon.ServerConfig) {
 		cfg.MoveBatchBudget = time.Nanosecond //nolint:kennlint // deadlinetest: Force a yield after one completed database chunk.
 	})
 	dir, _ := initLocalBoundWorkspace(t, env, "kata")
@@ -33,7 +33,32 @@ func TestMoveBatchCLI_ContinuationAfterCompletedDuplicate(t *testing.T) {
 	require.NoError(t, err)
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "selected issue", Author: "tester"})
 	require.NoError(t, err)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, "", "--workspace", dir, "move", issue.UID, target.Name, "--from-project", source.Name, "--status", "all", "--json")
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	var continuation api.MoveIssuesRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/issues/actions/move" {
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			var body api.MoveIssuesRequest
+			if err := json.Unmarshal(raw, &body.Body); err != nil {
+				t.Error(err)
+				return
+			}
+			if body.Body.StartIndex > 0 {
+				continuation = body
+			}
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+		}
+		r.Host = origin.Host
+		proxy.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, "", "--workspace", dir, "move", issue.UID, target.Name, "--from-project", source.Name, "--status", "all", "--json")
 	require.NoError(t, err)
 	var reply struct {
 		Results []api.MoveIssuesResult `json:"results"`
@@ -42,6 +67,11 @@ func TestMoveBatchCLI_ContinuationAfterCompletedDuplicate(t *testing.T) {
 	require.Len(t, reply.Results, 2)
 	require.Equal(t, "moved", reply.Results[0].Result)
 	require.Equal(t, "unchanged", reply.Results[1].Result)
+	require.Equal(t, 1, continuation.Body.StartIndex)
+	require.Len(t, continuation.Body.Completed, 1)
+	require.Equal(t, reply.Results[0].EventID, continuation.Body.Completed[0].EventID)
+	require.Equal(t, reply.Results[0].Revision, continuation.Body.Completed[0].Revision)
+	require.Equal(t, issue.Revision, continuation.Body.Items[1].ExpectedRevision)
 }
 
 func TestParseRefsFrom(t *testing.T) {

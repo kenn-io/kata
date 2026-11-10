@@ -233,6 +233,7 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		"from_short_id":    curShortID,
 		"to_project_uid":   toProjectUID,
 		"to_short_id":      newShortID,
+		"revision":         newRev,
 		"updated_at":       ts,
 	}
 	var federated bool

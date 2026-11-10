@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"encoding/json/v2"
 	"slices"
 	"testing"
 
@@ -80,6 +81,11 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 		require.Len(t, comments, 1)
 		require.Equal(t, "routed", comments[0].Body)
 		require.Len(t, out.Results[n].Out.Events, 2)
+		var movePayload struct {
+			Revision int64 `json:"revision"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out.Results[n].Out.Events[0].Payload), &movePayload))
+		require.Equal(t, out.Results[n].Out.NewRevision, movePayload.Revision)
 		require.Greater(t, out.Results[n].Out.Events[1].ID, out.Results[n].Out.EventID)
 	}
 	access, err = store.ProjectAccessRevision(ctx)

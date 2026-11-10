@@ -181,7 +181,7 @@ func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
 		require.Equal(t, 1, first.Body.NextIndex)
 		require.Equal(t, "moved", first.Body.Results[0].Result)
 		req.Body.StartIndex = first.Body.NextIndex
-		req.Body.Items[1].ExpectedRevision = first.Body.Results[0].Revision
+		req.Body.Completed = completedMoveResults(first.Body.Results)
 		second, err := handler(t.Context(), req)
 		require.NoError(t, err)
 		require.Len(t, second.Body.Results, 1)
@@ -222,6 +222,7 @@ func TestMoveIssuesBatch_ContinuationAfterRefusedDuplicate(t *testing.T) {
 	require.Equal(t, 50, first.Body.NextIndex)
 	require.Equal(t, "revision_conflict", first.Body.Results[0].Code)
 	req.Body.StartIndex = first.Body.NextIndex
+	req.Body.Completed = completedMoveResults(first.Body.Results)
 	second, err := handler(t.Context(), req)
 	require.NoError(t, err)
 	require.Len(t, second.Body.Results, 1)
