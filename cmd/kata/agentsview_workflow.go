@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
 	"time"
 
@@ -94,7 +95,7 @@ func (w agentsViewWorkflow) Prepare(ctx context.Context, ref, path string, nativ
 	if err != nil {
 		return agentsViewConsent{}, err
 	}
-	defer snapshot.Close()
+	defer func() { _ = snapshot.Close() }()
 	if err = inspectAgentsViewSnapshot(ctx, snapshot, native.Agent, canonical); err != nil {
 		return agentsViewConsent{}, err
 	}
@@ -174,11 +175,9 @@ func (w agentsViewWorkflow) Close(ctx context.Context, ref string, c agentsViewC
 	if err != nil {
 		return agentsViewCloseResult{}, err
 	}
-	defer snapshot.Close()
+	defer func() { _ = snapshot.Close() }()
 	request := make(map[string]any, len(body)+3)
-	for key, value := range body {
-		request[key] = value
-	}
+	maps.Copy(request, body)
 	if evidence, ok := request["evidence"].([]api.Evidence); ok {
 		resolved, err := w.port.ResolveEvidence(ctx, evidence)
 		if err != nil {
@@ -232,7 +231,7 @@ func (w agentsViewWorkflow) Share(ctx context.Context, ref string, c agentsViewC
 	if err != nil {
 		return err
 	}
-	defer snapshot.Close()
+	defer func() { _ = snapshot.Close() }()
 	original, err := w.port.Original(ctx, ref, eventUID)
 	if err != nil {
 		return err

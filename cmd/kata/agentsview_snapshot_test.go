@@ -24,7 +24,7 @@ func TestAgentsViewFrozenSnapshotRetainsOpenedBytes(t *testing.T) {
 	frozen, err := freezeAgentsViewSnapshot(t.Context(), path, hex.EncodeToString(sum[:]), int64(len(original)))
 	require.NoError(t, err)
 	spool := frozen.Name()
-	defer frozen.Close()
+	defer func() { _ = frozen.Close() }()
 	require.NoError(t, safefileio.ValidatePrivateCurrentUserFile(frozen.File))
 	require.NoError(t, os.WriteFile(path, []byte("replacement"), 0o600))
 	got, err := io.ReadAll(frozen)
@@ -64,7 +64,7 @@ func TestAgentsViewConsentExclusivePrivateFile(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, safefileio.ValidatePrivateCurrentUserFile(file))
 	require.NoError(t, file.Close())
-	got, err := os.ReadFile(path)
+	got, err := os.ReadFile(path) //nolint:gosec // Path is created in the test temporary directory.
 	require.NoError(t, err)
 	require.Equal(t, `{"v":1}`, string(got))
 }
@@ -118,7 +118,7 @@ func TestAgentsViewSnapshotAcceptsMaximumCanonicalIdentity(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(raw), 0o600))
 	snapshot, err := captureAgentsViewSnapshot(t.Context(), path)
 	require.NoError(t, err)
-	defer snapshot.Close()
+	defer func() { _ = snapshot.Close() }()
 	require.NoError(t, inspectAgentsViewSnapshot(t.Context(), snapshot, agent, canonical))
 }
 

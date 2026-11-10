@@ -23,7 +23,7 @@ import (
 func TestAgentsViewHTTPRefusesCompressionAndOversize(t *testing.T) {
 	for _, state := range []string{"compression", "oversize", "error-content"} {
 		t.Run(state, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				switch state {
 				case "compression":
 					w.Header().Set("Content-Encoding", "gzip")
@@ -78,7 +78,7 @@ var _ agentsViewWorkflowPort = (*agentsViewHTTPPort)(nil)
 
 func TestAgentsViewHTTPMissingGeneratedAssociationCannotClose(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(500) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls++; w.WriteHeader(500) }))
 	defer server.Close()
 	port := &agentsViewHTTPPort{api: daemonAPI{client: server.Client(), baseURL: server.URL}, projectID: 2, issueUID: "issue-a"}
 	_, err := port.Close(t.Context(), "example#abcd", map[string]any{"agentsview_protocol": "relay-v1"}, nil)
@@ -112,13 +112,11 @@ func TestAgentsViewConstructedAdapterNeverFollowsRedirect(t *testing.T) {
 	ref := createIssue(t, env, pid, "selected issue")
 	flags.Workspace = dir
 	escaped := 0
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { escaped++; w.WriteHeader(500) }))
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { escaped++; w.WriteHeader(500) }))
 	defer target.Close()
 	upstream, err := url.Parse(env.URL)
 	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(upstream)
-	director := proxy.Director
-	proxy.Director = func(r *http.Request) { director(r); r.Host = upstream.Host }
+	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(upstream); r.Out.Host = upstream.Host }}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/transcript-service") {
 			w.Header().Set("Location", target.URL)

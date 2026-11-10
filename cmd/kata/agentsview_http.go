@@ -142,7 +142,7 @@ func (p *agentsViewHTTPPort) request(ctx context.Context, method, path string, b
 	if err != nil {
 		return nil, &agentsViewSafeFailure{state: "daemon response unconfirmed", cause: err}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	headerBytes := 0
 	for name, values := range response.Header {
 		for _, value := range values {
@@ -209,7 +209,7 @@ func (p *agentsViewHTTPPort) Original(ctx context.Context, _ string, eventUID st
 		return agentsViewCloseEvent{}, err
 	}
 	var after int64
-	for page := 0; page < 128; page++ {
+	for range 128 {
 		response, callErr := apiClient.PollProjectEventsWithResponse(ctx, &generated.PollProjectEventsRequestOptions{
 			PathParams: &generated.PollProjectEventsPath{ProjectID: p.projectID}, Query: &generated.PollProjectEventsQuery{Issue: &p.issueUID, AfterID: &after, Limit: new(int64(10)), IncludeEffectiveCloseEventUID: new(true)},
 		})
@@ -297,11 +297,11 @@ func (t agentsViewBoundedResponseTransport) RoundTrip(request *http.Request) (*h
 		}
 	}
 	if headerBytes > 16<<10 || response.Header.Get("Content-Encoding") != "" || response.Uncompressed {
-		response.Body.Close()
+		_ = response.Body.Close()
 		return nil, errors.New("AgentsView: unsupported daemon response encoding or headers")
 	}
 	raw, err := io.ReadAll(io.LimitReader(agentsViewContextReader{request.Context(), response.Body}, agentsViewDaemonResponseLimit+1))
-	response.Body.Close()
+	_ = response.Body.Close()
 	if err != nil || int64(len(raw)) > agentsViewDaemonResponseLimit {
 		return nil, errors.New("AgentsView: daemon response exceeds limit or was interrupted")
 	}

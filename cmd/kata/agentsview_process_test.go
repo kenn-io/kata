@@ -44,9 +44,9 @@ func agentsViewSyntheticProcessEnv(home, server string) []string {
 
 func TestAgentsViewUnavailableProcessSendsNoBytesToEitherDestination(t *testing.T) {
 	var company, personal atomic.Int64
-	companyReceiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { company.Add(1); w.WriteHeader(500) }))
+	companyReceiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { company.Add(1); w.WriteHeader(500) }))
 	defer companyReceiver.Close()
-	personalReceiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { personal.Add(1); w.WriteHeader(500) }))
+	personalReceiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { personal.Add(1); w.WriteHeader(500) }))
 	defer personalReceiver.Close()
 	_, _, consent, snapshot := agentsViewWorkflowFixture(t)
 	raw, err := json.Marshal(consent)

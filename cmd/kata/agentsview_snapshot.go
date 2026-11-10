@@ -68,7 +68,7 @@ func captureAgentsViewSnapshot(ctx context.Context, path string) (_ *agentsViewF
 	if err != nil {
 		return nil, errors.New("AgentsView: cannot open selected snapshot; retain the original file")
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	info, err := source.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > agentsViewSnapshotLimit {
 		return nil, errors.New("AgentsView: snapshot must be a nonempty regular file of at most 64 MiB")

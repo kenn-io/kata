@@ -35,8 +35,8 @@ func TestAgentsViewNamespaceAndFlags(t *testing.T) {
 		require.Equal(t, name, command.Name())
 		require.NotNil(t, command.Flags().Lookup("snapshot"))
 	}
-	close, _, err := root.Find([]string{"close"})
+	closeCmd, _, err := root.Find([]string{"close"})
 	require.NoError(t, err)
-	require.NotNil(t, close.Flags().Lookup("share-transcript"))
-	require.NotNil(t, close.Flags().Lookup("confirm-transcript-sha256"))
+	require.NotNil(t, closeCmd.Flags().Lookup("share-transcript"))
+	require.NotNil(t, closeCmd.Flags().Lookup("confirm-transcript-sha256"))
 }
