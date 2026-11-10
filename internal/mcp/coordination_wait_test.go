@@ -577,3 +577,71 @@ func TestMCPCoordinationWaitUntilAnySurvivesTransientFailure(t *testing.T) {
 	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "any": true, "timeout_seconds": 1})
 	require.Equal(t, "matched", out["reason"])
 }
+
+func TestMCPCoordinationWaitUntilRetriesTransientFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, until string
+		statuses    []int
+	}{
+		{"attention", "attention", []int{503, 200}},
+		{"reply baseline", "reply", []int{200, 503, 200}},
+		{"successful read resets failures", "attention", []int{503, 503, 200, 503, 503, 200}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var reads atomic.Int64
+			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/projects" {
+					writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+					return
+				}
+				i := min(int(reads.Add(1))-1, len(tc.statuses)-1)
+				if tc.statuses[i] != http.StatusOK {
+					http.Error(w, "unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				issue := issueJSON(1, "spoke-project", "abc1")
+				if tc.until == "reply" {
+					message := "before"
+					if i == len(tc.statuses)-1 {
+						message = "after"
+					}
+					issue["metadata"] = map[string]any{notification.MetadataKey("worker"): map[string]any{"message": message}}
+				} else if i == len(tc.statuses)-1 {
+					issue["metadata"] = map[string]any{"work.attention": "stuck"}
+				}
+				writeJSON(w, map[string]any{"issue": issue})
+			})
+			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
+			args := map[string]any{"refs": []string{"abc1"}, "until": tc.until, "timeout_seconds": 3}
+			if tc.until == "reply" {
+				args["for"] = "worker"
+			}
+			out := callCoordinationTool(t, session, "kata.wait", args)
+			require.Equal(t, "matched", out["reason"])
+			require.Equal(t, tc.until, out["states"].([]any)[0].(map[string]any)["reason"])
+			require.Equal(t, int64(len(tc.statuses)), reads.Load())
+		})
+	}
+}
+
+func TestMCPCoordinationWaitUntilPersistentFailure(t *testing.T) {
+	for _, anyMode := range []bool{false, true} {
+		t.Run(fmt.Sprintf("any=%t", anyMode), func(t *testing.T) {
+			var reads atomic.Int64
+			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/projects" {
+					writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+					return
+				}
+				reads.Add(1)
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			})
+			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: map[string]any{"refs": []string{"abc1"}, "until": "attention", "any": anyMode, "timeout_seconds": 2}})
+			require.NoError(t, err)
+			require.True(t, result.IsError)
+			require.Contains(t, string(mustJSON(t, result.Content)), "503")
+			require.Equal(t, int64(3), reads.Load())
+		})
+	}
+}

@@ -144,6 +144,7 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 
 // waitUntil polls each candidate independently so a stalled read cannot delay another.
 func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, until, recipient string) (*sdkmcp.CallToolResult, WaitOutput, error) {
+	const maxConsecutiveFailures = 3 // Match the CLI wait retry limit.
 	type result struct {
 		index  int
 		target waitTarget
@@ -158,10 +159,16 @@ func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, un
 		go func(i int, ref string) {
 			defer workers.Done()
 			var target waitTarget
+			var failures int
 			for {
 				var err error
 				target, err = h.pollWaitTarget(pollCtx, ref, target, until, "", recipient)
-				if err == nil || !input.Any || permanentWaitError(err) {
+				if err == nil {
+					failures = 0
+				} else if !permanentWaitError(err) {
+					failures++
+				}
+				if err == nil || permanentWaitError(err) || failures >= maxConsecutiveFailures {
 					select {
 					case results <- result{i, target, err}:
 					case <-pollCtx.Done():
