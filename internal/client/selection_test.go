@@ -34,7 +34,7 @@ token_env = "EXAMPLE_LOCAL_TOKEN"
 	assert.Equal(t, config.TokenEnvError{Daemon: "personal", Env: "EXAMPLE_LOCAL_TOKEN"}, *tokenErr)
 }
 
-// Selection stays credential-free, as `kata daemon locate` requires, but
+// Selection defers credential errors, as `kata daemon locate` requires, but
 // every path that resolves the selected daemon reports a catalog entry whose
 // token_env variable is unset or empty. KATA_AUTH_TOKEN replaces only a remote
 // entry's credential.
@@ -59,7 +59,7 @@ token_env = "EXAMPLE_LOCAL_TOKEN"
 	for name, env := range map[string]string{"hub": "EXAMPLE_HUB_TOKEN", "personal": "EXAMPLE_LOCAL_TOKEN"} {
 		want := `daemon "` + name + `": token_env "` + env + `" is unset or empty`
 		_, err := InspectSelection(t.Context(), "", name)
-		require.NoError(t, err, "selection reads no credential for %s", name)
+		require.NoError(t, err, "selection defers credential errors for %s", name)
 		_, _, err = DiscoverSelected(t.Context(), DiscoverRequest{Name: name})
 		require.EqualError(t, err, want)
 		_, err = PrepareResolvedNamed(t.Context(), name)

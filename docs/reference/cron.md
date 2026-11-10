@@ -201,20 +201,10 @@ the stored expression exactly as written.
 - A step that starts at one weekday continues through 7, which is Sunday.
   `0 9 * * 5/2` runs on Fridays and Sundays.
 
-A rejected expression's error names the field and value, descriptor, timezone,
-or field count that failed, with advice for correcting it.
-
-- A `TZ=` or `CRON_TZ=` zone name ends at the first ASCII space, even inside
-  quotes. A schedule must follow that space.
-- Removing an extra field preserves the schedule only for a `0` seconds field
-  or a wildcard `*` year. Nonzero seconds and a restricted year have no
-  five-field equivalent.
-- Last-day or last-weekday (`L`), nearest-weekday (`W`), and nth-weekday (`#`)
-  schedules have no five-field equivalent. `28-31` fires on each of those days
-  that exists, rather than only on the last day. Restricting both day fields
-  matches either field; it cannot express an nth weekday.
-- For hashed (`H`) schedules, choose a fixed value. `@reboot` is unsupported;
-  use a supported descriptor, a five-field schedule, or an interval trigger.
+Rejected expressions include the parser's error. For common unsupported syntax,
+the error also describes Kata's five-field format or the unsupported feature.
+`@reboot`, `L`, `W`, `#`, and hashed (`H`) schedules are unsupported. Use an
+interval trigger for native recurring jobs that need `@every`.
 
 Schedules follow the trigger timezone's daylight-saving transitions:
 

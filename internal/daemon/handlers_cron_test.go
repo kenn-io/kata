@@ -298,7 +298,5 @@ func TestCronJobCreateExplainsUnsupportedCron(t *testing.T) {
 	var response api.ErrorEnvelope
 	require.NoError(t, json.Unmarshal(raw, &response))
 	require.Equal(t, "validation", response.Error.Code)
-	_, err := cron.ParseCron(definition.Trigger.Cron)
-	require.Error(t, err)
-	require.Equal(t, err.Error(), response.Error.Message)
+	require.Contains(t, response.Error.Message, "L, W, and # syntax is not supported")
 }
