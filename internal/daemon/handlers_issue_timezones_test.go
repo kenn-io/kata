@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -27,7 +28,10 @@ func TestIssuePortableTimezoneAdmission(t *testing.T) {
 		t.Helper()
 		if create {
 			status, raw := cronHTTP(t, env, http.MethodPost, projectPath(p.ID)+"/issues", map[string]any{"actor": "tester", "title": "Example", "force_new": true, "metadata": md})
-			assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
+			failure := assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
+			if _, choosingZone := md["timezone"]; choosingZone {
+				require.Contains(t, failure.Error.Message, "bundled geographic")
+			}
 		}
 		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Existing", Author: "tester"})
 		require.NoError(t, err)
@@ -36,7 +40,10 @@ func TestIssuePortableTimezoneAdmission(t *testing.T) {
 		status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": md})
 		require.Equal(t, want, status, string(raw))
 		if want == http.StatusBadRequest {
-			assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
+			failure := assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
+			if _, choosingZone := md["timezone"]; choosingZone {
+				require.Contains(t, failure.Error.Message, "bundled geographic")
+			}
 			after, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Equal(t, issue, after)
@@ -99,7 +106,7 @@ func TestIssuePortableTimezoneLegacyCompatibility(t *testing.T) {
 			for _, field := range fields {
 				issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Legacy", Author: "tester"})
 				require.NoError(t, err)
-				// ImportReplay is the supported path for unreadable restored zones.
+				// Public JSONL restore preserves opaque metadata, including unreadable zones.
 				var pe db.ProjectExport
 				raw, err := json.Marshal(p)
 				require.NoError(t, err)
@@ -109,7 +116,14 @@ func TestIssuePortableTimezoneLegacyCompatibility(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, json.Unmarshal(raw, &ie))
 				ie.Metadata = jsontext.Value(strings.ReplaceAll(tc.stored, "$field", field))
-				require.NoError(t, env.DB.ImportReplay(t.Context(), []db.ImportRecord{&pe, &ie}, db.ImportOptions{}))
+				var backup strings.Builder
+				encoder := jsonl.NewEncoder(&backup)
+				for _, record := range []db.ImportRecord{&db.MetaKV{Key: "export_version", Value: fmt.Sprint(db.CurrentSchemaVersion())}, &pe, &ie} {
+					raw, err := json.Marshal(record)
+					require.NoError(t, err)
+					require.NoError(t, encoder.Write(jsonl.Envelope{Kind: jsonl.Kind(record.ImportKind()), Data: raw}))
+				}
+				require.NoError(t, jsonl.Import(t.Context(), strings.NewReader(backup.String()), env.DB))
 				resp := doPost(t, env, fmt.Sprintf("%s%s/issues/%s/metadata", env.URL, projectPath(p.ID), issue.ShortID), `{"actor":"tester","patch":`+strings.ReplaceAll(tc.patch, "$field", field)+`}`)
 				body := readClose(t, resp)
 				require.Equal(t, tc.want, resp.StatusCode, string(body))
@@ -152,8 +166,13 @@ func TestIssuePortableTimezoneTransactionCurrent(t *testing.T) {
 		require.Equal(t, issue.Revision, after.Revision)
 		rec, _, err := store.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{ProjectID: p.ID, Actor: "tester", Rule: "FREQ=DAILY", DTStart: "2026-11-12", Timezone: "US/Eastern", Template: db.RecurrenceTemplate{Title: "Daily example"}})
 		require.NoError(t, err)
-		_, err = exec(t.Context(), `UPDATE issues SET recurrence_id = $1 WHERE id = $2`, rec.ID, issue.ID)
+		out, err := store.MaterializeNext(t.Context(), rec.ID, "2026-11-11", "tester")
 		require.NoError(t, err)
+		occurrence, err := store.IssueByUID(t.Context(), out.NewIssueUID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		path = fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), occurrence.ShortID)
+		status, raw = cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]any{"timezone": nil, "scheduled_on": nil}})
+		require.Equal(t, http.StatusOK, status, string(raw))
 		status, raw = cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]string{"scheduled_on": "2026-11-12"}})
 		require.Equal(t, http.StatusOK, status, string(raw))
 	})
