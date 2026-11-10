@@ -528,26 +528,3 @@ func completedMoveResults(results []api.MoveIssuesResult) []api.MoveIssuesComple
 	}
 	return completed
 }
-
-// A newer event format cannot prove the revision to an older reader.
-type moveProofVersionStore struct{ db.Storage }
-
-func (s *moveProofVersionStore) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([]db.Event, error) {
-	events, err := s.Storage.EventsAfter(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	for j := range events {
-		var payload map[string]any
-		if err := json.Unmarshal([]byte(events[j].Payload), &payload); err != nil {
-			return nil, err
-		}
-		payload["move_proof_version"] = 2
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			return nil, err
-		}
-		events[j].Payload = string(raw)
-	}
-	return events, nil
-}

@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json/v2"
-	"errors"
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
@@ -11,17 +10,15 @@ import (
 	"go.kenn.io/kata/internal/shortid"
 )
 
-var errUnsupportedMoveProof = errors.New("unsupported move proof version")
-
 type moveBatchPrior struct {
 	targetID int64
 	revision int64
 }
 
-func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult, actor string, cache *claimClientCache) (map[int64]api.MoveIssuesResult, map[int64]moveBatchPrior, map[int64]string, error) {
+func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult, actor string, cache *claimClientCache) (map[int64]api.MoveIssuesResult, map[int64]moveBatchPrior, map[int64]bool, error) {
 	succeeded := map[int64]api.MoveIssuesResult{}
 	moves := map[int64]moveBatchPrior{}
-	conflicts := map[int64]string{}
+	conflicts := map[int64]bool{}
 	pending := map[string]db.Issue{}
 	for j := in.Body.StartIndex; j < len(items); j++ {
 		if results[j].Result == "" {
@@ -57,10 +54,6 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 		}
 		if completed.Result == "moved" {
 			valid, err := verifyMoveBatchEvent(ctx, cfg.DB, in.Body.DefaultProjectID, input, completed, current, target, actor)
-			if err == errUnsupportedMoveProof {
-				conflicts[current.ID] = "unsupported_move_proof_version"
-				continue
-			}
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -78,9 +71,7 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 			continue
 		}
 		if completed.Result == "refused" && completed.Code == "conflicting_target" {
-			if conflicts[current.ID] == "" {
-				conflicts[current.ID] = "conflicting_target"
-			}
+			conflicts[current.ID] = true
 			continue
 		}
 		if completed.Result == "would_move" && in.Body.DryRun && current.ProjectID != target.ID {
@@ -128,15 +119,8 @@ func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectI
 		FromShortID    string `json:"from_short_id"`
 		ToProjectUID   string `json:"to_project_uid"`
 		Revision       int64  `json:"revision"`
-		ProofVersion   int    `json:"move_proof_version"`
 	}
-	if err := json.Unmarshal([]byte(events[0].Payload), &payload); err != nil {
-		return false, nil
-	}
-	if payload.ProofVersion != db.MoveProofVersion {
-		return false, errUnsupportedMoveProof
-	}
-	if payload.ToProjectUID != target.UID || payload.Revision != completed.Revision {
+	if err := json.Unmarshal([]byte(events[0].Payload), &payload); err != nil || payload.ToProjectUID != target.UID || payload.Revision != completed.Revision {
 		return false, nil
 	}
 	ref, err := shortid.Parse(input.Ref)

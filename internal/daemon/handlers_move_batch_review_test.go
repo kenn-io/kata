@@ -168,14 +168,12 @@ func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
 	require.Equal(t, "duplicate_item", last.Code)
 	t.Run("continuation", func(t *testing.T) {
 		store := openClaimGateHelperDB(t)
-		source, issue := createClaimGateHelperIssue(t, store)
+		_, issue := createClaimGateHelperIssue(t, store)
 		target, err := store.CreateProject(t.Context(), "routing-target")
 		require.NoError(t, err)
 		req := &api.MoveIssuesRequest{}
 		req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed", target.UID
-		other, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "independent", Author: "agent"})
-		require.NoError(t, err)
-		req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}, {Ref: issue.UID, ExpectedRevision: issue.Revision}, {Ref: other.UID}}
+		req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}, {Ref: issue.UID, ExpectedRevision: issue.Revision}}
 		//nolint:kennlint // deadlinetest: Force a yield after the first database chunk, as in TestMoveIssuesBatch_BudgetResume.
 		handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
 		first, err := handler(t.Context(), req)
@@ -184,17 +182,9 @@ func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
 		require.Equal(t, "moved", first.Body.Results[0].Result)
 		req.Body.StartIndex = first.Body.NextIndex
 		req.Body.Completed = completedMoveResults(first.Body.Results)
-		otherTarget, err := store.CreateProject(t.Context(), "other-target")
-		require.NoError(t, err)
-		req.Body.Items[1].ToProjectUID, req.Body.Items[1].ExpectedRevision = otherTarget.UID, 0
-		unsupported, err := moveIssuesHandler(ServerConfig{DB: &moveProofVersionStore{Storage: store}})(t.Context(), req)
-		require.NoError(t, err)
-		require.Equal(t, "unsupported_move_proof_version", unsupported.Body.Results[0].Code)
-		require.Equal(t, "moved", unsupported.Body.Results[1].Result)
-		req.Body.Items[1].ToProjectUID, req.Body.Items[1].ExpectedRevision = "", issue.Revision
 		second, err := handler(t.Context(), req)
 		require.NoError(t, err)
-		require.Len(t, second.Body.Results, 2)
+		require.Len(t, second.Body.Results, 1)
 		require.Equal(t, "unchanged", second.Body.Results[0].Result)
 		got, err := store.IssueByID(t.Context(), issue.ID)
 		require.NoError(t, err)
