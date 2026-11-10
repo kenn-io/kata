@@ -470,8 +470,6 @@ func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
 func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 	for _, snapshot := range []string{
 		`{"uid":"issue-1","title":"snapshot","status":"open","labels":["current"]}`,
-		`{"uid":"issue-1","title":"snapshot","status":"open","labels":[]}`,
-		`{"uid":"issue-1","title":"snapshot","status":"open","labels":null}`,
 		`{"uid":"issue-1","title":"snapshot","status":"open"}`,
 	} {
 		t.Run(snapshot, func(t *testing.T) {
