@@ -26,11 +26,11 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	require.NoError(t, store.CheckIssueMovePair(ctx, src.ID, a.ID))
 	b, err := store.CreateProject(ctx, "batch-b")
 	require.NoError(t, err)
-	var issues []db.Issue
-	for range 3 {
+	issues := make([]db.Issue, 3)
+	for index := range issues {
 		i, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: src.ID, Title: "route issue", Author: "worker"})
 		require.NoError(t, err)
-		issues = append(issues, i)
+		issues[index] = i
 	}
 	rec, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{ProjectID: src.ID, Actor: "worker", Rule: "FREQ=WEEKLY", DTStart: "2026-10-12", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "pinned"}})
 	require.NoError(t, err)

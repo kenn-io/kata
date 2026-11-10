@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	jsonv1 "encoding/json"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -168,8 +168,8 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 			query.Unowned = new(true)
 		}
 		response, callErr := client.ListIssuesWithResponse(ctx, &generated.ListIssuesRequestOptions{PathParams: &generated.ListIssuesPath{ProjectID: project.ID}, Query: query})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
@@ -205,8 +205,8 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 			query.Cursor = &cursor
 		}
 		response, callErr := client.SearchIssuesWithResponse(ctx, &generated.SearchIssuesRequestOptions{PathParams: &generated.SearchIssuesPath{ProjectID: project.ID}, Query: query})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
@@ -301,7 +301,15 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	// Match the generated transport's JSON escaping and reserve the largest
 	// continuation encoding before the first mutation.
 	request.Body.StartIndex = len(items)
-	raw, err := jsonv1.Marshal(request.Body)
+	raw, err := json.Marshal(request.Body)
+	if err != nil {
+		return err
+	}
+	var body generated.MoveIssuesBody
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return err
+	}
+	raw, err = json.Marshal(body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 	if err != nil {
 		return err
 	}
@@ -312,14 +320,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	var results []api.MoveIssuesResult
 	requests := 0
 	for request.Body.StartIndex < len(request.Body.Items) {
-		raw, err := json.Marshal(request.Body)
-		if err != nil {
-			return err
-		}
-		var body generated.MoveIssuesBody
-		if err := json.Unmarshal(raw, &body); err != nil {
-			return err
-		}
+		body.StartIndex = new(int64(request.Body.StartIndex))
 		response, callErr := client.MoveIssuesWithResponse(a.ctx, &generated.MoveIssuesRequestOptions{Body: &body})
 		if response == nil {
 			if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
