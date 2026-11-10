@@ -102,21 +102,11 @@ func (h toolHandlers) cronJobHistory(ctx context.Context, _ *sdkmcp.CallToolRequ
 		if err != nil {
 			return nil, out, err
 		}
-		// Decode only the added fields; retain generated definitions and their exact
-		// json.Number literals from the initial response.
-		var diff struct {
-			Versions []struct {
-				Changes jsontext.Value `json:"changes"`
-			} `json:"versions"`
-			Skipped []string `json:"skipped_event_uids"`
-		}
-		if err := json.Unmarshal(enriched, &diff); err != nil {
-			return nil, out, err
-		}
+
 		for i := range out.Versions {
-			out.Versions[i].Changes = diff.Versions[i].Changes
+			out.Versions[i].Changes = enriched.Versions[i].Changes
 		}
-		out.SkippedEventUIDs = diff.Skipped
+		out.SkippedEventUIDs = enriched.SkippedEventUIDs
 	}
 	return successResult(), out, nil
 }

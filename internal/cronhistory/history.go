@@ -16,9 +16,22 @@ import (
 // ErrChanged means a continuation no longer provides one preceding version.
 var ErrChanged = errors.New("definition history changed while reading the previous version; retry history")
 
+// Version adds exact field changes to one retained definition version.
+type Version struct {
+	db.CronDefinitionVersion
+	Changes jsontext.Value `json:"changes"`
+}
+
+// Page retains the initial page cursor and merged skipped-event diagnostics.
+type Page struct {
+	Versions           []Version `json:"versions"`
+	NextBeforeEventUID string    `json:"next_before_event_uid,omitempty"`
+	SkippedEventUIDs   []string  `json:"skipped_event_uids,omitempty"`
+}
+
 // WithDiff compares each version to its predecessor, fetching one older entry
 // when needed. It preserves the initial cursor and merges skipped diagnostics.
-func WithDiff(ctx context.Context, raw []byte, fetchOlder func(context.Context, string) ([]byte, error)) ([]byte, error) {
+func WithDiff(ctx context.Context, raw []byte, fetchOlder func(context.Context, string) ([]byte, error)) (*Page, error) {
 	var page db.CronVersionPage
 	if err := json.Unmarshal(raw, &page); err != nil {
 		return nil, err
@@ -39,15 +52,7 @@ func WithDiff(ctx context.Context, raw []byte, fetchOlder func(context.Context, 
 		older = &lookahead.Versions[0]
 		page.SkippedEventUIDs = historySkippedEvents(page.SkippedEventUIDs, lookahead.SkippedEventUIDs)
 	}
-	type versionWithChanges struct {
-		db.CronDefinitionVersion
-		Changes jsontext.Value `json:"changes"`
-	}
-	out := struct {
-		Versions           []versionWithChanges `json:"versions"`
-		NextBeforeEventUID string               `json:"next_before_event_uid,omitempty"`
-		SkippedEventUIDs   []string             `json:"skipped_event_uids,omitempty"`
-	}{Versions: make([]versionWithChanges, 0, len(page.Versions)), NextBeforeEventUID: page.NextBeforeEventUID, SkippedEventUIDs: page.SkippedEventUIDs}
+	out := &Page{Versions: make([]Version, 0, len(page.Versions)), NextBeforeEventUID: page.NextBeforeEventUID, SkippedEventUIDs: page.SkippedEventUIDs}
 	for i, v := range page.Versions {
 		previous := older
 		if i+1 < len(page.Versions) {
@@ -72,9 +77,9 @@ func WithDiff(ctx context.Context, raw []byte, fetchOlder func(context.Context, 
 				return nil, err
 			}
 		}
-		out.Versions = append(out.Versions, versionWithChanges{CronDefinitionVersion: v, Changes: changes})
+		out.Versions = append(out.Versions, Version{CronDefinitionVersion: v, Changes: changes})
 	}
-	return json.Marshal(out)
+	return out, nil
 }
 
 func cronHistoryDocument(v db.CronDefinitionVersion) (jsontext.Value, error) {

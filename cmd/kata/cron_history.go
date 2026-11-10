@@ -22,7 +22,10 @@ func (o cronCLIOptions) callHistory(ctx context.Context, client *kataclient.Clie
 	if errors.Is(err, cronhistory.ErrChanged) {
 		return nil, &cliError{Message: err.Error(), Kind: kindInternal, ExitCode: ExitInternal}
 	}
-	return enriched, err
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(enriched)
 }
 
 func (o cronCLIOptions) historyPage(ctx context.Context, client *kataclient.Client, projectID, limit int64, before string) ([]byte, error) {
