@@ -67,7 +67,7 @@ func explainCron(expression string, err error) error {
 		for i, token := range fields {
 			probe := []string{"*", "*", "*", "*", "*"}
 			probe[i] = token
-			if _, fieldErr := cronParser.Parse(strings.Join(probe, " ")); fieldErr != nil {
+			if _, fieldErr := cronParser.Parse(strings.Join(probe, " ")); fieldErr != nil && fieldErr.Error() == detail {
 				reason := fieldErr.Error()
 				if i == 2 || i == 4 {
 					reason = daySyntaxReason(i, token)

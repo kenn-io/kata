@@ -11,34 +11,40 @@ import (
 )
 
 func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
-	for _, tc := range []struct{ expression, detail, forbidden string }{
-		{"@reboot", "@reboot is not supported", ""}, {"@invented", "supported descriptors, such as @daily, must match exactly", ""},
-		{"0 9 L * *", `day of month "L": last-day`, ""}, {"0 9 l * *", `day of month "l": last-day`, ""},
-		{"0 9 15W * *", "nearest-weekday", ""}, {"0 9 15w * *", "nearest-weekday", ""},
-		{"0 9 LW * *", `day of month "LW": last-weekday`, ""},
-		{"0 9 * * FRI#L", `day of week "FRI#L": last-weekday`, ""},
-		{"0 9 1,LW * *", `day of month "1,LW": last-weekday`, ""},
-		{"0 9 * * MON,FRI#L", `day of week "MON,FRI#L": last-weekday`, ""},
-		{"0 9 * * JUL", "numeric values or field-appropriate names", ""},
-		{"0 9 * * 2#2", "nth-weekday", ""}, {"0 9 * * 5L", "last-weekday", ""},
-		{"H 9 * * *", `minute "H": choose a fixed value`, ""},
-		{"0 0 9 * * *", "only a 0 seconds field or wildcard * year", ""}, {"0 9 * * * 2026", "restricted year has no five-field equivalent", ""},
-		{"0 0 9 * * * 2026", "7 fields", ""}, {"0 9 * *", "4 fields", ""}, {"5", "1 field;", ""},
-		{"", "expression is empty", ""}, {"   ", "expression is empty", ""}, {" @daily", "descriptor must start", ""},
-		{"60 9 * * *", `minute "60"`, ""}, {"0 9 * * 8", `day of week "8"`, ""},
-		{"0 */24 * * *", `hour "*/24": step (24)`, ""}, {"*/0 * * * *", `minute "*/0"`, ""},
-		{"0 9 * JAN-XYZ *", `month "JAN-XYZ"`, ""}, {"x\ny 9 * * *", "6 fields", ""},
-		{"0 9 * * MON/7", "step (7)", "field-appropriate names"},
-		{"0 9 * * MON-FRI/5", "step (5)", "field-appropriate names"},
-		{"0 9 * * MON/0", "step of range", "field-appropriate names"},
-		{"0 9 * * MON-FRI/0", "step of range", "field-appropriate names"},
-		{"0 9 JUL * *", "day of month takes numbers 1-31", "option"},
-		{"0 9 WED * *", "day of month takes numbers 1-31", "option"},
-		{"@daily extra", "supported descriptors, such as @daily, must match exactly", "unknown descriptor"},
-		{"@daily ", "supported descriptors, such as @daily, must match exactly", "unknown descriptor"},
-		{"0 9 * * 5#", "nth-weekday", "option"},
+	for _, tc := range []struct{ expression, detail, forbidden, producer string }{
+		{"@reboot", "@reboot is not supported", "", ""}, {"@invented", "supported descriptors, such as @daily, must match exactly", "", ""},
+		{"0 9 L * *", `day of month "L": last-day`, "", ""}, {"0 9 l * *", `day of month "l": last-day`, "", ""},
+		{"0 9 15W * *", "nearest-weekday", "", ""}, {"0 9 15w * *", "nearest-weekday", "", ""},
+		{"0 9 LW * *", `day of month "LW": last-weekday`, "", ""},
+		{"0 9 * * FRI#L", `day of week "FRI#L": last-weekday`, "", ""},
+		{"0 9 1,LW * *", `day of month "1,LW": last-weekday`, "", ""},
+		{"0 9 * * MON,FRI#L", `day of week "MON,FRI#L": last-weekday`, "", ""},
+		{"0 9 * * JUL", "numeric values or field-appropriate names", "", ""},
+		{"0 9 * * 2#2", "nth-weekday", "", ""}, {"0 9 * * 5L", "last-weekday", "", ""},
+		{"H 9 * * *", `minute "H": choose a fixed value`, "", ""},
+		{"0 0 9 * * *", "only a 0 seconds field or wildcard * year", "", ""}, {"0 9 * * * 2026", "restricted year has no five-field equivalent", "", ""},
+		{"0 0 9 * * * 2026", "7 fields", "", ""}, {"0 9 * *", "4 fields", "", ""}, {"5", "1 field;", "", ""},
+		{"", "expression is empty", "", ""}, {"   ", "expression is empty", "", ""}, {" @daily", "descriptor must start", "", ""},
+		{"60 9 * * *", `minute "60"`, "", ""}, {"0 9 * * 8", `day of week "8"`, "", ""},
+		{"0 */24 * * *", `hour "*/24": step (24)`, "", ""}, {"*/0 * * * *", `minute "*/0"`, "", ""},
+		{"0 9 * JAN-XYZ *", `month "JAN-XYZ"`, "", ""}, {"x\ny 9 * * *", "6 fields", "", ""},
+		{"0 9 * * MON/7", "step (7)", "field-appropriate names", ""},
+		{"0 9 * * MON-FRI/5", "step (5)", "field-appropriate names", ""},
+		{"0 9 * * MON/0", "step of range", "field-appropriate names", ""},
+		{"0 9 * * MON-FRI/0", "step of range", "field-appropriate names", ""},
+		{"0 9 JUL * *", "day of month takes numbers 1-31", "option", ""},
+		{"0 9 WED * *", "day of month takes numbers 1-31", "option", ""},
+		{"@daily extra", "supported descriptors, such as @daily, must match exactly", "unknown descriptor", ""},
+		{"@daily ", "supported descriptors, such as @daily, must match exactly", "unknown descriptor", ""},
+		{"0 9 * * 5#", "nth-weekday", "option", ""},
+		{"0 9 L BAD *", `month "BAD": failed to parse int from "BAD"`, "last-day", `failed to parse int from "BAD": strconv.Atoi: parsing "BAD": invalid syntax`},
+		{"99 9 * * H", `day of week "H": choose a fixed value`, `minute "99"`, "h expressions require hash option to be enabled"},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
+			if tc.producer != "" {
+				_, err := cronParser.Parse(tc.expression)
+				require.EqualError(t, err, tc.producer)
+			}
 			_, err := ParseCron(tc.expression)
 			require.ErrorIs(t, err, ErrInvalid)
 			require.Contains(t, err.Error(), "invalid cron document: invalid cron expression: ")
