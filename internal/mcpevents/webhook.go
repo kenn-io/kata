@@ -106,19 +106,6 @@ func NewWebhookClient(options ...WebhookOptions) *WebhookClient {
 	return w
 }
 
-// ValidateWebhookCallback validates syntax and literal destinations without DNS
-// or other network activity. Resolved addresses are always checked again at dial.
-func ValidateWebhookCallback(raw string) error {
-	u, err := parseWebhookCallback(raw)
-	if err != nil {
-		return err
-	}
-	if ip, err := netip.ParseAddr(u.Hostname()); err == nil && !publicWebhookIP(ip) {
-		return &WebhookError{Reason: "destination_not_allowed"}
-	}
-	return nil
-}
-
 func parseWebhookCallback(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || strings.Contains(raw, "#") || u.Opaque != "" {
@@ -143,6 +130,20 @@ func parseWebhookCallback(raw string) (*url.URL, error) {
 	return u, nil
 }
 
+// validateLiteralCallback refuses prohibited literals without DNS or spending
+// failed-challenge tokens. The same selector honors exact operator pins.
+func (w *WebhookClient) validateLiteralCallback(ctx context.Context, raw string) error {
+	u, err := parseWebhookCallback(raw)
+	if err != nil {
+		return err
+	}
+	if _, err := netip.ParseAddr(u.Hostname()); err == nil {
+		_, err = w.destinationAddresses(ctx, u)
+		return err
+	}
+	return nil
+}
+
 // ValidateCallback authorizes a subscription destination before any write.
 // Lookup failures remain reachability errors; cached consent can be refreshed
 // during a DNS outage. Dialing independently validates every actual DNS answer.
@@ -164,6 +165,14 @@ func (w *WebhookClient) destinationAddresses(ctx context.Context, u *url.URL) ([
 	if w.policy != nil {
 		if pins, ok := w.policy.origins[webhookOrigin(u)]; ok {
 			return pins, nil
+		}
+	}
+	// These private DNS namespaces require an exact static grant; never resolve
+	// them on the public-only path. Lexical hostname checks are shared above.
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	for _, suffix := range []string{"internal", "home.arpa"} {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return nil, &WebhookError{Reason: "destination_not_allowed"}
 		}
 	}
 	var addresses []netip.Addr
@@ -196,7 +205,7 @@ func validWebhookHostname(host string) bool {
 	if len(labels) < 2 {
 		return false
 	}
-	for _, suffix := range []string{"localhost", "local", "internal", "home.arpa"} {
+	for _, suffix := range []string{"localhost", "local"} {
 		if host == suffix || strings.HasSuffix(host, "."+suffix) {
 			return false
 		}

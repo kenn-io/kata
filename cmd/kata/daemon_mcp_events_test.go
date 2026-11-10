@@ -152,9 +152,22 @@ func TestMCPEventsFailuresDisableOnlyEvents(t *testing.T) {
 	})
 }
 
+type refusingMCPEventsAuthority struct{}
+
+func (refusingMCPEventsAuthority) Reacquire(context.Context, mcpevents.Principal) (mcpevents.Authorized, error) {
+	return nil, mcpevents.ErrPrincipalRevoked
+}
+
 func TestMCPEventsTrustedCallbacksStartup(t *testing.T) {
-	for _, origin := range []string{"https://receiver.example", "https://receiver.example/path"} {
-		t.Run(origin, func(t *testing.T) {
+	for _, tc := range []struct {
+		origin  string
+		enabled bool
+		reason  string
+	}{
+		{origin: "https://100.64.0.1", enabled: true},
+		{origin: "https://receiver.example/path", reason: mcpevents.ReasonStartFailed},
+	} {
+		t.Run(tc.origin, func(t *testing.T) {
 			store := newMCPEventsStore(t)
 			ctx, cancel := context.WithCancel(t.Context())
 			workers := newDaemonWorkerGroup()
@@ -164,17 +177,20 @@ func TestMCPEventsTrustedCallbacksStartup(t *testing.T) {
 				defer stop()
 				require.True(t, workers.Wait(joined))
 			}()
-			cfg := config.DaemonConfig{MCPEvents: config.MCPEventsConfig{Enabled: true, TrustedCallbacks: []config.MCPEventsTrustedCallback{{Origin: origin, Addresses: []string{"100.64.0.1"}}}}}
-			service, reason := startMCPEvents(ctx, workers, mcpEventsStartup{Config: cfg, Store: store, KeyPath: filepath.Join(t.TempDir(), "key"), Authority: daemon.NewMCPEventsAuthority(daemon.ServerConfig{DB: store}), Log: log.New(io.Discard, "", 0)})
-			if origin == "https://receiver.example" {
-				require.NotNil(t, service)
-				require.Empty(t, reason)
-				require.True(t, service.Availability().Enabled)
-			} else {
+			cfg := config.DaemonConfig{MCPEvents: config.MCPEventsConfig{Enabled: true, TrustedCallbacks: []config.MCPEventsTrustedCallback{{Origin: tc.origin, Addresses: []string{"100.64.0.1"}}}}}
+			service, reason := startMCPEvents(ctx, workers, mcpEventsStartup{Config: cfg, Store: store, KeyPath: filepath.Join(t.TempDir(), "key"), Authority: refusingMCPEventsAuthority{}, Log: log.New(io.Discard, "", 0)})
+			require.Equal(t, tc.reason, reason)
+			if !tc.enabled {
 				require.Nil(t, service)
-				require.Equal(t, mcpevents.ReasonStartFailed, reason)
-				requireDaemonServes(t, store, service, reason, mcpevents.ReasonStartFailed)
+				requireDaemonServes(t, store, service, reason, tc.reason)
+				return
 			}
+			require.NotNil(t, service)
+			require.True(t, service.Availability().Enabled)
+			_, err := service.Subscribe(t.Context(), mcpevents.Principal{Authority: mcpevents.AuthorityDBToken, Subject: "7"}, mcpevents.ForwarderScope{All: true}, mcpevents.SubscribeRequest{Name: mcpevents.EventName, Arguments: mcpevents.Arguments{For: "example-user"}, Delivery: mcpevents.Delivery{Mode: "webhook", URL: tc.origin + "/events", Secret: "whsec_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}})
+			// The literal passes installed policy, then authority refuses before a socket.
+			// Omitting the startup policy instead returns destination_not_allowed.
+			assert.ErrorIs(t, err, mcpevents.ErrForbidden)
 		})
 	}
 }

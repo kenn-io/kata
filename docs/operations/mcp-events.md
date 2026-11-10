@@ -181,8 +181,11 @@ private-network receiver. Trusted origins bypass DNS and use only those pins;
 TLS still validates the original callback hostname. Loopback, link-local,
 reserved and untrusted mixed-address destinations remain forbidden. Redirects
 are never followed. A policy refusal reports `destination_not_allowed`,
-including in delivery's `lastError`. Requests carry no daemon bearer, browser
-credentials, or environment proxy. They use TLS 1.2 or newer and time out after
+including in delivery's `lastError`. A syntactically valid private callback
+without a grant returns `CallbackEndpointError` (`-32027`) with
+`destination_not_allowed`; older versions returned `InvalidParams`
+(`-32602`) with `invalid_callback` for private literals. Requests carry no
+daemon bearer, browser credentials, or environment proxy. They use TLS 1.2 or newer and time out after
 10 seconds.
 
 The response has `id`, `refreshBefore`, `cursor`, `truncated`, and

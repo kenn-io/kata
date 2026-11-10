@@ -42,7 +42,8 @@ func CompileTrustedCallbacks(entries []TrustedCallback) (*TrustedCallbackPolicy,
 				return nil, invalid
 			}
 			ip = ip.Unmap()
-			if !(ip.IsPrivate() || netip.MustParsePrefix("100.64.0.0/10").Contains(ip)) || seen[ip] {
+			if ip == netip.MustParseAddr("100.100.100.200") || ip == netip.MustParseAddr("fd00:ec2::254") ||
+				(!ip.IsPrivate() && !netip.MustParsePrefix("100.64.0.0/10").Contains(ip)) || seen[ip] {
 				return nil, invalid
 			}
 			if literalErr == nil && literal.Unmap() != ip {

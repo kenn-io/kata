@@ -3,6 +3,7 @@ package mcpevents
 import (
 	"context"
 	"net/http"
+	"net/netip"
 	"time"
 )
 
@@ -26,7 +27,11 @@ const (
 func (s *Service) InflightCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.inflight)
+	total := 0
+	for _, count := range s.inflight {
+		total += count
+	}
+	return total
 }
 
 // ChallengeStateCount reports how many consent and failure-budget entries the
@@ -66,3 +71,8 @@ func EffectiveRenewInterval(cfg ServiceConfig) (interval, ceiling time.Duration)
 
 // Rematch runs one rematch pass, as another daemon's worker would.
 func (s *Service) Rematch(ctx context.Context) error { return s.rematch(ctx) }
+
+// SetResolverForTest installs a resolver before a fixture starts serving calls.
+func (w *WebhookClient) SetResolverForTest(resolve func(context.Context, string, string) ([]netip.Addr, error)) {
+	w.resolve = resolve
+}

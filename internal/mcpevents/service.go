@@ -400,7 +400,7 @@ func (s *Service) Subscribe(ctx context.Context, p Principal, scope ForwarderSco
 	if err := checkForwarderScope(scope, ident.args); err != nil {
 		return SubscribeResult{}, err
 	}
-	if err := s.webhook.ValidateCallback(ctx, ident.url); err != nil {
+	if err := s.webhook.validateLiteralCallback(ctx, ident.url); err != nil {
 		return SubscribeResult{}, callbackEndpoint(endpointCategory(err))
 	}
 	// The fingerprint activation stores describes the archive at this head.
@@ -467,6 +467,9 @@ func (s *Service) subscribeOnce(ctx context.Context, c subscribeCall) (result Su
 // refresh is the live-row path. It touches only the TTL, the actor and the
 // secret columns, so it never overwrites concurrent delivery progress.
 func (s *Service) refresh(ctx context.Context, c subscribeCall, row db.MCPEventSubscription, now time.Time) (SubscribeResult, bool, error) {
+	if err := s.webhook.ValidateCallback(ctx, c.ident.url); err != nil {
+		return SubscribeResult{}, false, callbackEndpoint(endpointCategory(err))
+	}
 	in := db.MCPEventRefresh{
 		ID: row.ID, Incarnation: row.Incarnation, Now: now, Actor: c.p.Actor, ExpectedSecretEnc: row.SecretEnc,
 		ExpiresAt: s.grantExpiry(now, c.req.TTLMS), ClearFailures: true,
@@ -590,6 +593,7 @@ func (s *Service) activate(ctx context.Context, c subscribeCall, prior *db.MCPEv
 		return SubscribeResult{}, false, unavailable("seal_failed")
 	}
 	row.SecretEnc = sealed
+	freshlyVerified := false
 	if consentAt != nil {
 		row.VerifiedAt = consentAt
 	} else {
@@ -601,6 +605,7 @@ func (s *Service) activate(ctx context.Context, c subscribeCall, prior *db.MCPEv
 				}
 				return callbackEndpoint(endpointCategory(err))
 			}
+			freshlyVerified = true
 			return nil
 		}); err != nil {
 			if _, ok := errors.AsType[*Error](err); ok {
@@ -610,6 +615,14 @@ func (s *Service) activate(ctx context.Context, c subscribeCall, prior *db.MCPEv
 		}
 		t := s.now().UTC()
 		row.VerifiedAt = &t
+	}
+
+	// Durable, recent and coalesced consent can skip the dial. Recheck those
+	// destinations before writing, without resolving twice for a fresh challenge.
+	if !freshlyVerified {
+		if err := s.webhook.ValidateCallback(ctx, c.ident.url); err != nil {
+			return SubscribeResult{}, false, callbackEndpoint(endpointCategory(err))
+		}
 	}
 
 	s.catchUp(ctx)

@@ -1056,12 +1056,15 @@ Each entry needs at least one numeric address from RFC1918 IPv4
 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), CGNAT
 (`100.64.0.0/10`), or IPv6 ULA (`fc00::/7`). Loopback, link-local,
 metadata, unspecified, multicast, public and other reserved addresses are
-not permitted. Do not use CIDRs, zones or hostnames in `addresses`.
+not permitted. This includes metadata endpoints `100.100.100.200` and
+`fd00:ec2::254`, even though they fall within the ranges above. Do not use
+CIDRs, zones or hostnames in `addresses`.
 
 An origin includes the scheme, hostname and optional port. The default
 HTTPS port `:443` equals an omitted port. Hostname case is ignored.
 Origins cannot contain credentials, wildcards, non-root paths, queries or
-fragments. Reserved names such as `localhost` and `.local` remain forbidden.
+fragments. Exact pinned `.internal` and `home.arpa` names are permitted; `localhost`
+and `.local` remain forbidden.
 Duplicate origins or addresses within an entry disable Events. A private
 literal-IP origin must pin only that same IP.
 

@@ -239,10 +239,11 @@ type receiver struct {
 	client     *mcpevents.WebhookClient
 	// deliver, when set before the first request, answers every request that
 	// is not a verification challenge.
-	deliver func(http.ResponseWriter, *http.Request, []byte)
+	deliver        func(http.ResponseWriter, *http.Request, []byte)
+	afterChallenge func()
 }
 
-func newReceiver(t *testing.T) *receiver {
+func newReceiver(t *testing.T, entries ...mcpevents.TrustedCallback) *receiver {
 	t.Helper()
 	r := &receiver{}
 	client, _ := mcpevents.FixtureWebhook(t, func(w http.ResponseWriter, req *http.Request) {
@@ -274,8 +275,11 @@ func newReceiver(t *testing.T) *receiver {
 			w.WriteHeader(s)
 			return
 		}
+		if r.afterChallenge != nil {
+			r.afterChallenge()
+		}
 		_ = json.MarshalWrite(w, map[string]string{"challenge": body.Challenge})
-	})
+	}, entries...)
 	r.client = client
 	return r
 }

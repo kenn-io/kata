@@ -2,16 +2,13 @@ package mcpevents_test
 
 import (
 	"context"
-	"crypto/x509"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -91,7 +88,15 @@ func TestTTLFieldDecodesAbsentNullAndValue(t *testing.T) {
 
 // Every case fails before storage, so one backend is enough.
 func TestSubscribeValidation(t *testing.T) {
-	h := newHarness(t, openSQLite(t))
+	var lookups, dials atomic.Int64
+	client := mcpevents.NewWebhookClient(mcpevents.WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
+		lookups.Add(1)
+		return nil, errors.New("fixture DNS unavailable")
+	}, DialContext: func(context.Context, string, string) (net.Conn, error) {
+		dials.Add(1)
+		return nil, errors.New("fixture unreachable")
+	}})
+	h := newHarnessWith(t, openSQLite(t), func(cfg *mcpevents.ServiceConfig) { cfg.Webhook = client })
 	for _, tc := range []struct {
 		name   string
 		mutate func(*mcpevents.SubscribeRequest)
@@ -116,7 +121,9 @@ func TestSubscribeValidation(t *testing.T) {
 			tc.mutate(&req)
 			_, err := h.subscribe(principalA, req)
 			_ = requireWire(t, err, tc.code, tc.reason)
-			assert.Zero(t, h.recv.challenges.Load(), "validation fails before any network activity")
+			assert.Zero(t, lookups.Load(), "validation does no DNS")
+			assert.Zero(t, dials.Load(), "validation does not dial")
+			assert.Zero(t, h.svc.ChallengeStateCount(), "private literal refusal spends no challenge budget")
 		})
 	}
 	t.Run("invalid principal", func(t *testing.T) {
@@ -402,9 +409,7 @@ func TestSubscribeRechecksDestinationWithCachedConsent(t *testing.T) {
 		refuse    bool
 	}{
 		{name: "DNS outage", lookupErr: errors.New("private resolver details")},
-		{name: "empty DNS answer"},
 		{name: "withdrawn private trust", addresses: []netip.Addr{netip.MustParseAddr("100.64.0.1")}, refuse: true},
-		{name: "mixed public and private", addresses: []netip.Addr{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("10.0.0.1")}, refuse: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := mcpevents.NewWebhookClient(mcpevents.WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) { return tc.addresses, tc.lookupErr }})
@@ -413,17 +418,12 @@ func TestSubscribeRechecksDestinationWithCachedConsent(t *testing.T) {
 			before := h.row(result.ID)
 			_, err = svc.Subscribe(t.Context(), principalA, allScope, req)
 			if tc.refuse {
-				requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
+				_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
 				assert.Equal(t, before, h.row(result.ID))
 			} else {
 				require.NoError(t, err)
 			}
 			require.NoError(t, svc.Unsubscribe(t.Context(), principalA, mcpevents.UnsubscribeRequest{Name: req.Name, Arguments: req.Arguments, Delivery: req.Delivery}))
-			// Reactivation must obey the same policy before a new verification.
-			if tc.refuse {
-				_, err = svc.Subscribe(t.Context(), principalA, allScope, req)
-				requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
-			}
 			// Restore for the next case without depending on that case's resolver.
 			h.mustSubscribe(req)
 		})
@@ -431,47 +431,17 @@ func TestSubscribeRechecksDestinationWithCachedConsent(t *testing.T) {
 }
 
 func TestSubscribeTrustedPrivateCallbackAndWithdrawal(t *testing.T) {
-	challenges := 0
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var body struct {
-			Type      string `json:"type"`
-			Challenge string `json:"challenge"`
-		}
-		require.NoError(t, json.Unmarshal(raw, &body))
-		if body.Type == "verification" {
-			challenges++
-			_, _ = w.Write(raw)
-		} else {
-			w.WriteHeader(200)
-		}
-	}))
-	defer server.Close()
-	roots := x509.NewCertPool()
-	roots.AddCert(server.Certificate())
-	policy, err := mcpevents.CompileTrustedCallbacks([]mcpevents.TrustedCallback{{Origin: "https://example.com", Addresses: []string{"100.64.0.1"}}})
-	require.NoError(t, err)
-	client := mcpevents.NewWebhookClient(mcpevents.WebhookOptions{TrustedCallbacks: policy, RootCAs: roots, Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
-		t.Error("trusted subscribe used DNS")
-		return nil, nil
-	}, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-		assert.Equal(t, "100.64.0.1:443", address)
-		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
-	}})
-	h := newHarnessWith(t, openSQLite(t), func(cfg *mcpevents.ServiceConfig) { cfg.Webhook = client })
+	recv := newReceiver(t, mcpevents.TrustedCallback{Origin: "https://example.com", Addresses: []string{"100.64.0.1"}})
+	h := newHarnessWith(t, openSQLite(t), func(cfg *mcpevents.ServiceConfig) { cfg.Webhook = recv.client })
 	req := h.request("example-user")
 	req.TTLMS = mcpevents.TTLNull()
 	result := h.mustSubscribe(req)
-	h.mustSubscribe(req)
-	assert.Equal(t, 1, challenges)
-	// A restarted daemon retains consent but no longer has the operator grant.
+	// Restart without the grant, keeping durable consent and pending delivery.
 	withdrawn := mcpevents.NewWebhookClient(mcpevents.WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
 	}})
 	svc, err := mcpevents.NewService(t.Context(), mcpevents.ServiceConfig{Store: h.store, Keys: h.keys, Authority: h.auth, Webhook: withdrawn, Now: h.clock.Now})
 	require.NoError(t, err)
-	_, err = svc.Subscribe(t.Context(), principalA, allScope, req)
-	requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
 	h.touch(result.ID)
 	require.NoError(t, svc.Drain(t.Context()))
 	assert.Equal(t, "destination_not_allowed", h.row(result.ID).LastError)

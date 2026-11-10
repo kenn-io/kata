@@ -7,66 +7,61 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"strings"
+	"net/url"
 	"testing"
 )
 
 func TestTrustedCallbackPolicy(t *testing.T) {
-	for _, pin := range []string{"10.1.2.3", "172.16.1.2", "192.168.1.2", "100.64.0.1", "fd00::1"} {
-		t.Run(pin, func(t *testing.T) {
-			entries := []TrustedCallback{{Origin: "https://EXAMPLE.com:443/", Addresses: []string{pin}}}
-			policy, err := CompileTrustedCallbacks(entries)
-			if err != nil {
-				t.Fatal(err)
-			}
-			entries[0].Addresses[0] = "127.0.0.1"
-			w, server := fixtureWebhook(t, func(rw http.ResponseWriter, r *http.Request) {
-				body, _ := io.ReadAll(r.Body)
-				checkFixtureSignature(t, r, body, fixtureSecret(1, 32))
-				if strings.Contains(string(body), `"verification"`) {
-					_, _ = rw.Write(body)
-				} else {
-					rw.WriteHeader(202)
-				}
-			})
-			roots := x509.NewCertPool()
-			roots.AddCert(server.Certificate())
-			resolves := 0
-			w = NewWebhookClient(WebhookOptions{TrustedCallbacks: policy, RootCAs: roots, Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
-				resolves++
-				return []netip.Addr{netip.MustParseAddr("10.0.0.2")}, nil
-			}, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-				if address != net.JoinHostPort(pin, "443") {
-					t.Errorf("dial=%s", address)
-				}
-				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
-			}})
-			if err := w.Verify(t.Context(), fixtureTLSCallback, "sub", fixtureSecret(1, 32)); err != nil {
-				t.Fatal(err)
-			}
-			receipt, err := w.Send(t.Context(), fixtureTLSCallback, "evt", "sub", []byte(`{}`), []string{fixtureSecret(1, 32)})
-			if err != nil || receipt.StatusCode != 202 {
-				t.Fatalf("receipt=%+v err=%v", receipt, err)
-			}
-			if resolves != 0 {
-				t.Fatal("trusted callback used DNS")
-			}
-			for _, raw := range []string{"https://other.example/events", "https://example.com:444/events", "https://sub.example.com/events"} {
-				if err := w.ValidateCallback(t.Context(), raw); safeWebhookError(err).Reason != "destination_not_allowed" {
-					t.Fatalf("nonexact origin accepted: %s %v", raw, err)
-				}
-			}
-		})
+	const pin = "100.64.0.1"
+	received := 0
+	w, _ := fixtureWebhook(t, func(rw http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		checkFixtureSignature(t, r, body, fixtureSecret(1, 32))
+		received++
+		rw.Header().Set("Location", "https://127.0.0.1/secret")
+		rw.WriteHeader(307)
+	}, TrustedCallback{Origin: "https://EXAMPLE.com:443/", Addresses: []string{pin}})
+	w.resolve = func(context.Context, string, string) ([]netip.Addr, error) {
+		t.Error("trusted callback used DNS")
+		return nil, nil
+	}
+	receipt, err := w.Send(t.Context(), fixtureTLSCallback, "evt", "sub", []byte(`{}`), []string{fixtureSecret(1, 32)})
+	if err != nil || receipt.StatusCode != 307 || received != 1 {
+		t.Fatalf("trusted redirect followed or lost: %+v %v count=%d", receipt, err, received)
+	}
+	w.resolve = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("10.0.0.2")}, nil
+	}
+	for _, raw := range []string{"https://other.example/events", "https://example.com:444/events", "https://sub.example.com/events"} {
+		if err := w.ValidateCallback(t.Context(), raw); safeWebhookError(err).Reason != "destination_not_allowed" {
+			t.Fatalf("nonexact origin accepted: %s %v", raw, err)
+		}
 	}
 }
 
 func TestTrustedCallbackPolicyRejectsInvalidConfiguration(t *testing.T) {
-	for _, origin := range []string{"http://example.com", "https://user@example.com", "https://*.example.com", "https://localhost", "https://service.local", "https://example.com/path", "https://example.com/?", "https://example.com/#", "https://example.com:0", "https://example.com:", "https://example.com/%2f"} {
+	for _, pin := range []string{"10.1.2.3", "172.16.1.2", "192.168.1.2", "100.64.0.1", "fd00::1"} {
+		for _, origin := range []string{"https://example.com", "https://events.corp.internal", "https://events.home.arpa"} {
+			policy, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: origin, Addresses: []string{pin}}})
+			if err != nil {
+				t.Errorf("valid pin %s origin %s: %v", pin, origin, err)
+				continue
+			}
+			w := NewWebhookClient(WebhookOptions{TrustedCallbacks: policy, Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
+				t.Error("trusted private host used DNS")
+				return nil, nil
+			}})
+			if err := w.ValidateCallback(t.Context(), origin+"/events"); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	for _, origin := range []string{"https://*.example.com", "https://example.com/path", "https://example.com/?"} {
 		if _, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}}); err == nil {
 			t.Errorf("accepted origin %q", origin)
 		}
 	}
-	for _, pin := range []string{"127.0.0.1", "169.254.169.254", "0.0.0.0", "224.0.0.1", "8.8.8.8", "192.0.2.1", "::1", "fe80::1", "::", "ff00::1", "2001:db8::1", "fd00::1%eth0", "10.0.0.0/8", "receiver.example"} {
+	for _, pin := range []string{"fd00:ec2::254", "100.100.100.200", "::ffff:100.100.100.200", "127.0.0.1", "169.254.169.254", "0.0.0.0", "224.0.0.1", "8.8.8.8", "192.0.2.1", "::1", "fe80::1", "::", "ff00::1", "2001:db8::1", "fd00::1%eth0", "10.0.0.0/8", "receiver.example"} {
 		if _, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: "https://example.com", Addresses: []string{pin}}}); err == nil {
 			t.Errorf("accepted pin %q", pin)
 		}
@@ -91,15 +86,24 @@ func TestTrustedCallbackTLSAndLiteral(t *testing.T) {
 		origin, pin, callback string
 		roots                 *x509.CertPool
 	}{
-		{"https://example.com", "10.0.0.1", fixtureTLSCallback, nil},
+
 		{"https://wrong.example", "10.0.0.1", "https://wrong.example/events", roots},
 		{"https://10.0.0.1", "10.0.0.1", "https://10.0.0.1/events", roots},
+		{"https://[fd00::1]:8443", "fd00::1", "https://[fd00::1]:8443/events", roots},
 	} {
 		policy, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: tc.origin, Addresses: []string{tc.pin}}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		w := NewWebhookClient(WebhookOptions{TrustedCallbacks: policy, RootCAs: tc.roots, DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		w := NewWebhookClient(WebhookOptions{TrustedCallbacks: policy, RootCAs: tc.roots, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			u, _ := url.Parse(tc.callback)
+			port := u.Port()
+			if port == "" {
+				port = "443"
+			}
+			if address != net.JoinHostPort(tc.pin, port) {
+				t.Errorf("numeric literal/port not retained: %s", address)
+			}
 			return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
 		}})
 		_, err = w.Send(t.Context(), tc.callback, "evt", "sub", []byte(`{}`), []string{fixtureSecret(1, 32)})

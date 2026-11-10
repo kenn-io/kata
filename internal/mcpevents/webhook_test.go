@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -30,20 +31,39 @@ func fixtureSecret(b byte, size int) string {
 
 // The fixture replaces only the network socket: production URL validation,
 // public-IP policy, TLS hostname checking and HTTP/signature serialization run.
-func fixtureWebhook(t *testing.T, handler http.HandlerFunc) (*WebhookClient, *httptest.Server) {
+func fixtureWebhook(t *testing.T, handler http.HandlerFunc, entries ...TrustedCallback) (*WebhookClient, *httptest.Server) {
 	t.Helper()
 	server := httptest.NewUnstartedServer(handler)
 	server.StartTLS()
 	t.Cleanup(server.Close)
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
+	policy, err := CompileTrustedCallbacks(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{"8.8.8.8:443": true}
+	if len(entries) > 0 {
+		allowed = map[string]bool{}
+		for _, entry := range entries {
+			u, _ := url.Parse(entry.Origin)
+			port := u.Port()
+			if port == "" {
+				port = "443"
+			}
+			for _, pin := range entry.Addresses {
+				allowed[net.JoinHostPort(netip.MustParseAddr(pin).Unmap().String(), port)] = true
+			}
+		}
+	}
 	w := NewWebhookClient(WebhookOptions{
+		TrustedCallbacks: policy,
 		Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
 			return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
 		},
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			if address != "8.8.8.8:443" {
-				t.Errorf("dial did not pin validated public IP: %q", address)
+			if !allowed[address] {
+				t.Errorf("dial did not pin validated destination: %q", address)
 			}
 			return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
 		},
@@ -157,7 +177,7 @@ func TestWebhookRejectsRebindingRedirectAndPrivateIPs(t *testing.T) {
 		t.Fatal("DNS rebinding reached receiver")
 	}
 	for _, addresses := range [][]string{
-		{"8.8.8.8", "10.0.0.1"}, {"::1"}, {"::ffff:127.0.0.1"}, {"100.64.0.1"}, {"169.254.1.1"}, {"192.0.2.1"}, {"198.51.100.1"}, {"203.0.113.1"}, {"198.18.0.1"}, {"240.1.1.1"}, {"ff02::1"}, {"2001:db8::1"}, {"64:ff9b::7f00:1"}, {"2002:7f00:1::"}, {"2001::ffff:80ff:fffe"}, {"fe80::1%eth0"}, {},
+		{"8.8.8.8", "10.0.0.1"}, {"::1"}, {"::ffff:127.0.0.1"}, {"100.64.0.1"}, {"100.100.100.200"}, {"::ffff:100.100.100.200"}, {"fd00:ec2::254"}, {"169.254.1.1"}, {"192.0.2.1"}, {"198.51.100.1"}, {"203.0.113.1"}, {"198.18.0.1"}, {"240.1.1.1"}, {"ff02::1"}, {"2001:db8::1"}, {"64:ff9b::7f00:1"}, {"2002:7f00:1::"}, {"2001::ffff:80ff:fffe"}, {"fe80::1%eth0"}, {},
 	} {
 		t.Run(strings.Join(addresses, ","), func(t *testing.T) {
 			w.resolve = func(context.Context, string, string) ([]netip.Addr, error) {
@@ -167,8 +187,13 @@ func TestWebhookRejectsRebindingRedirectAndPrivateIPs(t *testing.T) {
 				}
 				return result, nil
 			}
-			if _, err := w.Send(t.Context(), fixtureTLSCallback, "evt", "sub", []byte(`{}`), []string{key}); err == nil {
-				t.Fatal("prohibited DNS answer accepted")
+			_, err := w.Send(t.Context(), fixtureTLSCallback, "evt", "sub", []byte(`{}`), []string{key})
+			if len(addresses) == 0 {
+				if safeWebhookError(err).Reason != "dns_error" {
+					t.Fatalf("empty answer: %v", err)
+				}
+			} else if safeWebhookError(err).Reason != "destination_not_allowed" {
+				t.Fatalf("policy refusal lost: %v", err)
 			}
 		})
 	}
@@ -406,18 +431,5 @@ func TestWebhookDialSharesTheDeadlineAcrossAddresses(t *testing.T) {
 	}
 	if budgets[1] < webhookTimeout/2+time.Second {
 		t.Errorf("the last address got only %v", budgets[1])
-	}
-}
-
-func TestWebhookDestinationPolicyRefusal(t *testing.T) {
-	w := NewWebhookClient(WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
-		return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
-	}})
-	err := w.Verify(t.Context(), fixtureTLSCallback, "sub", fixtureSecret(1, 32))
-	if got := safeWebhookError(err).Reason; got != "destination_not_allowed" {
-		t.Fatalf("private callback refusal=%s, want destination_not_allowed", got)
-	}
-	if endpointCategory(err) != "destination_not_allowed" || failureCategory(0, err) != "destination_not_allowed" {
-		t.Fatal("safe policy refusal was lost")
 	}
 }
