@@ -2417,8 +2417,10 @@ On current `main` (unreleased), automatic attempts after this refusal wait
 at least one minute or the configured sync interval, whichever is longer. The
 delay doubles after each refusal up to five minutes (or the sync interval if
 longer). Local activity does not bypass the delay, and other projects keep
-syncing. After the hub operator removes the links, the spoke retries when its
-delay is due; restarting the spoke daemon makes a fresh attempt immediately.
+syncing. Local edits remain available locally but wait until the next due
+attempt to reach the hub. After the hub operator removes the links, the spoke
+retries when its delay is due; restarting the spoke daemon makes a fresh attempt
+immediately.
 The last error remains visible until an attempted sync succeeds.
 
 ## Purge and reset
