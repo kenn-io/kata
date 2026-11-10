@@ -4,12 +4,16 @@ package wait
 import (
 	"bytes"
 	"encoding/json/jsontext"
+	"time"
 
 	"go.kenn.io/kata/internal/metadata"
 )
 
 // MaxConsecutiveFailures bounds transient retries for each issue.
 const MaxConsecutiveFailures = 3
+
+// DefaultPollInterval is the CLI's default cadence between retries.
+const DefaultPollInterval = 2 * time.Second
 
 // Evaluator retains the initial reply slot for one issue and recipient.
 type Evaluator struct {

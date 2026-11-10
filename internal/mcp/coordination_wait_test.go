@@ -500,6 +500,7 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 		{"attention", "until", "attention", "abc1", false}, {"out of scope", "until", "attention", "other-project#abc1", false}, {"retry limit", "until", "attention", "abc1", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var reads atomic.Int64
 			var failures atomic.Int64
 			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -525,6 +526,9 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 			})
 			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
 			args := map[string]any{"refs": []string{tc.ref, "def1"}, tc.field: tc.value, "any": true, "timeout_seconds": 2}
+			if tc.unavailable {
+				args["timeout_seconds"] = 6
+			}
 
 			out := callAdministrationTool(t, session, "kata.wait", args)
 			require.Equal(t, "matched", out["reason"])
@@ -626,6 +630,26 @@ func TestMCPCoordinationWaitStatusReturnsMissing(t *testing.T) {
 }
 
 func TestMCPCoordinationWaitUntilRetriesTransientFailures(t *testing.T) {
+	t.Run("daemon recovers after a short outage", func(t *testing.T) {
+		t.Parallel()
+		started := time.Now()
+		client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/projects" {
+				writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+				return
+			}
+			if time.Since(started) < 1200*time.Millisecond {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["metadata"] = map[string]any{"work.attention": "stuck"}
+			writeJSON(w, map[string]any{"issue": issue})
+		})
+		session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
+		out := callAdministrationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1"}, "until": "attention", "timeout_seconds": 5})
+		require.Equal(t, "matched", out["reason"])
+	})
 	for _, tc := range []struct {
 		name, until string
 		statuses    []int
@@ -634,6 +658,7 @@ func TestMCPCoordinationWaitUntilRetriesTransientFailures(t *testing.T) {
 		{"successful read resets failures", "attention", []int{503, 503, 200, 503, 503, 200}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var reads atomic.Int64
 			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/projects" {
@@ -658,7 +683,7 @@ func TestMCPCoordinationWaitUntilRetriesTransientFailures(t *testing.T) {
 				writeJSON(w, map[string]any{"issue": issue})
 			})
 			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
-			args := map[string]any{"refs": []string{"abc1"}, "until": tc.until, "timeout_seconds": 3}
+			args := map[string]any{"refs": []string{"abc1"}, "until": tc.until, "timeout_seconds": 12}
 			if tc.until == "reply" {
 				args["for"] = "worker"
 			}
@@ -683,6 +708,7 @@ func TestMCPCoordinationWaitUntilPersistentFailure(t *testing.T) {
 		{"missing any", 404, true, []string{"abc1", "def1"}, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var reads atomic.Int64
 			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/projects" {
@@ -693,7 +719,7 @@ func TestMCPCoordinationWaitUntilPersistentFailure(t *testing.T) {
 				http.Error(w, "unavailable", tc.status)
 			})
 			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
-			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: map[string]any{"refs": tc.refs, "until": "attention", "any": tc.any, "timeout_seconds": 2}})
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: map[string]any{"refs": tc.refs, "until": "attention", "any": tc.any, "timeout_seconds": 6}})
 			require.NoError(t, err)
 			require.True(t, result.IsError)
 			require.Contains(t, string(mustJSON(t, result.Content)), fmt.Sprint(tc.status))

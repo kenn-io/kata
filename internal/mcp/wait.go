@@ -191,7 +191,7 @@ func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, un
 				select {
 				case <-pollCtx.Done():
 					return
-				case <-time.After(250 * time.Millisecond):
+				case <-time.After(waitPollDelay(err)):
 				}
 			}
 		}(i, ref)
@@ -256,6 +256,13 @@ func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, un
 			}
 		}
 	}
+}
+
+func waitPollDelay(err error) time.Duration {
+	if err != nil {
+		return wait.DefaultPollInterval
+	}
+	return 250 * time.Millisecond
 }
 
 func permanentWaitError(err error) bool {

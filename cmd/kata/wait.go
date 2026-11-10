@@ -37,7 +37,7 @@ const kindTimeout errKind = "timeout"
 const (
 	// defaultWaitPollInterval keeps the human default gentle; tests pass tiny
 	// values via --poll-interval.
-	defaultWaitPollInterval = 2 * time.Second
+	defaultWaitPollInterval = wait.DefaultPollInterval
 	// attentionKey / attentionMsgKey are the flat (dotted) metadata keys the
 	// attention convention writes; opaque to the daemon.
 	attentionKey    = "work.attention"
