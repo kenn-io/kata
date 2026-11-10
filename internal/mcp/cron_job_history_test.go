@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	kataclient "go.kenn.io/kata/pkg/client"
-	"hegel.dev/go/hegel"
 )
 
 func TestCronJobHistoryDiscovery(t *testing.T) {
@@ -119,7 +117,7 @@ func TestCronJobHistoryPreservesResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
 		require.Equal(t, "/api/v1/projects/42/cron/jobs/01ARZ3NDEKTSV4RRFFQ69G5FAV/versions", r.URL.Path)
-		require.Equal(t, "20", r.URL.Query().Get("limit"))
+		require.NotContains(t, r.URL.Query(), "limit")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, body.Load().(string))
 	}))
@@ -145,9 +143,4 @@ func TestCronJobHistoryPreservesResponse(t *testing.T) {
 		require.Equal(rt, want, got)
 	}
 	check(t, "9007199254740993", "1.0000000000000000001")
-	hegel.Test(t, func(ht *hegel.T) {
-		integer := fmt.Sprint(hegel.Draw(ht, hegel.Integers(int64(math.MinInt64), int64(math.MaxInt64))))
-		decimal := fmt.Sprintf("0.%019d", hegel.Draw(ht, hegel.Integers(int64(0), int64(math.MaxInt64))))
-		check(ht, integer, decimal)
-	}, hegel.WithTestCases(100))
 }

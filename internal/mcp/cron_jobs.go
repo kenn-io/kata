@@ -40,11 +40,7 @@ func (h toolHandlers) cronJobHistory(ctx context.Context, _ *sdkmcp.CallToolRequ
 	if err != nil {
 		return nil, out, err
 	}
-	limit := int64(defaultResultLimit)
-	if in.Limit != nil {
-		limit = *in.Limit
-	}
-	if limit < 1 || limit > maximumResultLimit {
+	if in.Limit != nil && *in.Limit == 0 {
 		return nil, out, errors.New("limit must be from 1 through 100")
 	}
 	if in.BeforeEventUID != "" {
@@ -59,7 +55,7 @@ func (h toolHandlers) cronJobHistory(ctx context.Context, _ *sdkmcp.CallToolRequ
 	}
 	response, err := h.options.Client.ListCronJobVersions(ctx, &generated.ListCronJobVersionsRequestOptions{
 		PathParams: &generated.ListCronJobVersionsPath{ProjectID: p.ID, CronUID: id},
-		Query:      &generated.ListCronJobVersionsQuery{Limit: &limit, BeforeEventUID: optionalString(in.BeforeEventUID)},
+		Query:      &generated.ListCronJobVersionsQuery{Limit: in.Limit, BeforeEventUID: optionalString(in.BeforeEventUID)},
 	})
 	if err != nil {
 		return nil, out, err
