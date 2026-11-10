@@ -199,15 +199,15 @@ func checkMoveBatchSelectedRevisions(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 	require.NoError(t, err)
-	in := db.MoveIssuesBatchIn{Comment: "routed", Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Single: true, Actor: "worker"}, {IssueID: child.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: child.Revision, Single: true, Actor: "worker"}}}
+	in := db.MoveIssuesBatchIn{Comment: "routed", Items: []db.MoveIssueProjectIn{{IssueID: child.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: child.Revision, Single: true, Actor: "worker"}, {IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Single: true, Actor: "worker"}}}
 	owner := "new-owner"
 	changed, _, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: child.ID, Owner: &owner, Actor: "worker"})
 	require.NoError(t, err)
 	require.Greater(t, changed.Revision, child.Revision)
 	out, err := store.MoveIssuesBatch(ctx, in)
 	require.NoError(t, err)
-	require.NoError(t, out.Results[0].Err)
-	require.ErrorAs(t, out.Results[1].Err, new(*db.RevisionConflictError))
+	require.ErrorAs(t, out.Results[0].Err, new(*db.RevisionConflictError))
+	require.NoError(t, out.Results[1].Err)
 	for i, issue := range []db.Issue{root, child} {
 		got, err := store.IssueByID(ctx, issue.ID)
 		require.NoError(t, err)

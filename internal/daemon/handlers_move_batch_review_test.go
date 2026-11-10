@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -34,13 +35,13 @@ func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {
 			}
 			req := &api.MoveIssuesRequest{}
 			req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed", target.UID
-			req.Body.Items = []api.MoveIssuesItem{{Ref: root.UID}, {Ref: child.UID, ExpectedRevision: child.Revision}}
+			req.Body.Items = []api.MoveIssuesItem{{Ref: child.UID, ExpectedRevision: child.Revision}, {Ref: root.UID}}
 			out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
 			require.NoError(t, err)
 			require.Len(t, out.Body.Results, 2)
-			require.Equal(t, "moved", out.Body.Results[0].Result)
-			require.Equal(t, "refused", out.Body.Results[1].Result)
-			require.Equal(t, "revision_conflict", out.Body.Results[1].Code)
+			require.Equal(t, "refused", out.Body.Results[0].Result)
+			require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
+			require.Equal(t, "moved", out.Body.Results[1].Result)
 			for i, issue := range []db.Issue{root, child} {
 				got, err := store.IssueByID(t.Context(), issue.ID)
 				require.NoError(t, err)
@@ -165,4 +166,37 @@ func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
 	last := out.Body.Results[len(out.Body.Results)-1]
 	require.Equal(t, "unchanged", last.Result)
 	require.Equal(t, "duplicate_item", last.Code)
+	t.Run("continuation", func(t *testing.T) {
+		store := openClaimGateHelperDB(t)
+		_, issue := createClaimGateHelperIssue(t, store)
+		target, err := store.CreateProject(t.Context(), "routing-target")
+		require.NoError(t, err)
+		req := &api.MoveIssuesRequest{}
+		req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed", target.UID
+		req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}, {Ref: issue.UID, ExpectedRevision: issue.Revision}}
+		//nolint:kennlint // deadlinetest: Force a yield after the first database chunk, as in TestMoveIssuesBatch_BudgetResume.
+		handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
+		first, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.Equal(t, 1, first.Body.NextIndex)
+		require.Equal(t, "moved", first.Body.Results[0].Result)
+		req.Body.StartIndex = first.Body.NextIndex
+		second, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.Len(t, second.Body.Results, 1)
+		require.Equal(t, "unchanged", second.Body.Results[0].Result)
+		got, err := store.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, target.ID, got.ProjectID)
+		comments, err := store.CommentsByIssue(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		owner := "changed"
+		_, _, _, err = store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "agent"})
+		require.NoError(t, err)
+		stale, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.Equal(t, "refused", stale.Body.Results[0].Result)
+		require.Equal(t, "revision_conflict", stale.Body.Results[0].Code)
+	})
 }

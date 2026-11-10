@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -137,37 +136,4 @@ func TestMoveBatchContinuationPreservesAliasConflicts(t *testing.T) {
 			require.Empty(t, comments)
 		}
 	}
-}
-
-func TestMoveBatchContinuationRecognizesCompletedDuplicate(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	_, issue := createClaimGateHelperIssue(t, store)
-	target, err := store.CreateProject(t.Context(), "routing-target")
-	require.NoError(t, err)
-	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}, {Ref: issue.UID, ExpectedRevision: issue.Revision}}
-	//nolint:kennlint // deadlinetest: Force a yield after the first database chunk, as in TestMoveIssuesBatch_BudgetResume.
-	handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
-	first, err := handler(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, 1, first.Body.NextIndex)
-	require.Equal(t, "moved", first.Body.Results[0].Result)
-	req.Body.StartIndex = first.Body.NextIndex
-	second, err := handler(t.Context(), req)
-	require.NoError(t, err)
-	require.Len(t, second.Body.Results, 1)
-	require.Equal(t, "unchanged", second.Body.Results[0].Result)
-	got, err := store.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, target.ID, got.ProjectID)
-	comments, err := store.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	owner := "changed"
-	_, _, _, err = store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "agent"})
-	require.NoError(t, err)
-	stale, err := handler(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, "revision_conflict", stale.Body.Results[0].Code)
 }
