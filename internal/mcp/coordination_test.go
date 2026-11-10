@@ -19,15 +19,15 @@ import (
 
 func TestNewSectionLoadersRegisterOnlyTheirTools(t *testing.T) {
 	for _, test := range []struct {
-		loader, section string
-		tools           []string
-		events          bool
+		name, loader, section string
+		tools                 []string
+		events                bool
 	}{
-		{"kata.load_coordination", "coordination", []string{"kata.assign", "kata.inbox", "kata.notify", "kata.status", "kata.unassign"}, false},
-		{"kata.load_coordination", "coordination-events", []string{"kata.assign", "kata.event_subscriptions", "kata.inbox", "kata.notify", "kata.status", "kata.unassign"}, true},
-		{"kata.load_docs", "docs", []string{"kata.read_doc", "kata.search_docs"}, false},
+		{"coordination", "kata.load_coordination", "coordination", []string{"kata.assign", "kata.inbox", "kata.notify", "kata.status", "kata.unassign"}, false},
+		{"coordination-events", "kata.load_coordination", "coordination", []string{"kata.assign", "kata.event_subscriptions", "kata.inbox", "kata.notify", "kata.status", "kata.unassign"}, true},
+		{"docs", "kata.load_docs", "docs", []string{"kata.read_doc", "kata.search_docs"}, false},
 	} {
-		t.Run(test.section, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			session := connectRawTestServerWithOptions(t, Options{
 				Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 				Actor: "example-agent", Version: "test-version", Events: test.events,
@@ -37,11 +37,7 @@ func TestNewSectionLoadersRegisterOnlyTheirTools(t *testing.T) {
 			require.False(t, result.IsError)
 			var output ToolSectionOutput
 			require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &output))
-			section := test.section
-			if test.events {
-				section = "coordination"
-			}
-			require.Equal(t, ToolSectionOutput{Section: section, Available: true, Loaded: true, Tools: test.tools}, output)
+			require.Equal(t, ToolSectionOutput{Section: test.section, Available: true, Loaded: true, Tools: test.tools}, output)
 
 			listed, err := session.ListTools(t.Context(), nil)
 			require.NoError(t, err)

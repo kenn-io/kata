@@ -15,7 +15,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestProjectNotificationActorForBindingModes(t *testing.T) {
+func TestProjectNotificationActorEndpointBindingModes(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		binding    bool
@@ -71,40 +71,48 @@ func TestProjectNotificationActorForBindingModes(t *testing.T) {
 	}
 }
 
-func TestProjectNotificationActorAuthenticatedIdentityOverridesFallback(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	project, err := env.DB.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
-		PlaintextToken: "actor-token", Actor: "authenticated-actor", AdminActor: db.BootstrapActor,
-	})
-	require.NoError(t, err)
-
-	resp, raw := envDoRaw(t, env, http.MethodGet,
-		projectPath(project.ID)+"/notifications/actor?requested_actor=untrusted-fallback", nil,
-		map[string]string{"Authorization": "Bearer actor-token"})
-	require.Equalf(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
-	var body struct {
-		EffectiveActor string `json:"effective_actor"`
+func TestProjectNotificationActorIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, token, query, want string
+		identity                 bool
+		status                   int
+	}{
+		{"authenticated", "actor-token", "?requested_actor=untrusted-fallback", "authenticated-actor", true, http.StatusOK},
+		{"static token", "static-token", "?requested_actor=untrusted-fallback", "untrusted-fallback", false, http.StatusOK},
+		{"missing fallback", "", "", "actor is required", false, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var env *testenv.Env
+			if tc.identity {
+				env = testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+			} else if tc.token != "" {
+				env = testenv.New(t, testenv.WithAuthToken(tc.token))
+			} else {
+				env = testenv.New(t)
+			}
+			project, err := env.DB.CreateProject(t.Context(), "example-project")
+			require.NoError(t, err)
+			if tc.identity {
+				_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: tc.token, Actor: "authenticated-actor", AdminActor: db.BootstrapActor})
+				require.NoError(t, err)
+			}
+			var headers map[string]string
+			if tc.token != "" {
+				headers = map[string]string{"Authorization": "Bearer " + tc.token}
+			}
+			resp, raw := envDoRaw(t, env, http.MethodGet, projectPath(project.ID)+"/notifications/actor"+tc.query, nil, headers)
+			require.Equalf(t, tc.status, resp.StatusCode, "response: %s", raw)
+			if tc.status != http.StatusOK {
+				assert.Contains(t, string(raw), tc.want)
+				return
+			}
+			var body struct {
+				EffectiveActor string `json:"effective_actor"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &body))
+			assert.Equal(t, tc.want, body.EffectiveActor)
+		})
 	}
-	require.NoError(t, json.Unmarshal(raw, &body))
-	assert.Equal(t, "authenticated-actor", body.EffectiveActor)
-}
-
-func TestProjectNotificationActorUsesFallbackForStaticToken(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("static-token"))
-	project, err := env.DB.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-
-	resp, raw := envDoRaw(t, env, http.MethodGet,
-		projectPath(project.ID)+"/notifications/actor?requested_actor=untrusted-fallback", nil,
-		map[string]string{"Authorization": "Bearer static-token"})
-	require.Equalf(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
-	var body struct {
-		EffectiveActor string `json:"effective_actor"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &body))
-	assert.Equal(t, "untrusted-fallback", body.EffectiveActor)
 }
 
 func TestProjectNotificationActorHidesProjectsOutsideTokenScope(t *testing.T) {
@@ -133,15 +141,4 @@ func TestProjectNotificationActorHidesProjectsOutsideTokenScope(t *testing.T) {
 		projectPath(hidden.ID)+"/notifications/actor?requested_actor=worker", nil,
 		map[string]string{"Authorization": "Bearer scoped-token"})
 	require.Equalf(t, http.StatusNotFound, resp.StatusCode, "response: %s", raw)
-}
-
-func TestProjectNotificationActorRequiresUnauthenticatedFallback(t *testing.T) {
-	env := testenv.New(t)
-	project, err := env.DB.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-
-	resp, raw := envDoRaw(t, env, http.MethodGet,
-		projectPath(project.ID)+"/notifications/actor", nil, nil)
-	require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "response: %s", raw)
-	assert.Contains(t, string(raw), "actor is required")
 }

@@ -581,6 +581,7 @@ In multi-project scope, use `project#ref` for existing-issue calls and pass
 ## Attention requests and waits
 
 Load `kata.load_coordination` to send or clear requests with `kata.notify`.
+Sending requests requires a daemon with the typed notifications route.
 Send `{ref, to, message}` to one exact `actor` or `actor/teammate` inbox.
 Messages must be nonblank and at most 1024 UTF-8 bytes. Optional `re` links a
 comment handle or UID that needs an answer. The daemon resolves that reference
@@ -821,7 +822,7 @@ capability described in [Native inbox events](#native-inbox-events). It does
 not advertise prompts, resources, roots,
 logging, sampling, subscriptions, or server-to-client requests. Discovery uses
 a five-minute private cache hint. Tool execution allows 20 starts per second,
-a burst of 20, and at most eight concurrent daemon calls per server process.
+a burst of 20, and at most eight concurrent tool calls per server process.
 
 Host process control stays outside MCP: daemon lifecycle, the TUI and Web UI,
 install/update, database migrations and cutovers, and raw internal replication

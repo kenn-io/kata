@@ -49,19 +49,7 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	targets := make([]waitTarget, len(input.Refs))
 	finishError := func(err error) (*sdkmcp.CallToolResult, WaitOutput, error) {
 		if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-			states := lastStates
-			if until != "" {
-				// Until joins retain every authorized observation, including a
-				// completion followed by a stalled member in this round. Status
-				// waits keep their existing last-complete-snapshot contract.
-				states = make([]WaitState, 0, len(targets))
-				for _, target := range targets {
-					if target.state.Ref != "" {
-						states = append(states, target.state)
-					}
-				}
-			}
-			return successResult(), WaitOutput{Reason: "timeout", States: states}, nil
+			return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
 		}
 		return nil, WaitOutput{}, err
 	}
@@ -88,7 +76,7 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		results := make(chan result, len(targets))
 		var pending sync.WaitGroup
 		for i, raw := range input.Refs {
-			if targets[i].missing != nil || until != "" && targets[i].state.Matched {
+			if targets[i].missing != nil {
 				continue
 			}
 			pending.Add(1)
@@ -100,7 +88,6 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		}
 		go func() { pending.Wait(); close(results) }()
 		var firstErr error
-		matchedAny := false
 		for res := range results {
 			if res.err != nil {
 				if input.Any && permanentWaitError(res.err) {
@@ -114,10 +101,6 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				continue
 			}
 			targets[res.index] = res.target
-			if input.Any && until != "" && res.target.state.Matched {
-				matchedAny = true
-				stopRound()
-			}
 		}
 		stopRound()
 		states := make([]WaitState, 0, len(targets))
@@ -141,7 +124,7 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		if ctx.Err() != nil {
 			return nil, WaitOutput{}, ctx.Err()
 		}
-		if matchedAny || firstErr == nil && (input.Any && matches > 0 || matches == len(targets)) || input.Any && matches > 0 && errors.Is(waitContext.Err(), context.DeadlineExceeded) {
+		if firstErr == nil && (input.Any && matches > 0 || matches == len(targets)) || input.Any && matches > 0 && errors.Is(waitContext.Err(), context.DeadlineExceeded) {
 			return successResult(), WaitOutput{Reason: "matched", States: states}, nil
 		}
 		if firstErr != nil {
@@ -178,13 +161,15 @@ func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, un
 			for {
 				var err error
 				target, err = h.pollWaitTarget(pollCtx, ref, target, until, "", recipient)
-				select {
-				case results <- result{i, target, err}:
-				case <-pollCtx.Done():
-					return
-				}
-				if err != nil || target.state.Matched {
-					return
+				if err == nil || !input.Any || permanentWaitError(err) {
+					select {
+					case results <- result{i, target, err}:
+					case <-pollCtx.Done():
+						return
+					}
+					if err != nil || target.state.Matched {
+						return
+					}
 				}
 				select {
 				case <-pollCtx.Done():
@@ -269,9 +254,6 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 		Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
 	})
 	if err != nil {
-		if kataclient.StatusCode(err) == http.StatusNotFound {
-			target.missing = err
-		}
 		return target, err
 	}
 	project, err = h.currentIssueProject(ctx, project, issueFromShow(shown.Issue))
@@ -303,7 +285,7 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 					Query:      &generated.GetProjectNotificationActorQuery{RequestedActor: &requestedActor},
 				})
 				if err != nil {
-					if notificationActorLookupUnsupported(err) {
+					if notificationRouteUnsupported(err) {
 						return target, errors.New("daemon does not support project notification actor lookup; use an explicit for recipient with until=reply")
 					}
 					return target, err
@@ -329,7 +311,7 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 	return target, nil
 }
 
-func notificationActorLookupUnsupported(err error) bool {
+func notificationRouteUnsupported(err error) bool {
 	if kataclient.StatusCode(err) != http.StatusNotFound {
 		return false
 	}

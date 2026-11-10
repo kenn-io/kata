@@ -68,6 +68,9 @@ func (h toolHandlers) notify(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		},
 	})
 	if err != nil {
+		if notificationRouteUnsupported(err) {
+			return nil, NotifyOutput{}, errors.New("daemon does not support notifications; update the daemon to use kata.notify")
+		}
 		return nil, NotifyOutput{}, err
 	}
 	result, mutation, err := h.mutationResult(ctx, project, response.Issue, response.Changed, nil, response.Event)

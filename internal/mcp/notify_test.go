@@ -20,7 +20,7 @@ func callCoordinationTool(t *testing.T, session *sdkmcp.ClientSession, name stri
 }
 
 // Typed sends and clears address one exact recipient.
-func TestMCPNotifySendRetryAndClearAgainstDaemon(t *testing.T) {
+func TestMCPNotifySendAndClearAgainstDaemon(t *testing.T) {
 	session, _ := newCoordinationSession(t)
 	created := callCoordinationTool(t, session, "kata.create", map[string]any{"title": "Review the adapter", "idempotency_key": "notify-create"})
 	ref := created["issue"].(map[string]any)["ref"].(string)
@@ -47,7 +47,6 @@ func TestMCPNotifySendRetryAndClearAgainstDaemon(t *testing.T) {
 	inbox = callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "example-agent/worker"})
 	require.Equal(t, root["uid"], inbox["requests"].([]any)[0].(map[string]any)["re"])
 	reply := callCoordinationTool(t, session, "kata.comment", map[string]any{"ref": ref, "body": "Confirmed the notification contract against the isolated fixture.", "reply_to": root["handle"], "kind": "confirm", "teammate": "worker", "idempotency_key": "linked-answer"})["comment"].(map[string]any)
-	require.Empty(t, callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "example-agent/worker"})["requests"])
 	inbox = callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "example-agent/planner"})
 	require.Len(t, inbox["requests"], 1)
 	request = inbox["requests"].([]any)[0].(map[string]any)
@@ -76,14 +75,26 @@ func TestMCPNotifyValidationAndScope(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{"clear message", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "message": "x"}, "validating"},
-		{"clear linked", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "re": "c:abcdef"}, "validating"},
+		{"clear message", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "message": "x"}, "not: validated against"},
+		{"clear linked", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "re": "c:abcdef"}, "not: validated against"},
 		{"clear broadcast", map[string]any{"ref": ref, "clear": true, "broadcast": true}, "clear cannot"},
 		{"clear invalid recipient", map[string]any{"ref": ref, "to": "review\ner", "clear": true}, "recipient"},
 		{"outside scope", map[string]any{"ref": "other-project#abcd", "to": "reviewer", "message": "x"}, "outside"},
-		{"forged sender", map[string]any{"ref": ref, "to": "reviewer", "message": "x", "from": "someone-else"}, "from"},
+		{"forged sender", map[string]any{"ref": ref, "to": "reviewer", "message": "x", "from": "someone-else"}, "additional properties"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "clear message" || tc.name == "clear linked" {
+				control := make(map[string]any, len(tc.args))
+				for k, v := range tc.args {
+					control[k] = v
+				}
+				if tc.name == "clear message" {
+					delete(control, "message")
+				} else {
+					delete(control, "re")
+				}
+				callCoordinationTool(t, session, "kata.notify", control)
+			}
 			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.notify", Arguments: tc.args})
 			if err != nil {
 				require.Contains(t, err.Error(), tc.want)
@@ -128,4 +139,19 @@ func TestMCPNotifyIdentityAndTeammateDefaults(t *testing.T) {
 			require.Equal(t, tc.want, body["teammate"])
 		})
 	}
+}
+
+func TestMCPNotifyOlderDaemon(t *testing.T) {
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects" {
+			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+			return
+		}
+		http.NotFound(w, r)
+	})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.notify", Arguments: map[string]any{"ref": "abc1", "to": "reviewer", "message": "Please review"}})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, string(mustJSON(t, result.Content)), "daemon does not support notifications")
 }

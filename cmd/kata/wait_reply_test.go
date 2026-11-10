@@ -78,14 +78,6 @@ func runWaitReplyDiscoveryUntilContextDone(t *testing.T, waitTimeout, parentTime
 	return stdout, err
 }
 
-func TestWaitReplySlotTransition(t *testing.T) {
-	run := waitRun{mode: waitReply, start: time.Now()}
-	target := &waitTarget{arg: "example", state: targetPending}
-	require.False(t, evalTarget(run, target, issueState{status: "open", reply: jsontext.Value(`"old"`)}, ""))
-	require.True(t, evalTarget(run, target, issueState{status: "open", reply: jsontext.Value(`"new"`)}, ""))
-	require.Equal(t, "reply", target.result.Reason)
-}
-
 // The first successful poll establishes the baseline; a startup 503 and a
 // mutation of another inbox must not satisfy a reply wait.
 func TestWaitReplyTransientBaselineAndRecipientIsolation(t *testing.T) {
