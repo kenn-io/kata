@@ -27,6 +27,8 @@ const (
 	apiVersionReadyAndSearchFilters     = "0.8.0"
 	apiVersionReadyPrioritySort         = "0.41.0"
 	apiVersionGlobalListFilters         = "0.9.0"
+	// Inbox watch requires compact issue rows and complete cursor pagination.
+	apiVersionInboxWatch = "0.43.0"
 	// apiVersionMCPServer is the oldest daemon the native MCP server can
 	// drive: it pins relationship targets with to_project_uid and
 	// expected_project_uids and pages audit rows by event_id.

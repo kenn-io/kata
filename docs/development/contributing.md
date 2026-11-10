@@ -68,6 +68,11 @@ make nilaway
 
 Pull requests select checks based on the changed files. See the filters and job conditions in [test.yml](https://github.com/kenn-io/kata/blob/main/.github/workflows/test.yml) for the selection rules. Pushes to `main` run every check.
 
+Inbox watcher properties use Hegel on hosts with a bundled native engine and
+the existing Rapid runner elsewhere, including Intel macOS. Both runners use
+the same property checks. `go test -tags=inboxportable ./cmd/kata -run TestInboxWatch`
+exercises the portable runner on a supported Hegel host without an engine build.
+
 ### Native agent plugins
 
 The `native-agent-plugins` job in

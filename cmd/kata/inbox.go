@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -47,6 +48,8 @@ func newInboxCmd() *cobra.Command {
 	var recipient string
 	var contextOutput bool
 	var allProjects bool
+	var watch bool
+	var interval time.Duration
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "list attention requests for an address (actor or actor/teammate)",
@@ -56,6 +59,9 @@ func newInboxCmd() *cobra.Command {
 and prints qualified refs. --context emits bounded context for a harness.
 --context conflicts with --agent, --json, or --format; omit output selectors.
 Reading does not clear a request; clear it with kata notify --clear.
+
+JSON output can be stale; check current attention before acting.
+Watch cannot be combined with --context.
 
 A row with re=<comment> asks you to answer that comment; answering it with
 comment --reply, --confirm, --refute, or --supersede clears it. A row with
@@ -68,6 +74,12 @@ broadcast=true marks a notify --broadcast.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if allProjects && (cmd.Root().PersistentFlags().Changed("project") || cmd.Root().PersistentFlags().Changed("workspace")) {
 				return &cliError{Message: "--all conflicts with --project and --workspace", Kind: kindUsage, ExitCode: ExitUsage}
+			}
+			if (!watch && cmd.Flags().Changed("interval")) || (watch && interval < time.Second) {
+				return &cliError{Message: "--interval requires --watch and must be at least 1s", Kind: kindUsage, ExitCode: ExitUsage}
+			}
+			if watch && contextOutput {
+				return &cliError{Message: "--watch conflicts with --context", Kind: kindUsage, ExitCode: ExitUsage}
 			}
 			if contextOutput && (flags.Sel.json || flags.Sel.agent || len(flags.Sel.formats) > 0) {
 				return &cliError{Message: "--context conflicts with explicit output format selectors", Kind: kindUsage, ExitCode: ExitUsage}
@@ -83,6 +95,9 @@ broadcast=true marks a notify --broadcast.`,
 				}
 				return recipientErr
 			}
+			if watch {
+				return runInboxWatch(cmd.Context(), cmd, forUser, allProjects, interval)
+			}
 			requests, err := loadInbox(cmd, forUser, allProjects)
 			if err != nil {
 				return err
@@ -97,6 +112,8 @@ broadcast=true marks a notify --broadcast.`,
 	cmd.Flags().StringVar(&recipient, "for", "", "teammate whose attention requests to list (or KATA_INBOX_USER)")
 	cmd.Flags().BoolVar(&contextOutput, "context", false, "emit bounded context for an agent harness")
 	cmd.Flags().BoolVar(&allProjects, "all", false, "read the exact recipient's requests across all active projects on this daemon")
+	cmd.Flags().BoolVar(&watch, "watch", false, "emit initial and changed attention requests until canceled")
+	cmd.Flags().DurationVar(&interval, "interval", 5*time.Second, "delay between inbox scans with --watch (minimum 1s)")
 	return cmd
 }
 

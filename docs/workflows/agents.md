@@ -511,6 +511,17 @@ allocated even while the teammates are idle. On a pending request it:
 - discards a failed inbox fetch rather than treating stale context as a new
   wakeup signal.
 
+Use `kata inbox --for coordinator/teammate-1 --watch --json` for a stream of
+new or changed attention hints. Select the authorized hub with `--daemon`
+when the harness reads there directly. This uses outbound polling and emits
+the initial backlog; it does not install a runtime dispatcher. Run one
+dispatcher for each address and coalesce by `project_uid` and `issue_uid`
+before resuming a worker. Re-read current attention before acting on a queued
+hint: removals emit nothing, and restarting the watcher replays pending work.
+Keep oversized hints visible to the coordinator. See the
+[watch contract](../reference/cli.md#watch-an-exact-inbox) for transport,
+scope, failure and coalescing limits.
+
 The teammate reads current issue state and applies its normal authorization
 and task instructions before acting. Reading or scheduling does not clear the
 request. Clear after it has been handled, then read back. Repeated requests for
