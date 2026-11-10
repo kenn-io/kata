@@ -210,6 +210,9 @@ func authorizeIssueMoveProjects(ctx context.Context, tx *sql.Tx, in MoveIssuePro
 		err = ApplyTransactionFence(ctx, tx)
 	}
 	if err != nil {
+		if in.Savepoint {
+			return err
+		}
 		return FinishTransactionRollback(ctx, err, tx.Rollback())
 	}
 	return nil

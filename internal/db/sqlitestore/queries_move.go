@@ -40,6 +40,21 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		return out, err
 	}
 
+	out, err = d.moveTreeTx(ctx, tx, in)
+	if err != nil {
+		return out, err
+	}
+	if in.DryRun {
+		return out, tx.Rollback()
+	}
+	if err := tx.Commit(); err != nil {
+		return db.MoveIssueProjectOut{}, err
+	}
+	return out, nil
+}
+
+func (d *Store) moveTreeTx(ctx context.Context, tx *sql.Tx, in db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
+	var out db.MoveIssueProjectOut
 	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
 		return out, err
 	}
@@ -58,12 +73,6 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		}
 		out.Issues = append(out.Issues, result.Issue)
 		out.Events = append(out.Events, result.Events...)
-	}
-	if in.DryRun {
-		return out, tx.Rollback()
-	}
-	if err := tx.Commit(); err != nil {
-		return db.MoveIssueProjectOut{}, err
 	}
 	return out, nil
 }
@@ -174,8 +183,10 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 	}
 	// A moved issue changes who can see it, so in-flight requests recheck
 	// what they exposed exactly as they do after a policy change.
-	if err := bumpProjectAccess(ctx, tx); err != nil {
-		return out, fmt.Errorf("advance project access revision: %w", err)
+	if !in.Savepoint {
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return out, fmt.Errorf("advance project access revision: %w", err)
+		}
 	}
 	if err := rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, toProjectUID); err != nil {
 		return out, fmt.Errorf("rehome embedding artifacts: %w", err)
