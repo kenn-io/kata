@@ -403,7 +403,8 @@ loading.
 
 Load `kata.load_cron` for job and workflow lifecycle tools, live capability
 discovery, runtime inventory and warnings, and attributed run evidence. This
-interface uses cron job definitions; the separate `kata.load_recurrence` tools manage RRULE issue templates.
+interface uses cron job definitions; the separate `kata.load_recurrence` tools
+manage RRULE issue templates.
 
 | Purpose | Tools |
 | --- | --- |
