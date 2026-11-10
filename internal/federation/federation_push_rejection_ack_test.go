@@ -64,3 +64,9 @@ func TestFederationPushRejectsUnsubmittedRejectionAcknowledgments(t *testing.T) 
 		})
 	}
 }
+
+func TestFederationPushReportsUnknownRejectionReason(t *testing.T) {
+	message := federationEventRejectionMessage([]db.FederationEventRejection{{Code: "future_reason", Message: "future detail"}}, 0)
+	require.Contains(t, message, "future_reason")
+	require.NotContains(t, message, "need enrollment")
+}

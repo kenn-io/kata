@@ -11,7 +11,7 @@ import (
 )
 
 func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"mixed", "all-rejected", "payload-only", "moved-peer", "rejected-create", "dependent-on-rejected-create", "rejected-move", "malformed-comment"} {
+	for _, kind := range []string{"mixed", "all-rejected", "payload-only", "moved-peer", "rejected-create", "dependent-on-rejected-create", "rejected-move", "malformed-comment", "known-create", "known-snapshot"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			source, target, moved, _ := federatedRehomeFixture(t, store, "partial-"+kind)
@@ -31,6 +31,13 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				// Malformed actor attribution is atomic poison even when the same
 				// event also lacks authority for its issue's current project.
 				bad = newRemoteEvent(t, source, &moved.UID, "issue.commented", "worker", origin, at, []byte(`{"comment_uid":"`+commentUID+`","author":"worker","body":"Malformed","teammate":23}`))
+			}
+			if kind == "known-create" || kind == "known-snapshot" {
+				eventType := "issue.created"
+				if kind == "known-snapshot" {
+					eventType = "issue.snapshot"
+				}
+				bad = newRemoteEvent(t, source, &moved.UID, eventType, "worker", origin, at, []byte(`{"uid":"`+moved.UID+`","title":"Duplicate","author":"worker","status":"open"}`))
 			}
 			if kind == "payload-only" {
 				bad.IssueUID = nil
@@ -77,7 +84,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				params.MoveSourceEnrollmentIDs = nil
 			}
 			result, err := store.IngestFederationEvents(ctx, params)
-			if kind == "dependent-on-rejected-create" || kind == "malformed-comment" {
+			if kind == "dependent-on-rejected-create" || kind == "malformed-comment" || kind == "known-create" || kind == "known-snapshot" {
 				require.ErrorIs(t, err, db.ErrFederationIngestValidation, "independent payload validation remains atomic despite missing enrollment")
 				after, err := store.MaxEventID(ctx)
 				require.NoError(t, err)

@@ -67,6 +67,10 @@ var ErrFederationAdoptionBaselineTooLarge = errors.New("federation adoption snap
 
 var errFederationRunnerLeaseInvalid = errors.New("federation runner lease invalid")
 
+type federationPartialPushError struct{ message string }
+
+func (e *federationPartialPushError) Error() string { return e.message }
+
 // SyncFederationOnce pulls one spoke binding from its configured hub.
 func SyncFederationOnce(
 	ctx context.Context,
@@ -245,6 +249,7 @@ func pushDirectSpoke(
 	validateLease func(context.Context) error,
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
+	acceptedEchoes ...map[string]bool,
 ) error {
 	if binding.PushEnabled {
 		scanCursor := binding.PushCursorEventID
@@ -314,6 +319,17 @@ func pushDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
+				if len(acceptedEchoes) > 0 {
+					rejectedUIDs := make(map[string]bool, len(rejected))
+					for _, event := range rejected {
+						rejectedUIDs[event.UID] = true
+					}
+					for _, event := range batch {
+						if event.ID <= ack.PushCursorEventID && !rejectedUIDs[event.UID] {
+							acceptedEchoes[0][event.UID] = true
+						}
+					}
+				}
 				for _, event := range rejected {
 					if firstRejected == 0 || event.ID < firstRejected {
 						firstRejected = event.ID
@@ -342,8 +358,8 @@ func pushDirectSpoke(
 			}
 		}
 		if len(rejections) > 0 {
-			// Retain the diagnostic without aborting the subsequent pull.
-			return store.RecordFederationSyncError(ctx, binding.ProjectID, errors.New(federationEventRejectionMessage(rejections, acknowledged)), time.Now().UTC())
+			err := &federationPartialPushError{message: "pending federation events remain: " + federationEventRejectionMessage(rejections, acknowledged)}
+			return errors.Join(err, store.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
 		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
@@ -384,7 +400,21 @@ func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIn
 func federationEventRejectionMessage(rejected []db.FederationEventRejection, acknowledged int) string {
 	messages := make([]string, 0, 5)
 	seen := map[[2]string]bool{}
+	unknown := false
 	for _, rejection := range rejected {
+		if rejection.Code != db.FederationProjectNotEnrolledCode {
+			unknown = true
+			break
+		}
+	}
+	for _, rejection := range rejected {
+		if rejection.Code != db.FederationProjectNotEnrolledCode {
+			messages = append(messages, fmt.Sprintf("unknown rejection reason %.256s: %.1024s", rejection.Code, rejection.Message))
+			if len(messages) == 5 {
+				break
+			}
+			continue
+		}
 		key := [2]string{rejection.IssueUID, rejection.CurrentProjectUID}
 		if seen[key] {
 			continue
@@ -394,6 +424,9 @@ func federationEventRejectionMessage(rejected []db.FederationEventRejection, ack
 		if len(messages) == 5 {
 			break
 		}
+	}
+	if unknown {
+		return fmt.Sprintf("%d events rejected, including unknown reasons (showing up to five): %s; hub acknowledged %d other events", len(rejected), strings.Join(messages, "; "), acknowledged)
 	}
 	return fmt.Sprintf("%d events need enrollment (showing up to five issues): %s; hub acknowledged %d other events; pending push includes accepted later events as replays until recovery", len(rejected), strings.Join(messages, "; "), acknowledged)
 }
@@ -447,13 +480,24 @@ func syncDirectSpoke(
 	validateLease func(context.Context) error,
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
-) error {
+) (resultErr error) {
 	runStartBinding := binding
+	acceptedEchoes := map[string]bool{}
+	var pushErr error
 	if pushThisTurn {
-		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
-			return err
+		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts, acceptedEchoes); err != nil {
+			if _, ok := errors.AsType[*federationPartialPushError](err); !ok {
+				return err
+			}
+			pushErr = err
 		}
 	}
+	defer func() {
+		if pushErr != nil {
+			resultErr = errors.Join(pushErr, resultErr)
+			resultErr = errors.Join(resultErr, store.RecordFederationSyncError(ctx, binding.ProjectID, resultErr, time.Now().UTC()))
+		}
+	}()
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
 		return err
@@ -600,11 +644,11 @@ func syncDirectSpoke(
 			var invalidate bool
 			if duplicate[i] && shouldDeliverPage {
 				var err error
-				if ev.OriginInstanceUID == localInstanceUID {
+				if ev.OriginInstanceUID == localInstanceUID && !acceptedEchoes[ev.EventUID] {
 					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, runStartBinding, ev)
-				} else if insertedThisPull[ev.EventUID] {
+				} else if ev.OriginInstanceUID != localInstanceUID && insertedThisPull[ev.EventUID] {
 					deliver[i] = true
-				} else {
+				} else if ev.OriginInstanceUID != localInstanceUID {
 					deliver[i], invalidate, err = recovery.recover(ctx, ev)
 				}
 				if err != nil {
@@ -1327,7 +1371,6 @@ func (r *Runner) runSpoke(
 			r.OnPulledEventsFrom(projectID, events, fork)
 		}
 	}
-	syncStartedAt := time.Now().UTC()
 	remaining, syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, binding.PushEnabled, opts, onPulledEvents, validateLease, credentialStore)
 	if r.OnSyncComplete != nil {
 		r.OnSyncComplete()
@@ -1341,17 +1384,6 @@ func (r *Runner) runSpoke(
 	if len(errs) == 0 {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return false, err
-		}
-		status, err := r.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
-		if errors.Is(err, db.ErrNotFound) {
-			return remaining, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		// A successful pull must preserve diagnostics recorded by this turn's push.
-		if status.LastErrorAt != nil && !status.LastErrorAt.Before(syncStartedAt) {
-			return remaining, nil
 		}
 		if err := r.DB.ClearFederationSyncError(ctx, binding.ProjectID); err != nil {
 			errs = append(errs, err)

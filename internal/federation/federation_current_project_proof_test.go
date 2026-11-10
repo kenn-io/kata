@@ -94,7 +94,7 @@ func TestSyncFederationDelayedSourceEditCurrentProjectAuthority(t *testing.T) {
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
-	require.NoError(t, err, "missing enrollment retains its diagnostic through a full runner push/pull turn")
+	require.ErrorContains(t, err, "pending federation events remain")
 	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.NotNil(t, status.LastError)
@@ -135,15 +135,20 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	good, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent first batch", Author: "worker"})
 	require.NoError(t, err)
 	paged := &boundedPushPageStore{Storage: sender.env.DB}
-	push := func() {
+	push := func(wantPending bool) {
 		t.Helper()
 		binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 		require.NoError(t, err)
 		client, err := NewClient(t.Context(), hub.URL, sender.credentials[projects[0].UID].Token, clientpkg.Opts{})
 		require.NoError(t, err)
-		require.NoError(t, pushDirectSpoke(t.Context(), paged, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{}))
+		err = pushDirectSpoke(t.Context(), paged, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{})
+		if wantPending {
+			require.ErrorContains(t, err, "pending federation events remain")
+		} else {
+			require.NoError(t, err)
+		}
 	}
-	push()
+	push(true)
 	_, err = hub.DB.IssueByUID(t.Context(), good.UID, db.IncludeDeletedNo)
 	require.NoError(t, err, "independent work arrives after an all-rejected page")
 	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
@@ -161,7 +166,7 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	require.ErrorContains(t, PushDirectSpoke(t.Context(), sender.env.DB, binding, projects[0].ID, client), "pending federation events remain", "a partial push is not a fully drained cron prerequisite")
 	later, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent later turn", Author: "worker"})
 	require.NoError(t, err)
-	push()
+	push(true)
 	_, err = hub.DB.IssueByUID(t.Context(), later.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
@@ -176,12 +181,37 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	grant, err := hub.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: sender.env.DB.InstanceUID(), ProjectID: &projects[1].ID, Capabilities: "push,pull", Actor: "worker"})
 	require.NoError(t, err)
 	sender.credentials[projects[1].UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: grant.Token, Actor: "worker"}
-	push()
+	push(false)
 	comments, err = hub.DB.CommentsByIssue(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 	require.Equal(t, "Retained stale comment", comments[0].Body)
 
+}
+
+func TestSyncFederationReportsPushAndPullFailures(t *testing.T) {
+	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+	sender := newMoveDeliverySpoke(t, hub, projects[:1])
+	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved work", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, sender.sync(t, 0))
+	local, err := sender.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, _, err = sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Pending"})
+	require.NoError(t, err)
+	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
+	require.NoError(t, err)
+	runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
+	_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
+	require.ErrorContains(t, err, "target-project")
+	require.ErrorIs(t, err, db.ErrNotFound)
+	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, status.LastError)
+	require.Contains(t, *status.LastError, "target-project")
+	require.Contains(t, *status.LastError, "not found")
 }
 
 func TestFederationMissingEnrollmentThenPoisonBlocksPush(t *testing.T) {
@@ -243,11 +273,12 @@ func TestFederationRejectedPrefixDoesNotRedeliverAcceptedLocalEcho(t *testing.T)
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	var delivered []string
-	require.NoError(t, SyncFederationOnceWithPulledEvents(t.Context(), sender.env.DB, binding, sender.credentials[projects[0].UID], clientpkg.Opts{}, func(_ int64, events []db.Event) {
+	err = SyncFederationOnceWithPulledEvents(t.Context(), sender.env.DB, binding, sender.credentials[projects[0].UID], clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		for _, event := range events {
 			delivered = append(delivered, event.UID)
 		}
-	}, sender.credentials))
+	}, sender.credentials)
+	require.ErrorContains(t, err, "pending federation events remain")
 	binding, err = sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.Less(t, binding.PushCursorEventID, rejected.ID)
