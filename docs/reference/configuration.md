@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Configuration
@@ -357,12 +357,30 @@ isolated credentials, PostgreSQL restrictions, and recovery.
 Committed `.kata.toml` files bind the project name only; do not put daemon
 routing or tokens there.
 
-A catalog entry's `token`, or the value of the variable its `token_env` names,
-is the bearer credential clients send to that daemon. A command that connects
-to an entry whose `token_env` variable is unset or empty fails; kata never
-falls back to another credential. `kata daemon locate` reports a remote or
-plain local entry without reading its credential. `KATA_AUTH_TOKEN` replaces a
-remote entry's credential, so its `token_env` is not read then.
+A catalog entry's bearer credential uses `token` > `token_file` > `token_env`.
+Prefer `token_file` on a device to keep the token out of `config.toml`:
+
+```toml
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example"
+token_file = "~/.config/kata/tokens/team-hub"
+```
+
+The file must use an absolute or `~/` path, be a regular file owned by the
+user running Kata, and have no group or world permissions (`chmod 600`). On
+Windows it must be a private current-user file. The file must be at most
+64 KiB; its trimmed contents must be nonempty. Use `token_env` for containers or service
+managers that already inject secrets.
+
+Loading or listing the catalog does not read its credentials. Selection,
+including `kata daemon locate`, may inspect a selected credential. Remote and
+plain local entries defer source errors until connection. A failed selected
+file or an unset or empty selected environment variable stops the connection
+without fallback.
+`KATA_AUTH_TOKEN` replaces a remote entry's credential, so its file or variable
+is not read then. Hub administration uses only the hub's catalog credential;
+the local daemon's global token never replaces it.
 
 For trusted private-network hostnames that cannot be represented as literal
 non-public IP addresses, opt in per target:
@@ -780,10 +798,11 @@ actor = "user-a"
 
 `hub` names a remote `[[daemon]]` entry; its URL, authentication, and
 `allow_insecure` policy are reused without falling back to the spoke daemon's
-global bearer token. Prefer `token_env` so the hub administration credential
-does not appear in `config.toml`. An unset or empty selected `token_env` is a
-runtime authentication failure: the spoke stays available and retries without
-sending another credential.
+global bearer token. Prefer `token_file` on a device, or `token_env` when the
+service environment already injects secrets, to keep the hub administration
+credential out of `config.toml`. A failed selected file or an unset or empty
+selected variable is a runtime authentication failure: the spoke stays
+available and retries without sending another credential.
 
 Each mapping ensures the named hub project and a `pull,push,lease` enrollment,
 then creates the local `spoke_project` if it is missing or adopts the existing
@@ -822,8 +841,8 @@ The selected spoke daemon resolves `team-hub` from its own startup config. It
 requires HTTPS, validates the existing enrollment against the same hub project
 ID and UID at the new endpoint, then updates the stored endpoint without
 changing the enrollment token, capabilities, actor, project identity, or sync
-cursors. The catalog entry's administration `token` or `token_env` is not used
-for this validation. Restart first if the edited catalog has not yet been
+cursors. The catalog entry's administration `token`, `token_file` or
+`token_env` is not used for this validation. Restart first if the edited catalog has not yet been
 loaded by the daemon.
 
 Before changing either local endpoint record, rebind drains in-flight
@@ -884,7 +903,7 @@ credential_provider = ["access-helper", "credentials", "--profile", "work"]
 | `intent` | Required: `read_only`, `collaborate`, or `migrate`. |
 | `credential_provider` | Nonempty executable/argument array. Kata executes it directly, without a shell. |
 | `actor` | Must be absent; the provider supplies the approved actor. |
-| Catalog `token`, `token_env` | Must be absent for a provider mapping. |
+| Catalog `token`, `token_file`, `token_env` | Must be absent for a provider mapping. |
 
 Provider mappings require HTTPS even if the catalog sets `allow_insecure`.
 The helper approves a credential for an exact HTTPS destination; the catalog's

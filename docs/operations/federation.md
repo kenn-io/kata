@@ -1221,8 +1221,8 @@ the hub. Runtime failures are fail-open and each mapping retries independently,
 starting after one second and backing off to at most five minutes. Inspect the
 sanitized aggregate under `federation_config` in `GET /api/v1/health`;
 `ok` remains true during hub outages, authentication failures, and conflicts.
-An unset selected `token_env` is reported as `hub_authentication` and follows
-the same retry path.
+A failed selected `token_file`, or an unset or empty selected `token_env`, is
+reported as `hub_authentication` and follows the same retry path.
 
 The config is startup-only. Restart the spoke daemon after adding or changing
 a mapping. Once a mapping succeeds it stays quiet until the next restart.
@@ -1270,8 +1270,9 @@ credential_provider = ["access-helper", "credentials", "--profile", "work"]
 ```
 
 Use the helper command supplied by your hub operator. Kata runs the listed
-program directly, without a shell. Do not set `actor`, `token`, or `token_env`
-for this mapping; the provider supplies the approved identity and permissions.
+program directly, without a shell. Do not set `actor` for this mapping, or
+`token`, `token_file` or `token_env` on its catalog entry. The provider supplies
+the approved identity and permissions.
 
 - `read_only` starts an empty local replica that can pull tasks.
 - `collaborate` starts an empty replica that can also push work. The hub may
@@ -1336,7 +1337,7 @@ The spoke daemon requires the entry to be remote HTTPS,
 then deliberately sends the existing enrollment token to that configured
 origin and fetches the same hub project's federation metadata. It updates
 local state only if both the numeric project ID and stable project UID match.
-The catalog administration token and `token_env` are not used.
+Catalog credentials are not used.
 
 Rebind keeps the old binding and credential expectations through the update;
 a changed principal, catalog target, binding revision, or project identity
@@ -1594,8 +1595,9 @@ kata federation identity
 
 Create one enrollment per trusted spoke. `--hub-url` selects the hub daemon for
 this command. Supply the hub's admin credential with `--hub-token-env`, or add a
-same-origin daemon-catalog entry with `token` or `token_env`. The spoke's
-global daemon token is never sent to the hub:
+same-origin daemon-catalog entry with `token`, `token_file` or `token_env`.
+Catalog credentials use that order of precedence. The spoke's global daemon
+token is never sent to the hub:
 
 ```sh
 export HUB_ADMIN_TOKEN="<hub-admin-token>"
