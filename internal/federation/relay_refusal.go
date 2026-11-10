@@ -50,7 +50,7 @@ func (states relayRefusalRetries) reconcile(spokes []activeSpokeBinding) {
 
 func (states relayRefusalRetries) blocked(binding db.FederationBinding, now time.Time) bool {
 	state, ok := states[binding.ProjectID]
-	return ok && state.identity == refusalIdentity(binding) && now.Before(state.due)
+	return ok && now.Before(state.due)
 }
 
 func (states relayRefusalRetries) record(binding db.FederationBinding, err error, interval time.Duration, completed time.Time) {
@@ -63,7 +63,7 @@ func (states relayRefusalRetries) record(binding db.FederationBinding, err error
 	}
 	delay := max(time.Minute, interval)
 	identity := refusalIdentity(binding)
-	if previous, ok := states[binding.ProjectID]; ok && previous.identity == identity {
+	if previous, ok := states[binding.ProjectID]; ok {
 		delay = max(interval, doubledDelay(previous.delay))
 	}
 	states[binding.ProjectID] = relayRefusalRetry{identity: identity, delay: delay, due: completed.Add(delay)}
