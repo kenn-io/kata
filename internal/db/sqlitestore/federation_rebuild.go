@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
-	"errors"
 	"maps"
 	"reflect"
 	"slices"
@@ -13,8 +12,6 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 )
-
-var errFederationRebuildWithoutMoves = errors.New("federation rebuild has no moves")
 
 type preparedFederationRebuildProject struct {
 	id              int64
@@ -79,9 +76,8 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 	if err != nil {
 		return preparedFederationRebuild{}, err
 	}
-	if len(result.projects[0].decisions) == 0 {
-		return preparedFederationRebuild{}, errFederationRebuildWithoutMoves
-	}
+	// Match the locked rebuild's single destination pass; it does not follow
+	// moves discovered while reconciling those destinations.
 	for _, id := range destinations {
 		if id != projectID {
 			if _, err := prepare(id); err != nil {
@@ -167,6 +163,9 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			m.moveIssueUIDs[uid] = struct{}{}
 		}
 		for uid, decision := range result.moved {
+			if !decision.Joined {
+				continue
+			}
 			delete(m.staleIssues, uid)
 			delete(m.issueRows, uid)
 			if decision.Exists && decision.SourceID == p.id {

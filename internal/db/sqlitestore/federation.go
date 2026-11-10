@@ -1185,9 +1185,6 @@ func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 			return d.materializeFederatedProject(ctx, projectID)
 		}
 		prepared, err := d.prepareFederationRebuild(ctx, projectID)
-		if errors.Is(err, errFederationRebuildWithoutMoves) {
-			return d.materializeFederatedProject(ctx, projectID)
-		}
 		if err != nil {
 			return err
 		}

@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -259,4 +260,126 @@ func TestMoveRebuildRetriesDetachedDestination(t *testing.T) {
 	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, got.ProjectID)
+}
+
+func TestMoveRebuildPrunesDetachedDestinationSourceRow(t *testing.T) {
+	for _, locked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("locked=%t", locked), func(t *testing.T) {
+			ctx := t.Context()
+			d, source, issue := incrementalTestStore(t)
+			destination, err := d.CreateProject(ctx, "destination")
+			require.NoError(t, err)
+			_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
+			require.NoError(t, err)
+			_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+			require.NoError(t, err)
+			_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
+			require.NoError(t, err)
+			_, err = d.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE issue_id=?`, issue.ID)
+			require.NoError(t, err)
+			_, err = d.ExecContext(ctx, `UPDATE events SET related_issue_id=NULL WHERE related_issue_id=?`, issue.ID)
+			require.NoError(t, err)
+			_, err = d.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id=?`, destination.ID)
+			require.NoError(t, err)
+			if locked {
+				err = d.materializeFederatedProject(ctx, source.ID)
+			} else {
+				err = d.MaterializeFederatedProject(ctx, source.ID)
+			}
+			require.NoError(t, err)
+			_, err = d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+			require.ErrorIs(t, err, db.ErrNotFound)
+		})
+	}
+}
+
+func TestMoveFreeRebuildLeavesWriterAvailableDuringPreparation(t *testing.T) {
+	ctx := t.Context()
+	d, project, issue := incrementalTestStore(t)
+	other, err := d.CreateProject(ctx, "local")
+	require.NoError(t, err)
+	writer, err := Open(ctx, d.Path())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	update := incrementalRemoteEvent(t, project, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"updated"}`, 9_000_000_000_000)
+	_, err = d.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{update})
+	require.NoError(t, err)
+	prepared := false
+	d.federationIngestPrepared = func() {
+		prepared = true
+		writeCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		_, _, err := writer.CreateIssue(writeCtx, db.CreateIssueParams{ProjectID: other.ID, Title: "concurrent", Author: "tester"})
+		require.NoError(t, err, "create must commit while the rebuild prepares")
+	}
+	require.NoError(t, d.MaterializeFederatedProject(ctx, project.ID))
+	require.True(t, prepared)
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, "updated", got.Title)
+}
+
+func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
+	ctx := t.Context()
+	prepared, source, issue := incrementalTestStore(t)
+	destination, err := prepared.CreateProject(ctx, "destination")
+	require.NoError(t, err)
+	_, err = prepared.EnableProjectFederation(ctx, destination.ID, "tester")
+	require.NoError(t, err)
+	peer, _, err := prepared.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "peer", Author: "tester"})
+	require.NoError(t, err)
+	_, _, err = prepared.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "retained comment"})
+	require.NoError(t, err)
+	_, _, err = prepared.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "retained", Actor: "tester"})
+	require.NoError(t, err)
+	_, _, err = prepared.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "tester"})
+	require.NoError(t, err)
+	_, err = prepared.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	_, err = prepared.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
+	require.NoError(t, err)
+	update := incrementalRemoteEvent(t, destination, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"updated"}`, 9_000_001_000_002)
+	workflow := cronPullWorkflow(t, destination, "workflow", 9_000_001_000_001)
+	_, err = prepared.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{update, workflow})
+	require.NoError(t, err)
+	copyPath := filepath.Join(t.TempDir(), "locked.db")
+	_, err = prepared.ExecContext(ctx, `VACUUM INTO ?`, copyPath)
+	require.NoError(t, err)
+	locked, err := Open(ctx, copyPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, locked.Close()) })
+	require.NoError(t, prepared.MaterializeFederatedProject(ctx, destination.ID))
+	require.NoError(t, locked.materializeFederatedProject(ctx, destination.ID))
+	actual, err := prepared.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	want, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, want, actual)
+	require.Equal(t, "updated", actual.Title)
+	actualComments, err := prepared.CommentsByIssue(ctx, actual.ID)
+	require.NoError(t, err)
+	wantComments, err := locked.CommentsByIssue(ctx, want.ID)
+	require.NoError(t, err)
+	require.Equal(t, wantComments, actualComments)
+	require.Len(t, actualComments, 1)
+	require.Equal(t, "retained comment", actualComments[0].Body)
+	actualLabels, err := prepared.LabelsByIssue(ctx, actual.ID)
+	require.NoError(t, err)
+	wantLabels, err := locked.LabelsByIssue(ctx, want.ID)
+	require.NoError(t, err)
+	require.Equal(t, wantLabels, actualLabels)
+	require.Len(t, actualLabels, 1)
+	require.Equal(t, "retained", actualLabels[0].Label)
+	actualLinks, err := prepared.LinksByIssue(ctx, actual.ID)
+	require.NoError(t, err)
+	wantLinks, err := locked.LinksByIssue(ctx, want.ID)
+	require.NoError(t, err)
+	require.Equal(t, wantLinks, actualLinks)
+	require.Len(t, actualLinks, 1)
+	actualWorkflow, err := (db.CronSQL{Query: prepared}).Workflow(ctx, destination.ID, "01ARZ3NDEKTSV4RRFFQ69G5FAA")
+	require.NoError(t, err)
+	wantWorkflow, err := (db.CronSQL{Query: locked}).Workflow(ctx, destination.ID, "01ARZ3NDEKTSV4RRFFQ69G5FAA")
+	require.NoError(t, err)
+	require.Equal(t, wantWorkflow, actualWorkflow)
+	require.Equal(t, "workflow", actualWorkflow.Name)
 }
