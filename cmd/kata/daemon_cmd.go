@@ -49,6 +49,7 @@ import (
 	kataweb "go.kenn.io/kata/internal/web"
 	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/embedlocal"
 	"go.kenn.io/kit/safefileio"
 	kitvec "go.kenn.io/kit/vector"
 )
@@ -2104,6 +2105,25 @@ func preflightEmbeddingStartup(
 	if !ec.Enabled() {
 		return nil, "", nil
 	}
+	cfg := embeddingClientConfig(ec)
+	embedder, err := embedding.New(cfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("embedding client: %w", err)
+	}
+	batchOptions := embeddingBatchOptions(ec, embedder.BatchSize())
+	if _, err := kitvec.EncodeBatched(
+		context.Background(), embedder.EncodeFunc(), nil, batchOptions...,
+	); err != nil {
+		return nil, "", fmt.Errorf("embedding batching: %w", err)
+	}
+	vectorsPath, err := vectorsPathForDSN(dbPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("embedding index: %w", err)
+	}
+	return embedder, vectorsPath, nil
+}
+
+func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
 	cfg := embedding.Config{
 		BaseURL:             ec.BaseURL,
 		Model:               ec.Model,
@@ -2120,27 +2140,19 @@ func preflightEmbeddingStartup(
 		TrustPrivateNetwork: ec.TrustPrivateNetwork,
 	}
 	if ec.UsesLocal() {
+		if cfg.BatchSize == 0 {
+			cfg.BatchSize = embedlocal.BatchItems
+		}
+		if cfg.Timeout == 0 {
+			cfg.Timeout = embedlocal.RequestTimeout
+		}
 		cfg.Endpoint = func(ctx context.Context) (string, error) {
 			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
 				return false, errors.New("run kata daemon local-embeddings to approve the download")
 			})
 		}
 	}
-	embedder, err := embedding.New(cfg)
-	if err != nil {
-		return nil, "", fmt.Errorf("embedding client: %w", err)
-	}
-	batchOptions := embeddingBatchOptions(ec, embedder.BatchSize())
-	if _, err := kitvec.EncodeBatched(
-		context.Background(), embedder.EncodeFunc(), nil, batchOptions...,
-	); err != nil {
-		return nil, "", fmt.Errorf("embedding batching: %w", err)
-	}
-	vectorsPath, err := vectorsPathForDSN(dbPath)
-	if err != nil {
-		return nil, "", fmt.Errorf("embedding index: %w", err)
-	}
-	return embedder, vectorsPath, nil
+	return cfg
 }
 
 func embeddingBatchOptions(ec config.EmbeddingsConfig, batchSize int) []kitvec.BatchOption {

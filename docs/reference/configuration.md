@@ -1116,6 +1116,13 @@ one is a startup error rather than a silent disable. With no credential source
 configured, requests omit the `Authorization` header. Keyless local providers
 such as Ollama need only `base_url` and `model`.
 
+The built-in server defaults to 8 inputs per request and a 300-second request
+timeout. Configured endpoints default to 64 inputs and 30 seconds. Set
+`batch_size` or `timeout_seconds` to override either default. Kata sends one
+embedding request at a time during indexing. If a multi-input request times
+out, Kata splits it into smaller requests. If a single input also times out,
+later fills use smaller batches until the daemon restarts.
+
 Affixes preserve every space and newline. Kata applies document affixes once
 around each prepared issue chunk and query affixes once around the search
 query text, which Kata sends as entered. With empty affixes and

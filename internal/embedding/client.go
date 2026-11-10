@@ -43,6 +43,7 @@ type Client struct {
 	credential         config.EmbeddingCredential
 	credentialRevision uint64
 	credentialHealth   CredentialHealth
+	batchLimit         int
 }
 
 const (
@@ -159,6 +160,11 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 		return nil, err
 	}
 	options := c.options
+	c.mu.Lock()
+	if c.batchLimit > 0 {
+		options.Batch.Items = min(options.Batch.Items, c.batchLimit)
+	}
+	c.mu.Unlock()
 	if c.endpoint != nil {
 		options.Deployment.BaseURL, err = c.endpoint(ctx)
 		if err != nil {
@@ -181,6 +187,15 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 	}
 	vectors, err := provider.EmbedTexts(ctx, role, texts)
 	if err != nil {
+		// A later fill must not restart with the batch that just timed out.
+		if transport, ok := errors.AsType[*embedclient.TransportError](err); ok && transport.Timeout() && ctx.Err() == nil && len(texts) > 1 && options.Batch.Items > 1 {
+			limit := max(1, min(len(texts), options.Batch.Items)/2)
+			c.mu.Lock()
+			if c.batchLimit == 0 || limit < c.batchLimit {
+				c.batchLimit = limit
+			}
+			c.mu.Unlock()
+		}
 		if rejected, ok := errors.AsType[*embedclient.APIError](err); ok && rejected.CredentialsRejected() {
 			return nil, c.rejectCredential(credential, revision, rejected)
 		}
