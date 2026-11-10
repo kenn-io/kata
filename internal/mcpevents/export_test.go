@@ -27,11 +27,7 @@ const (
 func (s *Service) InflightCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	total := 0
-	for _, count := range s.inflight {
-		total += count
-	}
-	return total
+	return len(s.inflight)
 }
 
 // ChallengeStateCount reports how many consent and failure-budget entries the
