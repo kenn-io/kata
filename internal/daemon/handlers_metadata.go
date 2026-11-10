@@ -102,7 +102,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 						return nil, err
 					}
 				}
-				return prepareIssueSchedules(jsontext.Value(current.Metadata), in.Body.Patch, cfg.DefaultTimezone, recurrenceZone)
+				return db.PrepareIssueSchedules(jsontext.Value(current.Metadata), in.Body.Patch, cfg.DefaultTimezone, recurrenceZone)
 			})
 		}
 

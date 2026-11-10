@@ -8,6 +8,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io/fs"
+	"sync"
 	"time"
 )
 
@@ -26,10 +27,20 @@ type SavedSchedule struct {
 
 // Retain every published bundle when changing the current write version.
 var scheduleZoneBundles = map[string][]byte{scheduleTZData2026c: scheduleZoneBundle}
+var scheduleLocations sync.Map
 
 // ScheduleLocation loads the exact zone rules shipped for schedule values.
 func ScheduleLocation(zone, version string) (*time.Location, error) {
-	return scheduleLocationFromBundles(scheduleZoneBundles, zone, version)
+	key := [2]string{zone, version}
+	if loc, ok := scheduleLocations.Load(key); ok {
+		return loc.(*time.Location), nil
+	}
+	loc, err := scheduleLocationFromBundles(scheduleZoneBundles, zone, version)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := scheduleLocations.LoadOrStore(key, loc)
+	return actual.(*time.Location), nil
 }
 
 func scheduleLocationFromBundles(bundles map[string][]byte, zone, version string) (*time.Location, error) {
@@ -69,20 +80,26 @@ func NewScheduleValueWithVersion(value, zone, version string) (jsontext.Value, e
 
 // DecodeSavedSchedule returns a descriptor for an object-backed value.
 func DecodeSavedSchedule(raw jsontext.Value) (*SavedSchedule, error) {
+	obj, _, err := decodeSavedSchedule(raw)
+	return obj, err
+}
+
+func decodeSavedSchedule(raw jsontext.Value) (*SavedSchedule, *time.Location, error) {
 	if len(raw) == 0 || raw[0] != '{' {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var obj SavedSchedule
 	if err := json.Unmarshal(raw, &obj, json.RejectUnknownMembers(true)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, _, _, err := classifyScheduledOn(obj.Value); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if _, err := ScheduleLocation(obj.Timezone, obj.TZDataVersion); err != nil {
-		return nil, err
+	loc, err := ScheduleLocation(obj.Timezone, obj.TZDataVersion)
+	if err != nil {
+		return nil, nil, err
 	}
-	return &obj, nil
+	return &obj, loc, nil
 }
 
 func decodeScheduleValue(raw jsontext.Value) (*string, *time.Location, error) {
@@ -96,16 +113,12 @@ func decodeScheduleValue(raw jsontext.Value) (*string, *time.Location, error) {
 		}
 		return &s, nil, nil
 	}
-	obj, err := DecodeSavedSchedule(raw)
+	obj, loc, err := decodeSavedSchedule(raw)
 	if err != nil {
 		return nil, nil, err
 	}
 	if obj == nil {
 		return nil, nil, fmt.Errorf("schedule must be a string or object")
-	}
-	loc, err := ScheduleLocation(obj.Timezone, obj.TZDataVersion)
-	if err != nil {
-		return nil, nil, err
 	}
 	return &obj.Value, loc, nil
 }

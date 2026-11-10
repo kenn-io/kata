@@ -79,7 +79,8 @@ Echoing the same date preserves its saved rules.
 
 Stop every older daemon sharing a database before starting the new version,
 and keep those older daemons stopped. Older versions skip object-backed dates
-in notification sweeps. An existing recurrence using `Local` can create an
+in notification sweeps. Older clients may also show object-backed dates as
+empty; upgrade clients that read schedule metadata. An existing recurrence using `Local` can create an
 occurrence when the host's named zone is bundled and its rules agree for the
 occurrence and inherited deadline. Otherwise, change the recurrence to a named
 IANA timezone.

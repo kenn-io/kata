@@ -18,6 +18,7 @@ import (
 	connectorclient "go.kenn.io/kata/internal/connector"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/metadata"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/connector"
 )
@@ -940,8 +941,10 @@ func TestResolveFieldConflictAllowsCoordinatedLocalTimezoneTransition(t *testing
 	require.NoError(t, readErr)
 	values, readErr := metadataObject(issue.Metadata)
 	require.NoError(t, readErr)
-	assert.JSONEq(t, `"2026-08-22T09:30"`, string(values["scheduled_on"]))
-	assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+	saved, err := metadata.DecodeSavedSchedule(values["scheduled_on"])
+	require.NoError(t, err)
+	assert.Equal(t, "2026-08-22T09:30", saved.Value)
+	assert.Equal(t, "America/Los_Angeles", saved.Timezone)
 
 	dueState, dueEvents, err := service.ResolveFieldConflict(
 		t.Context(), h.issue.ID, "deadline_on", "external", "operator",
@@ -954,8 +957,10 @@ func TestResolveFieldConflictAllowsCoordinatedLocalTimezoneTransition(t *testing
 	require.NoError(t, readErr)
 	values, readErr = metadataObject(issue.Metadata)
 	require.NoError(t, readErr)
-	assert.JSONEq(t, `"2026-08-22T10:30"`, string(values["deadline_on"]))
-	assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+	saved, err = metadata.DecodeSavedSchedule(values["deadline_on"])
+	require.NoError(t, err)
+	assert.Equal(t, "2026-08-22T10:30", saved.Value)
+	assert.Equal(t, "America/Los_Angeles", saved.Timezone)
 }
 
 func TestResolveFieldConflictRequiresCurrentFieldsCapability(t *testing.T) {

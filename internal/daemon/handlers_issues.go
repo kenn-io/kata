@@ -208,7 +208,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 
 		// Matching retries are stored operations, not new timezone choices.
-		frozenMetadata, err := prepareIssueSchedules(nil, in.Body.Metadata, cfg.DefaultTimezone, "")
+		frozenMetadata, err := db.PrepareIssueSchedules(nil, in.Body.Metadata, cfg.DefaultTimezone, "")
 		if err != nil {
 			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
 		}

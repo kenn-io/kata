@@ -13,10 +13,10 @@ func TestFreezeSchedulePreservesEchoAndRebindsZone(t *testing.T) {
 	original, err := metadata.NewScheduleValue("2026-11-12T09:00", "Europe/Paris")
 	require.NoError(t, err)
 	current := jsontext.Value(`{"scheduled_on":` + string(original) + `}`)
-	patch, err := prepareIssueSchedules(current, map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`)}, "UTC", "")
+	patch, err := db.PrepareIssueSchedules(current, map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`)}, "UTC", "")
 	require.NoError(t, err)
 	require.JSONEq(t, string(original), string(patch["scheduled_on"]))
-	patch, err = prepareIssueSchedules(current, map[string]jsontext.Value{"timezone": jsontext.Value(`"America/New_York"`)}, "UTC", "")
+	patch, err = db.PrepareIssueSchedules(current, map[string]jsontext.Value{"timezone": jsontext.Value(`"America/New_York"`)}, "UTC", "")
 	require.NoError(t, err)
 	raw, err := db.ApplyMetadataPatch(current, patch)
 	require.NoError(t, err)
@@ -31,7 +31,7 @@ func TestScheduleEditKeepsSavedZone(t *testing.T) {
 			original, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
 			require.NoError(t, err)
 			current := jsontext.Value(`{"` + field + `":` + string(original) + `}`)
-			patch, err := prepareIssueSchedules(current, map[string]jsontext.Value{field: jsontext.Value(`"2026-01-02T02:00:00Z"`)}, "Europe/Paris", "")
+			patch, err := db.PrepareIssueSchedules(current, map[string]jsontext.Value{field: jsontext.Value(`"2026-01-02T02:00:00Z"`)}, "Europe/Paris", "")
 			require.NoError(t, err)
 			descriptor, err := metadata.DecodeSavedSchedule(patch[field])
 			require.NoError(t, err)
@@ -52,7 +52,7 @@ func TestUTCInstantUsesAvailableZone(t *testing.T) {
 		{"unusable issue zone", `{"timezone":17}`, "", "Local", "UTC"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			patch, err := prepareIssueSchedules(jsontext.Value(tc.issue), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-01-01T02:00:00Z"`)}, tc.fallback, tc.recurrence)
+			patch, err := db.PrepareIssueSchedules(jsontext.Value(tc.issue), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-01-01T02:00:00Z"`)}, tc.fallback, tc.recurrence)
 			require.NoError(t, err)
 			saved, err := metadata.DecodeSavedSchedule(patch["scheduled_on"])
 			require.NoError(t, err)
