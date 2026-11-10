@@ -2,6 +2,7 @@ package cron
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -19,24 +20,32 @@ func explainCron(expression string, err error) error {
 		return reject(detail)
 	}
 	if strings.HasPrefix(expression, "TZ=") || strings.HasPrefix(expression, "CRON_TZ=") {
-		zone, rest, _, _ := splitCronDirective(expression)
-		if strings.HasPrefix(detail, "unknown time zone ") {
-			if len(zone) >= 2 && (zone[0] == '\'' && zone[len(zone)-1] == '\'' || zone[0] == '"' && zone[len(zone)-1] == '"') {
-				zone = zone[1 : len(zone)-1]
-			}
-			return unknownTimezone(zone)
+		directive, rest, _ := strings.Cut(expression, " ")
+		_, zone, _ := strings.Cut(directive, "=")
+		if len(zone) >= 2 && (zone[0] == '\'' && zone[len(zone)-1] == '\'' || zone[0] == '"' && zone[len(zone)-1] == '"') {
+			zone = zone[1 : len(zone)-1]
 		}
-		if strings.HasPrefix(detail, "invalid timezone ") || strings.HasPrefix(detail, "missing fields after timezone") {
+		if strings.HasPrefix(detail, "unknown time zone ") || strings.HasPrefix(detail, "invalid timezone ") {
+			return explainTimezone(zone, err)
+		}
+		if strings.HasPrefix(detail, "missing fields after timezone") {
 			return reject(detail)
 		}
-		expression = rest
+		expression = strings.TrimSpace(rest)
+	}
+	fields := strings.Fields(expression)
+	for _, field := range fields {
+		upper := strings.ToUpper(field)
+		if strings.HasPrefix(upper, "TZ=") || strings.HasPrefix(upper, "CRON_TZ=") {
+			return reject("use one uppercase TZ= or CRON_TZ= directive at the start of the expression, without leading whitespace, followed by a space and schedule")
+		}
 	}
 	if strings.HasPrefix(expression, "@") {
 		switch {
 		case expression == "@reboot":
 			return reject("@reboot is not supported; use a supported descriptor, five-field schedule, or interval trigger")
 		case expression == "@every" || strings.HasPrefix(expression, "@every "):
-			return reject("@every needs a duration such as 90m or 2h; native recurring jobs use an interval trigger instead; " + safeCronDetail(detail, 160))
+			return reject("@every needs a duration such as 90m or 2h; native recurring jobs use an interval trigger instead; " + detail)
 		default:
 			return reject(fmt.Sprintf("unknown descriptor %q; use a descriptor such as @daily", clip(expression, 40)))
 		}
@@ -44,7 +53,7 @@ func explainCron(expression string, err error) error {
 	if strings.HasPrefix(strings.TrimSpace(expression), "@") {
 		return reject("descriptor must start the expression without leading whitespace")
 	}
-	fields := strings.Fields(expression)
+
 	switch len(fields) {
 	case 0:
 		return reject("expression is empty; use five fields or a descriptor such as @daily")
@@ -56,18 +65,17 @@ func explainCron(expression string, err error) error {
 			probe := []string{"*", "*", "*", "*", "*"}
 			probe[i] = token
 			if _, fieldErr := cronParser.Parse(strings.Join(probe, " ")); fieldErr != nil {
-				reason := safeCronDetail(fieldErr.Error(), 160)
-				upper := strings.ToUpper(token)
-				switch {
-				case i == 2 && strings.Contains(upper, "L"):
-					reason = "last-day syntax (L) is not supported and has no five-field equivalent; 28-31 fires on each of those days that exists"
-				case i == 2 && strings.Contains(upper, "W"):
-					reason = "nearest-weekday syntax (W) is not supported and has no five-field equivalent"
-				case i == 4 && strings.Contains(token, "#"):
-					reason = "nth-weekday syntax (#) is not supported and has no five-field equivalent"
-				case i == 4 && strings.Contains(upper, "L"):
-					reason = "last-weekday syntax (L) is not supported and has no five-field equivalent"
-				case strings.Contains(fieldErr.Error(), "hash option"):
+				reason := fieldErr.Error()
+				if i == 2 || i == 4 {
+					reason = daySyntaxReason(i, token)
+					if reason == "" {
+						reason = fieldErr.Error()
+						if strings.ContainsAny(strings.ToUpper(token), "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+							reason = "use numeric values or field-appropriate names"
+						}
+					}
+				}
+				if strings.Contains(fieldErr.Error(), "hash option") {
 					reason = "choose a fixed value; hashed schedules (H) are not supported"
 				}
 				return reject(fmt.Sprintf("%s %q: %s", names[i], clip(token, 40), reason))
@@ -83,8 +91,40 @@ func explainCron(expression string, err error) error {
 	}
 }
 
-func unknownTimezone(name string) error {
+// Timezone diagnostics run only after the owning parser/LoadLocation rejects
+// the input. Probe the dependency's quoted name to distinguish syntax from lookup
+// failures without imposing its name rules on accepted Trigger.Timezone values.
+func explainTimezone(name string, err error) error {
+	_, probeErr := cronParser.Parse("TZ=" + strconv.Quote(name) + " @daily")
+	if strings.Contains(err.Error(), "time: invalid location name") ||
+		strings.HasPrefix(err.Error(), "invalid timezone ") ||
+		probeErr != nil && strings.HasPrefix(probeErr.Error(), "invalid timezone ") {
+		return invalid(fmt.Sprintf("invalid cron expression: invalid timezone %q; use an unquoted timezone name such as America/New_York or UTC", clip(name, 40)))
+	}
 	return invalid(fmt.Sprintf("unknown time zone %q; use an IANA name such as America/New_York, or UTC", clip(name, 40)))
+}
+
+var (
+	lastDayToken    = regexp.MustCompile(`(?i)^L(-[0-9]+)?$`)
+	nearestDayToken = regexp.MustCompile(`(?i)^[0-9]+W$`)
+	weekdayToken    = regexp.MustCompile(`(?i)^([0-9]+|SUN|MON|TUE|WED|THU|FRI|SAT)(L|#(L|[0-9]+))$`)
+)
+
+// Recognize unsupported constructs, including list components, solely for advice.
+func daySyntaxReason(field int, token string) string {
+	for _, part := range strings.Split(strings.ToUpper(token), ",") {
+		switch {
+		case field == 2 && part == "LW", field == 4 && weekdayToken.MatchString(part) && strings.HasSuffix(part, "L"):
+			return "last-weekday syntax is not supported and has no five-field equivalent"
+		case field == 2 && lastDayToken.MatchString(part):
+			return "last-day syntax (L) is not supported and has no five-field equivalent; 28-31 fires on each of those days that exists"
+		case field == 2 && nearestDayToken.MatchString(part):
+			return "nearest-weekday syntax (W) is not supported and has no five-field equivalent"
+		case field == 4 && weekdayToken.MatchString(part):
+			return "nth-weekday syntax (#) is not supported and has no five-field equivalent"
+		}
+	}
+	return ""
 }
 
 // clip bounds raw values before quoting, keeping complete UTF-8 runes.

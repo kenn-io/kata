@@ -10,7 +10,7 @@ import (
 func (t Trigger) Validate() error {
 	if t.Timezone != "" {
 		if _, err := time.LoadLocation(t.Timezone); err != nil {
-			return unknownTimezone(t.Timezone)
+			return explainTimezone(t.Timezone, err)
 		}
 	}
 	if t.LeadSeconds < 0 {

@@ -182,7 +182,8 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 A `cron` expression has five fields: minute, hour, day of month, month, and day
 of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
 `@monthly`, or `@yearly`. Kata does not accept seconds, years, `L`, `W`, `#`,
-or `H` syntax. Kata keeps the expression exactly as written.
+or `H` syntax. Expressions are limited to 1024 bytes. Kata keeps the expression
+exactly as written.
 
 A rejected expression's error names the field and value, descriptor, timezone,
 or field count that failed, with advice for correcting it.
@@ -192,9 +193,8 @@ or field count that failed, with advice for correcting it.
   five-field equivalent.
 - Last-day or last-weekday (`L`), nearest-weekday (`W`), and nth-weekday (`#`)
   schedules have no five-field equivalent. `28-31` fires on each of those days
-  that exists,
-  rather than only on the last day. Restricting both day fields matches either
-  field; it cannot express an nth weekday.
+  that exists, rather than only on the last day. Restricting both day fields
+  matches either field; it cannot express an nth weekday.
 - For hashed (`H`) schedules, choose a fixed value. `@reboot` is unsupported;
   use a supported descriptor, a five-field schedule, or an interval trigger.
 
