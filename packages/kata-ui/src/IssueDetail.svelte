@@ -22,6 +22,7 @@
     commentActionsDisabled = false,
     selectedCommentUID,
     returnComment,
+    pending = false,
   }: KataIssueDetailProps = $props()
 
   function invoke(action: KataIssueHostAction): void {
@@ -99,6 +100,7 @@
     {onReplyComment}
     {selectedCommentUID}
     actionsDisabled={commentActionsDisabled || detail.issue.status !== 'open'}
+    {pending}
   />
 </section>
 

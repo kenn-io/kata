@@ -11,6 +11,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Schedule consistently across hosts with [portable zones](reference/metadata.md)
   for new issue writes, preserving stored values, recurrences and create retries.
+- Keep a daemon catalog credential in an owner-only device file with
+  `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
+  stop on a failed selected source without fallback. See
+  [catalog credentials](reference/configuration.md#daemon-config).
+
 - Keep search focus and text when keyboard selection opens task detail.
 - Keep local writes responsive while a federation pull updates projects with long histories.
 - See why Docbank attachments fail when the daemon cannot read its own key.

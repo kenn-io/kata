@@ -18,6 +18,8 @@
   let props: ComponentProps<typeof IssueEditor> & {
     attachmentsEnabled?: boolean | undefined
     onUploadAttachment?: ((uid: string, file: File) => Promise<void>) | undefined
+    // True while the task shows the list's copy and its comments and history load.
+    pending?: boolean | undefined
   } = $props()
   let editing = $state(false)
   let replyIntent = $state<KataCommentReplyIntent | undefined>()
@@ -105,6 +107,7 @@
       }}
       commentActionsDisabled={Boolean(props.actionsDisabled || props.authorityBlocked)}
       selectedCommentUID={props.selectedCommentUID}
+      pending={props.pending}
     />
   {/if}
   {#if replyIntent && replySourceUID === props.issue.issue.uid}
@@ -139,7 +142,11 @@
     {#if visibleRecurrences.length > 0}
       <RecurrencePanel recurrences={visibleRecurrences} readOnly />
     {/if}
-    <IssueHistory events={props.events ?? []} metadata={props.issue.issue.metadata} />
+    <IssueHistory
+      events={props.events ?? []}
+      metadata={props.issue.issue.metadata}
+      pending={props.pending}
+    />
   {/if}
 </div>
 

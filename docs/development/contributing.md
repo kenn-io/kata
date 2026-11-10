@@ -283,6 +283,11 @@ last_edited: 2026-09-15
 Do not leave accepted repository changes uncommitted at the end of a task.
 Do not squash or amend history unless explicitly asked.
 
+End the pull request description with a `Model used:` line naming the model, such as
+`Model used: Opus 5.5` or `Model used: GPT-6.1 Sol`. Add a `Co-authored-by:`
+trailer for the tool to each commit it wrote and to the end of the description,
+because squash-merge keeps only the description.
+
 When closing kata issues, close with a substantive message and typed evidence:
 
 ```sh
