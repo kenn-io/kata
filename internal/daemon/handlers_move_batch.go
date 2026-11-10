@@ -66,6 +66,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		results := make([]api.MoveIssuesResult, n)
 		targets := map[string]db.Project{}
 		targetErrors := map[string]error{}
+		residentPrefix := map[[2]int64]bool{}
 		authorize := func(uids []string) error { _, err := authorizeHostProjectScope(ctx, nil, uids, false); return err }
 		for j, input := range in.Body.Items {
 			r := &results[j]
@@ -127,7 +128,13 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			items[j].issue = issue
 			items[j].target = target
 			items[j].move = db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: target.ID, IfMatchRev: rev, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: authorize}
-			if input.ExpectedRevision != 0 && input.ExpectedRevision != issue.Revision {
+			key := [2]int64{issue.ID, target.ID}
+			if j < in.Body.StartIndex && issue.ProjectID == target.ID {
+				residentPrefix[key] = true
+			}
+			// A prior row may have moved this issue and advanced its revision once.
+			completedDuplicate := j >= in.Body.StartIndex && residentPrefix[key] && issue.ProjectID == target.ID && input.ExpectedRevision == issue.Revision-1
+			if input.ExpectedRevision != 0 && input.ExpectedRevision != issue.Revision && !completedDuplicate {
 				moveBatchRefusal(r, &db.RevisionConflictError{CurrentRevision: issue.Revision})
 			}
 		}
