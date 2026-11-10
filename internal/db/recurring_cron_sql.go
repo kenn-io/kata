@@ -56,10 +56,12 @@ func recurringWriteContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, recurringWriteKey{}, true)
 }
 
-func recurringAuthority(ctx context.Context, tx *sql.Tx, projectID int64) (bool, FederationRole, error) {
+func recurringAuthority(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, projectID int64) (bool, FederationRole, error) {
 	var role FederationRole
 	var enabled int
-	err := tx.QueryRowContext(ctx, `SELECT role,enabled FROM federation_bindings WHERE project_id=$1`, projectID).Scan(&role, &enabled)
+	err := q.QueryRowContext(ctx, `SELECT role,enabled FROM federation_bindings WHERE project_id=$1`, projectID).Scan(&role, &enabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, "", nil
 	}
@@ -70,15 +72,17 @@ func recurringAuthority(ctx context.Context, tx *sql.Tx, projectID int64) (bool,
 }
 
 // recurringParent reads the bound parent and whether it is soft-deleted.
-func (a CronSQL) recurringParent(ctx context.Context, tx *sql.Tx, projectID int64, parentUID string) (Issue, bool, error) {
-	// Parent lock precedes reading owner/status/progress, sharing normal mutation serialization.
+func (a CronSQL) recurringParent(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, projectID int64, parentUID string, lock bool) (Issue, bool, error) {
+	// Writers lock before reading owner/status/progress; delivery status is nonlocking.
 	query := `SELECT id,uid,status,owner,author,metadata,revision,deleted_at IS NOT NULL FROM issues WHERE uid=$1 AND project_id=$2`
-	if a.Postgres {
+	if lock && a.Postgres {
 		query += " FOR UPDATE"
 	}
 	var p Issue
 	var deleted bool
-	err := tx.QueryRowContext(ctx, query, parentUID, projectID).Scan(&p.ID, &p.UID, &p.Status, &p.Owner, &p.Author, &p.Metadata, &p.Revision, &deleted)
+	err := q.QueryRowContext(ctx, query, parentUID, projectID).Scan(&p.ID, &p.UID, &p.Status, &p.Owner, &p.Author, &p.Metadata, &p.Revision, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, false, ErrNotFound
 	}
@@ -124,7 +128,7 @@ func (a CronSQL) checkRecurringPutTx(ctx context.Context, tx *sql.Tx, req cronPu
 		return fmt.Errorf("%w: native parent binding and ownership are immutable", cron.ErrInvalid)
 	}
 	if oldNative && !req.deleted {
-		parent, _, err := a.recurringParent(ctx, tx, req.projectID, old.Issue.ParentUID)
+		parent, _, err := a.recurringParent(ctx, tx, req.projectID, old.Issue.ParentUID, true)
 		if err != nil {
 			return err
 		}
@@ -147,7 +151,7 @@ func (a CronSQL) initializeRecurringTx(ctx context.Context, tx *sql.Tx, req cron
 			return nil, nil
 		}
 	}
-	parent, _, err := a.recurringParent(ctx, tx, req.projectID, next.Issue.ParentUID)
+	parent, _, err := a.recurringParent(ctx, tx, req.projectID, next.Issue.ParentUID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +247,7 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		if !cron.IsRecurringIssueJob(job.Definition) || !job.Definition.Enabled {
 			return nil
 		}
-		parent, deleted, err := a.recurringParent(ctx, tx, project.ID, job.Definition.Issue.ParentUID)
+		parent, deleted, err := a.recurringParent(ctx, tx, project.ID, job.Definition.Issue.ParentUID, true)
 		if errors.Is(err, ErrNotFound) {
 			return nil
 		}

@@ -195,7 +195,7 @@ func checkRecurringDeliveryLastChild(t *testing.T, s db.Storage, b Backend) erro
 	readCtx := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, []string{p.UID}))
 	_, err = s.RecurringCronDelivery(readCtx, p.ID, []db.CronJob{j}, now)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []int64{parent.ID, children[0].ID, children[1].ID}, db.ExposedIssues(readCtx))
+	require.ElementsMatch(t, []int64{parent.ID, children[0].ID}, db.ExposedIssues(readCtx))
 	tied, err := time.Parse(time.RFC3339Nano, stamps[0])
 	require.NoError(t, err)
 	deliveryStamp(t, s, children[1], tied)
@@ -319,5 +319,62 @@ func checkRecurringDeliveryDurableScan(t *testing.T, s db.Storage) error {
 	require.Equal(t, checkpoint.Scan.Until, d.Scan.Until)
 	require.Equal(t, 1, d.Pending.Count)
 	require.False(t, d.Pending.More)
+	return nil
+}
+
+// Only supported occurrence metadata is delivery evidence, including after restore.
+func checkRecurringDeliveryOccurrenceVersions(t *testing.T, s db.Storage, b Backend) error {
+	ctx := t.Context()
+	p, parent, j, progress := recurringFixture(t, s, "all")
+	now := progress.Anchor.Add(5 * time.Hour)
+	_, err := s.DispatchRecurringCron(ctx, db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: j.UID, ExpectedEventUID: j.DefinitionEventUID, Now: now})
+	require.NoError(t, err)
+	children, err := s.ChildrenOfIssue(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Len(t, children, 2)
+	newest := deliveryRead(t, s, p, j, now).LastChild.UID
+	var latest, older db.Issue
+	for _, child := range children {
+		if child.UID == newest {
+			latest = child
+		} else {
+			older = child
+		}
+	}
+	for _, tc := range []struct{ name, key, raw string }{
+		{"future version", "version", "2"},
+		{"zero version", "version", "0"},
+		{"missing version", "version", ""},
+		{"missing timestamp", "scheduled_at", ""},
+		{"zero timestamp", "scheduled_at", `"0001-01-01T00:00:00Z"`},
+		{"invalid timestamp", "scheduled_at", `"not a timestamp"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var metadata, occurrence map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal([]byte(latest.Metadata), &metadata))
+			require.NoError(t, json.Unmarshal(metadata["cron.occurrence"], &occurrence))
+			if tc.raw == "" {
+				delete(occurrence, tc.key)
+			} else {
+				occurrence[tc.key] = jsontext.Value(tc.raw)
+			}
+			metadata["cron.occurrence"], err = json.Marshal(occurrence)
+			require.NoError(t, err)
+			raw, err := json.Marshal(metadata)
+			require.NoError(t, err)
+			deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, string(raw), latest.ID)
+			require.Equal(t, older.UID, deliveryRead(t, s, p, j, now).LastChild.UID)
+			if tc.name == "future version" {
+				records, err := CollectImportRecords(ctx, s, db.ExportFilter{IncludeDeleted: true})
+				require.NoError(t, err)
+				restored := b.Open(t)
+				t.Cleanup(func() { require.NoError(t, restored.Close()) })
+				require.NoError(t, restored.ImportReplay(t.Context(), records, db.ImportOptions{}))
+				rp, err := restored.ProjectByUID(t.Context(), p.UID)
+				require.NoError(t, err)
+				require.Equal(t, older.UID, deliveryRead(t, restored, rp, j, now).LastChild.UID)
+			}
+		})
+	}
 	return nil
 }

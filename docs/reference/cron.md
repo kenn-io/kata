@@ -410,7 +410,10 @@ occurrence and `skip` retains only those within its grace window.
 `behind` means **not caught up**, not that the hub is dead. A busy `latest`
 calendar scan can show `pending.count: 0`, `pending.more: true` and a durable
 `scan` with `until` and `cursor`. Compare two reads to see whether `scan.cursor`
-or `through` is advancing. On a paused job, pending work is hypothetical: what
+or `through` is advancing. `scan` is the stored checkpoint, while `pending`
+comes from a dry run of the current definition. A definition change can cause
+the next sweep to reset the stored scan instead of resuming its cursor.
+On a paused job, pending work is hypothetical: what
 resuming would create if the resume succeeds. Re-enabling is a write and may
 first require fixing a definition rejected by current write rules.
 

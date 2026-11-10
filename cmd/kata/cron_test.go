@@ -809,27 +809,31 @@ func TestCronJobShowPrintsDelivery(t *testing.T) {
 	require.NoError(t, err)
 	j, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Check service", Actor: "worker", Definition: cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Check service"}, Overlap: "allow", Catchup: "latest"}})
 	require.NoError(t, err)
-	for _, args := range [][]string{{"job", "show", j.UID}, {"job", "list"}} {
-		out, _, err := executeCronCLI(t, env.URL, nil, args...)
-		require.NoError(t, err)
-		t.Logf("cron %v: %s", args, out)
-		type jobView struct {
-			Delivery *struct {
-				State string `json:"state"`
-			} `json:"delivery"`
-		}
-		var response struct {
-			Job  jobView   `json:"job"`
-			Jobs []jobView `json:"jobs"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(out), &response))
-		if len(args) == 3 {
-			require.NotNil(t, response.Job.Delivery)
-			require.Equal(t, "active", response.Job.Delivery.State)
-		} else {
-			require.Len(t, response.Jobs, 1)
-			require.NotNil(t, response.Jobs[0].Delivery)
-			require.Equal(t, "active", response.Jobs[0].Delivery.State)
-		}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{{"show", []string{"job", "show", j.UID}}, {"list", []string{"job", "list"}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, _, err := executeCronCLI(t, env.URL, nil, tc.args...)
+			require.NoError(t, err)
+			type jobView struct {
+				Delivery *struct {
+					State string `json:"state"`
+				} `json:"delivery"`
+			}
+			var response struct {
+				Job  jobView   `json:"job"`
+				Jobs []jobView `json:"jobs"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &response))
+			if tc.name == "show" {
+				require.NotNil(t, response.Job.Delivery)
+				require.Equal(t, "active", response.Job.Delivery.State)
+			} else {
+				require.Len(t, response.Jobs, 1)
+				require.NotNil(t, response.Jobs[0].Delivery)
+				require.Equal(t, "active", response.Jobs[0].Delivery.State)
+			}
+		})
 	}
 }

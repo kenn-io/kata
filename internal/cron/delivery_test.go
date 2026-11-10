@@ -89,9 +89,6 @@ func TestDescribeRecurringIntervalProperty(t *testing.T) {
 		now := p.Through.Add(10 * time.Hour)
 		d, e := DescribeRecurring(j, definitionUID, p, now)
 		require.NoError(t, e)
-		b, e := PlanRecurring(j, definitionUID, p, now)
-		require.NoError(t, e)
-		require.Equal(t, b, d.Batch)
 		require.Equal(t, anchor.Add(time.Duration((elapsed/seconds+1)*seconds)*time.Second), d.NextDueAt)
 	})
 }

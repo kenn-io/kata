@@ -309,7 +309,6 @@ func TestCronJobShowIncludesDelivery(t *testing.T) {
 	env, p, _, j, now := deliveryHTTPFixture(t)
 	status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s?include=unknown,delivery", p.ID, j.UID), nil)
 	require.Equalf(t, 200, status, "%s", raw)
-	t.Logf("job show delivery response: %s", raw)
 	var out struct {
 		Job struct {
 			Delivery struct {
@@ -450,6 +449,47 @@ func TestCronDeliveryReleaseRejectsMovedChild(t *testing.T) {
 		require.Contains(t, wrapped.exposed, f.issue.ID, "parent evidence participates in response release")
 		require.Contains(t, wrapped.exposed, child.ID, "child evidence participates in response release")
 		require.Equal(t, http.StatusNotFound, status, string(raw))
+		require.NotContains(t, string(raw), child.UID)
+	})
+}
+
+func TestCronDeliveryReleaseAllowsUnreturnedChildMove(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		hidden := projectAccessHiddenProject(t, store, "hidden-project")
+		j, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.private.ID, Name: "Recurring work", Actor: "member", Definition: cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: f.issue.UID, Title: "Recurring work"}, Overlap: "allow", Catchup: "all"}})
+		require.NoError(t, err)
+		_, err = store.DispatchRecurringCron(t.Context(), db.DispatchRecurringCronIn{ProjectID: f.private.ID, JobUID: j.UID, ExpectedEventUID: j.DefinitionEventUID, Now: time.Now().UTC().Add(5 * time.Hour)})
+		require.NoError(t, err)
+		children, err := store.ChildrenOfIssue(t.Context(), f.issue.ID)
+		require.NoError(t, err)
+		require.Len(t, children, 2)
+		delivery, err := store.RecurringCronDelivery(t.Context(), f.private.ID, []db.CronJob{j}, time.Now().UTC().Add(5*time.Hour))
+		require.NoError(t, err)
+		selected := delivery[0].LastChild.UID
+		var child db.Issue
+		for _, candidate := range children {
+			if candidate.UID != selected {
+				child = candidate
+			}
+		}
+		path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s?include=delivery", f.private.ID, j.UID)
+		status, _, raw := f.request(t, http.MethodGet, path, "member", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Contains(t, string(raw), selected)
+		moved := false
+		wrapped := &deliveryAfterReadStore{Storage: store, afterRead: func() error {
+			_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: child.ID, FromProjectID: f.private.ID, ToProjectID: hidden.ID, IfMatchRev: child.Revision, Actor: "member"})
+			moved = err == nil
+			return err
+		}}
+		f = projectAccessFixtureWithStorage(t, f, wrapped)
+		status, _, raw = f.request(t, http.MethodGet, path, "member", nil, nil)
+		require.True(t, moved)
+		require.Contains(t, wrapped.exposed, f.issue.ID, "parent evidence participates in response release")
+		require.NotContains(t, wrapped.exposed, child.ID, "unreturned child is not response evidence")
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Contains(t, string(raw), selected)
 		require.NotContains(t, string(raw), child.UID)
 	})
 }

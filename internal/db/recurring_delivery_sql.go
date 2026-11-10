@@ -47,20 +47,38 @@ type RecurringChild struct {
 	ScheduledAt time.Time `json:"scheduled_at"`
 }
 
-// RecurringProgressOf reads the native checkpoint using dispatch's validation.
-func RecurringProgressOf(parent Issue, jobUID string) (cron.RecurringProgress, error) {
-	return readRecurringProgress(parent, jobUID)
-}
-
-// RecurringChildFrom parses only the occurrence timestamp from selected evidence.
-func RecurringChildFrom(uid, occurrence string) (RecurringChild, error) {
-	var value struct {
-		ScheduledAt time.Time `json:"scheduled_at"`
+// LastRecurringChild consumes authorized child rows, retaining only the newest
+// supported occurrence. Only the returned evidence participates in response release.
+func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, error) {
+	defer func() { _ = rows.Close() }()
+	var latest *RecurringChild
+	var latestID int64
+	for rows.Next() {
+		var id int64
+		var uid, occurrence string
+		if err := rows.Scan(&id, &uid, &occurrence); err != nil {
+			return nil, err
+		}
+		var value struct {
+			Version     int       `json:"version"`
+			ScheduledAt time.Time `json:"scheduled_at"`
+		}
+		// Unknown versions and corrupt provenance are not delivery evidence.
+		if err := json.Unmarshal([]byte(occurrence), &value); err != nil || value.Version != 1 || value.ScheduledAt.IsZero() {
+			continue
+		}
+		child := RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}
+		if latest == nil || child.ScheduledAt.After(latest.ScheduledAt) || (child.ScheduledAt.Equal(latest.ScheduledAt) && child.UID > latest.UID) {
+			latest, latestID = &child, id
+		}
 	}
-	if err := json.Unmarshal([]byte(occurrence), &value); err != nil {
-		return RecurringChild{}, err
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
-	return RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}, nil
+	if latest != nil {
+		RecordExposedIssue(ctx, latestID)
+	}
+	return latest, nil
 }
 
 func recurringRecipient(j cron.JobDefinition, parent Issue) (string, error) {
@@ -74,25 +92,6 @@ func recurringRecipient(j cron.JobDefinition, parent Issue) (string, error) {
 	return notification.NormalizeRecipient(recipient)
 }
 
-func (a CronSQL) recurringDeliveryAuthority(ctx context.Context, projectID int64) (string, error) {
-	var role string
-	var enabled int
-	err := a.Query.QueryRowContext(ctx, `SELECT role,enabled FROM federation_bindings WHERE project_id=$1`, projectID).Scan(&role, &enabled)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "local", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if role == string(FederationRoleHub) {
-		if enabled == 1 {
-			return "hub", nil
-		}
-		return "hub_disabled", nil
-	}
-	return "spoke", nil
-}
-
 // RecurringDelivery returns one status per input; adapter entries remain nil.
 func (a CronSQL) RecurringDelivery(ctx context.Context, projectID int64, jobs []CronJob, now time.Time) ([]*RecurringDelivery, error) {
 	out := make([]*RecurringDelivery, len(jobs))
@@ -103,22 +102,30 @@ func (a CronSQL) RecurringDelivery(ctx context.Context, projectID int64, jobs []
 	if !native {
 		return out, nil
 	}
-	authority, err := a.recurringDeliveryAuthority(ctx, projectID)
+	delivers, role, err := recurringAuthority(ctx, a.Query, projectID)
 	if err != nil {
 		return nil, err
+	}
+	authority := "spoke"
+	switch role {
+	case "":
+		authority = "local"
+	case FederationRoleHub:
+		authority = "hub_disabled"
+		if delivers {
+			authority = "hub"
+		}
 	}
 	now = now.UTC()
 	for i, j := range jobs {
 		if !cron.IsRecurringIssueJob(j.Definition) {
 			continue
 		}
-		d := &RecurringDelivery{State: "active", Authority: authority, DeliversHere: authority == "local" || authority == "hub", EvaluatedAt: now}
+		d := &RecurringDelivery{State: "active", Authority: authority, DeliversHere: delivers, EvaluatedAt: now}
 		out[i] = d
-		var parent Issue
-		var deleted bool
-		// Unlike dispatch this is a read-only projection: never lock the parent.
-		err := a.Query.QueryRowContext(ctx, `SELECT id,uid,status,owner,author,metadata,revision,deleted_at IS NOT NULL FROM issues WHERE uid=$1 AND project_id=$2`, j.Definition.Issue.ParentUID, projectID).Scan(&parent.ID, &parent.UID, &parent.Status, &parent.Owner, &parent.Author, &parent.Metadata, &parent.Revision, &deleted)
-		missing := errors.Is(err, sql.ErrNoRows)
+		// Unlike dispatch this projection must not lock the parent.
+		parent, deleted, err := a.recurringParent(ctx, a.Query, projectID, j.Definition.Issue.ParentUID, false)
+		missing := errors.Is(err, ErrNotFound)
 		if err != nil && !missing {
 			return nil, err
 		}
@@ -138,7 +145,7 @@ func (a CronSQL) RecurringDelivery(ctx context.Context, projectID int64, jobs []
 		}
 		if !missing {
 			RecordExposedIssue(ctx, parent.ID)
-			progress, evalErr := RecurringProgressOf(parent, j.UID)
+			progress, evalErr := readRecurringProgress(parent, j.UID)
 			if evalErr == nil {
 				d.Anchor = &progress.Anchor
 				d.Through = &progress.Through
@@ -165,18 +172,9 @@ func (a CronSQL) RecurringDelivery(ctx context.Context, projectID int64, jobs []
 			if evalErr != nil {
 				d.Error = evalErr.Error()
 			}
-			children, queryErr := a.RecurringChildren(ctx, parent.ID, j.UID)
-			if queryErr != nil {
-				return nil, queryErr
-			}
-			for _, child := range children {
-				if child.ScheduledAt.IsZero() {
-					continue
-				}
-				if d.LastChild == nil || child.ScheduledAt.After(d.LastChild.ScheduledAt) || (child.ScheduledAt.Equal(d.LastChild.ScheduledAt) && child.UID > d.LastChild.UID) {
-					copy := child
-					d.LastChild = &copy
-				}
+			d.LastChild, err = a.RecurringChild(ctx, parent.ID, j.UID)
+			if err != nil {
+				return nil, err
 			}
 		}
 		switch {
