@@ -138,21 +138,6 @@ func TestMCPCoordinationWaitReplyNormalizesDefaultIdentity(t *testing.T) {
 	require.Equal(t, "reply", out["states"].([]any)[0].(map[string]any)["reason"])
 }
 
-func TestMCPCoordinationWaitAnyStopsBeforeLaterRef(t *testing.T) {
-	var later atomic.Bool
-	session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
-		if strings.HasSuffix(r.URL.Path, "/def1") {
-			later.Store(true)
-		}
-		issue := issueJSON(1, "spoke-project", "abc1")
-		issue["metadata"] = map[string]any{"work.attention": "stuck"}
-		return issue
-	})
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "any": true, "timeout_seconds": 1})
-	require.Equal(t, "matched", out["reason"])
-	require.False(t, later.Load(), "a slow later reference must not postpone a satisfied any join")
-}
-
 func TestMCPCoordinationWaitAllRetainsObservedCompletions(t *testing.T) {
 	var first, second atomic.Int64
 	session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
@@ -318,7 +303,7 @@ func TestMCPCoordinationWaitParentCancellationStopsActorResolution(t *testing.T)
 func TestMCPCoordinationWaitReplyResolvesActorPerProject(t *testing.T) {
 	actors := map[string]string{"/api/v1/projects/1/notifications/actor": "first-bound-actor", "/api/v1/projects/2/notifications/actor": "second-bound-actor"}
 	lookups := map[int64]*atomic.Int64{1: new(atomic.Int64), 2: new(atomic.Int64)}
-	shows := map[string]int{}
+	shows := map[string]*atomic.Int64{"abc1": new(atomic.Int64), "def2": new(atomic.Int64)}
 	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects":
@@ -340,9 +325,8 @@ func TestMCPCoordinationWaitReplyResolvesActorPerProject(t *testing.T) {
 			if strings.Contains(r.URL.Path, "/2/") {
 				projectID, name, ref, actor = 2, "second-project", "def2", "second-bound-actor"
 			}
-			shows[ref]++
 			message := "before"
-			if shows[ref] > 1 {
+			if shows[ref].Add(1) > 1 {
 				message = "reply arrived"
 			}
 			issue := issueJSON(projectID, name, ref)
@@ -368,8 +352,8 @@ func TestMCPCoordinationWaitReplyResolvesActorPerProject(t *testing.T) {
 	require.Equal(t, "matched", out["reason"])
 	require.GreaterOrEqual(t, lookups[1].Load(), int64(1))
 	require.GreaterOrEqual(t, lookups[2].Load(), int64(1))
-	require.GreaterOrEqual(t, shows["abc1"], 2)
-	require.GreaterOrEqual(t, shows["def2"], 2)
+	require.GreaterOrEqual(t, shows["abc1"].Load(), int64(2))
+	require.GreaterOrEqual(t, shows["def2"].Load(), int64(2))
 }
 
 func TestMCPCoordinationWaitReplySurvivesProjectMove(t *testing.T) {
@@ -531,4 +515,43 @@ func TestMCPCoordinationWaitParentCancellation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("daemon request was not cancelled")
 	}
+}
+
+func TestMCPCoordinationWaitAnyLetsLaterIssueProgress(t *testing.T) {
+	session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
+		if strings.HasSuffix(r.URL.Path, "/abc1") {
+			<-r.Context().Done()
+			return nil
+		}
+		issue := issueJSON(1, "spoke-project", "def1")
+		issue["metadata"] = map[string]any{"work.attention": "stuck"}
+		return issue
+	})
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "any": true, "timeout_seconds": 1})
+	require.Equal(t, "matched", out["reason"])
+}
+
+func TestMCPCoordinationWaitStatusAnyReturnsCompleteSnapshot(t *testing.T) {
+	session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
+		ref := "abc1"
+		if strings.HasSuffix(r.URL.Path, "/def1") {
+			ref = "def1"
+		}
+		return issueJSON(1, "spoke-project", ref)
+	})
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "open", "any": true, "timeout_seconds": 1})
+	require.Equal(t, "matched", out["reason"])
+	require.Len(t, out["states"], 2)
+}
+
+func TestMCPCoordinationWaitStatusAnyLetsLaterIssueProgress(t *testing.T) {
+	session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
+		if strings.HasSuffix(r.URL.Path, "/abc1") {
+			<-r.Context().Done()
+			return nil
+		}
+		return issueJSON(1, "spoke-project", "def1")
+	})
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "open", "any": true, "timeout_seconds": 1})
+	require.Equal(t, "matched", out["reason"])
 }

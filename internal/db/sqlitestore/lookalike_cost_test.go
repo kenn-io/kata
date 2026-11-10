@@ -373,3 +373,37 @@ func TestSearchFTSAny_LookalikeTitlePageBudget(t *testing.T) {
 		})
 	}
 }
+
+// Large-store title filtering must still find titles made only of stop words
+// and one-letter words, which leave the similarity tokenizer nothing to match.
+func TestSearchFTSAny_LookalikeStopWordTitle(t *testing.T) {
+	for _, title := range []string{"the", "This is it", "A B"} {
+		t.Run(title, func(t *testing.T) {
+			ctx := t.Context()
+			store, path := openTestDBWithPath(t)
+			project, err := store.CreateProject(ctx, "example-project")
+			require.NoError(t, err)
+			raw, err := sql.Open("sqlite", path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, raw.Close()) })
+			tx, err := raw.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = tx.Rollback() })
+			for n := range 5_100 {
+				_, err = tx.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,body,author) VALUES(?,?,?,?,?,'tester')`, fmt.Sprintf("%026d", n+1), project.ID, fmt.Sprintf("%08d", n+1), "unrelated issue", "other content")
+				require.NoError(t, err)
+			}
+			require.NoError(t, tx.Commit())
+			original := createTesterIssueWithBody(ctx, t, store, project.ID, title, "")
+
+			hits, err := store.SearchFTSAny(ctx, db.SearchFTSParams{
+				ProjectID: project.ID, Query: similarity.LookalikeQuery(title, ""),
+				TitleQuery: similarity.TitlePrefix(title), Limit: 20,
+			})
+
+			require.NoError(t, err)
+			require.NotEmpty(t, hits)
+			require.Equal(t, original.ID, hits[0].Issue.ID)
+		})
+	}
+}

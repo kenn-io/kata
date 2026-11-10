@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
 	"modernc.org/sqlite"
@@ -17,6 +18,49 @@ import (
 func cronPullWorkflow(t testing.TB, p db.Project, name string, clock int64) db.RemoteEvent {
 	t.Helper()
 	return incrementalRemoteEvent(t, p, "", "cron.workflow.created", fmt.Sprintf(`{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","project_uid":%q,"name":%q,"author":"tester","created_at":"2026-05-23T12:00:00Z","updated_at":"2026-05-23T12:00:00Z","definition":{"version":1,"steps":[{"key":"review","kind":"command","command":"echo synthetic"}]}}`, p.UID, name), clock)
+}
+
+func cronPullRun(t testing.TB, p db.Project, workflow db.RemoteEvent, uid, message string, clock int64) db.RemoteEvent {
+	t.Helper()
+	at := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	payload, err := json.Marshal(db.NewCronRunObservation(db.CronRun{
+		UID: uid, WorkflowUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAA"), WorkflowDefinitionEventUID: &workflow.EventUID,
+		Actor: "tester", Status: "succeeded", Summary: cron.Summary{Version: 1, Message: message}, Revision: 1,
+		CreatedAt: at, UpdatedAt: at.Add(time.Second),
+	}, p.UID))
+	require.NoError(t, err)
+	return incrementalRemoteEvent(t, p, "", "cron.run.observed", string(payload), clock)
+}
+
+func TestCronPullMaterializesOnlyTouchedRuns(t *testing.T) {
+	d, p, _ := incrementalTestStore(t)
+	ctx := t.Context()
+	workflow := cronPullWorkflow(t, p, "workflow", 9_000_001_000_000)
+	a := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FBB", "original A", 9_000_001_000_001)
+	b := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FCC", "original B", 9_000_001_000_001)
+	_, err := d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{workflow, a, b})
+	require.NoError(t, err)
+	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	before, err := (db.CronSQL{Query: d}).Run(ctx, p.ID, "01ARZ3NDEKTSV4RRFFQ69G5FCC")
+	require.NoError(t, err)
+	// Admission can retain an observation before its pull page is materialized.
+	pendingB := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FCC", "pending B", 9_000_001_000_005)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{pendingB})
+	require.NoError(t, err)
+	later := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FBB", "later A", 9_000_001_000_003)
+	older := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FBB", "older A", 9_000_001_000_002)
+	c := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FDD", "new C", 9_000_001_000_004)
+	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{c, later, older})
+	require.NoError(t, err)
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{c.EventUID, later.EventUID, older.EventUID}))
+	after, err := (db.CronSQL{Query: d}).Run(ctx, p.ID, "01ARZ3NDEKTSV4RRFFQ69G5FCC")
+	require.NoError(t, err)
+	require.Equal(t, before, after, "a pull must leave runs outside its page unchanged")
+	// A page carrying only an older observation must keep the historical winner.
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{older.EventUID}))
+	run, err := (db.CronSQL{Query: d}).Run(ctx, p.ID, "01ARZ3NDEKTSV4RRFFQ69G5FBB")
+	require.NoError(t, err)
+	require.Equal(t, "later A", run.Summary.Message)
 }
 
 func seedCronPullHistory(t testing.TB, d *Store, p db.Project, count int) {
@@ -115,7 +159,7 @@ func BenchmarkCronOnlyPullHistory(b *testing.B) {
 // Mixed pages must still materialize issue deltas, and reset baselines must
 // rebuild identities even when cron definitions arrive on an earlier page.
 func TestCronPullMatchesFullFold(t *testing.T) {
-	for _, scenario := range []string{"cron-only", "mixed", "reset-cron-first", "move-and-reset-alias"} {
+	for _, scenario := range []string{"cron-only", "runs", "mixed", "reset-cron-first", "move-and-reset-alias"} {
 		t.Run(scenario, func(t *testing.T) {
 			d, p, issue := incrementalTestStore(t)
 			ctx := t.Context()
@@ -150,6 +194,12 @@ func TestCronPullMatchesFullFold(t *testing.T) {
 			reference := cloneIncrementalStore(t, d)
 			workflow := cronPullWorkflow(t, p, "workflow", 9_000_001_000_000)
 			pages := [][]db.RemoteEvent{{workflow}}
+			if scenario == "runs" {
+				a := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FBB", "original A", 9_000_001_000_001)
+				later := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FBB", "later A", 9_000_001_000_002)
+				b := cronPullRun(t, p, workflow, "01ARZ3NDEKTSV4RRFFQ69G5FCC", "new B", 9_000_001_000_003)
+				pages = [][]db.RemoteEvent{{workflow, a}, {later, b}}
+			}
 			if scenario == "mixed" {
 				pages[0] = append(pages[0], incrementalRemoteEvent(t, p, "", "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":"mixed update"}`, issue.UID), 9_000_001_000_001))
 			}

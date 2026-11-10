@@ -1,6 +1,6 @@
 <script lang="ts">
   /* eslint-disable svelte/prefer-svelte-reactivity */
-  import { onDestroy, tick, untrack } from 'svelte'
+  import { onDestroy, tick, untrack, type Snippet } from 'svelte'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
   import ChevronUpIcon from '@lucide/svelte/icons/chevron-up'
@@ -38,6 +38,7 @@
 
   interface Props {
     currentView: KataCurrentView
+    now: number
     resultsKey?: string
     issueCatalog: readonly KataTaskSummary[]
     scopeLabel?: string
@@ -51,12 +52,15 @@
     revealRequest?: KataIssueRevealRequest | null
     onSelect: (issue: KataTaskSummary) => void
     onOpenGraph?: ((issue: KataTaskSummary) => void) | undefined
+    /** Replaces the bare `No tasks` line when the list has no rows. */
+    empty?: Snippet | undefined
   }
 
   const EMPTY_READY_ISSUE_UIDS: ReadonlySet<string> = new Set()
 
   let {
     currentView,
+    now,
     resultsKey = '',
     issueCatalog,
     scopeLabel = undefined,
@@ -70,6 +74,7 @@
     revealRequest = null,
     onSelect,
     onOpenGraph = undefined,
+    empty = undefined,
   }: Props = $props()
 
   const SORT_STORAGE_KEY = 'kata:issue-sort/v1'
@@ -1040,7 +1045,11 @@
       </div>
 
       {#if visibleRootIssues.length === 0}
-        <div class="empty">No tasks</div>
+        {#if empty}
+          {@render empty()}
+        {:else}
+          <div class="empty">No tasks</div>
+        {/if}
       {/if}
 
       {#if hasTemporaryReveal || isProjectScoped || shouldFlatten}
@@ -1109,7 +1118,7 @@
       </span>
       {#if columnVisibility.updated}
         <span class="cell cell-updated" title={issue.updated_at}>
-          {relativeTime(issue.updated_at)}
+          {relativeTime(issue.updated_at, new Date(now))}
         </span>
       {/if}
       {#if columnVisibility.priority}

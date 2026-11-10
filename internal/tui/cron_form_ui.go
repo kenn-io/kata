@@ -19,18 +19,21 @@ import (
 )
 
 // cronJobsScope says the keys that edit jobs apply: the Jobs list or a job's page.
-func (m Model) cronJobsScope() bool {
+func (m Model) cronJobsScope() bool { return m.cronScope(cronJobs) }
+
+// cronScope says the keys that edit records of one kind apply: its list or a record's page.
+func (m Model) cronScope(kind int) bool {
 	if m.scope.allProjects || m.scope.projectID == 0 {
 		return false
 	}
 	if n := len(m.cron.stack); n > 0 {
-		return m.cron.stack[n-1].ref.kind == cronJobs
+		return m.cron.stack[n-1].ref.kind == kind
 	}
-	return m.cron.tab == cronJobs
+	return m.cron.tab == kind
 }
 
-// cronSelectedJob is the job under the cursor on the list, or the open job page.
-func (m Model) cronSelectedJob(lines []cronLine, cursor int) (uid string, ok bool) {
+// cronSelectedUID is the record under the cursor on the list, or the open page.
+func (m Model) cronSelectedUID(lines []cronLine, cursor int) (uid string, ok bool) {
 	if n := len(m.cron.stack); n > 0 {
 		return m.cron.stack[n-1].ref.uid, true
 	}
@@ -63,7 +66,7 @@ func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model,
 	default:
 		return m, nil, false
 	}
-	uid, ok := m.cronSelectedJob(lines, cursor)
+	uid, ok := m.cronSelectedUID(lines, cursor)
 	job := m.cron.data.job(uid)
 	if !ok || job == nil {
 		return m, nil, true
@@ -89,12 +92,17 @@ type cronEditOpenedMsg struct {
 	err              error
 }
 
-// cronSavedMsg answers a save. conflict carries
-// the job as it is now when the guard refused the write.
+type cronCurrent struct {
+	db.CronDefinition
+	Definition any
+}
+
+// cronSavedMsg answers a save. conflict carries the current record when
+// the guard refused the write.
 type cronSavedMsg struct {
 	conn, scope uint64
 	notice      string
-	conflict    *db.CronJob
+	conflict    *cronCurrent
 	fieldErr    *cronFieldError
 	err         error
 }
@@ -110,13 +118,7 @@ func (m Model) cronOpenEdit(uid string, seq uint64) tea.Cmd {
 }
 
 func (m Model) cronEditOpened(msg cronEditOpenedMsg) (Model, tea.Cmd) {
-	if msg.conn != m.connGen || msg.scope != m.scopeGen || m.cron.data == nil || m.cron.form != nil || msg.seq != m.cron.editSeq || m.cron.filtering || m.modal != modalNone {
-		return m, nil
-	}
-	// The answer may arrive after the user moved on; it opens the form only
-	// where the key was pressed: the same job, with nothing else on top.
-	_, _, lines := cronScreen(m)
-	if uid, ok := m.cronSelectedJob(lines, *m.cronCursor()); m.view != viewCron || m.cron.help || !m.cronJobsScope() || !ok || uid != msg.uid {
+	if !m.cronEditAnswerApplies(msg.conn, msg.scope, msg.seq, msg.uid, cronJobs) {
 		return m, nil
 	}
 	if msg.err != nil {
@@ -135,9 +137,25 @@ func (m Model) cronEditOpened(msg cronEditOpenedMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// cronEditAnswerApplies reports whether a late answer to an edit read still
+// belongs to the screen it was asked from: same connection and scope, nothing
+// open on top, and the same job (or workflow) under the cursor.
+func (m Model) cronEditAnswerApplies(conn, scope, seq uint64, uid string, kind int) bool {
+	if conn != m.connGen || scope != m.scopeGen || m.cron.data == nil || m.cron.form != nil ||
+		seq != m.cron.editSeq || m.cron.filtering || m.modal != modalNone {
+		return false
+	}
+	_, _, lines := cronScreen(m)
+	selected, ok := m.cronSelectedUID(lines, *m.cronCursor())
+	return m.view == viewCron && !m.cron.help && m.cronScope(kind) && ok && selected == uid
+}
+
 // cronSaveCmd resolves the issue refs the draft names, builds the definition
 // and writes it. A refused guard returns the current job beside the draft.
 func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
+	if f.wf {
+		return m.cronSaveWorkflowCmd(f)
+	}
 	api, pid, actor := m.api, m.scope.projectID, m.list.actor
 	conn, scope := m.connGen, m.scopeGen
 	return func() tea.Msg {
@@ -146,7 +164,7 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 		fail := func(err error) tea.Msg { return cronSavedMsg{conn: conn, scope: scope, err: err} }
 		resolved := map[string]string{}
 		for _, r := range f.issueRefs() {
-			detail, err := api.GetIssueDetail(ctx, pid, r.ref)
+			detail, err := api.readIssue(ctx, pid, r.ref)
 			if err != nil || detail == nil || detail.Issue == nil || detail.Issue.UID == "" {
 				text := fmt.Sprintf("no issue %q in this project", r.ref)
 				var apiErr *APIError
@@ -170,21 +188,15 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 			write.ExpectedEventUID, notice = f.expected, "Saved "+name
 		}
 		if err := api.PutCronJob(ctx, pid, f.uid, write); err != nil {
-			var apiErr *APIError
-			if errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusConflict && apiErr.Code == "cron_conflict" {
-				var data struct {
-					Current jsontext.Value `json:"current"`
+			if raw, ok := cronConflictCurrent(err); ok {
+				current, readErr := decodeCronJob(raw)
+				if readErr == nil {
+					_, readErr = cronFormFor(current, f.workflows)
 				}
-				if json.Unmarshal(apiErr.Data, &data) == nil && len(data.Current) > 0 {
-					current, readErr := decodeCronJob(data.Current)
-					if readErr == nil {
-						_, readErr = cronFormFor(current, f.workflows)
-					}
-					if readErr == nil {
-						return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err}
-					}
-					return fail(readErr)
+				if readErr == nil {
+					return cronSavedMsg{conn: conn, scope: scope, conflict: &cronCurrent{current.CronDefinition, current.Definition}, err: err}
 				}
+				return fail(readErr)
 			}
 			return fail(err)
 		}
@@ -366,7 +378,7 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 	lines = make([]string, 0, cfCount)
 	if f.conflict != nil {
 		c := f.conflict
-		lines = append(lines, errorStyle.Render("This job changed while you edited it. Your draft is kept."), "",
+		lines = append(lines, errorStyle.Render("This "+f.noun()+" changed while you edited it. Your draft is kept."), "",
 			"Current name: "+sanitizeForLine(c.Name), "Current event: "+c.DefinitionEventUID)
 		if c.DeletedAt != nil {
 			lines = append(lines, "Current state: archived")
@@ -425,9 +437,9 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 
 func renderCronForm(m Model) string {
 	f := m.cron.form
-	title := "New job"
+	title := "New " + f.noun()
 	if !f.create {
-		title = "Edit job · " + sanitizeForLine(f.openedName)
+		title = "Edit " + f.noun() + " · " + sanitizeForLine(f.openedName)
 	}
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),

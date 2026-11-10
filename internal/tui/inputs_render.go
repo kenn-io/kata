@@ -96,6 +96,8 @@ func renderCenteredForm(s inputState, width, height int, now time.Time) string {
 		return renderDatesForm(s, innerW, now)
 	case inputDeleteForm:
 		return renderDeleteForm(s, innerW)
+	case inputRecurrenceForm:
+		return renderRecurrenceForm(s, min(innerW, width-4), height, now)
 	}
 	return renderSingleFieldForm(s, innerW, innerH)
 }
@@ -288,17 +290,16 @@ func renderNewIssueField(s inputState, idx, innerW int) string {
 	} else {
 		label = subtleStyle.Render(label)
 	}
-	var view string
 	switch f.kind {
 	case fieldMultiLine:
-		view = f.area.View()
+		return label + "\n" + f.area.View()
 	case fieldRadio:
-		view = renderRadio(f.radio, idx == s.active)
+		return label + "\n" + renderRadio(f.radio, idx == s.active)
 	default:
 		f.input.SetWidth(innerW - 2)
-		view = f.input.View()
+		f.input.SetCursor(f.input.Position())
+		return label + "\n" + f.input.View()
 	}
-	return label + "\n" + view
 }
 
 // renderFormFooter is the footer-hint row inside the panel. While
@@ -307,12 +308,16 @@ func renderNewIssueField(s inputState, idx, innerW int) string {
 // hint with a "(body only)" parenthetical, used by the new-issue
 // form when a single-line field has focus.
 func renderFormFooter(s inputState, innerW int, allowEditor bool) string {
-	if s.saving {
-		return statusStyle.Render("saving…")
-	}
 	hint := "ctrl+o save · esc cancel · ctrl+e $EDITOR"
 	if !allowEditor {
 		hint = "ctrl+o save · esc cancel · tab next · ctrl+e (body only)"
+	}
+	return renderFormFooterHint(s, innerW, hint)
+}
+
+func renderFormFooterHint(s inputState, innerW int, hint string) string {
+	if s.saving {
+		return statusStyle.Render("saving…")
 	}
 	if len(hint) > innerW {
 		hint = "ctrl+o save · esc cancel"

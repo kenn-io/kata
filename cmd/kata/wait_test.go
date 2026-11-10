@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/wait"
 )
 
 // --- pure condition-evaluation unit tests -------------------------------
@@ -49,7 +50,8 @@ func TestWaitEvalCondition(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sat, reason := evalWait(c.mode, c.st)
+			var evaluator wait.Evaluator
+			sat, reason := evaluator.Eval(string(c.mode), c.st.status, c.st.attention, c.st.reply)
 			assert.Equal(t, c.wantSat, sat)
 			assert.Equal(t, c.wantReason, reason)
 		})

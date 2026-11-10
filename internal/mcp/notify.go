@@ -4,13 +4,10 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
-	"unicode/utf8"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"go.kenn.io/kata/internal/notification"
-	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -36,30 +33,21 @@ func (h toolHandlers) notify(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if input.Clear && (input.Message != nil || input.Re != "" || input.Broadcast || input.Teammates) {
 		return nil, NotifyOutput{}, errors.New("clear cannot be combined with message, re, broadcast, or teammates")
 	}
-	if input.Broadcast && input.To != "" {
-		return nil, NotifyOutput{}, errors.New("broadcast and to are mutually exclusive")
-	}
-	if input.Teammates && !input.Broadcast {
-		return nil, NotifyOutput{}, errors.New("teammates requires broadcast")
-	}
-	to := ""
-	if !input.Broadcast {
+	to := input.To
+	if input.Clear {
 		var err error
-		to, err = notification.NormalizeRecipient(input.To)
+		to, err = notification.NormalizeRecipient(to)
 		if err != nil {
 			return nil, NotifyOutput{}, err
 		}
 	}
-	handle := ""
-	if !input.Clear {
-		if input.Message == nil || strings.TrimSpace(*input.Message) == "" || !utf8.ValidString(*input.Message) || len(*input.Message) > notification.MessageMaxBytes {
-			return nil, NotifyOutput{}, errors.New("message must be nonblank valid UTF-8 and at most 1024 bytes")
-		}
-		var err error
-		handle, err = teammate.Resolve(input.Teammate, h.options.Teammate)
-		if err != nil {
-			return nil, NotifyOutput{}, err
-		}
+	handle := h.options.Teammate
+	if input.Teammate != nil {
+		handle = *input.Teammate
+	}
+	message := ""
+	if input.Message != nil {
+		message = *input.Message
 	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
@@ -74,8 +62,8 @@ func (h toolHandlers) notify(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	response, err := h.options.Client.NotifyIssue(ctx, &generated.NotifyIssueRequestOptions{
 		PathParams: &generated.NotifyIssuePath{ProjectID: strconv.FormatInt(project.ID, 10), Ref: ref},
 		Body: &generated.NotifyIssueBody{
-			Actor: &h.options.Actor, To: optionalString(to), Message: *input.Message,
-			Re: optionalString(input.Re), Teammate: optionalString(handle),
+			Actor: &h.options.Actor, To: &to, Message: message,
+			Re: &input.Re, Teammate: &handle,
 			Broadcast: optionalTrue(input.Broadcast), Teammates: optionalTrue(input.Teammates),
 		},
 	})

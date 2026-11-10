@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-31
+last_edited: 2026-11-07
 ---
 
 # Backup and restore
@@ -55,7 +55,15 @@ damaged database.
 
 ## Slow or interrupted upgrade startup
 
-An SQLite upgrade exports the old database and imports a replacement before
+SQLite in-place upgrades from schemas 41 through 49 to 50 add the missing
+indexes, and the empty MCP Events subscriptions table, inside the existing
+database in one transaction. Allow free space for the new indexes, their WAL
+pages, and temporary sort files. These upgrades keep
+no `kata.db.bak.*` backup. An interrupted or failed transaction leaves the old
+schema version intact, and the next start retries. Take a backup before upgrading
+if you need to return to an older binary.
+
+Other SQLite upgrades export the old database and import a replacement before
 publishing a ready daemon. Large databases can take minutes. Detached
 `kata daemon start` and `kata daemon restart` keep waiting while an SQLite
 migration is pending and report that progress on stderr. Cancelling detached
@@ -219,6 +227,17 @@ that appears after import starts is never overwritten, even with `--force`.
 Shared cron definitions and independent run observations are portable backup
 data. A run with `running` or `unknown` status does not prevent an explicitly
 requested replacement.
+
+Full backups also carry MCP Events subscriptions and the `mcp_events_key_check`
+metadata row that proves which Events key sealed them. The key file
+`mcp-events.key` is never in a backup, like the root signing key. Restore it
+into `<KATA_HOME>/runtime/<storage-id>/` before you start the restored daemon.
+The Events service accepts subscriptions and delivers only with a key that
+matches the check. Project exports, `--merge`, and `--as-standalone` copies omit
+both the subscriptions and the key check, so callbacks never follow partial
+data and a partial import never changes the destination's key check. A full
+restore replaces both. A restored daemon pings every active subscription once,
+because a restore can roll an inbox back without any new event.
 
 For Postgres, pass a DSN as the target:
 

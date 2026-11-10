@@ -3,6 +3,7 @@ package tui
 import (
 	"cmp"
 	"encoding/json/jsontext"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -53,6 +54,7 @@ const (
 	cfCheckout
 	cfSecrets
 	cfOptions
+	cfDefinition
 	cfCount
 )
 
@@ -63,7 +65,7 @@ var cronFieldLabels = [cfCount]string{
 	cfPolicy: "Issue policy", cfScheduled: "Scheduled offset", cfDeadline: "Deadline offset",
 	cfRecipient: "Recipient", cfMessage: "Message", cfReport: "Issue",
 	cfOverlap: "Overlap", cfCatchup: "Catch up", cfGrace: "Grace", cfTimeout: "Timeout",
-	cfCheckout: "Checkout key", cfSecrets: "Secrets", cfOptions: "Options",
+	cfCheckout: "Checkout key", cfSecrets: "Secrets", cfOptions: "Options", cfDefinition: "Definition",
 }
 
 type cronChoice struct{ value, label string }
@@ -358,6 +360,7 @@ func cronFormatSecrets(refs map[string]string) string {
 // cronForm is the create and edit draft. Text fields hold what was typed; the
 // definition is built from them only when validating or saving.
 type cronForm struct {
+	wf             bool
 	uid            string // minted when the form opens, so every send of a create is one job
 	create         bool
 	expected       string // definition_event_uid the edit replaces
@@ -377,7 +380,7 @@ type cronForm struct {
 	general        string
 	saving         bool
 	conflictCursor int
-	conflict       *db.CronJob
+	conflict       *cronCurrent
 	formGen        int64
 	workflows      []cronChoice
 }
@@ -416,7 +419,7 @@ func newCronForm(workflows []cronChoice) (*cronForm, error) {
 // cronFormFor is a form on an existing job. It reads the portable definition
 // that was returned by the daemon, so nothing is lost on a round trip.
 func cronFormFor(rec db.CronJob, workflows []cronChoice) (*cronForm, error) {
-	if err := rec.Definition.Validate(); err != nil {
+	if err := rec.Definition.Validate(); err != nil && !errors.Is(err, cron.ErrNeverFires) {
 		return nil, err
 	}
 	f := &cronForm{uid: rec.UID, expected: rec.DefinitionEventUID, opened: rec.Definition, openedName: rec.Name, workflows: workflows}
@@ -569,6 +572,9 @@ func (f *cronForm) executePolicy(uidOf func(string) string) (*cron.IssuePolicy, 
 
 // shown says a field applies to the form as it stands.
 func (f *cronForm) shown(field cronField) bool {
+	if f.wf {
+		return field == cfName || field == cfDefinition
+	}
 	switch field {
 	case cfKind, cfName, cfTrigger, cfEnabled:
 		return true
@@ -758,18 +764,23 @@ func (f *cronForm) focusField(field cronField) {
 }
 
 func (f *cronForm) externalText(field cronField) bool {
-	return slices.Contains([]cronField{cfBody, cfPrompt, cfMessage, cfOptions}, field)
+	return slices.Contains([]cronField{cfBody, cfPrompt, cfMessage, cfOptions, cfDefinition}, field)
 }
 
 // validate builds the definition with stand-in issue UIDs.
 func (f *cronForm) validate() {
 	f.syncEditor()
-	_, _, err := f.build(func(ref string) string {
-		if strings.TrimSpace(ref) == "" {
-			return ""
-		}
-		return cronValidationUID
-	})
+	var err error
+	if f.wf {
+		_, _, err = f.workflowBuild()
+	} else {
+		_, _, err = f.build(func(ref string) string {
+			if strings.TrimSpace(ref) == "" {
+				return ""
+			}
+			return cronValidationUID
+		})
+	}
 	f.err, f.general = nil, ""
 	if fe, ok := err.(*cronFieldError); ok {
 		f.err = fe

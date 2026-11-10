@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"go.kenn.io/kata/internal/notification"
+	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -29,11 +29,14 @@ type UnassignInput struct {
 type InboxInput struct {
 	For     string `json:"for" jsonschema:"Recipient actor, or actor/teammate"`
 	Project string `json:"project,omitempty" jsonschema:"Project name; omit to read every project in scope"`
-	Limit   int    `json:"limit,omitempty" jsonschema:"Maximum issues to read; default 20"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"Maximum candidate issues per page; default 20"`
+	Cursor  string `json:"cursor,omitempty" jsonschema:"Follow next_cursor even for empty pages; keep recipient and project unchanged"`
 }
 
 // InboxRequest is one open issue asking for the recipient's attention.
 type InboxRequest struct {
+	IssueUID     string  `json:"issue_uid"`
+	ProjectUID   string  `json:"project_uid"`
 	Ref          string  `json:"ref"`
 	QualifiedRef string  `json:"qualified_ref"`
 	WebURL       *string `json:"web_url,omitempty"`
@@ -48,9 +51,11 @@ type InboxRequest struct {
 
 // InboxOutput lists attention requests without clearing them.
 type InboxOutput struct {
-	Recipient string         `json:"recipient"`
-	Requests  []InboxRequest `json:"requests"`
-	Truncated bool           `json:"truncated" jsonschema:"More open issues carry requests than the limit allowed"`
+	NextCursor *string        `json:"next_cursor,omitempty"`
+	Recipient  string         `json:"recipient"`
+	Requests   []InboxRequest `json:"requests"`
+	Oversized  []string       `json:"oversized,omitempty" jsonschema:"Qualified refs of candidate issues too large to read here, such as imports with huge fields"`
+	Truncated  bool           `json:"truncated" jsonschema:"More candidate issues remain; follow next_cursor until absent, including empty filtered pages"`
 }
 
 // StatusInput selects one issue.
@@ -83,7 +88,7 @@ func registerCoordinationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, false)
 	mutating := toolHints(false, true, false)
 	addTool(server, "kata.assign", "Assign issue", "Make another actor the owner of an issue.", mutating, handlers.assign)
-	addTool(server, "kata.inbox", "Read inbox", "List open issues that ask a recipient for attention. Reading does not clear them.", read, handlers.inbox)
+	addTool(server, "kata.inbox", "Read inbox", "List open issues that ask an exact recipient for attention. Follow next_cursor until absent, including empty pages. Reading does not clear them. Native Events can signal changes.", read, handlers.inbox)
 	addTool(server, "kata.notify", "Request attention", "Send or clear an exact-recipient inbox signal. Optional re requests a comment answer; broadcasts use the daemon's bounded audience and rate limit. Identical targeted retries are no-ops. This does not change work.attention.", mutating, handlers.notify)
 	addTool(server, "kata.status", "Issue status", "Show who owns or holds an issue and which actor this server writes as.", read, handlers.status)
 	addTool(server, "kata.unassign", "Unassign issue", "Clear an issue's owner, optionally only while an expected owner still holds it.", mutating, handlers.unassign)
@@ -135,23 +140,37 @@ func (h toolHandlers) inbox(ctx context.Context, request *sdkmcp.CallToolRequest
 		return nil, InboxOutput{}, err
 	}
 	key := notification.MetadataKey(recipient)
-	_, listed, err := h.list(ctx, request, ListInput{Project: input.Project, Status: "open", Metadata: []string{key}, Limit: input.Limit})
+	limit, err := boundedLimit(input.Limit)
 	if err != nil {
 		return nil, InboxOutput{}, err
 	}
-	output := InboxOutput{Recipient: recipient, Requests: make([]InboxRequest, 0, len(listed.Issues)), Truncated: listed.Truncated}
+	h.options.Client = h.options.Client.WithResponseLimit(8 << 20)
+	var listed IssueListOutput
+	for {
+		// Compact rows carry no body, so an imported issue with a huge one
+		// cannot make even a one-row page too large to read.
+		_, listed, err = h.list(ctx, request, ListInput{Project: input.Project, Status: "open", Metadata: []string{key}, Limit: limit, Cursor: input.Cursor, compact: true})
+		if !errors.Is(err, kataclient.ErrResponseTooLarge) || limit == 1 {
+			break
+		}
+		limit = max(1, limit/2)
+	}
+	if err != nil {
+		return nil, InboxOutput{}, err
+	}
+	output := InboxOutput{Recipient: recipient, Requests: make([]InboxRequest, 0, len(listed.Issues)), Truncated: listed.Truncated, NextCursor: listed.NextCursor}
 	for _, issue := range listed.Issues {
-		// Skip malformed requests the same way the CLI inbox does.
-		encoded, err := json.Marshal(issue.metadata[key])
-		if err != nil {
+		if issue.oversized {
+			output.Oversized = append(output.Oversized, issue.QualifiedRef)
 			continue
 		}
-		value, _, err := notification.DecodeValue(encoded)
-		if err != nil {
+		// Skip malformed requests the same way the CLI inbox does.
+		value, valid := parseInboxNotification(issue.metadata[key])
+		if !valid {
 			continue
 		}
 		output.Requests = append(output.Requests, InboxRequest{
-			Ref: issue.Ref, QualifiedRef: issue.QualifiedRef, WebURL: issue.WebURL, Title: issue.Title,
+			IssueUID: issue.UID, ProjectUID: issue.projectUID, Ref: issue.Ref, QualifiedRef: issue.QualifiedRef, WebURL: issue.WebURL, Title: issue.Title,
 			From: value.From, Teammate: value.Teammate, Message: value.Message,
 			Re: value.Re, Kind: value.Kind, Broadcast: value.Broadcast,
 		})

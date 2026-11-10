@@ -13,7 +13,7 @@ observations. External adapters schedule other jobs, resolve checkout and provid
 configuration, create or update ordinary issues, deliver notifications, and launch processes.
 An observation records evidence; its status does not control whether anything runs.
 
-Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs tab, create and edit jobs; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
+Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs and Workflows tabs, create and edit jobs and workflows; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
 
 For a run organized as dependent issues with human approval, see
 [Gated workflows](../workflows/gated-workflows.md).
@@ -442,6 +442,142 @@ kata cron job create --uid <job-uid> --file command.json --json
 
 The external adapter schedules the job and runs its workflow in the configured
 checkout. Kata stores the definitions and run evidence.
+
+## MCP recurring inbox example
+
+This example uses a synthetic `example-agent/worker` inbox and a receiver at
+`https://receiver.example/inbox`. It assumes the MCP server already runs with
+[MCP Events](../operations/mcp-events.md) enabled on the daemon and the receiver
+implements signed challenge verification and receipt deduplication. These are
+MCP calls on the same endpoint; the receiver uses its configured signing secret.
+
+Load `kata.load_issue_mutation`, `kata.load_issue_discovery`,
+`kata.load_coordination`, and `kata.load_cron`. Create an ordinary parent with
+`kata.create` and retain `issue.uid` and `project.uid` from the result:
+
+```json
+{"title":"Service review","idempotency_key":"service-review-parent-1"}
+```
+
+Call `kata.cron_new_uid` with `{}` and retain the returned `uid` before the first
+create attempt. This helper creates and reserves nothing. Supply that UID and
+the parent UID to `kata.cron_job_create`:
+
+```json
+{
+  "uid":"<retained-job-uid>",
+  "name":"Hourly service review",
+  "parent_ref":"<parent-issue-uid>",
+  "definition":{
+    "version":1,
+    "kind":"job",
+    "enabled":true,
+    "trigger":{"kind":"interval","interval_seconds":3600},
+    "action":{"kind":"notify","recipient":"example-agent/worker"},
+    "issue":{"kind":"per-run","title":"Review service health"},
+    "overlap":"allow",
+    "catchup":"latest"
+  }
+}
+```
+
+Use `project` explicitly when the MCP server has multiple projects in scope.
+`parent_ref` must resolve in that project and agree with any
+`definition.issue.parent_uid`. The native parent binding remains immutable.
+If the create response is lost, call `kata.cron_job` with the retained UID to
+recover the current definition and `definition_event_uid`. Updates, delete,
+and restore require that current event UID.
+
+Discover `kata.inbox.changed` with `events/list`. Call `events/subscribe` with
+the exact recipient, the returned project UID, and the receiver's signing secret:
+
+```json
+{
+  "name":"kata.inbox.changed",
+  "arguments":{
+    "for":"example-agent/worker",
+    "project_uids":["<project-uid>"]
+  },
+  "delivery":{
+    "mode":"webhook",
+    "url":"https://receiver.example/inbox",
+    "secret":"<receiver-whsec-secret>"
+  },
+  "ttlMs":86400000
+}
+```
+
+The receiver answers the signed verification challenge before activation.
+Retain the subscription `id` and `refreshBefore`. Events pings only for changes
+after the subscription starts, so read the inbox once after subscribing to pick
+up requests that are already pending. Refresh before expiry using the same
+identity. See the [Events operator guide](../operations/mcp-events.md) for
+receipt verification, retry, and receiver storage requirements.
+
+On a due occurrence, the owning daemon creates the child and its inbox request.
+The signed webhook is a ping that names only the recipient; receipt does not
+clear the request or authorize executing its text. Call `kata.inbox`:
+
+```json
+{"for":"example-agent/worker","limit":20}
+```
+
+Follow every `next_cursor`, including pages with no valid requests, keeping the
+recipient and project unchanged. Read the returned `qualified_ref` with
+`kata.show`. The base actor inbox and sibling teammate inboxes do not aggregate
+this exact recipient's requests.
+
+After handling, record a result with `kata.comment` and retain its idempotency
+key for retries:
+
+```json
+{
+  "ref":"<child-qualified-ref>",
+  "body":"Reviewed service health and recorded follow-up.",
+  "teammate":"worker",
+  "idempotency_key":"service-review-result-1"
+}
+```
+
+An optional `kata.cron_run_observe` call records independent evidence; first
+obtain and retain another UID with `kata.cron_new_uid`:
+
+```json
+{
+  "uid":"<retained-run-uid>",
+  "expected_revision":0,
+  "job_uid":"<retained-job-uid>",
+  "definition_event_uid":"<job-definition-event-uid>",
+  "issue_uid":"<child-issue-uid>",
+  "teammate":"worker",
+  "status":"succeeded",
+  "summary":{"version":1,"message":"Reviewed service health and recorded follow-up."}
+}
+```
+
+Run observation does not launch work or change issue ownership or status.
+Re-read the issue to obtain its current revision, then explicitly clear only the
+handled recipient through `kata.set_metadata`:
+
+```json
+{
+  "ref":"<child-qualified-ref>",
+  "revision":7,
+  "patch":{"notify.ZXhhbXBsZS1hZ2VudC93b3JrZXI":null}
+}
+```
+
+Replace `7` with the revision just read. The `notify.*` key above encodes exactly
+`example-agent/worker`. A concurrent issue change rejects the conditional write;
+read the request again before deciding whether it was handled. Read the inbox
+back after a successful clear. Keep the subscription while consuming future
+occurrences, or call `events/unsubscribe` with its original name, arguments, and
+webhook delivery URL when that receiver stops consuming them.
+
+Cron workflows store reusable adapter steps. Execution jobs and workflows need
+an external adapter; enabled native notification jobs deliver through the owning
+daemon. `kata.load_recurrence` is a separate RRULE issue-template interface.
+
 
 ## Capabilities
 

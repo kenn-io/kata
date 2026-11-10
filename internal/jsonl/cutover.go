@@ -23,9 +23,9 @@ var ErrCutoverInProgress = errors.New("jsonl cutover in progress")
 
 var errSourceChangedDuringCutover = errors.New("source changed during cutover; stop all database users and retry; original source retained")
 
-// AutoCutover upgrades an older SQLite database by exporting it to JSONL,
-// importing into a fresh current-schema temp DB, then swapping the temp DB into
-// place. Databases already at the current schema are left untouched.
+// AutoCutover applies registered additive SQLite upgrades in place. Other
+// older schemas are exported to JSONL, imported into a fresh current-schema
+// temp DB, and swapped into place. Current-schema databases stay untouched.
 func AutoCutover(ctx context.Context, path string) error {
 	return autoCutover(ctx, path, cutoverOperations{exportCutoverSource, atomicfile.Replace})
 }
@@ -95,6 +95,12 @@ func autoCutoverLocked(ctx context.Context, path string, ops cutoverOperations) 
 	}
 	if version >= db.CurrentSchemaVersion() {
 		return rejectCutoverTemps(cutoverTempPaths(path)...)
+	}
+	if sqlitestore.UpgradesInPlace(version) {
+		if err := preserveCutoverTemps(path); err != nil {
+			return err
+		}
+		return sqlitestore.UpgradeInPlace(ctx, path)
 	}
 
 	if err := checkpointCutoverSource(ctx, path); err != nil {

@@ -413,10 +413,13 @@ func (s *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 		if err := s.materializeFederatedProjectTx(applyCtx, tx, projectID, true, nil, nil); err != nil {
 			return err
 		}
-		return db.RecordFederationCurrentProjectResets(applyCtx, tx, db.FederationPulledEventUIDs(applyCtx), func(project db.Project) (int64, error) {
+		if err := db.RecordFederationCurrentProjectResets(applyCtx, tx, db.FederationPulledEventUIDs(applyCtx), func(project db.Project) (int64, error) {
 			event, err := s.insertEventTx(applyCtx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true})
 			return event.ID, err
-		})
+		}); err != nil {
+			return err
+		}
+		return db.RecordMCPEventsRematch(applyCtx, tx, db.FederationPulledEventUIDs(applyCtx))
 	})
 	if err == nil && resets != nil {
 		db.CommitFederationMoveResets(ctx, resets.Resets)

@@ -46,6 +46,7 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 		var apiError *APIError
 		m.activeAuthRejected = errors.As(msg.err, &apiError) && apiError != nil && apiError.Status == http.StatusUnauthorized
 		m.input = inputState{}
+		m = m.closeMoveForm()
 		if attentionPending {
 			m.attention.capabilityPending = false
 			m.attention.loading = false
@@ -88,6 +89,9 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 	m.closeRequiresEvidence = msg.auth.CloseRequiresEvidence
 	if !m.inputMutationAllowed() {
 		m.input = inputState{}
+	}
+	if !m.mutationAllowed(false) {
+		m = m.closeMoveForm()
 	}
 	var viewCmd tea.Cmd
 	if credentialsPending {

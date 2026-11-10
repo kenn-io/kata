@@ -44,6 +44,11 @@
 - User or Developer Benefit: Pull requests must have a user-facing benefit or improve the developer
   experience, and the body must say which one.
 - English: Write issues and pull requests in English.
+- AI Attribution: End every commit message with a `Co-authored-by:` trailer naming the agent that
+  wrote the change.
+- AI Model Line: End the pull request description with a `Model used:` line naming the model, such
+  as `Model used: Opus 5.5` or `Model used: GPT-6.1 Sol`. Squash-merge keeps only the description,
+  so put the `Co-authored-by:` trailer there too.
 - No Unrequested GitHub Comments: Do not comment on GitHub issues or pull
   requests unless the user explicitly instructs you to post a comment.
 - No Compiled-In Source Paths: Never locate files from a path returned by
