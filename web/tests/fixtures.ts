@@ -30,7 +30,7 @@ export interface SeededIssue {
   revision: number
 }
 
-interface KataFixture {
+export interface KataFixture {
   origin: string
   projectID: number
   projectUID: string
