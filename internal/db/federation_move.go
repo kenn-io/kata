@@ -352,8 +352,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEven
 		}
 		decisions = append(decisions, decision)
 	}
-	destinations := slices.Sorted(maps.Keys(projects))
-	return decisions, destinations, nil
+	return decisions, slices.Sorted(maps.Keys(projects)), nil
 }
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim

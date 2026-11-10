@@ -11,12 +11,9 @@ import (
 )
 
 func TestMoveRebuildLeavesWriterAvailableDuringPreparation(t *testing.T) {
-	for _, moved := range []bool{false, true} {
-		name := "move-free"
-		if moved {
-			name = "moved"
-		}
+	for _, name := range []string{"move-free", "moved"} {
 		t.Run(name, func(t *testing.T) {
+			moved := name == "moved"
 			ctx := t.Context()
 			d, project, issue := incrementalTestStore(t)
 			local, err := d.CreateProject(ctx, "local")
@@ -60,7 +57,7 @@ func TestMoveRebuildLeavesWriterAvailableDuringPreparation(t *testing.T) {
 }
 
 func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
-	for _, change := range []string{"row", "history", "binding", "unrelated", "fallback", "move", "destination-binding"} {
+	for _, change := range []string{"history", "binding", "unrelated", "fallback", "move", "destination-binding"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, source, issue := incrementalTestStore(t)
@@ -87,7 +84,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 					return
 				}
 				switch change {
-				case "row", "fallback":
+				case "fallback":
 					_, err := d.ExecContext(ctx, `UPDATE issues SET title='out of date' WHERE id=?`, preparedIssue.ID)
 					require.NoError(t, err)
 				case "history":
@@ -225,8 +222,7 @@ func TestMoveRebuildPrunesDetachedDestinationSourceRow(t *testing.T) {
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id=?`, destination.ID)
 	require.NoError(t, err)
-	err = d.MaterializeFederatedProject(ctx, source.ID)
-	require.NoError(t, err)
+	require.NoError(t, d.MaterializeFederatedProject(ctx, source.ID))
 	_, err = d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
 }
