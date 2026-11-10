@@ -11,9 +11,10 @@ import (
 // federationLocalReplaysBackfill records local-origin events that an
 // interrupted reset restored: a reset recorded after the event was created
 // with no pull completed since. Pull cursor equality marks the unadvanced turn.
+// Events the hub acknowledged are not due, unless their issue is unprojected.
 const federationLocalReplaysBackfill = `
 INSERT INTO federation_local_replays(event_uid, delivery_due)
-SELECT e.uid, 1
+SELECT e.uid, CASE WHEN e.id > b.push_cursor_event_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL) THEN 1 ELSE 0 END
   FROM events e
   JOIN federation_bindings b ON b.project_id = e.project_id
   JOIN federation_sync_status s ON s.project_id = e.project_id

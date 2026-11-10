@@ -4,9 +4,10 @@ CREATE TABLE federation_local_replays (
 );
 
 -- An interrupted reset leaves local-origin events restored after the reset
--- with no pull completed since. Record them so the next pull still delivers them.
+-- with no pull completed since. Record them so the next pull still delivers them,
+-- except acknowledged events whose issue is projected, which already notified.
 INSERT INTO federation_local_replays(event_uid, delivery_due)
-SELECT e.uid, 1
+SELECT e.uid, CASE WHEN e.id > b.push_cursor_event_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL) THEN 1 ELSE 0 END
   FROM events e
   JOIN federation_bindings b ON b.project_id = e.project_id
   JOIN federation_sync_status s ON s.project_id = e.project_id
