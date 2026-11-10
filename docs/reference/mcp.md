@@ -514,8 +514,8 @@ require `issue_mappings` from source issue UIDs to destination issue references.
 Use `dry_run` to predict outcomes without writes. With `replace`, import reads
 the authoritative conflict revision and attempts one guarded replacement.
 A stopped import returns an error with its partial per-item report intact.
-Interrupted imports are safe to retry with the same bundle and options because
-deterministic UIDs recognize completed copies.
+Retry interrupted imports with the same bundle and options; `replace` can
+overwrite later edits to completed copies.
 The bundle archive limit is 16 MiB; MCP messages are limited to 8 MiB. An export
 response includes both the structured bundle and its JSON text representation,
 plus the envelope; all of these count toward that limit. Use
