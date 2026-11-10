@@ -612,9 +612,10 @@ and absent versus null values do not wake it. Waiting never clears a request.
 
 The default timeout is 30 seconds; `timeout_seconds` accepts 1–300 and covers
 setup as well as polling. Top-level `reason` remains `matched` or `timeout`.
-Set `any: true` to return after the first matching issue. Otherwise every
-issue must match; observed `until` completions are retained while the others
-finish.
+With `any: true`, an `until` wait returns after the first matching issue. A
+status wait reads the current snapshot before returning a match, or returns at
+the deadline if a completed read matched. Otherwise every issue must match;
+observed `until` completions are retained while the others finish.
 
 ## Scheduling and someday
 
