@@ -117,14 +117,14 @@ func (a TrackerFenceSQL) AcknowledgeExecutor(ctx context.Context, checkpoint Tra
 // stored configuration and grants no provider authority on its own.
 func TrackerExecutorTransportFence(instance, project string, expected FederationBinding, pin RootKeyPin) TransactionFence {
 	return func(ctx context.Context, tx Transaction) error {
-		if expected.Role != FederationRoleSpoke || !expected.Enabled || expected.RelayConfig == nil || expected.RelayConfig.Validate(instance) != nil || expected.RelayConfig.UpstreamRevoked || expected.RelayConfig.AuthorityUID != pin.AuthorityUID || pin.ProjectUID != project {
+		if expected.Role != FederationRoleSpoke || !expected.Enabled || !expected.PushEnabled || expected.RelayConfig == nil || expected.RelayConfig.Validate(instance) != nil || expected.RelayConfig.UpstreamRevoked || expected.RelayConfig.AuthorityUID != pin.AuthorityUID || pin.ProjectUID != project {
 			return ErrTrackerFenceChanged
 		}
 		var role, hub string
-		var enabled int
+		var enabled, pushEnabled int
 		var hubProject int64
 		var raw sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT f.role,f.enabled,f.hub_url,f.hub_project_id,f.relay_config FROM federation_bindings f JOIN projects p ON p.id=f.project_id WHERE p.uid=$1 AND p.deleted_at IS NULL`, project).Scan(&role, &enabled, &hub, &hubProject, &raw); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT f.role,f.enabled,f.push_enabled,f.hub_url,f.hub_project_id,f.relay_config FROM federation_bindings f JOIN projects p ON p.id=f.project_id WHERE p.uid=$1 AND p.deleted_at IS NULL`, project).Scan(&role, &enabled, &pushEnabled, &hub, &hubProject, &raw); err != nil {
 			return ErrTrackerFenceChanged
 		}
 		relay, err := DecodeRelayBindingConfig(func() *string {
@@ -133,7 +133,7 @@ func TrackerExecutorTransportFence(instance, project string, expected Federation
 			}
 			return &raw.String
 		}())
-		if err != nil || relay == nil || role != string(FederationRoleSpoke) || enabled != 1 || hub != expected.HubURL || hubProject != expected.HubProjectID || !reflect.DeepEqual(relay, expected.RelayConfig) {
+		if err != nil || relay == nil || role != string(FederationRoleSpoke) || enabled != 1 || pushEnabled != 1 || hub != expected.HubURL || hubProject != expected.HubProjectID || !reflect.DeepEqual(relay, expected.RelayConfig) {
 			return ErrTrackerFenceChanged
 		}
 		var authority, key, encodedPublic string

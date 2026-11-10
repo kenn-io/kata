@@ -70,18 +70,7 @@ func checkTrackerExecutorAdmission(t *testing.T, store db.Storage) error {
 	confirmed.Result, err = json.Marshal(db.TrackerStatusResult{Status: "closed", Version: time.Unix(1900000000, 0).UTC()})
 	require.NoError(t, err)
 	require.NoError(t, store.(db.TrackerFenceStore).StoreTrackerExecutionFence(ctx, &dispatched, confirmed, epoch))
-	// Removing provider grants/credentials must not strand original receipt ack.
-	_, err = store.(db.TrackerRegistryStore).ReconcileTrackerRegistry(ctx, epoch, nil)
-	require.NoError(t, err)
 	checkpoint := db.TrackerOwnerCheckpoint{Version: 1, RootInstanceUID: root, ProjectUID: project.UID, OwnerInstanceUID: store.InstanceUID(), Selection: selection, Sequence: 1, Head: db.TrackerFenceHead(confirmed), Attempt: *confirmed.Remote, WriteUID: confirmed.WriteUID, Disposition: db.TrackerWriteAcknowledged, ResultDigest: tracker.WorkerArgumentsDigest(confirmed.Result)}
-	require.NoError(t, executor.AcknowledgeTrackerExecutor(ctx, checkpoint))
-	require.NoError(t, executor.AcknowledgeTrackerExecutor(ctx, checkpoint))
-	head, found, err := store.(db.TrackerFenceStore).LoadTrackerExecutionFence(ctx, root, project.UID, "executor")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, db.TrackerWriteAcknowledged, head.Phase)
-	_, err = store.IssueSyncBindingByProject(ctx, project.ID)
-	require.ErrorIs(t, err, db.ErrNotFound, "executor did not create a spoke sync binding")
 
 	// The runtime's final native fence rejects a disconnected/missing replica
 	// in the same transaction, even when the provider registry is otherwise live.
@@ -100,6 +89,14 @@ func checkTrackerExecutorAdmission(t *testing.T, store db.Storage) error {
 	require.NoError(t, store.PinRootAuthority(ctx, pin))
 	_, err = store.SetRelayBindingConfig(ctx, project.ID, *expected.RelayConfig)
 	require.NoError(t, err)
+	disconnectReservation := reservation
+	disconnectReservation.RootInstanceUID = "01ARZ3NDEKTSV4RRFFQ69G5FB6"
+	disconnectReservation.PendingEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB7"
+	disconnectReservation.Remote = &db.TrackerRemoteAttempt{UID: "01ARZ3NDEKTSV4RRFFQ69G5FB8", ArgumentsDigest: reservation.Remote.ArgumentsDigest, RootSequence: 1, OwnerSequence: 1, RootEpoch: reservation.Remote.RootEpoch, OwnerEpoch: reservation.Remote.OwnerEpoch}
+	disconnectReservation.WriteUID, err = db.TrackerStatusWriteUID(disconnectReservation.RootInstanceUID, project.UID, disconnectReservation.SourceKey, disconnectReservation.Locator, disconnectReservation.PendingEventUID, disconnectReservation.Target)
+	require.NoError(t, err)
+	disconnectPrepared, err := executor.PrepareTrackerExecutor(ctx, disconnectReservation, "notion", epoch)
+	require.NoError(t, err, "the attempt is prepared while relay writes are enabled")
 	beginner := store.(interface {
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
@@ -108,9 +105,40 @@ func checkTrackerExecutorAdmission(t *testing.T, store db.Storage) error {
 	defer func() { _ = tx.Rollback() }()
 	check := db.TrackerExecutorTransportFence(store.InstanceUID(), project.UID, expected, pin)
 	require.NoError(t, check(ctx, tx), "the persisted root pin permits the same live route")
+	disabledExpected := expected
+	disabledExpected.PushEnabled = false
+	require.ErrorIs(t, db.TrackerExecutorTransportFence(store.InstanceUID(), project.UID, disabledExpected, pin)(ctx, tx), db.ErrTrackerFenceChanged, "an expected binding without push authority cannot admit provider work")
 	wrong := pin
 	wrong.PublicKey = append([]byte(nil), pin.PublicKey...)
 	wrong.PublicKey[0] ^= 1
 	require.ErrorIs(t, db.TrackerExecutorTransportFence(store.InstanceUID(), project.UID, expected, wrong)(ctx, tx), db.ErrTrackerFenceChanged)
+	require.NoError(t, tx.Commit())
+
+	lifecycle, ok := store.(db.RelayDisconnectFenceStore)
+	require.True(t, ok, "native relay disconnect fencing is required")
+	require.NoError(t, lifecycle.FenceRelayDisconnect(ctx, project.ID))
+	disconnected, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.True(t, disconnected.Enabled, "disconnect leaves the binding present during upstream teardown")
+	require.False(t, disconnected.PushEnabled, "disconnect fences provider writes before upstream teardown")
+	disconnectedFence := db.WithAdditionalTransactionFence(ctx, db.TrackerExecutorTransportFence(store.InstanceUID(), project.UID, expected, pin))
+	_, _, err = store.CreateIssue(disconnectedFence, db.CreateIssueParams{ProjectID: project.ID, Title: "Must not dispatch after disconnect", Author: "owner-service"})
+	require.ErrorIs(t, err, db.ErrTrackerFenceChanged, "disconnect after preparation must reject final provider admission")
+	unchanged, found, err = store.(db.TrackerFenceStore).LoadTrackerExecutionFence(ctx, disconnectPrepared.RootInstanceUID, project.UID, "executor")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, disconnectPrepared, unchanged, "a rejected admission leaves the prepared attempt untouched")
+
+	// Removing provider grants/credentials must not strand original receipt ack.
+	_, err = store.(db.TrackerRegistryStore).ReconcileTrackerRegistry(ctx, epoch, nil)
+	require.NoError(t, err)
+	require.NoError(t, executor.AcknowledgeTrackerExecutor(ctx, checkpoint))
+	require.NoError(t, executor.AcknowledgeTrackerExecutor(ctx, checkpoint))
+	head, found, err := store.(db.TrackerFenceStore).LoadTrackerExecutionFence(ctx, root, project.UID, "executor")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, db.TrackerWriteAcknowledged, head.Phase)
+	_, err = store.IssueSyncBindingByProject(ctx, project.ID)
+	require.ErrorIs(t, err, db.ErrNotFound, "executor did not create a spoke sync binding")
 	return nil
 }

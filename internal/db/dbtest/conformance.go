@@ -56,7 +56,7 @@ var storageScenarios = []scenario{
 	{name: "tracker pending control capacity", methods: []string{"CreateProject"}, run: checkTrackerControlCapacity},
 	{name: "tracker control UID receipts", methods: []string{"CreateProject"}, run: checkTrackerControlReceipts},
 	{name: "tracker disabled binding receipt recovery", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding"}, run: checkTrackerRecoveryReceipt},
-	{name: "tracker executor admission and receipt", methods: []string{"CreateProject", "UpsertFederationBinding", "SetRelayBindingConfig", "PinRootAuthority"}, run: checkTrackerExecutorAdmission},
+	{name: "tracker executor admission and receipt", methods: []string{"CreateProject", "UpsertFederationBinding", "SetRelayBindingConfig", "PinRootAuthority", "FenceRelayDisconnect", "FederationBindingByProject"}, run: checkTrackerExecutorAdmission},
 	{name: "tracker remote reservation and acknowledgement", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding"}, runWithBackend: checkTrackerRemoteStatusAdmission},
 	{name: "tracker remote non-send after permit", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding"}, runWithBackend: checkTrackerNonSendAfterPermit},
 	{name: "tracker atomic status admission", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding"}, run: checkTrackerStatusAdmission},
