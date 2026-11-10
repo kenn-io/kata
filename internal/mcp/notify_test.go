@@ -11,41 +11,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func callCoordinationTool(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) map[string]any {
-	t.Helper()
-	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: name, Arguments: args})
-	require.NoError(t, err)
-	require.False(t, result.IsError, "%s: %s", name, mustJSON(t, result.Content))
-	var out map[string]any
-	require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &out))
-	return out
-}
-
 // Typed sends and clears address one exact recipient.
 func TestMCPNotifySendAndClearAgainstDaemon(t *testing.T) {
 	session, _ := newCoordinationSession(t)
-	created := callCoordinationTool(t, session, "kata.create", map[string]any{"title": "Review the adapter", "idempotency_key": "notify-create"})
+	created := callAdministrationTool(t, session, "kata.create", map[string]any{"title": "Review the adapter", "idempotency_key": "notify-create"})
 	ref := created["issue"].(map[string]any)["ref"].(string)
-	args := map[string]any{"ref": ref, "to": " reviewer/worker ", "message": "Please review", "teammate": "planner"}
-	sent := callCoordinationTool(t, session, "kata.notify", args)
+	args := map[string]any{"ref": ref, "to": " reviewer/worker ", "message": "Please review"}
+	sent := callAdministrationTool(t, session, "kata.notify", args)
 	require.Equal(t, true, sent["changed"])
 	require.Equal(t, []any{"reviewer/worker"}, sent["recipients"])
 	require.Equal(t, "example-agent", sent["event"].(map[string]any)["actor"])
-	inbox := callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer/worker"})
+	inbox := callAdministrationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer/worker"})
 	require.Len(t, inbox["requests"], 1)
 	request := inbox["requests"].([]any)[0].(map[string]any)
 	require.Equal(t, "Please review", request["message"])
-	cleared := callCoordinationTool(t, session, "kata.notify", map[string]any{"ref": ref, "to": "reviewer/worker", "clear": true})
+	cleared := callAdministrationTool(t, session, "kata.notify", map[string]any{"ref": ref, "to": "reviewer/worker", "clear": true})
 	require.Equal(t, true, cleared["changed"])
-	require.Empty(t, callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer/worker"})["requests"])
-	cleared = callCoordinationTool(t, session, "kata.notify", map[string]any{"ref": ref, "to": "reviewer/worker", "clear": true})
+	require.Empty(t, callAdministrationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer/worker"})["requests"])
+	cleared = callAdministrationTool(t, session, "kata.notify", map[string]any{"ref": ref, "to": "reviewer/worker", "clear": true})
 	require.Equal(t, false, cleared["changed"])
-
 }
 
 func TestMCPNotifyValidation(t *testing.T) {
 	session, _ := newCoordinationSession(t)
-	created := callCoordinationTool(t, session, "kata.create", map[string]any{"title": "Keep untouched", "idempotency_key": "validation-create"})
+	created := callAdministrationTool(t, session, "kata.create", map[string]any{"title": "Validation", "idempotency_key": "validation-create"})
 	ref := created["issue"].(map[string]any)["ref"].(string)
 	for _, tc := range []struct {
 		name, want, without string
@@ -62,7 +51,7 @@ func TestMCPNotifyValidation(t *testing.T) {
 			if tc.without != "" {
 				control := maps.Clone(tc.args)
 				delete(control, tc.without)
-				callCoordinationTool(t, session, "kata.notify", control)
+				callAdministrationTool(t, session, "kata.notify", control)
 			}
 			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.notify", Arguments: tc.args})
 			if err != nil {
@@ -103,7 +92,7 @@ func TestMCPNotifyTeammateDefaults(t *testing.T) {
 			if tc.teammate != nil {
 				args["teammate"] = *tc.teammate
 			}
-			callCoordinationTool(t, session, "kata.notify", args)
+			callAdministrationTool(t, session, "kata.notify", args)
 			body := <-requests
 			require.Equal(t, tc.want, body["teammate"])
 		})
@@ -112,7 +101,7 @@ func TestMCPNotifyTeammateDefaults(t *testing.T) {
 		{"ref": "abc1", "to": "recipient", "message": "linked", "re": "c:abcdef"},
 		{"ref": "abc1", "broadcast": true, "message": "broadcast"},
 	} {
-		callCoordinationTool(t, session, "kata.notify", args)
+		callAdministrationTool(t, session, "kata.notify", args)
 		body := <-requests
 		if re, ok := args["re"]; ok {
 			require.Equal(t, re, body["re"])

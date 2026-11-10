@@ -119,8 +119,8 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 	session, _ := newCoordinationSession(t)
 	key := notification.MetadataKey("reviewer-agent")
 	requests := []map[string]any{
-		{"from": "example-agent", "message": "Please review the plan"},
-		{"from": "example-agent", "teammate": "planner", "message": "Second look"},
+		{"from": "example-agent", "message": "Please review the plan", "kind": "reply"},
+		{"from": "example-agent", "teammate": "planner", "message": "Second look", "broadcast": true},
 		{"from": "", "message": "Malformed request"},
 	}
 	var linkedUID string
@@ -132,8 +132,9 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 		if i == 0 {
 			comment := callAdministrationTool(t, session, "kata.comment", map[string]any{"ref": ref, "body": "Finding", "idempotency_key": "attention-finding"})
 			linkedUID = comment["comment"].(map[string]any)["uid"].(string)
-			value["re"], value["kind"], value["broadcast"] = linkedUID, "confirm", true
+			value["re"] = linkedUID
 		}
+
 		callAdministrationTool(t, session, "kata.set_metadata", map[string]any{"ref": ref, "patch": map[string]any{key: value}})
 	}
 	callAdministrationTool(t, session, "kata.create", map[string]any{"title": "Quiet issue", "idempotency_key": "quiet"})
@@ -152,8 +153,8 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 	}
 	require.Equal(t, "planner", messages["Second look"]["teammate"])
 	require.Equal(t, linkedUID, messages["Please review the plan"]["re"])
-	require.Equal(t, "confirm", messages["Please review the plan"]["kind"])
-	require.Equal(t, true, messages["Please review the plan"]["broadcast"])
+	require.Equal(t, "reply", messages["Please review the plan"]["kind"])
+	require.Equal(t, true, messages["Second look"]["broadcast"])
 	require.NotContains(t, messages["Please review the plan"], "teammate")
 
 	limited := callAdministrationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer-agent", "limit": 1})

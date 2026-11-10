@@ -103,7 +103,7 @@ func TestFixedMCPScopeRejectsHistoricalReferenceOutsideCurrentProject(t *testing
 		t.Run(tool, func(t *testing.T) {
 			store, _, session, source, _, excluded, issue := mcpFixedScopeFixture(t)
 			if tool == "kata.notify" {
-				callCoordinationTool(t, session, tool, map[string]any{"ref": source.Name + "#" + issue.ShortID, "to": "reviewer", "message": "First request"})
+				callAdministrationTool(t, session, tool, map[string]any{"ref": source.Name + "#" + issue.ShortID, "to": "reviewer", "message": "First request"})
 				var err error
 				issue, err = store.IssueByID(t.Context(), issue.ID)
 				require.NoError(t, err)

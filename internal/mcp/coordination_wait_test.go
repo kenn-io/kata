@@ -49,7 +49,7 @@ func TestMCPCoordinationWaitAttentionPredicates(t *testing.T) {
 				issue["metadata"] = map[string]any{"work.attention": tc.attention, "work.attention_msg": "Need a decision"}
 				return issue
 			})
-			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1"}, "until": "attention", "timeout_seconds": 1})
+			out := callAdministrationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1"}, "until": "attention", "timeout_seconds": 1})
 			require.Equal(t, tc.want, out["reason"])
 			state := out["states"].([]any)[0].(map[string]any)
 			require.Equal(t, tc.want == "matched", state["matched"])
@@ -103,7 +103,7 @@ func TestMCPCoordinationWaitReplyBaseline(t *testing.T) {
 			if tc.explicit {
 				args["for"] = " bound-actor/worker "
 			}
-			out := callCoordinationTool(t, session, "kata.wait", args)
+			out := callAdministrationTool(t, session, "kata.wait", args)
 			require.Equal(t, "matched", out["reason"])
 			require.Equal(t, int64(len(tc.frames)), shows.Load(), "the first snapshot and unrelated slots cannot wake the wait")
 			state := out["states"].([]any)[0].(map[string]any)
@@ -134,7 +134,7 @@ func TestMCPCoordinationWaitAllRetainsObservedCompletions(t *testing.T) {
 		issue["metadata"] = map[string]any{"work.attention": attention}
 		return issue
 	})
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "timeout_seconds": 2})
+	out := callAdministrationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "timeout_seconds": 2})
 	require.Equal(t, "matched", out["reason"])
 	for _, raw := range out["states"].([]any) {
 		require.Equal(t, true, raw.(map[string]any)["matched"])
@@ -159,7 +159,7 @@ func TestMCPCoordinationWaitRejectsReusedIssueIdentity(t *testing.T) {
 
 func TestMCPCoordinationWaitValidation(t *testing.T) {
 	session := coordinationWaitSession(t, func(_ *http.Request) map[string]any { return issueJSON(1, "spoke-project", "abc1") })
-	for _, tc := range []struct {
+	for i, tc := range []struct {
 		args map[string]any
 		want string
 	}{
@@ -172,13 +172,15 @@ func TestMCPCoordinationWaitValidation(t *testing.T) {
 		{map[string]any{"refs": []string{"abc1"}, "until": "attention", "timeout_seconds": -1}, "minimum"},
 		{map[string]any{"refs": []string{"other-project#abc1"}, "until": "attention"}, "outside"},
 	} {
-		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: tc.args})
-		if err != nil {
-			require.Contains(t, err.Error(), tc.want)
-			continue
-		}
-		require.True(t, result.IsError)
-		require.Contains(t, string(mustJSON(t, result.Content)), tc.want)
+		t.Run(fmt.Sprintf("%s-%d", tc.want, i), func(t *testing.T) {
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: tc.args})
+			if err != nil {
+				require.Contains(t, err.Error(), tc.want)
+				return
+			}
+			require.True(t, result.IsError)
+			require.Contains(t, string(mustJSON(t, result.Content)), tc.want)
+		})
 	}
 }
 
@@ -297,7 +299,7 @@ func TestMCPCoordinationWaitReplyResolvesActorPerProject(t *testing.T) {
 	})
 	require.NoError(t, err)
 	session := connectTestServerWithOptions(t, Options{Client: client, Scope: scope, Actor: "startup-actor", Teammate: "worker", Version: "test"})
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{
+	out := callAdministrationTool(t, session, "kata.wait", map[string]any{
 		"refs": []string{"first-project#abc1", "second-project#def2"}, "until": "reply", "timeout_seconds": 3,
 	})
 	require.Equal(t, "matched", out["reason"])
@@ -345,7 +347,7 @@ func TestMCPCoordinationWaitReplySurvivesProjectMove(t *testing.T) {
 	require.NoError(t, err)
 	session := connectTestServerWithOptions(t, Options{Client: client, Scope: scope, Actor: "worker", Version: "test"})
 	args := map[string]any{"refs": []string{"first-project#abc1"}, "until": "reply", "timeout_seconds": 2}
-	out := callCoordinationTool(t, session, "kata.wait", args)
+	out := callAdministrationTool(t, session, "kata.wait", args)
 	require.Equal(t, "matched", out["reason"])
 }
 
@@ -392,7 +394,7 @@ func TestMCPCoordinationWaitStatusAnySnapshot(t *testing.T) {
 		}
 		return issueJSON(1, "spoke-project", ref)
 	})
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "open", "any": true, "timeout_seconds": 1})
+	out := callAdministrationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "open", "any": true, "timeout_seconds": 1})
 	require.Equal(t, "matched", out["reason"])
 	require.Len(t, out["states"], 2)
 }
@@ -411,33 +413,43 @@ func TestMCPCoordinationWaitStatusPollsPastStalledPeer(t *testing.T) {
 			}
 			return issue
 		})
-		out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "closed", "timeout_seconds": 2})
+		out := callAdministrationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "closed", "timeout_seconds": 2})
 		require.Equal(t, "matched", out["reason"])
 		require.Len(t, out["states"], 2)
 	})
-	for _, anyMode := range []bool{false, true} {
-		t.Run(fmt.Sprintf("any=%t", anyMode), func(t *testing.T) {
-			var reads atomic.Int64
-			session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
-				if strings.HasSuffix(r.URL.Path, "/abc1") {
-					<-r.Context().Done()
-					return nil
+	for _, mode := range []string{"status", "until"} {
+		for _, anyMode := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/any=%t", mode, anyMode), func(t *testing.T) {
+				var reads atomic.Int64
+				session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
+					if strings.HasSuffix(r.URL.Path, "/abc1") {
+						<-r.Context().Done()
+						return nil
+					}
+					issue := issueJSON(1, "spoke-project", "def1")
+					if reads.Add(1) > 1 {
+						if mode == "status" {
+							issue["status"] = "closed"
+						} else {
+							issue["metadata"] = map[string]any{"work.attention": "stuck"}
+						}
+					}
+					return issue
+				})
+				value := "closed"
+				if mode == "until" {
+					value = "attention"
 				}
-				issue := issueJSON(1, "spoke-project", "def1")
-				if reads.Add(1) > 1 {
-					issue["status"] = "closed"
+				out := callAdministrationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, mode: value, "any": anyMode, "timeout_seconds": 1})
+				if anyMode {
+					require.Equal(t, "matched", out["reason"])
+				} else {
+					require.Equal(t, "timeout", out["reason"])
 				}
-				return issue
+				require.GreaterOrEqual(t, reads.Load(), int64(2))
+				require.Equal(t, true, out["states"].([]any)[0].(map[string]any)["matched"])
 			})
-			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "closed", "any": anyMode, "timeout_seconds": 1})
-			if anyMode {
-				require.Equal(t, "matched", out["reason"])
-			} else {
-				require.Equal(t, "timeout", out["reason"])
-			}
-			require.GreaterOrEqual(t, reads.Load(), int64(2))
-			require.Equal(t, true, out["states"].([]any)[0].(map[string]any)["matched"])
-		})
+		}
 	}
 	for _, nonmatchFirst := range []bool{false, true} {
 		t.Run(fmt.Sprintf("nonmatchFirst=%t", nonmatchFirst), func(t *testing.T) {
@@ -473,7 +485,7 @@ func TestMCPCoordinationWaitStatusPollsPastStalledPeer(t *testing.T) {
 				issue["status"] = "closed"
 				return issue
 			})
-			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "closed", "timeout_seconds": 2})
+			out := callAdministrationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "closed", "timeout_seconds": 2})
 			require.Equal(t, "timeout", out["reason"])
 			require.GreaterOrEqual(t, bReads.Load(), int64(2))
 		})
@@ -485,7 +497,7 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 		name, field, value, ref string
 		unavailable             bool
 	}{
-		{"status", "status", "open", "abc1", false}, {"attention", "until", "attention", "abc1", false}, {"out of scope", "until", "attention", "other-project#abc1", false}, {"retry limit", "until", "attention", "abc1", true},
+		{"attention", "until", "attention", "abc1", false}, {"out of scope", "until", "attention", "other-project#abc1", false}, {"retry limit", "until", "attention", "abc1", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reads atomic.Int64
@@ -513,14 +525,8 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 			})
 			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
 			args := map[string]any{"refs": []string{tc.ref, "def1"}, tc.field: tc.value, "any": true, "timeout_seconds": 2}
-			if tc.field == "status" {
-				result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: args})
-				require.NoError(t, err)
-				require.True(t, result.IsError, string(mustJSON(t, result.Content)))
-				require.Contains(t, string(mustJSON(t, result.Content)), "404")
-				return
-			}
-			out := callCoordinationTool(t, session, "kata.wait", args)
+
+			out := callAdministrationTool(t, session, "kata.wait", args)
 			require.Equal(t, "matched", out["reason"])
 			if tc.unavailable {
 				require.Equal(t, int64(3), failures.Load())
@@ -531,7 +537,7 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 
 func TestMCPCoordinationWaitDeletedIssue(t *testing.T) {
 	session, store := newCoordinationSession(t)
-	created := callCoordinationTool(t, session, "kata.create", map[string]any{"title": "Deleted attention", "idempotency_key": "deleted-attention"})
+	created := callAdministrationTool(t, session, "kata.create", map[string]any{"title": "Deleted attention", "idempotency_key": "deleted-attention"})
 	summary := created["issue"].(map[string]any)
 	issue, err := store.IssueByUID(t.Context(), summary["uid"].(string), db.IncludeDeletedNo)
 	require.NoError(t, err)
@@ -544,64 +550,39 @@ func TestMCPCoordinationWaitDeletedIssue(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.IsError, string(mustJSON(t, result.Content)))
 	require.Contains(t, string(mustJSON(t, result.Content)), "404")
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{ref}, "status": "deleted", "timeout_seconds": 1})
+	out := callAdministrationTool(t, session, "kata.wait", map[string]any{"refs": []string{ref}, "status": "deleted", "timeout_seconds": 1})
 	require.Equal(t, "matched", out["reason"])
 }
 
-func TestMCPCoordinationWaitStatusAllReturnsMissingBeforeStalledPeer(t *testing.T) {
-	peerStarted := make(chan struct{})
-	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/projects":
-			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
-		case "/api/v1/projects/1/issues/abc1":
-			select {
-			case <-peerStarted:
-			case <-r.Context().Done():
-				return
-			}
-			http.NotFound(w, r)
-		default:
-			close(peerStarted)
-			<-r.Context().Done()
-		}
-	})
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
-	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: map[string]any{"refs": []string{"abc1", "def1"}, "status": "open", "timeout_seconds": 1}})
-	require.NoError(t, err)
-	require.True(t, result.IsError, string(mustJSON(t, result.Content)))
-	require.Contains(t, string(mustJSON(t, result.Content)), "404")
-}
-
-func TestMCPCoordinationWaitUntilPollsPastStalledPeer(t *testing.T) {
+func TestMCPCoordinationWaitStatusReturnsMissing(t *testing.T) {
 	for _, anyMode := range []bool{false, true} {
 		t.Run(fmt.Sprintf("any=%t", anyMode), func(t *testing.T) {
-			var reads atomic.Int64
-			session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
-				if strings.HasSuffix(r.URL.Path, "/abc1") {
+			peerStarted := make(chan struct{})
+			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/projects":
+					writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+				case "/api/v1/projects/1/issues/abc1":
+					select {
+					case <-peerStarted:
+					case <-r.Context().Done():
+						return
+					}
+					http.NotFound(w, r)
+				default:
+					close(peerStarted)
+					if anyMode {
+						writeJSON(w, map[string]any{"issue": issueJSON(1, "spoke-project", "def1")})
+						return
+					}
 					<-r.Context().Done()
-					return nil
 				}
-				issue := issueJSON(1, "spoke-project", "def1")
-				if reads.Add(1) > 1 {
-					issue["metadata"] = map[string]any{"work.attention": "stuck"}
-				}
-				return issue
 			})
-			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "any": anyMode, "timeout_seconds": 1})
-			if anyMode {
-				require.Equal(t, "matched", out["reason"])
-			} else {
-				require.Equal(t, "timeout", out["reason"])
-			}
-			require.GreaterOrEqual(t, reads.Load(), int64(2))
-			var matched bool
-			for _, item := range out["states"].([]any) {
-				if item.(map[string]any)["matched"] == true {
-					matched = true
-				}
-			}
-			require.True(t, matched)
+			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: map[string]any{"refs": []string{"abc1", "def1"}, "status": "open", "any": anyMode, "timeout_seconds": 1}})
+			require.NoError(t, err)
+			require.True(t, result.IsError, string(mustJSON(t, result.Content)))
+			require.Contains(t, string(mustJSON(t, result.Content)), "404")
 		})
 	}
 }
@@ -643,7 +624,7 @@ func TestMCPCoordinationWaitUntilRetriesTransientFailures(t *testing.T) {
 			if tc.until == "reply" {
 				args["for"] = "worker"
 			}
-			out := callCoordinationTool(t, session, "kata.wait", args)
+			out := callAdministrationTool(t, session, "kata.wait", args)
 			require.Equal(t, "matched", out["reason"])
 			require.Equal(t, tc.until, out["states"].([]any)[0].(map[string]any)["reason"])
 			require.Equal(t, int64(len(tc.statuses)), reads.Load())
