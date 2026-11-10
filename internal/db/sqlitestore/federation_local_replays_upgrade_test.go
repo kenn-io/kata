@@ -25,7 +25,7 @@ func TestFederationLocalReplaysUpgradeBackfillsInterruptedReset(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		project db.Project
-	}{{"acknowledged", resetProject}, {"before", resetProject}, {"after", resetProject}, {"pulled", pulledProject}} {
+	}{{"unprojected", resetProject}, {"acknowledged", resetProject}, {"before", resetProject}, {"after", resetProject}, {"pulled", pulledProject}} {
 		_, event, createErr := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: c.project.ID, Title: c.name, Author: "tester"})
 		require.NoError(t, createErr)
 		events[c.name] = event.UID
@@ -48,9 +48,14 @@ func TestFederationLocalReplaysUpgradeBackfillsInterruptedReset(t *testing.T) {
 		require.NoError(t, execErr)
 	}
 	stamp("before", "2026-01-01T00:00:00.000Z")
+	stamp("unprojected", "2026-01-01T00:00:00.000Z")
 	stamp("acknowledged", "2026-01-01T00:00:00.000Z")
 	stamp("after", "2026-01-03T00:00:00.000Z")
 	stamp("pulled", "2026-01-01T00:00:00.000Z")
+	_, err = store.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE uid=?`, events["unprojected"])
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `DELETE FROM issues WHERE uid=(SELECT issue_uid FROM events WHERE uid=?)`, events["unprojected"])
+	require.NoError(t, err)
 	_, err = store.ExecContext(ctx, `UPDATE federation_sync_status SET last_pull_success_at='2026-01-02T12:00:00.000Z' WHERE project_id=?`, pulledProject.ID)
 	require.NoError(t, err)
 	_, err = store.ExecContext(ctx, `DROP TABLE federation_local_replays`)
@@ -62,7 +67,7 @@ func TestFederationLocalReplaysUpgradeBackfillsInterruptedReset(t *testing.T) {
 	upgraded, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
-	for name, want := range map[string]bool{"acknowledged": false, "before": true, "after": false, "pulled": false} {
+	for name, want := range map[string]bool{"unprojected": true, "acknowledged": false, "before": true, "after": false, "pulled": false} {
 		got, replayErr := upgraded.FederationLocalReplayDue(ctx, events[name], false)
 		require.NoError(t, replayErr)
 		require.Equal(t, want, got, name)

@@ -3,9 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json/v2"
 	"errors"
-	"strings"
 )
 
 // AuthorizeFederationCurrentIssue checks every issue affected by a fresh event.
@@ -14,31 +12,9 @@ func AuthorizeFederationCurrentIssue(ctx context.Context, tx *sql.Tx, p Federati
 	if err != nil {
 		return err
 	}
-	var primary string
-	var refs []string
-	switch {
-	case strings.HasPrefix(event.Type, "issue."):
-		payload := PayloadMap(event.Payload)
-		var err error
-		primary, err = FederationPayloadIssueUID(event, payload)
-		if err != nil {
-			return err
-		}
-		refs, err = FederationPayloadReferencedIssueUIDs(referenceEvent, PayloadMap(referenceEvent.Payload))
-		if err != nil {
-			return err
-		}
-	case event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot":
-		// A run's UID identifies the run, not its optional issue reference.
-		var run CronRunObservation
-		if err := json.Unmarshal(event.Payload, &run); err != nil {
-			return err
-		}
-		if run.IssueUID != nil {
-			primary = *run.IssueUID
-		}
-	default:
-		return nil
+	primary, refs, err := federationEventIssueReferences(event, referenceEvent)
+	if err != nil {
+		return err
 	}
 	if event.Type == "issue.moved" {
 		replyIssues, err := FederationMoveSnapshotReplyIssues(ctx, tx, referenceEvent)

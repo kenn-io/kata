@@ -412,9 +412,9 @@ func checkFederationLocalReplayStorage(t *testing.T, store db.Storage) error {
 	due, err = store.FederationLocalReplayDue(ctx, event.UID, false)
 	require.NoError(t, err)
 	require.True(t, due, "a delivery found owed stays owed across turns")
-	_, err = sqlStore.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, event.UID)
+	_, other, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "ordinary local event", Author: "tester"})
 	require.NoError(t, err)
-	due, err = store.FederationLocalReplayDue(ctx, event.UID, true)
+	due, err = store.FederationLocalReplayDue(ctx, other.UID, true)
 	require.NoError(t, err)
 	require.False(t, due, "only recorded replays can be owed")
 	return nil

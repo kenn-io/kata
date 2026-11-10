@@ -27,7 +27,7 @@ func TestFederationLocalReplaysMigrationBackfillsInterruptedReset(t *testing.T) 
 	for _, c := range []struct {
 		name    string
 		project db.Project
-	}{{"acknowledged", resetProject}, {"before", resetProject}, {"after", resetProject}, {"pulled", pulledProject}} {
+	}{{"unprojected", resetProject}, {"acknowledged", resetProject}, {"before", resetProject}, {"after", resetProject}, {"pulled", pulledProject}} {
 		_, event, createErr := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: c.project.ID, Title: c.name, Author: "tester"})
 		require.NoError(t, createErr)
 		events[c.name] = event.UID
@@ -54,9 +54,14 @@ func TestFederationLocalReplaysMigrationBackfillsInterruptedReset(t *testing.T) 
 		require.NoError(t, execErr)
 	}
 	stamp("before", "2026-01-01T00:00:00.000Z")
+	stamp("unprojected", "2026-01-01T00:00:00.000Z")
 	stamp("acknowledged", "2026-01-01T00:00:00.000Z")
 	stamp("after", "2026-01-03T00:00:00.000Z")
 	stamp("pulled", "2026-01-01T00:00:00.000Z")
+	_, err = admin.ExecContext(ctx, `UPDATE federation_replays_backfill.events SET issue_id=NULL WHERE uid=$1`, events["unprojected"])
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx, `DELETE FROM federation_replays_backfill.issues WHERE uid=(SELECT issue_uid FROM federation_replays_backfill.events WHERE uid=$1)`, events["unprojected"])
+	require.NoError(t, err)
 	_, err = admin.ExecContext(ctx, `UPDATE federation_replays_backfill.federation_sync_status SET last_pull_success_at='2026-01-02T12:00:00.000Z' WHERE project_id=$1`, pulledProject.ID)
 	require.NoError(t, err)
 	_, err = admin.ExecContext(ctx, `DROP TABLE federation_replays_backfill.federation_local_replays`)
@@ -66,7 +71,7 @@ func TestFederationLocalReplaysMigrationBackfillsInterruptedReset(t *testing.T) 
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
-	for name, want := range map[string]bool{"acknowledged": false, "before": true, "after": false, "pulled": false} {
+	for name, want := range map[string]bool{"unprojected": true, "acknowledged": false, "before": true, "after": false, "pulled": false} {
 		got, replayErr := upgraded.FederationLocalReplayDue(ctx, events[name], false)
 		require.NoError(t, replayErr)
 		require.Equal(t, want, got, name)

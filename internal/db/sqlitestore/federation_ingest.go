@@ -343,12 +343,6 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 	}
 	if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, prepared, moveSnapshots); err != nil {
-		_, missingEnrollment := errors.AsType[*db.FederationProjectNotEnrolledError](err)
-		if p.AllowEventRejections && !lockBeforePreparation && missingEnrollment {
-			// Rebuild all accepted-only witnesses from the original input while the
-			// writer is held; no rejected preparation state survives this retry.
-			return db.FederationIngestResult{}, errStaleFederationPreparation
-		}
 		return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
 	}
 	for _, in := range prepared {

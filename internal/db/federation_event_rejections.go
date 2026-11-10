@@ -68,26 +68,7 @@ func (r FederationRejectedCreations) Dependent(event RemoteEvent) (FederationEve
 	if len(r) == 0 {
 		return FederationEventRejection{}, false, nil
 	}
-	if event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot" {
-		var run CronRunObservation
-		if err := json.Unmarshal(event.Payload, &run); err != nil {
-			return FederationEventRejection{}, false, err
-		}
-		if run.IssueUID != nil {
-			rejection, ok := r[*run.IssueUID]
-			return rejection, ok, nil
-		}
-		return FederationEventRejection{}, false, nil
-	}
-	if !strings.HasPrefix(event.Type, "issue.") {
-		return FederationEventRejection{}, false, nil
-	}
-	payload := PayloadMap(event.Payload)
-	uid, err := FederationPayloadIssueUID(event, payload)
-	if err != nil {
-		return FederationEventRejection{}, false, err
-	}
-	refs, err := FederationPayloadReferencedIssueUIDs(event, payload)
+	uid, refs, err := federationEventIssueReferences(event, event)
 	if err != nil {
 		return FederationEventRejection{}, false, err
 	}
@@ -98,6 +79,27 @@ func (r FederationRejectedCreations) Dependent(event RemoteEvent) (FederationEve
 		}
 	}
 	return FederationEventRejection{}, false, nil
+}
+
+func federationEventIssueReferences(event, referenceEvent RemoteEvent) (string, []string, error) {
+	if strings.HasPrefix(event.Type, "issue.") {
+		primary, err := FederationPayloadIssueUID(event, PayloadMap(event.Payload))
+		if err != nil {
+			return "", nil, err
+		}
+		refs, err := FederationPayloadReferencedIssueUIDs(referenceEvent, PayloadMap(referenceEvent.Payload))
+		return primary, refs, err
+	}
+	if event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot" {
+		var run CronRunObservation
+		if err := json.Unmarshal(event.Payload, &run); err != nil {
+			return "", nil, err
+		}
+		if run.IssueUID != nil {
+			return *run.IssueUID, nil, nil
+		}
+	}
+	return "", nil, nil
 }
 
 // Remember records a rejected creation so dependent events remain pending too.

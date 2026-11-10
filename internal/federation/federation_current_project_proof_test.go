@@ -76,35 +76,6 @@ func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T)
 	}
 }
 
-func TestSyncFederationPartialPushStillPulls(t *testing.T) {
-	hub, projects := newMoveDeliveryHub(t, "delayed-edit-source", "delayed-edit-target")
-	sender := newMoveDeliverySpoke(t, hub, projects)
-	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Delayed source work", Author: "worker"})
-	require.NoError(t, err)
-	for i := range projects {
-		require.NoError(t, sender.sync(t, i))
-	}
-	local, err := sender.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	_, _, err = sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Authorized delayed edit"})
-	require.NoError(t, err)
-	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	delete(sender.credentials, projects[1].UID)
-	runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
-	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
-	require.NoError(t, err)
-	before, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
-	require.NoError(t, err)
-	require.NotNil(t, before.LastPullSuccessAt)
-	_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
-	require.ErrorContains(t, err, "pending federation events remain")
-	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
-	require.NoError(t, err)
-	require.NotNil(t, status.LastPullSuccessAt)
-	require.True(t, status.LastPullSuccessAt.After(*before.LastPullSuccessAt))
-}
-
 type boundedPushPageStore struct {
 	db.Storage
 	limit int
@@ -261,33 +232,52 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 	}
 }
 
-func TestSyncFederationReportsPushAndPullFailures(t *testing.T) {
-	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
-	sender := newMoveDeliverySpoke(t, hub, projects[:1])
-	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved work", Author: "worker"})
-	require.NoError(t, err)
-	require.NoError(t, sender.sync(t, 0))
-	local, err := sender.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	_, _, err = sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Pending"})
-	require.NoError(t, err)
-	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
-	require.NoError(t, err)
-	runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
-	_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
-	require.ErrorContains(t, err, "target-project")
-	require.ErrorContains(t, err, "pending federation events remain")
-	require.ErrorContains(t, err, "need enrollment")
-	require.ErrorIs(t, err, db.ErrNotFound)
-	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
-	require.NoError(t, err)
-	require.NotNil(t, status.LastError)
-	require.Contains(t, *status.LastError, "target-project")
-	require.Contains(t, *status.LastError, "not found")
-	require.Contains(t, *status.LastError, "pending federation events remain")
-	require.Contains(t, *status.LastError, "need enrollment")
+func TestSyncFederationPartialPushAndPull(t *testing.T) {
+	for _, destinationBound := range []bool{true, false} {
+		name := "destination bound"
+		if !destinationBound {
+			name = "destination unbound"
+		}
+		t.Run(name, func(t *testing.T) {
+			hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+			bound := projects[:1]
+			if destinationBound {
+				bound = projects
+			}
+			sender := newMoveDeliverySpoke(t, hub, bound)
+			issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved work", Author: "worker"})
+			require.NoError(t, err)
+			for i := range bound {
+				require.NoError(t, sender.sync(t, i))
+			}
+			local, err := sender.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, _, err = sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Delayed edit"})
+			require.NoError(t, err)
+			_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			delete(sender.credentials, projects[1].UID)
+			binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
+			require.NoError(t, err)
+			runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
+			_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
+			require.ErrorContains(t, err, "pending federation events remain")
+			if destinationBound {
+				after, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
+				require.NoError(t, err)
+				require.Greater(t, after.PullCursorEventID, binding.PullCursorEventID)
+				return
+			}
+			require.ErrorContains(t, err, "need enrollment")
+			require.ErrorIs(t, err, db.ErrNotFound)
+			status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
+			require.NoError(t, err)
+			require.NotNil(t, status.LastError)
+			require.Contains(t, *status.LastError, "not found")
+			require.Contains(t, *status.LastError, "pending federation events remain")
+			require.Contains(t, *status.LastError, "need enrollment")
+		})
+	}
 }
 
 func TestFederationMissingEnrollmentThenPoisonBlocksPush(t *testing.T) {

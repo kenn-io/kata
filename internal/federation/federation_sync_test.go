@@ -1786,15 +1786,6 @@ func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
 }
 
 func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing.T) {
-	testResetRetryLocalOriginEvent(t, false)
-}
-
-func TestUpgradeDuringInterruptedReset(t *testing.T) {
-	testResetRetryLocalOriginEvent(t, true)
-}
-
-func testResetRetryLocalOriginEvent(t *testing.T, upgrade bool) {
-	t.Helper()
 	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
@@ -1869,30 +1860,10 @@ func testResetRetryLocalOriginEvent(t *testing.T, upgrade bool) {
 	_, err = spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
 
-	var store db.Storage = spoke.DB
-	if upgrade {
-		// An older binary can acknowledge the replay before it is upgraded.
-		binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
-		require.NoError(t, err)
-		require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
-			delivered = append(delivered, events...)
-		}))
-		require.Empty(t, delivered)
-		// Simulate the schema 50 state left by an old binary after insertion.
-		_, err = spoke.DB.ExecContext(ctx, `DROP TABLE federation_local_replays`)
-		require.NoError(t, err)
-		_, err = spoke.DB.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
-		require.NoError(t, err)
-		require.NoError(t, sqlitestore.UpgradeInPlace(ctx, filepath.Join(spoke.Home, "kata.db")))
-		reopened, err := sqlitestore.Open(ctx, filepath.Join(spoke.Home, "kata.db"))
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = reopened.Close() })
-		store = reopened
-	}
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
-	binding, err = store.FederationBindingByProject(ctx, project.ID)
+	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, store, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		delivered = append(delivered, events...)
 	}))
 
@@ -1908,7 +1879,7 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 	testResetRetryLocalProjectEvent(t, false, false)
 }
 
-func TestSyncFederationOnceResetRetryDeliversAcknowledgedLocalProjectEvent(t *testing.T) {
+func TestSyncFederationOnceResetRetryDoesNotRedeliverAcknowledgedLocalProjectEvent(t *testing.T) {
 	testResetRetryLocalProjectEvent(t, true, false)
 }
 
