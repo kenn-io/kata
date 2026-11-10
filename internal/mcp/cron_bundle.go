@@ -71,7 +71,7 @@ func (h toolHandlers) cronImport(ctx context.Context, _ *sdkmcp.CallToolRequest,
 	for raw, ref := range in.IssueMappings {
 		source, err := cronUID(raw)
 		if err != nil {
-			return nil, cronbundle.Report{}, err
+			return nil, cronbundle.Report{}, fmt.Errorf("issue_mappings: %w", err)
 		}
 		ref = strings.TrimSpace(ref)
 		if old, ok := refs[source]; ok && old != ref {

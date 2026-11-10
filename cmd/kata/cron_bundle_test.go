@@ -113,42 +113,37 @@ func TestCronBundleExportSelectionAndTombstones(t *testing.T) {
 
 func TestCronBundleUnboundRemoteWorkspaceDoesNotSendPath(t *testing.T) {
 	for _, source := range []string{"environment", "active", "named"} {
-		for _, operation := range []string{"export", "import", "copy"} {
-			t.Run(source+"/"+operation, func(t *testing.T) {
-				env := testenv.New(t, testenv.WithAuthToken("fixture-token"))
-				t.Setenv("KATA_AUTH_TOKEN", "fixture-token")
-				project, err := env.DB.CreateProject(t.Context(), "spoke-project")
-				require.NoError(t, err)
-				_, err = env.DB.CreateProject(t.Context(), "target-project")
-				require.NoError(t, err)
-				job := cronCLIUID(t)
-				_, _, err = executeCronCLI(t, env.URL, nil, "job", "create", "--uid", job, "--file", cronCLIFile(t, cronCLIJob(t)))
-				require.NoError(t, err)
-				bundleFile := cronCLIFile(t, cron.Bundle{Format: "kata.cron.bundle", Version: 1, Source: cron.BundleSource{ProjectUID: project.UID, ProjectName: project.Name, ExportedAt: "2026-11-10T00:00:00Z"}, Jobs: []cron.BundleDefinition{}, Workflows: []cron.BundleDefinition{}})
-				bound := t.TempDir()
-				testfix.WriteKataToml(t, bound, "spoke-project")
-				server, recorder := projectResolutionProxy(t, env, bound)
-				workspace := filepath.Join(t.TempDir(), "unbound-client")
-				// The explicit temporary client workspace has no binding or git ancestor.
-				require.NoError(t, os.Mkdir(workspace, 0o700))
-				t.Chdir(workspace)
-				selection := selectProjectResolutionRemote(t, env, workspace, server.URL, source)
-				args := []string{"cron", operation, "--json"}
-				switch operation {
-				case "export":
-					args = append(args, "--all")
-				case "import":
-					args = append(args, "--file", bundleFile, "--dry-run")
-				case "copy":
-					args = append(args, "--job", job, "--to-project", "target-project", "--dry-run")
-				}
-				args = append(args, selection...)
-				_, _, err = executeRootCapture(t, t.Context(), args...)
-				requests := recorder.take()
-				require.Empty(t, requests, "unbound configured-remote resolution must fail locally without sending client paths")
-				assertCLIErrorMatches(t, err, unboundRemoteProjectError())
-			})
-		}
+		t.Run(source, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("fixture-token"))
+			project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			bound := t.TempDir()
+			testfix.WriteKataToml(t, bound, "spoke-project")
+			for _, operation := range []string{"export", "import", "copy"} {
+				t.Run(operation, func(t *testing.T) {
+					job := cronCLIUID(t)
+					bundleFile := cronCLIFile(t, cron.Bundle{Format: "kata.cron.bundle", Version: 1, Source: cron.BundleSource{ProjectUID: project.UID, ProjectName: project.Name, ExportedAt: "2026-11-10T00:00:00Z"}, Jobs: []cron.BundleDefinition{}, Workflows: []cron.BundleDefinition{}})
+					server, recorder := projectResolutionProxy(t, env, bound)
+					workspace := t.TempDir()
+					t.Chdir(workspace)
+					selection := selectProjectResolutionRemote(t, env, workspace, server.URL, source)
+					args := []string{"cron", operation, "--json"}
+					switch operation {
+					case "export":
+						args = append(args, "--all")
+					case "import":
+						args = append(args, "--file", bundleFile, "--dry-run")
+					case "copy":
+						args = append(args, "--job", job, "--to-project", "target-project", "--dry-run")
+					}
+					args = append(args, selection...)
+					_, _, err := executeRootCapture(t, t.Context(), args...)
+					requests := recorder.take()
+					require.Empty(t, requests, "unbound configured-remote resolution must fail locally without sending client paths")
+					assertCLIErrorMatches(t, err, unboundRemoteProjectError())
+				})
+			}
+		})
 	}
 }
 
