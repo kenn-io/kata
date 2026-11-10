@@ -1115,6 +1115,15 @@ func (r *Runner) runOnce(
 	validateLease func(context.Context) error,
 	only map[int64]bool,
 ) (retry <-chan struct{}, denied bool, remaining map[int64]bool, err error) {
+	return r.runPass(ctx, validateLease, only, nil)
+}
+
+func (r *Runner) runPass(
+	ctx context.Context,
+	validateLease func(context.Context) error,
+	only map[int64]bool,
+	refusals relayRefusalRetries,
+) (retry <-chan struct{}, denied bool, remaining map[int64]bool, err error) {
 	var scan *activity.Lease
 	if r.DrainAdmission != nil {
 		var admitted bool
@@ -1150,6 +1159,7 @@ func (r *Runner) runOnce(
 	if err != nil {
 		return nil, false, nil, err
 	}
+	refusals.reconcile(spokes)
 	if len(spokes) == 0 {
 		return nil, false, nil, nil
 	}
@@ -1159,7 +1169,7 @@ func (r *Runner) runOnce(
 	}
 	var errs []error
 	for _, spoke := range spokes {
-		if len(only) > 0 && !only[spoke.binding.ProjectID] {
+		if refusals.blocked(spoke.binding, time.Now()) || (len(only) > 0 && !only[spoke.binding.ProjectID]) {
 			continue
 		}
 		var drain *activity.Lease
@@ -1176,6 +1186,7 @@ func (r *Runner) runOnce(
 			}
 			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
 		}()
+		refusals.record(spoke.binding, spokeErr, r.effectiveInterval(), time.Now())
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}
@@ -1561,10 +1572,8 @@ func monitorFederationRunnerLease(
 }
 
 func (r *Runner) run(ctx context.Context, validateLease func(context.Context) error) error {
-	interval := r.Interval
-	if interval <= 0 {
-		interval = 30 * time.Second
-	}
+	interval := r.effectiveInterval()
+	refusals := make(relayRefusalRetries)
 	debounce := r.Debounce
 	if debounce <= 0 {
 		debounce = 50 * time.Millisecond
@@ -1580,7 +1589,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 				return err
 			}
 		}
-		retry, denied, remaining, err := r.runOnce(ctx, validateLease, pending)
+		retry, denied, remaining, err := r.runPass(ctx, validateLease, pending, refusals)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err

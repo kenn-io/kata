@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Federation
@@ -2407,9 +2407,19 @@ root can quarantine the same batch again. Do not skip relay data or edit a
 database cursor instead.
 
 A live cross-project link is unsupported. The root refuses to sign a checkpoint
-while the link exists and keeps the owner's link and events. Remove the link,
-then retry. A reset never strips the link silently or shares its private
-endpoint.
+while the link exists and keeps the owner's link and events. The spoke reports
+`409 relay_cross_project_links` as a hub-side refusal. Ask a hub operator to
+remove cross-project related, blocks, and parent links, including links to
+projects you cannot access. A reset never strips the link silently or shares
+its private endpoint.
+
+On current `main` (unreleased), automatic attempts after this refusal wait
+at least one minute or the configured sync interval, whichever is longer. The
+delay doubles after each refusal up to five minutes (or the sync interval if
+longer). Local activity does not bypass the delay, and other projects keep
+syncing. After the hub operator removes the links, the spoke retries when its
+delay is due; restarting the spoke daemon makes a fresh attempt immediately.
+The last error remains visible until an attempted sync succeeds.
 
 ## Purge and reset
 

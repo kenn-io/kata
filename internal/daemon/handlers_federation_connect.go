@@ -374,7 +374,7 @@ func (d federationBridgeDoer) Do(ctx context.Context, request *http.Request) (*h
 			if readErr == nil && len(raw) <= 1<<20 && json.Unmarshal(raw, &envelope) == nil && envelope.Error.Code == "relay_cross_project_links" {
 				// Map only this public conflict to its known, endpoint-free message and
 				// remedy. Never forward arbitrary upstream diagnostic text or data.
-				failure := newRelayCrossProjectLinksError("hub")
+				failure := api.NewRelayCrossProjectLinksError("hub")
 				failure.Data = map[string]any{"hub_status": response.StatusCode}
 				return nil, failure
 			}
