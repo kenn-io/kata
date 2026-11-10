@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// FederationPayloadIssueUID resolves the issue identity from the envelope and payload.
 func FederationPayloadIssueUID(ev RemoteEvent, payload map[string]jsontext.Value) (string, error) {
 	var payloadUID string
 	if uid, ok := StringValue(payload["issue_uid"]); ok {
@@ -27,6 +28,7 @@ func FederationPayloadIssueUID(ev RemoteEvent, payload map[string]jsontext.Value
 	return payloadUID, nil
 }
 
+// FederationPayloadReferencedIssueUIDs returns issue references in an event.
 func FederationPayloadReferencedIssueUIDs(ev RemoteEvent, payload map[string]jsontext.Value) ([]string, error) {
 	var refs []string
 	if ev.RelatedIssueUID != nil && *ev.RelatedIssueUID != "" {
@@ -56,6 +58,7 @@ func FederationPayloadReferencedIssueUIDs(ev RemoteEvent, payload map[string]jso
 	return refs, nil
 }
 
+// FederationPayloadLinksChangedIssueUIDs returns link changes in an event.
 func FederationPayloadLinksChangedIssueUIDs(
 	ev RemoteEvent,
 	payload map[string]jsontext.Value,
