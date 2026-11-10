@@ -22,6 +22,22 @@ func portableIssueTimezone(zone string) bool {
 	return err == nil
 }
 
+// legacyScheduleZoneKnown reports whether a legacy string schedule resolves to a usable zone.
+func legacyScheduleZoneKnown(issueZone jsontext.Value, field, defaultZone, recurrenceZone string) bool {
+	var zone string
+	if json.Unmarshal(issueZone, &zone) == nil && portableIssueTimezone(zone) {
+		return true
+	}
+	if len(issueZone) > 0 {
+		return false
+	}
+	if field == "scheduled_on" && recurrenceZone != "" {
+		_, err := metadata.ScheduleLocation(recurrenceZone, metadata.ScheduleTZDataVersion)
+		return err == nil
+	}
+	return portableIssueTimezone(defaultZone)
+}
+
 // PrepareIssueSchedules validates and freezes schedule changes together.
 func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Value, defaultZone, recurrenceZone string) (map[string]jsontext.Value, error) {
 	effective, err := ApplyMetadataPatch(current, patch)
@@ -78,13 +94,7 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		if patched && !changedZone && len(before[field]) > 0 {
 			previous, err := metadata.ScheduleValueText(before[field])
 			if err == nil && previous == value {
-				var zone string
-				knownZone := json.Unmarshal(before["timezone"], &zone) == nil && portableIssueTimezone(zone)
-				if !knownZone && len(before["timezone"]) == 0 && field == "scheduled_on" && recurrenceZone != "" {
-					_, err := metadata.ScheduleLocation(recurrenceZone, metadata.ScheduleTZDataVersion)
-					knownZone = err == nil
-				}
-				if before[field][0] != '"' || !knownZone {
+				if before[field][0] != '"' || !legacyScheduleZoneKnown(before["timezone"], field, defaultZone, recurrenceZone) {
 					result[field] = before[field]
 					continue
 				}

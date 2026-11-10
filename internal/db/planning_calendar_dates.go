@@ -1,8 +1,6 @@
 package db
 
 import (
-	"errors"
-
 	"go.kenn.io/kata/internal/metadata"
 )
 
@@ -21,11 +19,11 @@ func (d planningCalendarDates) err() error {
 	return d.deadlineErr
 }
 
-// unsupported returns the error of a field saved with tzdata rules this build
-// cannot read, which a row must surface instead of omitting the date.
+// unsupported returns the error of a field saved by a newer build (tzdata rules
+// or members this build cannot read), which a row must surface, not omit.
 func (d planningCalendarDates) unsupported() error {
 	for _, err := range []error{d.scheduledErr, d.deadlineErr} {
-		if errors.Is(err, metadata.ErrUnsupportedScheduleTZData) {
+		if metadata.IsUnsupportedSchedule(err) {
 			return err
 		}
 	}
@@ -56,7 +54,7 @@ func resolvePlanningCalendarDates(
 // the field's default timezone, then UTC, so a request needs no zone. A field
 // is empty when its key is absent or its stored value cannot be resolved, so
 // one malformed value never fails a whole response; only a saved schedule with
-// an unsupported tzdata version returns an error. scheduledDefaultTimezone can
+// an unsupported tzdata version or member returns an error. scheduledDefaultTimezone can
 // include the legacy recurrence fallback; deadlines use the daemon timezone.
 func RowPlanningDates(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string) (scheduledOn, deadlineOn string, err error) {
 	dates := resolvePlanningCalendarDates(raw, nil, scheduledDefaultTimezone, deadlineDefaultTimezone)

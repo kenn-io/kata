@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 func TestRowPlanningDatesResolveInIssueThenDefaultThenUTC(t *testing.T) {
@@ -138,4 +139,10 @@ func TestRowPlanningDatesFailsOnUnsupportedTZDataVersion(t *testing.T) {
 	raw := `{"scheduled_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"},"deadline_on":"2026-11-02"}`
 	_, _, err := RowPlanningDates(raw, "", "")
 	require.ErrorContains(t, err, "unsupported schedule tzdata version")
+}
+
+func TestRowPlanningDatesReportsUnknownScheduleMember(t *testing.T) {
+	raw := `{"scheduled_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1},"deadline_on":"2026-11-02"}`
+	_, _, err := RowPlanningDates(raw, "", "")
+	require.Error(t, err)
 }

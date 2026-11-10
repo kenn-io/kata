@@ -338,7 +338,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("attach initial recurrence issue: %w", err)
 	}
-	assert.Equal(t, []string{"recurrence.created", "recurrence.materialized"}, eventTypeNames(attached.Events))
+	assert.Equal(t, []string{"recurrence.created", "issue.metadata_updated", "recurrence.materialized"}, eventTypeNames(attached.Events))
 	linkedIssue, err := store.IssueByID(ctx, initialIssue.ID)
 	if err != nil {
 		return fmt.Errorf("load attached recurrence issue: %w", err)
@@ -351,6 +351,18 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	require.NoError(t, json.Unmarshal([]byte(linkedIssue.Metadata), &linkedMetadata))
 	assert.Equal(t, map[string]any{"value": "2026-08-03", "timezone": "UTC", "tzdata_version": metadata.ScheduleTZDataVersion}, linkedMetadata["scheduled_on"])
 	assert.Equal(t, "UTC", linkedMetadata["timezone"])
+	folded, err := foldProjectIssues(ctx, store, attachmentProject.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, string(linkedIssue.Metadata), string(folded.IssueMetadata[linkedIssue.UID]), "federation replay must retain the attached issue's saved schedule")
+	issueEvents, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: attachmentProject.ID, Limit: 1000})
+	require.NoError(t, err)
+	var creations int
+	for _, event := range issueEvents {
+		if event.Type == "issue.created" && event.IssueUID != nil && *event.IssueUID == linkedIssue.UID {
+			creations++
+		}
+	}
+	require.Equal(t, 1, creations, "attaching must not duplicate the initial issue creation")
 	require.NotNil(t, attached.Recurrence.NextOccurrenceKey)
 	assert.Equal(t, "2026-08-10", *attached.Recurrence.NextOccurrenceKey)
 	exhaustedRule := "FREQ=DAILY;COUNT=1"

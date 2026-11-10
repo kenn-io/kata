@@ -91,6 +91,12 @@ func DecodeSavedSchedule(raw jsontext.Value) (*SavedSchedule, error) {
 	return obj, err
 }
 
+// IsUnsupportedSchedule reports a saved schedule written by a newer build:
+// tzdata rules or object members this build does not know.
+func IsUnsupportedSchedule(err error) bool {
+	return errors.Is(err, ErrUnsupportedScheduleTZData) || errors.Is(err, json.ErrUnknownName)
+}
+
 func decodeSavedSchedule(raw jsontext.Value) (*SavedSchedule, *time.Location, error) {
 	if len(raw) == 0 || raw[0] != '{' {
 		return nil, nil, nil

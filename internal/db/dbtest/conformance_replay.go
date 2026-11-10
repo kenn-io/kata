@@ -512,6 +512,41 @@ func CollectImportRecords(
 	return records, nil
 }
 
+func checkAttachedScheduleFederationReplay(t *testing.T, target db.Storage, backend Backend) error {
+	ctx := t.Context()
+	source := backend.Open(t)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "recurrence-source")
+	require.NoError(t, err)
+	binding, err := source.EnableProjectFederation(ctx, project.ID, "worker")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Scheduled", Author: "worker"})
+	require.NoError(t, err)
+	_, err = source.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{IssueID: issue.ID, Recurrence: db.CreateRecurrenceIn{ProjectID: project.ID, Actor: "worker", Rule: "FREQ=DAILY", DTStart: "2026-11-12", Timezone: "America/New_York", Template: db.RecurrenceTemplate{Title: "Scheduled"}}})
+	require.NoError(t, err)
+	want, err := source.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	local, err := target.CreateProject(ctx, "recurrence-peer")
+	require.NoError(t, err)
+	_, err = target.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: local.ID, HubURL: "https://daemon.example", HubProjectID: project.ID, HubProjectUID: project.UID, ReplayHorizonEventID: binding.ReplayHorizonEventID, Actor: "worker", EmptyOnly: true})
+	require.NoError(t, err)
+	events, err := source.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, AfterID: binding.ReplayHorizonEventID - 1, Limit: 100})
+	require.NoError(t, err)
+	for _, event := range events {
+		if event.Type != "issue.created" && event.Type != "issue.metadata_updated" {
+			continue
+		}
+		inserted, err := target.InsertRemoteEvent(ctx, local.ID, portableNativeEvent(event))
+		require.NoError(t, err)
+		require.True(t, inserted)
+	}
+	require.NoError(t, target.MaterializeFederatedProject(ctx, local.ID))
+	got, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.JSONEq(t, string(want.Metadata), string(got.Metadata))
+	return nil
+}
+
 func checkScheduleReplay(t *testing.T, target db.Storage, backend Backend) error {
 	ctx := t.Context()
 	source := backend.Open(t)

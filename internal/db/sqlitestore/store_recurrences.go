@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence"
 	"go.kenn.io/kata/internal/shortid"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -216,17 +217,9 @@ func (d *Store) createRecurrenceForIssue(
 	if err != nil {
 		return out, fmt.Errorf("walk after initial occurrence: %w", err)
 	}
-	updatedMetadata, err := db.ComposeExistingRecurrenceIssueMetadata(
-		jsontext.Value(metadataJSON), *requireFirst, rec.Timezone,
-	)
-	if err != nil {
-		return out, fmt.Errorf("compose initial recurrence issue metadata: %w", err)
-	}
 	updatedAt := nowTimestamp()
-	if _, err := tx.ExecContext(ctx, `UPDATE issues
-		SET recurrence_id = ?, occurrence_key = ?, metadata = ?,
-		    revision = revision + 1, updated_at = ?
-		WHERE id = ?`, rec.ID, *requireFirst, string(updatedMetadata), updatedAt, in.IssueID); err != nil {
+	attached, err := d.attachIssueToRecurrenceTx(ctx, tx, in, rec, *requireFirst, projectName, metadataJSON, revision, updatedAt)
+	if err != nil {
 		return out, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE recurrences
@@ -257,8 +250,39 @@ func (d *Store) createRecurrenceForIssue(
 		return out, err
 	}
 	out.Recurrence = rec
-	out.Events = []db.Event{created, materialized}
+	out.Events = append(append([]db.Event{created}, attached...), materialized)
 	return out, nil
+}
+
+// attachIssueToRecurrenceTx stamps the recurrence onto the issue and returns the
+// issue.metadata_updated event that carries its saved schedule to replay.
+func (d *Store) attachIssueToRecurrenceTx(
+	ctx context.Context, tx *sql.Tx, in db.CreateRecurrenceForIssueIn, rec db.Recurrence,
+	key, projectName, metadataJSON string, revision int64, updatedAt string,
+) ([]db.Event, error) {
+	updated, err := db.ComposeExistingRecurrenceIssueMetadata(jsontext.Value(metadataJSON), key, rec.Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("compose initial recurrence issue metadata: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE issues
+		SET recurrence_id = ?, occurrence_key = ?, metadata = ?,
+		    revision = revision + 1, updated_at = ?
+		WHERE id = ?`, rec.ID, key, string(updated), updatedAt, in.IssueID); err != nil {
+		return nil, err
+	}
+	diff, err := metadata.Diff(jsontext.Value(metadataJSON), updated)
+	if err != nil || len(diff) == 0 {
+		return nil, err
+	}
+	payload, err := marshalIssueMetadataUpdatePayload(diff, revision+1, updatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("marshal issue metadata event: %w", err)
+	}
+	event, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID: in.Recurrence.ProjectID, ProjectName: projectName, IssueID: &in.IssueID,
+		Type: "issue.metadata_updated", Actor: in.Recurrence.Actor, Payload: string(payload),
+	})
+	return []db.Event{event}, err
 }
 
 // PatchRecurrence runs an If-Match-guarded UPDATE comparing each supplied
