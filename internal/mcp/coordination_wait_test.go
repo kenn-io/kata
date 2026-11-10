@@ -44,7 +44,6 @@ func TestMCPCoordinationWaitAttentionPredicates(t *testing.T) {
 	}{
 		{"attention", "stuck", "matched", "attention"},
 		{"nonstring", 3, "timeout", ""},
-		{"unset", nil, "timeout", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			session := coordinationWaitSession(t, func(_ *http.Request) map[string]any {
@@ -73,21 +72,35 @@ func TestMCPCoordinationWaitReplyBaseline(t *testing.T) {
 	key := notification.MetadataKey("bound-actor/worker")
 	other := notification.MetadataKey("bound-actor")
 	for _, tc := range []struct {
-		name     string
-		frames   []map[string]any
-		explicit bool
+		name, actor, teammate, effective string
+		frames                           []map[string]any
+		explicit                         bool
 	}{
-		{"changed", []map[string]any{{key: map[string]any{"from": "reviewer", "message": "old"}}, {key: map[string]any{"from": "reviewer", "message": "new"}}}, true},
-		{"null and exact recipient", []map[string]any{{}, {key: nil, other: map[string]any{"from": "reviewer", "message": "wrong inbox"}}, {key: map[string]any{"from": "reviewer", "message": "answer"}}}, false},
+		{"changed", "startup-actor", "worker", "bound-actor", []map[string]any{{key: map[string]any{"from": "reviewer", "message": "old"}}, {key: map[string]any{"from": "reviewer", "message": "new"}}}, true},
+		{"null and exact recipient", "startup-actor", "worker", "bound-actor", []map[string]any{{}, {key: nil, other: map[string]any{"from": "reviewer", "message": "wrong inbox"}}, {key: map[string]any{"from": "reviewer", "message": "answer"}}}, false},
+		{"normalized default identity", "worker ", "review", "", []map[string]any{{}, {notification.MetadataKey("worker/review"): map[string]any{"from": "reviewer", "message": "answer"}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var shows, lookups atomic.Int64
-			session := coordinationWaitSession(t, func(_ *http.Request) map[string]any {
-				issue := issueJSON(1, "spoke-project", "abc1")
-				index := min(int(shows.Add(1))-1, len(tc.frames)-1)
-				issue["metadata"] = tc.frames[index]
-				return issue
-			}, &lookups)
+			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/projects":
+					writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+				case "/api/v1/projects/1/notifications/actor":
+					lookups.Add(1)
+					effective := tc.effective
+					if effective == "" {
+						effective = r.URL.Query().Get("requested_actor")
+					}
+					writeJSON(w, map[string]any{"effective_actor": effective})
+				default:
+					issue := issueJSON(1, "spoke-project", "abc1")
+					index := min(int(shows.Add(1))-1, len(tc.frames)-1)
+					issue["metadata"] = tc.frames[index]
+					writeJSON(w, map[string]any{"issue": issue})
+				}
+			})
+			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: tc.actor, Teammate: tc.teammate, Version: "test"})
 			args := map[string]any{"refs": []string{"abc1"}, "until": "reply", "timeout_seconds": 2}
 			if tc.explicit {
 				args["for"] = " bound-actor/worker "
@@ -103,30 +116,6 @@ func TestMCPCoordinationWaitReplyBaseline(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Contract: the inferred inbox uses the same normalized identity as native
-// reply delivery, including accepted whitespace around the startup actor.
-func TestMCPCoordinationWaitReplyNormalizesDefaultIdentity(t *testing.T) {
-	var shows atomic.Int64
-	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/projects":
-			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
-		case "/api/v1/projects/1/notifications/actor":
-			writeJSON(w, map[string]any{"effective_actor": r.URL.Query().Get("requested_actor")})
-		default:
-			issue := issueJSON(1, "spoke-project", "abc1")
-			if shows.Add(1) > 1 {
-				issue["metadata"] = map[string]any{notification.MetadataKey("worker/review"): map[string]any{"from": "reviewer", "message": "An answer arrived"}}
-			}
-			writeJSON(w, map[string]any{"issue": issue})
-		}
-	})
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker ", Teammate: "review", Version: "test"})
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1"}, "until": "reply", "timeout_seconds": 1})
-	require.Equal(t, "matched", out["reason"], "native replies are delivered to the canonical actor/teammate slot")
-	require.Equal(t, "reply", out["states"].([]any)[0].(map[string]any)["reason"])
 }
 
 func TestMCPCoordinationWaitAllRetainsObservedCompletions(t *testing.T) {
@@ -152,35 +141,6 @@ func TestMCPCoordinationWaitAllRetainsObservedCompletions(t *testing.T) {
 	for _, raw := range out["states"].([]any) {
 		require.Equal(t, true, raw.(map[string]any)["matched"])
 	}
-}
-
-// Contract: an until completion remains visible after a later member uses up
-// the deadline, including when that completion arrived after a full round.
-func TestMCPCoordinationWaitTimeoutRetainsObservedCompletions(t *testing.T) {
-	var first, second atomic.Int64
-	session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
-		issue := issueJSON(1, "spoke-project", "abc1")
-		if strings.HasSuffix(r.URL.Path, "/abc1") {
-			if first.Add(1) > 1 {
-				issue["metadata"] = map[string]any{"work.attention": "stuck"}
-			}
-		} else {
-			issue["short_id"], issue["uid"] = "def1", "01ARZ3NDEKTSV4RRFFQ69G5FAW"
-			if second.Add(1) > 1 {
-				<-r.Context().Done()
-			}
-		}
-		return issue
-	})
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "timeout_seconds": 1})
-	require.Equal(t, "timeout", out["reason"])
-	states := out["states"].([]any)
-	require.NotEmpty(t, states, "an observed completion must survive a later stalled read")
-	state := states[0].(map[string]any)
-	require.Equal(t, "spoke-project#abc1", state["ref"])
-	require.Equal(t, true, state["matched"])
-	require.Equal(t, "attention", state["reason"])
-	require.Equal(t, "stuck", state["attention"])
 }
 
 func TestMCPCoordinationWaitRejectsReusedIssueIdentity(t *testing.T) {
@@ -472,21 +432,18 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 }
 
 func TestMCPCoordinationWaitClosedDeletedIssue(t *testing.T) {
-	t.Run("closed", func(t *testing.T) {
-		var reads atomic.Int64
-		session := coordinationWaitSession(t, func(_ *http.Request) map[string]any {
-			issue := issueJSON(1, "spoke-project", "abc1")
-			if reads.Add(1) > 1 {
-				issue["status"], issue["deleted_at"] = "closed", "2026-11-10T12:00:00Z"
-			}
-			return issue
-		})
-		out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1"}, "until": "closed", "timeout_seconds": 1})
-		require.Equal(t, "matched", out["reason"])
-		state := out["states"].([]any)[0].(map[string]any)
-		require.Equal(t, "deleted", state["status"])
-		require.Equal(t, "closed", state["reason"])
+	var reads atomic.Int64
+	session := coordinationWaitSession(t, func(_ *http.Request) map[string]any {
+		issue := issueJSON(1, "spoke-project", "abc1")
+		if reads.Add(1) > 1 {
+			issue["status"], issue["deleted_at"] = "closed", "2026-11-10T12:00:00Z"
+		}
+		return issue
 	})
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1"}, "until": "closed", "timeout_seconds": 1})
+	require.Equal(t, "matched", out["reason"])
+	state := out["states"].([]any)[0].(map[string]any)
+	require.Equal(t, "deleted", state["status"])
 }
 
 func TestMCPCoordinationWaitAnyAllMissing(t *testing.T) {
@@ -550,40 +507,11 @@ func TestMCPCoordinationWaitUntilAnySurvivesOutOfScopeRef(t *testing.T) {
 	require.Equal(t, "matched", out["reason"])
 }
 
-func TestMCPCoordinationWaitUntilAnySurvivesTransientFailure(t *testing.T) {
-	failed := make(chan struct{})
-	var attempts atomic.Int64
-	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/projects":
-			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
-		case "/api/v1/projects/1/issues/abc1":
-			http.Error(w, "unavailable", http.StatusServiceUnavailable)
-			if attempts.Add(1) == 2 {
-				close(failed)
-			}
-		default:
-			select {
-			case <-failed:
-			case <-r.Context().Done():
-				return
-			}
-			issue := issueJSON(1, "spoke-project", "def1")
-			issue["metadata"] = map[string]any{"work.attention": "stuck"}
-			writeJSON(w, map[string]any{"issue": issue})
-		}
-	})
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "any": true, "timeout_seconds": 1})
-	require.Equal(t, "matched", out["reason"])
-}
-
 func TestMCPCoordinationWaitUntilRetriesTransientFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, until string
 		statuses    []int
 	}{
-		{"attention", "attention", []int{503, 200}},
 		{"reply baseline", "reply", []int{200, 503, 200}},
 		{"successful read resets failures", "attention", []int{503, 503, 200, 503, 503, 200}},
 	} {

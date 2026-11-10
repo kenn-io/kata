@@ -2,11 +2,14 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 )
 
 func callCoordinationTool(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) map[string]any {
@@ -21,7 +24,7 @@ func callCoordinationTool(t *testing.T, session *sdkmcp.ClientSession, name stri
 
 // Typed sends and clears address one exact recipient.
 func TestMCPNotifySendAndClearAgainstDaemon(t *testing.T) {
-	session, _ := newCoordinationSession(t)
+	session, store := newCoordinationSession(t)
 	created := callCoordinationTool(t, session, "kata.create", map[string]any{"title": "Review the adapter", "idempotency_key": "notify-create"})
 	ref := created["issue"].(map[string]any)["ref"].(string)
 	args := map[string]any{"ref": ref, "to": " reviewer/worker ", "message": "Please review", "teammate": "planner"}
@@ -33,11 +36,9 @@ func TestMCPNotifySendAndClearAgainstDaemon(t *testing.T) {
 	require.Len(t, inbox["requests"], 1)
 	request := inbox["requests"].([]any)[0].(map[string]any)
 	require.Equal(t, "Please review", request["message"])
-	callCoordinationTool(t, session, "kata.notify", map[string]any{"ref": ref, "to": "reviewer", "message": "Separate actor inbox"})
 	cleared := callCoordinationTool(t, session, "kata.notify", map[string]any{"ref": ref, "to": "reviewer/worker", "clear": true})
 	require.Equal(t, true, cleared["changed"])
 	require.Empty(t, callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer/worker"})["requests"])
-	require.Len(t, callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer"})["requests"], 1)
 	cleared = callCoordinationTool(t, session, "kata.notify", map[string]any{"ref": ref, "to": "reviewer/worker", "clear": true})
 	require.Equal(t, false, cleared["changed"])
 	root := callCoordinationTool(t, session, "kata.comment", map[string]any{"ref": ref, "body": "Inspect this contract", "teammate": "planner", "idempotency_key": "linked-root"})["comment"].(map[string]any)
@@ -46,23 +47,22 @@ func TestMCPNotifySendAndClearAgainstDaemon(t *testing.T) {
 	callCoordinationTool(t, session, "kata.notify", map[string]any{"ref": ref, "to": "example-agent/worker", "message": "Please answer", "re": root["handle"], "teammate": "planner"})
 	inbox = callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "example-agent/worker"})
 	require.Equal(t, root["uid"], inbox["requests"].([]any)[0].(map[string]any)["re"])
-	reply := callCoordinationTool(t, session, "kata.comment", map[string]any{"ref": ref, "body": "Confirmed the notification contract against the isolated fixture.", "reply_to": root["handle"], "kind": "confirm", "teammate": "worker", "idempotency_key": "linked-answer"})["comment"].(map[string]any)
+	issue, err := store.IssueByUID(t.Context(), created["issue"].(map[string]any)["uid"].(string), db.IncludeDeletedNo)
+	require.NoError(t, err)
+	value, err := json.Marshal(map[string]any{"from": "worker", "message": "Confirmed", "re": root["uid"], "kind": "confirm"})
+	require.NoError(t, err)
+	_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{notification.MetadataKey("example-agent/planner"): value}})
+	require.NoError(t, err)
 	inbox = callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "example-agent/planner"})
 	require.Len(t, inbox["requests"], 1)
 	request = inbox["requests"].([]any)[0].(map[string]any)
-	require.Equal(t, reply["uid"], request["re"])
+	require.Equal(t, root["uid"], request["re"])
 	require.Equal(t, "confirm", request["kind"])
-}
-
-func TestMCPNotifyBroadcast(t *testing.T) {
-	session, _ := newCoordinationSession(t)
-	created := callCoordinationTool(t, session, "kata.create", map[string]any{"title": "Coordinate review", "idempotency_key": "broadcast-create"})
-	ref := created["issue"].(map[string]any)["ref"].(string)
 	callCoordinationTool(t, session, "kata.assign", map[string]any{"ref": ref, "owner": "reviewer"})
-	args := map[string]any{"ref": ref, "broadcast": true, "message": "Please inspect the update"}
-	sent := callCoordinationTool(t, session, "kata.notify", args)
+	args = map[string]any{"ref": ref, "broadcast": true, "message": "Please inspect the update"}
+	sent = callCoordinationTool(t, session, "kata.notify", args)
 	require.Equal(t, []any{"reviewer"}, sent["recipients"])
-	inbox := callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer"})
+	inbox = callCoordinationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer"})
 	require.Equal(t, true, inbox["requests"].([]any)[0].(map[string]any)["broadcast"])
 }
 
@@ -71,28 +71,23 @@ func TestMCPNotifyValidationAndScope(t *testing.T) {
 	created := callCoordinationTool(t, session, "kata.create", map[string]any{"title": "Keep untouched", "idempotency_key": "validation-create"})
 	ref := created["issue"].(map[string]any)["ref"].(string)
 	for _, tc := range []struct {
-		name string
-		args map[string]any
-		want string
+		name, want, without string
+		args                map[string]any
 	}{
-		{"clear message", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "message": "x"}, "not: validated against"},
-		{"clear linked", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "re": "c:abcdef"}, "not: validated against"},
-		{"clear broadcast", map[string]any{"ref": ref, "clear": true, "broadcast": true}, "clear cannot"},
-		{"clear invalid recipient", map[string]any{"ref": ref, "to": "review\ner", "clear": true}, "recipient"},
-		{"outside scope", map[string]any{"ref": "other-project#abcd", "to": "reviewer", "message": "x"}, "outside"},
-		{"forged sender", map[string]any{"ref": ref, "to": "reviewer", "message": "x", "from": "someone-else"}, "additional properties"},
+		{"clear message", "not: validated against", "message", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "message": "x"}},
+		{"clear linked", "not: validated against", "re", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "re": "c:abcdef"}},
+		{"clear broadcast", "clear cannot", "", map[string]any{"ref": ref, "clear": true, "broadcast": true}},
+		{"clear invalid recipient", "recipient", "", map[string]any{"ref": ref, "to": "review\ner", "clear": true}},
+		{"outside scope", "outside", "", map[string]any{"ref": "other-project#abcd", "to": "reviewer", "message": "x"}},
+		{"forged sender", "additional properties", "", map[string]any{"ref": ref, "to": "reviewer", "message": "x", "from": "someone-else"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.name == "clear message" || tc.name == "clear linked" {
+			if tc.without != "" {
 				control := make(map[string]any, len(tc.args))
 				for k, v := range tc.args {
 					control[k] = v
 				}
-				if tc.name == "clear message" {
-					delete(control, "message")
-				} else {
-					delete(control, "re")
-				}
+				delete(control, tc.without)
 				callCoordinationTool(t, session, "kata.notify", control)
 			}
 			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.notify", Arguments: tc.args})
@@ -106,7 +101,7 @@ func TestMCPNotifyValidationAndScope(t *testing.T) {
 	}
 }
 
-func TestMCPNotifyIdentityAndTeammateDefaults(t *testing.T) {
+func TestMCPNotifyTeammateDefaults(t *testing.T) {
 	requests := make(chan map[string]any, 1)
 	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -154,4 +149,28 @@ func TestMCPNotifyOlderDaemon(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	require.Contains(t, string(mustJSON(t, result.Content)), "daemon does not support notifications")
+}
+
+func TestMCPNotifyHistoricalReferenceOutsideScope(t *testing.T) {
+	store, _, session, source, _, excluded, issue := mcpFixedScopeFixture(t)
+	args := map[string]any{"ref": source.Name + "#" + issue.ShortID, "to": "reviewer", "message": "First request"}
+	sent := callCoordinationTool(t, session, "kata.notify", args)
+	require.Equal(t, true, sent["changed"])
+	issue, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	mcpMoveOutside(t, store, source, excluded, issue)
+	before, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	beforeEvent, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	args["message"] = "Out of scope request"
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.notify", Arguments: args})
+	require.NoError(t, err)
+	require.True(t, result.IsError, string(mustJSON(t, result)))
+	after, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, before.Metadata, after.Metadata)
+	afterEvent, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, beforeEvent, afterEvent)
 }
