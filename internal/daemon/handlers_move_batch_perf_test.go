@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -87,4 +89,62 @@ func moveIssuesBatch2000(t testing.TB, spoke bool, measure func(func())) time.Du
 	})
 	t.Logf("PERF spoke=%t issues=2000 elapsed=%s microseconds_per_issue=%d", spoke, elapsed, elapsed.Microseconds()/2000)
 	return elapsed
+}
+
+type countingBatchPreviews struct {
+	db.Storage
+	items int
+}
+
+func (s *countingBatchPreviews) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
+	if in.DryRun {
+		s.items += len(in.Items)
+	}
+	return s.Storage.MoveIssuesBatch(ctx, in)
+}
+
+func BenchmarkMoveIssuesBatch5000(b *testing.B) {
+	for _, conflicts := range []bool{false, true} {
+		b.Run(fmt.Sprintf("conflicts=%t", conflicts), func(b *testing.B) {
+			for range b.N {
+				b.StopTimer()
+				var counter *countingBatchPreviews
+				env := testenv.New(b, func(cfg *daemon.ServerConfig) {
+					counter = &countingBatchPreviews{Storage: cfg.DB}
+					cfg.DB = counter
+					cfg.MoveBatchBudget = time.Nanosecond
+				})
+				source, err := env.DB.CreateProject(b.Context(), "source")
+				require.NoError(b, err)
+				a, err := env.DB.CreateProject(b.Context(), "target-a")
+				require.NoError(b, err)
+				c, err := env.DB.CreateProject(b.Context(), "target-b")
+				require.NoError(b, err)
+				items := make([]api.MoveIssuesItem, 0, 5000)
+				for i := 0; i < 5000; i++ {
+					issue, _, err := env.DB.CreateIssue(b.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "route", Author: "worker"})
+					require.NoError(b, err)
+					items = append(items, api.MoveIssuesItem{Ref: issue.UID, ToProjectUID: a.UID})
+				}
+				if conflicts {
+					for i := 0; i < 200; i += 2 {
+						items[i+1] = api.MoveIssuesItem{Ref: items[i].Ref, ToProjectUID: c.UID}
+					}
+				}
+				b.StartTimer()
+				for start := 0; start < len(items); {
+					raw, err := json.Marshal(map[string]any{"actor": "worker", "items": items, "start_index": start})
+					require.NoError(b, err)
+					reply := postMoveBatch(b, env, string(raw))
+					require.Greater(b, reply.NextIndex, start)
+					start = reply.NextIndex
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(counter.items), "previews/op")
+				if !conflicts {
+					require.Equal(b, 5000, counter.items)
+				}
+			}
+		})
+	}
 }

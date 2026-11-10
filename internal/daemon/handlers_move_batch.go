@@ -45,6 +45,67 @@ func moveBatchShouldPreview(result *api.MoveIssuesResult, item moveBatchItem, su
 	return false
 }
 
+func previewMoveBatch(ctx context.Context, store db.Storage, items []moveBatchItem, results []api.MoveIssuesResult, indexes []int) error {
+	for start := 0; start < len(indexes); start += moveBatchChunkIssues {
+		part := indexes[start:min(start+moveBatchChunkIssues, len(indexes))]
+		moves := make([]db.MoveIssueProjectIn, 0, len(part))
+		for _, j := range part {
+			moves = append(moves, items[j].move)
+		}
+		preview, err := store.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: moves, DryRun: true})
+		if err != nil {
+			return err
+		}
+		for k, j := range part {
+			if preview.Results[k].Err != nil {
+				moveBatchRefusal(&results[j], preview.Results[k].Err)
+				continue
+			}
+			items[j].tree = preview.Results[k].Out.Issues
+			db.FenceIssueMove(&items[j].move, preview.Results[k].Out)
+		}
+	}
+	return nil
+}
+
+func finishUnchangedMove(ctx context.Context, store db.Storage, item moveBatchItem, result *api.MoveIssuesResult, prior api.MoveIssuesResult) error {
+	issue, err := resolveLinkTargetRef(ctx, store, 0, item.issue.UID, db.IncludeDeletedNo)
+	if err == nil {
+		_, err = activeProjectByID(ctx, store, issue.ProjectID)
+	}
+	if err == nil {
+		_, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+	}
+	if err == nil {
+		err = authorizeIssueScopedIssue(ctx, store, issue)
+	}
+	if err != nil {
+		if moveIssueAPIError(err).(*api.APIError).Status >= 500 {
+			return err
+		}
+		moveBatchRefusal(result, err)
+		return nil
+	}
+	want := item.issue.Revision
+	if prior.Result != "" {
+		want = prior.Revision
+	}
+	if issue.Revision != want {
+		moveBatchRefusal(result, &db.RevisionConflictError{CurrentRevision: issue.Revision})
+		return nil
+	}
+	if issue.ProjectID != item.target.ID {
+		moveBatchRefusal(result, db.ErrIssueMoveTreeChanged)
+		return nil
+	}
+	result.Result, result.Code, result.NewShortID, result.Revision = "unchanged", "already_in_target", issue.ShortID, issue.Revision
+	if prior.Result != "" {
+		result.Code = "duplicate_item"
+	}
+	result.To = item.target.Name + "#" + issue.ShortID
+	return nil
+}
+
 func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
 	return func(ctx context.Context, in *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
 		started := time.Now()
@@ -131,48 +192,48 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				moveBatchRefusal(r, &db.RevisionConflictError{CurrentRevision: issue.Revision})
 			}
 		}
-		// Validate every candidate before comparing targets, including the skipped prefix.
-		for start := 0; start < n; start += moveBatchChunkIssues {
-			end := min(start+moveBatchChunkIssues, n)
-			var moves []db.MoveIssueProjectIn
-			var indexes []int
-			for j := start; j < end; j++ {
-				if moveBatchShouldPreview(&results[j], items[j], in.Body.Subtree) {
-					moves = append(moves, items[j].move)
-					indexes = append(indexes, j)
-				}
-			}
-			if len(moves) == 0 {
-				continue
-			}
-			preview, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: moves, DryRun: true})
-			if err != nil {
-				return nil, moveBatchError(err, nil, in.Body.StartIndex)
-			}
-			for k, j := range indexes {
-				if preview.Results[k].Err != nil {
-					moveBatchRefusal(&results[j], preview.Results[k].Err)
-					continue
-				}
-				items[j].tree = preview.Results[k].Out.Issues
-				db.FenceIssueMove(&items[j].move, preview.Results[k].Out)
-			}
-		}
 		seen := map[int64][]int{}
 		for j := range items {
 			if results[j].Result == "" {
 				seen[items[j].issue.ID] = append(seen[items[j].issue.ID], j)
 			}
 		}
+		var conflictPreviews []int
 		for _, indexes := range seen {
-			target := items[indexes[0]].target.UID
 			conflict := false
 			for _, j := range indexes {
-				conflict = conflict || items[j].target.UID != target
+				conflict = conflict || items[j].target.ID != items[indexes[0]].target.ID
+			}
+			if !conflict {
+				continue
+			}
+			for _, j := range indexes {
+				if moveBatchShouldPreview(&results[j], items[j], in.Body.Subtree) {
+					conflictPreviews = append(conflictPreviews, j)
+				}
+			}
+		}
+		if err := previewMoveBatch(ctx, cfg.DB, items, results, conflictPreviews); err != nil {
+			return nil, moveBatchError(err, nil, in.Body.StartIndex)
+		}
+		for _, indexes := range seen {
+			var target int64
+			conflict := false
+			for _, j := range indexes {
+				if results[j].Result != "" {
+					continue
+				}
+				if target == 0 {
+					target = items[j].target.ID
+				} else {
+					conflict = conflict || items[j].target.ID != target
+				}
 			}
 			if conflict {
 				for _, j := range indexes {
-					results[j].Result, results[j].Code, results[j].Message = "refused", "conflicting_target", "issue requested for different targets"
+					if results[j].Result == "" {
+						results[j].Result, results[j].Code, results[j].Message = "refused", "conflicting_target", "issue requested for different targets"
+					}
 				}
 			}
 		}
@@ -186,7 +247,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		for start := in.Body.StartIndex; start < n; {
 			end := min(start+moveBatchChunkIssues, n)
 			pending := map[int64]bool{}
-			var indexes []int
+			var indexes, chunkPreviews, noops []int
 			var claimed []db.Issue
 			for j := start; j < end; j++ {
 				if results[j].Result != "" {
@@ -194,12 +255,12 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				}
 				item := &items[j]
 				if prior, ok := succeeded[item.issue.ID]; ok {
-					r := &results[j]
-					r.Result, r.Code = "unchanged", "duplicate_item"
 					if prior.Result == "would_move" {
-						r.Result = "would_move"
+						r := &results[j]
+						r.Result, r.Code, r.NewShortID, r.To = "would_move", "duplicate_item", prior.NewShortID, prior.To
+					} else {
+						noops = append(noops, j)
 					}
-					r.NewShortID, r.To = prior.NewShortID, prior.To
 					continue
 				}
 				if pending[item.issue.ID] {
@@ -208,19 +269,33 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				}
 				pending[item.issue.ID] = true
 				if item.issue.ProjectID == item.target.ID {
-					r := &results[j]
-					r.Result, r.Code, r.NewShortID = "unchanged", "already_in_target", item.issue.ShortID
-					r.To = item.target.Name + "#" + item.issue.ShortID
-					succeeded[item.issue.ID] = *r
+					if in.Body.Subtree {
+						moveBatchShouldPreview(&results[j], *item, true)
+					} else {
+						noops = append(noops, j)
+					}
 					continue
 				}
 				indexes = append(indexes, j)
-				claimed = append(claimed, item.tree...)
+				if len(item.tree) == 0 {
+					chunkPreviews = append(chunkPreviews, j)
+				}
+			}
+			if err := previewMoveBatch(ctx, cfg.DB, items, results, chunkPreviews); err != nil {
+				return nil, moveBatchError(err, out.Body.Results, start)
+			}
+			for _, j := range indexes {
+				if results[j].Result == "" {
+					claimed = append(claimed, items[j].tree...)
+				}
 			}
 			refusals := requireFederatedIssueClaimsConcurrently(ctx, cfg, claimed, actor, cache, moveBatchClaimConcurrency, !in.Body.DryRun)
 			var write []db.MoveIssueProjectIn
 			var written []int
 			for _, j := range indexes {
+				if results[j].Result != "" {
+					continue
+				}
 				for _, issue := range items[j].tree {
 					if err := refusals[issue.UID]; err != nil {
 						moveBatchRefusal(&results[j], err)
@@ -259,6 +334,20 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					events = append(events, item.Out.Events...)
 				}
 				cfg.Publish().EventsByProject(events)
+			}
+			for _, j := range noops {
+				if err := finishUnchangedMove(ctx, cfg.DB, items[j], &results[j], succeeded[items[j].issue.ID]); err != nil {
+					completed := append([]api.MoveIssuesResult(nil), out.Body.Results...)
+					for _, result := range results[start:end] {
+						if result.Result != "" {
+							completed = append(completed, result)
+						}
+					}
+					return nil, moveBatchError(err, completed, start)
+				}
+				if results[j].Result == "unchanged" {
+					succeeded[items[j].issue.ID] = results[j]
+				}
 			}
 			out.Body.Results = append(out.Body.Results, results[start:end]...)
 			out.Body.NextIndex = end
