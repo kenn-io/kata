@@ -313,10 +313,10 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 // FederatedMoveDecision records the state used to decide whether to rehome an
 // issue. It can be compared with a fresh decision before applying a snapshot.
 type FederatedMoveDecision struct {
-	IssueUID, ProjectUID, SourceUID, SourceName, SourceShortID string
-	IssueID, SourceID, TargetID                                int64
-	RecurrenceID                                               sql.NullInt64
-	Active, Joined, Exists                                     bool
+	IssueUID, SourceUID, SourceName, SourceShortID string
+	IssueID, SourceID, TargetID                    int64
+	RecurrenceID                                   sql.NullInt64
+	Active, Joined, Exists                         bool
 }
 
 // PlanFederatedMovedIssues reads move decisions without changing any rows.
@@ -333,7 +333,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEven
 		if !moved[issue.UID] {
 			continue
 		}
-		decision := FederatedMoveDecision{IssueUID: issue.UID, ProjectUID: issue.ProjectUID}
+		decision := FederatedMoveDecision{IssueUID: issue.UID}
 		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&decision.TargetID, &decision.Active); err != nil {
 			return nil, nil, err
 		}

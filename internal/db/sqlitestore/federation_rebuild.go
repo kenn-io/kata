@@ -98,7 +98,6 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		p.moved.Issues = maps.Clone(p.projection.Issues)
 		p.moved.Comments = maps.Clone(p.projection.Comments)
 		p.moved.Labels = maps.Clone(p.projection.Labels)
-		p.moved.ProjectMetadata = nil
 		db.RestrictFoldProjectWhere(&p.projection, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return !ok })
 		db.RestrictFoldProjectWhere(&p.moved, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return ok })
 		m.projection = p.projection
