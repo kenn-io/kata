@@ -49,9 +49,8 @@ func TestIssuePortableTimezoneInventory(t *testing.T) {
 	const target = "issue_timezones_gen.go"
 	if *updateIssueTimezones {
 		require.NoError(t, os.WriteFile(target, []byte(content.String()), 0644))
+	} else {
+		require.Equal(t, portableIssueTimezones[:], names, "refresh with go test ./internal/daemon -run '^TestIssuePortableTimezoneInventory$' -update-golden")
 	}
-	committed, err := os.ReadFile(target)
-	require.NoError(t, err)
-	require.Equal(t, content.String(), string(committed), "refresh with go test ./internal/daemon -run '^TestIssuePortableTimezoneInventory$' -update-golden")
 	t.Logf("checked %d bundled names", len(names))
 }

@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # HTTP API schema
@@ -72,6 +72,9 @@ message names it:
 
 The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
+
+Issue scheduling writes that violate the [portable timezone rules](metadata.md)
+return HTTP 400 `invalid_metadata_value`.
 
 ## Recurrence timezones
 

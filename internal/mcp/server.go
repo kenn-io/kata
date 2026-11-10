@@ -726,7 +726,7 @@ type CreateInput struct {
 	Labels         []string       `json:"labels,omitempty" jsonschema:"Initial project labels"`
 	Metadata       map[string]any `json:"metadata,omitempty" jsonschema:"Initial issue metadata"`
 	ScheduledOn    string         `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or an RFC 3339 UTC instant ending in Z"`
-	Timezone       string         `json:"timezone,omitempty" jsonschema:"IANA timezone for date-only and local scheduled_on values"`
+	Timezone       string         `json:"timezone,omitempty" jsonschema:"Portable issue timezone: UTC, Etc/UTC, or an exact bundled geographic IANA name"`
 	ForceNew       bool           `json:"force_new,omitempty" jsonschema:"Create even when Kata finds a likely duplicate"`
 	Parent         string         `json:"parent,omitempty" jsonschema:"Parent issue reference"`
 	Blocks         []string       `json:"blocks,omitempty" jsonschema:"Issues this new issue blocks"`
@@ -746,7 +746,7 @@ type EditInput struct {
 	ClearPriority    bool           `json:"clear_priority,omitempty" jsonschema:"Remove the current priority"`
 	Metadata         map[string]any `json:"metadata,omitempty" jsonschema:"Issue metadata merge patch; JSON null removes a key"`
 	ScheduledOn      *string        `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or an RFC 3339 UTC instant ending in Z"`
-	Timezone         *string        `json:"timezone,omitempty" jsonschema:"IANA timezone for date-only and local scheduled_on values"`
+	Timezone         *string        `json:"timezone,omitempty" jsonschema:"Portable issue timezone: UTC, Etc/UTC, or an exact bundled geographic IANA name"`
 	ClearScheduledOn bool           `json:"clear_scheduled_on,omitempty" jsonschema:"Remove scheduled_on"`
 	ClearTimezone    bool           `json:"clear_timezone,omitempty" jsonschema:"Remove timezone"`
 	Parent           *string        `json:"parent,omitempty" jsonschema:"Replacement parent reference"`

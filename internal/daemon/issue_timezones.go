@@ -69,8 +69,8 @@ func validateIssueTimezoneWrite(current jsontext.Value, patch map[string]jsontex
 		if len(raw) == 0 {
 			continue
 		}
-		// Callers validate changed values with the shared grammar before admission.
-		// Stored values exposed by zone removal are classified conservatively.
+		// The patch hook precedes shared grammar validation; invalid changed values
+		// still fail before commit. Classify exposed stored values conservatively.
 		var value *string
 		if err := json.Unmarshal(raw, &value); err == nil && (value == nil || strings.HasSuffix(*value, "Z")) {
 			continue

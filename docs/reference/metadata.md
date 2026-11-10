@@ -72,12 +72,13 @@ must be `UTC`, `Etc/UTC`, or exact case-sensitive bundled names under `Africa/`,
 `Europe/`, `Indian/` or `Pacific/`, including aliases such as `Asia/Calcutta`.
 `Local`, fixed offsets, non-geographic aliases such as `US/Eastern`, and wrong
 case are rejected. Connector ingest retains its existing validation.
-New civil dates and zone removals exposing civil dates require a portable issue
-zone or daemon default; recurrence-owned `scheduled_on` retains its behavior
-when the issue zone is absent or matches the recurrence zone. Set a portable
-issue `timezone` or change the [daemon default](configuration.md) and restart
-if rejected. Stored values, reads, replay, unchanged echoes, unrelated edits,
-clears, UTC `Z` instants and matching idempotent create retries keep working.
+New civil dates, including deadlines, and zone removals exposing them require
+a portable issue zone or daemon default. Recurrence-owned `scheduled_on` keeps
+its behavior when the issue zone is absent or matches the recurrence zone.
+Set a portable issue `timezone` or change the [daemon default](configuration.md)
+and restart if rejected. Stored values, reads, replay, unchanged echoes,
+unrelated edits, clears, UTC `Z` instants and matching idempotent create retries
+keep working.
 
 ### Calendar dates on issue rows
 
