@@ -70,7 +70,7 @@ func TestFederationFreshCurrentProjectHostAuthority(t *testing.T) {
 			response, raw := envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
 			require.Equalf(t, tc.status, response.StatusCode, "%s", raw)
 			if tc.mode == "missing-proof" {
-				require.Contains(t, string(raw), db.FederationProjectNotEnrolledCode)
+				require.Contains(t, string(raw), "auth_invalid")
 			}
 			if tc.mode != "missing-proof" {
 				require.Positive(t, access.sourceChecks.Load())

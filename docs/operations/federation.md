@@ -2282,8 +2282,7 @@ alone does not create a quarantine or offer a skip action. A later poisoned
 batch retains both the rejected events and the poison batch in blocking
 quarantine. Only that quarantined range can be skipped;
 skip deliberately abandons its outbound events. Older peers keep atomic batch
-failure; an upgraded hub reports the missing project separately from
-invalid-credential errors. Adoption snapshot
+failure. Adoption snapshot
 baselines remain atomic: a missing enrollment keeps the whole baseline pending
 until joining allows its original snapshots to retry.
 

@@ -1085,15 +1085,12 @@ func federationIngestEventsToDB(events []api.FederationIngestEventEnvelope) []db
 }
 
 func federationIngestError(err error) error {
-	var missing *db.FederationProjectNotEnrolledError
 	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
 		return federationFeatureError(err)
 	}
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
-	case errors.As(err, &missing):
-		return api.NewError(http.StatusForbidden, db.FederationProjectNotEnrolledCode, missing.Error(), "", nil)
 	case errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
 		return federationCredentialDenied()
 	case errors.Is(err, ErrHostAccessDenied):
