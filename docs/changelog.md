@@ -1,13 +1,18 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Schedule issues consistently across hosts: API, CLI, MCP, TUI, and web writes
+  now require [portable timezone names](reference/metadata.md) for new issue
+  zones and civil dates. Stored dates and matching create retries keep working;
+  connector ingest retains its existing validation.
 
 - Keep search focus and text when keyboard selection opens task detail.
 - See why Docbank attachments fail when the daemon cannot read its own key.

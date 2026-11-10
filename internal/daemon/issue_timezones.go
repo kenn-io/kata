@@ -17,9 +17,22 @@ func portableIssueTimezone(zone string) bool {
 	return ok
 }
 
+// issueTimezoneWriteRelevant excludes unrelated agent metadata from admission.
+func issueTimezoneWriteRelevant(patch map[string]jsontext.Value) bool {
+	for _, key := range []string{"timezone", "scheduled_on", "deadline_on"} {
+		if _, ok := patch[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // validateIssueTimezoneWrite is admission policy, not stored-data validation.
 // In particular, an unchanged legacy timezone remains usable and echoable.
 func validateIssueTimezoneWrite(current jsontext.Value, patch map[string]jsontext.Value, defaultZone, recurrenceZone string) error {
+	if !issueTimezoneWriteRelevant(patch) {
+		return nil
+	}
 	effective, err := db.ApplyMetadataPatch(current, patch)
 	if err != nil {
 		return err
@@ -34,19 +47,24 @@ func validateIssueTimezoneWrite(current jsontext.Value, patch map[string]jsontex
 			return fmt.Errorf("%w: issue timezone must be UTC, Etc/UTC, or an exact bundled geographic IANA name", metadata.ErrInvalidValue)
 		}
 	}
-	var values struct {
-		Timezone string `json:"timezone"`
-	}
+	var values map[string]jsontext.Value
 	if err := json.Unmarshal(effective, &values); err != nil {
 		return err
 	}
-	if values.Timezone != "" {
-		return nil
+	var issueZone string
+	if raw, ok := values["timezone"]; ok {
+		if err := json.Unmarshal(raw, &issueZone); err != nil {
+			return err
+		}
 	}
-	if defaultZone == "" {
-		defaultZone = "UTC"
+	effectiveZone, source := defaultZone, "daemon timezone in config.toml"
+	if issueZone != "" {
+		effectiveZone, source = issueZone, "issue timezone"
 	}
-	if portableIssueTimezone(defaultZone) {
+	if effectiveZone == "" {
+		effectiveZone = "UTC"
+	}
+	if portableIssueTimezone(effectiveZone) {
 		return nil
 	}
 	zoneChange, changedZone := diff["timezone"]
@@ -59,19 +77,23 @@ func validateIssueTimezoneWrite(current jsontext.Value, patch map[string]jsontex
 		if _, changed := diff[field]; !changed && !removedZone {
 			continue
 		}
-		if field == "scheduled_on" && recurrenceZone != "" {
+		if issueZone == "" && field == "scheduled_on" && recurrenceZone != "" {
 			continue
 		}
-		// The existing resolver classifies accepted civil/instant grammar. Resolve
-		// with UTC here so admission never consults the nonportable daemon zone.
-		value, _, _, present, err := metadata.ScheduleFieldInstant(string(effective), field, "UTC")
+		// Classify just this field with the existing grammar in UTC, so
+		// neither the issue zone nor daemon default consults host zone data.
+		probe, err := json.Marshal(map[string]jsontext.Value{field: values[field]})
+		if err != nil {
+			return err
+		}
+		value, _, _, present, err := metadata.ScheduleFieldInstant(string(probe), field, "UTC")
 		if err != nil {
 			return fmt.Errorf("%w: %v", metadata.ErrInvalidValue, err)
 		}
 		// The accepted instant grammar always ends in Z; the resolver above has
 		// already classified and validated the value using the shared grammar.
 		if present && !strings.HasSuffix(value, "Z") {
-			return fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (current default %q)", metadata.ErrInvalidValue, field, defaultZone)
+			return fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (effective %s %q)", metadata.ErrInvalidValue, field, source, effectiveZone)
 		}
 	}
 	return nil

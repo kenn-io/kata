@@ -180,9 +180,6 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateCreateMetadata(in.Body.Metadata); err != nil {
 			return nil, err
 		}
-		if err := validateIssueTimezoneWrite(nil, in.Body.Metadata, cfg.DefaultTimezone, ""); err != nil {
-			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
-		}
 		if err := validateIssueTitle(in.Body.Title); err != nil {
 			return nil, err
 		}
@@ -208,6 +205,11 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if reuse != nil {
 			return reuse, nil
+		}
+
+		// Matching retries are stored operations, not new timezone choices.
+		if err := validateIssueTimezoneWrite(nil, in.Body.Metadata, cfg.DefaultTimezone, ""); err != nil {
+			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
 		}
 
 		// Fresh create (no reuse): now run the state-dependent link-target

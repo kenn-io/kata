@@ -66,19 +66,24 @@ offsets are rejected because they pin an instant while duplicating the named
 timezone. `deadline_on` accepts the same three forms and uses the same timezone
 rules. It is a deadline only; it does not control `ready` or `next`.
 
-New or changed issue `timezone` values must be `UTC`, `Etc/UTC`, or an exact,
+Issue writes through the API, CLI, MCP, TUI, and web UI follow these rules.
+Connector ingest retains its existing validation and is outside this admission
+policy. New or changed issue `timezone` values must be `UTC`, `Etc/UTC`, or an exact,
 case-sensitive geographic name from Kata's bundled Go timezone inventory:
 `Africa/`, `America/`, `Antarctica/`, `Arctic/`, `Asia/`, `Atlantic/`,
 `Australia/`, `Europe/`, `Indian/`, or `Pacific/`. Geographic aliases such as
 `Asia/Calcutta` are accepted. `Local`, fixed offsets, non-geographic aliases
 such as `US/Eastern`, and wrong-case names are rejected.
 
-New or changed civil dates, and timezone removal that exposes a civil date,
-also require a portable daemon default when no issue or applicable recurrence
-timezone supplies the zone. Set an issue `timezone` or fix the daemon's
-[top-level timezone](configuration.md) in `config.toml` if the
-write is rejected. Stored legacy zones and defaults keep working; unchanged
-values, unrelated edits, clears, and UTC `Z` instants remain accepted.
+New or changed civil dates require a portable effective issue timezone or,
+when no issue zone is set, a portable daemon default. Removing an issue zone
+also checks any civil date newly exposed to the default. Recurrence-inherited
+`scheduled_on` zones retain their existing behavior. Set a portable issue
+`timezone` or fix the daemon's [top-level timezone](configuration.md) in
+`config.toml` if a write is rejected. Stored legacy zones and dates keep
+working for reads and replay; unchanged values, unrelated edits, clears, and
+UTC `Z` instants remain accepted. Matching idempotent create retries return
+the original receipt even when the zone would be rejected for a new create.
 
 ### Calendar dates on issue rows
 

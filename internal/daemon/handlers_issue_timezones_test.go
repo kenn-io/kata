@@ -86,7 +86,9 @@ func TestIssuePortableTimezoneLegacyCompatibility(t *testing.T) {
 		want                int
 	}{
 		{"legacy echo", `{"timezone":"Local","scheduled_on":"2026-11-12"}`, `{"timezone":"Local"}`, 200},
-		{"legacy schedule edit", `{"timezone":"Local"}`, `{"scheduled_on":"2026-11-12"}`, 200},
+		{"legacy date no-op", `{"timezone":"Local","scheduled_on":"2026-11-12"}`, `{"scheduled_on":"2026-11-12"}`, 200},
+		{"legacy instant edit", `{"timezone":"Local"}`, `{"scheduled_on":"2026-11-12T10:30:00Z"}`, 200},
+		{"legacy schedule edit", `{"timezone":"Local"}`, `{"scheduled_on":"2026-11-12"}`, 400},
 		{"unrelated", `{"scheduled_on":"2026-11-12"}`, `{"topic":"x"}`, 200},
 		{"civil no-op", `{"scheduled_on":"2026-11-12"}`, `{"scheduled_on":"2026-11-12"}`, 200},
 		{"clear date", `{"scheduled_on":"2026-11-12"}`, `{"scheduled_on":null}`, 200},
@@ -209,4 +211,93 @@ func TestIssuePortableTimezonePostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{}`, string(after.Metadata))
 	require.Equal(t, issue.Revision, after.Revision)
+	storage.beforePatch = func(context.Context) error { return nil }
+	_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"timezone": jsontext.Value(`"Local"`)}})
+	require.NoError(t, err)
+	before, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	status, raw = cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]string{"deadline_on": "2026-11-12"}})
+	require.Equal(t, http.StatusBadRequest, status, string(raw))
+	require.Contains(t, string(raw), "effective issue timezone")
+	after, err = store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
+// Contract: successful idempotent creates remain replayable through upgrades;
+// a replay changes no metadata, including a stored legacy timezone.
+func TestIssuePortableTimezoneLegacyCreateRetry(t *testing.T) {
+	env := testenv.New(t)
+	p := seedProject(t, env, "example-project")
+	md := map[string]jsontext.Value{"timezone": jsontext.Value(`"Local"`)}
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: p.ID, Title: "Legacy example", Author: "tester", Metadata: md,
+		IdempotencyKey: "legacy-create", IdempotencyFingerprint: db.Fingerprint("Legacy example", "", nil, nil, nil, nil, md),
+	})
+	require.NoError(t, err)
+	match, err := env.DB.LookupIdempotency(t.Context(), p.ID, "legacy-create", time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, match)
+	require.Equal(t, issue.ID, match.IssueID)
+	before := recurrenceWriteCursor(t, env)
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(p.ID)+"/issues",
+		map[string]any{"actor": "tester", "title": "Legacy example", "metadata": md},
+		map[string]string{"Idempotency-Key": "legacy-create"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), `"reused":true`)
+	require.Contains(t, string(raw), `"changed":false`)
+	require.Contains(t, string(raw), `"original_event"`)
+	require.Equal(t, before, recurrenceWriteCursor(t, env))
+}
+
+// Contract: a matching create retry returns the recorded result after a
+// daemon configuration change; there is no new schedule write.
+func TestIssuePortableTimezoneDefaultChangeRetry(t *testing.T) {
+	env := testenv.New(t)
+	p := seedProject(t, env, "example-project")
+	body := map[string]any{"actor": "tester", "title": "Scheduled example", "metadata": map[string]string{"scheduled_on": "2026-11-12"}}
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(p.ID)+"/issues", body, map[string]string{"Idempotency-Key": "scheduled-create"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	d := daemon.NewServer(daemon.ServerConfig{DB: env.DB, DefaultTimezone: "Local", StartedAt: time.Now().UTC(), Broadcaster: daemon.NewEventBroadcaster()})
+	t.Cleanup(func() { require.NoError(t, d.Close()) })
+	srv := httptest.NewServer(d.Handler())
+	t.Cleanup(srv.Close)
+	retry := &testenv.Env{URL: srv.URL, HTTP: srv.Client()}
+	before := recurrenceWriteCursor(t, env)
+	resp, raw = envDoRaw(t, retry, http.MethodPost, projectPath(p.ID)+"/issues", body, map[string]string{"Idempotency-Key": "scheduled-create"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Contains(t, string(raw), `"reused":true`)
+	require.Contains(t, string(raw), `"changed":false`)
+	require.Contains(t, string(raw), `"original_event"`)
+	require.Equal(t, before, recurrenceWriteCursor(t, env))
+}
+
+func TestIssuePortableTimezoneLegacyCivilWrite(t *testing.T) {
+	env := testenv.New(t) // A portable daemon default must not hide the legacy issue zone.
+	p := seedProject(t, env, "example-project")
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Legacy example", Author: "tester", Metadata: map[string]jsontext.Value{"timezone": jsontext.Value(`"Local"`)}})
+		require.NoError(t, err)
+		before := recurrenceWriteCursor(t, env)
+		status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": map[string]string{field: "2026-11-12", "topic": "must roll back"}})
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		require.Contains(t, string(raw), "effective issue timezone")
+		require.Contains(t, string(raw), "Local")
+		after, err := env.DB.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, issue, after)
+		require.Equal(t, before, recurrenceWriteCursor(t, env))
+	}
+}
+
+func TestIssuePortableTimezoneUnrelatedPatch(t *testing.T) {
+	env := testenv.New(t)
+	p := seedProject(t, env, "example-project")
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Example", Author: "tester"})
+	require.NoError(t, err)
+	// Unrelated edits do not revalidate stored timezone data.
+	_, err = env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"timezone":17}`, issue.ID)
+	require.NoError(t, err)
+	status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": map[string]string{"topic": "updated"}})
+	require.Equal(t, http.StatusOK, status, string(raw))
 }
