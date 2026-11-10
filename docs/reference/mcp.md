@@ -456,8 +456,9 @@ dispatch object that `kata cron job show --why` includes: `job_uid`,
 `evaluated_at`, the live `gate`, and required nullable `last` and
 `last_non_idle` observations. The observations describe retained local batches
 and reset on daemon restart; `null` means no observation is retained. The tool
-only reads and does not dispatch work. Spokes report `replica`; query the hub's
-MCP server for its observations. See [Dispatch reasons](cron.md#dispatch-decisions-and-skipped-occurrences)
+only reads and does not dispatch work. Spokes report `replica`. To read the hub's
+observations, configure the MCP server to connect to the hub daemon; this tool
+has no per-call daemon selector. See [Dispatch reasons](cron.md#dispatch-decisions-and-skipped-occurrences)
 for reason codes and read-only gate limits.
 
 Call `kata.cron_new_uid` before creation and retain its returned `uid`. The helper

@@ -348,7 +348,8 @@ forwarded. Public details use fixed messages; raw errors stay in the local log.
 
 The same explanation is available at
 `GET /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/dispatch`, with the same
-project read authorization as job show.
+project read authorization as job show. The MCP tool `kata.cron_job_dispatch`
+returns this same explanation; see [Native cron through MCP](mcp.md#native-cron-through-mcp).
 
 Read the current daemon's native recurring decisions with:
 
