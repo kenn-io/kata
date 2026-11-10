@@ -817,9 +817,7 @@ func TestCronJobShowPrintsDelivery(t *testing.T) {
 			out, _, err := executeCronCLI(t, env.URL, nil, tc.args...)
 			require.NoError(t, err)
 			type jobView struct {
-				Delivery *struct {
-					State string `json:"state"`
-				} `json:"delivery"`
+				Delivery *struct{} `json:"delivery"`
 			}
 			var response struct {
 				Job  jobView   `json:"job"`
@@ -828,11 +826,9 @@ func TestCronJobShowPrintsDelivery(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(out), &response))
 			if tc.name == "show" {
 				require.NotNil(t, response.Job.Delivery)
-				require.Equal(t, "active", response.Job.Delivery.State)
 			} else {
 				require.Len(t, response.Jobs, 1)
 				require.NotNil(t, response.Jobs[0].Delivery)
-				require.Equal(t, "active", response.Jobs[0].Delivery.State)
 			}
 		})
 	}

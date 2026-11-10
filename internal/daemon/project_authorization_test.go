@@ -282,13 +282,17 @@ func (s *projectAccessBeforeEditStore) EditIssueAtomic(
 }
 
 func projectAccessFixtureWithStorage(
-	t *testing.T, fixture projectAccessFixture, store db.Storage,
+	t *testing.T, fixture projectAccessFixture, store db.Storage, clock ...func() time.Time,
 ) projectAccessFixture {
 	t.Helper()
-	server := daemon.NewServer(daemon.ServerConfig{
+	cfg := daemon.ServerConfig{
 		DB: store, Broadcaster: fixture.broadcaster,
 		Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true},
-	})
+	}
+	if len(clock) > 0 {
+		cfg.UIClock = clock[0]
+	}
+	server := daemon.NewServer(cfg)
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	httpServer := httptest.NewServer(server.Handler())
 	t.Cleanup(httpServer.Close)
