@@ -607,13 +607,10 @@ date-time `scheduled_on` and `deadline_on` values without an issue-level
 If no zone is set, Kata uses UTC. RFC 3339 values ending in `Z` are UTC instants
 and do not use this setting.
 
-New civil scheduling writes through the API, CLI, MCP, TUI, and web UI that
-rely on this default require a
-[portable timezone name](metadata.md). If rejected, set the
-top-level `timezone` in `<KATA_HOME>/config.toml` to a portable name such as
-`UTC` or `America/New_York`, restart the daemon, and retry; alternatively set
-the issue's `timezone`. Existing configurations and stored schedules continue
-to load and run with legacy names.
+New civil scheduling writes using this default require a [portable timezone name](metadata.md).
+If rejected, set `timezone` in `<KATA_HOME>/config.toml` to a portable name such as `UTC`,
+restart the daemon and retry, or set the issue's `timezone`.
+Existing configurations keep loading.
 
 The web UI's daemon selector lists URL entries and home-less local entries.
 Home-bearing profiles are omitted and cannot alias the serving daemon. A plain
