@@ -367,8 +367,10 @@ func TestMCPCoordinationWaitReplySurvivesProjectMove(t *testing.T) {
 						projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "first-project"),
 						projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "second-project"),
 					}})
-				case "/api/v1/projects/1/notifications/actor", "/api/v1/projects/2/notifications/actor":
+				case "/api/v1/projects/1/notifications/actor":
 					writeJSON(w, map[string]any{"effective_actor": "worker"})
+				case "/api/v1/projects/2/notifications/actor":
+					writeJSON(w, map[string]any{"effective_actor": "other-worker"})
 				case "/api/v1/projects/1/issues/abc1":
 					issue := issueJSON(1, "first-project", "abc1")
 					message := "before"

@@ -22,7 +22,6 @@ import (
 type waitTarget struct {
 	uid       string
 	recipient string
-	projectID int64
 	evaluator wait.Evaluator
 	state     WaitState
 }
@@ -35,13 +34,7 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if until != "" && status != "" {
 		return nil, WaitOutput{}, errors.New("until and status are mutually exclusive")
 	}
-	if until != "" {
-		switch until {
-		case "closed", "attention", "needs-human", "stuck", "reply":
-		default:
-			return nil, WaitOutput{}, errors.New("until must be closed, attention, needs-human, stuck, or reply")
-		}
-	} else {
+	if until == "" {
 		if status == "" {
 			status = "closed"
 		}
@@ -185,7 +178,7 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 		var reply []byte
 		if until == "reply" && state.Status != "closed" {
 			recipient := explicitRecipient
-			if recipient == "" && target.projectID == project.ID {
+			if recipient == "" {
 				recipient = target.recipient
 			}
 			if recipient == "" {
@@ -205,10 +198,7 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 					return target, err
 				}
 			}
-			if target.recipient != "" && target.recipient != recipient {
-				target.evaluator = wait.Evaluator{}
-			}
-			target.recipient, target.projectID = recipient, project.ID
+			target.recipient = recipient
 			reply, err = json.Marshal(shown.Issue.Metadata[notification.MetadataKey(recipient)])
 			if err != nil {
 				return target, err
