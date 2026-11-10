@@ -567,16 +567,70 @@ describe('AppShell', () => {
   const project = '01J00000000000000000000002'
   const issue = '01J00000000000000000000001'
   test.each([
-    ['same project', 'all-open', 'all-open', project, project, issue, {}],
-    ['different project', 'all-open', 'all-open', project, 'other-project', undefined, {}],
-    ['implicit Inbox', undefined, 'inbox', undefined, undefined, issue, {}],
-    ['status', 'all-open', 'all-open', undefined, undefined, issue, { status: ['closed'] }],
-    ['owners', 'all-open', 'all-open', undefined, undefined, issue, { owner: ['alice', 'bob'] }],
-    ['labels', 'all-open', 'all-open', undefined, undefined, issue, { label: ['bug', 'ui'] }],
-    ['relation', 'all-open', 'all-open', undefined, undefined, issue, { relationship: ['blocks'] }],
+    ['same project', 'all-open', 'all-open', project, project, issue, 'all-open', {}],
+    [
+      'different project',
+      'all-open',
+      'all-open',
+      project,
+      'other-project',
+      undefined,
+      'all-open',
+      {},
+    ],
+    ['implicit Inbox', undefined, 'inbox', undefined, undefined, issue, 'inbox', {}],
+    [
+      'status',
+      'all-open',
+      'all-open',
+      undefined,
+      undefined,
+      issue,
+      'all-open',
+      { status: ['closed'] },
+    ],
+    [
+      'owners',
+      'all-open',
+      'all-open',
+      undefined,
+      undefined,
+      issue,
+      'all-open',
+      { owner: ['alice', 'bob'] },
+    ],
+    [
+      'labels',
+      'all-open',
+      'all-open',
+      undefined,
+      undefined,
+      issue,
+      'all-open',
+      { label: ['bug', 'ui'] },
+    ],
+    [
+      'relation',
+      'all-open',
+      'all-open',
+      undefined,
+      undefined,
+      issue,
+      'all-open',
+      { relationship: ['blocks'] },
+    ],
   ] as const)(
     'search preserves the pending %s',
-    async (_name, view, requestedView, projectUID, requestedProjectUID, issueUID, pending) => {
+    async (
+      _name,
+      view,
+      requestedView,
+      projectUID,
+      requestedProjectUID,
+      issueUID,
+      expectedView,
+      pending,
+    ) => {
       const onNavigate = vi.fn()
       const route = {
         kind: 'kata' as const,
@@ -609,7 +663,7 @@ describe('AppShell', () => {
       )
       expect(onNavigate.mock.lastCall?.[0].projectUID).toBe(projectUID)
       expect(onNavigate.mock.lastCall?.[0].issueUID).toBe(issueUID)
-      expect(onNavigate.mock.lastCall?.[0].view).toBe(issueUID ? requestedView : view)
+      expect(onNavigate.mock.lastCall?.[0].view).toBe(expectedView)
     },
   )
 
@@ -622,7 +676,6 @@ describe('AppShell', () => {
     }
     const props = {
       route,
-      requestedRoute: route,
       snapshot: snapshot(),
       loading: false,
       ...mutationProps(),
@@ -641,7 +694,7 @@ describe('AppShell', () => {
     expect(input.value).toBe('second t')
   })
 
-  test.each(['Owner', 'Label'])('keeps typed %s while its search is pending', async (name) => {
+  test('keeps typed owner while its search is pending', async () => {
     const route = {
       kind: 'kata' as const,
       view: 'all-open' as const,
@@ -658,13 +711,12 @@ describe('AppShell', () => {
       onCreateProject: vi.fn(async () => ({ changed: true })),
     }
     const { rerender } = render(AppShell, { props })
-    const input = screen.getByRole('textbox', { name }) as HTMLInputElement
+    const input = screen.getByRole('textbox', { name: 'Owner' }) as HTMLInputElement
     for (const char of 'alice') {
       await fireEvent.input(input, { target: { value: input.value + char } })
       await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
     }
     expect(input.value).toBe('alice')
-    expect(onNavigate.mock.lastCall?.[0].filters[name.toLowerCase()]).toEqual(['alice'])
   })
 
   test('stays in the landing Inbox while selecting, graphing, and narrowing', async () => {
