@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-30
+last_edited: 2026-11-08
 ---
 
 # Dormant native cron storage
@@ -63,3 +63,24 @@ See [Cron](../reference/cron.md) for API/CLI documents,
 [Backup and restore](../operations/backup-restore.md) for replacement protections,
 and [PostgreSQL migrations](../development/postgres-migrations.md) for schema
 history and startup validation.
+
+## Reserved argv step kind
+
+The event feature `cron_workflow_argv_v1` is reserved for a future `argv`
+workflow step kind. Kata does not advertise it or accept argv steps. Workflow
+decoding rejects any argv step, including one that carries only its kind, on
+reads, lists, snapshots and replay. Legacy federation push inspects the raw
+workflow payload and sends an argv workflow only to a target that advertises
+the feature.
+
+Workflow definitions with a null document, steps array, step or step kind are
+also invalid. Accepted-history validation, backup restore and legacy federation
+page and push classification reject them; folding skips them with a warning.
+
+An older daemon could store either shape from an imported backup or federated
+history. Reads, lifecycle actions, tombstone-inclusive lists, snapshots,
+exports and restores of that workflow then fail, and the SQLite JSONL cutover
+from schema 31 through 40 fails at startup. There is no per-workflow repair.
+
+Enabling argv needs coordinated relay publication, project-history negotiation,
+reset and adoption handling, client preservation and adapter conformance.

@@ -480,35 +480,6 @@ Stored definitions and events stay unchanged. Deleting a cron job does not
 remove its retained history or the project's cron capability requirement.
 See [Cron triggers](#triggers) for the expression rules.
 
-The additional event feature `cron_workflow_argv_v1` is reserved for workflows
-with an explicit `argv` step kind. This release does not advertise that feature
-or accept argv steps. Legacy federation push checks the raw workflow payload
-and requires positive target support before sending such a batch. A stored or
-imported argv workflow also fails decoding on reads, lists, snapshots and replay,
-including when the step contains only its reserved kind.
-
-An older daemon could have accepted a kind-only argv workflow from an imported
-backup or federated history. If one is stored, its read fails before archive or
-restore can run. Tombstone-inclusive lists, definition snapshots and exports
-also fail, and a backup containing the workflow or its event cannot be restored.
-This release has no supported per-workflow repair for that state.
-
-Older federated history can also contain workflow definitions with a null
-document, steps array, step, or step kind. Accepted-history validation and
-backup restoration reject those events, as do legacy federation page and push
-classification. Folding skips them with a warning. If a stored definition
-contains one of these null shapes, its reads and lifecycle actions fail in the
-same way.
-
-For a SQLite database at schema version 31 through 40, a stored workflow in
-either state can also prevent the daemon from starting: the automatic JSONL
-cutover exports workflow definitions and encounters the same decode failure.
-This release has no supported per-workflow repair for that startup failure.
-
-This reservation does not enable argv authoring or execution. Relay publication,
-project-history negotiation, reset and adoption handling, client preservation
-and adapter conformance need coordinated support before argv can be enabled.
-
 ## Independent run evidence
 
 An adapter creates one independent run UID and retains it across retries:
