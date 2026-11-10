@@ -3,6 +3,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"reflect"
@@ -264,7 +265,12 @@ func addTool[In, Out any](
 }
 
 func schemaFor[T any]() *jsonschema.Schema {
-	schema, err := jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{})
+	// Raw cron definitions and bundles are JSON objects, rather than byte arrays.
+	schema, err := jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{
+		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+			reflect.TypeFor[jsontext.Value](): {Type: "object"},
+		},
+	})
 	if err != nil {
 		panic(fmt.Errorf("infer MCP schema for %T: %w", *new(T), err))
 	}

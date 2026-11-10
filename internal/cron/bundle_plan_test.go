@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/uid"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 func bundlePlanFixture(t *testing.T) Bundle {
@@ -23,12 +23,12 @@ func bundlePlanFixture(t *testing.T) Bundle {
 	return b
 }
 
-func drawBundlePlanCase(t *testing.T, ht *hegel.T) (Bundle, BundleTarget, string) {
+func drawBundlePlanCase(t *testing.T, ht *rapid.T) (Bundle, BundleTarget, string) {
 	b := bundlePlanFixture(t)
-	sourceSeed := hegel.Draw(ht, hegel.Text())
-	targetSeed := hegel.Draw(ht, hegel.Text())
-	issueSeed := hegel.Draw(ht, hegel.Text())
-	millis := hegel.Draw(ht, hegel.Integers[int64](0, (1<<48)-1))
+	sourceSeed := rapid.String().Draw(ht, "text")
+	targetSeed := rapid.String().Draw(ht, "text")
+	issueSeed := rapid.String().Draw(ht, "text")
+	millis := rapid.Int64Range(0, (1<<48)-1).Draw(ht, "millis")
 	stamp := time.UnixMilli(millis)
 	makeUID := func(seed string) string {
 		id, err := uid.FromStableSeed([]byte(seed), stamp)
@@ -40,7 +40,7 @@ func drawBundlePlanCase(t *testing.T, ht *hegel.T) (Bundle, BundleTarget, string
 	b.Source.ProjectUID = makeUID("source project:" + sourceSeed)
 	b.Workflows[0].UID = makeUID("workflow:" + sourceSeed)
 	b.Jobs[0].UID = makeUID("job:" + sourceSeed)
-	if hegel.Draw(ht, hegel.Booleans()) {
+	if rapid.Bool().Draw(ht, "choice") {
 		b.Jobs[0].UID = b.Workflows[0].UID
 	}
 	workflow, err := ParseWorkflow(b.Workflows[0].Definition)
@@ -50,12 +50,12 @@ func drawBundlePlanCase(t *testing.T, ht *hegel.T) (Bundle, BundleTarget, string
 	require.NoError(ht, err)
 	job, err := ParseJob(b.Jobs[0].Definition)
 	require.NoError(ht, err)
-	number := hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))
+	number := rapid.Uint64().Draw(ht, "integer")
 	job.Options = []byte(fmt.Sprintf(`{"source":%q,"large":%d}`, sourceIssue, number))
 	job.Trigger.IssueUID = sourceIssue
 	job.Issue.UID = sourceIssue
 	job.Action.WorkflowUID = b.Workflows[0].UID
-	switch hegel.Draw(ht, hegel.Integers(0, 2)) {
+	switch rapid.IntRange(0, 2).Draw(ht, "job kind") {
 	case 1:
 		job.Trigger = Trigger{Kind: "interval", IntervalSeconds: 3600}
 		job.Action = Action{Kind: "notify", Recipient: "current-owner-or-author", Message: sourceIssue}
@@ -74,7 +74,7 @@ func drawBundlePlanCase(t *testing.T, ht *hegel.T) (Bundle, BundleTarget, string
 }
 
 func TestBundlePlanRemapsOnlyReferencesProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	rapid.Check(t, func(ht *rapid.T) {
 		b, target, issue := drawBundlePlanCase(t, ht)
 		source, err := ParseJob(b.Jobs[0].Definition)
 		require.NoError(ht, err)
@@ -97,11 +97,11 @@ func TestBundlePlanRemapsOnlyReferencesProperty(t *testing.T) {
 			require.Equal(ht, issue, job.Issue.ParentUID)
 		}
 		require.Equal(ht, uid.MustTime(b.Jobs[0].UID), uid.MustTime(plan.Jobs[0].UID))
-	}, hegel.WithTestCases(100))
+	})
 }
 
 func TestBundlePlanPreservesOpaqueContentProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	rapid.Check(t, func(ht *rapid.T) {
 		b, target, _ := drawBundlePlanCase(t, ht)
 		source, err := ParseJob(b.Jobs[0].Definition)
 		require.NoError(ht, err)
@@ -117,11 +117,11 @@ func TestBundlePlanPreservesOpaqueContentProperty(t *testing.T) {
 		original, err := ParseWorkflow(b.Workflows[0].Definition)
 		require.NoError(ht, err)
 		require.Equal(ht, original.Steps, workflow.Steps)
-	}, hegel.WithTestCases(100))
+	})
 }
 
 func TestBundlePlanInputImmutabilityProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	rapid.Check(t, func(ht *rapid.T) {
 		b, target, _ := drawBundlePlanCase(t, ht)
 		before, err := json.Marshal(b)
 		require.NoError(ht, err)
@@ -135,13 +135,13 @@ func TestBundlePlanInputImmutabilityProperty(t *testing.T) {
 		afterMappings, err := json.Marshal(target.IssueMappings)
 		require.NoError(ht, err)
 		require.Equal(ht, mappings, afterMappings)
-	}, hegel.WithTestCases(100))
+	})
 }
 
 func TestBundlePlanDeterminismAndDomainProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	rapid.Check(t, func(ht *rapid.T) {
 		b := bundlePlanFixture(t)
-		seed := hegel.Draw(ht, hegel.Text())
+		seed := rapid.String().Draw(ht, "text")
 		a, err := uid.FromStableSeed([]byte("a:"+seed), time.Unix(1700000000, 0))
 		require.NoError(ht, err)
 		z, err := uid.FromStableSeed([]byte("z:"+seed), time.Unix(1700000000, 0))
@@ -157,7 +157,7 @@ func TestBundlePlanDeterminismAndDomainProperty(t *testing.T) {
 		require.NoError(ht, err)
 		require.NotEqual(ht, first.Jobs[0].UID, other.Jobs[0].UID)
 		require.NotEqual(ht, first.Workflows[0].UID, other.Workflows[0].UID)
-	}, hegel.WithTestCases(100))
+	})
 }
 
 func TestBundlePlanMissingMappingsAndSameProject(t *testing.T) {
@@ -211,9 +211,9 @@ func TestBundlePlanStableSeedGolden(t *testing.T) {
 }
 
 func TestBundlePlanEnabledTruthTableProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	rapid.Check(t, func(ht *rapid.T) {
 		b := bundlePlanFixture(t)
-		enabled, keep := hegel.Draw(ht, hegel.Booleans()), hegel.Draw(ht, hegel.Booleans())
+		enabled, keep := rapid.Bool().Draw(ht, "choice"), rapid.Bool().Draw(ht, "choice")
 		job, err := ParseJob(b.Jobs[0].Definition)
 		require.NoError(ht, err)
 		job.Enabled = enabled
@@ -224,7 +224,7 @@ func TestBundlePlanEnabledTruthTableProperty(t *testing.T) {
 		actual, err := ParseJob(plan.Jobs[0].Definition)
 		require.NoError(ht, err)
 		require.Equal(ht, enabled && keep, actual.Enabled)
-	}, hegel.WithTestCases(100))
+	})
 }
 
 func TestBundlePlanCompleteMissingMappingList(t *testing.T) {

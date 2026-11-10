@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-04
+last_edited: 2026-11-10
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -112,6 +112,8 @@ The daemon's current serialization rules and the bundle limits apply. Export per
 ordinary reads; concurrent edits can change which versions are collected.
 
 ### Copy jobs and workflows
+
+Agents can also copy definitions through the [MCP bundle tools](mcp.md#native-cron-through-mcp).
 
 Import a bundle into a selected project, or copy definitions to another project
 on the same daemon:

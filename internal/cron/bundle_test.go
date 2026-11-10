@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 const bundleTestUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -129,10 +129,10 @@ func TestBundleTimestampGrammar(t *testing.T) {
 }
 
 func TestBundleOpaqueNumericTokensProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		n := hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))
+	rapid.Check(t, func(ht *rapid.T) {
+		n := rapid.Uint64().Draw(ht, "integer")
 		token := fmt.Sprintf("%d", n)
-		spelling := hegel.Draw(ht, hegel.SampledFrom([]string{token, token + ".0", token + "e9999", "-0", "123456789012345678901234567890"}))
+		spelling := rapid.SampledFrom([]string{token, token + ".0", token + "e9999", "-0", "123456789012345678901234567890"}).Draw(ht, "spelling")
 		b := testBundle()
 		b.Workflows[0].Definition = []byte(`{"version":99,"options":{"n":` + spelling + `},"steps":[{"options":{"n":` + spelling + `}}]}`)
 		b.Jobs = []BundleDefinition{{UID: bundleTestUID, DefinitionEventUID: bundleTestUID, Name: "Historical", Definition: []byte(`{"version":99,"options":{"n":` + spelling + `}}`)}}
@@ -142,13 +142,13 @@ func TestBundleOpaqueNumericTokensProperty(t *testing.T) {
 		require.NoError(ht, err)
 		require.Equal(ht, b.Workflows[0].Definition, parsed.Workflows[0].Definition)
 		require.Equal(ht, b.Jobs[0].Definition, parsed.Jobs[0].Definition)
-	}, hegel.WithTestCases(100))
+	})
 }
 
 func TestBundleValidationDoesNotMutateProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	rapid.Check(t, func(ht *rapid.T) {
 		b := testBundle()
-		text := hegel.Draw(ht, hegel.Text())
+		text := rapid.String().Draw(ht, "text")
 		raw, err := json.Marshal(map[string]any{"version": 99, "about": text})
 		require.NoError(ht, err)
 		b.Workflows[0].Definition = raw
@@ -162,13 +162,13 @@ func TestBundleValidationDoesNotMutateProperty(t *testing.T) {
 		_, err = ParseBundle(input)
 		require.NoError(ht, err)
 		require.Equal(ht, before, input)
-	}, hegel.WithTestCases(100))
+	})
 }
 
 func TestBundleNameByteBoundsProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	rapid.Check(t, func(ht *rapid.T) {
 		b := testBundle()
-		name := hegel.Draw(ht, hegel.Text())
+		name := rapid.String().Draw(ht, "text")
 		b.Workflows[0].Name = name
 		size := len(strings.TrimSpace(name))
 		err := b.Validate()
@@ -177,7 +177,7 @@ func TestBundleNameByteBoundsProperty(t *testing.T) {
 		} else {
 			require.ErrorIs(ht, err, ErrInvalid)
 		}
-	}, hegel.WithTestCases(100))
+	})
 	for _, size := range []int{255, 256, 257} {
 		b := testBundle()
 		b.Workflows[0].Name = " \t" + strings.Repeat("é", size/2) + strings.Repeat("x", size%2) + "\n"

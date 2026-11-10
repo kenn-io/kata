@@ -1,19 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/cronbundle"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -117,25 +113,6 @@ func newCronCopyCmd() *cobra.Command {
 	return cmd
 }
 
-type cronImportItem struct {
-	Kind      string `json:"kind"`
-	SourceUID string `json:"source_uid"`
-	UID       string `json:"uid"`
-	Name      string `json:"name"`
-	Outcome   string `json:"outcome"`
-}
-type cronImportReport struct {
-	Target struct {
-		UID  string `json:"project_uid"`
-		Name string `json:"project_name"`
-	} `json:"target"`
-	Items  []cronImportItem    `json:"items"`
-	Review []cron.BundleReview `json:"review"`
-	DryRun bool                `json:"dry_run"`
-	Note   string              `json:"note,omitempty"`
-	Error  string              `json:"error,omitempty"`
-}
-
 func (o cronImportOptions) importBundle(ctx context.Context, cmd *cobra.Command, a daemonAPI, project projectRef, bundle cron.Bundle) error {
 	mappings, err := cronResolveMappings(ctx, a, project, o.mappings)
 	if err != nil {
@@ -152,29 +129,11 @@ func (o cronImportOptions) importBundle(ctx context.Context, cmd *cobra.Command,
 		}
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	report := cronImportReport{Items: []cronImportItem{}, Review: plan.Review, DryRun: o.dryRun}
-	report.Target.UID = project.UID
-	report.Target.Name = project.Name
-	if o.dryRun {
-		report.Note = "Predicted from current reads; spoke projections may be stale. Authorization, live dependencies, lifecycle and CAS are checked on writes."
+	report, importErr := cronbundle.Import(ctx, cronBundleDaemon{a}, cronbundle.Project{ID: project.ID, UID: project.UID, Name: project.Name}, plan, cronbundle.ImportOptions{Replace: o.replace, DryRun: o.dryRun, Actor: actor})
+	if err := emitJSON(cmd.OutOrStdout(), report); err != nil {
+		return err
 	}
-	for _, group := range []struct {
-		kind    string
-		entries []cron.PlannedDefinition
-	}{{"workflow", plan.Workflows}, {"job", plan.Jobs}} {
-		for _, entry := range group.entries {
-			outcome, writeErr := o.importItem(ctx, a, project, group.kind, entry, actor)
-			report.Items = append(report.Items, cronImportItem{group.kind, entry.SourceUID, entry.UID, entry.Name, outcome})
-			if writeErr != nil {
-				report.Error = writeErr.Error()
-				if emitErr := emitJSON(cmd.OutOrStdout(), report); emitErr != nil {
-					return emitErr
-				}
-				return writeErr
-			}
-		}
-	}
-	return emitJSON(cmd.OutOrStdout(), report)
+	return cronBundleCLIError(importErr)
 }
 
 func cronResolveMappings(ctx context.Context, a daemonAPI, project projectRef, values []string) (map[string]string, error) {
@@ -233,222 +192,4 @@ func cronResolveMappings(ctx context.Context, a daemonAPI, project projectRef, v
 		result[source] = shown.Issue.UID
 	}
 	return result, nil
-}
-
-func cronBundleDefinitionEqual(a, b jsontext.Value) (bool, error) {
-	left, err := json.Marshal(a, jsontext.ReorderRawObjects(true))
-	if err != nil {
-		return false, err
-	}
-	right, err := json.Marshal(b, jsontext.ReorderRawObjects(true))
-	if err != nil {
-		return false, err
-	}
-	return bytes.Equal(left, right), nil
-}
-
-func (o cronImportOptions) importItem(ctx context.Context, a daemonAPI, project projectRef, kind string, entry cron.PlannedDefinition, actor string) (string, error) {
-	path := fmt.Sprintf("/api/v1/projects/%d/cron/%ss/%s", project.ID, kind, url.PathEscape(entry.UID))
-	var current cronBundleRecord
-	if o.dryRun {
-		status, raw, err := cronBundleHTTP(ctx, a, http.MethodGet, path, nil)
-		if err != nil {
-			return "failed", err
-		}
-		if status == 404 {
-			return "created", nil
-		}
-		if err := externalCLIResponseError(status, raw, nil); err != nil {
-			return "failed", err
-		}
-		var envelope map[string]jsontext.Value
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			return "failed", err
-		}
-		if err := json.Unmarshal(envelope[kind], &current); err != nil {
-			return "failed", err
-		}
-	} else {
-		status, raw, err := cronImportPut(ctx, a, path, entry, actor, "")
-		if err != nil {
-			return "uncertain", err
-		}
-		if status >= 200 && status < 300 {
-			if err := cronConfirmBundleWrite(status, raw, project, kind, entry); err != nil {
-				return "uncertain", err
-			}
-			return "created", nil
-		}
-		if status != 409 {
-			return cronImportErrorOutcome(status), externalCLIResponseError(status, raw, nil)
-		}
-		var envelope struct {
-			Error struct {
-				Code string `json:"code"`
-				Data struct {
-					Current jsontext.Value `json:"current"`
-				} `json:"data"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			return "failed", err
-		}
-		if envelope.Error.Code != "cron_conflict" {
-			return "failed", externalCLIResponseError(status, raw, nil)
-		}
-		if err := json.Unmarshal(envelope.Error.Data.Current, &current); err != nil {
-			return "conflict", cronCLIValidation("conflict response has no authoritative current definition")
-		}
-	}
-	if err := cronValidateBundleCurrent(current, project, kind, entry.UID); err != nil {
-		return "conflict", err
-	}
-	if current.DeletedAt != nil {
-		return "tombstoned", cronCLIValidation("target " + kind + " is tombstoned; restore it explicitly")
-	}
-
-	equal, err := cronBundleDefinitionEqual(current.Definition, entry.Definition)
-	if err != nil {
-		return "conflict", err
-	}
-	if strings.TrimSpace(current.Name) == entry.Name && equal {
-		return "unchanged", nil
-	}
-	if !o.replace {
-		return "conflict", cronCLIValidation("target " + kind + " differs; use --replace to update it")
-	}
-	if o.dryRun {
-		return "replaced", nil
-	}
-	status, raw, err := cronImportPut(ctx, a, path, entry, actor, current.DefinitionEventUID)
-	if err != nil {
-		return "uncertain", err
-	}
-	if err := externalCLIResponseError(status, raw, nil); err != nil {
-		return cronImportErrorOutcome(status), err
-	}
-	if err := cronConfirmBundleWrite(status, raw, project, kind, entry); err != nil {
-		return "uncertain", err
-	}
-	return "replaced", nil
-}
-func cronImportErrorOutcome(status int) string {
-	if status >= 500 {
-		return "uncertain"
-	}
-	if status == 409 {
-		return "conflict"
-	}
-	return "failed"
-}
-func cronImportPut(ctx context.Context, a daemonAPI, path string, entry cron.PlannedDefinition, actor, expected string) (int, []byte, error) {
-	body := struct {
-		Actor      string         `json:"actor"`
-		Name       string         `json:"name"`
-		Definition jsontext.Value `json:"definition"`
-		Expected   string         `json:"expected_event_uid,omitempty"`
-	}{actor, entry.Name, entry.Definition, expected}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return 0, nil, err
-	}
-	return cronBundleHTTP(ctx, a, http.MethodPut, path, raw)
-}
-
-// A historical current document need not pass today's admission rules, but it
-// must contain the complete API shape for its resource before it can authorize CAS.
-func cronValidateBundleCurrent(current cronBundleRecord, project projectRef, kind, expectedUID string) error {
-	if current.UID != expectedUID || current.ProjectID != project.ID || !uid.Valid(current.DefinitionEventUID) || current.DefinitionEventUID != strings.ToUpper(current.DefinitionEventUID) {
-		return fmt.Errorf("current %s identity does not match destination", kind)
-	}
-	// Tombstones never authorize replacement, even when their historical document
-	// cannot be decoded by this client.
-	if current.DeletedAt != nil {
-		return nil
-	}
-	if name := strings.TrimSpace(current.Name); name == "" || len(name) > 256 {
-		return fmt.Errorf("current %s name is missing or invalid", kind)
-	}
-	if current.Definition.Kind() != '{' {
-		return fmt.Errorf("current %s definition must be an object", kind)
-	}
-	var fields map[string]jsontext.Value
-	if err := json.Unmarshal(current.Definition, &fields); err != nil {
-		return err
-	}
-	required := map[string]jsontext.Kind{"version": '0', "steps": '['}
-	if kind == "job" {
-		required = map[string]jsontext.Kind{"version": '0', "kind": '"', "trigger": '{', "action": '{', "overlap": '"', "catchup": '"'}
-	}
-	for field, want := range required {
-		if fields[field].Kind() != want {
-			return fmt.Errorf("current %s definition is missing valid %s", kind, field)
-		}
-	}
-	if kind == "job" {
-		enabled := fields["enabled"].Kind()
-		if enabled != 't' && enabled != 'f' {
-			return fmt.Errorf("current job definition is missing enabled")
-		}
-		for _, field := range []string{"trigger", "action", "issue"} {
-			raw, present := fields[field]
-			if !present && field == "issue" {
-				continue
-			}
-			var object map[string]jsontext.Value
-			if raw.Kind() != '{' || json.Unmarshal(raw, &object) != nil || object["kind"].Kind() != '"' {
-				return fmt.Errorf("current job definition has incomplete %s", field)
-			}
-		}
-		job, err := cron.DecodeJob(current.Definition)
-		if err != nil {
-			return err
-		}
-		if job.Kind != "job" {
-			return fmt.Errorf("current definition has wrong job kind")
-		}
-	} else {
-		_, err := cron.DecodeWorkflow(current.Definition)
-		if err != nil {
-			return err
-		}
-		var steps []map[string]jsontext.Value
-		if err := json.Unmarshal(fields["steps"], &steps); err != nil {
-			return err
-		}
-		for i, step := range steps {
-			if step["key"].Kind() != '"' || step["kind"].Kind() != '"' {
-				return fmt.Errorf("current workflow definition has incomplete step %d", i)
-			}
-		}
-	}
-	return nil
-}
-
-func cronConfirmBundleWrite(status int, raw []byte, project projectRef, kind string, entry cron.PlannedDefinition) error {
-	if status != http.StatusOK && status != http.StatusCreated {
-		return fmt.Errorf("unexpected cron write status %d; outcome is uncertain", status)
-	}
-	var envelope map[string]jsontext.Value
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return fmt.Errorf("invalid cron write response; outcome is uncertain: %w", err)
-	}
-	var current cronBundleRecord
-	if err := json.Unmarshal(envelope[kind], &current); err != nil {
-		return fmt.Errorf("incomplete cron write response; outcome is uncertain: %w", err)
-	}
-	if err := cronValidateBundleCurrent(current, project, kind, entry.UID); err != nil {
-		return fmt.Errorf("incomplete cron write response; outcome is uncertain: %w", err)
-	}
-	if current.DeletedAt != nil {
-		return fmt.Errorf("cron write returned a tombstone; outcome is uncertain")
-	}
-	equal, err := cronBundleDefinitionEqual(current.Definition, entry.Definition)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(current.Name) != entry.Name || !equal {
-		return fmt.Errorf("cron write returned different content; outcome is uncertain")
-	}
-	return nil
 }

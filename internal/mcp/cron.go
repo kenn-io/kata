@@ -48,6 +48,8 @@ func registerCronTools(server *sdkmcp.Server, h toolHandlers) {
 	registerCronWorkflowTools(server, h)
 	registerCronRunTools(server, h)
 	read := toolHints(true, false, false)
+	addCronTool(server, "kata.cron_export", "Export cron bundle", "Export selected job and workflow definitions, including workflow dependencies, as a portable bundle.", read, h.cronExport)
+	addCronTool(server, "kata.cron_import", "Import cron bundle", "Copy a bundle with deterministic UIDs, disabled jobs by default, optional issue mappings, dry_run and replace. Errors retain partial results.", toolHints(false, true, false), h.cronImport)
 	addCronTool(server, "kata.cron_new_uid", "Generate cron UID", "Generate and retain a UID before the first create or observe call. Creates and reserves nothing; the UID is unbound until creation. Reuse it after a lost response.", nonIdempotent(toolHints(true, false, false)), h.cronNewUID)
 	addCronTool(server, "kata.cron_capabilities", "Read cron capabilities", "Read the selected project's live cron capabilities under the configured daemon authority.", read, h.cronCapabilities)
 	addCronTool(server, "kata.cron_jobs", "List cron jobs", "List native notification and adapter execution definitions. Execution jobs need an external adapter; listing launches no work.", read, h.cronJobs)
