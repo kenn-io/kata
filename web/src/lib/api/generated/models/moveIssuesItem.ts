@@ -4,6 +4,6 @@
 
 export interface MoveIssuesItem {
   expected_revision?: number
-  ref: string
+  ref?: string
   to_project_uid?: string
 }

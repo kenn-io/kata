@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/api"
@@ -111,7 +112,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		if in.Body.Subtree && len(in.Body.Items) > 1 {
 			return nil, api.NewError(400, "validation", "subtree move accepts one item", "", nil)
 		}
-		if err := teammate.Validate(in.Body.Teammate); err != nil {
+		if err := validateMoveBatchOptions(in.Body.Comment, in.Body.Teammate); err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
 		n := len(in.Body.Items)
@@ -371,4 +372,11 @@ func resolveMoveBatchIssue(ctx context.Context, store db.Storage, projectID int6
 		err = authorizeIssueScopedIssue(ctx, store, issue)
 	}
 	return issue, project, err
+}
+
+func validateMoveBatchOptions(comment, handle string) error {
+	if comment != "" && strings.TrimSpace(comment) == "" {
+		return errors.New("comment must not be empty")
+	}
+	return teammate.Validate(handle)
 }

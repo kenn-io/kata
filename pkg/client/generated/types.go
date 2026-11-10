@@ -4910,12 +4910,8 @@ func (m MoveIssueResponseBody) Validate() error {
 
 type MoveIssuesItem struct {
 	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
-	Ref              string  `json:"ref" validate:"required"`
+	Ref              *string `json:"ref,omitempty"`
 	ToProjectUID     *string `json:"to_project_uid,omitempty"`
-}
-
-func (m MoveIssuesItem) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(m))
 }
 
 type MoveIssuesRequestBody struct {

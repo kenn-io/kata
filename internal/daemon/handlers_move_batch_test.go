@@ -118,7 +118,7 @@ func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
-	for _, mode := range []string{"empty", "negative", "stale first", "stale second"} {
+	for _, mode := range []string{"empty", "omitted", "negative", "stale first", "stale second"} {
 		for _, dry := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s dry=%t", mode, dry), func(t *testing.T) {
 				env := testenv.New(t, testenv.WithAuthToken("tok"))
@@ -129,6 +129,8 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 				switch mode {
 				case "empty":
 					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"to_project_uid":%q,"items":[{"ref":""},{"ref":%q}]}`, dry, target.UID, issue.UID)
+				case "omitted":
+					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"to_project_uid":%q,"items":[{}, {"ref":%q}]}`, dry, target.UID, issue.UID)
 				case "negative":
 					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"items":[{"ref":%q,"to_project_uid":%q,"expected_revision":-1},{"ref":%q,"to_project_uid":%q}]}`, dry, issue.UID, other.UID, issue.UID, target.UID)
 				default:
@@ -150,7 +152,7 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 				}
 				require.Equal(t, "refused", out.Results[stale].Result)
 				want := "revision_conflict"
-				if mode == "negative" || mode == "empty" {
+				if mode == "negative" || mode == "empty" || mode == "omitted" {
 					want = "validation"
 				}
 				require.Equal(t, want, out.Results[stale].Code)
@@ -173,4 +175,19 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestMoveIssuesBatch_RejectsBlankComment(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	source, target, issue := seedMovePair(t, env)
+	body := fmt.Sprintf(`{"actor":"tester","comment":"  \t ","to_project_uid":%q,"items":[{"ref":%q}]}`, target.UID, issue.UID)
+	resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, got.ProjectID)
+	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments)
 }

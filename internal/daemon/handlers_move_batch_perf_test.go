@@ -112,7 +112,7 @@ func BenchmarkMoveIssuesBatch5000(b *testing.B) {
 				env := testenv.New(b, func(cfg *daemon.ServerConfig) {
 					counter = &countingBatchPreviews{Storage: cfg.DB}
 					cfg.DB = counter
-					cfg.MoveBatchBudget = time.Nanosecond
+					cfg.MoveBatchBudget = time.Nanosecond //nolint:kennlint // deadlinetest: Force each completed chunk to yield.
 				})
 				source, err := env.DB.CreateProject(b.Context(), "source")
 				require.NoError(b, err)
@@ -121,7 +121,7 @@ func BenchmarkMoveIssuesBatch5000(b *testing.B) {
 				c, err := env.DB.CreateProject(b.Context(), "target-b")
 				require.NoError(b, err)
 				items := make([]api.MoveIssuesItem, 0, 5000)
-				for i := 0; i < 5000; i++ {
+				for range 5000 {
 					issue, _, err := env.DB.CreateIssue(b.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "route", Author: "worker"})
 					require.NoError(b, err)
 					items = append(items, api.MoveIssuesItem{Ref: issue.UID, ToProjectUID: a.UID})

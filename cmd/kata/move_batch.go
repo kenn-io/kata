@@ -97,10 +97,10 @@ func advanceMoveBatchRevisions(body *generated.MoveIssuesBody, next int, results
 	}
 	for j := next; j < len(body.Items); j++ {
 		item := &body.Items[j]
-		if item.ToProjectUID == nil || item.ExpectedRevision == nil {
+		if item.Ref == nil || item.ToProjectUID == nil || item.ExpectedRevision == nil {
 			continue
 		}
-		if revision := revisions[[2]string{strings.ToUpper(item.Ref), *item.ToProjectUID}]; revision > 1 && *item.ExpectedRevision == revision-1 {
+		if revision := revisions[[2]string{strings.ToUpper(*item.Ref), *item.ToProjectUID}]; revision > 1 && *item.ExpectedRevision == revision-1 {
 			item.ExpectedRevision = new(revision)
 		}
 	}
