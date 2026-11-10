@@ -17,10 +17,7 @@ var (
 
 // explainCron adds hints to parser errors without interpreting its error text.
 func explainCron(expression string, err error) error {
-	spec := expression
-	if strings.HasPrefix(spec, "TZ=") || strings.HasPrefix(spec, "CRON_TZ=") {
-		_, spec, _ = strings.Cut(spec, " ")
-	}
+	_, spec, _, _ := splitCronDirective(expression)
 	fields := strings.Fields(spec)
 	var hint string
 	switch {
@@ -40,15 +37,15 @@ func explainCron(expression string, err error) error {
 			}
 		}
 	}
-	detail := safeCronDetail(err.Error(), 250)
+	detail := safeCronDetail(err.Error())
 	if hint != "" {
 		detail = fmt.Sprintf("%s; %s", detail, hint)
 	}
 	return invalid("invalid cron expression: " + detail)
 }
 
-// safeCronDetail bounds parser errors and escapes control characters.
-func safeCronDetail(s string, n int) string {
+// safeCronDetail escapes control characters in parser errors.
+func safeCronDetail(s string) string {
 	var out strings.Builder
 	for _, r := range s {
 		part := string(r)
@@ -58,6 +55,5 @@ func safeCronDetail(s string, n int) string {
 		}
 		out.WriteString(part)
 	}
-	value, _ := textsafe.TruncateBytes(out.String(), n)
-	return value
+	return out.String()
 }

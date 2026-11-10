@@ -181,13 +181,8 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 
 A `cron` expression has five fields: minute, hour, day of month, month, and day
 of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
-`@monthly`, or `@yearly`. Kata does not accept seconds, years, `L`, `W`, `#`,
-or `H` syntax. The complete parser input is limited to 1024 bytes, including
-any timezone directive, and a timezone name to 64 bytes. Native jobs always add
-a timezone prefix (UTC by default). Adapters add a prefix for a separate
-timezone when the expression has no directive. That prefix can make an accepted
-adapter expression exceed the limit when its schedule is evaluated. Kata keeps
-the stored expression exactly as written.
+`@monthly`, or `@yearly`. Kata does not accept `@reboot`, seconds, years,
+`L`, `W`, `#`, or `H` syntax. Kata keeps the expression exactly as written.
 
 - Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
   `0 9 * * 7` runs on Sundays, `5-7` means Friday through Sunday, and `5-7/2`
@@ -203,8 +198,7 @@ the stored expression exactly as written.
 
 Rejected expressions include the parser's error. For common unsupported syntax,
 the error also describes Kata's five-field format or the unsupported feature.
-`@reboot`, `L`, `W`, `#`, and hashed (`H`) schedules are unsupported. Use an
-interval trigger for native recurring jobs; adapter jobs accept `@every`.
+Use an interval trigger for native recurring jobs; adapter jobs accept `@every`.
 
 Schedules follow the trigger timezone's daylight-saving transitions:
 

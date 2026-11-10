@@ -46,11 +46,7 @@ func TestRecurringDefinition(t *testing.T) {
 			var j JobDefinition
 			require.NoError(t, json.Unmarshal([]byte(recurringJSON), &j))
 			change(&j)
-			err := j.Validate()
-			require.ErrorIs(t, err, ErrInvalid)
-			if name == "every descriptor" {
-				require.EqualError(t, err, "invalid cron document: use an interval trigger instead of @every")
-			}
+			require.ErrorIs(t, j.Validate(), ErrInvalid)
 		})
 	}
 	job.Issue.Title = strings.Repeat("é", 991)

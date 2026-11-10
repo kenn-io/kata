@@ -298,5 +298,5 @@ func TestCronJobCreateExplainsUnsupportedCron(t *testing.T) {
 	var response api.ErrorEnvelope
 	require.NoError(t, json.Unmarshal(raw, &response))
 	require.Equal(t, "validation", response.Error.Code)
-	require.Contains(t, response.Error.Message, "L, W, and # syntax is not supported")
+	require.Equal(t, "invalid cron document: invalid cron expression: extended day-of-month syntax requires DomL option (for L, L-n) or DomW option (for nW, LW) to be enabled; L, W, and # syntax is not supported", response.Error.Message)
 }

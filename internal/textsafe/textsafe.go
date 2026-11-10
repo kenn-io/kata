@@ -8,7 +8,7 @@
 // returns, vertical tabs, bidi overrides) can similarly reorder or
 // hide content.
 //
-// JSON output paths must NOT use its sanitizers — agents and downstream
+// JSON output paths must NOT use this package — agents and downstream
 // tools need the daemon's raw bytes. Sanitization belongs at the
 // human-facing terminal boundary only.
 package textsafe
@@ -17,7 +17,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
 // ansiEscapePattern matches the two ANSI escape families an agent-
@@ -112,17 +111,4 @@ func IsUnsafeTerminalRune(r rune) bool {
 		return false
 	}
 	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
-}
-
-// TruncateBytes bounds value in bytes, preserving rune boundaries and adding …
-// when truncated. It does not sanitize text. The limit must be at least len("…").
-func TruncateBytes(value string, limit int) (string, bool) {
-	if len(value) <= limit {
-		return value, false
-	}
-	end := limit - len("…")
-	for end > 0 && !utf8.RuneStart(value[end]) {
-		end--
-	}
-	return value[:end] + "…", true
 }

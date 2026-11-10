@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/notification"
@@ -373,7 +374,14 @@ func inboxContextFooter(omitted int, truncated bool) string {
 }
 
 func truncateInboxField(value string, limit int) (string, bool) {
-	return textsafe.TruncateBytes(value, limit)
+	if len(value) <= limit {
+		return value, false
+	}
+	end := limit - len("…")
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end] + "…", true
 }
 
 func inboxAttentionText(request inboxRequest) string {
