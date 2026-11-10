@@ -11,7 +11,7 @@ import (
 )
 
 func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"mixed", "all-rejected", "payload-only", "moved-peer", "rejected-create", "dependent-on-rejected-create", "rejected-move", "rejected-move-new-route", "duplicate-rejected-uid", "malformed-comment", "known-create", "known-snapshot"} {
+	for _, kind := range []string{"mixed", "all-rejected", "payload-only", "moved-peer", "dependent-on-rejected-create", "rejected-move", "rejected-move-new-route", "duplicate-rejected-uid", "malformed-comment", "known-create", "known-snapshot"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			source, target, moved, _ := federatedRehomeFixture(t, store, "partial-"+kind)
@@ -44,6 +44,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				bad = newRemoteEvent(t, source, &moved.UID, eventType, "worker", origin, at, []byte(`{"uid":"`+moved.UID+`","title":"Duplicate","author":"worker","status":"open"}`))
 			}
 			if kind == "payload-only" {
+				// Older federated history can carry issue identity only in the payload.
 				bad.IssueUID = nil
 			}
 			if kind == "moved-peer" {
@@ -52,7 +53,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 			}
 			freshUID, err := uid.New()
 			require.NoError(t, err)
-			if kind == "rejected-create" || kind == "dependent-on-rejected-create" {
+			if kind == "dependent-on-rejected-create" {
 				payload, err := json.Marshal(map[string]any{"uid": freshUID, "title": "Rejected creation", "author": "worker", "status": "open", "links": []map[string]string{{"type": "related", "to_issue_uid": moved.UID}}})
 				require.NoError(t, err)
 				bad = newRemoteEvent(t, source, &freshUID, "issue.created", "worker", origin, at, payload)

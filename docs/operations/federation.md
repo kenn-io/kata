@@ -81,12 +81,8 @@ checks the whole tree without changing issues, claims, or cursors. Use `--single
 to move only the selected issue. The [CLI reference](../reference/cli.md) owns
 the per-issue restrictions.
 
-Spokes must join both projects before applying a move. Upgrade the hub before
-the spokes to allow a push to send independent events while missing enrollment
-holds affected events and their dependents, even across pages. Join the missing
-project to retry retained work. A destination pull can still stop when it needs
-history from a project the spoke has not joined. Adoption baselines remain atomic.
-Upgrade both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+Spokes must join both projects before applying a move. Upgrade both hub and
+spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
 teammate attribution must match trusted history, and a spoke cannot change
@@ -2227,7 +2223,7 @@ issues. A newer CLI feature may also need a newer daemon API; see the
 
 ### When a spoke is newer than its hub
 
-Push requests declare the minimum wire schema version needed by their events, starting at version 30.
+Push requests declare the schema version required by their event payloads.
 A hub accepts older positive schema versions, but rejects a version newer
 than its own with `unsupported_federation_schema`. The spoke treats that error as transient
 version skew: it records the sync error, leaves the push cursor unchanged, does
@@ -2261,7 +2257,7 @@ the push cursor.
 A spoke records active quarantine when it sees a permanently poisoned push
 batch. Quarantine blocks further push and can block reset.
 
-On newer main builds, a direct spoke continues independent pushes when an
+A direct spoke continues independent pushes when an
 issue has moved into a project it has not joined. Both peers must support
 per-event rejections. Upgrade the hub first so it understands partial acknowledgments.
 The status error names the issue and its current project and says the spoke

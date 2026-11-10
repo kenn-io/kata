@@ -76,7 +76,7 @@ func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T)
 	}
 }
 
-func TestSyncFederationDelayedSourceEditCurrentProjectAuthority(t *testing.T) {
+func TestSyncFederationPartialPushStillPulls(t *testing.T) {
 	hub, projects := newMoveDeliveryHub(t, "delayed-edit-source", "delayed-edit-target")
 	sender := newMoveDeliverySpoke(t, hub, projects)
 	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Delayed source work", Author: "worker"})
