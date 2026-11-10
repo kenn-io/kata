@@ -401,6 +401,30 @@ func TestMoveIssuesBatch_DuplicateInterveningEdit(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
+	t.Run("conflict preview after many refusals", func(t *testing.T) {
+		store := openClaimGateHelperDB(t)
+		_, issue := createClaimGateHelperIssue(t, store)
+		a, err := store.CreateProject(t.Context(), "target-a")
+		require.NoError(t, err)
+		b, err := store.CreateProject(t.Context(), "target-b")
+		require.NoError(t, err)
+		req := &api.MoveIssuesRequest{}
+		req.Body.Actor, req.Body.ToProjectUID = "agent", a.UID
+		for range 51 {
+			req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
+		}
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID}, api.MoveIssuesItem{Ref: issue.UID, ToProjectUID: b.UID})
+		_, err = moveIssuesHandler(ServerConfig{DB: &batchFailureStore{Storage: store, calls: 1, failPreview: true}})(t.Context(), req)
+		var apiErr *api.APIError
+		require.ErrorAs(t, err, &apiErr)
+		rows := apiErr.Data["results"].([]api.MoveIssuesResult)
+		require.Len(t, rows, 51)
+		for index, row := range rows {
+			require.Equal(t, index, row.Index)
+			require.Equal(t, "refused", row.Result)
+		}
+		require.Equal(t, 0, apiErr.Data["next_index"])
+	})
 	for _, mode := range []string{"preview", "write", "read after chunk", "preview refusal", "write refusal", "read before neighbor"} {
 		t.Run(mode, func(t *testing.T) {
 			store := openClaimGateHelperDB(t)
@@ -412,6 +436,7 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 			chunk := mode == "preview" || mode == "write" || mode == "read after chunk"
 			refusal := mode == "preview refusal" || mode == "write refusal"
 			var wrapped db.Storage
+			var failed db.Issue
 			if refusal {
 				owner := "changed"
 				changed, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: first.ID, Owner: &owner, Actor: "agent"})
@@ -442,12 +467,15 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 				other, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "other", Author: "agent"})
 				require.NoError(t, err)
 				req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: other.UID})
+				failed = other
 				calls := 0
 				if refusal {
 					calls = 1
 				}
 				wrapped = &batchFailureStore{Storage: store, calls: calls, failPreview: mode == "preview" || mode == "preview refusal"}
 			}
+			lastIndex := len(req.Body.Items)
+			req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
 			_, err = moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
 			var apiErr *api.APIError
 			require.ErrorAs(t, err, &apiErr)
@@ -456,7 +484,7 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 			require.True(t, ok)
 			if chunk {
 				require.Equal(t, 50, apiErr.Data["next_index"])
-				require.Len(t, rows, 50)
+				require.Len(t, rows, 51)
 				require.Equal(t, "moved", rows[0].Result)
 				got, err := store.IssueByID(t.Context(), first.ID)
 				require.NoError(t, err)
@@ -466,7 +494,7 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 				require.Len(t, comments, 1)
 			} else {
 				require.Equal(t, 0, apiErr.Data["next_index"])
-				require.Len(t, rows, 1)
+				require.Len(t, rows, 2)
 				if refusal {
 					require.Equal(t, 0, rows[0].Index)
 					require.Equal(t, "revision_conflict", rows[0].Code)
@@ -475,6 +503,16 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 					require.Equal(t, "moved", rows[0].Result)
 				}
 			}
+			if failed.ID != 0 {
+				got, err := store.IssueByID(t.Context(), failed.ID)
+				require.NoError(t, err)
+				require.Equal(t, source.ID, got.ProjectID)
+				comments, err := store.CommentsByIssue(t.Context(), failed.ID)
+				require.NoError(t, err)
+				require.Empty(t, comments)
+			}
+			require.Equal(t, lastIndex, rows[len(rows)-1].Index)
+			require.Equal(t, "refused", rows[len(rows)-1].Result)
 		})
 	}
 }
@@ -485,4 +523,27 @@ func completedMoveResults(results []api.MoveIssuesResult) []api.MoveIssuesComple
 		completed = append(completed, api.MoveIssuesCompleted{Result: result.Result, Code: result.Code, UID: result.UID, Revision: result.Revision, EventID: result.EventID})
 	}
 	return completed
+}
+
+// A newer event format cannot prove the revision to an older reader.
+type moveProofVersionStore struct{ db.Storage }
+
+func (s *moveProofVersionStore) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([]db.Event, error) {
+	events, err := s.Storage.EventsAfter(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	for j := range events {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(events[j].Payload), &payload); err != nil {
+			return nil, err
+		}
+		payload["move_proof_version"] = 2
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		events[j].Payload = string(raw)
+	}
+	return events, nil
 }

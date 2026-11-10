@@ -119,8 +119,9 @@ func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectI
 		FromShortID    string `json:"from_short_id"`
 		ToProjectUID   string `json:"to_project_uid"`
 		Revision       int64  `json:"revision"`
+		ProofVersion   int    `json:"move_proof_version"`
 	}
-	if err := json.Unmarshal([]byte(events[0].Payload), &payload); err != nil || payload.ToProjectUID != target.UID || payload.Revision != completed.Revision {
+	if err := json.Unmarshal([]byte(events[0].Payload), &payload); err != nil || payload.ToProjectUID != target.UID || payload.Revision != completed.Revision || payload.ProofVersion != db.MoveProofVersion {
 		return false, nil
 	}
 	ref, err := shortid.Parse(input.Ref)

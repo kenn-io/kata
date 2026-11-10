@@ -228,13 +228,14 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 	}
 
 	payloadFields := map[string]any{
-		"issue_uid":        issueUID,
-		"from_project_uid": fromProjectUID,
-		"from_short_id":    curShortID,
-		"to_project_uid":   toProjectUID,
-		"to_short_id":      newShortID,
-		"revision":         newRev,
-		"updated_at":       ts,
+		"issue_uid":          issueUID,
+		"from_project_uid":   fromProjectUID,
+		"from_short_id":      curShortID,
+		"to_project_uid":     toProjectUID,
+		"to_short_id":        newShortID,
+		"revision":           newRev,
+		"move_proof_version": db.MoveProofVersion,
+		"updated_at":         ts,
 	}
 	var federated bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, in.FromProjectID).Scan(&federated); err != nil {

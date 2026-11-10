@@ -10,6 +10,9 @@ import (
 	"go.kenn.io/kata/internal/shortid"
 )
 
+// MoveProofVersion identifies the issue.moved continuation proof format.
+const MoveProofVersion = 1
+
 // ErrIssueMoveDescendantArchived refuses a subtree whose descendant lives in an
 // archived project. Restore the project or detach the descendant first.
 var ErrIssueMoveDescendantArchived = errors.New("descendant is in an archived project")

@@ -182,6 +182,9 @@ func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
 		require.Equal(t, "moved", first.Body.Results[0].Result)
 		req.Body.StartIndex = first.Body.NextIndex
 		req.Body.Completed = completedMoveResults(first.Body.Results)
+		unsupported, err := moveIssuesHandler(ServerConfig{DB: &moveProofVersionStore{Storage: store}})(t.Context(), req)
+		require.NoError(t, err)
+		require.Equal(t, "revision_conflict", unsupported.Body.Results[0].Code)
 		second, err := handler(t.Context(), req)
 		require.NoError(t, err)
 		require.Len(t, second.Body.Results, 1)
@@ -203,6 +206,36 @@ func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_ContinuationAfterRefusedDuplicate(t *testing.T) {
+	t.Run("missing target created between pages", func(t *testing.T) {
+		store := openClaimGateHelperDB(t)
+		_, issue := createClaimGateHelperIssue(t, store)
+		target, err := store.CreateProject(t.Context(), "valid-target")
+		require.NoError(t, err)
+		missing := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+		req := &api.MoveIssuesRequest{}
+		req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ToProjectUID: missing})
+		for range 49 {
+			req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
+		}
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
+		//nolint:kennlint // deadlinetest: Yield after the first completed chunk.
+		handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
+		first, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.Equal(t, "refused", first.Body.Results[0].Result)
+		require.Equal(t, 50, first.Body.NextIndex)
+		_, err = store.CreateProjectWithUID(t.Context(), "new-target", missing)
+		require.NoError(t, err)
+		req.Body.StartIndex = first.Body.NextIndex
+		req.Body.Completed = completedMoveResults(first.Body.Results)
+		second, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.Equal(t, "moved", second.Body.Results[0].Result)
+		got, err := store.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, target.ID, got.ProjectID)
+	})
 	store := openClaimGateHelperDB(t)
 	target, issue := createClaimGateHelperIssue(t, store)
 	owner := "changed"

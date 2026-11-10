@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 	"time"
 
@@ -179,7 +178,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		cache := &claimClientCache{}
 		succeeded, priorMoves, conflicts, err := seedMoveBatchContinuations(ctx, cfg, in, items, results, actor, cache)
 		if err != nil {
-			return nil, moveBatchError(err, nil, in.Body.StartIndex)
+			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
 		}
 		for j := in.Body.StartIndex; j < n; j++ {
 			if results[j].Result != "" {
@@ -213,7 +212,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 		}
 		if err := previewMoveBatch(ctx, cfg.DB, items, results, conflictPreviews); err != nil {
-			return nil, moveBatchError(err, moveBatchCompleted(nil, results[in.Body.StartIndex:min(in.Body.StartIndex+moveBatchChunkIssues, n)]), in.Body.StartIndex)
+			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
 		}
 		for _, indexes := range seen {
 			var target int64
@@ -243,7 +242,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 		}
 		if err := previewMoveBatch(ctx, cfg.DB, items, results, conflictedPreviews); err != nil {
-			return nil, moveBatchError(err, moveBatchCompleted(nil, results[in.Body.StartIndex:min(in.Body.StartIndex+moveBatchChunkIssues, n)]), in.Body.StartIndex)
+			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
 		}
 		for j := in.Body.StartIndex; j < n; j++ {
 			if results[j].Result == "" && conflicts[items[j].issue.ID] {
@@ -293,7 +292,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				}
 			}
 			if err := previewMoveBatch(ctx, cfg.DB, items, results, chunkPreviews); err != nil {
-				return nil, moveBatchError(err, moveBatchCompleted(out.Body.Results, results[start:end]), start)
+				return nil, moveBatchError(err, results[in.Body.StartIndex:], start)
 			}
 			for _, j := range indexes {
 				if results[j].Result == "" {
@@ -328,7 +327,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			if len(write) > 0 {
 				committed, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: write, Comment: in.Body.Comment, Teammate: in.Body.Teammate})
 				if err != nil {
-					return nil, moveBatchError(err, moveBatchCompleted(out.Body.Results, results[start:end]), start)
+					return nil, moveBatchError(err, results[in.Body.StartIndex:], start)
 				}
 				var events []db.Event
 				for k, j := range written {
@@ -348,7 +347,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 			for _, j := range noops {
 				if err := finishUnchangedMove(ctx, cfg.DB, items[j], &results[j], succeeded[items[j].issue.ID]); err != nil {
-					return nil, moveBatchError(err, moveBatchCompleted(out.Body.Results, results[start:end]), start)
+					return nil, moveBatchError(err, results[in.Body.StartIndex:], start)
 				}
 				if results[j].Result == "unchanged" {
 					succeeded[items[j].issue.ID] = results[j]
@@ -378,13 +377,15 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 }
 
 func moveBatchError(err error, results []api.MoveIssuesResult, next int) error {
+	settled := make([]api.MoveIssuesResult, 0, len(results))
+	for _, result := range results {
+		if result.Result != "" {
+			settled = append(settled, result)
+		}
+	}
 	mapped := internalAPIError(err).(*api.APIError)
-	mapped.Data = map[string]any{"results": results, "next_index": next}
+	mapped.Data = map[string]any{"results": settled, "next_index": next}
 	return mapped
-}
-
-func moveBatchCompleted(prior, current []api.MoveIssuesResult) []api.MoveIssuesResult {
-	return slices.DeleteFunc(append(prior, current...), func(r api.MoveIssuesResult) bool { return r.Result == "" })
 }
 
 func resolveMoveBatchIssue(ctx context.Context, store db.Storage, projectID int64, ref string) (db.Issue, db.Project, error) {

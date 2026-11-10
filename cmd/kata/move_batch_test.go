@@ -412,10 +412,10 @@ func TestMoveBatchCLI_PartialErrorResults(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		require.NoError(t, json.MarshalWrite(w, map[string]any{"status": 500, "error": map[string]any{"code": "internal", "message": "database unavailable", "data": map[string]any{"results": []api.MoveIssuesResult{{Index: 0, Ref: issue.UID, Result: "moved"}}, "next_index": 1}}}))
+		require.NoError(t, json.MarshalWrite(w, map[string]any{"status": 500, "error": map[string]any{"code": "internal", "message": "database unavailable", "data": map[string]any{"results": []api.MoveIssuesResult{{Index: 0, Ref: issue.UID, Result: "moved"}, {Index: 50, Ref: issue.UID, Result: "refused", Code: "validation"}}, "next_index": 1}}}))
 	}))
 	t.Cleanup(server.Close)
-	input := issue.UID + "\tmissing-project\n" + issue.UID + "\t" + dst.Name + "\n" + issue.UID + "\t" + dst.Name + "\n"
+	input := issue.UID + "\tmissing-project\n" + strings.Repeat(issue.UID+"\t"+dst.Name+"\n", 51)
 	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
 	var ce *cliError
 	require.ErrorAs(t, err, &ce)
@@ -424,11 +424,13 @@ func TestMoveBatchCLI_PartialErrorResults(t *testing.T) {
 		Results []api.MoveIssuesResult `json:"results"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Len(t, reply.Results, 2)
+	require.Len(t, reply.Results, 3)
 	require.Equal(t, 0, reply.Results[0].Index)
 	require.Equal(t, "refused", reply.Results[0].Result)
 	require.Equal(t, 1, reply.Results[1].Index)
 	require.Equal(t, "moved", reply.Results[1].Result)
+	require.Equal(t, 51, reply.Results[2].Index)
+	require.Equal(t, "refused", reply.Results[2].Result)
 }
 
 func TestMoveBatchCLI_ReportsEarlierResultsOnInvalidReply(t *testing.T) {
