@@ -464,3 +464,28 @@ func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
 		})
 	}
 }
+
+// A full snapshot replaces label membership even when an empty label list is
+// omitted by the producer. Later label deltas still apply.
+func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
+	for _, snapshot := range []string{
+		`{"uid":"issue-1","title":"snapshot","status":"open","labels":["current"]}`,
+		`{"uid":"issue-1","title":"snapshot","status":"open","labels":[]}`,
+		`{"uid":"issue-1","title":"snapshot","status":"open","labels":null}`,
+		`{"uid":"issue-1","title":"snapshot","status":"open"}`,
+	} {
+		t.Run(snapshot, func(t *testing.T) {
+			got := FoldEvents([]FoldEvent{
+				testEvent("issue.snapshot", 1, `{"uid":"issue-1","title":"source","status":"open","labels":["old"]}`),
+				testEvent("issue.labeled", 2, `{"label":"before"}`),
+				testEvent("issue.snapshot", 3, snapshot),
+				testEvent("issue.labeled", 4, `{"label":"after"}`),
+				testEvent("issue.unlabeled", 5, `{"label":"current"}`),
+			})
+			require.False(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "old"}].Present)
+			require.False(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "before"}].Present)
+			require.True(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "after"}].Present)
+			require.False(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "current"}].Present)
+		})
+	}
+}
