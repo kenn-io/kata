@@ -1265,6 +1265,7 @@ func (h toolHandlers) summaryFromIssue(project ProjectIdentity, issue generated.
 		UpdatedAt:           formatTime(issue.UpdatedAt),
 		ScheduledOn:         metadataString(issue.Metadata, "scheduled_on"),
 		Timezone:            metadataString(issue.Metadata, "timezone"),
+		metadata:            issue.Metadata,
 		updatedAt:           issue.UpdatedAt,
 	}
 }
@@ -1351,11 +1352,21 @@ func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSumma
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
 		ScheduledOnDate: issue.ScheduledOnDate, DeadlineOnDate: issue.DeadlineOnDate,
-		updatedAt: issue.UpdatedAt,
+		updatedAt: issue.UpdatedAt, metadata: issue.Metadata,
 	}
 }
 
 func metadataString(values map[string]any, key string) *string {
+	if key == "timezone" {
+		if object, ok := values["scheduled_on"].(map[string]any); ok {
+			raw, err := json.Marshal(object)
+			if err == nil {
+				if saved, err := metadata.DecodeSavedSchedule(raw); err == nil && saved != nil {
+					return &saved.Timezone
+				}
+			}
+		}
+	}
 	value, ok := values[key].(string)
 	if !ok && (key == "scheduled_on" || key == "deadline_on") {
 		if object, valid := values[key].(map[string]any); valid {

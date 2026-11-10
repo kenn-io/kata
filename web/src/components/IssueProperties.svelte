@@ -233,10 +233,7 @@
     if (property === 'scheduled') {
       scheduledDraft = scheduleText(issue.issue.metadata.scheduled_on) ?? ''
     } else if (property === 'due') {
-      dueDraft =
-        typeof issue.issue.metadata.deadline_on === 'string'
-          ? deadlineDate()
-          : (scheduleText(issue.issue.metadata.deadline_on) ?? '')
+      dueDraft = deadlineDate()
     } else {
       priorityDraft =
         issue.issue.priority === undefined || issue.issue.priority === null

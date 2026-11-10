@@ -18,12 +18,14 @@ var scheduleZoneBundle []byte
 
 const scheduleTZData2026c = "sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"
 
+// ScheduleTZDataVersion identifies the rules used for newly saved schedules.
 const ScheduleTZDataVersion = scheduleTZData2026c
 
 // ErrUnsupportedScheduleTZData marks a saved schedule whose tzdata version this
 // build does not ship.
 var ErrUnsupportedScheduleTZData = errors.New("unsupported schedule tzdata version")
 
+// SavedSchedule records a schedule and the rules used to interpret it.
 type SavedSchedule struct {
 	Value         string `json:"value"`
 	Timezone      string `json:"timezone"`

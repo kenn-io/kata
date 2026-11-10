@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -639,10 +640,18 @@ func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, next.OccurrenceKey)
 	assert.Equal(t, "2026-08-05", *next.OccurrenceKey)
-	var metadata map[string]any
-	require.NoError(t, json.Unmarshal([]byte(next.Metadata), &metadata))
-	assert.Equal(t, "Local", metadata["timezone"])
-	assert.Equal(t, "2026-08-05", metadata["scheduled_on"])
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(next.Metadata), &fields))
+	value, zone, instant, present, err := metadata.ScheduleFieldInstant(string(next.Metadata), "scheduled_on", "")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.Equal(t, "2026-08-05", value)
+	assert.Equal(t, fields["timezone"], zone)
+	location, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion)
+	require.NoError(t, err)
+	_, localOffset := instant.In(time.Local).Zone()
+	_, savedOffset := instant.In(location).Zone()
+	assert.Equal(t, localOffset, savedOffset)
 	require.NotNil(t, current.NextOccurrenceKey)
 	assert.Equal(t, "2026-08-07", *current.NextOccurrenceKey)
 }

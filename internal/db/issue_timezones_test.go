@@ -36,6 +36,8 @@ func TestPrepareIssueSchedules(t *testing.T) {
 		{"unrelated invalid zone", `{"timezone":17}`, `{"topic":"x"}`, "Local", "", "", false},
 		{"restored clear", `{"timezone":17,"$field":"2026-11-12"}`, `{"$field":null}`, "Local", "", "", false},
 		{"restored no-op", `{"timezone":17,"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "Local", "", "", false},
+		{"legacy no-op with known zone", `{"timezone":"America/New_York","$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "", "America/New_York", false},
+		{"legacy no-op with recurrence zone", `{"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "US/Eastern", "US/Eastern", false},
 		{"restored UTC", `{"timezone":17}`, `{"$field":"2026-11-12T10:30:00Z"}`, "Local", "", "UTC", false},
 		{"restored civil", `{"timezone":17}`, `{"$field":"2026-11-12"}`, "UTC", "", "", true},
 		{"remove zone", `{"timezone":"UTC","$field":"2026-11-12"}`, `{"timezone":null}`, "Local", "", "", true},

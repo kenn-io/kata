@@ -7,6 +7,10 @@ import type { KataTaskDetail } from '../lib/kata/types'
 
 import IssueProperties from './IssueProperties.svelte'
 
+const tzdataVersion = `sha256:${createHash('sha256')
+  .update(readFileSync(resolve(process.cwd(), '../internal/metadata/tzdata/zoneinfo-2026c.zip')))
+  .digest('hex')}`
+
 function makeIssue(overrides: Partial<KataTaskDetail['issue']> = {}): KataTaskDetail {
   return {
     issue: {
@@ -203,6 +207,14 @@ describe('IssueProperties', () => {
   it.each([
     ['UTC instant', '2026-09-01T00:30:00Z'],
     ['local time', '2026-09-01T09:00'],
+    [
+      'saved UTC instant',
+      {
+        value: '2026-09-01T00:30:00Z',
+        timezone: 'America/New_York',
+        tzdata_version: tzdataVersion,
+      },
+    ],
   ])('uses the projected date for a timed %s deadline without replacing it', async (_, raw) => {
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({
@@ -222,12 +234,12 @@ describe('IssueProperties', () => {
   })
 
   it('shows an object-backed schedule in its editor', async () => {
-    const bundle = readFileSync(resolve(process.cwd(), '../internal/metadata/tzdata/zoneinfo-2026c.zip'))
-    const tzdataVersion = `sha256:${createHash('sha256').update(bundle).digest('hex')}`
     renderProperties({
       issue: makeIssue({
         scheduled_on_date: '2026-06-01',
-        metadata: { scheduled_on: { value: '2026-06-01', timezone: 'UTC', tzdata_version: tzdataVersion } },
+        metadata: {
+          scheduled_on: { value: '2026-06-01', timezone: 'UTC', tzdata_version: tzdataVersion },
+        },
       }),
     })
     expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('Jun 1')

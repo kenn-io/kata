@@ -41,13 +41,21 @@ export interface KataIssueWire extends KataCreationAttributionWire {
   priority?: number | undefined
   metadata?:
     | {
-        scheduled_on?: string | undefined
-        deadline_on?: string | undefined
+        scheduled_on?:
+          | string
+          | { value: string; timezone: string; tzdata_version: string }
+          | undefined
+        deadline_on?:
+          | string
+          | { value: string; timezone: string; tzdata_version: string }
+          | undefined
         checklist?: KataChecklistItem[] | undefined
         [key: string]: unknown
       }
     | undefined
   labels?: string[] | null | undefined
+  scheduled_on_date?: string | undefined
+  deadline_on_date?: string | undefined
   updated_at?: string | undefined
 }
 

@@ -63,7 +63,7 @@ func TestRecurrenceLocalMaterializesInNamedZone(t *testing.T) {
 	}
 	exe, err := os.Executable()
 	require.NoError(t, err)
-	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRecurrenceLocalMaterializesInNamedZone$")
+	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRecurrenceLocalMaterializesInNamedZone$") // #nosec G204 -- re-execute this test binary with an isolated timezone.
 	cmd.Env = append(os.Environ(), "KATA_TEST_LOCAL_RECURRENCE=1", "TZ=America/New_York")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))

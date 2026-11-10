@@ -55,7 +55,7 @@ func TestSavedScheduleIgnoresHostZoneinfo(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, b.Bytes(), 0600))
 	exe, err := os.Executable()
 	require.NoError(t, err)
-	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestSavedScheduleIgnoresHostZoneinfo$")
+	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestSavedScheduleIgnoresHostZoneinfo$") // #nosec G204 -- re-execute this test binary with isolated timezone data.
 	cmd.Env = append(os.Environ(), "KATA_SCHEDULE_ZONE_CHILD=1", "ZONEINFO="+path)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))

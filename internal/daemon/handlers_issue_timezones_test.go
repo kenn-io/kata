@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,8 +16,29 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestIssueTimezoneLegacyEchoFreezesKnownZone(t *testing.T) {
+	env := testenv.New(t)
+	p := seedProject(t, env, "example-project")
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Legacy", Author: "tester"})
+	require.NoError(t, err)
+	_, err = env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"timezone":"America/New_York","scheduled_on":"2026-11-12"}`, issue.ID)
+	require.NoError(t, err)
+	status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": map[string]any{"scheduled_on": "2026-11-12"}})
+	require.Equal(t, http.StatusOK, status, string(raw))
+	stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	var fields map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(stored.Metadata), &fields))
+	saved, err := metadata.DecodeSavedSchedule(fields["scheduled_on"])
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	require.Equal(t, "America/New_York", saved.Timezone)
+	require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
+}
 
 // Create and PATCH both prepare schedules and reject unportable zones atomically.
 func TestIssuePortableTimezoneAdmission(t *testing.T) {
@@ -39,9 +62,7 @@ func TestIssuePortableTimezoneAdmission(t *testing.T) {
 			require.NoError(t, err)
 			before := recurrenceWriteCursor(t, env)
 			patch := map[string]any{"topic": "changed"}
-			for key, value := range tc.metadata {
-				patch[key] = value
-			}
+			maps.Copy(patch, tc.metadata)
 			status, raw = cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": patch})
 			require.Equal(t, tc.want, status, string(raw))
 			if tc.want == http.StatusBadRequest {

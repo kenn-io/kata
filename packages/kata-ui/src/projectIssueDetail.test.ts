@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { ShowIssueResponseBody } from '../../../web/src/lib/api/generated/models/showIssueResponseBody.ts'
@@ -5,6 +8,9 @@ import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
 const versionID = '6f1c2e8a-2222-4222-8222-222222222222'
+const tzdataVersion = `sha256:${createHash('sha256')
+  .update(readFileSync(resolve(process.cwd(), '../../internal/metadata/tzdata/zoneinfo-2026c.zip')))
+  .digest('hex')}`
 const attachment = {
   name: 'shot.png',
   media_type: 'image/png',
@@ -17,6 +23,25 @@ function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
 }
 
 describe('projectIssueDetail', () => {
+  it('shows saved schedules on their resolved calendar dates', () => {
+    const saved = {
+      value: '2026-01-01T02:00:00Z',
+      timezone: 'America/New_York',
+      tzdata_version: tzdataVersion,
+    }
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Scheduled',
+        status: 'open',
+        scheduled_on_date: '2025-12-31',
+        deadline_on_date: '2025-12-31',
+        metadata: { scheduled_on: saved, deadline_on: saved },
+      },
+    })
+    expect(detail.issue.scheduledOn).toBe('2025-12-31')
+    expect(detail.issue.deadlineOn).toBe('2025-12-31')
+  })
   it.each([
     ['non-object entry', 'junk'],
     ['missing name', { ...attachment, name: undefined }],

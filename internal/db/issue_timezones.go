@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -41,9 +42,7 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		return nil, err
 	}
 	result := make(map[string]jsontext.Value, len(patch)+2)
-	for key, value := range patch {
-		result[key] = value
-	}
+	maps.Copy(result, patch)
 	zoneChange, changedZone := diff["timezone"]
 	if changedZone && zoneChange.To != nil {
 		var zone string
@@ -71,8 +70,16 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		if patched && !changedZone && len(before[field]) > 0 {
 			previous, err := metadata.ScheduleValueText(before[field])
 			if err == nil && previous == value {
-				result[field] = before[field]
-				continue
+				var zone string
+				knownZone := json.Unmarshal(before["timezone"], &zone) == nil && portableIssueTimezone(zone)
+				if !knownZone && len(before["timezone"]) == 0 && field == "scheduled_on" && recurrenceZone != "" {
+					_, err := metadata.ScheduleLocation(recurrenceZone, metadata.ScheduleTZDataVersion)
+					knownZone = err == nil
+				}
+				if before[field][0] != '"' || !knownZone {
+					result[field] = before[field]
+					continue
+				}
 			}
 		}
 		if !changedZone && len(before[field]) > 0 {

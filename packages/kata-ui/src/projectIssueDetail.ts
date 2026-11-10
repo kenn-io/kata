@@ -73,6 +73,12 @@ function validAttachment(value: unknown): value is KataAttachment {
 
 export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailModel {
   const { issue } = wire
+  const scheduled =
+    issue.scheduled_on_date ??
+    (typeof issue.metadata?.scheduled_on === 'string' ? issue.metadata.scheduled_on : undefined)
+  const deadline =
+    issue.deadline_on_date ??
+    (typeof issue.metadata?.deadline_on === 'string' ? issue.metadata.deadline_on : undefined)
   const labels = issue.labels ?? wire.labels?.map((label) => label.label) ?? []
   const parent = wire.parent == null ? undefined : projectReference(wire.parent)
   const children = (wire.children ?? []).map(projectReference)
@@ -112,12 +118,8 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
       ...creationFor(issue),
       ...(issue.owner === undefined ? {} : { owner: issue.owner }),
       ...(issue.priority === undefined ? {} : { priority: issue.priority }),
-      ...(issue.metadata?.scheduled_on === undefined
-        ? {}
-        : { scheduledOn: issue.metadata.scheduled_on }),
-      ...(issue.metadata?.deadline_on === undefined
-        ? {}
-        : { deadlineOn: issue.metadata.deadline_on }),
+      ...(scheduled === undefined ? {} : { scheduledOn: scheduled }),
+      ...(deadline === undefined ? {} : { deadlineOn: deadline }),
       checklist: (issue.metadata?.checklist ?? []).map((item) => ({ ...item })),
       labels: [...labels],
       ...(issue.updated_at === undefined ? {} : { updatedAt: issue.updated_at }),
