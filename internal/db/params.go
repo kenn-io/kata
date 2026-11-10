@@ -849,11 +849,14 @@ type FederationIngestEvent struct {
 	Event         RemoteEvent
 }
 
-// FederationIngestParams is the all-or-nothing DB ingest boundary used by the
-// hub transport handler.
+// FederationIngestParams defaults to atomic admission. Opted-in direct spokes
+// can retain targeted missing-enrollment rejections while accepting other work.
 type FederationIngestParams struct {
+	// AllowEventRejections opts into targeted missing-enrollment rejections.
+	AllowEventRejections bool
 	// MoveSourceEnrollmentIDs contains supplemental grants authenticated by transport.
 	// A matching spoke/actor enrollment alone does not prove token possession.
+	// A present zero grant marks an invalid supplied proof; absent means no proof.
 	MoveSourceEnrollmentIDs map[string]int64
 	// AuthorizeMove checks supplemental host authority for move sources and the
 	// current owners of fresh events, using a transactionally fenced native grant.
@@ -882,7 +885,8 @@ const (
 // only fresh events, including generated claim audit events in insertion order,
 // so callers can avoid rebroadcasting response-lost retries.
 type FederationIngestResult struct {
-	Resets []FederationProjectReset `json:"-"`
+	RejectedEvents []FederationEventRejection
+	Resets         []FederationProjectReset `json:"-"`
 	// Events retains every committed event in transaction insertion order.
 	Events                []Event
 	RequiredEventFeatures string

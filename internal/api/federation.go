@@ -472,13 +472,15 @@ type FederationPollEventsRequest struct {
 // FederationIngestEventsRequest is the enrollment-authenticated push transport
 // route.
 type FederationIngestEventsRequest struct {
-	EventFeatures string `header:"X-Kata-Event-Features"`
-	ProjectID     int64  `path:"project_id"`
-	Authorization string `header:"Authorization"`
-	Body          FederationIngestEventsRequestBody
+	EventRejections string `header:"X-Kata-Federation-Event-Rejections" doc:"Set to 1 to acknowledge per-event missing-enrollment rejections while accepting independent events."`
+	EventFeatures   string `header:"X-Kata-Event-Features"`
+	ProjectID       int64  `path:"project_id"`
+	Authorization   string `header:"Authorization"`
+	Body            FederationIngestEventsRequestBody
 }
 
-// FederationIngestEventsRequestBody carries an all-or-nothing push batch.
+// FederationIngestEventsRequestBody carries a push batch. Without transport
+// opt-in for targeted rejections, admission is atomic.
 type FederationIngestEventsRequestBody struct {
 	// MoveSourceTokens proves authority outside the route enrollment's scope:
 	// move sources and current owners of historical-envelope subjects or peers.
@@ -522,9 +524,10 @@ type FederationIngestEventEnvelope struct {
 // FederationIngestEventsBody summarizes an accepted push batch. Duplicates are
 // same-hash retries and still advance PushCursorEventID.
 type FederationIngestEventsBody struct {
-	Accepted          int   `json:"accepted"`
-	Duplicates        int   `json:"duplicates"`
-	PushCursorEventID int64 `json:"push_cursor_event_id"`
+	RejectedEvents    []db.FederationEventRejection `json:"rejected_events,omitempty"`
+	Accepted          int                           `json:"accepted"`
+	Duplicates        int                           `json:"duplicates"`
+	PushCursorEventID int64                         `json:"push_cursor_event_id"`
 }
 
 // FederationIngestEventsResponse wraps FederationIngestEventsBody.

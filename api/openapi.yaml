@@ -2565,6 +2565,33 @@ components:
         - created_at
         - updated_at
       type: object
+    FederationEventRejection:
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+        current_project_name:
+          type: string
+        current_project_uid:
+          type: string
+        event_uid:
+          type: string
+        issue_uid:
+          type: string
+        message:
+          type: string
+        source_event_id:
+          format: int64
+          type: integer
+      required:
+        - source_event_id
+        - event_uid
+        - issue_uid
+        - current_project_uid
+        - current_project_name
+        - code
+        - message
+      type: object
     FederationIngestEventEnvelope:
       additionalProperties: false
       properties:
@@ -2624,6 +2651,10 @@ components:
         push_cursor_event_id:
           format: int64
           type: integer
+        rejected_events:
+          items:
+            $ref: "#/components/schemas/FederationEventRejection"
+          type: array
       required:
         - accepted
         - duplicates
@@ -7545,7 +7576,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.45.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -9672,6 +9703,12 @@ paths:
     post:
       operationId: ingestFederationProjectEvents
       parameters:
+        - description: Set to 1 to acknowledge per-event missing-enrollment rejections while accepting independent events.
+          in: header
+          name: X-Kata-Federation-Event-Rejections
+          schema:
+            description: Set to 1 to acknowledge per-event missing-enrollment rejections while accepting independent events.
+            type: string
         - in: header
           name: X-Kata-Event-Features
           schema:

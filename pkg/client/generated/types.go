@@ -2751,6 +2751,20 @@ func (f FederationEnrollmentOut) Validate() error {
 	return errors
 }
 
+type FederationEventRejection struct {
+	Code               string `json:"code" validate:"required"`
+	CurrentProjectName string `json:"current_project_name" validate:"required"`
+	CurrentProjectUID  string `json:"current_project_uid" validate:"required"`
+	EventUID           string `json:"event_uid" validate:"required"`
+	IssueUID           string `json:"issue_uid" validate:"required"`
+	Message            string `json:"message" validate:"required"`
+	SourceEventID      int64  `json:"source_event_id"`
+}
+
+func (f FederationEventRejection) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
 type FederationIngestEventEnvelope struct {
 	Actor             string          `json:"actor" validate:"required"`
 	ContentHash       string          `json:"content_hash" validate:"required"`
@@ -2773,9 +2787,25 @@ func (f FederationIngestEventEnvelope) Validate() error {
 }
 
 type FederationIngestEventsBody struct {
-	Accepted          int64 `json:"accepted"`
-	Duplicates        int64 `json:"duplicates"`
-	PushCursorEventID int64 `json:"push_cursor_event_id"`
+	Accepted          int64                      `json:"accepted"`
+	Duplicates        int64                      `json:"duplicates"`
+	PushCursorEventID int64                      `json:"push_cursor_event_id"`
+	RejectedEvents    []FederationEventRejection `json:"rejected_events,omitempty"`
+}
+
+func (f FederationIngestEventsBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range f.RejectedEvents {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("RejectedEvents[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type FederationIngestEventsRequestBody struct {

@@ -108,6 +108,7 @@ func (c *Client) IngestProjectEvents(
 
 // IngestProjectEventsOptions carries optional metadata for federation ingest.
 type IngestProjectEventsOptions struct {
+	AllowEventRejections       bool
 	MoveSourceTokens           map[string]string
 	AdoptionBaseline           string
 	AdoptionBaselineEndEventID int64
@@ -161,7 +162,12 @@ func (c *Client) IngestProjectEventsWithOptions(
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return api.FederationIngestEventsBody{}, err
 	}
-	response, callErr := apiClient.IngestFederationProjectEventsWithResponse(ctx, &generated.IngestFederationProjectEventsRequestOptions{PathParams: &generated.IngestFederationProjectEventsPath{ProjectID: hubProjectID}, Body: &payload})
+	response, callErr := apiClient.IngestFederationProjectEventsWithResponse(ctx, &generated.IngestFederationProjectEventsRequestOptions{PathParams: &generated.IngestFederationProjectEventsPath{ProjectID: hubProjectID}, Body: &payload}, func(_ context.Context, req *http.Request) error {
+		if opts.AllowEventRejections {
+			req.Header.Set(db.FederationEventRejectionsHeader, "1")
+		}
+		return nil
+	})
 	var body api.FederationIngestEventsBody
 	if response == nil {
 		return body, callErr

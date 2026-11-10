@@ -316,6 +316,7 @@ var storageScenarios = []scenario{
 	{name: "federated move snapshot authority", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EnableProjectFederation", "CreateFederationEnrollment", "IngestFederationEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveSnapshotAuthority},
 	{name: "moved ordinary issue adoption", methods: []string{"CreateProject", "CreateIssue", "MoveIssueProject", "AdoptProjectIntoFederation", "IssueByUID", "PendingFederationPushEvents"}, run: checkMovedOrdinaryIssueAdoption},
 	{name: "federated cron run issue authority", methods: []string{"IngestFederationEvents", "MoveIssueProject", "ObserveCronRun"}, run: checkFederatedCronRunIssueAuthority},
+	{name: "federated missing enrollment partial batch", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedMissingEnrollmentPartialBatch},
 	{name: "federated fresh current project authority", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedFreshCurrentProjectAuthority},
 	{name: "federated move reset after acknowledged source leave", methods: []string{"CreateIssue", "MoveIssueProject", "AdvanceFederationPushCursor", "LeaveFederationReplica", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetAfterAcknowledgedSourceLeave},
 	{name: "federated move reset retained link", methods: []string{"CreateLinkAndEvent", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetRetainedLink},

@@ -64,6 +64,9 @@ func TestFederationFreshCurrentProjectHostAuthority(t *testing.T) {
 			}
 			headers := bearer(routeGrant.Token)
 			headers[db.EventFeaturesHeader] = db.SupportedEventFeatures
+			if tc.mode != "missing-proof" {
+				headers[db.FederationEventRejectionsHeader] = "1"
+			}
 			response, raw := envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
 			require.Equalf(t, tc.status, response.StatusCode, "%s", raw)
 			if tc.mode != "missing-proof" {

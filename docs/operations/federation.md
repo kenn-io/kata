@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Federation
@@ -2257,6 +2257,21 @@ the push cursor.
 
 A spoke records active quarantine when it sees a permanently poisoned push
 batch. Quarantine blocks further push and can block reset.
+
+On newer main builds, a direct spoke continues independent pushes when an
+issue has moved into a project it has not joined. Both peers must support
+per-event rejections. The status error names the issue and its current project
+and says the spoke has no enrollment there. Other events in the batch and later
+pages still reach the hub, and normal pull continues.
+
+Join the named project to recover the event automatically on the next sync.
+The event keeps its original UID and content hash. Until recovery, the durable
+push cursor stays before the earliest rejected event, so accepted later events
+can safely replay as duplicates. Missing enrollment alone does not create a
+quarantine. A later poisoned batch retains both the rejected events and the
+poison batch in blocking quarantine. Skip deliberately abandons that outbound
+range. Older peers keep atomic batch failure; an upgraded hub reports the
+missing project separately from invalid-credential errors.
 
 Inspect the retained event range and error before choosing any disposition:
 
