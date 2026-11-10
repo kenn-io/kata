@@ -82,9 +82,12 @@
     type MutationState,
   } from './lib/mutations/controller'
   import {
+    collectionIntentKey,
     createUISnapshotRequest,
+    projectUISnapshot,
     SnapshotController,
     snapshotIntentForRoute,
+    snapshotRequestIntent,
     uiSnapshotIntentKey,
     type SnapshotState,
     type UISnapshot,
@@ -115,7 +118,37 @@
   let returnPath = $state(launch.returnPath)
   let mode = $state(initialMode(launch, initialRoute, selectedAuthentication))
   let authority = $state.raw<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
-  const shellSnapshot = $derived(authority?.snapshot)
+  // The list route last shown from the snapshot already loaded, without a
+  // request of its own.
+  let listFromLoadedSnapshot = $state.raw<AppRoute | undefined>()
+  let shownSnapshot:
+    | { source: UISnapshot; projectUID: string | undefined; listOnly: boolean; value: UISnapshot }
+    | undefined
+  // The daemon sends every project's tasks; the shell shows the accepted route's
+  // share of them. The same inputs keep the same object, so an unchanged
+  // revalidation does not re-render the list.
+  const shellSnapshot = $derived.by(() => {
+    const source = authority?.snapshot
+    if (!source) return undefined
+    const projectUID = acceptedRoute?.projectUID
+    // A list shown from a task's snapshot leaves that task's detail behind.
+    const listOnly = acceptedRoute !== undefined && acceptedRoute === listFromLoadedSnapshot
+    if (
+      shownSnapshot?.source === source &&
+      shownSnapshot.projectUID === projectUID &&
+      shownSnapshot.listOnly === listOnly
+    ) {
+      return shownSnapshot.value
+    }
+    let value = projectUID ? projectUISnapshot(source, projectUID) : source
+    if (listOnly && (value.selected || value.graph)) {
+      value = { ...value }
+      delete value.selected
+      delete value.graph
+    }
+    shownSnapshot = { source, projectUID, listOnly, value }
+    return value
+  })
   let references = $state<UIReferencesResponseBody | undefined>()
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
@@ -324,7 +357,7 @@
         return
       }
       mode = authority?.snapshot ? 'ready' : 'loading'
-      void startAuthority()
+      loadRoute(next)
     }
     document.addEventListener('visibilitychange', visibility)
     window.addEventListener('focus', focus)
@@ -423,7 +456,48 @@
     route = next
     if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
     mode = authority?.snapshot ? 'ready' : 'loading'
-    void startAuthority()
+    loadRoute(next)
+  }
+
+  // Shows a list the accepted snapshot already holds, such as another project,
+  // in the same frame. Live updates keep that snapshot current; a polled daemon
+  // is asked again in the background. Any other route waits for its snapshot.
+  function loadRoute(next: AppRoute): void {
+    if (!showsFromAcceptedSnapshot(next)) {
+      void startAuthority()
+      return
+    }
+    listFromLoadedSnapshot = next
+    acceptedRoute = next
+    mode = 'ready'
+    if (authority?.snapshot?.capabilities.updates === 'poll') invalidations.refresh()
+  }
+
+  function showsFromAcceptedSnapshot(next: AppRoute): boolean {
+    const accepted = snapshots.state
+    return (
+      next.issueUID === undefined &&
+      !isDaemonView(next.view) &&
+      accepted.snapshot !== undefined &&
+      accepted.intent !== undefined &&
+      !accepted.loading &&
+      !accepted.stale &&
+      !accepted.authenticationRequired &&
+      !daemonSwitching &&
+      daemonError === undefined &&
+      collectionIntentKey(accepted.intent) === collectionIntentKey(requestIntentForRoute(next))
+    )
+  }
+
+  // Reads the route afresh after an await; TypeScript would keep a narrowing
+  // of the route variable from before it.
+  function currentRoute(): KataRoute {
+    return route
+  }
+
+  function requestIntentForRoute(next: AppRoute): UISnapshotIntent {
+    const intent = snapshotRequestIntent(snapshotIntentForRoute(next))
+    return activeDaemonID ? { ...intent, daemonID: activeDaemonID } : intent
   }
 
   function returnFromCredentials(): void {
@@ -1129,20 +1203,23 @@
 
   async function refreshSnapshot(full: boolean): Promise<boolean> {
     if (route.kind === 'route-error') return false
-    const requestedRoute = route
-    const baseIntent = snapshotIntentForRoute(requestedRoute)
-    const intent = activeDaemonID ? { ...baseIntent, daemonID: activeDaemonID } : baseIntent
-    const accepted = await snapshots.load(intent, { full })
+    const accepted = await snapshots.load(requestIntentForRoute(route), { full })
     if (snapshots.state.authenticationRequired) {
       requireAuthentication()
       return false
     }
+    // The route may have changed while this request ran. The snapshot serves
+    // the current route when that route requests the same snapshot, such as
+    // another project's list.
+    const current = currentRoute()
     if (
+      current.kind !== 'route-error' &&
       snapshots.state.snapshot &&
       snapshots.state.intent &&
-      uiSnapshotIntentKey(snapshots.state.intent) === uiSnapshotIntentKey(intent)
+      uiSnapshotIntentKey(snapshots.state.intent) ===
+        uiSnapshotIntentKey(requestIntentForRoute(current))
     ) {
-      acceptedRoute = requestedRoute
+      acceptedRoute = current
       return accepted
     }
     return false

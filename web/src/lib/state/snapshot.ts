@@ -81,12 +81,20 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
     const abort = new AbortController()
     this.#abort = abort
     const sameAuthority = requestedKey === this.#acceptedKey
+    // Revalidating the shown intent keeps it usable: a 304 or a newer copy of
+    // the same intent replaces it, and a failure still withdraws authority. A
+    // full reload or another intent hides authority until its snapshot arrives.
+    const revalidation =
+      sameAuthority &&
+      options.full !== true &&
+      this.state.snapshot !== undefined &&
+      !this.state.stale
     this.#setState({
       ...this.state,
       generation,
-      loading: true,
+      loading: !revalidation,
       error: undefined,
-      canMutate: false,
+      canMutate: revalidation && this.state.canMutate,
       authenticationRequired: false,
     })
 
@@ -257,6 +265,30 @@ export function snapshotIntentForRoute(
     intent.localDate = localDate(now, timeZone)
   }
   return intent
+}
+
+// The daemon's list for one project is its list for every project filtered to
+// that project, so the browser requests every project and filters locally.
+// Moving between projects then needs no request.
+export function snapshotRequestIntent(intent: UISnapshotIntent): UISnapshotIntent {
+  const request = { ...intent }
+  delete request.projectUID
+  return request
+}
+
+// Filters a snapshot of every project to one project the way the daemon's
+// project view does: that project's issues, and the links with an endpoint
+// among them.
+export function projectUISnapshot(snapshot: UISnapshot, projectUID: string): UISnapshot {
+  const collection = snapshot.collection.filter((issue) => issue.project_uid === projectUID)
+  const uids = new Set(collection.map((issue) => issue.uid))
+  return {
+    ...snapshot,
+    collection,
+    collection_links: snapshot.collection_links.filter(
+      (link) => uids.has(link.from_issue_uid) || uids.has(link.to_issue_uid),
+    ),
+  }
 }
 
 export function uiSnapshotIntentKey(intent: UISnapshotIntent): string {

@@ -29,6 +29,93 @@ describe('App', () => {
     vi.restoreAllMocks()
   })
 
+  it('shows a clicked project from the loaded list and keeps it current', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const otherProjectUID = '01J00000000000000000000003'
+    const initial = snapshot()
+    initial.catalog.push({
+      project: {
+        active: true,
+        id: 8,
+        uid: otherProjectUID,
+        name: 'other-project',
+        metadata: { area: 'Personal' },
+        revision: 1,
+        created_at: '2026-08-01T09:00:00.000Z',
+      },
+      stats: { Open: 1, Closed: 0, LastEventAt: '2026-08-01T12:00:00.000Z' },
+    })
+    const otherIssue = (id: number, uid: string, shortID: string, title: string) => ({
+      ...initial.collection[0]!,
+      id,
+      uid,
+      project_id: 8,
+      project_uid: otherProjectUID,
+      project_name: 'other-project',
+      short_id: shortID,
+      qualified_id: `other-project#${shortID}`,
+      title,
+    })
+    initial.collection.push(otherIssue(2, '01J00000000000000000000004', 'b2', 'Other issue'))
+    const refreshed = structuredClone(initial)
+    refreshed.cursor = 13
+    refreshed.catalog[1]!.stats.Open = 2
+    refreshed.collection.push(
+      otherIssue(3, '01J00000000000000000000005', 'c3', 'Issue from another client'),
+    )
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotRequests.push(request)
+          if (snapshotRequests.length === 1) {
+            return Response.json(initial, { headers: { ETag: '"snapshot-1"' } })
+          }
+          return Response.json(refreshed, { headers: { ETag: '"snapshot-2"' } })
+        }
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 })
+      }),
+    )
+    render(App)
+    await screen.findByRole('button', { name: /Other issue/ })
+    await waitFor(() => expect(snapshotRequests).toHaveLength(1))
+
+    const projectButton = [
+      ...document.querySelectorAll<HTMLButtonElement>('.project-select-button'),
+    ].find((button) => button.textContent?.includes('other-project'))!
+    await fireEvent.click(projectButton)
+
+    expect(new URL(window.location.href).searchParams.get('scope')).toBe(otherProjectUID)
+    expect(screen.getByRole('heading', { name: 'other-project' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: /Other issue/ })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).not.toBe(
+      'true',
+    )
+    expect(snapshotRequests).toHaveLength(1)
+
+    await fireEvent(window, new Event('focus'))
+
+    expect(await screen.findByRole('button', { name: /Issue from another client/ })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    const refresh = new URL(snapshotRequests[1]!.url)
+    expect(refresh.searchParams.get('project_uid')).toBeNull()
+    expect(snapshotRequests[1]!.headers.get('If-None-Match')).toBe('"snapshot-1"')
+  })
+
   it('keeps the normalized collection when focus revalidation returns unchanged', async () => {
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     sessionStorage.setItem(
