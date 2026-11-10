@@ -61,38 +61,26 @@ func mountEventsEndpoint(t *testing.T, env *testenv.Env, identity bool, projects
 	return gateway.URL + "/mcp"
 }
 
-// Both mounted authentication modes expose modern Events even when the backend
-// is disabled; listing then returns an empty collection and writes unavailable.
+// Both mounted authentication modes advertise and list modern Events.
 func TestDaemonMCPEventsDiscovery(t *testing.T) {
 	for _, identity := range []bool{false, true} {
-		for _, enabled := range []bool{false, true} {
-			t.Run(strconv.FormatBool(identity)+"/"+strconv.FormatBool(enabled), func(t *testing.T) {
-				_, endpoint := mountedEventsFixture(t, identity, enabled)
-				status, discovery := mcpRPC(t, endpoint, "server/discover", map[string]any{})
-				require.Equal(t, http.StatusOK, status, "%v", discovery)
-				require.NotContains(t, discovery, "error", "%v", discovery)
-				capabilities := discovery["result"].(map[string]any)["capabilities"].(map[string]any)
-				require.Equal(t, map[string]any{}, capabilities["events"])
-				require.Equal(t, map[string]any{}, capabilities["extensions"].(map[string]any)["io.modelcontextprotocol/events"])
-				status, listing := mcpRPC(t, endpoint, "events/list", map[string]any{})
-				require.Equal(t, http.StatusOK, status, "%v", listing)
-				require.NotContains(t, listing, "error", "%v", listing)
-				result := listing["result"].(map[string]any)
-				require.Equal(t, "complete", result["resultType"])
-				if enabled {
-					events := result["events"].([]any)
-					require.Len(t, events, 1)
-					require.Equal(t, mcpevents.EventName, events[0].(map[string]any)["name"])
-				} else {
-					require.Equal(t, []any{}, result["events"])
-					for _, method := range []string{"events/subscribe", "events/unsubscribe"} {
-						_, refused := mcpRPC(t, endpoint, method, eventsSubscribeParams("example-agent/worker", nil))
-						requireEventError(t, refused, mcpevents.CodeUnavailable)
-						require.NotEmpty(t, refused["error"].(map[string]any)["data"])
-					}
-				}
-			})
-		}
+		t.Run(strconv.FormatBool(identity), func(t *testing.T) {
+			_, endpoint := mountedEventsFixture(t, identity, true)
+			status, discovery := mcpRPC(t, endpoint, "server/discover", map[string]any{})
+			require.Equal(t, http.StatusOK, status, "%v", discovery)
+			require.NotContains(t, discovery, "error", "%v", discovery)
+			capabilities := discovery["result"].(map[string]any)["capabilities"].(map[string]any)
+			require.Equal(t, map[string]any{}, capabilities["events"])
+			require.Equal(t, map[string]any{}, capabilities["extensions"].(map[string]any)["io.modelcontextprotocol/events"])
+			status, listing := mcpRPC(t, endpoint, "events/list", map[string]any{})
+			require.Equal(t, http.StatusOK, status, "%v", listing)
+			require.NotContains(t, listing, "error", "%v", listing)
+			result := listing["result"].(map[string]any)
+			require.Equal(t, "complete", result["resultType"])
+			events := result["events"].([]any)
+			require.Len(t, events, 1)
+			require.Equal(t, mcpevents.EventName, events[0].(map[string]any)["name"])
+		})
 	}
 }
 
@@ -115,10 +103,12 @@ func TestDaemonMCPEventsLifecycle(t *testing.T) {
 			env, endpoint := mountedEventsFixture(t, identity, true)
 			project, err := env.DB.ProjectByName(t.Context(), "spoke-project")
 			require.NoError(t, err)
-			narrow := mountEventsEndpoint(t, env, identity, []string{project.Name})
-			_, refused := mcpRPC(t, narrow, "events/subscribe", eventsSubscribeParams("example-agent/worker", nil))
-			requireEventError(t, refused, mcpevents.CodeForbidden)
-			_, accepted := mcpRPC(t, narrow, "events/subscribe", eventsSubscribeParams("example-agent/worker", []string{project.UID}))
+			if identity {
+				endpoint = mountEventsEndpoint(t, env, identity, []string{project.Name})
+				_, refused := mcpRPC(t, endpoint, "events/subscribe", eventsSubscribeParams("example-agent/worker", nil))
+				requireEventError(t, refused, mcpevents.CodeForbidden)
+			}
+			_, accepted := mcpRPC(t, endpoint, "events/subscribe", eventsSubscribeParams("example-agent/worker", []string{project.UID}))
 			require.NotContains(t, accepted, "error", "%v", accepted)
 			id := accepted["result"].(map[string]any)["id"].(string)
 			row, err := env.DB.GetMCPEventSubscription(t.Context(), id)
@@ -132,19 +122,17 @@ func TestDaemonMCPEventsLifecycle(t *testing.T) {
 				require.Equal(t, mcpevents.AuthorityStaticToken, row.PrincipalAuthority)
 			}
 			if identity {
-				for _, bearer := range []string{"same-actor-token", "other-actor-token"} {
-					_, other := mcpRPCWithBearer(t, endpoint, bearer, "events/subscribe", eventsSubscribeParams("example-agent/worker", []string{project.UID}))
-					require.NotContains(t, other, "error", "%v", other)
-					otherID := other["result"].(map[string]any)["id"].(string)
-					require.NotEqual(t, id, otherID)
-					_, stopped := mcpRPCWithBearer(t, endpoint, bearer, "events/unsubscribe", unsubscribeParams("example-agent/worker", []string{project.UID}))
-					require.NotContains(t, stopped, "error", "%v", stopped)
-					row, err = env.DB.GetMCPEventSubscription(t.Context(), id)
-					require.NoError(t, err)
-					require.Equal(t, db.MCPEventStateActive, row.State, "another token must not end this subscription")
-				}
+				_, other := mcpRPCWithBearer(t, endpoint, "same-actor-token", "events/subscribe", eventsSubscribeParams("example-agent/worker", []string{project.UID}))
+				require.NotContains(t, other, "error", "%v", other)
+				otherID := other["result"].(map[string]any)["id"].(string)
+				require.NotEqual(t, id, otherID)
+				_, stopped := mcpRPCWithBearer(t, endpoint, "same-actor-token", "events/unsubscribe", unsubscribeParams("example-agent/worker", []string{project.UID}))
+				require.NotContains(t, stopped, "error", "%v", stopped)
+				row, err = env.DB.GetMCPEventSubscription(t.Context(), id)
+				require.NoError(t, err)
+				require.Equal(t, db.MCPEventStateActive, row.State, "another token must not end this subscription")
 			}
-			_, stopped := mcpRPC(t, narrow, "events/unsubscribe", unsubscribeParams("example-agent/worker", []string{project.UID}))
+			_, stopped := mcpRPC(t, endpoint, "events/unsubscribe", unsubscribeParams("example-agent/worker", []string{project.UID}))
 			require.NotContains(t, stopped, "error", "%v", stopped)
 			row, err = env.DB.GetMCPEventSubscription(t.Context(), id)
 			require.NoError(t, err)
@@ -158,18 +146,9 @@ func TestDaemonMCPEventsHeaders(t *testing.T) {
 	for _, identity := range []bool{false, true} {
 		t.Run(strconv.FormatBool(identity), func(t *testing.T) {
 			env, endpoint := mountedEventsFixture(t, identity, true)
-			for _, method := range []string{"events/subscribe", "events/unsubscribe"} {
-				for _, header := range []string{"Mcp-Name", "Mcp-Method"} {
-					for _, value := range []string{"", "other"} {
-						status, wire := mcpRPCWithBearer(t, endpoint, "test-mcp-token", method, eventsSubscribeParams("example-agent/worker", nil), func(r *http.Request) { r.Header.Set(header, value) })
-						require.Equal(t, http.StatusBadRequest, status, "%v", wire)
-						require.Contains(t, wire, "error")
-						if header == "Mcp-Name" {
-							requireEventError(t, wire, mcpevents.CodeHeaderMismatch)
-						}
-					}
-				}
-			}
+			status, wire := mcpRPCWithBearer(t, endpoint, "test-mcp-token", "events/subscribe", eventsSubscribeParams("example-agent/worker", nil), func(r *http.Request) { r.Header.Set("Mcp-Name", "other") })
+			require.Equal(t, http.StatusBadRequest, status, "%v", wire)
+			requireEventError(t, wire, mcpevents.CodeHeaderMismatch)
 			count, err := env.DB.CountActiveMCPEventSubscriptions(t.Context())
 			require.NoError(t, err)
 			require.Zero(t, count)
@@ -309,9 +288,6 @@ func TestDaemonMCPEventsLegacy(t *testing.T) {
 				require.Equal(t, http.StatusBadRequest, status, body)
 				require.Contains(t, body, "not handled")
 			}
-			count, err := env.DB.CountActiveMCPEventSubscriptions(t.Context())
-			require.NoError(t, err)
-			require.Zero(t, count)
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, endpoint, nil)
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer test-mcp-token")

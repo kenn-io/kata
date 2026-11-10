@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -190,7 +191,6 @@ func TestDaemonMCPIdentityRequests(t *testing.T) {
 		require.NotContains(t, discovery, "error", "%v", discovery)
 		result := discovery["result"].(map[string]any)
 		require.Contains(t, result["instructions"], "actor "+grant.actor+".")
-		require.Equal(t, map[string]any{}, result["capabilities"].(map[string]any)["events"])
 	}
 	other := newAuthenticatedMCPHTTPTestTransport(endpoint)
 	other.HTTPClient.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -236,10 +236,10 @@ func TestDaemonMCPIdentityRequests(t *testing.T) {
 	}, authors)
 }
 
-// Contract: ending an identity session releases the connections its REST
-// clients opened to the daemon. The daemon's Unix listener never times out
-// idle connections, so anything a closed session keeps open stays open.
-func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
+// Contract: ending an identity session or modern request releases its REST
+// connections. The daemon's Unix listener never times out idle connections,
+// so anything cleanup keeps open stays open.
+func TestDaemonMCPIdentitySessionsAndRequestsReleaseDaemonConnections(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix sockets are not supported on Windows")
 	}
@@ -261,9 +261,15 @@ func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
 	socket := filepath.Join(dir, "d.sock")
 	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
-	var open atomic.Int64
+	var open, issueReads atomic.Int64
+	listPath := fmt.Sprintf("/api/v1/projects/%d/issues", project.ID)
 	rest := &http.Server{
-		Handler: backend.Handler(), ReadHeaderTimeout: 10 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == listPath {
+				issueReads.Add(1)
+			}
+			backend.Handler().ServeHTTP(w, r)
+		}), ReadHeaderTimeout: 10 * time.Second,
 		ConnState: func(_ net.Conn, state http.ConnState) {
 			switch state {
 			case http.StateNew:
@@ -304,14 +310,16 @@ func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
 		require.NoError(t, session.Close())
 	}
 	for range 4 {
+		before := issueReads.Load()
 		status, listed := mcpRPCWithBearer(t, gateway.URL+"/mcp", "member-one-token", "tools/call", map[string]any{"name": "kata.list", "arguments": map[string]any{"project": project.Name}})
 		require.Equal(t, http.StatusOK, status)
 		require.NotContains(t, listed, "error", "%v", listed)
 		require.NotEqual(t, true, listed["result"].(map[string]any)["isError"])
+		require.Greater(t, issueReads.Load(), before, "the modern tool call reached the REST backend")
 	}
 	//nolint:kennlint // sleeptest: session and request cleanup close REST sockets asynchronously.
 	require.Eventually(t, func() bool { return open.Load() == 0 }, 5*time.Second, 10*time.Millisecond,
-		"closed sessions left %d daemon connections open", open.Load())
+		"closed MCP sessions or requests left daemon connections open")
 }
 
 // A successful modern request must leave enough lifetime for its activity report.

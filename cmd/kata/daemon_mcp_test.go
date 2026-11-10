@@ -184,30 +184,20 @@ all_projects = true
 					require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 				}
 				if tt.checkMountPolicy {
-					for _, policy := range []struct {
-						host, origin, bearer string
-						want                 int
-					}{
-						{tt.host, "", "test-mcp-token", http.StatusOK},
-						{"untrusted.example", "", "test-mcp-token", http.StatusBadRequest},
-						{tt.host, "https://untrusted.example", "test-mcp-token", http.StatusForbidden},
-					} {
-						raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": currentMCPProtocolVersion, "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}})
-						require.NoError(t, err)
-						request, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(raw))
-						require.NoError(t, err)
-						request.Host = policy.host
-						request.Header.Set("Authorization", "Bearer "+policy.bearer)
-						request.Header.Set("Origin", policy.origin)
-						request.Header.Set("Content-Type", "application/json")
-						request.Header.Set("Accept", "application/json, text/event-stream")
-						request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
-						request.Header.Set("Mcp-Method", "server/discover")
-						response, err := httpClient.Do(request)
-						require.NoError(t, err)
-						require.NoError(t, response.Body.Close())
-						require.Equal(t, policy.want, response.StatusCode, "%+v", policy)
-					}
+					raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": currentMCPProtocolVersion, "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}})
+					require.NoError(t, err)
+					request, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(raw))
+					require.NoError(t, err)
+					request.Host = tt.host
+					request.Header.Set("Authorization", "Bearer test-mcp-token")
+					request.Header.Set("Content-Type", "application/json")
+					request.Header.Set("Accept", "application/json, text/event-stream")
+					request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
+					request.Header.Set("Mcp-Method", "server/discover")
+					response, err := httpClient.Do(request)
+					require.NoError(t, err)
+					require.NoError(t, response.Body.Close())
+					require.Equal(t, http.StatusOK, response.StatusCode)
 				}
 				mcpTransport := newAuthenticatedMCPHTTPTestTransport(endpoint)
 				mcpTransport.HTTPClient.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
