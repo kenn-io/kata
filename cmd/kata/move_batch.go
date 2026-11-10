@@ -27,8 +27,8 @@ type moveBatchItem struct {
 	ExpectedRevision   int64
 }
 type moveBatchOptions struct {
-	DryRun, Subtree, Verbose bool
-	Comment, Teammate        string
+	DryRun, Subtree   bool
+	Comment, Teammate string
 }
 type moveSelector struct {
 	Project                string
@@ -355,13 +355,16 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		return moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
 	}
 	request.Body.StartIndex = 0
+	printResults := func() error {
+		slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
+		return printMoveBatch(cmd, results, len(items), opts)
+	}
 	requests := 0
 	for request.Body.StartIndex < len(request.Body.Items) {
 		body.StartIndex = new(int64(request.Body.StartIndex))
 		response, callErr := client.MoveIssuesWithResponse(a.ctx, &generated.MoveIssuesRequestOptions{Body: &body})
 		if response == nil {
-			slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
-			if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
+			if err := printResults(); err != nil {
 				return err
 			}
 			message := "Connection failed; rerun the same input to continue"
@@ -384,8 +387,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 					}
 				}
 			}
-			slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
-			if printErr := printMoveBatch(cmd, results, len(items), opts); printErr != nil {
+			if printErr := printResults(); printErr != nil {
 				return printErr
 			}
 			return err
@@ -395,15 +397,26 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			NextIndex int                    `json:"next_index"`
 		}
 		if err := json.Unmarshal(response.Body, &reply); err != nil {
+			if printErr := printResults(); printErr != nil {
+				return printErr
+			}
 			return err
 		}
 		if reply.NextIndex <= request.Body.StartIndex || reply.NextIndex > len(request.Body.Items) {
+			if printErr := printResults(); printErr != nil {
+				return printErr
+			}
 			return fmt.Errorf("could not continue batch move")
 		}
 		for _, r := range reply.Results {
 			if r.Index < 0 || r.Index >= len(indexes) {
+				if printErr := printResults(); printErr != nil {
+					return printErr
+				}
 				return fmt.Errorf("invalid batch move result index")
 			}
+		}
+		for _, r := range reply.Results {
 			r.Index = indexes[r.Index]
 			results = append(results, r)
 		}
@@ -415,8 +428,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			}
 		}
 	}
-	slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
-	if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
+	if err := printResults(); err != nil {
 		return err
 	}
 	for _, r := range results {
@@ -466,9 +478,6 @@ func printMoveBatch(cmd *cobra.Command, results []api.MoveIssuesResult, requeste
 		out.WriteByte('\n')
 	}
 	for _, r := range results {
-		if currentOutputMode() != outputAgent && !opts.Verbose && r.Result != "refused" && r.Result != "would_move" && !r.ShortIDExtended {
-			continue
-		}
 		fmt.Fprintf(&out, "- ref=%s result=%s", agentValue(r.Ref), r.Result)
 		if r.Result == "would_move" {
 			fmt.Fprintf(&out, " to_project=%s", agentValue(r.ToProjectName))

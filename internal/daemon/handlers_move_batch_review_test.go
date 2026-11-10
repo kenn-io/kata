@@ -59,31 +59,42 @@ func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_UnsupportedPairStillConflicts(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	source, issue := createClaimGateHelperIssue(t, store)
-	local, err := store.CreateProject(t.Context(), "local-target")
-	require.NoError(t, err)
-	remote, err := store.CreateProject(t.Context(), "remote-target")
-	require.NoError(t, err)
-	enableClaimGateHelperHub(t, store, remote.ID)
-	independent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "independent", Author: "agent"})
-	require.NoError(t, err)
-	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.Comment = "agent", "routed"
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ToProjectUID: local.UID}, {Ref: issue.UID, ToProjectUID: remote.UID}, {Ref: independent.UID, ToProjectUID: local.UID}}
-	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
-	require.NoError(t, err)
-	for _, r := range out.Body.Results[:2] {
-		require.Equal(t, "refused", r.Result)
-		require.Equal(t, "conflicting_target", r.Code)
+	for _, dry := range []bool{false, true} {
+		t.Run(map[bool]string{false: "write", true: "preview"}[dry], func(t *testing.T) {
+			store := openClaimGateHelperDB(t)
+			source, issue := createClaimGateHelperIssue(t, store)
+			local, err := store.CreateProject(t.Context(), "local-target")
+			require.NoError(t, err)
+			remote, err := store.CreateProject(t.Context(), "remote-target")
+			require.NoError(t, err)
+			enableClaimGateHelperHub(t, store, remote.ID)
+			independent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "independent", Author: "agent"})
+			require.NoError(t, err)
+			req := &api.MoveIssuesRequest{}
+			req.Body.Actor, req.Body.Comment, req.Body.DryRun = "agent", "routed", dry
+			req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ToProjectUID: local.UID}, {Ref: issue.UID, ToProjectUID: remote.UID}, {Ref: independent.UID, ToProjectUID: local.UID}}
+			out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
+			require.NoError(t, err)
+			want, project := "moved", local.ID
+			if dry {
+				want, project = "would_move", source.ID
+			}
+			require.Equal(t, want, out.Body.Results[0].Result)
+			require.Equal(t, "refused", out.Body.Results[1].Result)
+			require.Equal(t, "federated_move_unsupported", out.Body.Results[1].Code)
+			require.Equal(t, want, out.Body.Results[2].Result)
+			got, err := store.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, project, got.ProjectID)
+			comments, err := store.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			if dry {
+				require.Empty(t, comments)
+			} else {
+				require.Len(t, comments, 1)
+			}
+		})
 	}
-	require.Equal(t, "moved", out.Body.Results[2].Result)
-	got, err := store.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
-	comments, err := store.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Empty(t, comments)
 }
 
 func TestMoveBatchRefusal_FinalizationFailurePrecedesDenial(t *testing.T) {

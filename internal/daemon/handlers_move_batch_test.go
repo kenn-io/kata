@@ -117,3 +117,69 @@ func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
 		require.Equal(t, src.ID, got.ProjectID)
 	}
 }
+
+func TestMoveIssuesBatch_EmptyRefDoesNotBlockValid(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	src, target, issue := seedMovePair(t, env)
+	body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"items":[{"ref":""},{"ref":%q}]}`, target.UID, issue.UID)
+	out := postMoveBatch(t, env, body)
+	require.Len(t, out.Results, 2)
+	require.Equal(t, "refused", out.Results[0].Result)
+	require.Equal(t, "validation", out.Results[0].Code)
+	require.Equal(t, "moved", out.Results[1].Result)
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, src.ID, got.ProjectID)
+	require.Equal(t, target.ID, got.ProjectID)
+}
+
+func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
+	for _, mode := range []string{"negative", "stale first", "stale second"} {
+		for _, dry := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s dry=%t", mode, dry), func(t *testing.T) {
+				env := testenv.New(t, testenv.WithAuthToken("tok"))
+				src, target, issue := seedMovePair(t, env)
+				other, err := env.DB.CreateProject(t.Context(), "other-target")
+				require.NoError(t, err)
+				var body string
+				if mode == "negative" {
+					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"items":[{"ref":%q,"to_project_uid":%q,"expected_revision":-1},{"ref":%q,"to_project_uid":%q}]}`, dry, issue.UID, other.UID, issue.UID, target.UID)
+				} else {
+					bad := fmt.Sprintf(`{"ref":%q,"to_project_uid":%q,"expected_revision":%d}`, issue.UID, other.UID, issue.Revision+1)
+					good := fmt.Sprintf(`{"ref":%q,"to_project_uid":%q}`, issue.UID, target.UID)
+					if mode == "stale second" {
+						good, bad = bad, good
+					}
+					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"items":[%s,%s]}`, dry, bad, good)
+				}
+				out := postMoveBatch(t, env, body)
+				stale, valid := 0, 1
+				if mode == "stale second" {
+					stale, valid = 1, 0
+				}
+				require.Equal(t, "refused", out.Results[stale].Result)
+				want := "revision_conflict"
+				if mode == "negative" {
+					want = "validation"
+				}
+				require.Equal(t, want, out.Results[stale].Code)
+				outcome := "moved"
+				projectID := target.ID
+				if dry {
+					outcome, projectID = "would_move", src.ID
+				}
+				require.Equal(t, outcome, out.Results[valid].Result)
+				got, err := env.DB.IssueByID(t.Context(), issue.ID)
+				require.NoError(t, err)
+				require.Equal(t, projectID, got.ProjectID)
+				comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+				require.NoError(t, err)
+				if dry {
+					require.Empty(t, comments)
+				} else {
+					require.Len(t, comments, 1)
+				}
+			})
+		}
+	}
+}

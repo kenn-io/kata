@@ -4909,8 +4909,8 @@ func (m MoveIssueResponseBody) Validate() error {
 }
 
 type MoveIssuesItem struct {
-	ExpectedRevision *int64  `json:"expected_revision,omitempty" validate:"omitempty,gte=0"`
-	Ref              string  `json:"ref" validate:"required,min=1"`
+	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
+	Ref              string  `json:"ref" validate:"required"`
 	ToProjectUID     *string `json:"to_project_uid,omitempty"`
 }
 

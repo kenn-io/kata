@@ -3,9 +3,7 @@
  */
 
 export interface MoveIssuesItem {
-  /** @minimum 0 */
   expected_revision?: number
-  /** @minLength 1 */
   ref: string
   to_project_uid?: string
 }

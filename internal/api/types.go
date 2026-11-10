@@ -1865,9 +1865,9 @@ type MoveIssuesRequest struct {
 
 // MoveIssuesItem selects an issue and its destination project.
 type MoveIssuesItem struct {
-	Ref              string `json:"ref" minLength:"1"`
+	Ref              string `json:"ref"`
 	ToProjectUID     string `json:"to_project_uid,omitempty"`
-	ExpectedRevision int64  `json:"expected_revision,omitempty" minimum:"0"`
+	ExpectedRevision int64  `json:"expected_revision,omitempty"`
 }
 
 // MoveIssuesResult reports the outcome for one indexed input.

@@ -23,7 +23,6 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	a, err := store.CreateProject(ctx, "batch-a")
 	require.NoError(t, err)
-	require.NoError(t, store.CheckIssueMovePair(ctx, src.ID, a.ID))
 	b, err := store.CreateProject(ctx, "batch-b")
 	require.NoError(t, err)
 	issues := make([]db.Issue, 3)

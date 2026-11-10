@@ -21,60 +21,11 @@ func (s *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 		if err := lockProjectAccessExclusive(ctx, tx); err != nil {
 			return err
 		}
-		moved := false
-		for n, item := range in.Items {
-			if _, err := tx.ExecContext(ctx, "SAVEPOINT move_item"); err != nil {
-				return err
-			}
-			item.DryRun = in.DryRun
-			item.Savepoint = true
-			if in.Actor != "" {
-				item.Actor = in.Actor
-			}
-			if in.AuthorizeProjects != nil {
-				item.AuthorizeProjects = in.AuthorizeProjects
-			}
-			var oldShort string
-			err := tx.QueryRowContext(ctx, "SELECT short_id FROM issues WHERE id=$1", item.IssueID).Scan(&oldShort)
-			var result db.MoveIssueProjectOut
-			if err == nil {
-				if item.FromProjectID == item.ToProjectID {
-					err = errors.New("source and target projects are the same")
-				} else {
-					result, err = s.moveTreeTx(ctx, tx, item)
-				}
-			}
-			var commentEvent *db.Event
-			if err == nil && !in.DryRun && in.Comment != "" {
-				var events []db.Event
-				commentCtx := db.WithCommentMetadataHook(ctx, db.CommentMetadataPolicy(ctx), &events)
-				for _, issue := range result.Issues {
-					var event db.Event
-					_, event, err = s.createCommentTx(commentCtx, tx, db.CreateCommentParams{IssueID: issue.ID, Author: item.Actor, Body: in.Comment, Teammate: in.Teammate})
-					if err != nil {
-						break
-					}
-					if commentEvent == nil {
-						commentEvent = &event
-					}
-					result.Events = append(result.Events, events...)
-				}
-			}
-			if err != nil {
-				if IsTransient(err) || ctx.Err() != nil {
-					return err
-				}
-				if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT move_item"); rollbackErr != nil {
-					return errors.Join(err, rollbackErr)
-				}
-				out.Results[n].Err = err
-			} else {
-				out.Results[n] = db.MoveIssueBatchResult{Out: result, CommentEvent: commentEvent, ShortIDExtended: len(result.NewShortID) > len(oldShort)}
-				moved = moved || !in.DryRun
-			}
-			if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT move_item"); err != nil {
-				return err
-			}
+		var moved bool
+		var err error
+		out, moved, err = db.RunMoveBatchTx(ctx, tx, in, s.moveTreeTx, s.createCommentTx, IsTransient)
+		if err != nil {
+			return err
 		}
 		if moved {
 			if err := bumpProjectAccess(ctx, tx); err != nil {
@@ -103,9 +54,3 @@ func (s *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 }
 
 var errBatchMovePreview = errors.New("batch move preview complete")
-
-// CheckIssueMovePair checks the shared federation gate before collecting claims.
-// The write transaction independently revalidates the gate under its access lock.
-func (s *Store) CheckIssueMovePair(ctx context.Context, from, to int64) error {
-	return db.CheckFederatedIssueMove(ctx, s, from, to)
-}

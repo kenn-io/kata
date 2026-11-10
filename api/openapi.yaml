@@ -4788,10 +4788,8 @@ components:
       properties:
         expected_revision:
           format: int64
-          minimum: 0
           type: integer
         ref:
-          minLength: 1
           type: string
         to_project_uid:
           type: string

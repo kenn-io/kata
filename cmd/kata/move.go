@@ -17,7 +17,7 @@ import (
 )
 
 func newMoveCmd() *cobra.Command {
-	var dryRun, single, subtree, verbose bool
+	var dryRun, single, subtree bool
 	var refsFrom string
 	var selector moveSelector
 	cmd := &cobra.Command{
@@ -54,13 +54,12 @@ assigned in the target project.`,
 				return moveBatchUsage("--single and --subtree are mutually exclusive")
 			}
 			selector.StatusSet = cmd.Flags().Changed("status")
-			return runMoveBatchCommand(cmd, args, refsFrom, selector, moveBatchOptions{DryRun: dryRun, Subtree: subtree, Verbose: verbose})
+			return runMoveBatchCommand(cmd, args, refsFrom, selector, moveBatchOptions{DryRun: dryRun, Subtree: subtree})
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry", false, "validate and preview without mutating")
 	cmd.Flags().BoolVar(&single, "single", false, "move only the selected issue")
 	cmd.Flags().BoolVar(&subtree, "subtree", false, "move one selected issue with its descendants")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "print every batch result")
 	cmd.Flags().StringVar(&refsFrom, "refs-from", "", "read ref or ref<TAB>project per line from file or -")
 	cmd.Flags().StringVar(&selector.Project, "from-project", "", "select issues from this project")
 	cmd.Flags().StringSliceVar(&selector.Labels, "label", nil, "select issues with label (repeatable)")

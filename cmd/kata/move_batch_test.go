@@ -429,3 +429,58 @@ func TestMoveBatchCLI_HumanPreviewShowsItems(t *testing.T) {
 	require.Contains(t, out, "ref="+first.ShortID)
 	require.Contains(t, out, "ref="+second.ShortID)
 }
+
+func TestMoveBatchCLI_ReportsEarlierResultsOnInvalidReply(t *testing.T) {
+	for _, mode := range []string{"decode", "continuation"} {
+		t.Run(mode, func(t *testing.T) {
+			env, dir, _, target, issue := setupMoveCLIProjects(t)
+			origin, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			proxy := httputil.NewSingleHostReverseProxy(origin)
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/issues/actions/move" {
+					r.Host = origin.Host
+					proxy.ServeHTTP(w, r)
+					return
+				}
+				calls++
+				w.Header().Set("Content-Type", "application/json")
+				if calls == 1 {
+					require.NoError(t, json.MarshalWrite(w, map[string]any{"results": []api.MoveIssuesResult{{Index: 0, Ref: issue.UID, Result: "moved"}}, "next_index": 1}))
+				} else if mode == "decode" {
+					_, err := io.WriteString(w, "{")
+					require.NoError(t, err)
+				} else {
+					_, err := io.WriteString(w, `{"results":[],"next_index":1}`)
+					require.NoError(t, err)
+				}
+			}))
+			t.Cleanup(server.Close)
+			input := issue.UID + "\n" + issue.UID + "\n"
+			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, "--workspace", dir, "move", target.Name, "--refs-from", "-", "--json")
+			require.Error(t, err)
+			var reply struct {
+				Results []api.MoveIssuesResult `json:"results"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &reply))
+			require.Len(t, reply.Results, 1)
+			require.Equal(t, "moved", reply.Results[0].Result)
+			require.Equal(t, 0, reply.Results[0].Index)
+		})
+	}
+}
+
+func TestMoveBatchCLI_HumanShowsEveryResult(t *testing.T) {
+	env, dir, src, dst, first := setupMoveCLIProjects(t)
+	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "second", Author: "tester"})
+	require.NoError(t, err)
+	args := []string{"--project", src.Name, "move", first.ShortID, second.ShortID, dst.Name}
+	out := runCLI(t, env, dir, args...)
+	require.Contains(t, out, "ref="+first.ShortID)
+	require.Contains(t, out, "ref="+second.ShortID)
+	out = runCLI(t, env, dir, args...)
+	require.Contains(t, out, "result=unchanged")
+	require.Contains(t, out, "ref="+first.ShortID)
+	require.Contains(t, out, "ref="+second.ShortID)
+}
