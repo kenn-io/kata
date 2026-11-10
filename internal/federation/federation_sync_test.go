@@ -2009,9 +2009,13 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
 		delivered = append(delivered, events...)
 	}))
 
-	require.NotEmpty(t, delivered)
-	assert.Equal(t, localEvent.UID, delivered[0].UID)
-	assert.Greater(t, delivered[0].ID, localEvent.ID)
+	if acknowledged {
+		require.Empty(t, delivered, "acknowledged replay repairs must not repeat notifications")
+	} else {
+		require.NotEmpty(t, delivered)
+		assert.Equal(t, localEvent.UID, delivered[0].UID)
+		assert.Greater(t, delivered[0].ID, localEvent.ID)
+	}
 	repaired, err := spoke.DB.ProjectByID(ctx, project.ID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"area":"ops"}`, string(repaired.Metadata))
