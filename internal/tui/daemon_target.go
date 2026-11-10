@@ -18,6 +18,7 @@ type daemonTarget struct {
 	Local            bool
 	Home             string
 	URL              string
+	TokenFile        string
 	TokenEnv         string
 	Implicit         bool
 	resolved         client.ResolvedDaemon
@@ -68,11 +69,12 @@ func daemonTargetsFromConfig(daemons []config.CatalogDaemonConfig) []daemonTarge
 	out := make([]daemonTarget, 0, len(daemons))
 	for _, d := range daemons {
 		out = append(out, daemonTarget{
-			Name:     d.Name,
-			Local:    d.Local,
-			Home:     d.Home,
-			URL:      d.URL,
-			TokenEnv: d.TokenEnv,
+			Name:      d.Name,
+			Local:     d.Local,
+			Home:      d.Home,
+			URL:       d.URL,
+			TokenFile: d.TokenFile,
+			TokenEnv:  d.TokenEnv,
 			resolved: client.ResolvedDaemon{
 				Token: d.Token, AllowInsecure: d.AllowInsecure,
 			},

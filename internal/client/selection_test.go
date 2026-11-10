@@ -2,6 +2,9 @@ package client
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -72,4 +75,42 @@ token_env = "EXAMPLE_LOCAL_TOKEN"
 	assert.Equal(t, "override-token", resolved.Token)
 	_, err = PrepareResolvedNamed(t.Context(), "personal")
 	require.Error(t, err, "KATA_AUTH_TOKEN does not replace a local entry's credential")
+}
+
+// File selectors stay lazy during location, fail without fallback, and are
+// overridden by global auth only for ordinary remote-client connections.
+func TestCatalogTokenFileSelectionAndResolution(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	path := filepath.Join(home, "catalog-token")
+	require.NoError(t, writeRawConfig(home, fmt.Sprintf(`
+[[daemon]]
+name = "hub"
+url = "https://daemon.example"
+token_file = %q
+[[daemon]]
+name = "personal"
+local = true
+token_file = %q
+`, filepath.ToSlash(path), filepath.ToSlash(path))))
+	for _, name := range []string{"hub", "personal"} {
+		_, err := InspectSelection(t.Context(), "", name)
+		require.NoError(t, err)
+		_, err = PrepareResolvedNamed(t.Context(), name)
+		require.ErrorIs(t, err, config.ErrCredentialSource)
+	}
+	writePrivateAuthFixture(t, path, "catalog-token\n")
+	for _, name := range []string{"hub", "personal"} {
+		selection, err := InspectSelection(t.Context(), "", name)
+		require.NoError(t, err)
+		require.NoError(t, selection.credentialErr)
+		assert.Equal(t, "catalog-token", selection.Resolved.Token)
+	}
+	require.NoError(t, os.Remove(path))
+	t.Setenv("KATA_AUTH_TOKEN", "override-token")
+	resolved, err := PrepareResolvedNamed(t.Context(), "hub")
+	require.NoError(t, err)
+	assert.Equal(t, "override-token", resolved.Token)
+	_, err = PrepareResolvedNamed(t.Context(), "personal")
+	require.ErrorIs(t, err, config.ErrCredentialSource)
 }

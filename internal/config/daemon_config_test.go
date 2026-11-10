@@ -662,7 +662,7 @@ token_env = "KATA_WORK_TOKEN"
 	assert.Empty(t, cfg.Daemons[1].Token)
 }
 
-func TestReadDaemonConfig_RejectsDaemonTokenAndTokenEnv(t *testing.T) {
+func TestReadDaemonConfig_DaemonInlineTokenWinsOverTokenEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_WORK_TOKEN", "secret-from-env")
@@ -674,10 +674,11 @@ token = "inline-token"
 token_env = "KATA_WORK_TOKEN"
 `), 0o600))
 
-	_, err := config.ReadDaemonConfig()
-	require.Error(t, err, "token and token_env are mutually exclusive")
-	assert.Contains(t, err.Error(), "token")
-	assert.Contains(t, err.Error(), "token_env")
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	token, err := cfg.Daemons[0].ClientToken()
+	require.NoError(t, err)
+	assert.Equal(t, "inline-token", token)
 }
 
 func TestReadDaemonConfig_TrimsDaemonTokenEnv(t *testing.T) {
