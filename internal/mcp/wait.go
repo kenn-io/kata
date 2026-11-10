@@ -45,14 +45,6 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	waitContext, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 	h = h.withLongRunningClient()
-	lastStates := make([]WaitState, 0)
-	targets := make([]waitTarget, len(input.Refs))
-	finishError := func(err error) (*sdkmcp.CallToolResult, WaitOutput, error) {
-		if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-			return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
-		}
-		return nil, WaitOutput{}, err
-	}
 	explicitRecipient := input.For
 	if until == "reply" && explicitRecipient != "" {
 		var err error
@@ -66,55 +58,53 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		return h.waitUntil(ctx, waitContext, input, until, explicitRecipient)
 	}
 
+	return h.waitStatus(ctx, waitContext, input, status)
+}
+
+// waitStatus polls candidates independently while collecting their latest states.
+func (h toolHandlers) waitStatus(parent, ctx context.Context, input WaitInput, status string) (*sdkmcp.CallToolResult, WaitOutput, error) {
+	type result struct {
+		index  int
+		target waitTarget
+		err    error
+	}
+	pollCtx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	defer func() { cancel(); workers.Wait() }()
+	results := make(chan result, len(input.Refs))
+	for i, ref := range input.Refs {
+		workers.Add(1)
+		go func(i int, ref string) {
+			defer workers.Done()
+			var target waitTarget
+			for {
+				var err error
+				target, err = h.pollWaitTarget(pollCtx, ref, target, "", status, "")
+				select {
+				case results <- result{i, target, err}:
+				case <-pollCtx.Done():
+					return
+				}
+				if err != nil {
+					return
+				}
+				select {
+				case <-pollCtx.Done():
+					return
+				case <-time.After(250 * time.Millisecond):
+				}
+			}
+		}(i, ref)
+	}
+	targets := make([]waitTarget, len(input.Refs))
+	seen := make([]bool, len(input.Refs))
+	pending := len(targets)
+	var missing error
 	for {
-		type result struct {
-			index  int
-			target waitTarget
-			err    error
-		}
-		roundCtx, stopRound := context.WithCancel(waitContext)
-		results := make(chan result, len(targets))
-		var pending sync.WaitGroup
-		for i, raw := range input.Refs {
-			if targets[i].missing != nil {
-				continue
-			}
-			pending.Add(1)
-			go func(i int, raw string, target waitTarget) {
-				defer pending.Done()
-				target, err := h.pollWaitTarget(roundCtx, raw, target, until, status, explicitRecipient)
-				results <- result{i, target, err}
-			}(i, raw, targets[i])
-		}
-		go func() { pending.Wait(); close(results) }()
-		var firstErr, permanentErr error
-		for res := range results {
-			if res.err != nil {
-				if input.Any && permanentWaitError(res.err) {
-					res.target.missing = res.err
-					targets[res.index] = res.target
-					continue
-				}
-				if !input.Any && permanentWaitError(res.err) && waitContext.Err() == nil {
-					permanentErr = res.err
-					stopRound()
-				}
-				if firstErr == nil {
-					firstErr = res.err
-				}
-				continue
-			}
-			targets[res.index] = res.target
-		}
-		stopRound()
 		states := make([]WaitState, 0, len(targets))
 		matches, available := 0, 0
-		var missing error
 		for _, target := range targets {
 			if target.missing != nil {
-				if missing == nil {
-					missing = target.missing
-				}
 				continue
 			}
 			available++
@@ -125,28 +115,46 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				matches++
 			}
 		}
-		if ctx.Err() != nil {
-			return nil, WaitOutput{}, ctx.Err()
+		if parent.Err() != nil {
+			return nil, WaitOutput{}, parent.Err()
 		}
-		if permanentErr != nil {
-			return nil, WaitOutput{}, permanentErr
-		}
-		if firstErr == nil && (input.Any && matches > 0 || matches == len(targets)) || input.Any && matches > 0 && errors.Is(waitContext.Err(), context.DeadlineExceeded) {
+		if pending == 0 && (input.Any && matches > 0 || matches == len(targets)) {
 			return successResult(), WaitOutput{Reason: "matched", States: states}, nil
-		}
-		if firstErr != nil {
-			return finishError(firstErr)
 		}
 		if available == 0 {
 			return nil, WaitOutput{}, missing
 		}
-		lastStates = states
 		select {
-		case <-waitContext.Done():
-			return finishError(waitContext.Err())
-		case <-time.After(250 * time.Millisecond):
+		case <-ctx.Done():
+			if parent.Err() != nil {
+				return nil, WaitOutput{}, parent.Err()
+			}
+			reason := "timeout"
+			if input.Any && matches > 0 {
+				reason = "matched"
+			}
+			return successResult(), WaitOutput{Reason: reason, States: states}, nil
+		case res := <-results:
+			if !seen[res.index] {
+				seen[res.index] = true
+				pending--
+			}
+			if res.err != nil {
+				if ctx.Err() != nil {
+					continue
+				}
+				if !input.Any || !permanentWaitError(res.err) {
+					return nil, WaitOutput{}, res.err
+				}
+				res.target.missing = res.err
+				if missing == nil {
+					missing = res.err
+				}
+			}
+			targets[res.index] = res.target
 		}
 	}
+
 }
 
 // waitUntil polls each candidate independently so a stalled read cannot delay another.

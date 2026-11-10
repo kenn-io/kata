@@ -411,6 +411,33 @@ func TestMCPCoordinationWaitStatusAnySnapshot(t *testing.T) {
 	}
 }
 
+func TestMCPCoordinationWaitStatusPollsPastStalledPeer(t *testing.T) {
+	for _, anyMode := range []bool{false, true} {
+		t.Run(fmt.Sprintf("any=%t", anyMode), func(t *testing.T) {
+			var reads atomic.Int64
+			session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
+				if strings.HasSuffix(r.URL.Path, "/abc1") {
+					<-r.Context().Done()
+					return nil
+				}
+				issue := issueJSON(1, "spoke-project", "def1")
+				if reads.Add(1) > 1 {
+					issue["status"] = "closed"
+				}
+				return issue
+			})
+			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "closed", "any": anyMode, "timeout_seconds": 1})
+			if anyMode {
+				require.Equal(t, "matched", out["reason"])
+			} else {
+				require.Equal(t, "timeout", out["reason"])
+			}
+			require.GreaterOrEqual(t, reads.Load(), int64(2))
+			require.Equal(t, true, out["states"].([]any)[0].(map[string]any)["matched"])
+		})
+	}
+}
+
 func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 	for _, tc := range []struct{ name, field, value, ref string }{
 		{"status", "status", "open", "abc1"}, {"attention", "until", "attention", "abc1"}, {"out of scope", "until", "attention", "other-project#abc1"},
