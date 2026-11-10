@@ -1848,7 +1848,7 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 	query := `
 		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
 		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at,
-		       EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id AND e.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid'))
+		       EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id AND e.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid')), e.id, EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.role='hub' AND e.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid'))
 		  FROM events e JOIN projects p ON p.id=e.project_id
  WHERE (e.project_id=$1 OR (` + eventIssueUID + ` IN (
    SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
@@ -1916,7 +1916,7 @@ func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEve
 		)
 		if err := rows.Scan(&e.UID, &e.OriginInstanceUID, &projectUID, &issueUID,
 			&relatedIssueUID, &e.Type, &e.Actor, &payload, &e.HLCPhysicalMS,
-			&e.HLCCounter, &createdAt, &e.Pending); err != nil {
+			&e.HLCCounter, &createdAt, &e.Pending, &e.Position, &e.LocalHubSnapshot); err != nil {
 			return nil, fmt.Errorf("scan federated event: %w", err)
 		}
 		e.ProjectUID = projectUID

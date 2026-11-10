@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -91,7 +92,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 		ev := in.Event
 		event := db.FoldEvent{UID: ev.EventUID, OriginInstanceUID: ev.OriginInstanceUID, ProjectUID: ev.ProjectUID,
-			Type: ev.Type, Actor: ev.Actor, Payload: ev.Payload, HLCPhysicalMS: ev.HLCPhysicalMS, HLCCounter: ev.HLCCounter,
+			Type: ev.Type, Actor: ev.Actor, Payload: ev.Payload, Position: math.MaxInt64 - int64(len(prepared)) + int64(len(fresh)), HLCPhysicalMS: ev.HLCPhysicalMS, HLCCounter: ev.HLCCounter,
 			CreatedAt: ev.CreatedAt.UTC().Format(sqliteTimeFormat)}
 		if ev.IssueUID != nil {
 			event.IssueUID = *ev.IssueUID

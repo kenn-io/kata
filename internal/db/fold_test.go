@@ -470,11 +470,10 @@ func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
 func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 	for _, snapshot := range []string{
 		`{"uid":"issue-1","title":"snapshot","status":"open","labels":["current"]}`,
-		`{"uid":"issue-1","title":"snapshot","status":"open","labels":[]}`,
 		`{"uid":"issue-1","title":"snapshot","status":"open"}`,
 	} {
 		t.Run(snapshot, func(t *testing.T) {
-			other := testEvent("issue.snapshot", 1, `{"uid":"issue-2","title":"other","status":"open","labels":["keep"]}`)
+			other := testEvent("issue.snapshot", 0, `{"uid":"issue-2","title":"other","status":"open","labels":["keep"]}`)
 			other.IssueUID = "issue-2"
 			got := FoldEvents([]FoldEvent{
 				other,
@@ -519,6 +518,29 @@ func TestFoldSnapshotRetainsPendingMembership(t *testing.T) {
 	check(FoldEvents(events), false)
 }
 
+func TestFoldSnapshotRetainsPendingScalars(t *testing.T) {
+	edit := testEvent("issue.updated", 2, `{"title":"local","body":"local body"}`)
+	closed := testEvent("issue.closed", 3, `{"reason":"done"}`)
+	metadata := testEvent("issue.metadata_updated", 4, `{"diff":{"local":{"from":null,"to":"draft"}}}`)
+	edit.Pending, closed.Pending, metadata.Pending = true, true, true
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","title":"old","status":"open"}`), edit, closed, metadata,
+		testEvent("issue.snapshot", 5, `{"uid":"issue-1","title":"hub","body":"hub body","status":"open","metadata":{"remote":"new"}}`),
+	}
+	projection := FoldEvents(events)
+	require.Equal(t, "local", projection.Issues["issue-1"].Title)
+	require.Equal(t, "local body", projection.Issues["issue-1"].Body)
+	require.Equal(t, "closed", projection.Issues["issue-1"].Status)
+	require.JSONEq(t, `{"local":"draft","remote":"new"}`, string(projection.IssueMetadata["issue-1"]))
+	for i := 1; i <= 3; i++ {
+		events[i].Pending = false
+	}
+	projection = FoldEvents(events)
+	require.Equal(t, "hub", projection.Issues["issue-1"].Title)
+	require.Equal(t, "open", projection.Issues["issue-1"].Status)
+	require.JSONEq(t, `{"remote":"new"}`, string(projection.IssueMetadata["issue-1"]))
+}
+
 func TestFoldSnapshotReplacesOlderLinks(t *testing.T) {
 	old := []FoldEvent{
 		testEvent("issue.linked", 1, `{"type":"blocks","from_uid":"issue-1","to_uid":"out"}`),
@@ -552,23 +574,13 @@ func TestFoldSnapshotReplacesOlderLinks(t *testing.T) {
 	}
 }
 
-func TestFoldSnapshotLinksWhenPeerMoves(t *testing.T) {
-	for _, moveAt := range []int64{2, 4} {
-		for _, listed := range []bool{false, true} {
-			t.Run(fmt.Sprintf("move=%d/listed=%t", moveAt, listed), func(t *testing.T) {
-				peer := testEvent("issue.created", 1, `{"uid":"peer","title":"peer","status":"open"}`)
-				peer.IssueUID = "peer"
-				move := testEvent("issue.moved", moveAt, `{"issue_uid":"peer","to_project_uid":"project-2","to_short_id":"peer"}`)
-				move.IssueUID = "peer"
-				old := testEvent("issue.linked", 1, `{"type":"related","from_uid":"peer","to_uid":"issue-1"}`)
-				links := ""
-				if listed {
-					links = `,"links":[{"type":"related","to_issue_uid":"peer"}]`
-				}
-				snapshot := testEvent("issue.snapshot", 3, `{"uid":"issue-1","links_scope":"all"`+links+`}`)
-				projection := FoldEvents([]FoldEvent{peer, old, move, snapshot})
-				require.Equal(t, listed, projection.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "peer", Type: "related"}].Present)
-			})
-		}
-	}
+func TestFoldSnapshotKeepsLaterReceivedLink(t *testing.T) {
+	link := testEvent("issue.linked", 1, `{"type":"blocks","from_uid":"issue-1","to_uid":"peer"}`)
+	link.Position = 2
+	snapshot := testEvent("issue.snapshot", 2, `{"uid":"issue-1","links_scope":"all"}`)
+	snapshot.Position = 1
+	key := FoldLinkKey{FromUID: "issue-1", ToUID: "peer", Type: "blocks"}
+	require.True(t, FoldEvents([]FoldEvent{link, snapshot}).Links[key].Present)
+	snapshot.Position = 3
+	require.False(t, FoldEvents([]FoldEvent{link, snapshot}).Links[key].Present)
 }

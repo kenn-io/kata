@@ -344,7 +344,7 @@ func federationFoldEventsOfTypes(
 	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),m.payload::jsonb->>'issue_uid',m.payload::jsonb->>'uid')`
 	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
 e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at,
-EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id AND e.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid'))
+EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id AND e.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid')), e.id, EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=e.project_id AND b.role='hub' AND e.origin_instance_uid=(SELECT value FROM meta WHERE key='instance_uid'))
 FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (` + eventIssueUID + ` IN (
    SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
    UNION SELECT uid FROM issues WHERE project_id=$1)
@@ -393,7 +393,7 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (` 
 		var payload, createdAt string
 		if err := rows.Scan(&event.UID, &event.OriginInstanceUID, &event.ProjectUID,
 			&issueUID, &relatedIssueUID, &event.Type, &event.Actor, &payload,
-			&event.HLCPhysicalMS, &event.HLCCounter, &createdAt, &event.Pending); err != nil {
+			&event.HLCPhysicalMS, &event.HLCCounter, &createdAt, &event.Pending, &event.Position, &event.LocalHubSnapshot); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		if issueUID.Valid {

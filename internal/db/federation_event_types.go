@@ -99,10 +99,6 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 	if payloadCarriesCommentReply(kind, payload) {
 		version = max(version, commentReplyWireVersion)
 	}
-	_, err = snapshotLinksComplete(kind, payload)
-	if err != nil {
-		return 0, "", err
-	}
 	return version, feature, nil
 }
 

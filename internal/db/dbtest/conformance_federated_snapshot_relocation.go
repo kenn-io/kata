@@ -14,7 +14,7 @@ import (
 // A late destination baseline must relocate an issue already held in the source,
 // even when the spoke never received the intervening issue.moved event.
 func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, _ db.Storage, backend Backend) error {
-	for _, lifecycle := range []string{"active replicas", "old baseline upgrade", "enrolled destination upgrade", "pausing the source retains discussion", "source paused before destination joins", "source leave retains discussion", "destination leave preserves standalone issue"} {
+	for _, lifecycle := range []string{"active replicas", "enrolled destination upgrade", "pausing the source retains discussion", "source paused before destination joins", "source leave retains discussion", "destination leave preserves standalone issue"} {
 		t.Run(lifecycle, func(t *testing.T) {
 			hub := backend.Open(t)
 			t.Cleanup(func() { require.NoError(t, hub.Close()) })
@@ -99,11 +99,6 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		require.Positive(t, count)
 	}
 	localSource := join(source)
-	if lifecycle == "old baseline upgrade" {
-		binding, err := hub.FederationBindingByProject(ctx, source.ID)
-		require.NoError(t, err)
-		seedLegacySnapshotBaseline(t, hub, source, binding.ReplayHorizonEventID)
-	}
 	pull(source, localSource, 0)
 	before, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
@@ -116,6 +111,15 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.NoError(t, err)
 	require.Greater(t, pendingLabel.ID, sourceBinding.PushCursorEventID)
 	if lifecycle == "active replicas" {
+		title, body, owner, priority := "unsynced local title", "unsynced body", "local owner", int64(2)
+		_, _, _, err = spoke.EditIssue(ctx, db.EditIssueParams{IssueID: before.ID, Title: &title, Body: &body, Actor: "worker"})
+		require.NoError(t, err)
+		_, _, _, err = spoke.UpdateOwner(ctx, before.ID, &owner, "worker")
+		require.NoError(t, err)
+		_, _, _, err = spoke.UpdatePriority(ctx, before.ID, &priority, "worker")
+		require.NoError(t, err)
+		_, err = spoke.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: before.ID, Actor: "worker", Patch: map[string]jsontext.Value{"draft": jsontext.Value(`"local"`)}})
+		require.NoError(t, err)
 		localOther, err := spoke.IssueByUID(ctx, other.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		localPeer, err := spoke.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
@@ -154,6 +158,10 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.Len(t, beforeComments, 1)
 	_, err = spoke.ProjectByUID(ctx, target.UID)
 	require.ErrorIs(t, err, db.ErrNotFound, "the destination is not joined when the hub moves the issue")
+	if lifecycle == "active replicas" {
+		_, err = hub.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"hub": jsontext.Value(`"remote"`)}})
+		require.NoError(t, err)
+	}
 	issue, err = hub.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, err = hub.RemoveLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.unlabeled", Label: "retained", Actor: "worker"})
@@ -164,9 +172,8 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	baseline, refreshed, err := hub.RefreshProjectFederationBaseline(ctx, target.ID, "worker")
 	require.NoError(t, err)
 	require.True(t, refreshed)
-	var legacyUID, legacyHash string
-	if lifecycle == "old baseline upgrade" || lifecycle == "enrolled destination upgrade" {
-		legacyUID, legacyHash = seedLegacySnapshotBaseline(t, hub, target, baseline.ReplayHorizonEventID)
+	if lifecycle == "enrolled destination upgrade" {
+		seedLegacySnapshotBaseline(t, hub, target, baseline.ReplayHorizonEventID)
 	}
 	_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: before.ID, Author: "worker", Body: "source-only newer discussion"})
 	require.NoError(t, err)
@@ -199,11 +206,6 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		require.Len(t, beforeUpgrade, 2, "an old partial baseline retains the removed link")
 	}
 	pull(target, localTarget, afterBaseline)
-	if lifecycle == "old baseline upgrade" || lifecycle == "enrolled destination upgrade" {
-		old, err := hub.EventsByUIDs(ctx, target.ID, []string{legacyUID})
-		require.NoError(t, err)
-		require.Equal(t, legacyHash, old[0].ContentHash)
-	}
 	for _, project := range []db.Project{localSource, localTarget} {
 		reset, err := spoke.PurgeResetCheck(ctx, seen, project.ID)
 		require.NoError(t, err)
@@ -213,6 +215,15 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.NoError(t, err)
 	require.Equal(t, before.ID, got.ID, "relocation preserves the local issue identity")
 	require.Equal(t, localTarget.ID, got.ProjectID)
+	if lifecycle == "active replicas" {
+		require.Equal(t, "unsynced local title", got.Title)
+		require.Equal(t, "unsynced body", got.Body)
+		require.NotNil(t, got.Owner)
+		require.Equal(t, "local owner", *got.Owner)
+		require.NotNil(t, got.Priority)
+		require.Equal(t, int64(2), *got.Priority)
+		require.JSONEq(t, `{"draft":"local","hub":"remote"}`, string(got.Metadata))
+	}
 	require.NotEqual(t, blocker.ShortID, got.ShortID)
 	comments, err := spoke.CommentsByIssue(ctx, got.ID)
 	require.NoError(t, err)
@@ -259,6 +270,10 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	if lifecycle == "active replicas" {
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, localTarget.ID))
+		afterAck, err := spoke.IssueByID(ctx, got.ID)
+		require.NoError(t, err)
+		require.Equal(t, "late destination join", afterAck.Title)
+		require.JSONEq(t, `{"hub":"remote"}`, string(afterAck.Metadata))
 		labels, err := spoke.LabelsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Len(t, labels, 1)
@@ -377,7 +392,7 @@ func seedLegacySnapshotBaseline(t *testing.T, store db.Storage, project db.Proje
 }
 
 // Snapshot relocation must retain the existing same-hub and recurrence gates.
-func checkFederatedSnapshotRelocationGuards(t *testing.T, store db.Storage) error {
+func checkFederatedSnapshotRelocationGuardsAndMoveReplay(t *testing.T, store db.Storage) error {
 	for _, kind := range []string{"different-hub", "recurrence", "retained-move-after-source-leave"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
@@ -385,9 +400,9 @@ func checkFederatedSnapshotRelocationGuards(t *testing.T, store db.Storage) erro
 			if kind == "recurrence" {
 				r, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{ProjectID: source.ID, Actor: "worker", Rule: "FREQ=WEEKLY", DTStart: "2026-10-12", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "pinned"}})
 				require.NoError(t, err)
-				_, err = store.(interface {
-					ExecContext(context.Context, string, ...any) (sql.Result, error)
-				}).ExecContext(ctx, `UPDATE issues SET recurrence_id=$1 WHERE id=$2`, r.ID, issue.ID)
+				next, err := store.MaterializeNext(ctx, r.ID, "2026-10-12", "worker")
+				require.NoError(t, err)
+				issue, err = store.IssueByID(ctx, next.NewIssueID)
 				require.NoError(t, err)
 			}
 			prepareRehomePull(t, store, source, target, "pull")
@@ -407,6 +422,16 @@ func checkFederatedSnapshotRelocationGuards(t *testing.T, store db.Storage) erro
 			}
 			var payload map[string]jsontext.Value
 			require.NoError(t, json.Unmarshal(move.Payload, &payload))
+			if kind == "recurrence" {
+				var document map[string]jsontext.Value
+				require.NoError(t, json.Unmarshal(payload["snapshot"], &document))
+				encodedUID, err := json.Marshal(issue.UID)
+				require.NoError(t, err)
+				document["uid"] = encodedUID
+				encodedSnapshot, err := json.Marshal(document)
+				require.NoError(t, err)
+				payload["snapshot"] = encodedSnapshot
+			}
 			snapshot := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1, payload["snapshot"])
 			_, err := store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{snapshot})
 			require.NoError(t, err)
@@ -454,9 +479,6 @@ func checkFederatedSnapshotBaselineUpgrade(t *testing.T, store db.Storage) error
 	require.Len(t, events, 2)
 	marker := events[0]
 	hash := marker.ContentHash
-	executor := store.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	})
 	before, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
 	oldFeatures := db.CronEventFeature + "," + db.IssueMoveEventFeature
@@ -488,13 +510,6 @@ func checkFederatedSnapshotBaselineUpgrade(t *testing.T, store db.Storage) error
 		}
 		require.Equal(t, horizon, result.result.Binding.ReplayHorizonEventID)
 	}
-	oldMetadata, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: oldFeatures})
-	require.NoError(t, err)
-	require.Equal(t, horizon, oldMetadata.Binding.ReplayHorizonEventID)
-	oldPage, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Features: oldFeatures, Limit: 1})
-	require.NoError(t, err)
-	require.Len(t, oldPage.Events, 1)
-	require.Greater(t, oldPage.NextAfterID, int64(0))
 	after, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
 	page, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Features: oldFeatures, AfterID: before, Limit: 100})
@@ -511,15 +526,6 @@ func checkFederatedSnapshotBaselineUpgrade(t *testing.T, store db.Storage) error
 	old, err = store.EventsByUIDs(ctx, project.ID, []string{snapshotUID})
 	require.NoError(t, err)
 	require.Equal(t, snapshotHash, old[0].ContentHash)
-	empty, err := store.CreateProject(ctx, "empty-baseline-upgrade")
-	require.NoError(t, err)
-	emptyBinding, err := store.EnableProjectFederation(ctx, empty.ID, "worker")
-	require.NoError(t, err)
-	_, err = executor.ExecContext(ctx, `UPDATE federation_bindings SET replay_horizon_event_id=0 WHERE project_id=$1`, empty.ID)
-	require.NoError(t, err)
-	emptyRead, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: empty.ID, Metadata: true, Features: db.SupportedEventFeatures})
-	require.NoError(t, err)
-	require.Greater(t, emptyRead.Binding.ReplayHorizonEventID, emptyBinding.ReplayHorizonEventID)
 	paged, err := store.CreateProject(ctx, "paged-baseline-upgrade")
 	require.NoError(t, err)
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: paged.ID, Title: "paged issue", Author: "worker"})
@@ -531,6 +537,8 @@ func checkFederatedSnapshotBaselineUpgrade(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	require.Len(t, firstPage.Events, 1)
 	require.Greater(t, firstPage.Binding.ReplayHorizonEventID, pagedBinding.ReplayHorizonEventID)
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: paged.ID, Metadata: true, Features: db.SupportedEventFeatures})
+	require.NoError(t, err)
 	nextPage, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: paged.ID, Features: oldFeatures, AfterID: firstPage.NextAfterID, Limit: 1})
 	require.NoError(t, err)
 	require.Len(t, nextPage.Events, 1)

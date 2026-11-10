@@ -32,18 +32,8 @@ func TestSnapshotLinksFeature(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
-	for _, tc := range []struct {
-		payload string
-		version int
-		feature string
-	}{
-		{`{"uid":"a"}`, 30, ""},
-		{`{"uid":"a","links_scope":"all"}`, 30, ""},
-		{`{"uid":"a","links_scope":"all","comments":[{"reply_to_uid":"b"}]}`, 32, ""},
-	} {
-		version, feature, err := FederationEventPayloadWireVersion("issue.snapshot", jsontext.Value(tc.payload))
-		require.NoError(t, err)
-		require.Equal(t, tc.version, version)
-		require.Equal(t, tc.feature, feature)
-	}
+	version, feature, err := FederationEventPayloadWireVersion("issue.moved", jsontext.Value(`{"snapshot":{"comments":[{"reply_to_uid":"b"}]}}`))
+	require.NoError(t, err)
+	require.Equal(t, 32, version)
+	require.Equal(t, IssueMoveEventFeature, feature)
 }

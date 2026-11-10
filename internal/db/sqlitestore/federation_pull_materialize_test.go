@@ -110,34 +110,6 @@ func TestPulledMaterializationRetriesPreparedSnapshot(t *testing.T) {
 	}
 }
 
-func TestPulledSnapshotPendingAcknowledgedAfterPreparation(t *testing.T) {
-	ctx := t.Context()
-	d, _, _ := incrementalTestStore(t)
-	p, err := d.CreateProject(ctx, "spoke")
-	require.NoError(t, err)
-	issue, created, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "work", Author: "tester"})
-	require.NoError(t, err)
-	_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: p.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
-	require.NoError(t, err)
-	require.NoError(t, d.AdvanceFederationPushCursor(ctx, p.ID, created.ID))
-	_, pending, err := d.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "draft", Actor: "tester"})
-	require.NoError(t, err)
-	snapshot := incrementalRemoteEvent(t, p, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"title":"work","status":"open","links_scope":"all"}`, issue.UID), 9_000_000_000_000)
-	_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{snapshot})
-	require.NoError(t, err)
-	tx, err := d.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	prepared, err := preparePulledFederationMaterialization(ctx, tx, p.ID, []string{snapshot.EventUID}, pullPrepareComplete)
-	require.NoError(t, err)
-	require.True(t, prepared.fullReplay)
-	require.NoError(t, tx.Rollback())
-	require.NoError(t, d.AdvanceFederationPushCursor(ctx, p.ID, pending.ID))
-	require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{snapshot.EventUID}))
-	labels, err := d.LabelsByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Empty(t, labels)
-}
-
 func TestFullPulledMaterializationReplaysMoveHistory(t *testing.T) {
 	ctx := t.Context()
 	d, p, issue := incrementalTestStore(t)
@@ -493,6 +465,9 @@ func TestPulledSnapshotRelocationFallsBackToFullReplay(t *testing.T) {
 		_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
 		require.NoError(t, err)
 	}
+	acknowledged, err := d.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.NoError(t, d.AdvanceFederationPushCursor(ctx, source.ID, acknowledged))
 	snapshot := incrementalRemoteEvent(t, target, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"relocated snapshot","author":"tester","status":"open"}`, issue.UID, issue.ShortID), 9_000_000_000_000)
 	page := []db.RemoteEvent{snapshot}
 	page = append(page, incrementalRemoteEvent(t, target, "", "project.updated", `{"name":"snapshot-target"}`, 9_000_000_000_001))

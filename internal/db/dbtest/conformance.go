@@ -308,7 +308,7 @@ var storageScenarios = []scenario{
 	{name: "federated former project identity cleanup", methods: []string{"PurgeProject", "MergeProjects", "LeaveFederationReplica", "RemoveProject", "ResetFederatedProject"}, run: checkFederatedFormerProjectIdentityCleanup},
 	{name: "federated former project identity adoption", methods: []string{"AdoptProjectIntoFederation", "LeaveFederationReplica", "ResetFederatedProject"}, run: checkFederatedFormerProjectIdentityAdoption},
 	{name: "federated receiver departing references", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "IssueByShortID", "CreateIssue", "PurgeIssue", "MergeProjects"}, runWithBackend: checkFederatedReceiverDepartingReferences},
-	{name: "federated snapshot relocation guards", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedSnapshotRelocationGuards},
+	{name: "federated snapshot relocation guards and move replay", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedSnapshotRelocationGuardsAndMoveReplay},
 	{name: "federated snapshot relocates held issue", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "RefreshProjectFederationBaseline"}, runWithBackend: checkFederatedSnapshotRelocatesHeldIssue},
 	{name: "federated snapshot baseline upgrade", methods: []string{"ReadFederation", "EnableProjectFederation"}, run: checkFederatedSnapshotBaselineUpgrade},
 	{name: "federated pulled move apply reset", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "PurgeResetCheck", "IssueByShortID"}, runWithBackend: checkFederatedPulledMoveApplyReset},
