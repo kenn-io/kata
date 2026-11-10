@@ -1,13 +1,17 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-10
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Read cron runtime inventory and advisory warnings from MCP with
+  `kata.cron_runtimes`, available through `kata.load_cron`. See the
+  [MCP reference](reference/mcp.md#native-cron-through-mcp).
 
 - See which cron runtimes are alive with `kata cron runtime list` and report
   liveness with `kata cron runtime beat`. Spokes forward this ephemeral evidence

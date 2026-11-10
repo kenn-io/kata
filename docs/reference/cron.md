@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-04
+last_edited: 2026-11-10
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -422,6 +422,9 @@ kata cron runtime beat <runtime-uid> --json-input - --json <<'JSON'
 JSON
 kata cron runtime list --json
 ```
+
+MCP clients can read the same inventory and advisory warnings with
+[`kata.cron_runtimes`](mcp.md#native-cron-through-mcp) after loading `kata.load_cron`.
 
 The HTTP routes are `PUT /api/v1/projects/{project_id}/cron/runtimes/{runtime_uid}`
 and `GET /api/v1/projects/{project_id}/cron/runtimes`. Capabilities advertise

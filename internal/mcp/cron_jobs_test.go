@@ -77,7 +77,6 @@ func TestCronProgressiveDiscovery(t *testing.T) {
 	after, err := s.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(after.Tools), "kata.cron_job_create")
-	require.Contains(t, toolNames(after.Tools), "kata.cron_runtimes")
 	require.Contains(t, loaded["tools"], "kata.cron_runtimes")
 	require.NotContains(t, toolNames(after.Tools), "kata.create")
 	require.Equal(t, loaded, cronOK(t, s, "load_cron", map[string]any{}))
@@ -320,7 +319,6 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 	require.NoError(t, err)
 	s := connectTestServerWithOptions(t, Options{Client: client, ProjectID: f.project.ID, ProjectName: f.project.Name, Actor: "example-agent", Version: "test"})
 	cronOK(t, s, "cron_capabilities", map[string]any{})
-	cronOK(t, s, "cron_runtimes", map[string]any{})
 	require.True(t, cronCall(t, s, "cron_job_create", map[string]any{"uid": cronNewUID(t, s), "name": "Denied", "definition": cronDefinition()}).IsError)
 	parent, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: f.project.ID, Title: "Scoped root", Author: "example-agent"})
 	require.NoError(t, err)
@@ -343,7 +341,6 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 		arguments map[string]any
 	}{
 		{"cron_capabilities", map[string]any{}},
-		{"cron_runtimes", map[string]any{}},
 		{"cron_job_create", map[string]any{"uid": cronNewUID(t, scoped), "name": "Denied", "definition": cronDefinition()}},
 	} {
 		denied := cronCall(t, scoped, tc.name, tc.arguments)
