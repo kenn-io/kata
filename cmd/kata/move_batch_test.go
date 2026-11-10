@@ -467,9 +467,10 @@ func TestMoveBatchCLI_RefusalOutput(t *testing.T) {
 					input += issue.UID + "\t" + dst.Name + "\n"
 				}
 				args := []string{"--workspace", dir, "move", "--refs-from", "-"}
-				if mode == outputJSON {
+				switch mode {
+				case outputJSON:
 					args = append(args, "--json")
-				} else if mode == outputAgent {
+				case outputAgent:
 					args = append(args, "--agent")
 				}
 				out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, args...)
