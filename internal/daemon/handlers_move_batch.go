@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"go.kenn.io/kata/internal/api"
@@ -214,7 +215,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 		}
 		if err := previewMoveBatch(ctx, cfg.DB, items, results, conflictPreviews); err != nil {
-			return nil, moveBatchError(err, nil, in.Body.StartIndex)
+			return nil, moveBatchError(err, moveBatchCompleted(nil, results[in.Body.StartIndex:min(in.Body.StartIndex+moveBatchChunkIssues, n)]), in.Body.StartIndex)
 		}
 		for _, indexes := range seen {
 			var target int64
@@ -282,7 +283,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				}
 			}
 			if err := previewMoveBatch(ctx, cfg.DB, items, results, chunkPreviews); err != nil {
-				return nil, moveBatchError(err, out.Body.Results, start)
+				return nil, moveBatchError(err, moveBatchCompleted(out.Body.Results, results[start:end]), start)
 			}
 			for _, j := range indexes {
 				if results[j].Result == "" {
@@ -317,7 +318,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			if len(write) > 0 {
 				committed, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: write, Comment: in.Body.Comment, Teammate: in.Body.Teammate})
 				if err != nil {
-					return nil, moveBatchError(err, out.Body.Results, start)
+					return nil, moveBatchError(err, moveBatchCompleted(out.Body.Results, results[start:end]), start)
 				}
 				var events []db.Event
 				for k, j := range written {
@@ -337,13 +338,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 			for _, j := range noops {
 				if err := finishUnchangedMove(ctx, cfg.DB, items[j], &results[j], succeeded[items[j].issue.ID]); err != nil {
-					completed := append([]api.MoveIssuesResult(nil), out.Body.Results...)
-					for _, result := range results[start:end] {
-						if result.Result != "" {
-							completed = append(completed, result)
-						}
-					}
-					return nil, moveBatchError(err, completed, start)
+					return nil, moveBatchError(err, moveBatchCompleted(out.Body.Results, results[start:end]), start)
 				}
 				if results[j].Result == "unchanged" {
 					succeeded[items[j].issue.ID] = results[j]
@@ -376,4 +371,8 @@ func moveBatchError(err error, results []api.MoveIssuesResult, next int) error {
 	mapped := internalAPIError(err).(*api.APIError)
 	mapped.Data = map[string]any{"results": results, "next_index": next}
 	return mapped
+}
+
+func moveBatchCompleted(prior, current []api.MoveIssuesResult) []api.MoveIssuesResult {
+	return slices.DeleteFunc(append(prior, current...), func(r api.MoveIssuesResult) bool { return r.Result == "" })
 }

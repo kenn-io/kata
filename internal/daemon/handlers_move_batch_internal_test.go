@@ -505,3 +505,28 @@ func TestMoveIssuesBatch_ReadFailureAfterCommittedChunk(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, target.ID, got.ProjectID)
 }
+
+func TestMoveIssuesBatch_ReportsRefusalsOnChunkError(t *testing.T) {
+	for _, failPreview := range []bool{false, true} {
+		t.Run(fmt.Sprint(failPreview), func(t *testing.T) {
+			store := openClaimGateHelperDB(t)
+			source, stale := createClaimGateHelperIssue(t, store)
+			other, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "other", Author: "agent"})
+			require.NoError(t, err)
+			target, err := store.CreateProject(t.Context(), "target")
+			require.NoError(t, err)
+			req := &api.MoveIssuesRequest{}
+			req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+			req.Body.Items = []api.MoveIssuesItem{{Ref: stale.UID, ExpectedRevision: stale.Revision + 1}, {Ref: other.UID}}
+			_, err = moveIssuesHandler(ServerConfig{DB: &batchFailureStore{Storage: store, calls: 1, failPreview: failPreview}})(t.Context(), req)
+			var apiErr *api.APIError
+			require.ErrorAs(t, err, &apiErr)
+			rows, ok := apiErr.Data["results"].([]api.MoveIssuesResult)
+			require.True(t, ok)
+			require.Len(t, rows, 1)
+			require.Equal(t, "revision_conflict", rows[0].Code)
+			require.Equal(t, 0, rows[0].Index)
+			require.Equal(t, 0, apiErr.Data["next_index"])
+		})
+	}
+}

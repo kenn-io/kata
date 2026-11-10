@@ -984,8 +984,10 @@ kata move --from-project source-project --query "installer" target-project --dry
 
 Batch mode starts with multiple refs, `--refs-from`, `--from-project`, or
 `--subtree`. Its default is to move only each selected issue. Add `--subtree`
-to include descendants when selecting one issue. `--single` is also accepted. A single positional ref
-without a batch flag keeps the existing subtree default and output.
+to include descendants when selecting one issue. More than one selected issue
+with `--subtree`, or combining `--single` and `--subtree`, is a usage error
+(exit 2). A single positional ref without a batch flag keeps the existing
+subtree default and output.
 
 A ref file contains one `ref` or `ref<TAB>project` per line. A line's target
 project overrides the positional target. Each line needs a target from one
