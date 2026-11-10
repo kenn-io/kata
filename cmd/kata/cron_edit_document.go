@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -16,6 +17,16 @@ const cronEditConflictMarker = "// CONFLICT: delete this line to save your draft
 // cronEditParse shares update's strict request shape, then applies domain
 // validation without letting editor whitespace consume the document limit.
 func cronEditParse(resource string, raw []byte) (map[string]jsontext.Value, error) {
+	return parseCronEdit(resource, raw, false)
+}
+
+// cronEditParseStored permits opening only never-firing jobs for repair.
+// Edited drafts still use cronEditParse and must pass every rule.
+func cronEditParseStored(resource string, raw []byte) (map[string]jsontext.Value, error) {
+	return parseCronEdit(resource, raw, true)
+}
+
+func parseCronEdit(resource string, raw []byte, stored bool) (map[string]jsontext.Value, error) {
 	if len(raw) > cronDefinitionRequestLimit {
 		return nil, cronCLIValidation("cron request exceeds its byte limit")
 	}
@@ -47,7 +58,7 @@ func cronEditParse(resource string, raw []byte) (map[string]jsontext.Value, erro
 	} else {
 		value, err = cron.ParseWorkflow(definition)
 	}
-	if err != nil {
+	if err != nil && (!stored || resource != "job" || !errors.Is(err, cron.ErrNeverFires)) {
 		return nil, cronCLIValidation(err.Error())
 	}
 	// Normalize known fields as the daemon does. Options stay raw, including

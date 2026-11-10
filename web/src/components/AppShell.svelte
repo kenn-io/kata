@@ -29,7 +29,7 @@
     projectKataWorkspaceView,
   } from '../lib/kata/authority'
   import { createKataLinkFilters } from '../lib/kata/linkFilters'
-  import { normalizeKataUISnapshot } from '../lib/kata/projection'
+  import { normalizeKataUISnapshot, withPendingSelection } from '../lib/kata/projection'
   import { localDateString } from '../lib/kata/dates'
   import type {
     KataTaskMutationResponse,
@@ -40,7 +40,11 @@
     KataTaskStatusFilter,
     KataTaskViewName,
   } from '../lib/kata/types'
-  import type { UISnapshot } from '../lib/state/snapshot'
+  import {
+    collectionIntentKey,
+    snapshotIntentForRoute,
+    type UISnapshot,
+  } from '../lib/state/snapshot'
   import { defaultPreferences, type Preferences } from '../lib/state/preferences'
   import AccessManagement from './AccessManagement.svelte'
   import type { MutationContext, MutationResult } from '../lib/mutations/controller'
@@ -133,7 +137,7 @@
   }
 
   let {
-    route,
+    route: acceptedRoute,
     requestedRoute = undefined,
     snapshot,
     loading,
@@ -185,6 +189,31 @@
     onPatchRecurrence,
     onDeleteRecurrence,
   }: Props = $props()
+
+  let acceptedProjection = $derived(normalizeKataUISnapshot(snapshot))
+  // A click on another task in the loaded list shows that task at once, from the
+  // list's copy of it, while App loads the snapshot that carries its comments,
+  // links, and history. Any other route change waits for its snapshot.
+  let pendingSelection = $derived.by(() => {
+    if (!requestedRoute?.issueUID || requestedRoute.graph) return undefined
+    if (
+      requestedRoute.view === 'settings' ||
+      requestedRoute.view === 'credentials' ||
+      acceptedRoute.view === 'settings' ||
+      acceptedRoute.view === 'credentials'
+    ) {
+      return undefined
+    }
+    if (
+      collectionIntentKey(snapshotIntentForRoute(requestedRoute)) !==
+      collectionIntentKey(snapshotIntentForRoute(acceptedRoute))
+    ) {
+      return undefined
+    }
+    return withPendingSelection(acceptedProjection, requestedRoute.issueUID)
+  })
+  let route = $derived(pendingSelection && requestedRoute ? requestedRoute : acceptedRoute)
+  let projection = $derived(pendingSelection ?? acceptedProjection)
 
   let connectionNow = $state(Date.now())
   let today = $derived(localDateString(new Date(connectionNow)))
@@ -263,7 +292,6 @@
     route.issueUID && route.graph ? route.issueUID : null,
   )
 
-  let projection = $derived(normalizeKataUISnapshot(snapshot))
   let inboxProject = $derived(
     projection.projects.find((project) => project.metadata.role === 'inbox'),
   )
@@ -901,8 +929,9 @@
         projects={[...projection.projects]}
         {ownerOptions}
         selectedRecurrences={[...projection.selected_recurrences]}
-        actionsDisabled={!canMutate || mutationPending}
-        authorityBlocked={!canMutate}
+        actionsDisabled={!canMutate || mutationPending || projection.selected_pending === true}
+        authorityBlocked={!canMutate || projection.selected_pending === true}
+        pending={projection.selected_pending === true}
         attachmentsEnabled={snapshot.capabilities.attachments ?? false}
         {onUploadAttachment}
         administrativeActionsAllowed={!scopedAuthority}

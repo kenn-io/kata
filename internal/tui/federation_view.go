@@ -699,7 +699,7 @@ func (m Model) executeFederationLeave(attempt uint64) tea.Cmd {
 }
 
 // federationLeaveHubTarget resolves the hub admin daemonTarget for a leave by
-// matching the binding's hub URL against the catalog (so its token/token_env
+// matching the binding's hub URL against the catalog (so its credential
 // is used), falling back to an unauthenticated target. The catalog entry whose
 // URL matches the binding's hub_url supplies only the admin token; global daemon
 // auth is never sent to a hub. The target URL is ALWAYS the binding's hub URL —
@@ -713,7 +713,7 @@ func (m Model) federationLeaveHubTarget(hubURL string, allowInsecure bool) daemo
 			continue
 		}
 		if strings.TrimRight(target.URL, "/") == want {
-			// Token/token_env come from the catalog entry, but pin the URL to
+			// Credentials come from the catalog entry, but pin the URL to
 			// the binding's hub URL so the admin token is sent only to the
 			// bound origin. allow_insecure is the UNION of the binding's
 			// join-time opt-in and the same-origin catalog entry's: the
