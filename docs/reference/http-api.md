@@ -74,7 +74,7 @@ The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
 
 Issue scheduling writes that violate the [portable timezone rules](metadata.md)
-return HTTP 400 `invalid_metadata_value`. Schedule metadata stores the input text, effective zone, and timezone-data version together. Unknown versions are unreadable and the planning-date endpoint returns HTTP 422.
+return HTTP 400 `invalid_metadata_value`. Schedule metadata stores the input text, effective zone, and timezone-data version together, such as `{"value":"2026-11-12T09:00","timezone":"Europe/Paris","tzdata_version":"sha256:..."}`. A supplied saved object retains its own zone and rules. Unknown versions are unreadable and the planning-date endpoint returns HTTP 422.
 
 ## Recurrence timezones
 

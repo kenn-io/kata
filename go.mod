@@ -38,6 +38,7 @@ require (
 	github.com/teambition/rrule-go v1.8.2
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
+	github.com/thommeo/winianatz v0.0.2
 	github.com/yaronf/httpsign v0.6.2
 	go.kenn.io/kit v0.48.2
 	golang.org/x/mod v0.42.0

@@ -646,7 +646,7 @@ func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, present)
 	assert.Equal(t, "2026-08-05", value)
-	assert.Equal(t, fields["timezone"], zone)
+	assert.Equal(t, "Local", fields["timezone"])
 	location, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion)
 	require.NoError(t, err)
 	_, localOffset := instant.In(time.Local).Zone()

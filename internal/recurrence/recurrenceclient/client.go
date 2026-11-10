@@ -142,6 +142,9 @@ const DefaultLocaltimePath = "/etc/localtime"
 // link at localtimePath. It returns "" when nothing names a zone, so the
 // daemon falls back to its own timezone.
 func LocalZone(localtimePath string) string {
+	if zone, native := nativeLocalZone(); native {
+		return zone
+	}
 	tz, set := os.LookupEnv("TZ")
 	return ResolveLocalZone(tz, set, localtimePath)
 }

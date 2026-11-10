@@ -63,6 +63,14 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		if !patched && !changedZone {
 			continue
 		}
+		if supplied := patch[field]; len(supplied) > 0 && supplied[0] == '{' {
+			saved, err := metadata.DecodeSavedSchedule(supplied)
+			if err != nil || saved == nil {
+				return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
+			}
+			result[field] = supplied
+			continue
+		}
 		value, err := metadata.ScheduleValueText(raw)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)

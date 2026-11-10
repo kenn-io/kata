@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -386,6 +387,40 @@ func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
 	assert.Equal(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, h.stored())
 	assert.Equal(t, changed+1, h.revision(), "one patch")
 	assert.Empty(t, h.m.undoHistory.entries)
+}
+
+func TestDatesUndoRestoresSavedScheduleRules(t *testing.T) {
+	h := newDatesHarness(t, nil, viewDetail)
+	saved, err := metadata.NewScheduleValue("2026-11-02T09:00", "America/New_York")
+	require.NoError(t, err)
+	_, err = h.env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"scheduled_on":`+string(saved)+`}`, h.issue.ID)
+	require.NoError(t, err)
+	h.reload()
+	h.openForm()
+	h.fill("", "")
+	h.save()
+	h.undo()
+	current, err := h.env.DB.IssueByUID(t.Context(), h.issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	var values map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(current.Metadata), &values))
+	require.JSONEq(t, string(saved), string(values["scheduled_on"]))
+}
+
+func TestDateUndoDetectsChangedScheduleZone(t *testing.T) {
+	first, err := metadata.NewScheduleValue("2026-11-02T09:00", "America/New_York")
+	require.NoError(t, err)
+	second, err := metadata.NewScheduleValue("2026-11-02T09:00", "Europe/Paris")
+	require.NoError(t, err)
+	before := Issue{Metadata: issueMetadata{ScheduledOn: first}}
+	after := Issue{Metadata: issueMetadata{ScheduledOn: second}}
+	require.Equal(t, []string{"scheduled_on"}, changedDateKeys(&before, &after))
+	require.False(t, sameDates(&before, &after, []string{"scheduled_on"}))
+	var saved map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(first, &saved))
+	reordered := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(fmt.Sprintf(`{"tzdata_version":%s,"timezone":"America/New_York","value":"2026-11-02T09:00"}`, saved["tzdata_version"]))}}
+	require.Empty(t, changedDateKeys(&before, &reordered))
+	require.True(t, sameDates(&before, &reordered, []string{"scheduled_on"}))
 }
 
 func TestDatesUndoRestoresDatesSetOnAnIssueWithNone(t *testing.T) {

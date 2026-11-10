@@ -75,6 +75,7 @@ func composeRecurrenceIssueMetadata(
 	timezone string,
 	template bool,
 ) (jsontext.Value, error) {
+	issueTimezone := timezone
 	local := timezone == "Local"
 	if local {
 		timezone = time.Local.String()
@@ -96,7 +97,7 @@ func composeRecurrenceIssueMetadata(
 	if err != nil {
 		return nil, fmt.Errorf("marshal recurrence scheduled_on: %w", err)
 	}
-	timezoneValue, err := json.Marshal(timezone)
+	timezoneValue, err := json.Marshal(issueTimezone)
 	if err != nil {
 		return nil, fmt.Errorf("marshal recurrence timezone: %w", err)
 	}

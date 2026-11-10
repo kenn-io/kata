@@ -90,6 +90,19 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 	}
 }
 
+func TestScheduleCodecUpdatesAliasBackedSchedule(t *testing.T) {
+	original, err := metadata.NewScheduleValue("2026-08-20T09:30", "US/Eastern")
+	require.NoError(t, err)
+	issue := db.Issue{Metadata: db.JSONBlob(`{"scheduled_on":` + string(original) + `}`)}
+	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T10:30", Timezone: "US/Eastern"})
+	require.NoError(t, err)
+	saved, err := metadata.DecodeSavedSchedule(patch["scheduled_on"])
+	require.NoError(t, err)
+	require.Equal(t, "US/Eastern", saved.Timezone)
+	require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
+	require.Equal(t, "2026-08-20T10:30", saved.Value)
+}
+
 func TestScheduleCodecKataPatchKeepsOtherSchedule(t *testing.T) {
 	for _, tc := range []struct {
 		name, codec, metadata string

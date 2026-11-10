@@ -1260,9 +1260,10 @@ is written and the error reports the recurrence's current rule.
 
 The rule is sent as written. The daemon is the only validator, and its error is
 printed. The zone is `--timezone`, else, when changing, the recurrence's own
-zone, else the issue's `timezone` metadata, else your own IANA zone (`TZ`, then
-the zone the `/etc/localtime` link names; a `TZ` that is set but empty means
-UTC). With none of those, pass `--timezone`.
+zone, else the issue's `timezone` metadata, else your own IANA zone. On Unix,
+Kata checks `TZ` and then the `/etc/localtime` link; an empty `TZ` means UTC.
+On Windows, Kata maps the system timezone setting to an IANA name. If no zone
+is identified, pass `--timezone`.
 `Local` is never sent. `--if-match` checks the issue revision before anything is
 written. When starting a recurrence the daemon checks it again inside the
 transaction that attaches the issue, so a competing write in between fails with
@@ -2229,8 +2230,8 @@ The form has three fields. **Rule** is the RRULE text, sent with outer spaces tr
 daemon is the only validator, and its error appears in the form with your input
 kept. Clear **Rule** and save to stop an existing recurrence, keeping its occurrences. A blank rule cannot start a recurrence. **Start** requires a date when starting or changing: `YYYY-MM-DD`, `today`, `tomorrow`, `+Nd`, or
 `+Nw`. **Zone** starts as the recurrence's zone, else the issue's
-`timezone` metadata, else your own IANA zone (`TZ`, then the `/etc/localtime`
-link); it is never `Local`. Starting a recurrence rewrites the issue's
+`timezone` metadata, else your own IANA zone (from `TZ` or `/etc/localtime` on
+Unix, or the Windows timezone setting); it is never `Local`. Starting a recurrence rewrites the issue's
 `scheduled_on` to the first occurrence. `Ctrl+o` saves and `Esc` cancels. A
 change or stop is guarded by `If-Match` on the revision the form read, and a start on
 the issue's; if another client got there first, nothing is written, the form

@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"reflect"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // undoBacklogLookupTimeout bounds the optional backlog lookup so a slow read
@@ -192,13 +195,9 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 			out.err = errors.New("connected client cannot edit dates")
 			return out
 		}
-		restore := DatesInput{Actor: entry.actor, IfMatchRevision: entry.revision, Set: map[string]*string{}}
+		restore := DatesInput{Actor: entry.actor, IfMatchRevision: entry.revision, Raw: map[string]jsontext.Value{}}
 		for _, key := range keys {
-			if value := issueDate(&entry.before, key); value != "" {
-				restore.Set[key] = &value
-			} else {
-				restore.Set[key] = nil
-			}
+			restore.Raw[key] = issueDateRaw(&entry.before, key)
 		}
 		out.resp, out.err = writer.SetDates(ctx, entry.projectID, entry.uid, restore)
 	case "label.add", "label.remove":
@@ -340,25 +339,25 @@ func ambiguousWriteError(err error) bool {
 
 var dateKeys = []string{api.MetadataKeyScheduledOn, api.MetadataKeyDeadlineOn}
 
-func issueDate(i *Issue, key string) string {
+func issueDateRaw(i *Issue, key string) jsontext.Value {
 	if key == api.MetadataKeyScheduledOn {
-		return i.scheduledOn()
+		return i.Metadata.ScheduledOn
 	}
-	return i.deadlineOn()
+	return i.Metadata.DeadlineOn
 }
 
 // changedDateKeys lists the planning-date keys whose stored value differs
 // between two reads of an issue.
 func changedDateKeys(before, after *Issue) []string {
 	return slices.DeleteFunc(slices.Clone(dateKeys), func(key string) bool {
-		return issueDate(before, key) == issueDate(after, key)
+		return bytes.Equal(metadata.NormalizeJSON(issueDateRaw(before, key)), metadata.NormalizeJSON(issueDateRaw(after, key)))
 	})
 }
 
 // sameDates reports whether a and b hold the same stored value under every key.
 func sameDates(a, b *Issue, keys []string) bool {
 	return len(keys) > 0 && !slices.ContainsFunc(keys, func(key string) bool {
-		return issueDate(a, key) != issueDate(b, key)
+		return !bytes.Equal(metadata.NormalizeJSON(issueDateRaw(a, key)), metadata.NormalizeJSON(issueDateRaw(b, key)))
 	})
 }
 

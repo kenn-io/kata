@@ -559,6 +559,9 @@ func (c *Client) SetDates(ctx context.Context, projectID int64, ref string, in D
 			patch[key] = *value
 		}
 	}
+	for key, value := range in.Raw {
+		patch[key] = value
+	}
 	etag := fmt.Sprintf(`"rev-%d"`, in.IfMatchRevision)
 	wire, callErr := apiClient.PatchIssueMetadataWithResponse(ctx, &generated.PatchIssueMetadataRequestOptions{
 		PathParams: &generated.PatchIssueMetadataPath{ProjectID: projectID, Ref: ref},

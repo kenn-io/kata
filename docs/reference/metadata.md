@@ -74,8 +74,9 @@ The `value` retains the supplied text; UTC instants retain their selected zone
 for calendar dates while keeping their exact instant. Older stored
 strings remain readable using the issue and daemon defaults. Older published bundles remain available when new rules are added. An unknown bundle
 version makes the date unreadable and the planning-date endpoint returns HTTP
-422. Changing or removing an issue timezone rebinds its existing dates.
-Echoing the same date preserves its saved rules.
+422. Changing or removing an issue timezone rebinds existing dates unless the
+same write supplies a saved date object with its own rules. Echoing an already
+saved date preserves its rules.
 
 Stop every older daemon sharing a database before starting the new version,
 and keep those older daemons stopped. Older versions skip object-backed dates
@@ -83,7 +84,7 @@ in notification sweeps. Older clients may also show object-backed dates as
 empty; upgrade clients that read schedule metadata. An existing recurrence using `Local` can create an
 occurrence when the host's named zone is bundled and its rules agree for the
 occurrence and inherited deadline. Otherwise, change the recurrence to a named
-IANA timezone.
+IANA timezone. On Windows, Kata maps the system timezone setting to an IANA name.
 
 New or changed issue `timezone` values from API, CLI, MCP, TUI and web writes
 must be `UTC`, `Etc/UTC`, or exact case-sensitive bundled names under `Africa/`,

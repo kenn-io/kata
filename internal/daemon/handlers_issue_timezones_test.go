@@ -40,6 +40,25 @@ func TestIssueTimezoneLegacyEchoFreezesKnownZone(t *testing.T) {
 	require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
 }
 
+func TestIssueCreatePreservesSuppliedScheduleRules(t *testing.T) {
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "Europe/Paris" })
+	p := seedProject(t, env, "example-project")
+	scheduled, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+	require.NoError(t, err)
+	deadline, err := metadata.NewScheduleValue("2026-01-02", "Asia/Tokyo")
+	require.NoError(t, err)
+	status, raw := cronHTTP(t, env, http.MethodPost, projectPath(p.ID)+"/issues", map[string]any{"actor": "tester", "title": "Portable", "force_new": true, "metadata": map[string]any{"scheduled_on": scheduled, "deadline_on": deadline}})
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var body struct {
+		Issue struct {
+			Metadata map[string]jsontext.Value `json:"metadata"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.JSONEq(t, string(scheduled), string(body.Issue.Metadata["scheduled_on"]))
+	require.JSONEq(t, string(deadline), string(body.Issue.Metadata["deadline_on"]))
+}
+
 // Create and PATCH both prepare schedules and reject unportable zones atomically.
 func TestIssuePortableTimezoneAdmission(t *testing.T) {
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "Local" })

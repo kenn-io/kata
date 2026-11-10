@@ -118,7 +118,7 @@ func savedScheduleFeature(required string, value jsontext.Value) (string, error)
 	if members["tzdata_version"] == nil {
 		return required, nil
 	}
-	if _, err := metadata.ScheduleValueText(value); err != nil {
+	if _, err := metadata.DecodeSavedSchedule(value); err != nil {
 		return "", err
 	}
 	return MergeEventFeatures(required, IssueScheduleEventFeature), nil

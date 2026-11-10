@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -172,6 +173,11 @@ func TestSchedulePayloadFeatures(t *testing.T) {
 			require.NoError(t, err)
 			if tc.wantFeature {
 				require.Contains(t, got, db.IssueScheduleEventFeature)
+				if tc.kind != "projection.issue" {
+					_, wireFeatures, err := db.FederationEventPayloadWireVersion(tc.kind, jsontext.Value(tc.payload))
+					require.NoError(t, err)
+					require.Contains(t, wireFeatures, db.IssueScheduleEventFeature)
+				}
 			} else {
 				require.Empty(t, got)
 			}

@@ -96,3 +96,22 @@ func TestPrepareIssueSchedulesPreservesAndRebinds(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareIssueSchedulesPreservesSuppliedObject(t *testing.T) {
+	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+	require.NoError(t, err)
+	for _, current := range []jsontext.Value{jsontext.Value(`{}`), jsontext.Value(`{"scheduled_on":"2026-01-01T02:00:00Z"}`)} {
+		patch := map[string]jsontext.Value{"scheduled_on": saved, "timezone": jsontext.Value(`"Europe/Paris"`)}
+		out, err := db.PrepareIssueSchedules(current, patch, "UTC", "")
+		require.NoError(t, err)
+		require.JSONEq(t, string(saved), string(out["scheduled_on"]))
+	}
+	other, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "Europe/Paris")
+	require.NoError(t, err)
+	current := jsontext.Value(`{"scheduled_on":` + string(saved) + `}`)
+	out, err := db.PrepareIssueSchedules(current, map[string]jsontext.Value{"scheduled_on": other}, "UTC", "")
+	require.NoError(t, err)
+	require.JSONEq(t, string(other), string(out["scheduled_on"]))
+	_, err = db.PrepareIssueSchedules(jsontext.Value(`{}`), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`{"value":"2026-01-01","timezone":"UTC","tzdata_version":"unknown"}`)}, "UTC", "")
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
+}

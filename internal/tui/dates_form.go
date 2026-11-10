@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +20,7 @@ type DatesInput struct {
 	Actor           string
 	IfMatchRevision int64
 	Set             map[string]*string
+	Raw             map[string]jsontext.Value
 }
 
 type datesAPI interface {

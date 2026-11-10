@@ -97,7 +97,7 @@ func (c scheduleCodec) kataPatch(
 	if err != nil {
 		return nil, err
 	}
-	return patch, nil
+	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, "")
 }
 
 func kataPatchWithCoordinatedTimezone(

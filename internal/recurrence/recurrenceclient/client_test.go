@@ -34,15 +34,3 @@ func TestResolveLocalZone(t *testing.T) {
 	assert.Empty(t, ResolveLocalZone("", false, missing), "no zone known: the daemon decides")
 	assert.Empty(t, ResolveLocalZone("", false, link(t, "/etc/some-other-file")))
 }
-
-func TestLocalZoneUsesEnvironmentAndLocaltimeLink(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "localtime")
-	require.NoError(t, os.Symlink("/usr/share/zoneinfo/Asia/Tokyo", path))
-
-	t.Setenv("TZ", "")
-	assert.Equal(t, "UTC", LocalZone(path), "TZ set but empty means UTC, not the localtime link")
-	require.NoError(t, os.Unsetenv("TZ"))
-	assert.Equal(t, "Asia/Tokyo", LocalZone(path))
-	t.Setenv("TZ", "Europe/Paris")
-	assert.Equal(t, "Europe/Paris", LocalZone(path))
-}

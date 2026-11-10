@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"os"
 	"os/exec"
+	"runtime"
 	"testing"
 	"time"
 
@@ -51,6 +52,11 @@ func TestComposeRecurrenceIssueMetadataDefensivelyRejectsInvalidReservedValue(t 
 
 func TestRecurrenceLocalMaterializesInNamedZone(t *testing.T) {
 	if os.Getenv("KATA_TEST_LOCAL_RECURRENCE") == "1" {
+		if runtime.GOOS == "windows" {
+			location, err := time.LoadLocation("America/New_York")
+			require.NoError(t, err)
+			time.Local = location
+		}
 		value, err := ComposeRecurrenceIssueMetadata(jsontext.Value(`{"deadline_on":"2026-05-19T09:00"}`), "2026-05-18", "Local")
 		require.NoError(t, err)
 		for _, field := range []string{"scheduled_on", "deadline_on"} {
