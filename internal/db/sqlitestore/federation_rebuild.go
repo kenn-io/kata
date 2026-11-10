@@ -99,7 +99,10 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		p.moved.Comments = maps.Clone(p.projection.Comments)
 		p.moved.Labels = maps.Clone(p.projection.Labels)
 		db.RestrictFoldProjectWhere(&p.projection, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return !ok })
-		db.RestrictFoldProjectWhere(&p.moved, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return ok })
+		db.RestrictFoldProjectWhere(&p.moved, projectUID, func(uid string) bool {
+			decision, ok := result.moved[uid]
+			return ok && decision.Joined && (decision.Active || decision.Exists)
+		})
 		m.projection = p.projection
 		m.cronAffected = true
 		if err := m.prepareRows(ctx, tx, p.id, nil); err != nil {

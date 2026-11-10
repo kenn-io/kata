@@ -266,16 +266,12 @@ type federationRowsFingerprint struct {
 	sections [5][][32]byte
 }
 
-func (f *federationRowsFingerprint) add(section int, values ...any) error {
+func (f *federationRowsFingerprint) add(section int, values ...any) {
 	if f == nil {
-		return nil
+		return
 	}
-	value, err := json.Marshal(values)
-	if err != nil {
-		return err
-	}
-	f.sections[section] = append(f.sections[section], sha256.Sum256(value))
-	return nil
+	// Go's quoted string formatting preserves invalid UTF-8 as byte escapes.
+	f.sections[section] = append(f.sections[section], sha256.Sum256([]byte(fmt.Sprintf("%#v", values))))
 }
 
 func (f *federationRowsFingerprint) sum() [32]byte {

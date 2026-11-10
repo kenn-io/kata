@@ -2180,9 +2180,7 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, stamp *federationR
 		row.deleted = deletedAt != nil
 		row.values = []any{row.shortID, row.title, row.body, status, closedReason, owner, assignmentExpiresOn,
 			priority, author, createdAt, updatedAt, closedAt, deletedAt, metadata}
-		if err := stamp.add(0, uid, row.id, row.values); err != nil {
-			return nil, err
-		}
+		stamp.add(0, uid, row.id, row.values)
 		out[uid] = row
 	}
 	return out, rows.Err()
@@ -2304,9 +2302,7 @@ func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, stamp *federatio
 			return nil, fmt.Errorf("scan federated comment: %w", err)
 		}
 		row.teammate = teammate.String
-		if err := stamp.add(1, uid, row.id, row.issueID, row.author, row.createdAt, row.body, teammate); err != nil {
-			return nil, err
-		}
+		stamp.add(1, uid, row.id, row.issueID, row.author, row.createdAt, row.body, teammate)
 		out[uid] = row
 	}
 	return out, rows.Err()
@@ -2376,9 +2372,7 @@ func federatedLabelKeys(ctx context.Context, tx *sql.Tx, stamp *federationRowsFi
 		if err := rows.Scan(&key.issueID, &key.label); err != nil {
 			return nil, fmt.Errorf("scan federated label: %w", err)
 		}
-		if err := stamp.add(2, key.issueID, key.label); err != nil {
-			return nil, err
-		}
+		stamp.add(2, key.issueID, key.label)
 		out[key] = struct{}{}
 	}
 	return out, rows.Err()
@@ -2813,9 +2807,7 @@ func federationGroupIssueIDs(
 		if err := rows.Scan(&uid, &issueID, &projectID); err != nil {
 			return nil, fmt.Errorf("scan federation group issue: %w", err)
 		}
-		if err := stamp.add(3, uid, issueID, projectID); err != nil {
-			return nil, err
-		}
+		stamp.add(3, uid, issueID, projectID)
 		// A scoped fold only replaces endpoint resolution inside its scope.
 		// Untouched issues in this same project still resolve from persisted rows.
 		if projectID == currentProjectID && (len(currentIssueScope) == 0 || slices.Contains(currentIssueScope, uid)) {
@@ -2863,9 +2855,7 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64, stam
 		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID, &row.typ, &row.author, &row.createdAt); err != nil {
 			return nil, fmt.Errorf("scan federated link: %w", err)
 		}
-		if err := stamp.add(4, row.id, row.fromID, row.toID, row.fromUID, row.toUID, row.typ, row.author, row.createdAt); err != nil {
-			return nil, err
-		}
+		stamp.add(4, row.id, row.fromID, row.toID, row.fromUID, row.toUID, row.typ, row.author, row.createdAt)
 		out[row.key()] = row
 	}
 	return out, rows.Err()
