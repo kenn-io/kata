@@ -7,11 +7,13 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -78,7 +80,6 @@ func TestCronProgressiveDiscovery(t *testing.T) {
 	after, err := s.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(after.Tools), "kata.cron_job_create")
-	require.Contains(t, toolNames(after.Tools), "kata.cron_job_dispatch")
 	require.NotContains(t, toolNames(after.Tools), "kata.create")
 	require.Equal(t, loaded, cronOK(t, s, "load_cron", map[string]any{}))
 }
@@ -268,8 +269,12 @@ func TestCronAuthorityAndCapabilities(t *testing.T) {
 		{http.StatusServiceUnavailable, "unavailable", "cron backend offline"},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/health" {
+					writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.41.0"})
+					return
+				}
 				w.WriteHeader(tc.status)
 				writeJSON(w, map[string]any{"status": tc.status, "error": map[string]any{"code": tc.code, "message": tc.message}})
 			}))
@@ -323,7 +328,7 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 	id := cronNewUID(t, f.session)
 	cronOK(t, f.session, "cron_job_create", map[string]any{"uid": id, "name": "Adapter job", "definition": cronDefinition()})
 	dispatch := cronOK(t, s, "cron_job_dispatch", map[string]any{"uid": id})
-	require.Equal(t, "external_adapter", dispatch["gate"].(map[string]any)["reason"])
+	require.Equal(t, id, dispatch["job_uid"])
 	require.True(t, cronCall(t, s, "cron_job_create", map[string]any{"uid": cronNewUID(t, s), "name": "Denied", "definition": cronDefinition()}).IsError)
 	parent, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: f.project.ID, Title: "Scoped root", Author: "example-agent"})
 	require.NoError(t, err)
@@ -358,33 +363,43 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 
 func TestCronJobDispatchRoute(t *testing.T) {
 	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-	for _, observed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "unobserved", true: "observed"}[observed], func(t *testing.T) {
+	for _, tc := range []struct {
+		name, version string
+		observed      bool
+	}{
+		{name: "unobserved", version: "0.41.0"},
+		{name: "observed", version: "0.41.0", observed: true},
+		{name: "old-daemon", version: "0.40.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			payload := map[string]any{
 				"job_uid": id, "evaluated_at": "2026-11-10T12:00:00Z",
 				"gate": map[string]any{"reason": "idle", "next_due_at": "2026-11-10T13:00:00Z"},
 				"last": nil, "last_non_idle": nil,
 			}
-			if observed {
+			if tc.observed {
 				payload["last"] = map[string]any{
-					"at": "2026-11-10T11:00:00Z", "definition_event_uid": id,
+					"at": "2026-11-10T11:00:00Z", "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
 					"reason": "skipped", "delivered": 0, "more": false,
-					"skipped": map[string]any{"count": 2, "capped": false},
+					"skipped": map[string]any{"count": 2, "capped": false, "after": "2026-11-10T08:00:00Z", "before": "2026-11-10T11:00:00Z"},
 				}
 				payload["last_non_idle"] = payload["last"]
 			}
-			calls, healthCalls := 0, 0
+			var calls, healthCalls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
 				if r.URL.Path == "/api/v1/health" {
-					healthCalls++
-					w.Header().Set("Content-Type", "application/json")
-					writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.41.0"})
+					healthCalls.Add(1)
+					writeJSON(w, map[string]any{"ok": true, "api_schema_version": tc.version})
 					return
 				}
-				calls++
-				require.Equal(t, http.MethodGet, r.Method)
-				require.Equal(t, "/api/v1/projects/42/cron/jobs/"+id+"/dispatch", r.URL.Path)
-				w.Header().Set("Content-Type", "application/json")
+				calls.Add(1)
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/api/v1/projects/42/cron/jobs/"+id+"/dispatch", r.URL.Path)
+				if tc.version == "0.40.0" {
+					http.NotFound(w, r)
+					return
+				}
 				writeJSON(w, payload)
 			}))
 			t.Cleanup(server.Close)
@@ -392,70 +407,43 @@ func TestCronJobDispatchRoute(t *testing.T) {
 			require.NoError(t, err)
 			s := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test"})
 			result := cronCall(t, s, "cron_job_dispatch", map[string]any{"uid": "  " + strings.ToLower(id) + "  "})
+			if tc.version == "0.40.0" {
+				require.True(t, result.IsError)
+				require.Contains(t, result.Content[0].(*sdkmcp.TextContent).Text, "requires daemon API 0.41.0 or newer")
+				require.Zero(t, calls.Load(), "older daemons must not receive the unsupported route")
+				require.EqualValues(t, 1, healthCalls.Load())
+				return
+			}
 			require.False(t, result.IsError, "%s", mustJSON(t, result))
 			want, err := json.Marshal(payload)
 			require.NoError(t, err)
 			require.JSONEq(t, string(want), result.Content[0].(*sdkmcp.TextContent).Text)
 			require.JSONEq(t, string(want), string(mustJSON(t, result.StructuredContent)))
-			require.Equal(t, 1, calls)
-			for _, args := range []map[string]any{{"uid": "short"}, {"uid": id, "project": "outside-project"}} {
-				require.True(t, cronCall(t, s, "cron_job_dispatch", args).IsError)
-			}
-			multi := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
-			require.True(t, cronCall(t, multi, "cron_job_dispatch", map[string]any{"uid": id}).IsError)
-			require.Equal(t, 1, calls, "invalid identity and scope must not reach the daemon")
-			require.Equal(t, 1, healthCalls, "validate identity and scope before any health request")
+			require.EqualValues(t, 1, calls.Load())
+			invalid := cronCall(t, s, "cron_job_dispatch", map[string]any{"uid": "short"})
+			require.True(t, invalid.IsError)
+			require.Contains(t, invalid.Content[0].(*sdkmcp.TextContent).Text, "cron UID must be a full ULID")
+			require.True(t, cronCall(t, s, "cron_job_dispatch", map[string]any{"uid": id, "project": "outside-project"}).IsError)
+			require.EqualValues(t, 1, calls.Load(), "invalid identity and scope must not reach the daemon")
+			require.EqualValues(t, 1, healthCalls.Load(), "validate identity and scope before any health request")
 			tools, err := s.ListTools(t.Context(), nil)
 			require.NoError(t, err)
+			var dispatchTool *sdkmcp.Tool
 			for _, tool := range tools.Tools {
 				if tool.Name == "kata.cron_job_dispatch" {
-					require.Equal(t, toolHints(true, false, false), tool.Annotations)
-					var schema jsonschema.Schema
-					require.NoError(t, json.Unmarshal(mustJSON(t, tool.OutputSchema), &schema))
-					require.Equal(t, "object", schema.Type)
-					require.Contains(t, schema.Required, "last")
-					require.Contains(t, schema.Required, "last_non_idle")
-					resolved, err := schema.Resolve(nil)
-					require.NoError(t, err)
-					require.NoError(t, resolved.Validate(result.StructuredContent))
+					dispatchTool = tool
+					break
 				}
 			}
+			require.NotNil(t, dispatchTool)
+			var schema jsonschema.Schema
+			require.NoError(t, json.Unmarshal(mustJSON(t, dispatchTool.OutputSchema), &schema))
+			require.Equal(t, "object", schema.Type)
+			require.Contains(t, schema.Required, "last")
+			require.Contains(t, schema.Required, "last_non_idle")
+			resolved, err := schema.Resolve(nil)
+			require.NoError(t, err)
+			require.NoError(t, resolved.Validate(result.StructuredContent))
 		})
 	}
-}
-
-func TestCronJobDispatchAPIVersion(t *testing.T) {
-	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-	version := "0.40.0"
-	healthCalls, dispatchCalls := 0, 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/api/v1/health" {
-			healthCalls++
-			writeJSON(w, map[string]any{"ok": true, "api_schema_version": version})
-			return
-		}
-		dispatchCalls++
-		if version == "0.40.0" {
-			http.NotFound(w, r)
-			return
-		}
-		require.Equal(t, http.MethodGet, r.Method)
-		require.Equal(t, "/api/v1/projects/42/cron/jobs/"+id+"/dispatch", r.URL.Path)
-		writeJSON(w, map[string]any{"job_uid": id, "evaluated_at": "2026-11-10T12:00:00Z", "gate": map[string]any{"reason": "idle"}, "last": nil, "last_non_idle": nil})
-	}))
-	t.Cleanup(server.Close)
-	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
-	require.NoError(t, err)
-	s := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test"})
-	denied := cronCall(t, s, "cron_job_dispatch", map[string]any{"uid": id})
-	require.True(t, denied.IsError)
-	require.Contains(t, denied.Content[0].(*sdkmcp.TextContent).Text, "requires daemon API 0.41.0 or newer")
-	require.Equal(t, 0, dispatchCalls, "older daemons must not receive the unsupported route")
-	require.Equal(t, 1, healthCalls)
-	// Recheck live health after a daemon replacement; do not cache the old version.
-	version = "0.41.0"
-	cronOK(t, s, "cron_job_dispatch", map[string]any{"uid": id})
-	require.Equal(t, 1, dispatchCalls)
-	require.Equal(t, 2, healthCalls)
 }

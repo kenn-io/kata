@@ -1,13 +1,17 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-06
+last_edited: 2026-11-10
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Query why cron jobs did or did not fire through `kata.cron_job_dispatch`
+  in [MCP cron tools](reference/mcp.md#native-cron-through-mcp). Requires
+  daemon API `0.41.0` or newer.
 
 - Attach oh-my-pi sessions to closes by copying the documented
   [closing-session transcript](reference/configuration.md#closing-session-transcripts)
