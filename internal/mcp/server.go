@@ -260,7 +260,7 @@ func addTool[In, Out any](
 		Annotations:  annotations,
 		InputSchema:  inputSchemaFor[In](name),
 		OutputSchema: schemaFor[Out](),
-	}, validateScheduleOutput(handler))
+	}, handler)
 }
 
 func schemaFor[T any]() *jsonschema.Schema {

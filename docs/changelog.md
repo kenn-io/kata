@@ -11,7 +11,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Keep issue schedules consistent across daemons by saving each date's zone and
   timezone-data version. Stop older daemons sharing the database before upgrading;
-  their notification sweeps skip the new values. See [schedule metadata](reference/metadata.md).
+  their notification sweeps skip the new values. MCP forwards saved values and
+  daemon-projected dates across timezone-data versions. See [schedule metadata](reference/metadata.md).
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
   stop on a failed selected source without fallback. See

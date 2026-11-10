@@ -38,6 +38,11 @@ func TestValidateCreateValue_DelegatesToValidate(t *testing.T) {
 func TestValidateScheduleValues(t *testing.T) {
 	for _, key := range []string{"scheduled_on", "deadline_on"} {
 		t.Run(key, func(t *testing.T) {
+			saved, err := NewScheduleValue("2026-05-20T15:30", "America/New_York")
+			require.NoError(t, err)
+			assert.NoError(t, Validate(IssueRegistry, key, saved))
+			assert.Error(t, Validate(IssueRegistry, key, jsontext.Value(fmt.Sprintf(`{"value":"bad","timezone":"UTC","tzdata_version":%q}`, ScheduleTZDataVersion))))
+			assert.Error(t, Validate(IssueRegistry, key, jsontext.Value(`{"value":"2026-05-20","timezone":"UTC","tzdata_version":"future"}`)))
 			assert.NoError(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20"`)))
 			assert.NoError(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20T15:30"`)))
 			assert.NoError(t, Validate(IssueRegistry, key, jsontext.Value(`"2026-05-20T15:30:45"`)))
