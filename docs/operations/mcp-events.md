@@ -1,7 +1,7 @@
 ---
 title: MCP Events webhook delivery
 description: Run daemon-owned inbox subscriptions that survive restarts, and receive signed webhooks safely.
-last_edited: 2026-11-05
+last_edited: 2026-11-10
 ---
 
 # MCP Events webhook delivery
@@ -174,10 +174,14 @@ An MCP client supplies the ordinary protocol metadata and headers. The
 `for` is one exact recipient, including its teammate suffix. `issue_uid` is
 optional and narrows to one issue. Unknown arguments fail before any callback.
 
-The callback must use HTTPS and a publicly routable destination. Every
-connection validates all resolved addresses and dials a validated address with
-the original TLS hostname. Private, loopback, reserved, mixed-address, and
-redirect destinations are rejected. Requests carry no daemon bearer, browser
+The callback must use HTTPS. By default, every resolved address must be
+publicly routable. Operators can configure an [exact origin with static
+private pins](../reference/configuration.md#trusted-private-callbacks) for a
+private-network receiver. Trusted origins bypass DNS and use only those pins;
+TLS still validates the original callback hostname. Loopback, link-local,
+reserved and untrusted mixed-address destinations remain forbidden. Redirects
+are never followed. A policy refusal reports `destination_not_allowed`,
+including in delivery's `lastError`. Requests carry no daemon bearer, browser
 credentials, or environment proxy. They use TLS 1.2 or newer and time out after
 10 seconds.
 

@@ -408,3 +408,16 @@ func TestWebhookDialSharesTheDeadlineAcrossAddresses(t *testing.T) {
 		t.Errorf("the last address got only %v", budgets[1])
 	}
 }
+
+func TestWebhookDestinationPolicyRefusal(t *testing.T) {
+	w := NewWebhookClient(WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
+	}})
+	err := w.Verify(t.Context(), fixtureTLSCallback, "sub", fixtureSecret(1, 32))
+	if got := safeWebhookError(err).Reason; got != "destination_not_allowed" {
+		t.Fatalf("private callback refusal=%s, want destination_not_allowed", got)
+	}
+	if endpointCategory(err) != "destination_not_allowed" || failureCategory(0, err) != "destination_not_allowed" {
+		t.Fatal("safe policy refusal was lost")
+	}
+}

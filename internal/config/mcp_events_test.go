@@ -48,3 +48,19 @@ func TestMCPEventsConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPEventsTrustedCallbacksConfiguration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`[mcp_events]
+enabled=true
+[[mcp_events.trusted_callbacks]]
+origin="https://receiver.example"
+addresses=["100.64.0.1", "fd00::1"]
+`), 0600))
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.MCPEvents.TrustedCallbacks, 1)
+	assert.Equal(t, "https://receiver.example", cfg.MCPEvents.TrustedCallbacks[0].Origin)
+	assert.Equal(t, []string{"100.64.0.1", "fd00::1"}, cfg.MCPEvents.TrustedCallbacks[0].Addresses)
+}

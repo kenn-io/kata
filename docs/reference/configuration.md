@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Configuration
@@ -1041,6 +1041,45 @@ Programs that embed the Go `Service` set `Config.MCPEvents.Enabled` and
 supply `Config.MCPEvents.Key` instead. `Config.MCPEvents.MaxTTL` and
 `Config.MCPEvents.RefuseNoExpiry` match `max_ttl` and `allow_no_expiry = false`. Without a key provider, Events is
 disabled with `events_not_configured` and the other workers still run.
+
+### Trusted private callbacks
+
+Operators can grant one exact HTTPS origin access to static private addresses:
+
+```toml
+[[mcp_events.trusted_callbacks]]
+origin = "https://receiver.example"
+addresses = ["100.64.0.1", "fd00::1"]
+```
+
+Each entry needs at least one numeric address from RFC1918 IPv4
+(`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), CGNAT
+(`100.64.0.0/10`), or IPv6 ULA (`fc00::/7`). Loopback, link-local,
+metadata, unspecified, multicast, public and other reserved addresses are
+not permitted. Do not use CIDRs, zones or hostnames in `addresses`.
+
+An origin includes the scheme, hostname and optional port. The default
+HTTPS port `:443` equals an omitted port. Hostname case is ignored.
+Origins cannot contain credentials, wildcards, non-root paths, queries or
+fragments. Reserved names such as `localhost` and `.local` remain forbidden.
+Duplicate origins or addresses within an entry disable Events. A private
+literal-IP origin must pin only that same IP.
+
+A matching callback always connects to its pins without DNS or a public
+fallback. Other callbacks remain public-only; every address in a DNS answer
+must be public before any connection is attempted. TLS still checks the
+original callback hostname and certificate using system roots. Install a
+trusted certificate chain on the receiver; literal-IP callbacks need a
+matching IP subject alternative name. Signing and receiver verification
+remain required. Subscribers cannot grant private access.
+
+Restart the daemon after changing these entries. Removing an entry withdraws
+its private access: subsequent delivery attempts and subscription refreshes
+that resolve to private addresses fail with `destination_not_allowed`.
+Unsubscribe remains available. Cached public consent can still be refreshed
+during a DNS outage; delivery independently checks DNS when it connects.
+Invalid policy disables Events with `events_start_failed` while the daemon keeps
+serving other requests. No environment variable grants callback trust.
 
 ## Semantic search
 

@@ -190,6 +190,8 @@ func (c *challengeCoordinator) pruneLocked(now time.Time) {
 func endpointCategory(err error) string {
 	we := safeWebhookError(err)
 	switch we.Reason {
+	case "destination_not_allowed":
+		return "destination_not_allowed"
 	case "timeout":
 		return "timeout"
 	case "tls_error":

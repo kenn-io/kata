@@ -290,7 +290,7 @@ func (s *Service) identify(p Principal, name string, args Arguments, callbackURL
 	if err != nil {
 		return identity{}, err
 	}
-	if err := ValidateWebhookCallback(callbackURL); err != nil {
+	if _, err := parseWebhookCallback(callbackURL); err != nil {
 		return identity{}, invalidParams("invalid_callback")
 	}
 	canonical := canonicalArguments(args)
@@ -399,6 +399,9 @@ func (s *Service) Subscribe(ctx context.Context, p Principal, scope ForwarderSco
 	}
 	if err := checkForwarderScope(scope, ident.args); err != nil {
 		return SubscribeResult{}, err
+	}
+	if err := s.webhook.ValidateCallback(ctx, ident.url); err != nil {
+		return SubscribeResult{}, callbackEndpoint(endpointCategory(err))
 	}
 	// The fingerprint activation stores describes the archive at this head.
 	resolvedAfter, err := s.storeHead(db.WithoutIssueRegistries(db.WithAuthorizedProjects(ctx, nil)))

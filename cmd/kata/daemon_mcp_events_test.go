@@ -151,3 +151,30 @@ func TestMCPEventsFailuresDisableOnlyEvents(t *testing.T) {
 		requireDaemonServes(t, store, service, reason, mcpevents.ReasonStartFailed)
 	})
 }
+
+func TestMCPEventsTrustedCallbacksStartup(t *testing.T) {
+	for _, origin := range []string{"https://receiver.example", "https://receiver.example/path"} {
+		t.Run(origin, func(t *testing.T) {
+			store := newMCPEventsStore(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			workers := newDaemonWorkerGroup()
+			defer func() {
+				cancel()
+				joined, stop := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
+				defer stop()
+				require.True(t, workers.Wait(joined))
+			}()
+			cfg := config.DaemonConfig{MCPEvents: config.MCPEventsConfig{Enabled: true, TrustedCallbacks: []config.MCPEventsTrustedCallback{{Origin: origin, Addresses: []string{"100.64.0.1"}}}}}
+			service, reason := startMCPEvents(ctx, workers, mcpEventsStartup{Config: cfg, Store: store, KeyPath: filepath.Join(t.TempDir(), "key"), Authority: daemon.NewMCPEventsAuthority(daemon.ServerConfig{DB: store}), Log: log.New(io.Discard, "", 0)})
+			if origin == "https://receiver.example" {
+				require.NotNil(t, service)
+				require.Empty(t, reason)
+				require.True(t, service.Availability().Enabled)
+			} else {
+				require.Nil(t, service)
+				require.Equal(t, mcpevents.ReasonStartFailed, reason)
+				requireDaemonServes(t, store, service, reason, mcpevents.ReasonStartFailed)
+			}
+		})
+	}
+}

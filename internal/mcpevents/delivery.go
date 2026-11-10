@@ -278,6 +278,8 @@ func (s *Service) signingKeys(row db.MCPEventSubscription, now time.Time) ([]str
 func failureCategory(status int, err error) string {
 	if err != nil {
 		switch safeWebhookError(err).Reason {
+		case "destination_not_allowed":
+			return "destination_not_allowed"
 		case "timeout":
 			return "timeout"
 		case "tls_error":
