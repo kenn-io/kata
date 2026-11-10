@@ -54,6 +54,13 @@ func (h toolHandlers) cronJobDispatch(ctx context.Context, _ *sdkmcp.CallToolReq
 	if err != nil {
 		return nil, generated.ExplainCronJobDispatchResponse{}, err
 	}
+	supported, err := h.daemonSupportsAPIVersion(ctx, "0.41.0")
+	if err != nil {
+		return nil, generated.ExplainCronJobDispatchResponse{}, err
+	}
+	if !supported {
+		return nil, generated.ExplainCronJobDispatchResponse{}, errors.New("cron dispatch explanation requires daemon API 0.41.0 or newer")
+	}
 	return cronResult(h.options.Client.ExplainCronJobDispatch(ctx, &generated.ExplainCronJobDispatchRequestOptions{PathParams: &generated.ExplainCronJobDispatchPath{ProjectID: p.ID, CronUID: id}}))
 }
 func (h toolHandlers) cronJobCreate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobCreateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronJobResponse, error) {

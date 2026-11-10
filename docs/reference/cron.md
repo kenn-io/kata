@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-05
+last_edited: 2026-11-10
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -803,6 +803,7 @@ entries follow `kata.`. CLI and MCP create definitions through stable-UID
 | `GET` | `/api/v1/projects/{project_id}/cron/jobs` | `listCronJobs` | `job list` | `cron_jobs` |
 | `POST` | `/api/v1/projects/{project_id}/cron/jobs` | `createCronJob` | HTTP only | — |
 | `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `showCronJob` | `job show` | `cron_job` |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/dispatch` | `explainCronJobDispatch` | `job show --why` | `cron_job_dispatch` |
 | `PUT` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `replaceCronJob` | `job create` / `job update` | `cron_job_create` / `cron_job_update` |
 | `DELETE` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `archiveCronJob` | `job delete` | `cron_job_delete` |
 | `POST` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore` | `restoreCronJob` | `job restore` | `cron_job_restore` |

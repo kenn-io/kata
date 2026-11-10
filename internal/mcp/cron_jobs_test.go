@@ -373,8 +373,14 @@ func TestCronJobDispatchRoute(t *testing.T) {
 				}
 				payload["last_non_idle"] = payload["last"]
 			}
-			calls := 0
+			calls, healthCalls := 0, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/health" {
+					healthCalls++
+					w.Header().Set("Content-Type", "application/json")
+					writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.41.0"})
+					return
+				}
 				calls++
 				require.Equal(t, http.MethodGet, r.Method)
 				require.Equal(t, "/api/v1/projects/42/cron/jobs/"+id+"/dispatch", r.URL.Path)
@@ -398,6 +404,7 @@ func TestCronJobDispatchRoute(t *testing.T) {
 			multi := connectTestServerWithOptions(t, Options{Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
 			require.True(t, cronCall(t, multi, "cron_job_dispatch", map[string]any{"uid": id}).IsError)
 			require.Equal(t, 1, calls, "invalid identity and scope must not reach the daemon")
+			require.Equal(t, 1, healthCalls, "validate identity and scope before any health request")
 			tools, err := s.ListTools(t.Context(), nil)
 			require.NoError(t, err)
 			for _, tool := range tools.Tools {
@@ -415,4 +422,40 @@ func TestCronJobDispatchRoute(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCronJobDispatchAPIVersion(t *testing.T) {
+	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	version := "0.40.0"
+	healthCalls, dispatchCalls := 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/health" {
+			healthCalls++
+			writeJSON(w, map[string]any{"ok": true, "api_schema_version": version})
+			return
+		}
+		dispatchCalls++
+		if version == "0.40.0" {
+			http.NotFound(w, r)
+			return
+		}
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/api/v1/projects/42/cron/jobs/"+id+"/dispatch", r.URL.Path)
+		writeJSON(w, map[string]any{"job_uid": id, "evaluated_at": "2026-11-10T12:00:00Z", "gate": map[string]any{"reason": "idle"}, "last": nil, "last_non_idle": nil})
+	}))
+	t.Cleanup(server.Close)
+	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+	s := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test"})
+	denied := cronCall(t, s, "cron_job_dispatch", map[string]any{"uid": id})
+	require.True(t, denied.IsError)
+	require.Contains(t, denied.Content[0].(*sdkmcp.TextContent).Text, "requires daemon API 0.41.0 or newer")
+	require.Equal(t, 0, dispatchCalls, "older daemons must not receive the unsupported route")
+	require.Equal(t, 1, healthCalls)
+	// Recheck live health after a daemon replacement; do not cache the old version.
+	version = "0.41.0"
+	cronOK(t, s, "cron_job_dispatch", map[string]any{"uid": id})
+	require.Equal(t, 1, dispatchCalls)
+	require.Equal(t, 2, healthCalls)
 }
