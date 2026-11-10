@@ -1,12 +1,13 @@
 package cron
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/netresearch/go-cron"
 )
 
-// Validate checks the selected trigger and its kind-specific fields.
+// Validate checks trigger syntax and kind-specific fields.
 func (t Trigger) Validate() error {
 	if t.Timezone != "" {
 		if _, err := time.LoadLocation(t.Timezone); err != nil {
@@ -22,12 +23,8 @@ func (t Trigger) Validate() error {
 	switch t.Kind {
 	case "manual":
 	case "cron":
-		schedule, err := ParseCron(t.Cron)
-		if err != nil {
+		if _, err := ParseCron(t.Cron); err != nil {
 			return invalid("invalid cron expression")
-		}
-		if err := requireCalendarDate(schedule); err != nil {
-			return err
 		}
 	case "interval":
 		if t.IntervalSeconds <= 0 {
@@ -57,19 +54,29 @@ func (t Trigger) Validate() error {
 // sees every calendar date without depending on the wall clock.
 var calendarReference = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 
-func requireCalendarDate(schedule cron.Schedule) error {
-	spec, ok := schedule.(*cron.SpecSchedule)
-	if !ok {
-		return nil // @every is a constant delay and always has a next run.
+func (t Trigger) requireOccurrence() error {
+	if t.Kind != "cron" {
+		return nil
 	}
-	// Check date existence independently of historical DST gaps, without
-	// changing the original schedule's delivery timezone.
-	utc := *spec
-	utc.Location = time.UTC
-	if utc.Next(calendarReference).IsZero() {
-		return invalid("cron expression never fires: its day of month does not occur in its months")
+	schedule, err := ParseCron(t.Cron)
+	if err != nil {
+		return invalid("invalid cron expression")
 	}
-	return nil
+	spec, calendar := schedule.(*cron.SpecSchedule)
+	if calendar {
+		// Check date existence independently of historical DST gaps, without
+		// changing the original schedule's delivery timezone.
+		utc := *spec
+		utc.Location = time.UTC
+		schedule = &utc
+	}
+	if !schedule.Next(calendarReference).IsZero() {
+		return nil
+	}
+	if calendar {
+		return fmt.Errorf("%w: its day of month does not occur in its months", ErrNeverFires)
+	}
+	return ErrNeverFires
 }
 
 // cronParser reads the shared five-field and descriptor grammar. DowOrDom keeps

@@ -313,6 +313,12 @@ func TestDurationSecondsAdmission(t *testing.T) {
 // Calendar-impossible definitions must fail before any adapter or native write.
 func TestCronRejectsSchedulesThatNeverFire(t *testing.T) {
 	for _, trigger := range []Trigger{
+		{Kind: "cron", Cron: "@manual"},
+		{Kind: "cron", Cron: "@triggered"},
+		{Kind: "cron", Cron: "@none"},
+		{Kind: "cron", Cron: "CRON_TZ=UTC @manual", Timezone: "UTC"},
+		{Kind: "cron", Cron: "CRON_TZ=UTC @triggered", Timezone: "UTC"},
+		{Kind: "cron", Cron: "CRON_TZ=UTC @none", Timezone: "UTC"},
 		{Kind: "cron", Cron: "0 0 30 2 *"},
 		{Kind: "cron", Cron: "0 0 31 4 *"},
 		{Kind: "cron", Cron: "0 0 31 2,4,6,9,11 *"},
@@ -335,7 +341,11 @@ func TestCronRejectsSchedulesThatNeverFire(t *testing.T) {
 						job.Trigger, job.Enabled = trigger, enabled
 						err = job.Validate()
 						require.ErrorIs(t, err, ErrInvalid)
+						require.ErrorIs(t, err, ErrNeverFires)
 						require.ErrorContains(t, err, "never fires")
+						if strings.Contains(trigger.Cron, "@") {
+							require.Equal(t, ErrNeverFires.Error(), err.Error())
+						}
 					})
 				}
 			}

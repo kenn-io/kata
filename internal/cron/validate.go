@@ -16,6 +16,9 @@ import (
 // ErrInvalid identifies a malformed or unsupported portable document.
 var ErrInvalid = errors.New("invalid cron document")
 
+// ErrNeverFires means every other job rule passed, but its cron has no occurrence.
+var ErrNeverFires = fmt.Errorf("%w: cron expression never fires", ErrInvalid)
+
 func invalid(message string) error { return fmt.Errorf("%w: %s", ErrInvalid, message) }
 
 func decode(input []byte, out any, limit int) error {
@@ -159,7 +162,10 @@ func (j JobDefinition) Validate() error {
 	if err := validateOptions(j.Options); err != nil {
 		return err
 	}
-	return checkSize(j, DefinitionLimit)
+	if err := checkSize(j, DefinitionLimit); err != nil {
+		return err
+	}
+	return j.Trigger.requireOccurrence()
 }
 
 func validRecipient(value string) bool {

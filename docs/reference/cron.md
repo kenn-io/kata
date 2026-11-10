@@ -185,6 +185,7 @@ of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
 or `H` syntax. Kata keeps the expression exactly as written.
 Kata rejects a schedule that can never fire, such as `0 0 30 2 *` or
 `0 0 31 4 *`; `0 0 29 2 *` is accepted and fires in leap years.
+Dormant cron descriptors (`@manual`, `@triggered`, and `@none`) are also rejected.
 
 - Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
   `0 9 * * 7` runs on Sundays, `5-7` means Friday through Sunday, and `5-7/2`

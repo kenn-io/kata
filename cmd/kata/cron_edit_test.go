@@ -107,10 +107,65 @@ func requireCronEditExit(t *testing.T, err error, code int) {
 	require.Equal(t, code, ce.ExitCode)
 }
 
+func cronEditTestStaleJob(t *testing.T, env *testenv.Env, project int64, id, fault string) {
+	t.Helper()
+	job, err := env.DB.CronJob(t.Context(), project, id)
+	require.NoError(t, err)
+	job.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+	if fault == "overlap" {
+		job.Definition.Overlap = "unsupported"
+	}
+	raw, err := json.Marshal(job.Definition)
+	require.NoError(t, err)
+	_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=? WHERE uid=?`, string(raw), id)
+	require.NoError(t, err)
+}
+
+func TestCronEditStaleJobUnchangedOrUnsupported(t *testing.T) {
+	for _, fault := range []string{"", "version", "overlap"} {
+		t.Run("fault="+fault, func(t *testing.T) {
+			env, project, id, original := cronEditTestDefinition(t, "job")
+			cronEditTestStaleJob(t, env, project, id, fault)
+			session := cronEditTestEditor(t, func(_ int, _ []byte) ([]byte, error) { return nil, nil })
+			server := env.URL
+			if fault == "version" {
+				proxy := cronEditTestProxy(t, env, func(r *http.Request, status int, raw []byte) (int, []byte) {
+					if strings.HasSuffix(r.URL.Path, "/"+id) {
+						var envelope map[string]map[string]jsontext.Value
+						require.NoError(t, json.Unmarshal(raw, &envelope))
+						var definition map[string]jsontext.Value
+						require.NoError(t, json.Unmarshal(envelope["job"]["definition"], &definition))
+						definition["version"] = jsontext.Value(`2`)
+						envelope["job"]["definition"], _ = json.Marshal(definition)
+						raw, _ = json.Marshal(envelope)
+					}
+					return status, raw
+				})
+				server = proxy.URL
+			}
+			_, _, err := executeCronCLI(t, server, nil, "job", "edit", id)
+			requireCronEditExit(t, err, ExitValidation)
+			if fault == "" {
+				require.Equal(t, 2, session.calls)
+				require.ErrorContains(t, err, "never fires")
+			} else {
+				require.Zero(t, session.calls)
+				require.ErrorContains(t, err, fault)
+			}
+			stored, err := env.DB.CronJob(t.Context(), project, id)
+			require.NoError(t, err)
+			require.Equal(t, original, stored.DefinitionEventUID)
+		})
+	}
+}
+
 func TestCronEditSavesDefinitions(t *testing.T) {
 	for _, resource := range []string{"job", "workflow"} {
 		t.Run(resource, func(t *testing.T) {
 			env, project, id, original := cronEditTestDefinition(t, resource)
+			if resource == "job" {
+				cronEditTestStaleJob(t, env, project, id, "")
+			}
 			var originalStepOptions jsontext.Value
 			if resource == "workflow" {
 				before, err := env.DB.CronWorkflow(t.Context(), project, id)
@@ -119,7 +174,7 @@ func TestCronEditSavesDefinitions(t *testing.T) {
 			}
 			session := cronEditTestEditor(t, func(_ int, raw []byte) ([]byte, error) {
 				require.Contains(t, string(raw), original)
-				return cronEditTestRename(raw, "  Updated inspection  "), nil
+				return cronEditTestRename(bytes.ReplaceAll(raw, []byte("0 0 30 2 *"), []byte("0 0 28 2 *")), "  Updated inspection  "), nil
 			})
 			out, _, err := executeCronCLI(t, env.URL, nil, resource, "edit", strings.ToLower(id))
 			require.NoError(t, err)
@@ -847,6 +902,7 @@ func TestCronEditConflictFallsBackToShow(t *testing.T) {
 						next, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{UID: id, ProjectID: project, Name: "Other writer", Definition: job.Definition, ExpectedEventUID: original, Actor: "other"})
 						require.NoError(t, err)
 						current = next.DefinitionEventUID
+						cronEditTestStaleJob(t, env, project, id, "")
 					} else {
 						workflow, err := env.DB.CronWorkflow(t.Context(), project, id)
 						require.NoError(t, err)

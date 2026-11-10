@@ -233,10 +233,26 @@ func TestCronFormNotifyEditKeepsStoredOverlap(t *testing.T) {
 }
 
 func TestCronFormRefusesFutureVersion(t *testing.T) {
-	rec := executeRecord(`{}`)
-	rec.Definition.Version = 2
-	_, err := cronFormFor(rec, nil)
-	require.Error(t, err)
+	for _, fault := range []string{"version", "overlap", "options"} {
+		t.Run(fault, func(t *testing.T) {
+			rec := executeRecord(`{}`)
+			rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+			switch fault {
+			case "version":
+				rec.Definition.Version = 2
+			case "overlap":
+				rec.Definition.Overlap = "unsupported"
+			case "options":
+				rec.Definition.Options = []byte(`{"token":"fixture"}`)
+			}
+			_, err := cronFormFor(rec, nil)
+			if fault == "options" {
+				require.ErrorContains(t, err, "credentials")
+			} else {
+				require.ErrorContains(t, err, fault)
+			}
+		})
+	}
 }
 
 func TestCronFormCatchupLatestClearsGrace(t *testing.T) {
