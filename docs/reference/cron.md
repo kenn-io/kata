@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-10
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -183,6 +183,8 @@ A `cron` expression has five fields: minute, hour, day of month, month, and day
 of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
 `@monthly`, or `@yearly`. Kata does not accept seconds, years, `L`, `W`, `#`,
 or `H` syntax. Kata keeps the expression exactly as written.
+Kata rejects a schedule that can never fire, such as `0 0 30 2 *` or
+`0 0 31 4 *`; `0 0 29 2 *` is accepted and fires in leap years.
 
 - Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
   `0 9 * * 7` runs on Sundays, `5-7` means Friday through Sunday, and `5-7/2`
@@ -318,6 +320,15 @@ The existing daemon sweep runs at startup and every 30 seconds by default. Keep 
 for unattended delivery. Local projects deliver locally; federated projects
 deliver only on their enabled owning hub. Spokes never deliver.
 
+Upgrade federated projects in one window. Some releases reject cron
+definitions that older releases accepted, or accept syntax older releases
+reject. A hub that rejects an event a spoke pushes quarantines that spoke's
+whole relay batch, up to 1024 events. To avoid that, stop creating and
+editing cron definitions, and let every spoke drain its relay queue until
+the hub has acknowledged it, including offline spokes and pending retries.
+Then upgrade the hub and all its spokes in the same window. Only after that,
+use newly accepted syntax.
+
 Direct spokes with push enabled can create, update, delete, and restore native
 recurring jobs through their existing enrollment. Each request checks hub
 support, pushes pending local events (including a newly created parent), and
@@ -374,6 +385,9 @@ missing or malformed; ordinary issue writes and spoke ingest cannot change or
 delete progress or occurrence provenance. Recurrence templates also reject these
 system keys, including when older templates are materialized. Inspect that state before recovery;
 there is no implicit reset that could recreate already delivered children.
+A job stored by an older release with a schedule that never fires keeps
+failing each sweep with the validation error; update its schedule or delete
+it.
 Native jobs reject execution timeouts, secrets, adapter options, checkout keys,
 and issue date offsets.
 
