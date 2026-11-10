@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"testing"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
@@ -166,6 +167,42 @@ func checkRecurringDeliveryStatus(t *testing.T, s db.Storage) error {
 	out, err = s.RecurringCronDelivery(ctx, p.ID, []db.CronJob{j, adapter}, now)
 	require.NoError(t, err)
 	require.Nil(t, out[1])
+	return nil
+}
+
+// Delivery reads of stored definitions retain the shared parser's day-field OR,
+// minute wildcard and zone semantics.
+func checkRecurringDeliveryLegacyJobs(t *testing.T, s db.Storage) error {
+	p, parent, j, _ := recurringFixture(t, s, "all")
+	anchor := time.Date(2026, time.October, 1, 12, 0, 0, 0, time.UTC)
+	progress := cron.RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
+	raw, err := json.Marshal(map[string]any{"cron.progress." + j.UID: progress})
+	require.NoError(t, err)
+	deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, string(raw), parent.ID)
+	for _, tc := range []struct {
+		name    string
+		trigger cron.Trigger
+		state   string
+		next    time.Time
+	}{
+		{"both day fields", cron.Trigger{Kind: "cron", Cron: "0 9 1-7 * 2"}, "behind", time.Date(2026, time.October, 2, 9, 0, 0, 0, time.UTC)},
+		{"wildcard minute", cron.Trigger{Kind: "cron", Cron: "* 9 * * *"}, "behind", time.Date(2026, time.October, 2, 9, 0, 0, 0, time.UTC)},
+		{"nonportable zone", cron.Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "EST"}, "behind", time.Date(2026, time.October, 1, 14, 0, 0, 0, time.UTC)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			j.Definition.Trigger = tc.trigger
+			raw, err := json.Marshal(j.Definition)
+			require.NoError(t, err)
+			deliveryExec(t, s, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(raw), j.UID)
+			stored, err := s.CronJob(t.Context(), p.ID, j.UID)
+			require.NoError(t, err)
+			d := deliveryRead(t, s, p, stored, anchor.Add(24*time.Hour))
+			require.Empty(t, d.Error)
+			require.Equal(t, tc.state, d.State)
+			require.NotNil(t, d.NextDueAt)
+			require.Equal(t, tc.next, *d.NextDueAt)
+		})
+	}
 	return nil
 }
 
