@@ -59,7 +59,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
 	capabilities.Short = "discover local protocol support without creating cron state"
-	command.AddCommand(runs, capabilities)
+	command.AddCommand(runs, capabilities, newCronExportCmd(), newCronImportCmd(), newCronCopyCmd())
 	return command
 }
 
@@ -206,8 +206,8 @@ func cronCLIValidation(message string) error {
 	return &cliError{Message: message, Kind: kindValidation, ExitCode: ExitValidation}
 }
 func normalizedCronCLIUID(value string) (string, error) {
-	value = strings.ToUpper(strings.TrimSpace(value))
-	if !uid.Valid(value) {
+	value, ok := uid.Normalize(value)
+	if !ok {
 		return "", cronCLIValidation("cron identity must be a 26-character ULID")
 	}
 	return value, nil

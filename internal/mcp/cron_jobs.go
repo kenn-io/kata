@@ -66,7 +66,7 @@ func (h toolHandlers) cronPutJob(ctx context.Context, in CronJobCreateInput, exp
 		return nil, generated.ReplaceCronJobResponse{}, err
 	}
 	if strings.TrimSpace(in.ParentRef) != "" {
-		parent, err := h.cronParent(ctx, p, in.ParentRef)
+		parent, err := h.cronIssueRef(ctx, p, "parent_ref", in.ParentRef)
 		if err != nil {
 			return nil, generated.ReplaceCronJobResponse{}, err
 		}
@@ -87,13 +87,13 @@ func (h toolHandlers) cronPutJob(ctx context.Context, in CronJobCreateInput, exp
 	}
 	return cronResult(h.options.Client.ReplaceCronJob(ctx, &generated.ReplaceCronJobRequestOptions{PathParams: &generated.ReplaceCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ReplaceCronJobBody{Actor: &h.options.Actor, Name: in.Name, Definition: in.Definition, ExpectedEventUID: expected}}))
 }
-func (h toolHandlers) cronParent(ctx context.Context, p ProjectIdentity, raw string) (string, error) {
+func (h toolHandlers) cronIssueRef(ctx context.Context, p ProjectIdentity, field, raw string) (string, error) {
 	parsed, err := shortid.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return "", err
 	}
 	if parsed.Project != "" && parsed.Project != p.Name {
-		return "", errors.New("parent_ref must belong to the selected project")
+		return "", fmt.Errorf("%s must belong to the selected project", field)
 	}
 	ref := parsed.ShortID
 	if parsed.ULID != "" {
@@ -104,7 +104,7 @@ func (h toolHandlers) cronParent(ctx context.Context, p ProjectIdentity, raw str
 		return "", err
 	}
 	if shown.Issue.ProjectID != p.ID || (p.UID != "" && (shown.Issue.ProjectUID == nil || *shown.Issue.ProjectUID != p.UID)) {
-		return "", fmt.Errorf("parent_ref resolved outside project %q", p.Name)
+		return "", fmt.Errorf("%s resolved outside project %q", field, p.Name)
 	}
 	return shown.Issue.UID, nil
 }

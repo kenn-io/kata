@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Export and copy cron jobs and workflows through MCP with `kata.cron_export`
+  and `kata.cron_import`. See the [MCP reference](reference/mcp.md#native-cron-through-mcp).
 - Keep search focus and text when keyboard selection opens task detail.
 - Keep local writes responsive while a federation pull updates projects with long histories.
 - See why Docbank attachments fail when the daemon cannot read its own key.

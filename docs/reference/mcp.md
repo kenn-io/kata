@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Model Context Protocol server
@@ -352,7 +352,7 @@ typed tools needed for the current task instead of placing every detailed tool i
 model context at startup.
 
 The first `tools/list` from the workspace-bound default `kata mcp serve` is about 21 KB for 19 tools.
-With every section available by default loaded, it is about 263 KB for 110 tools;
+With every section available by default loaded, it stays below 289 KB for 112 tools;
 output schemas account for about two thirds. A test keeps these catalogs under
 24 KB and 289 KB, including every section loader. Detailed storage, team, and token tools
 require startup flags and fall outside these default catalogs.
@@ -362,7 +362,7 @@ require startup flags and fall outside these default catalogs.
 | `kata.load_issue_discovery` | `kata.search`, `kata.list`, `kata.show`, `kata.ready`, `kata.next`, `kata.labels`, `kata.graph` |
 | `kata.load_issue_mutation` | `kata.create`, `kata.edit`, `kata.comment`, `kata.edit_comment`, `kata.claim`, `kata.set_label`, `kata.set_metadata`, `kata.set_schedule`, `kata.set_deadline`, `kata.move` |
 | `kata.load_coordination` | `kata.assign`, `kata.unassign`, `kata.inbox`, `kata.status` |
-| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
+| `kata.load_cron` | `kata.cron_export`, `kata.cron_import`, `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 | `kata.load_issue_lifecycle` | `kata.close`, `kata.reopen`, `kata.delete`, `kata.restore`, `kata.purge`, `kata.wait`, `kata.audit_closes` |
 | `kata.load_leases` | `kata.lease_status`, `kata.lease`, `kata.lease_force_release`, `kata.lease_steal` |
 | `kata.load_projects` | `kata.projects`, `kata.project_show`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
@@ -482,6 +482,7 @@ the separate `kata.load_recurrence` tools manage RRULE issue templates.
 | Discovery and identity | `kata.cron_capabilities`, `kata.cron_new_uid` |
 | Jobs | `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore` |
 | Workflows | `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore` |
+| Copy definitions | `kata.cron_export`, `kata.cron_import` |
 | Run evidence | `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 
 Every operation uses the MCP server's configured daemon credentials, project
@@ -497,10 +498,28 @@ response, read the same UID with `kata.cron_job` or `kata.cron_workflow`; repeat
 a create preserves the daemon's conflict rather than becoming an update.
 
 Update, delete, and restore require the current `expected_event_uid`. Read the
-current definition after a conflict and decide whether to retry; MCP never fetches
-a new CAS value on the caller's behalf. Delete is the existing reversible cron
-tombstone operation. Workflow-in-use checks and native parent bindings are
+current definition after a conflict and decide whether to retry. These individual
+mutation tools never fetch a new CAS value on the caller's behalf. Delete is the
+existing reversible cron tombstone operation. Workflow-in-use checks and native parent bindings are
 preserved. Typed definitions and opaque option objects retain exact JSON numbers.
+
+Export selected `job_uids`, `workflow_uids`, or `all: true` with
+`kata.cron_export`, then pass its bundle object to `kata.cron_import` with the
+target `project`. The target must be in the server's startup scope; use
+`--projects source-project,target-project` or `--all` for copies between projects.
+Across hubs, export through the source daemon's MCP server and import through
+the target daemon's MCP server. Jobs include their workflows. Copies receive
+deterministic UIDs and start disabled unless `keep_enabled` is true. Cross-project issue references
+require `issue_mappings` from source issue UIDs to destination issue references.
+Use `dry_run` to predict outcomes without writes. With `replace`, import reads
+the authoritative conflict revision and attempts one guarded replacement.
+A stopped import returns an error with its partial per-item report intact.
+Retry interrupted imports with the same bundle and options; `replace` can
+overwrite later edits to completed copies.
+The bundle archive limit is 16 MiB; MCP messages are limited to 8 MiB. An export
+response includes both the structured bundle and its JSON text representation,
+plus the envelope; all of these count toward that limit. Use
+[CLI export and import](cron.md#copy-jobs-and-workflows) for bundles too large for MCP.
 
 `kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
 and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`
