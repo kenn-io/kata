@@ -584,12 +584,15 @@ type MoveIssuesBatchIn struct {
 	AuthorizeProjects        func([]string) error
 }
 
+// MoveIssueBatchResult retains one root move or its isolated refusal.
 type MoveIssueBatchResult struct {
 	Out             MoveIssueProjectOut
 	Err             error
 	CommentEvent    *Event
 	ShortIDExtended bool
 }
+
+// MoveIssuesBatchOut preserves input ordering after the chunk commits.
 type MoveIssuesBatchOut struct{ Results []MoveIssueBatchResult }
 
 // IfMatch wraps a revision for the optional IfMatchRev fields on the

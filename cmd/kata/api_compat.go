@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	apiVersionMoveBatch                 = "0.45.0"
 	apiVersionSearchStatus              = "0.20.0"
 	apiVersionListSort                  = "0.21.0"
 	apiVersionDiscoveryPagination       = "0.27.0"

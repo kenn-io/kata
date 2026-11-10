@@ -1,10 +1,19 @@
 package dbtest
 
 import (
+	"slices"
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"testing"
 )
+
+// Both backends classify this synthetic driver failure as transaction-retryable.
+type batchRetryProbe struct{}
+
+func (batchRetryProbe) Error() string    { return "synthetic transient transaction failure" }
+func (batchRetryProbe) Code() int        { return 5 } // SQLITE_BUSY
+func (batchRetryProbe) SQLState() string { return "40001" }
 
 // Contract: a batch isolates refusals and commits moves and comments together,
 // while previews leave both events and access authority unchanged.
@@ -14,6 +23,7 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	a, err := store.CreateProject(ctx, "batch-a")
 	require.NoError(t, err)
+	require.NoError(t, store.CheckIssueMovePair(ctx, src.ID, a.ID))
 	b, err := store.CreateProject(ctx, "batch-b")
 	require.NoError(t, err)
 	var issues []db.Issue
@@ -76,6 +86,74 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	access, err = store.ProjectAccessRevision(ctx)
 	require.NoError(t, err)
 	require.Equal(t, revision+1, access)
+	// Contract: an authorization refusal rolls back only its savepoint, even
+	// after admission has checked its source project inside the transaction.
+	deniedSource, err := store.CreateProject(ctx, "batch-denied-source")
+	require.NoError(t, err)
+	denied, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: deniedSource.ID, Title: "denied", Author: "worker"})
+	require.NoError(t, err)
+	allowed, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: src.ID, Title: "allowed", Author: "worker"})
+	require.NoError(t, err)
+	isolated, err := store.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{
+		Actor: "worker", Comment: "routed with authorization",
+		Items: []db.MoveIssueProjectIn{
+			{IssueID: denied.ID, FromProjectID: deniedSource.ID, ToProjectID: a.ID, IfMatchRev: denied.Revision, Single: true},
+			{IssueID: allowed.ID, FromProjectID: src.ID, ToProjectID: a.ID, IfMatchRev: allowed.Revision, Single: true},
+		},
+		AuthorizeProjects: func(uids []string) error {
+			if slices.Contains(uids, deniedSource.UID) {
+				return db.ErrNotFound
+			}
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, isolated.Results[0].Err, db.ErrNotFound)
+	require.NoError(t, isolated.Results[1].Err)
+	for _, entry := range []struct {
+		issue    db.Issue
+		project  int64
+		comments int
+	}{{denied, deniedSource.ID, 0}, {allowed, a.ID, 1}} {
+		got, err := store.IssueByID(ctx, entry.issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, entry.project, got.ProjectID)
+		comments, err := store.CommentsByIssue(ctx, entry.issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, entry.comments)
+	}
+	// A transient failure after one item wrote retries the complete chunk and
+	// exposes only the successful attempt's events and comments.
+	retryA, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: src.ID, Title: "retry a", Author: "worker"})
+	require.NoError(t, err)
+	retryB, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: deniedSource.ID, Title: "retry b", Author: "worker"})
+	require.NoError(t, err)
+	injected := false
+	retried, err := store.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Actor: "worker", Comment: "exactly once", Items: []db.MoveIssueProjectIn{
+		{IssueID: retryA.ID, FromProjectID: src.ID, ToProjectID: a.ID, IfMatchRev: retryA.Revision, Single: true},
+		{IssueID: retryB.ID, FromProjectID: deniedSource.ID, ToProjectID: a.ID, IfMatchRev: retryB.Revision, Single: true},
+	}, AuthorizeProjects: func(uids []string) error {
+		for _, uid := range uids {
+			if uid == deniedSource.UID && !injected {
+				injected = true
+				return batchRetryProbe{}
+			}
+		}
+		return nil
+	}})
+	require.NoError(t, err)
+	require.True(t, injected)
+	for n, issue := range []db.Issue{retryA, retryB} {
+		require.NoError(t, retried.Results[n].Err)
+		got, err := store.IssueByID(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, a.ID, got.ProjectID)
+		require.Equal(t, issue.Revision+1, got.Revision)
+		comments, err := store.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		require.Len(t, retried.Results[n].Out.Events, 2)
+	}
 	return nil
 }
 

@@ -135,6 +135,10 @@ type ListAllIssuesResponse = ListAllIssuesResponseBody
 
 type ListAllIssuesErrorResponse = ErrorEnvelope
 
+type MoveIssuesResponse = MoveIssuesResponseBody
+
+type MoveIssuesErrorResponse = ErrorEnvelope
+
 type ShowIssueByUIDResponse = ShowIssueResponseBody
 
 type ShowIssueByUIDErrorResponse = ErrorEnvelope
@@ -878,6 +882,14 @@ type ListAllIssuesResp struct {
 	StatusCode   int
 	JSON200      *ListAllIssuesResponse
 	JSONDefault  *ListAllIssuesErrorResponse
+}
+
+type MoveIssuesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *MoveIssuesResponse
+	JSONDefault  *MoveIssuesErrorResponse
 }
 
 type ShowIssueByUIDResp struct {

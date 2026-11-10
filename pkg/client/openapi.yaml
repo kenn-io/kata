@@ -4650,6 +4650,137 @@ components:
         - event_id
         - changed
       type: object
+    MoveIssuesItem:
+      additionalProperties: false
+      properties:
+        expected_revision:
+          format: int64
+          minimum: 0
+          type: integer
+        ref:
+          minLength: 1
+          type: string
+        to_project_uid:
+          type: string
+      required:
+        - ref
+      type: object
+    MoveIssuesRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        comment:
+          type: string
+        default_project_id:
+          format: int64
+          type: integer
+        dry_run:
+          type: boolean
+        items:
+          items:
+            $ref: "#/components/schemas/MoveIssuesItem"
+          maxItems: 5000
+          minItems: 1
+          type: array
+        start_index:
+          format: int64
+          minimum: 0
+          type: integer
+        subtree:
+          type: boolean
+        teammate:
+          type: string
+        to_project_uid:
+          type: string
+      required:
+        - items
+      type: object
+    MoveIssuesResponseBody:
+      properties:
+        next_index:
+          format: int64
+          type: integer
+        results:
+          items:
+            $ref: "#/components/schemas/MoveIssuesResult"
+          type: array
+        summary:
+          $ref: "#/components/schemas/MoveIssuesSummary"
+      required:
+        - results
+        - next_index
+        - summary
+      type: object
+    MoveIssuesResult:
+      properties:
+        code:
+          type: string
+        descendants:
+          items:
+            $ref: "#/components/schemas/Issue"
+          type: array
+        event_id:
+          format: int64
+          type: integer
+        from:
+          type: string
+        from_project_uid:
+          type: string
+        hint:
+          type: string
+        index:
+          format: int64
+          type: integer
+        message:
+          type: string
+        new_short_id:
+          type: string
+        old_short_id:
+          type: string
+        ref:
+          type: string
+        result:
+          type: string
+        revision:
+          format: int64
+          type: integer
+        short_id_extended:
+          type: boolean
+        to:
+          type: string
+        to_project_name:
+          type: string
+        to_project_uid:
+          type: string
+        uid:
+          type: string
+      required:
+        - index
+        - ref
+        - result
+        - short_id_extended
+      type: object
+    MoveIssuesSummary:
+      properties:
+        moved:
+          format: int64
+          type: integer
+        refused:
+          format: int64
+          type: integer
+        unchanged:
+          format: int64
+          type: integer
+        would_move:
+          format: int64
+          type: integer
+      required:
+        - moved
+        - unchanged
+        - refused
+        - would_move
+      type: object
     MutationResponseBody:
       properties:
         changed:
@@ -7325,7 +7456,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.45.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -8240,6 +8371,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ListAllIssuesResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/issues/actions/move:
+    post:
+      operationId: moveIssues
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveIssuesRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoveIssuesResponseBody"
           description: OK
         default:
           content:

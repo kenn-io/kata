@@ -1,13 +1,20 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Move many issues with `kata move <ref>... <project>`, `--refs-from`, or
+  project filters. Batch moves default to single issues, report each refusal,
+  and continue automatically across request budgets. Comments commit with the
+  moves and are not repeated on safe reruns. Requires daemon API 0.45.0 or newer;
+  [the CLI reference](reference/cli.md#move-many-issues) explains the formats
+  and the unchanged same-hub federation limits.
 
 - Keep search focus and text when keyboard selection opens task detail.
 - See why Docbank attachments fail when the daemon cannot read its own key.

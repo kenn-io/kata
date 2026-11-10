@@ -4908,6 +4908,135 @@ func (m MoveIssueResponseBody) Validate() error {
 	return errors
 }
 
+type MoveIssuesItem struct {
+	ExpectedRevision *int64  `json:"expected_revision,omitempty" validate:"omitempty,gte=0"`
+	Ref              string  `json:"ref" validate:"required,min=1"`
+	ToProjectUID     *string `json:"to_project_uid,omitempty"`
+}
+
+func (m MoveIssuesItem) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
+}
+
+type MoveIssuesRequestBody struct {
+	Actor            *string          `json:"actor,omitempty"`
+	Comment          *string          `json:"comment,omitempty"`
+	DefaultProjectID *int64           `json:"default_project_id,omitempty"`
+	DryRun           *bool            `json:"dry_run,omitempty"`
+	Items            []MoveIssuesItem `json:"items" validate:"required"`
+	StartIndex       *int64           `json:"start_index,omitempty" validate:"omitempty,gte=0"`
+	Subtree          *bool            `json:"subtree,omitempty"`
+	Teammate         *string          `json:"teammate,omitempty"`
+	ToProjectUID     *string          `json:"to_project_uid,omitempty"`
+}
+
+func (m MoveIssuesRequestBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(m.Items, "required"); err != nil {
+		errors = errors.Append("Items", err)
+	}
+	if m.Items != nil && len(m.Items) < 1 {
+		errors = errors.Add("Items", fmt.Sprintf("must have at least 1 items, got %d", len(m.Items)))
+	}
+	if len(m.Items) > 5000 {
+		errors = errors.Add("Items", fmt.Sprintf("must have at most 5000 items, got %d", len(m.Items)))
+	}
+	for i, item := range m.Items {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Items[%d]", i), err)
+			}
+		}
+	}
+	if m.StartIndex != nil {
+		if err := typesValidator.Var(m.StartIndex, "omitempty,gte=0"); err != nil {
+			errors = errors.Append("StartIndex", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MoveIssuesResponseBody struct {
+	NextIndex int64              `json:"next_index"`
+	Results   []MoveIssuesResult `json:"results" validate:"required"`
+	Summary   MoveIssuesSummary  `json:"summary"`
+}
+
+func (m MoveIssuesResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(m.Results, "required"); err != nil {
+		errors = errors.Append("Results", err)
+	}
+	for i, item := range m.Results {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Results[%d]", i), err)
+			}
+		}
+	}
+	if v, ok := any(m.Summary).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Summary", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MoveIssuesResult struct {
+	Code            *string `json:"code,omitempty"`
+	Descendants     []Issue `json:"descendants,omitempty"`
+	EventID         *int64  `json:"event_id,omitempty"`
+	From            *string `json:"from,omitempty"`
+	FromProjectUID  *string `json:"from_project_uid,omitempty"`
+	Hint            *string `json:"hint,omitempty"`
+	Index           int64   `json:"index"`
+	Message         *string `json:"message,omitempty"`
+	NewShortID      *string `json:"new_short_id,omitempty"`
+	OldShortID      *string `json:"old_short_id,omitempty"`
+	Ref             string  `json:"ref" validate:"required"`
+	Result          string  `json:"result" validate:"required"`
+	Revision        *int64  `json:"revision,omitempty"`
+	ShortIDExtended bool    `json:"short_id_extended"`
+	To              *string `json:"to,omitempty"`
+	ToProjectName   *string `json:"to_project_name,omitempty"`
+	ToProjectUID    *string `json:"to_project_uid,omitempty"`
+	UID             *string `json:"uid,omitempty"`
+}
+
+func (m MoveIssuesResult) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range m.Descendants {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Descendants[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(m.Ref, "required"); err != nil {
+		errors = errors.Append("Ref", err)
+	}
+	if err := typesValidator.Var(m.Result, "required"); err != nil {
+		errors = errors.Append("Result", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MoveIssuesSummary struct {
+	Moved     int64 `json:"moved"`
+	Refused   int64 `json:"refused"`
+	Unchanged int64 `json:"unchanged"`
+	WouldMove int64 `json:"would_move"`
+}
+
 type MutationResponseBody struct {
 	Changed       bool   `json:"changed"`
 	Event         Event  `json:"event"`

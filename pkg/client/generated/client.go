@@ -251,6 +251,9 @@ type ClientInterface interface {
 	ListAllIssues(ctx context.Context, options *ListAllIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListAllIssuesResponse, error)
 	ListAllIssuesWithResponse(ctx context.Context, options *ListAllIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListAllIssuesResp, error)
 
+	MoveIssues(ctx context.Context, options *MoveIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*MoveIssuesResponse, error)
+	MoveIssuesWithResponse(ctx context.Context, options *MoveIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*MoveIssuesResp, error)
+
 	ShowIssueByUID(ctx context.Context, options *ShowIssueByUIDRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowIssueByUIDResponse, error)
 	ShowIssueByUIDWithResponse(ctx context.Context, options *ShowIssueByUIDRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowIssueByUIDResp, error)
 
@@ -2566,6 +2569,69 @@ func (c *Client) ListAllIssues(ctx context.Context, options *ListAllIssuesReques
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/issues")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) MoveIssues(ctx context.Context, options *MoveIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*MoveIssuesResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/issues/actions/move",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*MoveIssuesResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(MoveIssuesErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "MoveIssuesErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(MoveIssuesResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "MoveIssuesResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/issues/actions/move")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

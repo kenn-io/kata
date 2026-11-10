@@ -30,6 +30,8 @@ type ConfigureFederationSigningBody = ConfigureFederationSigningRequestBody
 
 type RepinFederationRootKeyBody = RepinFederationRootKeyRequestBody
 
+type MoveIssuesBody = MoveIssuesRequestBody
+
 type McpEventsSubscribeBody = MCPEventsSubscribeBody
 
 type McpEventsUnsubscribeBody = MCPEventsUnsubscribeBody

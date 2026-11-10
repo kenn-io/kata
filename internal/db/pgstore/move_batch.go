@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/teammate"
 )
@@ -102,3 +103,9 @@ func (s *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 }
 
 var errBatchMovePreview = errors.New("batch move preview complete")
+
+// CheckIssueMovePair checks the shared federation gate before collecting claims.
+// The write transaction independently revalidates the gate under its access lock.
+func (s *Store) CheckIssueMovePair(ctx context.Context, from, to int64) error {
+	return db.CheckFederatedIssueMove(ctx, s, from, to)
+}

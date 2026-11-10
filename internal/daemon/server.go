@@ -47,6 +47,8 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	// MoveBatchBudget overrides the soft request budget for deterministic tests.
+	MoveBatchBudget           time.Duration
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage
