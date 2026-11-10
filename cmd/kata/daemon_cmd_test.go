@@ -56,8 +56,53 @@ func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	out := executeRoot(t, newDaemonCmd(), "status")
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
+	require.Error(t, err)
 	assert.Equal(t, "Selected daemon: local_stopped (source: local runtime)\nNo kata daemon is running in the current KATA_HOME.\n", string(out))
+}
+
+func TestDaemonStatusReadinessExit(t *testing.T) {
+	for _, mode := range []string{"human", "json", "agent"} {
+		for _, ready := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/ready=%t", mode, ready), func(t *testing.T) {
+				resetFlags(t)
+				setupKataEnv(t)
+				t.Chdir(t.TempDir())
+				if ready {
+					addr, cleanup := pipeServer(t)
+					t.Cleanup(cleanup)
+					t.Setenv("KATA_SERVER", "http://"+addr)
+				}
+				args := []string{"daemon", "status"}
+				if mode != "human" {
+					args = append(args, "--"+mode)
+				}
+				stdout, stderr, err := executeRootCapture(t, t.Context(), args...)
+				if ready {
+					require.NoError(t, err, "a ready selected remote does not require current-home processes")
+					assert.Empty(t, stderr)
+				} else {
+					require.Error(t, err)
+					assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
+					assert.NotEmpty(t, stderr)
+				}
+				switch mode {
+				case "json":
+					var status daemonStatusOutput
+					require.NoError(t, json.Unmarshal([]byte(stdout), &status))
+					assert.Empty(t, status.Daemons)
+				case "agent":
+					prefix := "ERR daemon status=stopped"
+					if ready {
+						prefix = "OK daemon status=stopped"
+					}
+					assert.True(t, strings.HasPrefix(stdout, prefix), stdout)
+				default:
+					assert.Contains(t, stdout, "No kata daemon is running in the current KATA_HOME.")
+				}
+			})
+		}
+	}
 }
 
 func TestDaemonLocate_JSONReportsConfiguredRemoteWithoutSecrets(t *testing.T) {
@@ -309,7 +354,8 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	out := string(executeRoot(t, newRootCmd(), "daemon", "status"))
+	out, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status")
+	require.Error(t, statusErr)
 
 	assert.Contains(t, out, "kata running at http://127.0.0.1:7777\n")
 	assert.Contains(t, out, "  web UI:  http://127.0.0.1:28888\n")
@@ -342,7 +388,9 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	out := executeRoot(t, newRootCmd(), "daemon", "status", "--json")
+	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	require.Error(t, statusErr)
+	out := []byte(stdout)
 
 	var got struct {
 		KataAPIVersion int `json:"kata_api_version"`
@@ -390,7 +438,9 @@ func TestDaemonStatus_JSONReportsDBPathFromKitRuntimeMetadata(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	out := executeRoot(t, newRootCmd(), "daemon", "status", "--json")
+	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	require.Error(t, statusErr)
+	out := []byte(stdout)
 
 	var got struct {
 		Daemons []struct {
@@ -406,7 +456,9 @@ func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	out := executeRoot(t, newRootCmd(), "daemon", "status", "--json")
+	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	require.Error(t, statusErr)
+	out := []byte(stdout)
 
 	var got struct {
 		KataAPIVersion int            `json:"kata_api_version"`
@@ -432,7 +484,7 @@ func TestDaemonStatus_JSONDegradesOnNonPrivateRuntimeDirectory(t *testing.T) {
 
 	stdout, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 
-	require.NoError(t, err)
+	require.Error(t, err)
 	var got struct {
 		Daemons  []json.RawMessage `json:"daemons"`
 		Selected struct {
@@ -448,8 +500,10 @@ func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
-	assert.Equal(t, "OK daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
+	stdout, _, statusErr := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+	require.Error(t, statusErr)
+	out := []byte(stdout)
+	assert.Equal(t, "ERR daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
 }
 
 func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
@@ -458,9 +512,11 @@ func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	child := startSleepProcess(t)
 	writeReusedRuntimePID(t, tmp, child.Process.Pid)
 
-	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
+	stdout, _, statusErr := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+	require.Error(t, statusErr)
+	out := []byte(stdout)
 
-	assert.Equal(t, "OK daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
+	assert.Equal(t, "ERR daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
 }
 
 // Discovery can select a daemon whose identity this process cannot check, so
@@ -471,7 +527,9 @@ func TestDaemonStatus_ListsUnverifiableRecord(t *testing.T) {
 	child := startSleepProcess(t)
 	writeUnknownRuntimePID(t, child.Process.Pid)
 
-	out := executeRoot(t, newRootCmd(), "daemon", "status", "--json")
+	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	require.Error(t, statusErr)
+	out := []byte(stdout)
 
 	var got struct {
 		Daemons []struct {
@@ -496,8 +554,10 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
-	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
+	stdout, _, statusErr := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+	require.Error(t, statusErr)
+	out := []byte(stdout)
+	assert.True(t, strings.HasPrefix(string(out), "ERR daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
 }
 
@@ -520,13 +580,19 @@ func TestDaemonStatusReportsMCPState(t *testing.T) {
 					MCP string `json:"mcp"`
 				} `json:"daemons"`
 			}
-			require.NoError(t, json.Unmarshal(executeRoot(t, newRootCmd(), "daemon", "status", "--json"), &got))
+			stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+			require.Error(t, statusErr)
+			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 			require.Len(t, got.Daemons, 1)
 			assert.Equal(t, state, got.Daemons[0].MCP)
 			resetFlags(t)
-			assert.Contains(t, string(executeRoot(t, newRootCmd(), "--agent", "daemon", "status")), " mcp="+state+" ")
+			stdout, _, statusErr = executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+			require.Error(t, statusErr)
+			assert.Contains(t, stdout, " mcp="+state+" ")
 			resetFlags(t)
-			assert.Contains(t, string(executeRoot(t, newRootCmd(), "daemon", "status")), "  MCP:     "+state+"\n")
+			stdout, _, statusErr = executeRootCapture(t, t.Context(), "daemon", "status")
+			require.Error(t, statusErr)
+			assert.Contains(t, stdout, "  MCP:     "+state+"\n")
 		})
 	}
 }

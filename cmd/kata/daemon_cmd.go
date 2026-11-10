@@ -667,6 +667,10 @@ func daemonStatusCmd() *cobra.Command {
 				selected = selectionErrorDiagnosis(err)
 			}
 			out.Selected = &selected
+			var statusErr error
+			if selected.State != "ready" {
+				statusErr = diagnosisError(selected)
+			}
 			for _, r := range recs {
 				// Match discovery, which can select a record controls skip.
 				if daemonruntime.RuntimeRecordWorthProbing(r) {
@@ -702,10 +706,19 @@ func daemonStatusCmd() *cobra.Command {
 				if selected.RootSigning != nil {
 					message += " root_signing=unavailable"
 				}
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s selected_state=%s selected_profile=%s%s\n", status, daemonFields, selected.State, agentValue(selected.Profile), message)
-				return err
+				prefix := "OK"
+				if statusErr != nil {
+					prefix = "ERR"
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s daemon status=%s%s selected_state=%s selected_profile=%s%s\n", prefix, status, daemonFields, selected.State, agentValue(selected.Profile), message); err != nil {
+					return err
+				}
+				return statusErr
 			case outputJSON:
-				return emitJSON(cmd.OutOrStdout(), out)
+				if err := emitJSON(cmd.OutOrStdout(), out); err != nil {
+					return err
+				}
+				return statusErr
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Selected daemon: %s (source: %s)\n", selected.State, selected.Source); err != nil {
 				return err
@@ -722,7 +735,7 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			if len(out.Daemons) == 0 {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No kata daemon is running in the current KATA_HOME.")
-				return nil
+				return statusErr
 			}
 			for _, d := range out.Daemons {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "kata running at %s\n", daemonStatusAddress(d.Address))
@@ -739,7 +752,7 @@ func daemonStatusCmd() *cobra.Command {
 					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  uptime:  %s\n", uptime)
 				}
 			}
-			return nil
+			return statusErr
 		},
 	}
 }
