@@ -168,11 +168,17 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			require.NoError(t, err)
 			if tc.ready {
 				require.Equal(t, "restart", status.Job.State, status.Job.Error)
+				chosen, err := embedlocal.ChoiceRecorded()
+				require.NoError(t, err)
+				require.True(t, chosen)
 				require.False(t, status.CanChange)
 			} else {
 				require.Equal(t, "failed", status.Job.State)
 				require.Contains(t, status.Job.Error, "pgvector")
 				require.Zero(t, installs.Load())
+				chosen, err := embedlocal.ChoiceRecorded()
+				require.NoError(t, err)
+				require.False(t, chosen)
 				require.Equal(t, original, data)
 				require.True(t, status.CanChange, "the owner can retry after database preparation")
 			}
@@ -189,7 +195,18 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 				return result.Mode, len(result.Results), err
 			}
 			stop()
+			if tc.ready {
+				// Simulate another app recording the choice before this daemon starts.
+				require.NoError(t, os.WriteFile(path, original, 0o600))
+			}
 			baseURL, _ = launch()
+			if tc.ready {
+				request("GET", "/api/v1/embeddings/local", "", 200, &status)
+				require.Equal(t, "built_in", status.Provider)
+				saved, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
+				require.NoError(t, err)
+				require.Contains(t, string(saved), "local = true")
+			}
 			wantMode := "lexical"
 			if tc.ready {
 				wantMode = "hybrid"
@@ -205,6 +222,7 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
+	t.Setenv("HOME", t.TempDir())
 	original := []byte("[search.embeddings]\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"nomic-embed-text\"\ndims = 768\n")
 	path := filepath.Join(home, "config.toml")
 	require.NoError(t, os.WriteFile(path, original, 0o600))
@@ -217,4 +235,92 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	got, err := os.ReadFile(path) // #nosec G304 -- configuration in the isolated test home
 	require.NoError(t, err)
 	require.Equal(t, original, got, "a page loaded while search was off cannot switch a provider saved later")
+	chosen, err := embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.False(t, chosen)
+}
+
+func TestSharedChoiceEnablesStartup(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	home := setupKataEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, embedlocal.RecordChoice())
+	cfg, err := config.ReadSearchConfig()
+	require.NoError(t, err)
+	next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, nil)
+	require.NoError(t, err)
+	require.True(t, next.UsesLocal())
+	data, err := os.ReadFile(filepath.Join(home, "config.toml")) // #nosec G304 -- isolated test configuration
+	require.NoError(t, err)
+	require.Contains(t, string(data), "local = true")
+}
+
+func TestSharedChoicePreservesStartupProviders(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, env string
+		choice          bool
+	}{
+		{name: "no choice"},
+		{name: "file provider", file: "[search.embeddings]\nbase_url = 'https://embeddings.example/v1'\nmodel = 'example'\ndims = 768\n", choice: true},
+		{name: "environment provider", env: "https://embeddings.example/v1", choice: true},
+		{name: "pgvector unavailable", choice: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearLocalEmbeddingsEnv(t)
+			home := setupKataEnv(t)
+			t.Setenv("HOME", t.TempDir())
+			if tc.env != "" {
+				t.Setenv("KATA_SEARCH_EMBEDDINGS_BASE_URL", tc.env)
+				t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "example")
+				t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", "768")
+			}
+			path := filepath.Join(home, "config.toml")
+			require.NoError(t, os.WriteFile(path, []byte(tc.file), 0o600))
+			if tc.choice {
+				require.NoError(t, embedlocal.RecordChoice())
+			}
+			cfg, err := config.ReadSearchConfig()
+			require.NoError(t, err)
+			next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, func(context.Context) error { return fmt.Errorf("pgvector unavailable") })
+			if tc.name == "pgvector unavailable" {
+				require.ErrorContains(t, err, "pgvector")
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, cfg.Embeddings, next)
+			data, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
+			require.NoError(t, err)
+			require.Equal(t, tc.file, string(data))
+		})
+	}
+}
+
+func TestSavedLocalRecordsSharedChoice(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	setupKataEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
+	require.NoError(t, err)
+	_, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, nil)
+	require.NoError(t, err)
+	chosen, err := embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.True(t, chosen)
+}
+
+func TestSharedChoicePreservesProviderSavedAfterPreflight(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	home := setupKataEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, embedlocal.RecordChoice())
+	current, err := config.ReadSearchConfig()
+	require.NoError(t, err)
+	original := "[search.embeddings]\nbase_url = 'https://embeddings.example/v1'\nmodel = 'example'\ndims = 768\n"
+	path := filepath.Join(home, "config.toml")
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
+	_, err = applySharedEmbeddingChoice(t.Context(), current.Embeddings, nil)
+	require.ErrorContains(t, err, "changed")
+	data, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
+	require.NoError(t, err)
+	require.Equal(t, original, string(data))
 }

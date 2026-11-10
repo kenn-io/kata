@@ -97,6 +97,7 @@ func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
 }
 
 func TestLocalEmbeddingsFreshOllama(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	clearLocalEmbeddingsEnv(t)
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
@@ -124,6 +125,9 @@ func TestLocalEmbeddingsFreshOllama(t *testing.T) {
 	require.Equal(t, "http://127.0.0.1:11434/v1", cfg.Embeddings.BaseURL)
 	require.Equal(t, "nomic-embed-text", cfg.Embeddings.Model)
 	require.False(t, cfg.Embeddings.Local)
+	chosen, err := embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.False(t, chosen)
 }
 
 func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
@@ -172,6 +176,7 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 }
 
 func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
 	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
@@ -348,4 +353,24 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLocalEmbeddingsDaemonApprovesRecordedChoice(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	clearLocalEmbeddingsEnv(t)
+	home := setupKataEnv(t)
+	require.NoError(t, embedlocal.RecordChoice())
+	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "", embedlocal.ErrNotFound }
+	localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		approved, err := opts.Confirm(ctx, 290_000_000)
+		require.NoError(t, err)
+		require.True(t, approved)
+		return embedlocal.Installation{}, errors.New("installation reached")
+	}
+	client, _, err := preflightEmbeddingStartup(config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text"}, filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	_, err = client.Embed(t.Context(), []string{"x"})
+	require.ErrorContains(t, err, "installation reached")
 }

@@ -1464,6 +1464,30 @@ func runDaemonProcess(
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	maps.Copy(rec.Metadata, restart.metadata())
 
+	var vectorReady func(context.Context) error
+	if pg, ok := store.(*pgstore.Store); ok {
+		vectorReady = func(ctx context.Context) error {
+			idx, err := vector.OpenPostgres(ctx, pg.DB)
+			if err != nil {
+				return fmt.Errorf("install pgvector in this daemon's database, then try again: %w", err)
+			}
+			return idx.Close()
+		}
+	}
+	chosen, choiceErr := applySharedEmbeddingChoice(ctx, dcfg.Search.Embeddings, vectorReady)
+	if choiceErr == nil && chosen != dcfg.Search.Embeddings {
+		startup.Embedder, startup.VectorsPath, choiceErr = preflightEmbeddingStartup(chosen, dbPath)
+		if choiceErr == nil {
+			dcfg.Search.Embeddings = chosen
+		}
+	}
+	if choiceErr != nil {
+		daemonLog.Printf("shared embeddings choice: %v", choiceErr)
+		if dcfg.Search.Embeddings.UsesLocal() {
+			startup.Embedder = nil
+		}
+	}
+
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
 	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconciler(
@@ -1627,15 +1651,7 @@ func runDaemonProcess(
 		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
 		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
 	}
-	if pg, ok := store.(*pgstore.Store); ok {
-		localSetup.vectorReady = func(ctx context.Context) error {
-			idx, err := vector.OpenPostgres(ctx, pg.DB)
-			if err != nil {
-				return fmt.Errorf("install pgvector in this daemon's database, then try again: %w", err)
-			}
-			return idx.Close()
-		}
-	}
+	localSetup.vectorReady = vectorReady
 
 	// Start the Events worker only after the last fallible startup step, so an
 	// earlier failure cannot leave it running past the store closing.
@@ -2148,7 +2164,14 @@ func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
 		}
 		cfg.Endpoint = func(ctx context.Context) (string, error) {
 			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
-				return false, errors.New("run kata daemon local-embeddings to approve the download")
+				chosen, err := embedlocal.ChoiceRecorded()
+				if err != nil {
+					return false, err
+				}
+				if !chosen {
+					return false, errors.New("run kata daemon local-embeddings to approve the download")
+				}
+				return true, nil
 			})
 		}
 	}
