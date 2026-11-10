@@ -1786,6 +1786,15 @@ func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
 }
 
 func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing.T) {
+	testResetRetryLocalOriginEvent(t, false)
+}
+
+func TestUpgradeDuringInterruptedReset(t *testing.T) {
+	testResetRetryLocalOriginEvent(t, true)
+}
+
+func testResetRetryLocalOriginEvent(t *testing.T, upgrade bool) {
+	t.Helper()
 	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
@@ -1869,6 +1878,14 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing
 	}))
 	require.Empty(t, delivered)
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
+	if upgrade {
+		// Simulate the schema 50 state left by an old binary after insertion.
+		_, err = spoke.DB.ExecContext(ctx, `DROP TABLE federation_local_replays`)
+		require.NoError(t, err)
+		_, err = spoke.DB.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
+		require.NoError(t, err)
+		require.NoError(t, sqlitestore.UpgradeInPlace(ctx, filepath.Join(spoke.Home, "kata.db")))
+	}
 	reopened, err := sqlitestore.Open(ctx, filepath.Join(spoke.Home, "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = reopened.Close() })
