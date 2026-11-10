@@ -277,7 +277,7 @@
       ? requestedRoute
       : route,
   )
-  let inputFilters = $derived({ ...searchFilters, query: filterRoute.filters.text ?? '' })
+  let inputFilters = $derived(searchFiltersForRoute(filterRoute, viewName))
   let currentView = $derived(
     projectKataWorkspaceView({
       view: viewName,
@@ -570,19 +570,19 @@
           ? filters.status === defaultStatus
             ? []
             : [filters.status]
-          : [...route.filters.status],
+          : [...filterRoute.filters.status],
       owner:
         changed === 'owner'
           ? filters.owner.trim()
             ? [filters.owner.trim()]
             : []
-          : [...route.filters.owner],
+          : [...filterRoute.filters.owner],
       label:
         changed === 'label'
           ? filters.label.trim()
             ? [filters.label.trim()]
             : []
-          : [...route.filters.label],
+          : [...filterRoute.filters.label],
       relationship: [...(filters.relationships ?? [])],
     }
     if (filters.query.trim()) result.text = filters.query.trim()

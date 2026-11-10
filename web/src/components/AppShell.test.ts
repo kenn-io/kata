@@ -648,6 +648,63 @@ describe('AppShell', () => {
     expect(input.value).toBe('second t')
   })
 
+  test.each([
+    ['status', { status: ['closed'], owner: [], label: [], relationship: [] }],
+    ['owners', { status: [], owner: ['alice', 'bob'], label: [], relationship: [] }],
+    ['labels', { status: [], owner: [], label: ['bug', 'ui'], relationship: [] }],
+    ['relationship', { status: [], owner: [], label: [], relationship: ['blocks'] }],
+  ])('keeps pending %s when searching', async (_name, filters) => {
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const onNavigate = vi.fn()
+    render(AppShell, {
+      props: {
+        route,
+        requestedRoute: { ...route, filters },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'a' } })
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ filters: { ...filters, text: 'a' } }),
+    )
+  })
+
+  test.each(['Owner', 'Label'])('keeps consecutive %s edits while results load', async (name) => {
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const onNavigate = vi.fn()
+    const props = {
+      route,
+      requestedRoute: route,
+      snapshot: snapshot(),
+      loading: false,
+      ...mutationProps(),
+      onNavigate,
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    const input = screen.getByRole('textbox', { name }) as HTMLInputElement
+    for (const char of 'alice') {
+      await fireEvent.input(input, { target: { value: input.value + char } })
+      await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
+    }
+    expect(input.value).toBe('alice')
+    expect(onNavigate.mock.lastCall?.[0].filters[name.toLowerCase()]).toEqual(['alice'])
+  })
+
   test('stays in the landing Inbox while selecting, graphing, and narrowing', async () => {
     const onNavigate = vi.fn()
     const landing = {
