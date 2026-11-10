@@ -549,8 +549,6 @@ func TestSyncFederationMovedIssueLateEnrollment(t *testing.T) {
 	hub, projects := newMoveDeliveryHub(t, "late-source", "late-target")
 	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "late enrollment", Author: "worker"})
 	require.NoError(t, err)
-	_, _, err = hub.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "retained discussion"})
-	require.NoError(t, err)
 	spoke := newMoveDeliverySpoke(t, hub, projects[:1])
 	require.NoError(t, spoke.sync(t, 0))
 	before, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
@@ -574,16 +572,8 @@ func TestSyncFederationMovedIssueLateEnrollment(t *testing.T) {
 	retained, err := spoke.env.DB.EventsByUIDs(ctx, local.ID, []string{move.Event.UID})
 	require.ErrorIs(t, err, db.ErrNotFound, "destination recovery did not depend on receiving the move")
 	require.Empty(t, retained)
-	for range 2 {
-		require.NoError(t, spoke.sync(t, 0))
-		require.NoError(t, spoke.sync(t, 1))
-	}
 	got, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, before.ID, got.ID)
 	require.Equal(t, local.ID, got.ProjectID)
-	comments, err := spoke.env.DB.CommentsByIssue(ctx, got.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	require.Equal(t, "retained discussion", comments[0].Body)
 }

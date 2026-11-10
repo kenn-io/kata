@@ -13,7 +13,19 @@ import (
 
 // A late destination baseline must relocate an issue already held in the source,
 // even when the spoke never received the intervening issue.moved event.
-func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, hub db.Storage, backend Backend) error {
+func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, _ db.Storage, backend Backend) error {
+	for _, lifecycle := range []string{"active replicas", "pausing the source retains discussion", "destination leave preserves standalone issue"} {
+		t.Run(lifecycle, func(t *testing.T) {
+			hub := backend.Open(t)
+			t.Cleanup(func() { require.NoError(t, hub.Close()) })
+			checkFederatedSnapshotRelocationLifecycle(t, hub, backend, lifecycle)
+		})
+	}
+	return nil
+}
+
+func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, backend Backend, lifecycle string) {
+	t.Helper()
 	ctx := t.Context()
 	source, err := hub.CreateProject(ctx, "snapshot-source")
 	require.NoError(t, err)
@@ -114,23 +126,18 @@ func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, hub db.Storage, back
 	after, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, cursor, after, "repeated pulls must not create synthetic moves or reset controls")
-	t.Run("source pause retains discussion", func(t *testing.T) {
+	switch lifecycle {
+	case "pausing the source retains discussion":
 		binding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
 		require.NoError(t, err)
 		binding.Enabled = false
 		_, err = spoke.UpsertFederationBinding(ctx, binding)
 		require.NoError(t, err)
-		defer func() {
-			binding.Enabled = true
-			_, err := spoke.UpsertFederationBinding(ctx, binding)
-			require.NoError(t, err)
-		}()
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, localTarget.ID))
 		retained, err := spoke.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Equal(t, comments, retained, "pausing the old source must preserve relocated discussion and comment IDs")
-	})
-	t.Run("destination leave preserves standalone issue", func(t *testing.T) {
+	case "destination leave preserves standalone issue":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
 		_, err := spoke.LeaveFederationReplica(ctx, localTarget.ID)
 		require.NoError(t, err)
@@ -148,8 +155,7 @@ func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, hub db.Storage, back
 		afterComments, err := spoke.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Equal(t, beforeComments, afterComments)
-	})
-	return nil
+	}
 }
 
 // Snapshot relocation must retain the existing same-hub and recurrence gates.
