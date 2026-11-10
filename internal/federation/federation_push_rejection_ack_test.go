@@ -54,7 +54,7 @@ func TestFederationPushRetainsUnrecognizedRejection(t *testing.T) {
 	require.NoError(t, err)
 	_, event, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Pending", Author: "worker"})
 	require.NoError(t, err)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		require.NoError(t, json.MarshalWrite(w, api.FederationIngestEventsBody{
 			PushCursorEventID: event.ID, RejectedEvents: []db.FederationEventRejection{{EventUID: "unknown", SourceEventID: event.ID}},
 		}))

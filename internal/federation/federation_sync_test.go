@@ -1902,7 +1902,7 @@ func TestSyncFederationDeliversReplayAfterSameMillisecondUpgrade(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	envelope := eventEnvelopeForSyncTest(event, 100)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: []api.EventEnvelope{envelope}, NextAfterID: 100}))
 	}))
 	t.Cleanup(hub.Close)
