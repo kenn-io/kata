@@ -132,7 +132,11 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 				case "negative":
 					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"items":[{"ref":%q,"to_project_uid":%q,"expected_revision":-1},{"ref":%q,"to_project_uid":%q}]}`, dry, issue.UID, other.UID, issue.UID, target.UID)
 				default:
-					bad := fmt.Sprintf(`{"ref":%q,"to_project_uid":%q,"expected_revision":%d}`, issue.UID, other.UID, issue.Revision+1)
+					owner := "changed"
+					changed, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
+					require.NoError(t, err)
+					require.Greater(t, changed.Revision, issue.Revision)
+					bad := fmt.Sprintf(`{"ref":%q,"to_project_uid":%q,"expected_revision":%d}`, issue.UID, other.UID, issue.Revision)
 					good := fmt.Sprintf(`{"ref":%q,"to_project_uid":%q}`, issue.UID, target.UID)
 					if mode == "stale second" {
 						good, bad = bad, good

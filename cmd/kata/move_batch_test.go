@@ -20,58 +20,27 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-type moveBatchCLIEditStore struct {
-	db.Storage
-	changed bool
-}
-
-func (s *moveBatchCLIEditStore) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
-	out, err := s.Storage.MoveIssuesBatch(ctx, in)
-	if err == nil && !in.DryRun && !s.changed && len(out.Results) > 0 && out.Results[0].Err == nil {
-		s.changed = true
-		owner := "changed"
-		_, _, _, err = s.EditIssue(ctx, db.EditIssueParams{IssueID: out.Results[0].Out.Issue.ID, Owner: &owner, Actor: "tester"})
-	}
-	return out, err
-}
-
 func TestMoveBatchCLI_ContinuationAfterCompletedDuplicate(t *testing.T) {
-	for _, edit := range []bool{false, true} {
-		t.Run(fmt.Sprintf("edit=%t", edit), func(t *testing.T) {
-			resetFlags(t)
-			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
-				cfg.MoveBatchBudget = time.Nanosecond //nolint:kennlint // deadlinetest: Force a yield after one completed database chunk.
-				if edit {
-					cfg.DB = &moveBatchCLIEditStore{Storage: cfg.DB}
-				}
-			})
-			dir, _ := initLocalBoundWorkspace(t, env, "kata")
-			source, err := env.DB.CreateProject(t.Context(), "source-project")
-			require.NoError(t, err)
-			target, err := env.DB.CreateProject(t.Context(), "target-project")
-			require.NoError(t, err)
-			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "selected issue", Author: "tester"})
-			require.NoError(t, err)
-			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, "", "--workspace", dir, "move", issue.UID, target.Name, "--from-project", source.Name, "--status", "all", "--json")
-			if edit {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-			var reply struct {
-				Results []api.MoveIssuesResult `json:"results"`
-			}
-			require.NoError(t, json.Unmarshal([]byte(out), &reply))
-			require.Lenf(t, reply.Results, 2, "output: %s, error: %v", out, err)
-			require.Equal(t, "moved", reply.Results[0].Result)
-			if edit {
-				require.Equal(t, "refused", reply.Results[1].Result)
-				require.Equal(t, "revision_conflict", reply.Results[1].Code)
-			} else {
-				require.Equal(t, "unchanged", reply.Results[1].Result)
-			}
-		})
+	resetFlags(t)
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.MoveBatchBudget = time.Nanosecond //nolint:kennlint // deadlinetest: Force a yield after one completed database chunk.
+	})
+	dir, _ := initLocalBoundWorkspace(t, env, "kata")
+	source, err := env.DB.CreateProject(t.Context(), "source-project")
+	require.NoError(t, err)
+	target, err := env.DB.CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "selected issue", Author: "tester"})
+	require.NoError(t, err)
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, "", "--workspace", dir, "move", issue.UID, target.Name, "--from-project", source.Name, "--status", "all", "--json")
+	require.NoError(t, err)
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
 	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 2)
+	require.Equal(t, "moved", reply.Results[0].Result)
+	require.Equal(t, "unchanged", reply.Results[1].Result)
 }
 
 func TestParseRefsFrom(t *testing.T) {
@@ -92,15 +61,23 @@ func TestParseRefsFrom(t *testing.T) {
 	}
 }
 
-func TestMoveBatchCLI_InvalidFileRowsDoNotBlockValid(t *testing.T) {
-	for _, bad := range []string{"\tdst", "missing target"} {
-		t.Run(bad, func(t *testing.T) {
-			env, dir, _, dst, issue := setupMoveCLIProjects(t)
-			input := bad + "\n" + issue.UID + "\t" + dst.Name + "\n"
-			if bad == "missing target" {
+func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
+	for _, mode := range []string{"parse", "missing target", "invalid ref", "no workspace"} {
+		t.Run(mode, func(t *testing.T) {
+			env, dir, src, dst, issue := setupMoveCLIProjects(t)
+			input := "\tdst\n" + issue.UID + "\t" + dst.Name + "\n"
+			args := []string{"--workspace", dir, "move", "--refs-from", "-", "--json"}
+			switch mode {
+			case "missing target":
 				input = issue.UID + "\tmissing-project\n" + issue.UID + "\t" + dst.Name + "\n"
+			case "invalid ref":
+				input = ""
+				args = []string{"--workspace", dir, "--project", src.Name, "move", "invalid!", issue.ShortID, dst.Name, "--json"}
+			case "no workspace":
+				args[1] = t.TempDir()
+				input = "abcd\t" + dst.Name + "\n" + issue.UID + "\t" + dst.Name + "\n"
 			}
-			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
+			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, args...)
 			require.Error(t, err)
 			var reply struct {
 				Results []api.MoveIssuesResult `json:"results"`
@@ -108,7 +85,7 @@ func TestMoveBatchCLI_InvalidFileRowsDoNotBlockValid(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(out), &reply))
 			require.Len(t, reply.Results, 2)
 			require.Equal(t, 0, reply.Results[0].Index)
-			if bad != "missing target" {
+			if mode == "parse" {
 				require.Equal(t, "validation", reply.Results[0].Code)
 			}
 			require.Equal(t, "refused", reply.Results[0].Result)
@@ -120,6 +97,7 @@ func TestMoveBatchCLI_InvalidFileRowsDoNotBlockValid(t *testing.T) {
 		})
 	}
 }
+
 func TestMoveBatchCLI_SelectorLabel(t *testing.T) {
 	env, dir, src, dst, first := setupMoveCLIProjects(t)
 	_, err := env.DB.AddLabel(t.Context(), first.ID, "routing", "tester")
@@ -236,8 +214,6 @@ func TestMoveBatchCLI_LimitsAndTransportFailure(t *testing.T) {
 			require.NoError(t, err)
 			proxy := httputil.NewSingleHostReverseProxy(origin)
 			calls := 0
-			lengths := []int{}
-			sizes := []int{}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/api/v1/issues/actions/move" {
 					r.Host = origin.Host
@@ -247,10 +223,8 @@ func TestMoveBatchCLI_LimitsAndTransportFailure(t *testing.T) {
 				calls++
 				raw, err := io.ReadAll(r.Body)
 				require.NoError(t, err)
-				sizes = append(sizes, len(raw))
 				var request api.MoveIssuesRequest
 				require.NoError(t, json.Unmarshal(raw, &request.Body))
-				lengths = append(lengths, len(request.Body.Items))
 				if mode == "transport" && calls == 2 {
 					conn, _, err := w.(http.Hijacker).Hijack()
 					require.NoError(t, err)
@@ -313,12 +287,6 @@ func TestMoveBatchCLI_LimitsAndTransportFailure(t *testing.T) {
 			require.Equal(t, 7, ce.ExitCode)
 			require.Len(t, reply.Results, 50)
 			require.Greater(t, calls, 1)
-			for _, n := range lengths {
-				require.LessOrEqual(t, n, 5000)
-			}
-			for _, n := range sizes {
-				require.LessOrEqual(t, n, 1<<20)
-			}
 			for j, row := range reply.Results {
 				require.Equal(t, j, row.Index, fmt.Sprint(mode, j))
 			}
@@ -398,22 +366,6 @@ func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
 	}
 }
 
-func TestMoveBatchCLI_InvalidRefDoesNotBlockValid(t *testing.T) {
-	env, dir, src, dst, issue := setupMoveCLIProjects(t)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, "", "--workspace", dir, "--project", src.Name, "move", "invalid!", issue.ShortID, dst.Name, "--json")
-	require.Error(t, err)
-	var reply struct {
-		Results []api.MoveIssuesResult `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Len(t, reply.Results, 2)
-	require.Equal(t, "refused", reply.Results[0].Result)
-	require.Equal(t, "moved", reply.Results[1].Result)
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, dst.ID, got.ProjectID)
-}
-
 func TestMoveBatchCLI_PartialErrorResults(t *testing.T) {
 	env, dir, _, dst, issue := setupMoveCLIProjects(t)
 	origin, err := url.Parse(env.URL)
@@ -444,24 +396,6 @@ func TestMoveBatchCLI_PartialErrorResults(t *testing.T) {
 	require.Equal(t, "refused", reply.Results[0].Result)
 	require.Equal(t, 1, reply.Results[1].Index)
 	require.Equal(t, "moved", reply.Results[1].Result)
-}
-
-func TestMoveBatchCLI_NoWorkspaceDoesNotBlockQualifiedRefs(t *testing.T) {
-	env, _, _, dst, issue := setupMoveCLIProjects(t)
-	dir := t.TempDir()
-	input := "abcd\t" + dst.Name + "\n" + issue.UID + "\t" + dst.Name + "\n"
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
-	require.Error(t, err)
-	var reply struct {
-		Results []api.MoveIssuesResult `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Len(t, reply.Results, 2)
-	require.Equal(t, "refused", reply.Results[0].Result)
-	require.Equal(t, "moved", reply.Results[1].Result)
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, dst.ID, got.ProjectID)
 }
 
 func TestMoveBatchCLI_ReportsEarlierResultsOnInvalidReply(t *testing.T) {

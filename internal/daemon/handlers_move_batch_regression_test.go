@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -103,37 +104,27 @@ func TestMoveBatchContinuationPreservesAliasConflicts(t *testing.T) {
 	require.NoError(t, err)
 	other, err := store.CreateProject(t.Context(), "other-target")
 	require.NoError(t, err)
-	for _, same := range []bool{false, true} {
-		req := &api.MoveIssuesRequest{}
-		req.Body.Actor = "agent"
-		req.Body.Comment = "routed"
-		req.Body.StartIndex = 1
-		destination := other.UID
-		if same {
-			destination = target.UID
-		}
-		req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID, ToProjectUID: target.UID}, {Ref: source.Name + "#" + first.ShortID, ToProjectUID: destination}}
-		out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
-		require.NoError(t, err)
-		require.Len(t, out.Body.Results, 1)
-		if same {
-			require.Equal(t, "moved", out.Body.Results[0].Result)
-		} else {
-			require.Equal(t, "conflicting_target", out.Body.Results[0].Code)
-		}
-		got, err := store.IssueByID(t.Context(), first.ID)
-		require.NoError(t, err)
-		if same {
-			require.Equal(t, target.ID, got.ProjectID)
-		} else {
-			require.Equal(t, source.ID, got.ProjectID)
-		}
-		comments, err := store.CommentsByIssue(t.Context(), first.ID)
-		require.NoError(t, err)
-		if same {
-			require.Len(t, comments, 1)
-		} else {
-			require.Empty(t, comments)
-		}
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.Comment = "agent", "routed"
+	for range 49 {
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
 	}
+	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: first.UID, ToProjectUID: target.UID}, api.MoveIssuesItem{Ref: source.Name + "#" + first.ShortID, ToProjectUID: other.UID})
+	//nolint:kennlint // deadlinetest: Force a continuation at the chunk boundary.
+	handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
+	firstPage, err := handler(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, 50, firstPage.Body.NextIndex)
+	require.Equal(t, "conflicting_target", firstPage.Body.Results[49].Code)
+	req.Body.StartIndex = firstPage.Body.NextIndex
+	out, err := handler(t.Context(), req)
+	require.NoError(t, err)
+	require.Len(t, out.Body.Results, 1)
+	require.Equal(t, "conflicting_target", out.Body.Results[0].Code)
+	got, err := store.IssueByID(t.Context(), first.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, got.ProjectID)
+	comments, err := store.CommentsByIssue(t.Context(), first.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments)
 }
