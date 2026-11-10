@@ -308,10 +308,8 @@ func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
 		require.Equal(t, http.StatusOK, status)
 		require.NotContains(t, listed, "error", "%v", listed)
 		require.NotEqual(t, true, listed["result"].(map[string]any)["isError"])
-		//nolint:kennlint // sleeptest: request-scoped client cleanup closes REST sockets asynchronously.
-		require.Eventually(t, func() bool { return open.Load() == 0 }, 5*time.Second, 10*time.Millisecond)
 	}
-	//nolint:kennlint // sleeptest: session teardown and connection close finish asynchronously after DELETE.
+	//nolint:kennlint // sleeptest: session and request cleanup close REST sockets asynchronously.
 	require.Eventually(t, func() bool { return open.Load() == 0 }, 5*time.Second, 10*time.Millisecond,
 		"closed sessions left %d daemon connections open", open.Load())
 }
@@ -371,6 +369,7 @@ func TestDaemonMCPIdentityModernDrainsActivityAfterResponse(t *testing.T) {
 		request.Header.Set("Mcp-Name", "kata.projects")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
+		cancel() // net/http cancels the request context when ServeHTTP returns.
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 		require.NotContains(t, response.Body.String(), `"isError":true`)
 		require.NotContains(t, response.Body.String(), `"error":`)

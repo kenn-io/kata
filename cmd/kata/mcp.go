@@ -239,7 +239,7 @@ func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client,
 	reportCtx, cancel := context.WithCancel(ctx)
 	queue := make(chan struct{}, 128)
 	var queueMu sync.Mutex
-	stopped := false
+	queueStopped := false
 	marker := client.TelemetryDayMarkerPath(target, "agent-full-")
 	var gate client.TelemetryGate
 	done := make(chan struct{})
@@ -274,7 +274,7 @@ func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client,
 	observe := func() {
 		queueMu.Lock()
 		defer queueMu.Unlock()
-		if stopped {
+		if queueStopped {
 			return
 		}
 		select {
@@ -284,8 +284,8 @@ func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client,
 	}
 	return observe, func() {
 		queueMu.Lock()
-		if !stopped {
-			stopped = true
+		if !queueStopped {
+			queueStopped = true
 			if drainOnStop {
 				close(queue)
 			} else {

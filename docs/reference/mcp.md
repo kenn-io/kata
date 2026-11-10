@@ -787,7 +787,9 @@ a five-minute private cache hint. Tool execution allows 20 starts per second,
 a burst of 20, and at most eight concurrent daemon calls. The standalone and
 static daemon mount share limits across protocol paths. Identity mounts retain
 per-session limits for legacy clients; modern requests share limits by exact
-token ID, independently of other tokens.
+token ID, independently of other tokens. Modern clients using the same token
+also share loaded tool-section selections, which remain until the daemon
+restarts.
 
 Host process control stays outside MCP: daemon lifecycle, the TUI and Web UI,
 install/update, database migrations and cutovers, and raw internal replication
