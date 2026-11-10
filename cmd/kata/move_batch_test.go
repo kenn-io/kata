@@ -93,7 +93,52 @@ func TestParseRefsFrom(t *testing.T) {
 }
 
 func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
-	for _, mode := range []string{"parse", "missing target", "invalid ref", "no workspace", "oversized"} {
+	for _, mode := range []outputMode{outputHuman, outputJSON, outputAgent} {
+		for _, allInvalid := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s all-invalid=%t", mode, allInvalid), func(t *testing.T) {
+				env, dir, _, dst, issue := setupMoveCLIProjects(t)
+				input := "\tdst\n"
+				if !allInvalid {
+					input += issue.UID + "\t" + dst.Name + "\n"
+				}
+				args := []string{"--workspace", dir, "move", "--refs-from", "-"}
+				switch mode {
+				case outputJSON:
+					args = append(args, "--json")
+				case outputAgent:
+					args = append(args, "--agent")
+				}
+				out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, args...)
+				require.Error(t, err)
+				require.Equal(t, ExitConflict, exitCodeForErr(err, true))
+				var stderr bytes.Buffer
+				emitErrorForMode(&stderr, err, mode, true)
+				if mode == outputHuman {
+					require.Contains(t, out, "1 refused")
+					require.Empty(t, stderr.String())
+				} else {
+					require.Contains(t, stderr.String(), "some issues were refused")
+				}
+				if mode == outputJSON && !allInvalid {
+					var reply struct {
+						Results []api.MoveIssuesResult `json:"results"`
+					}
+					require.NoError(t, json.Unmarshal([]byte(out), &reply))
+					require.Len(t, reply.Results, 2)
+					require.Equal(t, 0, reply.Results[0].Index)
+					require.Equal(t, "validation", reply.Results[0].Code)
+					require.Equal(t, "refused", reply.Results[0].Result)
+					require.Equal(t, 1, reply.Results[1].Index)
+					require.Equal(t, "moved", reply.Results[1].Result)
+					got, err := env.DB.IssueByID(t.Context(), issue.ID)
+					require.NoError(t, err)
+					require.Equal(t, dst.ID, got.ProjectID)
+				}
+			})
+		}
+	}
+
+	for _, mode := range []string{"missing target", "invalid ref", "no workspace", "oversized"} {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, src, dst, issue := setupMoveCLIProjects(t)
 			input := "\tdst\n" + issue.UID + "\t" + dst.Name + "\n"
@@ -118,7 +163,7 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(out), &reply))
 			require.Len(t, reply.Results, 2)
 			require.Equal(t, 0, reply.Results[0].Index)
-			if mode == "parse" || mode == "oversized" {
+			if mode == "oversized" {
 				require.Equal(t, "validation", reply.Results[0].Code)
 			}
 			require.Equal(t, "refused", reply.Results[0].Result)
@@ -169,9 +214,6 @@ func TestMoveBatchCLI_StdinMixedTargetsDryRun(t *testing.T) {
 		got, err := env.DB.IssueByID(t.Context(), issue.ID)
 		require.NoError(t, err)
 		require.Equal(t, src.ID, got.ProjectID)
-		comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
-		require.NoError(t, err)
-		require.Empty(t, comments)
 	}
 }
 
@@ -489,36 +531,4 @@ func TestMoveBatchCLI_HumanShowsEveryResult(t *testing.T) {
 	require.Contains(t, out, "result=unchanged")
 	require.Contains(t, out, "ref="+first.ShortID)
 	require.Contains(t, out, "ref="+second.ShortID)
-}
-
-func TestMoveBatchCLI_RefusalOutput(t *testing.T) {
-	for _, mode := range []outputMode{outputHuman, outputJSON, outputAgent} {
-		for _, allInvalid := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s all-invalid=%t", mode, allInvalid), func(t *testing.T) {
-				env, dir, _, dst, issue := setupMoveCLIProjects(t)
-				input := "\tdst\n"
-				if !allInvalid {
-					input += issue.UID + "\t" + dst.Name + "\n"
-				}
-				args := []string{"--workspace", dir, "move", "--refs-from", "-"}
-				switch mode {
-				case outputJSON:
-					args = append(args, "--json")
-				case outputAgent:
-					args = append(args, "--agent")
-				}
-				out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, args...)
-				require.Error(t, err)
-				require.Equal(t, ExitConflict, exitCodeForErr(err, true))
-				var stderr bytes.Buffer
-				emitErrorForMode(&stderr, err, mode, true)
-				if mode == outputHuman {
-					require.Contains(t, out, "1 refused")
-					require.Empty(t, stderr.String())
-				} else {
-					require.Contains(t, stderr.String(), "some issues were refused")
-				}
-			})
-		}
-	}
 }

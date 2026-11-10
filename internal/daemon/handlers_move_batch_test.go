@@ -111,8 +111,11 @@ func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
 	require.NoError(t, err)
 	body := fmt.Sprintf(`{"actor":"tester","subtree":true,"to_project_uid":%q,"items":[{"ref":%q},{"ref":%q}]}`, target.UID, root.UID, child.UID)
 	resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	require.Contains(t, string(raw), "subtree move accepts one item")
 	for _, issue := range []db.Issue{root, child} {
 		got, err := env.DB.IssueByID(t.Context(), issue.ID)
 		require.NoError(t, err)

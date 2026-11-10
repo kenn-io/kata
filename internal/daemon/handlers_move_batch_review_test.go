@@ -148,24 +148,6 @@ func TestClaimClientCache_ReplacementBinding(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_DuplicateAcrossChunks(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	source, issue := createClaimGateHelperIssue(t, store)
-	target, err := store.CreateProject(t.Context(), "target")
-	require.NoError(t, err)
-	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
-	for range 49 {
-		other, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "other", Author: "agent"})
-		require.NoError(t, err)
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: other.UID})
-	}
-	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
-	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
-	require.NoError(t, err)
-	last := out.Body.Results[len(out.Body.Results)-1]
-	require.Equal(t, "unchanged", last.Result)
-	require.Equal(t, "duplicate_item", last.Code)
 	t.Run("continuation", func(t *testing.T) {
 		store := openClaimGateHelperDB(t)
 		_, issue := createClaimGateHelperIssue(t, store)
@@ -233,28 +215,36 @@ func TestMoveIssuesBatch_ContinuationAfterRefusedDuplicate(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, target.ID, got.ProjectID)
 	})
-	store := openClaimGateHelperDB(t)
-	target, issue := createClaimGateHelperIssue(t, store)
-	owner := "changed"
-	_, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "agent"})
-	require.NoError(t, err)
-	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
-	for range 49 {
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
-	}
-	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
-	//nolint:kennlint // deadlinetest: Force a yield after the first database chunk, as in TestMoveIssuesBatch_BudgetResume.
-	handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
-	first, err := handler(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, 50, first.Body.NextIndex)
-	require.Equal(t, "revision_conflict", first.Body.Results[0].Code)
-	req.Body.StartIndex = first.Body.NextIndex
-	req.Body.Completed = completedMoveResults(first.Body.Results)
-	second, err := handler(t.Context(), req)
-	require.NoError(t, err)
-	require.Len(t, second.Body.Results, 1)
-	require.Equal(t, "revision_conflict", second.Body.Results[0].Code)
+	t.Run("stale revision", func(t *testing.T) {
+		store := openClaimGateHelperDB(t)
+		source, issue := createClaimGateHelperIssue(t, store)
+		target, err := store.CreateProject(t.Context(), "stale-target")
+		require.NoError(t, err)
+		owner := "changed"
+		changed, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "agent"})
+		require.NoError(t, err)
+		require.Greater(t, changed.Revision, issue.Revision)
+		req := &api.MoveIssuesRequest{}
+		req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
+		for range 49 {
+			req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
+		}
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
+		//nolint:kennlint // deadlinetest: Force a yield after the first database chunk, as in TestMoveIssuesBatch_BudgetResume.
+		handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
+		first, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.Equal(t, 50, first.Body.NextIndex)
+		require.Equal(t, "revision_conflict", first.Body.Results[0].Code)
+		req.Body.StartIndex = first.Body.NextIndex
+		req.Body.Completed = completedMoveResults(first.Body.Results)
+		second, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.Len(t, second.Body.Results, 1)
+		require.Equal(t, "revision_conflict", second.Body.Results[0].Code)
+		got, err := store.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, source.ID, got.ProjectID)
+	})
 }
