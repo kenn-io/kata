@@ -202,12 +202,12 @@
   }
 
   function scheduledLabel(): string {
-    const value =
-      issue.issue.scheduled_on_date ??
-      (typeof issue.issue.metadata.scheduled_on === 'string'
-        ? issue.issue.metadata.scheduled_on
-        : undefined)
+    const value = scheduledDate()
     return value ? formatDate(value) : 'When'
+  }
+
+  function scheduledDate(): string {
+    return issue.issue.scheduled_on_date ?? scheduleText(issue.issue.metadata.scheduled_on) ?? ''
   }
 
   function dueLabel(): string {
@@ -231,7 +231,7 @@
     if (actionsDisabled) return
     activeProperty = property
     if (property === 'scheduled') {
-      scheduledDraft = scheduleText(issue.issue.metadata.scheduled_on) ?? ''
+      scheduledDraft = scheduledDate()
     } else if (property === 'due') {
       dueDraft = deadlineDate()
     } else {
@@ -246,6 +246,10 @@
     if (actionsDisabled) return
     const property = 'scheduled'
     scheduledDraft = value
+    if (value !== '' && value === scheduledDate()) {
+      resetDraft(property)
+      return
+    }
     const mutationUID = uid()
     const generation = draftResetGeneration
     const ok = await onPatchMetadata(mutationUID, { scheduled_on: value === '' ? null : value })

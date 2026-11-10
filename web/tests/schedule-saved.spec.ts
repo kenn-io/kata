@@ -24,6 +24,18 @@ test('saved schedules use their zone and expose the due date to the editor', asy
   const scheduled = page.getByRole('button', { name: 'Edit scheduled' })
   await expect(scheduled).toContainText('Dec 31')
   await expect(page.getByRole('button', { name: 'Edit due date' })).toContainText('Dec 31')
+  await scheduled.click()
+  await page.getByRole('button', { name: /Scheduled: Dec 31/ }).click()
+  const selected = page.getByRole('dialog', { name: 'Scheduled' }).locator('[aria-pressed="true"]')
+  await expect(selected).toHaveText('31')
+  const writes: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === 'PATCH' && request.url().endsWith('/metadata'))
+      writes.push(request.url())
+  })
+  await selected.click()
+  await expect(scheduled).toBeVisible()
+  expect(writes).toEqual([])
   await page.getByRole('button', { name: 'Edit due date' }).click()
   await expect(page.getByRole('button', { name: /Due: Dec 31/ })).toBeVisible()
   expect(errors).toEqual([])
