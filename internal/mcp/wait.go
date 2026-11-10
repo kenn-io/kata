@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -67,9 +68,11 @@ func (h toolHandlers) waitStatus(parent, ctx context.Context, input WaitInput, s
 		index  int
 		target waitTarget
 		err    error
+		epoch  uint64
 	}
 	pollCtx, cancel := context.WithCancel(ctx)
 	var workers sync.WaitGroup
+	var epoch atomic.Uint64
 	defer func() { cancel(); workers.Wait() }()
 	results := make(chan result, len(input.Refs))
 	for i, ref := range input.Refs {
@@ -78,10 +81,11 @@ func (h toolHandlers) waitStatus(parent, ctx context.Context, input WaitInput, s
 			defer workers.Done()
 			var target waitTarget
 			for {
+				generation := epoch.Load()
 				var err error
 				target, err = h.pollWaitTarget(pollCtx, ref, target, "", status, "")
 				select {
-				case results <- result{i, target, err}:
+				case results <- result{i, target, err, generation}:
 				case <-pollCtx.Done():
 					return
 				}
@@ -127,15 +131,21 @@ func (h toolHandlers) waitStatus(parent, ctx context.Context, input WaitInput, s
 			}
 			return successResult(), WaitOutput{Reason: reason, States: states}, nil
 		case res := <-results:
-			if !seen[res.index] {
-				seen[res.index] = true
-				pending--
-			}
 			if res.err != nil {
 				if ctx.Err() != nil {
 					continue
 				}
 				return nil, WaitOutput{}, res.err
+			}
+			if !input.Any && !res.target.state.Matched {
+				epoch.Add(1)
+				clear(seen)
+				pending = len(targets)
+			}
+			// A read started before the last nonmatch cannot complete this snapshot.
+			if (input.Any || res.epoch == epoch.Load()) && !seen[res.index] {
+				seen[res.index] = true
+				pending--
 			}
 			targets[res.index] = res.target
 		}

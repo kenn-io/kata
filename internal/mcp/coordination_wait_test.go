@@ -398,6 +398,23 @@ func TestMCPCoordinationWaitStatusAnySnapshot(t *testing.T) {
 }
 
 func TestMCPCoordinationWaitStatusPollsPastStalledPeer(t *testing.T) {
+	t.Run("all eventually match", func(t *testing.T) {
+		var reads atomic.Int64
+		session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
+			ref := "abc1"
+			if strings.HasSuffix(r.URL.Path, "/def1") {
+				ref = "def1"
+			}
+			issue := issueJSON(1, "spoke-project", ref)
+			if reads.Add(1) > 2 {
+				issue["status"] = "closed"
+			}
+			return issue
+		})
+		out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "closed", "timeout_seconds": 2})
+		require.Equal(t, "matched", out["reason"])
+		require.Len(t, out["states"], 2)
+	})
 	for _, anyMode := range []bool{false, true} {
 		t.Run(fmt.Sprintf("any=%t", anyMode), func(t *testing.T) {
 			var reads atomic.Int64
@@ -420,6 +437,45 @@ func TestMCPCoordinationWaitStatusPollsPastStalledPeer(t *testing.T) {
 			}
 			require.GreaterOrEqual(t, reads.Load(), int64(2))
 			require.Equal(t, true, out["states"].([]any)[0].(map[string]any)["matched"])
+		})
+	}
+	for _, nonmatchFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nonmatchFirst=%t", nonmatchFirst), func(t *testing.T) {
+			var aReads, bReads atomic.Int64
+			aSecond := make(chan struct{})
+			bSecond := make(chan struct{})
+			session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
+				if strings.HasSuffix(r.URL.Path, "/abc1") {
+					issue := issueJSON(1, "spoke-project", "abc1")
+					if aReads.Add(1) == 1 {
+						if nonmatchFirst {
+							<-bSecond
+						}
+						issue["status"] = "closed"
+						return issue
+					}
+					close(aSecond)
+					<-r.Context().Done()
+					return nil
+				}
+				issue := issueJSON(1, "spoke-project", "def1")
+				bRead := bReads.Add(1)
+				if bRead == 1 {
+					if !nonmatchFirst {
+						<-aSecond
+					}
+					return issue
+				}
+				if nonmatchFirst && bRead == 2 {
+					close(bSecond)
+					<-aSecond
+				}
+				issue["status"] = "closed"
+				return issue
+			})
+			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "closed", "timeout_seconds": 2})
+			require.Equal(t, "timeout", out["reason"])
+			require.GreaterOrEqual(t, bReads.Load(), int64(2))
 		})
 	}
 }
