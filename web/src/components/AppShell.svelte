@@ -422,16 +422,15 @@
     changed: keyof KataTaskSearchFilters,
   ): void {
     const shareable = shareableFilters(filters, viewName, changed)
-    const currentRoute = filterRoute
     if (filters.scope.kind === 'project') {
       navigate({
-        ...withResolvedView(currentRoute),
+        ...withResolvedView(filterRoute),
         projectUID: filters.scope.project_uid,
         filters: shareable,
       })
       return
     }
-    const next = { ...currentRoute, filters: shareable }
+    const next = { ...filterRoute, filters: shareable }
     delete next.projectUID
     navigate(next)
   }

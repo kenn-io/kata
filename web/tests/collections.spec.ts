@@ -14,16 +14,16 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
     priority: 1,
   })
   const child = await kata.seedIssue(page, credentials, {
-    title: 'Example second task',
+    title: 'Example child task',
     owner: 'user-b',
     labels: ['delivery'],
     links: [{ type: 'parent', to_ref: parent.uid }],
   })
 
   await expect(page.getByRole('button', { name: /Example parent task/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Example second task/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Example child task/ })).toHaveCount(0)
   await page.getByRole('button', { name: /Example parent task/ }).press('ArrowRight')
-  await expect(page.getByRole('button', { name: /Example second task/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
   await page.getByRole('button', { name: 'Columns' }).click()
   await expect(page.getByText('Shown when space allows')).toBeVisible()
@@ -51,17 +51,17 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
     await request.fulfill({ response }).catch(() => {})
   })
   await parentRow.press('ArrowDown')
-  await expect(page.getByRole('button', { name: /Example second task/ })).toBeFocused()
+  await expect(page.getByRole('button', { name: /Example child task/ })).toBeFocused()
   await snapshotRequested
 
   const search = page.getByRole('searchbox', { name: 'Search tasks' })
   await search.focus()
   const original = await search.elementHandle()
   try {
-    await page.keyboard.type('second')
+    await page.keyboard.type('child')
     releaseSnapshot()
     await expect(
-      page.getByRole('heading', { name: 'Example second task', exact: true }),
+      page.getByRole('heading', { name: 'Example child task', exact: true }),
     ).toBeVisible()
     await expect(search).toBeFocused()
     expect(await search.evaluate((element, first) => element === first, original)).toBe(true)
@@ -69,10 +69,10 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   } finally {
     releaseSnapshot()
   }
-  await expect(search).toHaveValue('second task')
+  await expect(search).toHaveValue('child task')
   await expect.poll(() => new URL(page.url()).searchParams.get('issue')).toBe(child.uid)
-  await expect.poll(() => new URL(page.url()).searchParams.get('text')).toBe('second task')
-  await expect(page.getByRole('button', { name: /Example second task/ })).toBeVisible()
+  await expect.poll(() => new URL(page.url()).searchParams.get('text')).toBe('child task')
+  await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
   for (const view of ['Inbox', 'Today', 'Delegated', 'Scheduled']) {
     await page.getByRole('button', { name: new RegExp(`^${view}( \\d+)?$`) }).click()
