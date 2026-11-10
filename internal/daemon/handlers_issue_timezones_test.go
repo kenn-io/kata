@@ -36,6 +36,9 @@ func TestIssuePortableTimezoneAdmission(t *testing.T) {
 		md["topic"] = "changed" // A rejection must not apply the accompanying edit.
 		status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": md})
 		require.Equal(t, want, status, string(raw))
+		if md["scheduled_on"] == "2026-11-12T10:30:00Z" && want == http.StatusOK {
+			require.Contains(t, string(raw), `"timezone":"UTC"`)
+		}
 		if want == http.StatusBadRequest {
 			assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
 			after, err := env.DB.IssueByID(t.Context(), issue.ID)
@@ -225,9 +228,10 @@ func TestIssuePortableTimezoneCopiedRecurrence(t *testing.T) {
 			assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "invalid_metadata_value")
 		}
 	}
-	// A restored issue override differing from the recurrence owns admission.
+	// Editing a saved schedule retains its zone despite an invalid legacy override.
 	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"timezone": jsontext.Value(`"EST"`)}})
 	require.NoError(t, err)
 	status, raw := cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]any{"scheduled_on": "2026-11-16"}})
-	assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.Contains(t, string(raw), `"timezone":"US/Eastern"`)
 }

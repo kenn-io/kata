@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
@@ -31,77 +32,18 @@ func issueTimezoneWriteRelevant(patch map[string]jsontext.Value) bool {
 	return false
 }
 
-// validateIssueTimezoneWrite is admission policy, not stored-data validation.
-// In particular, an unchanged legacy timezone remains usable and echoable.
-func validateIssueTimezoneWrite(current jsontext.Value, patch map[string]jsontext.Value, defaultZone, recurrenceZone string) error {
-	effective, err := db.ApplyMetadataPatch(current, patch)
-	if err != nil {
-		return err
-	}
-	diff, err := metadata.Diff(current, effective)
-	if err != nil {
-		return err
-	}
-	if change, ok := diff["timezone"]; ok && change.To != nil {
-		var zone string
-		if err := json.Unmarshal(change.To, &zone); err != nil || !portableIssueTimezone(zone) {
-			return fmt.Errorf("%w: issue timezone must be UTC, Etc/UTC, or an exact bundled geographic IANA name", metadata.ErrInvalidValue)
-		}
-	}
-	var values map[string]jsontext.Value
-	if err := json.Unmarshal(effective, &values); err != nil {
-		return err
-	}
-	// Untouched restored values need interpretation only for civil candidates.
-	zoneValue := func(raw jsontext.Value) string {
-		var zone string
-		if err := json.Unmarshal(raw, &zone); err != nil {
-			return string(raw) // Present but unreadable is nonportable, never absent.
-		}
-		return zone
-	}
-	zoneChange, changedZone := diff["timezone"]
-	removedZone := changedZone && zoneChange.To == nil && zoneValue(zoneChange.From) != ""
-	for _, field := range []string{"scheduled_on", "deadline_on"} {
-		if _, changed := diff[field]; !changed && !removedZone {
-			continue
-		}
-		raw := values[field]
-		if len(raw) == 0 {
-			continue
-		}
-		// The patch hook precedes shared grammar validation; invalid changed values
-		// still fail before commit. Classify exposed stored values conservatively.
-		value, valueErr := metadata.ScheduleValueText(raw)
-		if valueErr == nil && strings.HasSuffix(value, "Z") {
-			continue
-		}
-		issueZone := zoneValue(values["timezone"])
-		if field == "scheduled_on" && recurrenceZone != "" && (issueZone == "" || issueZone == recurrenceZone) {
-			continue
-		}
-		effectiveZone, source := defaultZone, "daemon timezone in config.toml"
-		if issueZone != "" {
-			effectiveZone, source = issueZone, "issue timezone"
-		}
-		if effectiveZone == "" {
-			effectiveZone = "UTC"
-		}
-		if !portableIssueTimezone(effectiveZone) {
-			return fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (effective %s %q)", metadata.ErrInvalidValue, field, source, effectiveZone)
-		}
-	}
-	return nil
-}
-
-// freezeIssueSchedules saves the effective rules with changed civil values.
-func freezeIssueSchedules(current jsontext.Value, patch map[string]jsontext.Value, defaultZone, recurrenceZone string) (map[string]jsontext.Value, error) {
+// prepareIssueSchedules validates and freezes schedule changes together.
+func prepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Value, defaultZone, recurrenceZone string) (map[string]jsontext.Value, error) {
 	effective, err := db.ApplyMetadataPatch(current, patch)
 	if err != nil {
 		return nil, err
 	}
+	diff, err := metadata.Diff(current, effective)
+	if err != nil {
+		return nil, err
+	}
 	var before, after map[string]jsontext.Value
-	if len(current) > 0 {
+	if len(current) > 0 && string(current) != "null" {
 		if err := json.Unmarshal(current, &before); err != nil {
 			return nil, err
 		}
@@ -110,19 +52,23 @@ func freezeIssueSchedules(current jsontext.Value, patch map[string]jsontext.Valu
 		return nil, err
 	}
 	result := make(map[string]jsontext.Value, len(patch)+2)
-	for k, v := range patch {
-		result[k] = v
+	for key, value := range patch {
+		result[key] = value
 	}
-	_, zonePatched := patch["timezone"]
-	changedZone := zonePatched && string(before["timezone"]) != string(after["timezone"]) && !(string(before["timezone"]) == `""` && len(after["timezone"]) == 0)
-	var issueZone string
-	zoneErr := json.Unmarshal(after["timezone"], &issueZone)
-	if len(after["timezone"]) == 0 {
-		zoneErr = nil
+	zoneChange, changedZone := diff["timezone"]
+	if changedZone && zoneChange.To != nil {
+		var zone string
+		if err := json.Unmarshal(zoneChange.To, &zone); err != nil || !portableIssueTimezone(zone) {
+			return nil, fmt.Errorf("%w: issue timezone must be UTC, Etc/UTC, or an exact bundled geographic IANA name", metadata.ErrInvalidValue)
+		}
+	}
+	// Removing an empty zone does not change the effective zone.
+	if changedZone && string(zoneChange.From) == `""` && zoneChange.To == nil {
+		changedZone = false
 	}
 	for _, field := range []string{"scheduled_on", "deadline_on"} {
-		raw, exists := after[field]
-		if !exists || string(raw) == "null" {
+		raw := after[field]
+		if len(raw) == 0 || string(raw) == "null" {
 			continue
 		}
 		_, patched := patch[field]
@@ -140,34 +86,59 @@ func freezeIssueSchedules(current jsontext.Value, patch map[string]jsontext.Valu
 				continue
 			}
 		}
-		if strings.HasSuffix(value, "Z") {
-			stamped, err := metadata.NewScheduleValue(value, "UTC")
+		if !changedZone && len(before[field]) > 0 {
+			saved, err := metadata.DecodeSavedSchedule(before[field])
 			if err != nil {
-				return nil, fmt.Errorf("%w: %v", metadata.ErrInvalidValue, err)
+				return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
 			}
-			result[field] = stamped
-			continue
+			if saved != nil {
+				result[field], err = metadata.NewScheduleValueWithVersion(value, saved.Timezone, saved.TZDataVersion)
+				if err != nil {
+					return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
+				}
+				continue
+			}
 		}
-		if zoneErr != nil {
-			return nil, fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (effective issue timezone %q)", metadata.ErrInvalidValue, field, after["timezone"])
+		var zone string
+		_, instantErr := time.Parse(time.RFC3339, value)
+		utcInstant := strings.HasSuffix(value, "Z") && instantErr == nil
+		source := "daemon timezone in config.toml"
+		if len(after["timezone"]) > 0 {
+			if err := json.Unmarshal(after["timezone"], &zone); err != nil {
+				if !utcInstant {
+					return nil, fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (effective issue timezone %q)", metadata.ErrInvalidValue, field, after["timezone"])
+				}
+				zone = "UTC"
+			}
+			if zone != "" {
+				source = "issue timezone"
+			}
 		}
-		zone := issueZone
-		if zone == "" && field == "scheduled_on" && recurrenceZone != "" {
+		if field == "scheduled_on" && recurrenceZone != "" && (zone == "" || zone == recurrenceZone) {
 			zone = recurrenceZone
+			source = "recurrence timezone"
 		}
 		if zone == "" {
 			zone = defaultZone
 		}
-		if recurrenceZone == "" || zone != recurrenceZone {
-			if !portableIssueTimezone(zone) && zone != "" {
-				return nil, fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (effective issue timezone %q)", metadata.ErrInvalidValue, field, zone)
+		if zone == "" {
+			zone = "UTC"
+		}
+		if source != "recurrence timezone" && !portableIssueTimezone(zone) {
+			if !utcInstant {
+				return nil, fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (effective %s %q)", metadata.ErrInvalidValue, field, source, zone)
+			}
+			zone = "UTC"
+		}
+		if source == "recurrence timezone" && utcInstant {
+			if _, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion); err != nil {
+				zone = "UTC"
 			}
 		}
-		stamped, err := metadata.NewScheduleValue(value, zone)
+		result[field], err = metadata.NewScheduleValue(value, zone)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", metadata.ErrInvalidValue, err)
+			return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
 		}
-		result[field] = stamped
 	}
 	return result, nil
 }

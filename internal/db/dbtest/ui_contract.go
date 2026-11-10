@@ -807,17 +807,18 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("selected issues project timed deadline dates", func(t *testing.T) {
 		for _, test := range []struct {
 			name     string
+			want     string
 			metadata map[string]jsontext.Value
 		}{
-			{name: "saved rules", metadata: map[string]jsontext.Value{
+			{name: "saved rules", want: "2026-09-01", metadata: map[string]jsontext.Value{
 				"scheduled_on": jsontext.Value(`{"value":"2026-09-01T09:00","timezone":"Asia/Tokyo","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}`),
 				"deadline_on":  jsontext.Value(`{"value":"2026-09-01T09:00","timezone":"Asia/Tokyo","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}`),
 			}},
-			{name: "UTC instant", metadata: map[string]jsontext.Value{
+			{name: "UTC instant", want: "2026-08-31", metadata: map[string]jsontext.Value{
 				"scheduled_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
 				"deadline_on":  jsontext.Value(`"2026-09-01T00:30:00Z"`),
 			}},
-			{name: "local time", metadata: map[string]jsontext.Value{
+			{name: "local time", want: "2026-08-31", metadata: map[string]jsontext.Value{
 				"scheduled_on": jsontext.Value(`"2026-09-01T09:00"`),
 				"deadline_on":  jsontext.Value(`"2026-09-01T09:00"`),
 				"timezone":     jsontext.Value(`"Asia/Tokyo"`),
@@ -840,8 +841,8 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 				})
 				require.NoError(t, err)
 				require.NotNil(t, snapshot.SelectedIssue)
-				require.Equal(t, "2026-08-31", snapshot.SelectedIssue.ScheduledOnDate)
-				require.Equal(t, "2026-08-31", snapshot.SelectedIssue.DeadlineOnDate)
+				require.Equal(t, test.want, snapshot.SelectedIssue.ScheduledOnDate)
+				require.Equal(t, test.want, snapshot.SelectedIssue.DeadlineOnDate)
 			})
 		}
 	})

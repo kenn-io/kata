@@ -7,11 +7,11 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"go.kenn.io/kata/internal/metadata"
 	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"

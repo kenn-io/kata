@@ -63,7 +63,8 @@ type UIIssue struct {
 }
 
 // MatchUICalendarView evaluates date-sensitive browser collection predicates
-// after planning dates have been projected into the browser timezone.
+// after planning dates have been projected into their saved zones, or the
+// browser timezone for legacy strings.
 // scheduledDefaultTimezone can include the legacy recurrence fallback;
 // deadlines always use the daemon default from query.
 func MatchUICalendarView(

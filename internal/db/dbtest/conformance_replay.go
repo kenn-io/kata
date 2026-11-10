@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Storage) error {
@@ -545,5 +546,51 @@ func checkScheduleReplay(t *testing.T, target db.Storage, backend Backend) error
 	result, err := target.ReadFederation(ctx, db.FederationReadParams{ProjectID: restored.ProjectID, Metadata: true, Features: db.SupportedEventFeatures})
 	require.NoError(t, err)
 	require.Contains(t, result.RequiredFeatures, db.IssueScheduleEventFeature)
+	return nil
+}
+
+func checkLocalRecurrenceReplay(t *testing.T, target db.Storage, backend Backend) error {
+	ctx := t.Context()
+	zone := time.Local.String()
+	if zone == "Local" {
+		zone = recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath)
+	}
+	if zone == "" || zone == "Local" {
+		t.Skip("host local timezone has no bundled name")
+	}
+	if _, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion); err != nil {
+		t.Skip("host local timezone is absent from the bundle")
+	}
+	source := backend.Open(t)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "local-recurrence")
+	require.NoError(t, err)
+	rule, _, err := source.CreateRecurrence(ctx, db.CreateRecurrenceIn{ProjectID: project.ID, Actor: "worker", Rule: "FREQ=DAILY", DTStart: "2026-05-18", Timezone: zone, Template: db.RecurrenceTemplate{Title: "Local recurrence", Metadata: jsontext.Value(`{"deadline_on":"2026-05-20T09:00"}`)}})
+	require.NoError(t, err)
+	records, err := CollectImportRecords(ctx, source, db.ExportFilter{})
+	require.NoError(t, err)
+	for _, record := range records {
+		if rec, ok := record.(*db.RecurrenceExport); ok && rec.UID == rule.UID {
+			rec.Timezone = "Local"
+		}
+	}
+	require.NoError(t, target.ImportReplay(ctx, records, db.ImportOptions{}))
+	restored, err := target.GetRecurrenceByUID(ctx, rule.UID)
+	require.NoError(t, err)
+	require.Equal(t, "Local", restored.Timezone)
+	out, err := target.MaterializeNext(ctx, restored.ID, "2026-05-18", "worker")
+	require.NoError(t, err)
+	require.Equal(t, "2026-05-19", out.OccurrenceKey)
+	issue, err := target.IssueByUID(ctx, out.NewIssueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		_, savedZone, _, present, err := metadata.ScheduleFieldInstant(string(issue.Metadata), field, "UTC")
+		require.NoError(t, err)
+		require.True(t, present)
+		require.Equal(t, zone, savedZone)
+	}
+	restored, err = target.GetRecurrenceByUID(ctx, rule.UID)
+	require.NoError(t, err)
+	require.Equal(t, "2026-05-20", *restored.NextOccurrenceKey)
 	return nil
 }

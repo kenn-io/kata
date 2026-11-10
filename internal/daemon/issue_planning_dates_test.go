@@ -119,4 +119,75 @@ func TestPlanningDatesKeepWriterZoneAcrossDaemons(t *testing.T) {
 	require.Equal(t, "2026-11-12T09:00:00Z", response.ScheduledOn.Instant)
 	require.Equal(t, "UTC", response.DeadlineOn.Timezone)
 	require.Equal(t, "2026-11-13T09:00:00Z", response.DeadlineOn.Instant)
+	editPath := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", project.ID, created.Issue.UID)
+	status, raw = cronHTTP(t, reader, http.MethodPost, editPath, map[string]any{"actor": "worker", "patch": map[string]any{"scheduled_on": "2026-11-14T09:00", "deadline_on": "2026-11-15T09:00"}})
+	require.Equal(t, 200, status, string(raw))
+	status, raw = cronHTTP(t, reader, http.MethodGet, path, nil)
+	require.Equal(t, 200, status, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &response))
+	require.Equal(t, "UTC", response.ScheduledOn.Timezone)
+	require.Equal(t, "2026-11-14T09:00:00Z", response.ScheduledOn.Instant)
+	require.Equal(t, "UTC", response.DeadlineOn.Timezone)
+	require.Equal(t, "2026-11-15T09:00:00Z", response.DeadlineOn.Instant)
+}
+
+func TestSavedInstantDatesUseSelectedZoneAcrossViews(t *testing.T) {
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "UTC" })
+	project := seedProject(t, env, "example-project")
+	status, raw := cronHTTP(t, env, http.MethodPost, projectPath(project.ID)+"/issues", map[string]any{"actor": "worker", "title": "New York dates", "force_new": true, "metadata": map[string]any{"timezone": "America/New_York", "scheduled_on": "2026-01-01T02:00:00Z", "deadline_on": "2026-01-01T02:00:00Z"}})
+	require.Equal(t, 200, status, string(raw))
+	var created struct {
+		Issue struct {
+			UID string `json:"uid"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &created))
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s", project.ID, created.Issue.UID)
+	check := func(row rowDates) {
+		t.Helper()
+		require.Equal(t, "2025-12-31", row.ScheduledOnDate)
+		require.Equal(t, "2025-12-31", row.DeadlineOnDate)
+	}
+	status, raw = cronHTTP(t, env, http.MethodGet, path, nil)
+	require.Equal(t, 200, status, string(raw))
+	var show struct {
+		Issue rowDates `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &show))
+	check(show.Issue)
+	status, raw = cronHTTP(t, env, http.MethodGet, projectPath(project.ID)+"/issues", nil)
+	require.Equal(t, 200, status, string(raw))
+	var list struct {
+		Issues []rowDates `json:"issues"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &list))
+	require.Len(t, list.Issues, 1)
+	check(list.Issues[0])
+	status, raw = cronHTTP(t, env, http.MethodGet, path+"/planning-dates", nil)
+	require.Equal(t, 200, status, string(raw))
+	var planning struct {
+		ScheduledOn, DeadlineOn struct {
+			Timezone string `json:"timezone"`
+			Instant  string `json:"instant"`
+		}
+	}
+	var fields map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	require.NoError(t, json.Unmarshal(fields["scheduled_on"], &planning.ScheduledOn))
+	require.NoError(t, json.Unmarshal(fields["deadline_on"], &planning.DeadlineOn))
+	require.Equal(t, "America/New_York", planning.ScheduledOn.Timezone)
+	require.Equal(t, "2026-01-01T02:00:00Z", planning.ScheduledOn.Instant)
+	require.Equal(t, planning.ScheduledOn, planning.DeadlineOn)
+	status, raw = cronHTTP(t, env, http.MethodGet, "/api/v1/ui/snapshot?view=all-open&time_zone=Asia%2FTokyo&selected_issue_uid="+created.Issue.UID, nil)
+	require.Equal(t, 200, status, string(raw))
+	var snapshot struct {
+		Selected struct {
+			Issue rowDates `json:"issue"`
+		} `json:"selected"`
+		Collection []rowDates `json:"collection"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &snapshot))
+	check(snapshot.Selected.Issue)
+	require.Len(t, snapshot.Collection, 1)
+	check(snapshot.Collection[0])
 }

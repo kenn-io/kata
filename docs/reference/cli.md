@@ -750,7 +750,7 @@ and `deadline_on_date` when the issue has `scheduled_on` or `deadline_on`
 metadata. They are `YYYY-MM-DD` calendar dates in the issue's timezone. A row
 that has the metadata key but no date has a value that could not be read.
 Daemons older than API `0.36.0` omit them. The web UI snapshot uses the same
-field names but reads RFC 3339 instants in the viewer's zone. See
+field names and uses each saved schedule's zone. Legacy timed strings use the viewer's zone. See
 [Calendar dates on issue rows](metadata.md#calendar-dates-on-issue-rows).
 
 For an issue that belongs to a recurrence, `kata show` prints a `repeat:` line

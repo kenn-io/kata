@@ -60,3 +60,26 @@ func TestSavedScheduleIgnoresHostZoneinfo(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 }
+
+func TestScheduleRetainedBundleRules(t *testing.T) {
+	newer, err := os.ReadFile("testdata/zoneinfo-2026e-inuvik.zip")
+	require.NoError(t, err)
+	const newerVersion = "sha256:4e2962d1df08fd4a918e2c03cb999cee87360aa32d5aead1d4061b28c743b3dc"
+	require.Equal(t, newerVersion, fmt.Sprintf("sha256:%x", sha256.Sum256(newer)))
+	bundles := map[string][]byte{ScheduleTZDataVersion: scheduleZoneBundle, newerVersion: newer}
+	old, err := scheduleLocationFromBundles(bundles, "America/Inuvik", ScheduleTZDataVersion)
+	require.NoError(t, err)
+	current, err := scheduleLocationFromBundles(bundles, "America/Inuvik", newerVersion)
+	require.NoError(t, err)
+	moment := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	_, oldOffset := moment.In(old).Zone()
+	_, currentOffset := moment.In(current).Zone()
+	require.Equal(t, -7*60*60, oldOffset)
+	require.Equal(t, -6*60*60, currentOffset)
+	again, err := scheduleLocationFromBundles(bundles, "America/Inuvik", ScheduleTZDataVersion)
+	require.NoError(t, err)
+	_, againOffset := moment.In(again).Zone()
+	require.Equal(t, oldOffset, againOffset)
+	_, err = scheduleLocationFromBundles(bundles, "America/Inuvik", "sha256:unknown")
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
+}

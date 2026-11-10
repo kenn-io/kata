@@ -3,11 +3,14 @@ package db
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"go.kenn.io/kata/internal/metadata"
+	"os"
+	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 func TestValidateRecurrenceTemplateValidatesReservedMetadata(t *testing.T) {
@@ -60,7 +63,32 @@ func TestRecurrenceMaterializesSavedRules(t *testing.T) {
 	}
 }
 
-func TestRecurrenceLocalRequiresPortableZone(t *testing.T) {
-	_, err := ComposeRecurrenceIssueMetadata(nil, "2026-05-18", "Local")
-	require.ErrorContains(t, err, "change it to an IANA timezone")
+func TestRecurrenceLocalMaterializesInNamedZone(t *testing.T) {
+	if os.Getenv("KATA_TEST_LOCAL_RECURRENCE") == "1" {
+		value, err := ComposeRecurrenceIssueMetadata(jsontext.Value(`{"deadline_on":"2026-05-19T09:00"}`), "2026-05-18", "Local")
+		require.NoError(t, err)
+		for _, field := range []string{"scheduled_on", "deadline_on"} {
+			_, zone, _, present, err := metadata.ScheduleFieldInstant(string(value), field, "UTC")
+			require.NoError(t, err)
+			require.True(t, present)
+			require.Equal(t, "America/New_York", zone)
+		}
+		return
+	}
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRecurrenceLocalMaterializesInNamedZone$")
+	cmd.Env = append(os.Environ(), "KATA_TEST_LOCAL_RECURRENCE=1", "TZ=America/New_York")
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+}
+
+func TestRecurrenceLocalRejectsDifferentRules(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("fixture", -8*60*60)
+	t.Cleanup(func() { time.Local = previous })
+	saved, err := metadata.NewScheduleValue("2026-05-19T09:00", "America/New_York")
+	require.NoError(t, err)
+	err = compareLocalSchedule("2026-05-19T09:00", saved)
+	require.ErrorContains(t, err, "Local timezone rules differ")
 }

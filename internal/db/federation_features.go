@@ -20,9 +20,10 @@ const CronEventFeature = "cron_v1"
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
-// SupportedEventFeatures lists event capabilities understood by this daemon.
+// IssueScheduleEventFeature identifies support for saved issue schedules.
 const IssueScheduleEventFeature = "issue_schedule_v1"
 
+// SupportedEventFeatures lists event capabilities understood by this daemon.
 const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + IssueScheduleEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a

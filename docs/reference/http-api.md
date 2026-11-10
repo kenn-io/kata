@@ -96,7 +96,9 @@ value `Local` with HTTP 400 and error code `validation`. Changing another
 timezone to `Local` through PATCH returns the same error. `Local` depends on
 the daemon host, so moving the daemon could change the schedule's timezone.
 
-Existing recurrences stored with `Local` remain readable, but cannot materialize an occurrence until changed to a named timezone. PATCH
+Existing recurrences stored with `Local` can materialize when their host zone
+can be named and its rules match the bundled rules for the occurrence and
+inherited deadline. Otherwise, change the recurrence to a named zone. PATCH
 may omit `timezone` or echo `Local` while editing their schedule or template.
 To make an existing schedule portable, PATCH its timezone to an IANA zone or
 `UTC`. PATCH requires the current `If-Match: "rev-N"` revision; stale requests

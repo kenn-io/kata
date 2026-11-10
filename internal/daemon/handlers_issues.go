@@ -208,10 +208,9 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 
 		// Matching retries are stored operations, not new timezone choices.
-		if issueTimezoneWriteRelevant(in.Body.Metadata) {
-			if err := validateIssueTimezoneWrite(nil, in.Body.Metadata, cfg.DefaultTimezone, ""); err != nil {
-				return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
-			}
+		frozenMetadata, err := prepareIssueSchedules(nil, in.Body.Metadata, cfg.DefaultTimezone, "")
+		if err != nil {
+			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
 		}
 
 		// Fresh create (no reuse): now run the state-dependent link-target
@@ -230,10 +229,6 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err := runLookalikeCheck(ctx, cfg, in, project.Name); err != nil {
 				return nil, err
 			}
-		}
-		frozenMetadata, err := freezeIssueSchedules(nil, in.Body.Metadata, cfg.DefaultTimezone, "")
-		if err != nil {
-			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
 		}
 		var archivedTarget *db.LinkTargetArchivedError
 		issue, evt, err := cfg.DB.CreateIssue(ctx, db.CreateIssueParams{

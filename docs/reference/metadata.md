@@ -58,8 +58,9 @@ rejected. Everything else is stored verbatim.
 A date-only `scheduled_on` value becomes ready on that calendar day. A local
 date-time (`YYYY-MM-DDTHH:MM` or `YYYY-MM-DDTHH:MM:SS`) becomes ready at that
 wall-clock time. Both use the issue `timezone`, then the daemon's top-level
-`timezone`, then UTC. An RFC 3339 value ending in `Z` is an exact UTC instant
-and does not use those timezones. If a local time repeats during a daylight
+`timezone`, then UTC. An RFC 3339 value ending in `Z` is an exact UTC instant;
+its selected zone determines the calendar date shown. If the selected zone is
+unusable, the supplied UTC zone is retained. If a local time repeats during a daylight
 saving transition, the first occurrence opens the gate. If a local time does
 not exist, the gate opens at the first valid instant after the gap. Numeric
 offsets are rejected because they pin an instant while duplicating the named
@@ -69,16 +70,19 @@ rules. It is a deadline only; it does not control `ready` or `next`.
 New writes store each date with its effective zone and an immutable timezone-data
 bundle version. For example, `scheduled_on` is stored as
 `{"value":"2026-11-12T09:00","timezone":"Europe/Paris","tzdata_version":"sha256:..."}`.
-The `value` retains the supplied text; UTC instants use `UTC`. Older stored
-strings remain readable using the issue and daemon defaults. An unknown bundle
+The `value` retains the supplied text; UTC instants retain their selected zone
+for calendar dates while keeping their exact instant. Older stored
+strings remain readable using the issue and daemon defaults. Older published bundles remain available when new rules are added. An unknown bundle
 version makes the date unreadable and the planning-date endpoint returns HTTP
-422. Changing or removing an issue timezone rebinds its existing civil dates.
+422. Changing or removing an issue timezone rebinds its existing dates.
 Echoing the same date preserves its saved rules.
 
 Stop every older daemon sharing a database before starting the new version,
 and keep those older daemons stopped. Older versions skip object-backed dates
-in notification sweeps. A recurrence using `Local` must be changed to a named
-IANA timezone before it can create another occurrence.
+in notification sweeps. An existing recurrence using `Local` can create an
+occurrence when the host's named zone is bundled and its rules agree for the
+occurrence and inherited deadline. Otherwise, change the recurrence to a named
+IANA timezone.
 
 New or changed issue `timezone` values from API, CLI, MCP, TUI and web writes
 must be `UTC`, `Etc/UTC`, or exact case-sensitive bundled names under `Africa/`,
@@ -105,10 +109,9 @@ uses, resolved by one shared rule. A date-only value keeps its written date. A
 local date-time resolves with its saved zone and rules. Legacy strings use the
 issue `timezone`, then the daemon's top-level `timezone`, then UTC, as above. For a recurring occurrence without `timezone`
 metadata, `scheduled_on` resolves in the recurrence's timezone before the
-daemon's; `deadline_on` does not. An RFC 3339 `Z` instant is read in that same
-zone chain, so it can fall on a different calendar date than its UTC date.
-The web UI snapshot uses the same field names but reads instants in the
-viewer's zone, so it differs only when that zone differs from the issue's. For
+daemon's; `deadline_on` does not. A saved RFC 3339 `Z` instant uses its saved zone for display.
+The web UI uses each saved value's zone. Legacy timed strings in its snapshot
+use the viewer's zone. For
 an unreadable stored value the snapshot returns an error, while a row omits the
 field; a row that has the metadata key but no date means the value could not be
 read.

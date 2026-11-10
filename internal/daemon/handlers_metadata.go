@@ -102,14 +102,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 						return nil, err
 					}
 				}
-				frozen, err := freezeIssueSchedules(jsontext.Value(current.Metadata), in.Body.Patch, cfg.DefaultTimezone, recurrenceZone)
-				if err != nil {
-					return nil, err
-				}
-				if err := validateIssueTimezoneWrite(jsontext.Value(current.Metadata), frozen, cfg.DefaultTimezone, recurrenceZone); err != nil {
-					return nil, err
-				}
-				return frozen, nil
+				return prepareIssueSchedules(jsontext.Value(current.Metadata), in.Body.Patch, cfg.DefaultTimezone, recurrenceZone)
 			})
 		}
 

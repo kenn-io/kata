@@ -66,7 +66,7 @@ func ScheduleFieldDue(
 // ScheduleFieldInstant resolves a planning field with the same civil-time
 // policy as readiness. A skipped midnight (including a skipped civil day)
 // opens at the first valid instant after the gap; an overlap uses the first
-// occurrence. UTC input has UTC identity regardless of configured timezones.
+// occurrence. UTC input remains an absolute instant and reports its saved zone.
 func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone string, at time.Time, present bool, err error) {
 	if field != "scheduled_on" && field != "deadline_on" {
 		err = fmt.Errorf("unsupported planning field %q", field)
@@ -85,6 +85,9 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 		return
 	}
 	if kind == scheduledOnInstant {
+		if savedLocation != nil {
+			return value, savedLocation.String(), instant.UTC(), true, nil
+		}
 		return value, "UTC", instant.UTC(), true, nil
 	}
 	location := savedLocation
@@ -106,8 +109,8 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 
 // ScheduledOnCalendarDate returns the display calendar date for scheduled_on.
 // Date-only values keep their written civil date. Local date-times are first
-// resolved in the issue or daemon timezone, while UTC values are already
-// instants; both timed forms are then projected into displayTimezone.
+// resolved in their saved zone. Legacy timed values resolve in the issue or
+// daemon timezone and are projected into displayTimezone.
 func ScheduledOnCalendarDate(
 	raw string,
 	displayTimezone string,
@@ -129,9 +132,9 @@ func DeadlineOnCalendarDate(
 
 // CalendarDate projects one planning field ("scheduled_on" or "deadline_on")
 // to a YYYY-MM-DD calendar date, reporting whether the key is present. A
-// non-nil displayTimezone is the viewer's zone, with "" meaning UTC. A nil
-// displayTimezone reads the value in its own schedule zone: the issue
-// timezone, then defaultTimezone, then UTC.
+// Saved values use their own zone. For legacy strings, a non-nil
+// displayTimezone is the viewer's zone, with "" meaning UTC. A nil
+// displayTimezone uses the issue timezone, then defaultTimezone, then UTC.
 func CalendarDate(
 	raw string,
 	field string,
@@ -173,12 +176,13 @@ func CalendarDate(
 			return "", false, err
 		}
 	}
+	if savedLocation != nil {
+		return instant.In(savedLocation).Format(time.DateOnly), true, nil
+	}
 	var display string
 	switch {
 	case displayTimezone != nil:
 		display = *displayTimezone
-	case savedLocation != nil:
-		display = savedLocation.String()
 	case issueTimezone != "":
 		display = issueTimezone
 	default:
@@ -187,10 +191,7 @@ func CalendarDate(
 	if display == "" {
 		display = "UTC"
 	}
-	displayLocation := savedLocation
-	if displayTimezone != nil || displayLocation == nil {
-		displayLocation, err = time.LoadLocation(display)
-	}
+	displayLocation, err := time.LoadLocation(display)
 	if err != nil {
 		return "", false, fmt.Errorf("load display timezone %q: %w", display, err)
 	}

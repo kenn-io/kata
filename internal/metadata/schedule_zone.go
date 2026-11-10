@@ -7,68 +7,82 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"io"
+	"io/fs"
 	"time"
 )
 
-//go:embed tzdata/zoneinfo.zip
+//go:embed tzdata/zoneinfo-2026c.zip
 var scheduleZoneBundle []byte
 
-const ScheduleTZDataVersion = "sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"
+const scheduleTZData2026c = "sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"
 
-type savedSchedule struct {
+const ScheduleTZDataVersion = scheduleTZData2026c
+
+type SavedSchedule struct {
 	Value         string `json:"value"`
 	Timezone      string `json:"timezone"`
 	TZDataVersion string `json:"tzdata_version"`
 }
 
+// Retain every published bundle when changing the current write version.
+var scheduleZoneBundles = map[string][]byte{scheduleTZData2026c: scheduleZoneBundle}
+
 // ScheduleLocation loads the exact zone rules shipped for schedule values.
 func ScheduleLocation(zone, version string) (*time.Location, error) {
-	if version != ScheduleTZDataVersion {
+	return scheduleLocationFromBundles(scheduleZoneBundles, zone, version)
+}
+
+func scheduleLocationFromBundles(bundles map[string][]byte, zone, version string) (*time.Location, error) {
+	bundle, ok := bundles[version]
+	if !ok {
 		return nil, fmt.Errorf("unsupported schedule tzdata version %q", version)
 	}
-
-	z, err := zip.NewReader(bytes.NewReader(scheduleZoneBundle), int64(len(scheduleZoneBundle)))
+	z, err := zip.NewReader(bytes.NewReader(bundle), int64(len(bundle)))
 	if err != nil {
 		return nil, err
 	}
-	for _, f := range z.File {
-		if f.Name != zone {
-			continue
-		}
-		r, err := f.Open()
-		if err != nil {
-			return nil, err
-		}
-		data, err := io.ReadAll(r)
-		closeErr := r.Close()
-		if err != nil {
-			return nil, err
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		return time.LoadLocationFromTZData(zone, data)
+	data, err := fs.ReadFile(z, zone)
+	if err != nil {
+		return nil, fmt.Errorf("unknown schedule timezone %q: %w", zone, err)
 	}
-	return nil, fmt.Errorf("unknown schedule timezone %q", zone)
+	return time.LoadLocationFromTZData(zone, data)
 }
 
 // NewScheduleValue freezes the zone rules used to interpret a schedule.
 func NewScheduleValue(value, zone string) (jsontext.Value, error) {
-	kind, _, _, err := classifyScheduledOn(value)
-	if err != nil {
+	return NewScheduleValueWithVersion(value, zone, ScheduleTZDataVersion)
+}
+
+// NewScheduleValueWithVersion preserves the rules of an edited schedule.
+func NewScheduleValueWithVersion(value, zone, version string) (jsontext.Value, error) {
+	if _, _, _, err := classifyScheduledOn(value); err != nil {
 		return nil, err
-	}
-	if kind == scheduledOnInstant {
-		zone = "UTC"
 	}
 	if zone == "" {
 		zone = "UTC"
 	}
-	if _, err := ScheduleLocation(zone, ScheduleTZDataVersion); err != nil {
+	if _, err := ScheduleLocation(zone, version); err != nil {
 		return nil, err
 	}
-	return json.Marshal(savedSchedule{value, zone, ScheduleTZDataVersion})
+	return json.Marshal(SavedSchedule{value, zone, version})
+}
+
+// DecodeSavedSchedule returns a descriptor for an object-backed value.
+func DecodeSavedSchedule(raw jsontext.Value) (*SavedSchedule, error) {
+	if len(raw) == 0 || raw[0] != '{' {
+		return nil, nil
+	}
+	var obj SavedSchedule
+	if err := json.Unmarshal(raw, &obj, json.RejectUnknownMembers(true)); err != nil {
+		return nil, err
+	}
+	if _, _, _, err := classifyScheduledOn(obj.Value); err != nil {
+		return nil, err
+	}
+	if _, err := ScheduleLocation(obj.Timezone, obj.TZDataVersion); err != nil {
+		return nil, err
+	}
+	return &obj, nil
 }
 
 func decodeScheduleValue(raw jsontext.Value) (*string, *time.Location, error) {
@@ -82,16 +96,12 @@ func decodeScheduleValue(raw jsontext.Value) (*string, *time.Location, error) {
 		}
 		return &s, nil, nil
 	}
-	var obj savedSchedule
-	if err := json.Unmarshal(raw, &obj, json.RejectUnknownMembers(true)); err != nil {
-		return nil, nil, err
-	}
-	kind, _, _, err := classifyScheduledOn(obj.Value)
+	obj, err := DecodeSavedSchedule(raw)
 	if err != nil {
 		return nil, nil, err
 	}
-	if kind == scheduledOnInstant && obj.Timezone != "UTC" {
-		return nil, nil, fmt.Errorf("UTC schedule instant requires UTC timezone")
+	if obj == nil {
+		return nil, nil, fmt.Errorf("schedule must be a string or object")
 	}
 	loc, err := ScheduleLocation(obj.Timezone, obj.TZDataVersion)
 	if err != nil {
