@@ -11,6 +11,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/db"
@@ -19,19 +20,14 @@ import (
 
 // The HTTP fixtures control transitions; callers still use the public MCP
 // schema and real generated client. There are no sleeps driving mutations.
-func coordinationWaitSession(t *testing.T, snapshot func(*http.Request) map[string]any, lookups ...*atomic.Int64) *sdkmcp.ClientSession {
+func coordinationWaitSession(t *testing.T, snapshot func(*http.Request) map[string]any) *sdkmcp.ClientSession {
 	t.Helper()
 	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects":
 			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
-		case "/api/v1/projects/1/notifications/actor":
-			if len(lookups) > 0 {
-				lookups[0].Add(1)
-			}
-			writeJSON(w, map[string]any{"effective_actor": "bound-actor"})
 		default:
-			require.Equal(t, http.MethodGet, r.Method, "waiting must never consume or modify a request")
+			assert.Equal(t, http.MethodGet, r.Method, "waiting must never consume or modify a request")
 			writeJSON(w, map[string]any{"issue": snapshot(r), "labels": []any{}, "links": []any{}, "comments": []any{}})
 		}
 	})
@@ -389,26 +385,16 @@ func TestMCPCoordinationWaitActorLookupNotFound(t *testing.T) {
 }
 
 func TestMCPCoordinationWaitStatusAnySnapshot(t *testing.T) {
-	for _, stalled := range []bool{false, true} {
-		t.Run(fmt.Sprintf("stalled=%t", stalled), func(t *testing.T) {
-			session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
-				ref := "abc1"
-				if strings.HasSuffix(r.URL.Path, "/abc1") && stalled {
-					<-r.Context().Done()
-					return nil
-				}
-				if strings.HasSuffix(r.URL.Path, "/def1") {
-					ref = "def1"
-				}
-				return issueJSON(1, "spoke-project", ref)
-			})
-			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "open", "any": true, "timeout_seconds": 1})
-			require.Equal(t, "matched", out["reason"])
-			if !stalled {
-				require.Len(t, out["states"], 2)
-			}
-		})
-	}
+	session := coordinationWaitSession(t, func(r *http.Request) map[string]any {
+		ref := "abc1"
+		if strings.HasSuffix(r.URL.Path, "/def1") {
+			ref = "def1"
+		}
+		return issueJSON(1, "spoke-project", ref)
+	})
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "status": "open", "any": true, "timeout_seconds": 1})
+	require.Equal(t, "matched", out["reason"])
+	require.Len(t, out["states"], 2)
 }
 
 func TestMCPCoordinationWaitStatusPollsPastStalledPeer(t *testing.T) {
@@ -439,20 +425,29 @@ func TestMCPCoordinationWaitStatusPollsPastStalledPeer(t *testing.T) {
 }
 
 func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
-	for _, tc := range []struct{ name, field, value, ref string }{
-		{"status", "status", "open", "abc1"}, {"attention", "until", "attention", "abc1"}, {"out of scope", "until", "attention", "other-project#abc1"},
+	for _, tc := range []struct {
+		name, field, value, ref string
+		unavailable             bool
+	}{
+		{"status", "status", "open", "abc1", false}, {"attention", "until", "attention", "abc1", false}, {"out of scope", "until", "attention", "other-project#abc1", false}, {"retry limit", "until", "attention", "abc1", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reads atomic.Int64
+			var failures atomic.Int64
 			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/v1/projects":
 					writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
 				case "/api/v1/projects/1/issues/abc1":
+					if tc.unavailable {
+						failures.Add(1)
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
+						return
+					}
 					http.NotFound(w, r)
 				case "/api/v1/projects/1/issues/def1":
 					issue := issueJSON(1, "spoke-project", "def1")
-					if reads.Add(1) > 1 {
+					if (!tc.unavailable || failures.Load() >= 3) && reads.Add(1) > 1 {
 						issue["metadata"] = map[string]any{"work.attention": "stuck"}
 					}
 					writeJSON(w, map[string]any{"issue": issue})
@@ -463,6 +458,9 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
 			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{tc.ref, "def1"}, tc.field: tc.value, "any": true, "timeout_seconds": 2})
 			require.Equal(t, "matched", out["reason"])
+			if tc.unavailable {
+				require.Equal(t, int64(3), failures.Load())
+			}
 		})
 	}
 }
@@ -619,28 +617,4 @@ func TestMCPCoordinationWaitUntilPersistentFailure(t *testing.T) {
 			require.Equal(t, tc.reads, reads.Load())
 		})
 	}
-}
-
-func TestMCPCoordinationWaitAnyContinuesAfterRetryLimit(t *testing.T) {
-	var failures atomic.Int64
-	var laterReads atomic.Int64
-	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/projects":
-			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
-		case "/api/v1/projects/1/issues/abc1":
-			failures.Add(1)
-			http.Error(w, "unavailable", http.StatusServiceUnavailable)
-		default:
-			issue := issueJSON(1, "spoke-project", "def1")
-			if failures.Load() >= 3 && laterReads.Add(1) > 1 {
-				issue["metadata"] = map[string]any{"work.attention": "stuck"}
-			}
-			writeJSON(w, map[string]any{"issue": issue})
-		}
-	})
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "any": true, "timeout_seconds": 2})
-	require.Equal(t, "matched", out["reason"])
-	require.Equal(t, int64(3), failures.Load())
 }

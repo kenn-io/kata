@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,7 +43,7 @@ func TestMCPNotifySendAndClearAgainstDaemon(t *testing.T) {
 
 }
 
-func TestMCPNotifyValidationAndScope(t *testing.T) {
+func TestMCPNotifyValidation(t *testing.T) {
 	session, _ := newCoordinationSession(t)
 	created := callCoordinationTool(t, session, "kata.create", map[string]any{"title": "Keep untouched", "idempotency_key": "validation-create"})
 	ref := created["issue"].(map[string]any)["ref"].(string)
@@ -82,7 +83,7 @@ func TestMCPNotifyTeammateDefaults(t *testing.T) {
 			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
 		case "/api/v1/projects/1/issues/abc1/notifications":
 			var body map[string]any
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			requests <- body
 			writeJSON(w, map[string]any{"issue": issueJSON(1, "spoke-project", "abc1"), "changed": false, "recipients": []string{"recipient"}})
 		default:
