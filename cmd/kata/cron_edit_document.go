@@ -58,7 +58,7 @@ func parseCronEdit(resource string, raw []byte, stored bool) (map[string]jsontex
 	} else {
 		value, err = cron.ParseWorkflow(definition)
 	}
-	if err != nil && !(stored && resource == "job" && errors.Is(err, cron.ErrNeverFires)) {
+	if err != nil && (!stored || resource != "job" || !errors.Is(err, cron.ErrNeverFires)) {
 		return nil, cronCLIValidation(err.Error())
 	}
 	// Normalize known fields as the daemon does. Options stay raw, including
