@@ -400,7 +400,7 @@ func (s *Service) Subscribe(ctx context.Context, p Principal, scope ForwarderSco
 	if err := checkForwarderScope(scope, ident.args); err != nil {
 		return SubscribeResult{}, err
 	}
-	if err := s.webhook.validateLiteralCallback(ctx, ident.url); err != nil {
+	if err := s.webhook.validateStaticCallback(ctx, ident.url); err != nil {
 		return SubscribeResult{}, callbackEndpoint(endpointCategory(err))
 	}
 	// The fingerprint activation stores describes the archive at this head.

@@ -109,6 +109,8 @@ func TestSubscribeValidation(t *testing.T) {
 		{"missing secret", func(r *mcpevents.SubscribeRequest) { r.Delivery.Secret = "" }, mcpevents.CodeInvalidParams, "invalid_secret"},
 		{"http callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "http://example.com/x" }, mcpevents.CodeInvalidParams, "invalid_callback"},
 		{"private callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://10.0.0.1/x" }, mcpevents.CodeCallbackEndpoint, "destination_not_allowed"},
+		{"unpinned internal callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://events.corp.internal/x" }, mcpevents.CodeCallbackEndpoint, "destination_not_allowed"},
+		{"unpinned home callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://events.home.arpa/x" }, mcpevents.CodeCallbackEndpoint, "destination_not_allowed"},
 		{"blank recipient", func(r *mcpevents.SubscribeRequest) { r.Arguments.For = " " }, mcpevents.CodeInvalidParams, "invalid_arguments"},
 		{"empty project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{} }, mcpevents.CodeInvalidParams, "invalid_project_uids"},
 		{"unsorted project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{testProjectB, testProjectA} }, mcpevents.CodeInvalidParams, "project_uids_not_sorted_unique"},
@@ -123,7 +125,7 @@ func TestSubscribeValidation(t *testing.T) {
 			_ = requireWire(t, err, tc.code, tc.reason)
 			assert.Zero(t, lookups.Load(), "validation does no DNS")
 			assert.Zero(t, dials.Load(), "validation does not dial")
-			assert.Zero(t, h.svc.ChallengeStateCount(), "private literal refusal spends no challenge budget")
+			assert.Zero(t, h.svc.ChallengeStateCount(), "destination refusal spends no challenge budget")
 		})
 	}
 	t.Run("invalid principal", func(t *testing.T) {
@@ -423,9 +425,6 @@ func TestSubscribeRechecksDestinationWithCachedConsent(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			require.NoError(t, svc.Unsubscribe(t.Context(), principalA, mcpevents.UnsubscribeRequest{Name: req.Name, Arguments: req.Arguments, Delivery: req.Delivery}))
-			// Restore for the next case without depending on that case's resolver.
-			h.mustSubscribe(req)
 		})
 	}
 }

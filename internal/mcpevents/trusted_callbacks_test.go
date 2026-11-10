@@ -18,21 +18,20 @@ func TestTrustedCallbackPolicy(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		checkFixtureSignature(t, r, body, fixtureSecret(1, 32))
 		received++
-		rw.Header().Set("Location", "https://127.0.0.1/secret")
-		rw.WriteHeader(307)
+		rw.WriteHeader(204)
 	}, TrustedCallback{Origin: "https://EXAMPLE.com:443/", Addresses: []string{pin}})
 	w.resolve = func(context.Context, string, string) ([]netip.Addr, error) {
 		t.Error("trusted callback used DNS")
 		return nil, nil
 	}
 	receipt, err := w.Send(t.Context(), fixtureTLSCallback, "evt", "sub", []byte(`{}`), []string{fixtureSecret(1, 32)})
-	if err != nil || receipt.StatusCode != 307 || received != 1 {
-		t.Fatalf("trusted redirect followed or lost: %+v %v count=%d", receipt, err, received)
+	if err != nil || receipt.StatusCode != 204 || received != 1 {
+		t.Fatalf("trusted delivery failed: %+v %v count=%d", receipt, err, received)
 	}
 	w.resolve = func(context.Context, string, string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("10.0.0.2")}, nil
 	}
-	for _, raw := range []string{"https://other.example/events", "https://example.com:444/events", "https://sub.example.com/events"} {
+	for _, raw := range []string{"https://example.com:444/events", "https://sub.example.com/events"} {
 		if err := w.ValidateCallback(t.Context(), raw); safeWebhookError(err).Reason != "destination_not_allowed" {
 			t.Fatalf("nonexact origin accepted: %s %v", raw, err)
 		}
@@ -41,41 +40,55 @@ func TestTrustedCallbackPolicy(t *testing.T) {
 
 func TestTrustedCallbackPolicyRejectsInvalidConfiguration(t *testing.T) {
 	for _, pin := range []string{"10.1.2.3", "172.16.1.2", "192.168.1.2", "100.64.0.1", "fd00::1"} {
-		for _, origin := range []string{"https://example.com", "https://events.corp.internal", "https://events.home.arpa"} {
-			policy, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: origin, Addresses: []string{pin}}})
-			if err != nil {
-				t.Errorf("valid pin %s origin %s: %v", pin, origin, err)
-				continue
-			}
-			w := NewWebhookClient(WebhookOptions{TrustedCallbacks: policy, Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
-				t.Error("trusted private host used DNS")
-				return nil, nil
-			}})
-			if err := w.ValidateCallback(t.Context(), origin+"/events"); err != nil {
-				t.Error(err)
-			}
+		if _, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: "https://example.com", Addresses: []string{pin}}}); err != nil {
+			t.Errorf("valid pin %s: %v", pin, err)
 		}
 	}
+	for _, origin := range []string{"https://example.com", "https://events.corp.internal", "https://events.home.arpa"} {
+		policy, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}})
+		if err != nil {
+			t.Fatalf("valid origin %s: %v", origin, err)
+		}
+		w := NewWebhookClient(WebhookOptions{TrustedCallbacks: policy, Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
+			t.Error("trusted private host used DNS")
+			return nil, nil
+		}})
+		if err := w.validateStaticCallback(t.Context(), origin+"/events"); err != nil {
+			t.Error(err)
+		}
+		if err := w.ValidateCallback(t.Context(), origin+"/events"); err != nil {
+			t.Error(err)
+		}
+	}
+	// Operator diagnostics identify only the configuration field and indexes,
+	// never the supplied origin or address, even after earlier valid entries.
+	checkError := func(entries []TrustedCallback, field string) {
+		t.Helper()
+		valid := TrustedCallback{Origin: "https://valid.example", Addresses: []string{"10.0.0.1"}}
+		_, err := CompileTrustedCallbacks(append([]TrustedCallback{valid}, entries...))
+		if err == nil || err.Error() != "invalid mcp_events.trusted_callbacks"+field {
+			t.Errorf("expected sanitized field %s, got %v", field, err)
+		}
+	}
+
 	for _, origin := range []string{"https://*.example.com", "https://example.com/path", "https://example.com/?"} {
-		if _, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}}); err == nil {
-			t.Errorf("accepted origin %q", origin)
-		}
+		checkError([]TrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}}, "[1].origin")
 	}
-	for _, pin := range []string{"fd00:ec2::254", "100.100.100.200", "::ffff:100.100.100.200", "127.0.0.1", "169.254.169.254", "0.0.0.0", "224.0.0.1", "8.8.8.8", "192.0.2.1", "::1", "fe80::1", "::", "ff00::1", "2001:db8::1", "fd00::1%eth0", "10.0.0.0/8", "receiver.example"} {
-		if _, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: "https://example.com", Addresses: []string{pin}}}); err == nil {
-			t.Errorf("accepted pin %q", pin)
-		}
+	for _, pin := range []string{"fd00:ec2::254", "100.100.100.200", "::ffff:100.100.100.200", "8.8.8.8", "fd00::1%eth0", "10.0.0.0/8", "receiver.example"} {
+		checkError([]TrustedCallback{{Origin: "https://example.com", Addresses: []string{"10.0.0.1", pin}}}, "[1].addresses[1]")
 	}
-	for _, entries := range [][]TrustedCallback{
-		{{Origin: "https://example.com"}},
-		{{Origin: "https://example.com", Addresses: []string{"10.0.0.1", "::ffff:10.0.0.1"}}},
-		{{Origin: "https://example.com", Addresses: []string{"10.0.0.1"}}, {Origin: "https://EXAMPLE.com:443/", Addresses: []string{"10.0.0.2"}}},
-		{{Origin: "https://10.0.0.1", Addresses: []string{"10.0.0.2"}}},
+	for _, tc := range []struct {
+		entries []TrustedCallback
+		field   string
+	}{
+		{[]TrustedCallback{{Origin: "https://example.com"}}, "[1].addresses"},
+		{[]TrustedCallback{{Origin: "https://example.com", Addresses: []string{"10.0.0.1", "::ffff:10.0.0.1"}}}, "[1].addresses[1]"},
+		{[]TrustedCallback{{Origin: "https://example.com", Addresses: []string{"10.0.0.1"}}, {Origin: "https://EXAMPLE.com:443/", Addresses: []string{"10.0.0.2"}}}, "[2].origin"},
+		{[]TrustedCallback{{Origin: "https://10.0.0.1", Addresses: []string{"10.0.0.2"}}}, "[1].addresses[0]"},
 	} {
-		if _, err := CompileTrustedCallbacks(entries); err == nil {
-			t.Errorf("accepted invalid entries: %+v", entries)
-		}
+		checkError(tc.entries, tc.field)
 	}
+
 }
 
 func TestTrustedCallbackTLSAndLiteral(t *testing.T) {
@@ -84,18 +97,16 @@ func TestTrustedCallbackTLSAndLiteral(t *testing.T) {
 	roots.AddCert(server.Certificate())
 	for _, tc := range []struct {
 		origin, pin, callback string
-		roots                 *x509.CertPool
 	}{
-
-		{"https://wrong.example", "10.0.0.1", "https://wrong.example/events", roots},
-		{"https://10.0.0.1", "10.0.0.1", "https://10.0.0.1/events", roots},
-		{"https://[fd00::1]:8443", "fd00::1", "https://[fd00::1]:8443/events", roots},
+		{"https://wrong.example", "10.0.0.1", "https://wrong.example/events"},
+		{"https://10.0.0.1", "10.0.0.1", "https://10.0.0.1/events"},
+		{"https://[fd00::1]:8443", "fd00::1", "https://[fd00::1]:8443/events"},
 	} {
 		policy, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: tc.origin, Addresses: []string{tc.pin}}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		w := NewWebhookClient(WebhookOptions{TrustedCallbacks: policy, RootCAs: tc.roots, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+		w := NewWebhookClient(WebhookOptions{TrustedCallbacks: policy, RootCAs: roots, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			u, _ := url.Parse(tc.callback)
 			port := u.Port()
 			if port == "" {

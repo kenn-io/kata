@@ -1,20 +1,18 @@
 package mcpevents
 
 import (
-	"errors"
+	"fmt"
 	"net/netip"
 	"net/url"
 	"strings"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/httpurl"
 )
 
 // TrustedCallback grants one exact HTTPS origin a static set of private peers.
 // Only daemon operator configuration should supply these grants.
-type TrustedCallback struct {
-	Origin    string
-	Addresses []string
-}
+type TrustedCallback = config.MCPEventsTrustedCallback
 
 // TrustedCallbackPolicy is immutable after compilation and safe to share.
 // Its zero value keeps callbacks public-only.
@@ -24,30 +22,32 @@ type TrustedCallbackPolicy struct{ origins map[string][]netip.Addr }
 // include origins or addresses, which may disclose private network details.
 func CompileTrustedCallbacks(entries []TrustedCallback) (*TrustedCallbackPolicy, error) {
 	policy := &TrustedCallbackPolicy{origins: make(map[string][]netip.Addr, len(entries))}
-	invalid := errors.New("invalid trusted callback policy")
-	for _, entry := range entries {
+	for i, entry := range entries {
 		u, err := parseWebhookCallback(entry.Origin)
-		if err != nil || (u.Path != "" && u.Path != "/") || u.RawPath != "" || strings.ContainsAny(entry.Origin, "?#") || len(entry.Addresses) == 0 {
-			return nil, invalid
+		if err != nil || (u.Path != "" && u.Path != "/") || u.RawPath != "" || strings.ContainsAny(entry.Origin, "?#") {
+			return nil, fmt.Errorf("invalid mcp_events.trusted_callbacks[%d].origin", i)
 		}
 		origin := webhookOrigin(u)
 		if _, exists := policy.origins[origin]; exists {
-			return nil, invalid
+			return nil, fmt.Errorf("invalid mcp_events.trusted_callbacks[%d].origin", i)
+		}
+		if len(entry.Addresses) == 0 {
+			return nil, fmt.Errorf("invalid mcp_events.trusted_callbacks[%d].addresses", i)
 		}
 		seen := make(map[netip.Addr]bool, len(entry.Addresses))
 		literal, literalErr := netip.ParseAddr(u.Hostname())
-		for _, raw := range entry.Addresses {
+		for j, raw := range entry.Addresses {
 			ip, err := netip.ParseAddr(raw)
 			if err != nil || ip.Zone() != "" {
-				return nil, invalid
+				return nil, fmt.Errorf("invalid mcp_events.trusted_callbacks[%d].addresses[%d]", i, j)
 			}
 			ip = ip.Unmap()
 			if ip == netip.MustParseAddr("100.100.100.200") || ip == netip.MustParseAddr("fd00:ec2::254") ||
 				(!ip.IsPrivate() && !netip.MustParsePrefix("100.64.0.0/10").Contains(ip)) || seen[ip] {
-				return nil, invalid
+				return nil, fmt.Errorf("invalid mcp_events.trusted_callbacks[%d].addresses[%d]", i, j)
 			}
 			if literalErr == nil && literal.Unmap() != ip {
-				return nil, invalid
+				return nil, fmt.Errorf("invalid mcp_events.trusted_callbacks[%d].addresses[%d]", i, j)
 			}
 			seen[ip] = true
 			policy.origins[origin] = append(policy.origins[origin], ip)

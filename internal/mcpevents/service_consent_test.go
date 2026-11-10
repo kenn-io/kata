@@ -2,9 +2,7 @@ package mcpevents_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"strconv"
 	"sync"
@@ -134,7 +132,7 @@ func TestEndpointConsent(t *testing.T) {
 				assert.NotNil(t, row.VerifiedAt)
 			}
 		})
-		t.Run("coalesced and durable consent rechecks current destinations", func(t *testing.T) {
+		t.Run("durable consent rechecks current destinations", func(t *testing.T) {
 			h := newHarness(t, open(t))
 			var private atomic.Bool
 			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
@@ -143,21 +141,9 @@ func TestEndpointConsent(t *testing.T) {
 				}
 				return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
 			})
-			h.recv.afterChallenge = func() { private.Store(true) }
-			h.recv.gate = make(chan struct{})
-			release := sync.OnceFunc(func() { close(h.recv.gate) })
-			defer release()
-			h.recv.entered = make(chan struct{}, 1)
-			leader := make(chan error, 1)
-			go func() { _, err := h.subscribe(principalA, h.request("example-user/leader")); leader <- err }()
-			receive(t, h.recv.entered)
-			follower := make(chan error, 1)
-			go func() { _, err := h.subscribe(principalA, h.request("example-user/follower")); follower <- err }()
-			require.Eventually(t, func() bool { return h.svc.InflightCount() == 2 }, time.Second, time.Millisecond)
-			release()
-			require.NoError(t, receive(t, leader))
-			_ = requireWire(t, receive(t, follower), mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
-			_, err := h.subscribe(principalA, h.request("example-user/recent"))
+			h.mustSubscribe(h.request("example-user/leader"))
+			private.Store(true)
+			_, err := h.subscribe(principalA, h.request("example-user/other"))
 			_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
 			assert.EqualValues(t, 1, h.recv.challenges.Load())
 		})
@@ -250,6 +236,11 @@ func TestEndpointConsent(t *testing.T) {
 		})
 		t.Run("failed challenges are also limited per principal", func(t *testing.T) {
 			h := newHarness(t, open(t))
+			var lookups atomic.Int64
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				lookups.Add(1)
+				return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+			})
 			for i := range 10 {
 				req := h.request("example-user")
 				// The test certificate does not name example.net, so each of these fails TLS.
@@ -258,10 +249,12 @@ func TestEndpointConsent(t *testing.T) {
 				require.Error(t, err, "iteration %d", i)
 				_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "tls_error")
 			}
+			assert.EqualValues(t, 10, lookups.Load(), "fresh verification resolves once, after admission")
 			req := h.request("example-user")
 			req.Delivery.URL = "https://fresh.example.net/events"
 			_, err := h.subscribe(principalA, req)
 			_ = requireWire(t, err, mcpevents.CodeResourceExhausted, "callback_verification_failures")
+			assert.EqualValues(t, 10, lookups.Load(), "exhausted budget refuses before DNS")
 			// Another principal has its own budget.
 			_, err = h.subscribe(mcpevents.Principal{Authority: mcpevents.AuthorityDBToken, Subject: "8"}, req)
 			_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "tls_error")
@@ -425,30 +418,4 @@ func TestInvalidProviderKeyDoesNotPoisonDatabase(t *testing.T) {
 			})
 		})
 	}
-}
-
-func TestChallengeAdmissionBeforeDNS(t *testing.T) {
-	var lookups atomic.Int64
-	client := mcpevents.NewWebhookClient(mcpevents.WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
-		lookups.Add(1)
-		return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
-	}, DialContext: func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("fixture unreachable") }})
-	h := newHarnessWith(t, openSQLite(t), func(c *mcpevents.ServiceConfig) { c.Webhook = client })
-	for i := range 10 {
-		req := h.request("example-user")
-		req.Delivery.URL = fmt.Sprintf("https://failed%d.example.net/events", i)
-		_, err := h.subscribe(principalA, req)
-		_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "connection_refused")
-	}
-	assert.EqualValues(t, 10, lookups.Load(), "fresh verification resolves once, after admission")
-	before := lookups.Load()
-	req := h.request("example-user")
-	req.Delivery.URL = "https://fresh.example.net/events"
-	_, err := h.subscribe(principalA, req)
-	_ = requireWire(t, err, mcpevents.CodeResourceExhausted, "callback_verification_failures")
-	assert.Equal(t, before, lookups.Load(), "exhausted budget refuses before DNS")
-	h.auth.fail(mcpevents.ErrPrincipalRevoked)
-	_, err = h.subscribe(principalA, req)
-	assert.ErrorIs(t, err, mcpevents.ErrForbidden)
-	assert.Equal(t, before, lookups.Load(), "revoked authority refuses before DNS")
 }

@@ -130,14 +130,14 @@ func parseWebhookCallback(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// validateLiteralCallback refuses prohibited literals without DNS or spending
-// failed-challenge tokens. The same selector honors exact operator pins.
-func (w *WebhookClient) validateLiteralCallback(ctx context.Context, raw string) error {
+// validateStaticCallback refuses prohibited literals and private namespaces
+// without DNS or spending failed-challenge tokens. The same selector honors exact operator pins.
+func (w *WebhookClient) validateStaticCallback(ctx context.Context, raw string) error {
 	u, err := parseWebhookCallback(raw)
 	if err != nil {
 		return err
 	}
-	if _, err := netip.ParseAddr(u.Hostname()); err == nil {
+	if _, err := netip.ParseAddr(u.Hostname()); err == nil || privateWebhookHostname(u.Hostname()) {
 		_, err = w.destinationAddresses(ctx, u)
 		return err
 	}
@@ -169,11 +169,8 @@ func (w *WebhookClient) destinationAddresses(ctx context.Context, u *url.URL) ([
 	}
 	// These private DNS namespaces require an exact static grant; never resolve
 	// them on the public-only path. Lexical hostname checks are shared above.
-	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	for _, suffix := range []string{"internal", "home.arpa"} {
-		if host == suffix || strings.HasSuffix(host, "."+suffix) {
-			return nil, &WebhookError{Reason: "destination_not_allowed"}
-		}
+	if privateWebhookHostname(u.Hostname()) {
+		return nil, &WebhookError{Reason: "destination_not_allowed"}
 	}
 	var addresses []netip.Addr
 	if ip, err := netip.ParseAddr(u.Hostname()); err == nil {
@@ -194,6 +191,16 @@ func (w *WebhookClient) destinationAddresses(ctx context.Context, u *url.URL) ([
 		}
 	}
 	return addresses, nil
+}
+
+func privateWebhookHostname(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	for _, suffix := range []string{"internal", "home.arpa"} {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func validWebhookHostname(host string) bool {

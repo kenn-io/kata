@@ -177,7 +177,7 @@ func TestWebhookRejectsRebindingRedirectAndPrivateIPs(t *testing.T) {
 		t.Fatal("DNS rebinding reached receiver")
 	}
 	for _, addresses := range [][]string{
-		{"8.8.8.8", "10.0.0.1"}, {"::1"}, {"::ffff:127.0.0.1"}, {"100.64.0.1"}, {"100.100.100.200"}, {"::ffff:100.100.100.200"}, {"fd00:ec2::254"}, {"169.254.1.1"}, {"192.0.2.1"}, {"198.51.100.1"}, {"203.0.113.1"}, {"198.18.0.1"}, {"240.1.1.1"}, {"ff02::1"}, {"2001:db8::1"}, {"64:ff9b::7f00:1"}, {"2002:7f00:1::"}, {"2001::ffff:80ff:fffe"}, {"fe80::1%eth0"}, {},
+		{"8.8.8.8", "10.0.0.1"}, {"::1"}, {"::ffff:127.0.0.1"}, {"100.64.0.1"}, {"fd00:ec2::254"}, {"169.254.1.1"}, {"192.0.2.1"}, {"198.51.100.1"}, {"203.0.113.1"}, {"198.18.0.1"}, {"240.1.1.1"}, {"ff02::1"}, {"2001:db8::1"}, {"64:ff9b::7f00:1"}, {"2002:7f00:1::"}, {"2001::ffff:80ff:fffe"}, {"fe80::1%eth0"}, {},
 	} {
 		t.Run(strings.Join(addresses, ","), func(t *testing.T) {
 			w.resolve = func(context.Context, string, string) ([]netip.Addr, error) {

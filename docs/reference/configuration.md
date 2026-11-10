@@ -1016,6 +1016,7 @@ allow_no_expiry = true
 | `enabled` | `false` | Starts Events delivery and accepts subscriptions. |
 | `max_ttl` | `"720h"` (30 days) | Longest lifetime of a finite subscription grant. Go duration syntax; at least `"60s"`. |
 | `allow_no_expiry` | `true` | Honors requests for a subscription that never expires. Set `false` to give those requests a `max_ttl` grant instead. |
+| `trusted_callbacks` | `[]` | Grants exact HTTPS origins static private addresses; see [Trusted private callbacks](#trusted-private-callbacks). |
 
 Subscribers choose their own lifetime. A request without one gets 24 hours
 capped by `max_ttl`, and a finite request is clamped to between 60 seconds and
@@ -1082,7 +1083,9 @@ that resolve to private addresses fail with `destination_not_allowed`.
 Unsubscribe remains available. Cached public consent can still be refreshed
 during a DNS outage; delivery independently checks DNS when it connects.
 Invalid policy disables Events with `events_start_failed` while the daemon keeps
-serving other requests. No environment variable grants callback trust.
+serving other requests. The diagnostic identifies the zero-based entry index and
+`origin` or `addresses` field, plus the address index when applicable, without
+logging supplied origins or addresses. No environment variable grants callback trust.
 
 ## Semantic search
 

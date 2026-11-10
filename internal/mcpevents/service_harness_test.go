@@ -239,8 +239,7 @@ type receiver struct {
 	client     *mcpevents.WebhookClient
 	// deliver, when set before the first request, answers every request that
 	// is not a verification challenge.
-	deliver        func(http.ResponseWriter, *http.Request, []byte)
-	afterChallenge func()
+	deliver func(http.ResponseWriter, *http.Request, []byte)
 }
 
 func newReceiver(t *testing.T, entries ...mcpevents.TrustedCallback) *receiver {
@@ -274,9 +273,6 @@ func newReceiver(t *testing.T, entries ...mcpevents.TrustedCallback) *receiver {
 		if s := int(r.status.Load()); s != 0 {
 			w.WriteHeader(s)
 			return
-		}
-		if r.afterChallenge != nil {
-			r.afterChallenge()
 		}
 		_ = json.MarshalWrite(w, map[string]string{"challenge": body.Challenge})
 	}, entries...)
