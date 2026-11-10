@@ -52,27 +52,30 @@ func TestRelayResetRefusalAttribution(t *testing.T) {
 // The checked contract measures delay from completion, honors long configured
 // intervals, and forgets a refusal after success or a different failure.
 func TestRelayRefusalRetryLifecycle(t *testing.T) {
-	for _, interval := range []time.Duration{30 * time.Second, 4 * time.Minute, 10 * time.Minute} {
-		t.Run(interval.String(), func(t *testing.T) {
+	for _, tc := range []struct {
+		interval time.Duration
+		delays   []time.Duration
+	}{
+		{30 * time.Second, []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute}},
+		{4 * time.Minute, []time.Duration{4 * time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute}},
+		{10 * time.Minute, []time.Duration{10 * time.Minute, 10 * time.Minute, 10 * time.Minute, 10 * time.Minute, 10 * time.Minute, 10 * time.Minute}},
+	} {
+		t.Run(tc.interval.String(), func(t *testing.T) {
 			binding := db.FederationBinding{ProjectID: 1}
 			completed := time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC)
 			refused := fmt.Errorf("sync failed: %w", &HubStatusError{StatusCode: 409, relayCrossProjectLinks: true})
 			states := make(relayRefusalRetries)
-			for i := range 6 {
-				states.record(binding, refused, interval, completed)
-				delay := max(time.Minute, interval)
-				for range i {
-					delay = max(interval, min(2*delay, 5*time.Minute))
-				}
+			for _, delay := range tc.delays {
+				states.record(binding, refused, tc.interval, completed)
 				require.True(t, states.blocked(binding, completed.Add(delay-time.Nanosecond)))
 				require.False(t, states.blocked(binding, completed.Add(delay)))
 				completed = completed.Add(delay + 10*time.Second)
 			}
 			for _, err := range []error{nil, errors.New("different failure")} {
-				states.record(binding, err, interval, completed)
+				states.record(binding, err, tc.interval, completed)
 				require.False(t, states.blocked(binding, completed))
-				states.record(binding, refused, interval, completed)
-				require.False(t, states.blocked(binding, completed.Add(max(time.Minute, interval))), "a fresh refusal starts at the first delay")
+				states.record(binding, refused, tc.interval, completed)
+				require.False(t, states.blocked(binding, completed.Add(tc.delays[0])), "a fresh refusal starts at the first delay")
 			}
 		})
 	}
