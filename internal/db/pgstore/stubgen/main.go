@@ -339,7 +339,7 @@ var alreadyImplemented = map[string]bool{
 	"RecentSiblingCloses":                  true, // events.go
 	"EnsureScheduledReachedFloor":          true, // due_notifications.go
 	"ReconcileDueNotification":             true, // due_notifications.go
-	"IsFederationLocalReplay":              true, // federation_events.go
+	"FederationLocalReplayDue":             true, // federation_events.go
 	"ReconcileLocalFederationEcho":         true, // federation_events.go
 	"RecordIssueSyncError":                 true, // issue_sync.go
 	"RecordIssueSyncSuccess":               true, // issue_sync.go

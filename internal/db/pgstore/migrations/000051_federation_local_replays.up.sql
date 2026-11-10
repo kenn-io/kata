@@ -1,11 +1,12 @@
 CREATE TABLE federation_local_replays (
-  event_uid TEXT PRIMARY KEY REFERENCES events(uid) ON DELETE CASCADE
+  event_uid    TEXT PRIMARY KEY REFERENCES events(uid) ON DELETE CASCADE,
+  delivery_due INTEGER NOT NULL DEFAULT 0
 );
 
 -- An interrupted reset leaves local-origin events restored after the reset
 -- with no pull completed since. Record them so the next pull still delivers them.
-INSERT INTO federation_local_replays(event_uid)
-SELECT e.uid
+INSERT INTO federation_local_replays(event_uid, delivery_due)
+SELECT e.uid, 1
   FROM events e
   JOIN federation_bindings b ON b.project_id = e.project_id
   JOIN federation_sync_status s ON s.project_id = e.project_id

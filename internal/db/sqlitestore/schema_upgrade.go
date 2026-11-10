@@ -12,8 +12,8 @@ import (
 // interrupted reset restored: a reset recorded after the event was created
 // with no pull completed since. Pull cursor equality marks the unadvanced turn.
 const federationLocalReplaysBackfill = `
-INSERT INTO federation_local_replays(event_uid)
-SELECT e.uid
+INSERT INTO federation_local_replays(event_uid, delivery_due)
+SELECT e.uid, 1
   FROM events e
   JOIN federation_bindings b ON b.project_id = e.project_id
   JOIN federation_sync_status s ON s.project_id = e.project_id

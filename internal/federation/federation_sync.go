@@ -801,15 +801,12 @@ func shouldDeliverDuplicateLocalEcho(
 	if err != nil || len(events) != 1 {
 		return false, err
 	}
-	replay, err := store.IsFederationLocalReplay(ctx, ev.EventUID)
-	if err != nil || !replay {
-		return false, err
-	}
 	// This turn's push can acknowledge the replay before the pull applies it, so
-	// the cursor from before the turn decides. Acknowledged replays stay silent
-	// unless their issue is unprojected, which proves they never reached consumers.
+	// the cursor from before the turn decides. A replay found unacknowledged stays
+	// owed after a later push acknowledges it. Other acknowledged replays stay
+	// silent unless their issue is unprojected, which proves they never reached consumers.
 	event := events[0]
-	return event.ID > pushCursor || event.IssueID == nil && event.IssueUID != nil, nil
+	return store.FederationLocalReplayDue(ctx, ev.EventUID, event.ID > pushCursor || event.IssueID == nil && event.IssueUID != nil)
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {

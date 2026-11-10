@@ -61,7 +61,7 @@ func TestFederationLocalReplaysMigrationBackfillsInterruptedReset(t *testing.T) 
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
 	for name, want := range map[string]bool{"before": true, "after": false, "pulled": false} {
-		got, replayErr := upgraded.IsFederationLocalReplay(ctx, events[name])
+		got, replayErr := upgraded.FederationLocalReplayDue(ctx, events[name], false)
 		require.NoError(t, replayErr)
 		require.Equal(t, want, got, name)
 	}
