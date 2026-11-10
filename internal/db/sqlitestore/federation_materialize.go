@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"maps"
 	"slices"
 	"strings"
@@ -151,15 +152,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
 	if deferRows && len(issueScope) == 0 {
-		m.fullHistory = true
-		m.moveIssueUIDs = map[string]struct{}{}
-		m.recordMoveIssueUIDs(events)
-		m.linksAffected = linksAffected
-		m.eventStamp, err = federationEventStamp(ctx, tx, projectID, nil)
-		if err != nil {
-			return federationMaterialization{}, err
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events`).Scan(&m.maxEventID); err != nil {
+		if err := m.prepareFullHistory(ctx, tx, projectID, events, linksAffected); err != nil {
 			return federationMaterialization{}, err
 		}
 	}
@@ -182,21 +175,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 	}
 	if m.fullHistory {
-		if linksAffected {
-			m.linkStamps = make(map[int64][32]byte)
-			for _, id := range m.linkReadProjects {
-				if id == projectID {
-					continue
-				}
-				stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
-				if err != nil {
-					return federationMaterialization{}, err
-				}
-				m.linkStamps[id] = stamp
-			}
-		}
-		m.rowStamp, err = federationRowStamp(ctx, tx, projectID, m.linkProjects)
-		if err != nil {
+		if err := m.stampFullHistoryRows(ctx, tx, projectID); err != nil {
 			return federationMaterialization{}, err
 		}
 	}
@@ -325,6 +304,38 @@ func federationRowStamp(ctx context.Context, tx *sql.Tx, projectID int64, group 
 	return stamp, nil
 }
 
+func (m *federationMaterialization) prepareFullHistory(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent, linksAffected bool) error {
+	m.fullHistory = true
+	m.moveIssueUIDs = map[string]struct{}{}
+	m.recordMoveIssueUIDs(events)
+	m.linksAffected = linksAffected
+	var err error
+	m.eventStamp, err = federationEventStamp(ctx, tx, projectID, nil)
+	if err != nil {
+		return err
+	}
+	return tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events`).Scan(&m.maxEventID)
+}
+
+func (m *federationMaterialization) stampFullHistoryRows(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if m.linksAffected {
+		m.linkStamps = make(map[int64][32]byte)
+		for _, id := range m.linkReadProjects {
+			if id == projectID {
+				continue
+			}
+			stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+			if err != nil {
+				return err
+			}
+			m.linkStamps[id] = stamp
+		}
+	}
+	var err error
+	m.rowStamp, err = federationRowStamp(ctx, tx, projectID, m.linkProjects)
+	return err
+}
+
 func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes []string) ([32]byte, error) {
 	query := `SELECT id, content_hash FROM events WHERE project_id=?`
 	args := []any{projectID}
@@ -336,27 +347,31 @@ func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, even
 		}
 	}
 	query += ` ORDER BY id`
+	h := sha256.New()
+	if err := hashFederationEventRows(ctx, tx, h, query, args...); err != nil {
+		return [32]byte{}, err
+	}
+	return [32]byte(h.Sum(nil)), nil
+}
+
+func hashFederationEventRows(ctx context.Context, tx *sql.Tx, h hash.Hash, query string, args ...any) error {
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return [32]byte{}, fmt.Errorf("list federation event stamps: %w", err)
+		return fmt.Errorf("list federation event stamps: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	h := sha256.New()
 	for rows.Next() {
 		var id int64
 		var contentHash string
 		if err := rows.Scan(&id, &contentHash); err != nil {
-			return [32]byte{}, fmt.Errorf("scan federation event stamp: %w", err)
+			return fmt.Errorf("scan federation event stamp: %w", err)
 		}
 		var encoded [8]byte
 		binary.BigEndian.PutUint64(encoded[:], uint64(id)) //nolint:gosec // Preserve every bit of the SQLite row ID.
 		_, _ = h.Write(encoded[:])
 		_, _ = h.Write([]byte(contentHash))
 	}
-	if err := rows.Err(); err != nil {
-		return [32]byte{}, err
-	}
-	return [32]byte(h.Sum(nil)), nil
+	return rows.Err()
 }
 
 func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, projectID int64, validator *db.CronReplayValidator) error {

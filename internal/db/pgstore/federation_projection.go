@@ -582,7 +582,7 @@ func (s *Store) materializeFederatedProjectTxScoped(
 	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
 		return err
 	}
-	db.RestrictFoldProject(&projection, projectUID)
+	db.RestrictFoldProject(&projection, projectUID, nil)
 
 	if validator == nil {
 		validator = db.NewCronReplayValidator(tx, true)

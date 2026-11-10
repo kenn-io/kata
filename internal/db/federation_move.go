@@ -362,14 +362,17 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEven
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
 func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
-	decisions, _, err := PlanFederatedMovedIssues(ctx, tx, events, p)
+	decisions, destinations, err := PlanFederatedMovedIssues(ctx, tx, events, p)
 	if err != nil {
 		return nil, err
 	}
-	return applyFederatedMovedIssues(ctx, tx, events, p, decisions, assign, validate, afterRehome, acceptedEventUIDs, insertResetControl)
+	if err := applyFederatedMovedIssues(ctx, tx, events, p, decisions, assign, validate, afterRehome, acceptedEventUIDs, insertResetControl); err != nil {
+		return nil, err
+	}
+	return destinations, nil
 }
 
-func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
+func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
 	moved := map[string]FoldEvent{}
 	for _, e := range events {
 		if e.Type == "issue.moved" {
@@ -378,12 +381,12 @@ func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEve
 			}
 		}
 	}
-	projects := map[int64]bool{}
 	for _, decision := range decisions {
 		issue := p.Issues[decision.IssueUID]
 		winner := moved[issue.UID]
 		target, active := decision.TargetID, decision.Active
-		// A detached destination retains standalone data.
+		// A detached destination retains standalone data. Its former streams
+		// may keep syncing, but cannot reconcile that destination's projection.
 		if !decision.Joined {
 			delete(p.Issues, issue.UID)
 			continue
@@ -393,15 +396,14 @@ func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEve
 		sourceShort := decision.SourceShortID
 		if !decision.Exists {
 			if active {
-				projects[target] = true
-				// A cold replica can expose an empty projection before this fold
-				// creates the destination issue row.
+				// A cold replica can expose an empty projection at the append
+				// cursor before this fold creates the destination issue row.
 				from, _ := StringValue(PayloadMap(winner.Payload)["from_project_uid"])
 				if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, from).Scan(&sourceProject.ID, &sourceProject.UID, &sourceProject.Name); err != nil {
-					return nil, err
+					return err
 				}
 				if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, nil, insertResetControl); err != nil {
-					return nil, err
+					return err
 				}
 			} else {
 				delete(p.Issues, issue.UID)
@@ -409,33 +411,29 @@ func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEve
 			continue
 		}
 		if source == target {
-			if active {
-				projects[target] = true
-			}
 			continue
 		}
 		if !active {
-			return nil, ErrNotFound
+			return ErrNotFound
 		}
-		projects[target] = true
 		// Move ingress has already checked its authority and endpoints. Replaying
 		// trusted history must also work after a former source has left.
 		if decision.RecurrenceID.Valid {
-			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
+			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
 		}
 		if err := validate(id, source, target); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
+			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 		}
 
 		short, err := assign(target, issue)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET project_id=$1,short_id=$2,revision=revision+1 WHERE id=$3`, target, short, id); err != nil {
-			return nil, err
+			return err
 		}
 		if err := afterRehome(issue.UID, issue.ProjectUID); err != nil {
-			return nil, err
+			return err
 		}
 		sourceProject.ID = source
 		payload := PayloadMap(winner.Payload)
@@ -446,7 +444,7 @@ func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEve
 			reference = &FederationMovedReference{IssueUID: issue.UID, FromProjectUID: sourceProject.UID, FromShortID: sourceShort, MoveEventUID: winner.UID}
 		}
 		if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, reference, insertResetControl); err != nil {
-			return nil, err
+			return err
 		}
 		for _, query := range []string{
 			`UPDATE issue_claims SET project_id=$1 WHERE issue_id=$2`,
@@ -455,16 +453,11 @@ func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEve
 			`UPDATE external_root_bindings SET project_id=$1 WHERE issue_id=$2`,
 		} {
 			if _, err := tx.ExecContext(ctx, query, target, id); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
-	var out []int64
-	for id := range projects {
-		out = append(out, id)
-	}
-	slices.Sort(out)
-	return out, nil
+	return nil
 }
 
 type movedProjectPassKey struct{}
@@ -481,9 +474,9 @@ func WithMovedProjectPass(ctx context.Context) context.Context {
 }
 
 // RestrictFoldProject gives the existing reconcilers only their own issue view.
-func RestrictFoldProject(p *FoldProjection, projectUID string) {
+func RestrictFoldProject(p *FoldProjection, projectUID string, keep func(string) bool) {
 	for uid, issue := range p.Issues {
-		if issue.ProjectUID != projectUID {
+		if issue.ProjectUID != projectUID || (keep != nil && !keep(uid)) {
 			delete(p.Issues, uid)
 		}
 	}

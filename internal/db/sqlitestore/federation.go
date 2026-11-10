@@ -1196,6 +1196,12 @@ func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 }
 
 func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64) error {
+	return d.withFederationMaterialization(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
+	})
+}
+
+func (d *Store) withFederationMaterialization(ctx context.Context, apply func(context.Context, *sql.Tx) error) error {
 	parent := ctx
 	ctx, resets := db.WithFederationMoveResetCapture(ctx)
 	tx, err := d.BeginTx(ctx, nil)
@@ -1203,7 +1209,7 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 		return fmt.Errorf("begin federated materialization: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil); err != nil {
+	if err := apply(ctx, tx); err != nil {
 		return err
 	}
 	if err := db.RecordFederationCurrentProjectResets(ctx, tx, db.FederationPulledEventUIDs(ctx), func(project db.Project) (int64, error) {
@@ -1301,7 +1307,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	if err != nil {
 		return err
 	}
-	db.RestrictFoldProject(&projection, projectUID)
+	db.RestrictFoldProject(&projection, projectUID, nil)
 
 	if db.CronMaterializationNeeded(events, acceptedEventUIDs) {
 		if validator == nil {
