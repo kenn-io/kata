@@ -57,18 +57,12 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   const search = page.getByRole('searchbox', { name: 'Search tasks' })
   await search.focus()
   const original = await search.elementHandle()
-  try {
-    await page.keyboard.type('child')
-    releaseSnapshot()
-    await expect(
-      page.getByRole('heading', { name: 'Example child task', exact: true }),
-    ).toBeVisible()
-    await expect(search).toBeFocused()
-    expect(await search.evaluate((element, first) => element === first, original)).toBe(true)
-    await page.keyboard.type(' task')
-  } finally {
-    releaseSnapshot()
-  }
+  await page.keyboard.type('child')
+  releaseSnapshot()
+  await expect(page.getByRole('heading', { name: 'Example child task', exact: true })).toBeVisible()
+  await expect(search).toBeFocused()
+  expect(await search.evaluate((element, first) => element === first, original)).toBe(true)
+  await page.keyboard.type(' task')
   await expect(search).toHaveValue('child task')
   await expect.poll(() => new URL(page.url()).searchParams.get('issue')).toBe(child.uid)
   await expect.poll(() => new URL(page.url()).searchParams.get('text')).toBe('child task')

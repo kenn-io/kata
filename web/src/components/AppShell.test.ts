@@ -632,10 +632,9 @@ describe('AppShell', () => {
     relationship: ['blocks'],
   }
   test.each([
-    ['same project', 'all-open', project, project, issue, true, {}],
+    ['same project', 'all-open', project, project, issue, true, repeatedFilters],
     ['different project', 'all-open', project, 'other-project', undefined, true, {}],
     ['implicit Inbox', undefined, undefined, undefined, issue, true, {}],
-    ['pending filters', 'all-open', undefined, undefined, issue, true, repeatedFilters],
     ['accepted filters', 'all-open', undefined, undefined, undefined, false, repeatedFilters],
   ] as const)(
     'search preserves the %s',
