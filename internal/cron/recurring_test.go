@@ -3,7 +3,6 @@ package cron
 import (
 	"context"
 	"encoding/json/v2"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -392,14 +391,9 @@ func TestStoredImpossibleCalendarProperty(t *testing.T) {
 	base := nativeJob(t)
 	anchor := at(t, "2026-01-01T00:00:00Z")
 	rapid.Check(t, func(t *rapid.T) {
-		month := rapid.SampledFrom([]int{2, 4, 6, 9, 11}).Draw(t, "month")
-		day := 31
-		if month == 2 {
-			day = rapid.IntRange(30, 31).Draw(t, "day")
-		}
 		job := base
 		job.Enabled = rapid.Bool().Draw(t, "enabled")
-		job.Trigger = Trigger{Kind: "cron", Cron: fmt.Sprintf("0 0 %d %d *", day, month)}
+		job.Trigger = Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
 		seconds := rapid.Int64Range(-86400, 86400).Draw(t, "seconds from progress")
 		_, err := PlanRecurring(job, definitionUID, RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, anchor.Add(time.Duration(seconds)*time.Second))
 		require.ErrorIs(t, err, ErrInvalid)

@@ -107,54 +107,72 @@ func requireCronEditExit(t *testing.T, err error, code int) {
 	require.Equal(t, code, ce.ExitCode)
 }
 
-func cronEditTestStaleJob(t *testing.T, env *testenv.Env, project int64, id, fault string) {
+func cronEditTestStaleJob(t *testing.T, env *testenv.Env, project int64, id string) {
 	t.Helper()
 	job, err := env.DB.CronJob(t.Context(), project, id)
 	require.NoError(t, err)
 	job.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
-	if fault == "overlap" {
-		job.Definition.Overlap = "unsupported"
-	}
 	raw, err := json.Marshal(job.Definition)
 	require.NoError(t, err)
 	_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=? WHERE uid=?`, string(raw), id)
 	require.NoError(t, err)
 }
 
-func TestCronEditStaleJobUnchangedOrUnsupported(t *testing.T) {
-	for _, fault := range []string{"", "version", "overlap"} {
-		t.Run("fault="+fault, func(t *testing.T) {
+func TestCronEditStaleJobRepair(t *testing.T) {
+	for _, repair := range []bool{false, true} {
+		t.Run(fmt.Sprintf("repair=%t", repair), func(t *testing.T) {
 			env, project, id, original := cronEditTestDefinition(t, "job")
-			cronEditTestStaleJob(t, env, project, id, fault)
-			session := cronEditTestEditor(t, func(_ int, _ []byte) ([]byte, error) { return nil, nil })
-			server := env.URL
-			if fault == "version" {
-				proxy := cronEditTestProxy(t, env, func(r *http.Request, status int, raw []byte) (int, []byte) {
-					if strings.HasSuffix(r.URL.Path, "/"+id) {
-						var envelope map[string]map[string]jsontext.Value
-						require.NoError(t, json.Unmarshal(raw, &envelope))
-						var definition map[string]jsontext.Value
-						require.NoError(t, json.Unmarshal(envelope["job"]["definition"], &definition))
-						definition["version"] = jsontext.Value(`2`)
-						envelope["job"]["definition"], _ = json.Marshal(definition)
-						raw, _ = json.Marshal(envelope)
-					}
-					return status, raw
-				})
-				server = proxy.URL
-			}
-			_, _, err := executeCronCLI(t, server, nil, "job", "edit", id)
-			requireCronEditExit(t, err, ExitValidation)
-			if fault == "" {
+			cronEditTestStaleJob(t, env, project, id)
+			session := cronEditTestEditor(t, func(_ int, raw []byte) ([]byte, error) {
+				if repair {
+					return bytes.ReplaceAll(raw, []byte("0 0 30 2 *"), []byte("0 0 28 2 *")), nil
+				}
+				return nil, nil
+			})
+			out, _, err := executeCronCLI(t, env.URL, nil, "job", "edit", id)
+			if repair {
+				require.NoError(t, err)
+				require.Equal(t, 1, session.calls)
+				require.Contains(t, out, "9007199254740993")
+				require.Contains(t, out, "1.2300e+02")
+			} else {
+				requireCronEditExit(t, err, ExitValidation)
 				require.Equal(t, 2, session.calls)
 				require.ErrorContains(t, err, "never fires")
-			} else {
-				require.Zero(t, session.calls)
-				require.ErrorContains(t, err, fault)
 			}
 			stored, err := env.DB.CronJob(t.Context(), project, id)
 			require.NoError(t, err)
-			require.Equal(t, original, stored.DefinitionEventUID)
+			if repair {
+				require.NotEqual(t, original, stored.DefinitionEventUID)
+				require.Equal(t, "0 0 28 2 *", stored.Definition.Trigger.Cron)
+				require.Contains(t, string(stored.Definition.Options), `"empty":{}`)
+			} else {
+				require.Equal(t, original, stored.DefinitionEventUID)
+			}
+		})
+	}
+	// Stored-read tolerance must never swallow unrelated domain errors. These
+	// rules precede occurrence validation, so removing tolerance does not fail
+	// these cases; accepting every ErrInvalid does.
+	for _, fault := range []string{"version", "overlap"} {
+		t.Run(fault, func(t *testing.T) {
+			raw := cronEditValidTestBody("job", jsontext.Value(`{}`))
+			var envelope map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(raw, &envelope))
+			var definition map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(envelope["definition"], &definition))
+			definition["trigger"] = jsontext.Value(`{"kind":"cron","cron":"0 0 30 2 *"}`)
+			if fault == "version" {
+				definition["version"] = jsontext.Value(`2`)
+			} else {
+				definition["overlap"] = jsontext.Value(`"unsupported"`)
+			}
+			envelope["definition"], _ = json.Marshal(definition)
+			raw, _ = json.Marshal(envelope)
+			for _, stored := range []bool{false, true} {
+				_, err := parseCronEdit("job", raw, stored)
+				require.ErrorContains(t, err, fault)
+			}
 		})
 	}
 }
@@ -163,9 +181,6 @@ func TestCronEditSavesDefinitions(t *testing.T) {
 	for _, resource := range []string{"job", "workflow"} {
 		t.Run(resource, func(t *testing.T) {
 			env, project, id, original := cronEditTestDefinition(t, resource)
-			if resource == "job" {
-				cronEditTestStaleJob(t, env, project, id, "")
-			}
 			var originalStepOptions jsontext.Value
 			if resource == "workflow" {
 				before, err := env.DB.CronWorkflow(t.Context(), project, id)
@@ -174,7 +189,7 @@ func TestCronEditSavesDefinitions(t *testing.T) {
 			}
 			session := cronEditTestEditor(t, func(_ int, raw []byte) ([]byte, error) {
 				require.Contains(t, string(raw), original)
-				return cronEditTestRename(bytes.ReplaceAll(raw, []byte("0 0 30 2 *"), []byte("0 0 28 2 *")), "  Updated inspection  "), nil
+				return cronEditTestRename(raw, "  Updated inspection  "), nil
 			})
 			out, _, err := executeCronCLI(t, env.URL, nil, resource, "edit", strings.ToLower(id))
 			require.NoError(t, err)
@@ -763,26 +778,28 @@ func TestCronEditValidOpaqueRoundTripProperty(t *testing.T) {
 }
 
 func TestCronEditRejectsMalformedEnvelopes(t *testing.T) {
-	for _, resource := range []string{"job", "workflow"} {
-		good := cronEditValidTestBody(resource, jsontext.Value(`{}`))
-		_, err := cronEditParse(resource, good)
-		require.NoError(t, err)
-		var valid map[string]jsontext.Value
-		require.NoError(t, json.Unmarshal(good, &valid))
-		for _, name := range []string{"null", "4", `"x","name":"y"`} {
-			raw := []byte(`{"name":` + name + `,"definition":` + string(valid["definition"]) + `}`)
-			_, err := cronEditParse(resource, raw)
-			require.Error(t, err, "%s accepted malformed name %s", resource, name)
-		}
-		for _, raw := range []string{"null", "[]", "true", string(good) + "{}", string(good[:len(good)-1]), `{"name":"x"}`} {
-			_, err := cronEditParse(resource, []byte(raw))
-			require.Error(t, err, "%s accepted %s", resource, raw)
-		}
-		for _, key := range []string{"actor", "expected_event_uid"} {
-			for _, value := range []string{"null", `""`, `"worker"`} {
-				raw := append(bytes.Clone(good[:len(good)-1]), []byte(`,"`+key+`":`+value+`}`)...)
-				_, err := cronEditParse(resource, raw)
-				require.Error(t, err)
+	for _, stored := range []bool{false, true} {
+		for _, resource := range []string{"job", "workflow"} {
+			good := cronEditValidTestBody(resource, jsontext.Value(`{}`))
+			_, err := parseCronEdit(resource, good, stored)
+			require.NoError(t, err)
+			var valid map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(good, &valid))
+			for _, name := range []string{"null", "4", `"x","name":"y"`} {
+				raw := []byte(`{"name":` + name + `,"definition":` + string(valid["definition"]) + `}`)
+				_, err := parseCronEdit(resource, raw, stored)
+				require.Error(t, err, "%s accepted malformed name %s", resource, name)
+			}
+			for _, raw := range []string{"null", "[]", "true", string(good) + "{}", string(good[:len(good)-1]), `{"name":"x"}`} {
+				_, err := parseCronEdit(resource, []byte(raw), stored)
+				require.Error(t, err, "%s accepted %s", resource, raw)
+			}
+			for _, key := range []string{"actor", "expected_event_uid"} {
+				for _, value := range []string{"null", `""`, `"worker"`} {
+					raw := append(bytes.Clone(good[:len(good)-1]), []byte(`,"`+key+`":`+value+`}`)...)
+					_, err := parseCronEdit(resource, raw, stored)
+					require.Error(t, err)
+				}
 			}
 		}
 	}
@@ -811,25 +828,27 @@ func TestCronEditTrimmedNameBytesProperty(t *testing.T) {
 }
 
 func TestCronEditBodyAndHeaderLimits(t *testing.T) {
-	for _, resource := range []string{"job", "workflow"} {
-		body := cronEditValidTestBody(resource, jsontext.Value(`{}`))
-		for _, extra := range []int{-1, 0, 1} {
-			padded := append(bytes.Clone(body), bytes.Repeat([]byte(" "), cronDefinitionRequestLimit-len(body)+extra)...)
-			_, err := cronEditParse(resource, padded)
-			if extra > 0 {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
+	for _, stored := range []bool{false, true} {
+		for _, resource := range []string{"job", "workflow"} {
+			body := cronEditValidTestBody(resource, jsontext.Value(`{}`))
+			for _, extra := range []int{-1, 0, 1} {
+				padded := append(bytes.Clone(body), bytes.Repeat([]byte(" "), cronDefinitionRequestLimit-len(body)+extra)...)
+				_, err := parseCronEdit(resource, padded, stored)
+				if extra > 0 {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
 			}
-		}
-		notes := strings.Split(strings.Repeat(strings.Repeat("é", 300)+"\n", 200), "\n")
-		buffer := cronEditBuffer(resource, "example", "revision", body, notes)
-		require.LessOrEqual(t, len(buffer)-len(body), 32*1024)
-		stripped, _ := cronEditSplit(buffer)
-		require.Equal(t, body, stripped)
-		for line := range strings.SplitSeq(string(buffer[:len(buffer)-len(body)]), "\n") {
-			require.LessOrEqual(t, len(strings.TrimPrefix(line, "// ")), 384)
-			require.True(t, strings.ToValidUTF8(line, "") == line)
+			notes := strings.Split(strings.Repeat(strings.Repeat("é", 300)+"\n", 200), "\n")
+			buffer := cronEditBuffer(resource, "example", "revision", body, notes)
+			require.LessOrEqual(t, len(buffer)-len(body), 32*1024)
+			stripped, _ := cronEditSplit(buffer)
+			require.Equal(t, body, stripped)
+			for line := range strings.SplitSeq(string(buffer[:len(buffer)-len(body)]), "\n") {
+				require.LessOrEqual(t, len(strings.TrimPrefix(line, "// ")), 384)
+				require.True(t, strings.ToValidUTF8(line, "") == line)
+			}
 		}
 	}
 }
@@ -880,8 +899,12 @@ func TestCronEditInvalidInitialSnapshotNeverOpensEditor(t *testing.T) {
 }
 
 func TestCronEditConflictFallsBackToShow(t *testing.T) {
-	for _, resource := range []string{"job", "workflow"} {
-		t.Run(resource, func(t *testing.T) {
+	for _, fixture := range []string{"job", "stale job", "workflow"} {
+		t.Run(fixture, func(t *testing.T) {
+			resource := fixture
+			if fixture == "stale job" {
+				resource = "job"
+			}
 			env, project, id, original := cronEditTestDefinition(t, resource)
 			var current string
 			puts := 0
@@ -902,7 +925,9 @@ func TestCronEditConflictFallsBackToShow(t *testing.T) {
 						next, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{UID: id, ProjectID: project, Name: "Other writer", Definition: job.Definition, ExpectedEventUID: original, Actor: "other"})
 						require.NoError(t, err)
 						current = next.DefinitionEventUID
-						cronEditTestStaleJob(t, env, project, id, "")
+						if fixture == "stale job" {
+							cronEditTestStaleJob(t, env, project, id)
+						}
 					} else {
 						workflow, err := env.DB.CronWorkflow(t.Context(), project, id)
 						require.NoError(t, err)

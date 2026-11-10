@@ -73,7 +73,8 @@ func (j JobDefinition) Validate() error {
 	if j.Kind != "job" {
 		return invalid("unknown job kind")
 	}
-	if err := j.Trigger.Validate(); err != nil {
+	schedule, err := j.Trigger.validate()
+	if err != nil {
 		return err
 	}
 	if j.CheckoutKey != "" && !portableKey(j.CheckoutKey) {
@@ -165,7 +166,7 @@ func (j JobDefinition) Validate() error {
 	if err := checkSize(j, DefinitionLimit); err != nil {
 		return err
 	}
-	return j.Trigger.requireOccurrence()
+	return requireOccurrence(schedule)
 }
 
 func validRecipient(value string) bool {

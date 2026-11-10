@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -232,7 +233,7 @@ func TestCronFormNotifyEditKeepsStoredOverlap(t *testing.T) {
 	require.Equal(t, "allow", def.Overlap, "a new notify job gets a default")
 }
 
-func TestCronFormRefusesFutureVersion(t *testing.T) {
+func TestCronFormRefusesUnsupportedStoredJob(t *testing.T) {
 	for _, fault := range []string{"version", "overlap", "options"} {
 		t.Run(fault, func(t *testing.T) {
 			rec := executeRecord(`{}`)
@@ -245,7 +246,13 @@ func TestCronFormRefusesFutureVersion(t *testing.T) {
 			case "options":
 				rec.Definition.Options = []byte(`{"token":"fixture"}`)
 			}
-			_, err := cronFormFor(rec, nil)
+			// Storage reads use DecodeJob without current domain validation. This
+			// fixture models an invalid stored document, not an accepted live write.
+			raw, err := json.Marshal(rec.Definition)
+			require.NoError(t, err)
+			rec.Definition, err = cron.DecodeJob(raw)
+			require.NoError(t, err)
+			_, err = cronFormFor(rec, nil)
 			if fault == "options" {
 				require.ErrorContains(t, err, "credentials")
 			} else {

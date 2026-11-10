@@ -9,58 +9,63 @@ import (
 
 // Validate checks trigger syntax and kind-specific fields.
 func (t Trigger) Validate() error {
+	_, err := t.validate()
+	return err
+}
+
+// validate returns the parsed cron schedule for complete job validation to reuse.
+func (t Trigger) validate() (cron.Schedule, error) {
+	var schedule cron.Schedule
 	if t.Timezone != "" {
 		if _, err := time.LoadLocation(t.Timezone); err != nil {
-			return invalid("invalid timezone")
+			return nil, invalid("invalid timezone")
 		}
 	}
 	if t.LeadSeconds < 0 {
-		return invalid("negative deadline lead")
+		return nil, invalid("negative deadline lead")
 	}
 	if t.LeadSeconds > maxDurationSeconds {
-		return invalid("deadline lead exceeds supported duration")
+		return nil, invalid("deadline lead exceeds supported duration")
 	}
 	switch t.Kind {
 	case "manual":
 	case "cron":
-		if _, err := ParseCron(t.Cron); err != nil {
-			return invalid("invalid cron expression")
+		var err error
+		schedule, err = ParseCron(t.Cron)
+		if err != nil {
+			return nil, invalid("invalid cron expression")
 		}
 	case "interval":
 		if t.IntervalSeconds <= 0 {
-			return invalid("interval must be positive")
+			return nil, invalid("interval must be positive")
 		}
 		if t.IntervalSeconds > maxDurationSeconds {
-			return invalid("interval exceeds supported duration")
+			return nil, invalid("interval exceeds supported duration")
 		}
 	case "once":
 		if _, err := time.Parse(time.RFC3339, t.At); err != nil {
-			return invalid("once requires an RFC3339 instant")
+			return nil, invalid("once requires an RFC3339 instant")
 		}
 	case "issue-scheduled", "issue-deadline":
 		if !validUID(t.IssueUID) {
-			return invalid("issue date requires an issue UID")
+			return nil, invalid("issue date requires an issue UID")
 		}
 	default:
-		return invalid("unknown trigger")
+		return nil, invalid("unknown trigger")
 	}
 	if t.Kind != "cron" && t.Cron != "" || t.Kind != "interval" && t.IntervalSeconds != 0 || t.Kind != "once" && t.At != "" || t.Kind != "issue-scheduled" && t.Kind != "issue-deadline" && t.IssueUID != "" || t.Kind != "issue-deadline" && t.LeadSeconds != 0 {
-		return invalid("trigger carries fields for another kind")
+		return nil, invalid("trigger carries fields for another kind")
 	}
-	return nil
+	return schedule, nil
 }
 
 // calendarReference starts a fixed leap year so the schedule's search window
 // sees every calendar date without depending on the wall clock.
 var calendarReference = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 
-func (t Trigger) requireOccurrence() error {
-	if t.Kind != "cron" {
+func requireOccurrence(schedule cron.Schedule) error {
+	if schedule == nil {
 		return nil
-	}
-	schedule, err := ParseCron(t.Cron)
-	if err != nil {
-		return invalid("invalid cron expression")
 	}
 	spec, calendar := schedule.(*cron.SpecSchedule)
 	if calendar {

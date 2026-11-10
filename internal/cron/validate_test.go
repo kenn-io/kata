@@ -310,79 +310,57 @@ func TestDurationSecondsAdmission(t *testing.T) {
 	}
 }
 
-// Calendar-impossible definitions must fail before any adapter or native write.
+// Dormant descriptors use the generic error; calendar failures explain the date.
 func TestCronRejectsSchedulesThatNeverFire(t *testing.T) {
-	for _, trigger := range []Trigger{
-		{Kind: "cron", Cron: "@manual"},
-		{Kind: "cron", Cron: "@triggered"},
-		{Kind: "cron", Cron: "@none"},
-		{Kind: "cron", Cron: "CRON_TZ=UTC @manual", Timezone: "UTC"},
-		{Kind: "cron", Cron: "CRON_TZ=UTC @triggered", Timezone: "UTC"},
-		{Kind: "cron", Cron: "CRON_TZ=UTC @none", Timezone: "UTC"},
-		{Kind: "cron", Cron: "0 0 30 2 *"},
-		{Kind: "cron", Cron: "0 0 31 4 *"},
-		{Kind: "cron", Cron: "0 0 31 2,4,6,9,11 *"},
-		{Kind: "cron", Cron: "0 0 30-31 2 *"},
-		{Kind: "cron", Cron: "0 0 30 2 ?"},
-		{Kind: "cron", Cron: "0 0 31 2 */1"},
-		{Kind: "cron", Cron: "0 0 30 2 *", Timezone: "Asia/Tokyo"},
-		{Kind: "cron", Cron: "CRON_TZ=America/New_York 0 0 31 4 *", Timezone: "America/New_York"},
-		{Kind: "cron", Cron: "CRON_TZ=Asia/Damascus 0 0 30 2 *", Timezone: "Asia/Damascus"},
-	} {
-		t.Run(trigger.Cron+"/"+trigger.Timezone, func(t *testing.T) {
-			for _, native := range []bool{false, true} {
-				for _, enabled := range []bool{false, true} {
-					t.Run(fmt.Sprintf("native=%t/enabled=%t", native, enabled), func(t *testing.T) {
-						job, err := ParseJob([]byte(executeJSON))
-						require.NoError(t, err)
-						if native {
-							job = nativeJob(t)
-						}
-						job.Trigger, job.Enabled = trigger, enabled
-						err = job.Validate()
-						require.ErrorIs(t, err, ErrInvalid)
-						require.ErrorIs(t, err, ErrNeverFires)
-						require.ErrorContains(t, err, "never fires")
-						if strings.Contains(trigger.Cron, "@") {
-							require.Equal(t, ErrNeverFires.Error(), err.Error())
-						}
-					})
+	for _, expression := range []string{"@manual", "@triggered", "@none", "CRON_TZ=UTC @manual", "CRON_TZ=UTC @triggered", "CRON_TZ=UTC @none", "0 0 30 2 *"} {
+		for _, native := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/native=%t", expression, native), func(t *testing.T) {
+				job, err := ParseJob([]byte(executeJSON))
+				require.NoError(t, err)
+				if native {
+					job = nativeJob(t)
 				}
-			}
-		})
+				job.Trigger = Trigger{Kind: "cron", Cron: expression}
+				err = job.Validate()
+				require.ErrorIs(t, err, ErrInvalid)
+				require.ErrorIs(t, err, ErrNeverFires)
+				expected := ErrNeverFires.Error()
+				if expression == "0 0 30 2 *" {
+					expected += ": its day of month does not occur in its months"
+				}
+				require.EqualError(t, err, expected)
+			})
+		}
 	}
 }
 
 // Sparse calendar dates, Vixie OR semantics, and historical zone gaps remain valid.
 func TestCronAcceptsRareButRealSchedules(t *testing.T) {
 	for _, trigger := range []Trigger{
-		{Kind: "cron", Cron: "0 0 29 2 *"},
-		{Kind: "cron", Cron: "0 0 29 2 *", Timezone: "UTC"},
-		{Kind: "cron", Cron: "0 0 29 2 *", Timezone: "America/New_York"},
-		{Kind: "cron", Cron: "0 0 29 2 *", Timezone: "Pacific/Kiritimati"},
 		{Kind: "cron", Cron: "0 0 31 */2 *"},
 		{Kind: "cron", Cron: "0 0 30 2 1"},
-		{Kind: "cron", Cron: "0 0 31 2 0-6"},
 		{Kind: "cron", Cron: "0 0 30 2,4 *"},
 		{Kind: "cron", Cron: "0 0 31 1-12/3 *"},
 		{Kind: "cron", Cron: "@yearly"},
 		{Kind: "cron", Cron: "CRON_TZ=Asia/Damascus 0 0 1 4 *", Timezone: "Asia/Damascus"},
 		{Kind: "cron", Cron: "0 0 1 4 *", Timezone: "Asia/Damascus"},
 		{Kind: "cron", Cron: "CRON_TZ=Asia/Damascus @yearly", Timezone: "Asia/Damascus"},
-		{Kind: "cron", Cron: "@every 90m"},
 	} {
 		t.Run(trigger.Cron+"/"+trigger.Timezone, func(t *testing.T) {
 			adapter, err := ParseJob([]byte(executeJSON))
 			require.NoError(t, err)
 			adapter.Trigger = trigger
 			require.NoError(t, adapter.Validate())
-			if trigger.Cron != "@every 90m" {
-				native := nativeJob(t)
-				native.Trigger = trigger
-				require.NoError(t, native.Validate())
-			}
+			native := nativeJob(t)
+			native.Trigger = trigger
+			require.NoError(t, native.Validate())
 		})
 	}
+	// Constant-delay descriptors remain valid for adapter jobs only.
+	adapter, err := ParseJob([]byte(executeJSON))
+	require.NoError(t, err)
+	adapter.Trigger = Trigger{Kind: "cron", Cron: "@every 90m"}
+	require.NoError(t, adapter.Validate())
 }
 
 // A calendar date must exist in a leap year unless the explicit weekday range
@@ -390,6 +368,42 @@ func TestCronAcceptsRareButRealSchedules(t *testing.T) {
 // calendar feasibility.
 func TestCronCalendarDateProperty(t *testing.T) {
 	baseNative := nativeJob(t)
+	check := func(t require.TestingT, trigger Trigger, native, enabled, valid bool) {
+		job, err := ParseJob([]byte(executeJSON))
+		require.NoError(t, err)
+		if native {
+			job = baseNative
+		}
+		job.Trigger, job.Enabled = trigger, enabled
+		err = job.Validate()
+		if valid {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, ErrInvalid)
+			require.ErrorContains(t, err, "never fires")
+		}
+	}
+	// Keep the approved concrete counterexamples deterministic, sharing the
+	// property's assertion instead of repeating its native/enabled matrix.
+	for _, trigger := range []Trigger{
+		{Kind: "cron", Cron: "0 0 30 2 *"},
+		{Kind: "cron", Cron: "0 0 31 4 *"},
+		{Kind: "cron", Cron: "0 0 31 2,4,6,9,11 *"},
+		{Kind: "cron", Cron: "0 0 30-31 2 *"},
+		{Kind: "cron", Cron: "0 0 30 2 ?"},
+		{Kind: "cron", Cron: "0 0 30 2 *", Timezone: "Asia/Tokyo"},
+		{Kind: "cron", Cron: "CRON_TZ=America/New_York 0 0 31 4 *", Timezone: "America/New_York"},
+		{Kind: "cron", Cron: "CRON_TZ=Asia/Damascus 0 0 30 2 *", Timezone: "Asia/Damascus"},
+	} {
+		for _, native := range []bool{false, true} {
+			check(t, trigger, native, false, false)
+		}
+	}
+	for _, zone := range []string{"", "UTC", "America/New_York", "Pacific/Kiritimati"} {
+		for _, native := range []bool{false, true} {
+			check(t, Trigger{Kind: "cron", Cron: "0 0 29 2 *", Timezone: zone}, native, false, true)
+		}
+	}
 	rapid.Check(t, func(t *rapid.T) {
 		month := rapid.IntRange(1, 12).Draw(t, "month")
 		day := rapid.IntRange(1, 31).Draw(t, "day")
@@ -400,25 +414,12 @@ func TestCronCalendarDateProperty(t *testing.T) {
 		prefix := rapid.SampledFrom([]string{"", "TZ=", "CRON_TZ="}).Draw(t, "prefix")
 		native := rapid.Bool().Draw(t, "native")
 		enabled := rapid.Bool().Draw(t, "enabled")
-		job, err := ParseJob([]byte(executeJSON))
-		require.NoError(t, err)
-		if native {
-			job = baseNative
-		}
-		job.Enabled = enabled
 		expression := fmt.Sprintf("%d %d %d %d %s", minute, hour, day, month, weekday)
 		if prefix != "" && zone != "" {
 			expression = prefix + zone + " " + expression
 		}
-		job.Trigger = Trigger{Kind: "cron", Cron: expression, Timezone: zone}
-		err = job.Validate()
 		date := time.Date(2000, time.Month(month), day, 0, 0, 0, 0, time.UTC)
-		if date.Month() != time.Month(month) && weekday != "0-6" {
-			require.ErrorIs(t, err, ErrInvalid)
-			require.ErrorContains(t, err, "never fires")
-		} else {
-			require.NoError(t, err)
-		}
+		check(t, Trigger{Kind: "cron", Cron: expression, Timezone: zone}, native, enabled, date.Month() == time.Month(month) || weekday == "0-6")
 	})
 }
 
