@@ -374,3 +374,29 @@ func TestRecurringBacklogStopsWhenContextEnds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 5000, got)
 }
+
+// Calendar validation must not replace the zone used by occurrence delivery.
+func TestCalendarValidationPreservesDeliveryTimezone(t *testing.T) {
+	job := nativeJob(t)
+	job.Trigger = Trigger{Kind: "cron", Cron: "CRON_TZ=Asia/Damascus 0 0 1 4 *", Timezone: "Asia/Damascus"}
+	anchor := at(t, "2026-01-01T00:00:00Z")
+	plan, err := PlanRecurring(job, definitionUID, RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, at(t, "2026-04-02T00:00:00Z"))
+	require.NoError(t, err)
+	require.Equal(t, []time.Time{at(t, "2026-03-31T21:00:00Z")}, plan.Due)
+}
+
+// Stored validation must still reject impossible calendars before disabled and
+// already-processed fast paths, regardless of the sweep cursor.
+func TestStoredImpossibleCalendarProperty(t *testing.T) {
+	base := nativeJob(t)
+	anchor := at(t, "2026-01-01T00:00:00Z")
+	rapid.Check(t, func(t *rapid.T) {
+		job := base
+		job.Enabled = rapid.Bool().Draw(t, "enabled")
+		job.Trigger = Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+		seconds := rapid.Int64Range(-86400, 86400).Draw(t, "seconds from progress")
+		_, err := PlanRecurring(job, definitionUID, RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, anchor.Add(time.Duration(seconds)*time.Second))
+		require.ErrorIs(t, err, ErrInvalid)
+		require.ErrorContains(t, err, "never fires")
+	})
+}
