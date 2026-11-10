@@ -535,6 +535,44 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 	}
 }
 
+func TestMCPCoordinationWaitAnyReportsInitialInputErrorAtDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name, ref, want string
+		transient       bool
+	}{
+		{"missing", "abc1", "404", false},
+		{"out of scope", "other-project#abc1", "outside", false},
+		{"transient", "abc1", "timeout", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/projects":
+					writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+				case "/api/v1/projects/1/issues/abc1":
+					if tc.transient {
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					http.NotFound(w, r)
+				default:
+					writeJSON(w, map[string]any{"issue": issueJSON(1, "spoke-project", "def1")})
+				}
+			})
+			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: map[string]any{"refs": []string{tc.ref, "def1"}, "until": "attention", "any": true, "timeout_seconds": 1}})
+			require.NoError(t, err)
+			if tc.transient {
+				require.False(t, result.IsError)
+				require.Equal(t, tc.want, result.StructuredContent.(map[string]any)["reason"])
+			} else {
+				require.True(t, result.IsError)
+				require.Contains(t, string(mustJSON(t, result.Content)), tc.want)
+			}
+		})
+	}
+}
+
 func TestMCPCoordinationWaitDeletedIssue(t *testing.T) {
 	session, store := newCoordinationSession(t)
 	created := callAdministrationTool(t, session, "kata.create", map[string]any{"title": "Deleted attention", "idempotency_key": "deleted-attention"})

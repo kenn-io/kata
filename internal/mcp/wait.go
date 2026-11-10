@@ -199,6 +199,7 @@ func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, un
 	targets := make([]waitTarget, len(input.Refs))
 	remaining := len(targets)
 	var firstErr error
+	var inputErr error
 	states := func() []WaitState {
 		out := make([]WaitState, 0, len(targets))
 		for _, target := range targets {
@@ -214,12 +215,18 @@ func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, un
 			if parent.Err() != nil {
 				return nil, WaitOutput{}, parent.Err()
 			}
+			if inputErr != nil {
+				return nil, WaitOutput{}, inputErr
+			}
 			return successResult(), WaitOutput{Reason: "timeout", States: states()}, nil
 		case res := <-results:
 			if parent.Err() != nil {
 				return nil, WaitOutput{}, parent.Err()
 			}
 			if res.err != nil && ctx.Err() != nil {
+				if inputErr != nil {
+					return nil, WaitOutput{}, inputErr
+				}
 				return successResult(), WaitOutput{Reason: "timeout", States: states()}, nil
 			}
 			if res.err != nil {
@@ -227,6 +234,9 @@ func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, un
 					return nil, WaitOutput{}, res.err
 				}
 				res.target.missing = res.err
+				if res.target.uid == "" && permanentWaitError(res.err) && inputErr == nil {
+					inputErr = res.err
+				}
 				if firstErr == nil {
 					firstErr = res.err
 				}

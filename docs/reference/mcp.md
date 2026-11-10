@@ -619,6 +619,8 @@ the deadline if a completed read matched. Otherwise every issue must match;
 observed `until` completions are retained while the others finish. An `until`
 wait with `any: true` omits issues with permanent lookup errors or three
 consecutive transient errors. If no issues remain, it returns a lookup error.
+If the deadline arrives without a match and an issue initially had a permanent
+lookup error, it returns that error.
 Before the deadline, a status wait returns a lookup error even if another issue
 matched.
 
