@@ -490,6 +490,7 @@ func syncDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) (resultErr error) {
+	startPushCursor := binding.PushCursorEventID
 	var pushErr error
 	if pushThisTurn {
 		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
@@ -652,7 +653,7 @@ func syncDirectSpoke(
 			if duplicate[i] && shouldDeliverPage {
 				var err error
 				if ev.OriginInstanceUID == localInstanceUID {
-					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, ev)
+					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, startPushCursor, eventProjects[i], ev)
 				} else if insertedThisPull[ev.EventUID] {
 					deliver[i] = true
 				} else {
@@ -781,34 +782,34 @@ func shouldDeliverDuplicateLocalEcho(
 	ctx context.Context,
 	store db.Storage,
 	binding db.FederationBinding,
+	pushCursor, projectID int64,
 	ev api.EventEnvelope,
 ) (bool, error) {
-	projectID := binding.ProjectID
-	if ev.ProjectUID != binding.HubProjectUID {
-		project, err := store.ProjectByUID(ctx, ev.ProjectUID)
-		if err != nil {
-			return false, err
-		}
-		projectID = project.ID
-	}
 	if projectID != binding.ProjectID {
 		source, err := store.FederationBindingByProject(ctx, projectID)
 		if errors.Is(err, db.ErrNotFound) {
-			// This local event was already applied before its source left.
-			// Backfilling it through a destination needs no new delivery or
-			// acknowledgement from the retired source stream.
+			// Applied before its source left: backfilling it through a
+			// destination needs no delivery or retired-stream acknowledgement.
 			return false, nil
 		}
-		if err != nil {
+		if err != nil || source.PullCursorEventID >= ev.EventID {
 			return false, err
 		}
-		if source.PullCursorEventID >= ev.EventID {
-			return false, nil
-		}
+		pushCursor = source.PushCursorEventID
 	}
-	// A push acknowledgment cannot prove that a replay reached its pull
-	// consumers. The pull cursor is the delivery boundary for this page.
-	return store.IsFederationLocalReplay(ctx, ev.EventUID)
+	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
+	if err != nil || len(events) != 1 {
+		return false, err
+	}
+	replay, err := store.IsFederationLocalReplay(ctx, ev.EventUID)
+	if err != nil || !replay {
+		return false, err
+	}
+	// This turn's push can acknowledge the replay before the pull applies it, so
+	// the cursor from before the turn decides. Acknowledged replays stay silent
+	// unless their issue is unprojected, which proves they never reached consumers.
+	event := events[0]
+	return event.ID > pushCursor || event.IssueID == nil && event.IssueUID != nil, nil
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {
