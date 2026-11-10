@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # CLI reference
@@ -1827,6 +1827,13 @@ targets use their canonical login origin and return to the requested path
 after login. Kata never puts a remote token or another credential in the URL.
 
 ## Daemon and diagnostics
+
+Foreground daemons, including supervised launches, append diagnostics to
+`<KATA_HOME>/runtime/<storage-hash>/daemon.log` as well as stderr. The log also
+retains fatal Go runtime diagnostics and goroutine dumps. Detached launches use
+the same file without duplicating entries. New log files are owner-only; Kata
+does not rotate them. If the log cannot be opened, the daemon warns on stderr
+and continues with stderr diagnostics.
 
 `kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity. Each skipped record is printed on stderr with its PID and reason, for example `skipping daemon pid=54 (another PID namespace)`.
 

@@ -1246,15 +1246,24 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // re-executes itself only after every listener and the runtime record have
 // been released.
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
-	restart := newDaemonRestart(os.Stderr)
-	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart); err != nil {
-		return reportRestartFailure(startedForRestartReply, err)
+	diagnostics, closeLog := startDaemonLogging(ctx)
+	// Keep crash output alive during panic unwinding; close only on normal return.
+	restart := newDaemonRestart(diagnostics)
+	err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart, diagnostics)
+	if err != nil {
+		err = reportRestartFailure(startedForRestartReply, err)
+	} else {
+		err = restart.exec(ctx)
 	}
-	return restart.exec(ctx)
+	if err != nil {
+		fmt.Fprintln(diagnostics, "kata daemon: "+err.Error())
+	}
+	closeLog()
+	return err
 }
 
 func runDaemonProcess(
-	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart,
+	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart, diagnostics io.Writer,
 ) (returnErr error) {
 	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly, noAutoToken)
 	if err != nil {
@@ -1265,10 +1274,10 @@ func runDaemonProcess(
 	ns := startup.Namespace
 	endpoint := startup.Endpoint
 	if msg, ok := daemon.TrustPrivateNetworkWarning(listen, dcfg.Auth); ok {
-		fmt.Fprintln(os.Stderr, msg)
+		fmt.Fprintln(diagnostics, msg)
 	}
 	if msg, ok := daemon.UnauthenticatedPrivateNetworkWritesWarning(listen, dcfg.Auth); ok {
-		fmt.Fprintln(os.Stderr, msg)
+		fmt.Fprintln(diagnostics, msg)
 	}
 	if err := ns.EnsureDirs(); err != nil {
 		return err
@@ -1346,7 +1355,7 @@ func runDaemonProcess(
 		return fmt.Errorf("check root attribution signing key: %w", err)
 	}
 	if rootSigningHealth != nil {
-		fmt.Fprintln(os.Stderr, "kata daemon: "+daemon.RootSigningWarning(*rootSigningHealth))
+		fmt.Fprintln(diagnostics, "kata daemon: "+daemon.RootSigningWarning(*rootSigningHealth))
 	}
 
 	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
@@ -1368,7 +1377,7 @@ func runDaemonProcess(
 		runtimeEndpoint,
 		webEndpoint,
 		func(timeout time.Duration) {
-			announceIdleShutdown(os.Stderr, timeout)
+			announceIdleShutdown(diagnostics, timeout)
 			shutdownTrigger.Call()
 		},
 	)
@@ -1376,7 +1385,7 @@ func runDaemonProcess(
 		return err
 	}
 	if idleIneligible {
-		fmt.Fprintln(os.Stderr,
+		fmt.Fprintln(diagnostics,
 			"kata daemon: auto-start idle shutdown disabled because the daemon is not owner-local")
 	}
 	var acquireHookDrain hooks.AcquireActivity
@@ -1392,7 +1401,7 @@ func runDaemonProcess(
 
 	disp, daemonLog, err := setupHooks(
 		store, ns.DBHash, startup.KataHome, startup.HookConfig, acquireHookDrain,
-		withoutEnvironmentKey(os.Environ(), daemonruntime.AutoStartMarkerEnv),
+		withoutEnvironmentKey(os.Environ(), daemonruntime.AutoStartMarkerEnv), diagnostics,
 	)
 	if err != nil {
 		return err
@@ -1795,13 +1804,13 @@ func runDaemonProcess(
 			}
 			runtimeFile = path
 			if federationIngressAddress != "" {
-				fmt.Fprintf(os.Stderr, "federation ingress listening at %s\n", federationIngressAddress)
+				fmt.Fprintf(diagnostics, "federation ingress listening at %s\n", federationIngressAddress)
 			}
 			if idleController != nil {
 				idleController.Start()
 			}
 			if listen != "" {
-				fmt.Fprintf(os.Stderr, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
+				fmt.Fprintf(diagnostics, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
 			}
 			return nil
 		})
@@ -2546,11 +2555,12 @@ func setupHooks(
 	loaded hooks.LoadedConfig,
 	acquireDrain hooks.AcquireActivity,
 	environment []string,
+	diagnostics io.Writer,
 ) (*hooks.Dispatcher, *log.Logger, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, nil, err
 	}
-	daemonLog := log.New(os.Stderr, "kata-daemon: ", log.LstdFlags)
+	daemonLog := log.New(diagnostics, "kata-daemon: ", log.LstdFlags)
 	deps := hooks.DispatcherDeps{
 		DBHash:          dbHash,
 		KataHome:        home,
