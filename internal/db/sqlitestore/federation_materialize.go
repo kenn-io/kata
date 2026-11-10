@@ -1,6 +1,7 @@
 package sqlitestore
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -23,6 +24,7 @@ type federationMaterialization struct {
 	linksAffected    bool
 	eventStamp       [32]byte
 	rowStamp         [32]byte
+	rowFingerprint   *federationRowsFingerprint
 	shortIDChecks    []federatedShortIDCheck
 	linkStamps       map[int64][32]byte
 	linkReadProjects []int64
@@ -192,6 +194,10 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 			return federationMaterialization{}, err
 		}
 	}
+	if m.fullHistory {
+		m.rowStamp = m.rowFingerprint.sum()
+		m.rowFingerprint = nil
+	}
 	return m, nil
 }
 
@@ -255,57 +261,60 @@ func (m *federationMaterialization) recordMoveIssueUIDs(events []db.FoldEvent) {
 	}
 }
 
-// federationRowStamp reads the persisted inputs used by row and link preparation.
-func federationRowStamp(ctx context.Context, tx *sql.Tx, projectID int64, group []int64) ([32]byte, error) {
-	type stampQuery struct {
-		query string
-		args  []any
+// federationRowsFingerprint records each input before preparation consumes it.
+type federationRowsFingerprint struct {
+	sections [5][][32]byte
+}
+
+func (f *federationRowsFingerprint) add(section int, values ...any) error {
+	if f == nil {
+		return nil
 	}
-	queries := []stampQuery{
-		{`SELECT json_array(uid,id,short_id,title,body,status,closed_reason,owner,CAST(assignment_expires_on AS TEXT),priority,author,CAST(created_at AS TEXT),CAST(updated_at AS TEXT),CAST(closed_at AS TEXT),CAST(deleted_at AS TEXT),metadata) FROM issues WHERE project_id=? ORDER BY id`, []any{projectID}},
-		{`SELECT json_array(c.uid,c.id,c.issue_id,c.author,CAST(c.created_at AS TEXT),c.body,c.teammate) FROM issues i JOIN comments c ON c.issue_id=i.id WHERE i.project_id=? ORDER BY c.id`, []any{projectID}},
-		{`SELECT json_array(l.issue_id,l.label) FROM issues i JOIN issue_labels l ON l.issue_id=i.id WHERE i.project_id=? ORDER BY l.issue_id,l.label`, []any{projectID}},
+	value, err := json.Marshal(values)
+	if err != nil {
+		return err
 	}
-	if len(group) > 0 {
-		placeholders, args := projectIDPlaceholders(group)
-		//nolint:gosec // The IN clauses contain generated placeholders; IDs are bound.
-		queries = append(queries, stampQuery{`SELECT json_array(uid,id,project_id) FROM issues WHERE project_id IN (` + placeholders + `) ORDER BY project_id,id`, args})
-		//nolint:gosec // The IN clauses contain generated placeholders; IDs are bound.
-		queries = append(queries, stampQuery{`SELECT json_array(l.id,l.from_issue_id,l.to_issue_id,l.from_issue_uid,l.to_issue_uid,l.type,l.author,CAST(l.created_at AS TEXT)) FROM links l JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id WHERE f.project_id IN (` + placeholders + `) AND t.project_id IN (` + placeholders + `) ORDER BY l.id`, append(slices.Clone(args), args...)})
-	}
+	f.sections[section] = append(f.sections[section], sha256.Sum256(value))
+	return nil
+}
+
+func (f *federationRowsFingerprint) sum() [32]byte {
 	h := sha256.New()
-	for _, q := range queries {
-		rows, err := tx.QueryContext(ctx, q.query, q.args...)
-		if err != nil {
-			return [32]byte{}, err
-		}
-		for rows.Next() {
-			var value string
-			if err := rows.Scan(&value); err != nil {
-				_ = rows.Close()
-				return [32]byte{}, err
-			}
-			var length [8]byte
-			binary.BigEndian.PutUint64(length[:], uint64(len(value))) //nolint:gosec // A string length is nonnegative.
-			_, _ = h.Write(length[:])
-			_, _ = h.Write([]byte(value))
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return [32]byte{}, err
-		}
-		if err := rows.Close(); err != nil {
-			return [32]byte{}, err
+	for _, section := range f.sections {
+		slices.SortFunc(section, func(a, b [32]byte) int { return bytes.Compare(a[:], b[:]) })
+		for _, row := range section {
+			_, _ = h.Write(row[:])
 		}
 		_, _ = h.Write([]byte{0})
 	}
-	var stamp [32]byte
-	copy(stamp[:], h.Sum(nil))
-	return stamp, nil
+	return [32]byte(h.Sum(nil))
+}
+
+func federationRowStamp(ctx context.Context, tx *sql.Tx, projectID int64, group []int64) ([32]byte, error) {
+	stamp := &federationRowsFingerprint{}
+	if _, err := federatedIssueRowsByUID(ctx, tx, stamp, projectID); err != nil {
+		return [32]byte{}, err
+	}
+	if _, err := federatedCommentRowsByUID(ctx, tx, stamp, projectID); err != nil {
+		return [32]byte{}, err
+	}
+	if _, err := federatedLabelKeys(ctx, tx, stamp, projectID); err != nil {
+		return [32]byte{}, err
+	}
+	if len(group) > 0 {
+		if _, err := federationGroupIssueIDs(ctx, tx, group, projectID, nil, nil, stamp); err != nil {
+			return [32]byte{}, err
+		}
+		if _, err := federatedLinkRows(ctx, tx, group, stamp); err != nil {
+			return [32]byte{}, err
+		}
+	}
+	return stamp.sum(), nil
 }
 
 func (m *federationMaterialization) prepareFullHistory(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent, linksAffected bool) error {
 	m.fullHistory = true
+	m.rowFingerprint = &federationRowsFingerprint{}
 	m.moveIssueUIDs = map[string]struct{}{}
 	m.recordMoveIssueUIDs(events)
 	m.linksAffected = linksAffected
@@ -331,9 +340,7 @@ func (m *federationMaterialization) stampFullHistoryRows(ctx context.Context, tx
 			m.linkStamps[id] = stamp
 		}
 	}
-	var err error
-	m.rowStamp, err = federationRowStamp(ctx, tx, projectID, m.linkProjects)
-	return err
+	return nil
 }
 
 func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, movedUIDs []string) ([32]byte, error) {
@@ -422,7 +429,7 @@ type federatedShortIDCheck struct {
 // prepareRows compares against persisted values, rather than a previous fold:
 // local writes and imports can leave values that a full rebuild would repair.
 func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {
-	existing, err := federatedIssueRowsByUID(ctx, tx, projectID, issueScope...)
+	existing, err := federatedIssueRowsByUID(ctx, tx, m.rowFingerprint, projectID, issueScope...)
 	if err != nil {
 		return err
 	}
@@ -456,7 +463,7 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 			delete(m.projection.Issues, issue.UID)
 		}
 	}
-	comments, err := federatedCommentRowsByUID(ctx, tx, projectID, issueScope...)
+	comments, err := federatedCommentRowsByUID(ctx, tx, m.rowFingerprint, projectID, issueScope...)
 	if err != nil {
 		return err
 	}
@@ -473,7 +480,7 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 			delete(comments, uid)
 		}
 	}
-	labels, err := federatedLabelKeys(ctx, tx, projectID, issueScope...)
+	labels, err := federatedLabelKeys(ctx, tx, m.rowFingerprint, projectID, issueScope...)
 	if err != nil {
 		return err
 	}
@@ -504,7 +511,7 @@ func canonicalFederatedLinkKey(key db.FoldLinkKey) db.FoldLinkKey {
 }
 
 func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string, included map[string]int64, excluded map[string]bool) error {
-	ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, projectID, m.issueIDs, issueScope)
+	ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, projectID, m.issueIDs, issueScope, m.rowFingerprint)
 	if err != nil {
 		return err
 	}
@@ -520,7 +527,7 @@ func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx
 		}
 	}
 	m.linkIDs = ids
-	existing, err := federatedLinkRows(ctx, tx, m.linkProjects)
+	existing, err := federatedLinkRows(ctx, tx, m.linkProjects, m.rowFingerprint)
 	if err != nil {
 		return err
 	}

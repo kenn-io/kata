@@ -132,6 +132,69 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 	}
 }
 
+func TestMoveRebuildRetriesInPlaceRowChanges(t *testing.T) {
+	for _, change := range []string{"issue", "comment", "label", "link"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := t.Context()
+			d, source, issue := incrementalTestStore(t)
+			destination, err := d.CreateProject(ctx, "destination")
+			require.NoError(t, err)
+			_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
+			require.NoError(t, err)
+			peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "peer", Author: "tester"})
+			require.NoError(t, err)
+			comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: peer.ID, Author: "tester", Body: "original"})
+			require.NoError(t, err)
+			_, _, err = d.AddLabelAndEvent(ctx, peer.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "original", Actor: "tester"})
+			require.NoError(t, err)
+			other, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "other", Author: "tester"})
+			require.NoError(t, err)
+			_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peer.ID, ToIssueID: other.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peer.ID, FromShortID: peer.ShortID, FromUID: peer.UID, ToShortID: other.ShortID, ToUID: other.UID, Actor: "tester"})
+			require.NoError(t, err)
+			_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+			require.NoError(t, err)
+			_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
+			require.NoError(t, err)
+			attempts := 0
+			d.federationIngestPrepared = func() {
+				attempts++
+				if attempts != 1 {
+					return
+				}
+				var err error
+				switch change {
+				case "issue":
+					_, err = d.ExecContext(ctx, `UPDATE issues SET title='changed' WHERE id=?`, peer.ID)
+				case "comment":
+					_, err = d.ExecContext(ctx, `UPDATE comments SET body='changed' WHERE id=?`, comment.ID)
+				case "label":
+					_, err = d.ExecContext(ctx, `UPDATE issue_labels SET label='changed' WHERE issue_id=?`, peer.ID)
+				case "link":
+					_, err = d.ExecContext(ctx, `UPDATE links SET author='changed' WHERE from_issue_id=? AND to_issue_id=?`, peer.ID, other.ID)
+				}
+				require.NoError(t, err)
+			}
+			require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
+			require.Equal(t, 2, attempts)
+			got, err := d.IssueByUID(ctx, peer.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, "peer", got.Title)
+			comments, err := d.CommentsByIssue(ctx, peer.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			require.Equal(t, "original", comments[0].Body)
+			labels, err := d.LabelsByIssue(ctx, peer.ID)
+			require.NoError(t, err)
+			require.Len(t, labels, 1)
+			require.Equal(t, "original", labels[0].Label)
+			links, err := d.LinksByIssue(ctx, peer.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 1)
+			require.Equal(t, "tester", links[0].Author)
+		})
+	}
+}
+
 func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
 	ctx := t.Context()
 	d, source, issue := incrementalTestStore(t)

@@ -153,6 +153,8 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err := p.materialization.prepareLinks(ctx, tx, p.id, nil, included, excluded); err != nil {
 			return preparedFederationRebuild{}, err
 		}
+		p.materialization.rowStamp = p.materialization.rowFingerprint.sum()
+		p.materialization.rowFingerprint = nil
 	}
 	return result, nil
 }
