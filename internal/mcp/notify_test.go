@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"encoding/json"
 	"encoding/json/jsontext"
+	"maps"
 	"net/http"
 	"testing"
 
@@ -83,10 +84,7 @@ func TestMCPNotifyValidationAndScope(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.without != "" {
-				control := make(map[string]any, len(tc.args))
-				for k, v := range tc.args {
-					control[k] = v
-				}
+				control := maps.Clone(tc.args)
 				delete(control, tc.without)
 				callCoordinationTool(t, session, "kata.notify", control)
 			}

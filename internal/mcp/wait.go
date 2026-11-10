@@ -87,13 +87,17 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 			}(i, raw, targets[i])
 		}
 		go func() { pending.Wait(); close(results) }()
-		var firstErr error
+		var firstErr, permanentErr error
 		for res := range results {
 			if res.err != nil {
 				if input.Any && permanentWaitError(res.err) {
 					res.target.missing = res.err
 					targets[res.index] = res.target
 					continue
+				}
+				if !input.Any && permanentWaitError(res.err) && waitContext.Err() == nil {
+					permanentErr = res.err
+					stopRound()
 				}
 				if firstErr == nil {
 					firstErr = res.err
@@ -123,6 +127,9 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		}
 		if ctx.Err() != nil {
 			return nil, WaitOutput{}, ctx.Err()
+		}
+		if permanentErr != nil {
+			return nil, WaitOutput{}, permanentErr
 		}
 		if firstErr == nil && (input.Any && matches > 0 || matches == len(targets)) || input.Any && matches > 0 && errors.Is(waitContext.Err(), context.DeadlineExceeded) {
 			return successResult(), WaitOutput{Reason: "matched", States: states}, nil
@@ -255,7 +262,7 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 	if err != nil {
 		return target, err
 	}
-	includeDeleted := true
+	includeDeleted := until == ""
 	shown, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
 		PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
 		Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},

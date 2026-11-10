@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/notification"
 )
 
@@ -431,19 +433,23 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 	}
 }
 
-func TestMCPCoordinationWaitClosedDeletedIssue(t *testing.T) {
-	var reads atomic.Int64
-	session := coordinationWaitSession(t, func(_ *http.Request) map[string]any {
-		issue := issueJSON(1, "spoke-project", "abc1")
-		if reads.Add(1) > 1 {
-			issue["status"], issue["deleted_at"] = "closed", "2026-11-10T12:00:00Z"
-		}
-		return issue
-	})
-	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1"}, "until": "closed", "timeout_seconds": 1})
+func TestMCPCoordinationWaitDeletedIssue(t *testing.T) {
+	session, store := newCoordinationSession(t)
+	created := callCoordinationTool(t, session, "kata.create", map[string]any{"title": "Deleted attention", "idempotency_key": "deleted-attention"})
+	summary := created["issue"].(map[string]any)
+	issue, err := store.IssueByUID(t.Context(), summary["uid"].(string), db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"work.attention": jsontext.Value(`"stuck"`)}})
+	require.NoError(t, err)
+	_, _, _, err = store.SoftDeleteIssue(t.Context(), issue.ID, "worker")
+	require.NoError(t, err)
+	ref := summary["ref"].(string)
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: map[string]any{"refs": []string{ref}, "until": "attention", "timeout_seconds": 1}})
+	require.NoError(t, err)
+	require.True(t, result.IsError, string(mustJSON(t, result.Content)))
+	require.Contains(t, string(mustJSON(t, result.Content)), "404")
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{ref}, "status": "deleted", "timeout_seconds": 1})
 	require.Equal(t, "matched", out["reason"])
-	state := out["states"].([]any)[0].(map[string]any)
-	require.Equal(t, "deleted", state["status"])
 }
 
 func TestMCPCoordinationWaitAnyAllMissing(t *testing.T) {
@@ -458,6 +464,31 @@ func TestMCPCoordinationWaitAnyAllMissing(t *testing.T) {
 	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "any": true, "timeout_seconds": 2}})
 	require.NoError(t, err)
 	require.True(t, result.IsError)
+	require.Contains(t, string(mustJSON(t, result.Content)), "404")
+}
+
+func TestMCPCoordinationWaitStatusAllReturnsMissingBeforeStalledPeer(t *testing.T) {
+	peerStarted := make(chan struct{})
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/projects/1/issues/abc1":
+			select {
+			case <-peerStarted:
+			case <-r.Context().Done():
+				return
+			}
+			http.NotFound(w, r)
+		default:
+			close(peerStarted)
+			<-r.Context().Done()
+		}
+	})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: map[string]any{"refs": []string{"abc1", "def1"}, "status": "open", "timeout_seconds": 1}})
+	require.NoError(t, err)
+	require.True(t, result.IsError, string(mustJSON(t, result.Content)))
 	require.Contains(t, string(mustJSON(t, result.Content)), "404")
 }
 
