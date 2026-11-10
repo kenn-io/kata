@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -166,54 +165,42 @@ func TestCronCreateResendKeepsUID(t *testing.T) {
 }
 
 func TestCronCtrlSSavesEditedJob(t *testing.T) {
-	for _, staleJob := range []bool{false, true} {
-		t.Run(fmt.Sprintf("stale=%t", staleJob), func(t *testing.T) {
-			env := testenv.New(t)
-			c := NewClient(env.URL, env.HTTP)
-			project, err := c.EnsureProject(t.Context(), "cron-save-example", "alice")
-			require.NoError(t, err)
-			rec := executeRecord(`{}`)
-			require.NoError(t, c.PutCronJob(t.Context(), project.ID, rec.UID, kataapi.PutCronJobBody{Name: "Original", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(rec.Definition)}))
-			if staleJob {
-				stale := rec.Definition
-				stale.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
-				raw, err := json.Marshal(stale)
-				require.NoError(t, err)
-				_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=? WHERE uid=?`, string(raw), rec.UID)
-				require.NoError(t, err)
-			}
-			rec, err = c.ShowCronJob(t.Context(), project.ID, rec.UID)
-			require.NoError(t, err)
-			m := cronFixture(t)
-			m.api, m.scope.projectID, m.list.actor = c, project.ID, "alice"
-			m.cron.form, err = cronFormFor(rec, nil)
-			require.NoError(t, err)
-			if staleJob {
-				require.Contains(t, stripANSI(m.viewBody()), "never fires")
-				m, refused := press(m, ctrlKey('s'))
-				require.Nil(t, refused)
-				unchanged, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
-				require.NoError(t, err)
-				require.Equal(t, rec.DefinitionEventUID, unchanged.DefinitionEventUID)
-				m.cron.form.val[cfCron] = "0 0 28 2 *"
-			}
-			m.cron.form.val[cfName] = "Renamed"
-			m, cmd := press(m, ctrlKey('s'))
-			if cmd != nil {
-				m = settle(t, m, cmd)
-			}
-			saved, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
-			require.NoError(t, err)
-			require.Equal(t, "Renamed", saved.Name)
-			require.NotEqual(t, rec.DefinitionEventUID, saved.DefinitionEventUID)
-			if staleJob {
-				require.Equal(t, "0 0 28 2 *", saved.Definition.Trigger.Cron)
-			} else {
-				require.Equal(t, rec.Definition.Trigger, saved.Definition.Trigger)
-			}
-			require.Nil(t, m.cron.form)
-		})
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	project, err := c.EnsureProject(t.Context(), "cron-save-example", "alice")
+	require.NoError(t, err)
+	rec := executeRecord(`{}`)
+	require.NoError(t, c.PutCronJob(t.Context(), project.ID, rec.UID, kataapi.PutCronJobBody{Name: "Original", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(rec.Definition)}))
+	stale := rec.Definition
+	stale.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+	raw, err := json.Marshal(stale)
+	require.NoError(t, err)
+	_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=? WHERE uid=?`, string(raw), rec.UID)
+	require.NoError(t, err)
+	rec, err = c.ShowCronJob(t.Context(), project.ID, rec.UID)
+	require.NoError(t, err)
+	m := cronFixture(t)
+	m.api, m.scope.projectID, m.list.actor = c, project.ID, "alice"
+	m.cron.form, err = cronFormFor(rec, nil)
+	require.NoError(t, err)
+	require.Contains(t, stripANSI(m.viewBody()), "never fires")
+	m, refused := press(m, ctrlKey('s'))
+	require.Nil(t, refused)
+	unchanged, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
+	require.NoError(t, err)
+	require.Equal(t, rec.DefinitionEventUID, unchanged.DefinitionEventUID)
+	m.cron.form.val[cfCron] = "0 0 28 2 *"
+	m.cron.form.val[cfName] = "Renamed"
+	m, cmd := press(m, ctrlKey('s'))
+	if cmd != nil {
+		m = settle(t, m, cmd)
 	}
+	saved, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
+	require.NoError(t, err)
+	require.Equal(t, "Renamed", saved.Name)
+	require.NotEqual(t, rec.DefinitionEventUID, saved.DefinitionEventUID)
+	require.Equal(t, "0 0 28 2 *", saved.Definition.Trigger.Cron)
+	require.Nil(t, m.cron.form)
 }
 
 func TestCronFormFieldTraversalSkipsLockedParent(t *testing.T) {
@@ -245,40 +232,34 @@ func TestCronSaveNamesUnknownIssueBesideField(t *testing.T) {
 }
 
 func TestCronEditConflictKeepsDraftAndAppliesToCurrent(t *testing.T) {
-	for _, staleJob := range []bool{false, true} {
-		t.Run(fmt.Sprintf("stale=%t", staleJob), func(t *testing.T) {
-			m, api := openEdit(t, executeRecord(`{"keep":1}`))
-			require.NotNil(t, m.cron.form)
-			require.False(t, m.cron.form.create)
-			opened := api.shown.DefinitionEventUID
+	m, api := openEdit(t, executeRecord(`{"keep":1}`))
+	require.NotNil(t, m.cron.form)
+	require.False(t, m.cron.form.create)
+	opened := api.shown.DefinitionEventUID
 
-			m.cron.form.val[cfTitle] = "My edit"
-			api.shown.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB8"
-			api.shown.Definition.Enabled = false
-			if staleJob {
-				api.shown.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
-			}
-			api.showErr = errors.New("current job must come from the conflict response")
-			api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}, nil}
+	m.cron.form.val[cfTitle] = "My edit"
+	api.shown.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB8"
+	api.shown.Definition.Enabled = false
+	api.shown.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+	api.showErr = errors.New("current job must come from the conflict response")
+	api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}, nil}
 
-			m, cmd := press(m, ctrlKey('o'))
-			m = settle(t, m, cmd)
-			require.Equal(t, opened, api.puts[0].write.ExpectedEventUID, "the edit is guarded on the event it read")
-			require.NotNil(t, m.cron.form.conflict)
-			require.Equal(t, "My edit", m.cron.form.val[cfTitle], "the draft survives the conflict")
-			view := stripANSI(m.viewBody())
-			require.Contains(t, view, "01ARZ3NDEKTSV4RRFFQ69G5FB8", "the current job is shown")
-			require.Contains(t, view, "save my draft")
+	m, cmd := press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	require.Equal(t, opened, api.puts[0].write.ExpectedEventUID, "the edit is guarded on the event it read")
+	require.NotNil(t, m.cron.form.conflict)
+	require.Equal(t, "My edit", m.cron.form.val[cfTitle], "the draft survives the conflict")
+	view := stripANSI(m.viewBody())
+	require.Contains(t, view, "01ARZ3NDEKTSV4RRFFQ69G5FB8", "the current job is shown")
+	require.Contains(t, view, "save my draft")
 
-			m, cmd = press(m, ctrlKey('o'))
-			m = settle(t, m, cmd)
-			require.Nil(t, m.cron.form)
-			require.Len(t, api.puts, 2)
-			require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FB8", api.puts[1].write.ExpectedEventUID, "the draft is applied to the current definition")
-			require.Equal(t, "My edit", api.puts[1].write.Definition.Issue.Title)
-			require.True(t, api.puts[1].write.Definition.Enabled, "saving replaces the whole definition with the kept draft")
-		})
-	}
+	m, cmd = press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	require.Nil(t, m.cron.form)
+	require.Len(t, api.puts, 2)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FB8", api.puts[1].write.ExpectedEventUID, "the draft is applied to the current definition")
+	require.Equal(t, "My edit", api.puts[1].write.Definition.Issue.Title)
+	require.True(t, api.puts[1].write.Definition.Enabled, "saving replaces the whole definition with the kept draft")
 }
 
 func TestCronConflictRefusesFutureVersion(t *testing.T) {

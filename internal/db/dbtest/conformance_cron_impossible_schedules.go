@@ -14,8 +14,7 @@ import (
 )
 
 // Impossible writes leave definitions untouched. A failed stored-job sweep
-// cannot create children or advance progress.
-// Generic stale-document deletion is covered by the read-tolerance check.
+// cannot create children or advance progress; the stale job remains deletable.
 func checkCronRejectsImpossibleSchedules(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, parent, job, progress := recurringFixture(t, store, "all")
@@ -41,7 +40,7 @@ func checkCronRejectsImpossibleSchedules(t *testing.T, store db.Storage) error {
 			require.Equal(t, before, after)
 		})
 	}
-	t.Run("stored sweep", func(t *testing.T) {
+	t.Run("stored sweep and delete", func(t *testing.T) {
 		stored, err := store.CronJob(ctx, project.ID, job.UID)
 		require.NoError(t, err)
 		stored.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
@@ -71,6 +70,9 @@ func checkCronRejectsImpossibleSchedules(t *testing.T, store db.Storage) error {
 		issuesAfter, err := store.ListIssues(ctx, db.ListIssuesParams{ProjectID: project.ID})
 		require.NoError(t, err)
 		require.Equal(t, issuesBefore, issuesAfter)
+		deleted, _, err := store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: stored.Name, Definition: stored.Definition, ExpectedEventUID: stored.DefinitionEventUID, Actor: "operator", Deleted: true})
+		require.NoError(t, err)
+		require.NotNil(t, deleted.DeletedAt)
 	})
 	return nil
 }
