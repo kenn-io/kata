@@ -5,10 +5,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -309,4 +312,69 @@ func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
 	//nolint:kennlint // sleeptest: session teardown and connection close finish asynchronously after DELETE.
 	require.Eventually(t, func() bool { return open.Load() == 0 }, 5*time.Second, 10*time.Millisecond,
 		"closed sessions left %d daemon connections open", open.Load())
+}
+
+// A successful modern request must leave enough lifetime for its activity report.
+func TestDaemonMCPIdentityModernDrainsActivityAfterResponse(t *testing.T) {
+	t.Setenv("KATA_TELEMETRY_ENABLED", "1")
+	capture := &cliUseTelemetry{}
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity(), func(cfg *daemon.ServerConfig) { cfg.Telemetry = capture })
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "member-token", Actor: "example-agent", AdminActor: db.BootstrapActor})
+	require.NoError(t, err)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	started, release := make(chan struct{}), make(chan struct{})
+	var once, startOnce sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	rest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ui/telemetry":
+			startOnce.Do(func() { close(started) })
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+			if r.Context().Err() != nil {
+				return
+			}
+		case "/api/v1/projects":
+			// Let the tool finish while its activity report is still in flight.
+			select {
+			case <-started:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(rest.Close)
+	t.Cleanup(unblock)
+	address, err := url.Parse(rest.URL)
+	require.NoError(t, err)
+	handler, err := newDaemonMCPHandler(t.Context(), env.DB, config.MCPConfig{AllProjects: true, StartupSections: []string{"projects"}}, "", kitdaemon.Endpoint{Network: "tcp", Address: address.Host}, config.AuthConfig{Token: "bootstrap-token", RequireTokenIdentity: true})
+	require.NoError(t, err)
+	returned := make(chan struct{})
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r)
+		close(returned)
+	}))
+	t.Cleanup(gateway.Close)
+	callCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	status, wire := mcpRPCWithBearer(t, gateway.URL+"/mcp", "member-token", "tools/call", map[string]any{"name": "kata.projects", "arguments": map[string]any{}}, func(r *http.Request) { *r = *r.WithContext(callCtx) })
+	require.Equal(t, http.StatusOK, status)
+	require.NotContains(t, wire, "error", "%v", wire)
+	require.NotEqual(t, true, wire["result"].(map[string]any)["isError"], "%v", wire)
+	select {
+	case <-returned:
+	case <-callCtx.Done():
+		t.Fatal("modern cleanup blocked the request on delayed telemetry")
+	}
+	unblock()
+	capture.waitForCapture(t)
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	require.Equal(t, []string{"agent_active"}, capture.events)
 }

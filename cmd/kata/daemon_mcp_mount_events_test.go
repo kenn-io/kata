@@ -250,13 +250,14 @@ func TestDaemonMCPEventsAdmission(t *testing.T) {
 			for range 8 {
 				next()
 			}
-			if mode == "static" {
+			switch mode {
+			case "static":
 				start("", secondLegacy) // static legacy and modern share eight slots
-			} else if mode == "legacy identity" {
+			case "legacy identity":
 				start("", firstLegacy)  // this session is full
 				start("", secondLegacy) // another session for the same token is independent
 				next()
-			} else {
+			default:
 				start("test-mcp-token", nil)   // another request for the same token is full
 				start("same-actor-token", nil) // same actor, different credential is independent
 				require.Equal(t, "Bearer same-actor-token", next())
@@ -337,14 +338,17 @@ func TestDaemonMCPIdentityModernLoadedSections(t *testing.T) {
 	result := created["result"].(map[string]any)
 	require.NotEqual(t, true, result["isError"], "%v", result)
 	require.Equal(t, "example-agent", result["structuredContent"].(map[string]any)["issue"].(map[string]any)["author"])
-	for _, bearer := range []string{"test-mcp-token", "same-actor-token", "other-actor-token"} {
-		_, listed := mcpRPCWithBearer(t, endpoint, bearer, "tools/list", map[string]any{})
+	for _, caller := range []struct {
+		bearer string
+		loaded bool
+	}{{"test-mcp-token", true}, {"same-actor-token", false}, {"other-actor-token", false}} {
+		_, listed := mcpRPCWithBearer(t, endpoint, caller.bearer, "tools/list", map[string]any{})
 		require.NotContains(t, listed, "error", "%v", listed)
 		found := false
 		for _, tool := range listed["result"].(map[string]any)["tools"].([]any) {
 			found = found || tool.(map[string]any)["name"] == "kata.create"
 		}
-		require.Equal(t, bearer == "test-mcp-token", found, bearer)
+		require.Equal(t, caller.loaded, found, caller.bearer)
 	}
 	session, err := newMCPHTTPTestClient().Connect(t.Context(), newAuthenticatedMCPHTTPTestTransport(endpoint), &sdkmcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 	require.NoError(t, err)
