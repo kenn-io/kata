@@ -7,7 +7,7 @@ import (
 	"encoding/json/v2"
 	"testing"
 	"time"
-	_ "time/tzdata"
+	_ "time/tzdata" // Trimmed conformance test binaries need embedded data for named-zone fixtures.
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
@@ -27,6 +27,9 @@ func deliveryStamp(t *testing.T, s db.Storage, child db.Issue, stamp time.Time) 
 	var metadata, occurrence map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(child.Metadata), &metadata))
 	require.NoError(t, json.Unmarshal(metadata["cron.occurrence"], &occurrence))
+	if metadata == nil || occurrence == nil {
+		t.Fatal("expected metadata and cron.occurrence fixture objects")
+	}
 	raw, err := json.Marshal(stamp.UTC())
 	require.NoError(t, err)
 	occurrence["scheduled_at"] = raw
