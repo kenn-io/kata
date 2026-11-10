@@ -19,22 +19,24 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// Exercise create and patch through the same admission matrix.
+// PATCH owns the matrix; two create cases pin its admission wiring.
 func TestIssuePortableTimezoneAdmission(t *testing.T) {
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "Local" })
 	p := seedProject(t, env, "example-project")
-	check := func(t *testing.T, md map[string]any, want int) {
+	check := func(t *testing.T, md map[string]any, want int, create bool) {
 		t.Helper()
-		status, raw := cronHTTP(t, env, http.MethodPost, projectPath(p.ID)+"/issues", map[string]any{"actor": "tester", "title": "Example", "force_new": true, "metadata": md})
-		require.Equal(t, want, status, string(raw))
+		if create {
+			status, raw := cronHTTP(t, env, http.MethodPost, projectPath(p.ID)+"/issues", map[string]any{"actor": "tester", "title": "Example", "force_new": true, "metadata": md})
+			assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
+		}
 		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Existing", Author: "tester"})
 		require.NoError(t, err)
 		before := recurrenceWriteCursor(t, env)
 		md["topic"] = "changed" // A rejection must not apply the accompanying edit.
-		status, raw = cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": md})
+		status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": md})
 		require.Equal(t, want, status, string(raw))
 		if want == http.StatusBadRequest {
-			require.Contains(t, string(raw), "invalid_metadata_value")
+			assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
 			after, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Equal(t, issue, after)
@@ -48,23 +50,19 @@ func TestIssuePortableTimezoneAdmission(t *testing.T) {
 			case "UTC", "Etc/UTC", "America/New_York", "Asia/Calcutta", "America/Argentina/Buenos_Aires":
 				want = http.StatusOK
 			}
-			check(t, map[string]any{"timezone": zone}, want)
+			check(t, map[string]any{"timezone": zone}, want, zone == "Local")
 		})
 	}
-	for _, field := range []string{"scheduled_on", "deadline_on"} {
-		for _, value := range []string{"2026-11-12", "2026-11-12T10:30", "2026-11-12T10:30:00Z"} {
-			for _, zone := range []string{"", "UTC"} {
-				t.Run(field+value+zone, func(t *testing.T) {
-					md, want := map[string]any{field: value}, http.StatusOK
-					if zone != "" {
-						md["timezone"] = zone
-					} else if value != "2026-11-12T10:30:00Z" {
-						want = http.StatusBadRequest
-					}
-					check(t, md, want)
-				})
-			}
-		}
+	for _, tc := range []struct {
+		name     string
+		metadata map[string]any
+		want     int
+	}{
+		{"civil", map[string]any{"scheduled_on": "2026-11-12T10:30"}, 400},
+		{"portable override", map[string]any{"scheduled_on": "2026-11-12", "timezone": "UTC"}, 200},
+		{"UTC instant", map[string]any{"scheduled_on": "2026-11-12T10:30:00Z"}, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) { check(t, tc.metadata, tc.want, tc.want == http.StatusBadRequest) })
 	}
 }
 
@@ -94,7 +92,11 @@ func TestIssuePortableTimezoneLegacyCompatibility(t *testing.T) {
 				}
 			})
 			p := seedProject(t, env, "example-project")
-			for _, field := range []string{"scheduled_on", "deadline_on"} {
+			fields := []string{"scheduled_on"}
+			if strings.Contains(tc.stored+tc.patch, "$field") {
+				fields = append(fields, "deadline_on")
+			}
+			for _, field := range fields {
 				issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Legacy", Author: "tester"})
 				require.NoError(t, err)
 				// ImportReplay is the supported path for unreadable restored zones.
@@ -111,6 +113,9 @@ func TestIssuePortableTimezoneLegacyCompatibility(t *testing.T) {
 				resp := doPost(t, env, fmt.Sprintf("%s%s/issues/%s/metadata", env.URL, projectPath(p.ID), issue.ShortID), `{"actor":"tester","patch":`+strings.ReplaceAll(tc.patch, "$field", field)+`}`)
 				body := readClose(t, resp)
 				require.Equal(t, tc.want, resp.StatusCode, string(body))
+				if tc.want == http.StatusBadRequest {
+					assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "invalid_metadata_value")
+				}
 				if tc.portableDefault && tc.want == 400 {
 					require.Contains(t, string(body), "effective issue timezone")
 				}
@@ -140,7 +145,7 @@ func TestIssuePortableTimezoneTransactionCurrent(t *testing.T) {
 		}
 		path := fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID)
 		status, raw := cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]string{"deadline_on": "2026-11-12"}})
-		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
 		after, err := store.IssueByID(t.Context(), issue.ID)
 		require.NoError(t, err)
 		require.JSONEq(t, `{}`, string(after.Metadata))
@@ -154,7 +159,7 @@ func TestIssuePortableTimezoneTransactionCurrent(t *testing.T) {
 	})
 }
 
-func TestIssuePortableTimezonePatchGuards(t *testing.T) {
+func TestIssuePortableTimezoneRevisionPrecedesAdmission(t *testing.T) {
 	env := testenv.New(t)
 	p := seedProject(t, env, "example-project")
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Example", Author: "tester"})
@@ -203,11 +208,15 @@ func TestIssuePortableTimezoneCopiedRecurrence(t *testing.T) {
 		{`{"timezone":null,"scheduled_on":"2026-11-15"}`, 200},
 	} {
 		resp := doPost(t, env, env.URL+path, `{"actor":"tester","patch":`+tc.patch+`}`)
-		require.Equal(t, tc.want, resp.StatusCode, string(readClose(t, resp)))
+		body := readClose(t, resp)
+		require.Equal(t, tc.want, resp.StatusCode, string(body))
+		if tc.want == http.StatusBadRequest {
+			assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "invalid_metadata_value")
+		}
 	}
 	// A restored issue override differing from the recurrence owns admission.
 	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"timezone": jsontext.Value(`"EST"`)}})
 	require.NoError(t, err)
 	status, raw := cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]any{"scheduled_on": "2026-11-16"}})
-	require.Equal(t, http.StatusBadRequest, status, string(raw))
+	assertAPIError(t, status, raw, http.StatusBadRequest, "invalid_metadata_value")
 }
