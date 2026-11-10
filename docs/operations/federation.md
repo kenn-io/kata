@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Federation
@@ -1221,8 +1221,8 @@ the hub. Runtime failures are fail-open and each mapping retries independently,
 starting after one second and backing off to at most five minutes. Inspect the
 sanitized aggregate under `federation_config` in `GET /api/v1/health`;
 `ok` remains true during hub outages, authentication failures, and conflicts.
-An unset selected `token_env` is reported as `hub_authentication` and follows
-the same retry path.
+A failed selected `token_file`, or an unset or empty selected `token_env`, is
+reported as `hub_authentication` and follows the same retry path.
 
 The config is startup-only. Restart the spoke daemon after adding or changing
 a mapping. Once a mapping succeeds it stays quiet until the next restart.
@@ -1594,8 +1594,9 @@ kata federation identity
 
 Create one enrollment per trusted spoke. `--hub-url` selects the hub daemon for
 this command. Supply the hub's admin credential with `--hub-token-env`, or add a
-same-origin daemon-catalog entry with `token` or `token_env`. The spoke's
-global daemon token is never sent to the hub:
+same-origin daemon-catalog entry with `token`, `token_file` or `token_env`.
+Catalog credentials use that order of precedence. The spoke's global daemon
+token is never sent to the hub:
 
 ```sh
 export HUB_ADMIN_TOKEN="<hub-admin-token>"

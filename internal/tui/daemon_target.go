@@ -18,6 +18,7 @@ type daemonTarget struct {
 	Local            bool
 	Home             string
 	URL              string
+	Token            string // Configured inline selector, distinct from the cached resolved token.
 	TokenFile        string
 	TokenEnv         string
 	Implicit         bool
@@ -73,6 +74,7 @@ func daemonTargetsFromConfig(daemons []config.CatalogDaemonConfig) []daemonTarge
 			Local:     d.Local,
 			Home:      d.Home,
 			URL:       d.URL,
+			Token:     d.Token,
 			TokenFile: d.TokenFile,
 			TokenEnv:  d.TokenEnv,
 			resolved: client.ResolvedDaemon{

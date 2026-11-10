@@ -70,7 +70,7 @@ func newHubAdminClient(ctx context.Context, target daemonTarget) (*Client, daemo
 // daemon and is never a fallback or override for a catalog hub.
 func federationHubTargetToken(target daemonTarget) (string, error) {
 	return (config.CatalogDaemonConfig{
-		Name: daemonTargetDisplay(target), Token: target.resolved.Token,
+		Name: daemonTargetDisplay(target), Token: target.Token,
 		TokenFile: target.TokenFile, TokenEnv: target.TokenEnv,
 	}).ClientToken()
 }
