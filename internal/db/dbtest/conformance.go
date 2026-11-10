@@ -307,6 +307,8 @@ var storageScenarios = []scenario{
 	{name: "federated former project identity cleanup", methods: []string{"PurgeProject", "MergeProjects", "LeaveFederationReplica", "RemoveProject", "ResetFederatedProject"}, run: checkFederatedFormerProjectIdentityCleanup},
 	{name: "federated former project identity adoption", methods: []string{"AdoptProjectIntoFederation", "LeaveFederationReplica", "ResetFederatedProject"}, run: checkFederatedFormerProjectIdentityAdoption},
 	{name: "federated receiver departing references", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "IssueByShortID", "CreateIssue", "PurgeIssue", "MergeProjects"}, runWithBackend: checkFederatedReceiverDepartingReferences},
+	{name: "federated snapshot relocation guards", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedSnapshotRelocationGuards},
+	{name: "federated snapshot relocates held issue", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "RefreshProjectFederationBaseline"}, runWithBackend: checkFederatedSnapshotRelocatesHeldIssue},
 	{name: "federated pulled move apply reset", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "PurgeResetCheck", "IssueByShortID"}, runWithBackend: checkFederatedPulledMoveApplyReset},
 	{name: "federated moved issue current project reset", methods: []string{"IngestFederationEvents", "ReadFederation", "PurgeResetCheck"}, runWithBackend: checkFederatedMovedIssueCurrentProjectReset},
 	{name: "federated move author baseline", methods: []string{"RewriteAuthorIdentity", "MoveIssueProject", "ReadFederation", "MaterializeFederatedProject"}, runWithBackend: checkFederatedMoveAuthorBaseline},

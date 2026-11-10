@@ -145,6 +145,17 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}
+	var projectedUIDs []string
+	for uid := range m.moveIssueUIDs {
+		projectedUIDs = append(projectedUIDs, uid)
+	}
+	rehome, err := federationIssuesHeldElsewhere(ctx, tx, projectID, projectedUIDs)
+	if err != nil {
+		return err
+	}
+	if rehome {
+		return errStaleFederationPreparation
+	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err != nil {
 		return err

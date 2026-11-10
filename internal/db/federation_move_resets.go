@@ -61,7 +61,10 @@ func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Pr
 	payload := PayloadMap(winner.Payload)
 	from, _ := StringValue(payload["from_project_uid"])
 	to, _ := StringValue(payload["to_project_uid"])
-	atomic := to == targetUID && slices.Contains(accepted, winner.UID)
+	if winner.Type == "issue.snapshot" {
+		from = source.UID
+	}
+	atomic := winner.Type == "issue.moved" && to == targetUID && slices.Contains(accepted, winner.UID)
 	if atomic && reference != nil {
 		cursor, err := insertControl(source, reference)
 		if err != nil {

@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Federation
@@ -93,6 +93,12 @@ merging the former project can end compatibility; the move returns the current
 reference, and the stable issue UID stays unchanged. If a spoke previously
 assigned a longer short ID to avoid a local collision, that former reference
 also remains reserved while its move history remains.
+
+When a direct spoke joins the destination after the hub moved an issue, a
+destination baseline can relocate the existing source row without retained
+move history. Both replicas must use the same hub origin. The local issue ID,
+comments, labels, and links survive; later pulls of either project keep the
+destination ownership. Kata does not author another move during this recovery.
 
 Destination sync recovers retained source history even when its cursor has
 already passed those events. This preserves missed changes and comments without

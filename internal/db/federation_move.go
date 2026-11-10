@@ -311,10 +311,17 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, snapshotGroup []int64, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
 	moved := map[string]FoldEvent{}
+	retainedMoves := map[string]FoldEvent{}
 	for _, e := range events {
-		if e.Type == "issue.moved" {
+		if e.Type == "issue.moved" || e.Type == "issue.snapshot" {
+			e.IssueUID = FederationEventIssueUID(&e.IssueUID, string(e.Payload))
+			if e.Type == "issue.moved" {
+				if previous, known := retainedMoves[e.IssueUID]; !known || compareClock(clockOf(e), clockOf(previous)) > 0 {
+					retainedMoves[e.IssueUID] = e
+				}
+			}
 			if previous, known := moved[e.IssueUID]; !known || compareClock(clockOf(e), clockOf(previous)) > 0 {
 				moved[e.IssueUID] = e
 			}
@@ -351,6 +358,9 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 				projects[target] = true
 				// A cold replica can expose an empty projection at the append
 				// cursor before this fold creates the destination issue row.
+				if winner.Type != "issue.moved" {
+					continue
+				}
 				from, _ := StringValue(PayloadMap(winner.Payload)["from_project_uid"])
 				if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, from).Scan(&sourceProject.ID, &sourceProject.UID, &sourceProject.Name); err != nil {
 					return nil, err
@@ -371,6 +381,16 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 				projects[target] = true
 			}
 			continue
+		}
+		if winner.Type == "issue.snapshot" && (!slices.Contains(snapshotGroup, source) || !slices.Contains(snapshotGroup, target)) {
+			// A later baseline does not retire an already verified move to this
+			// destination. Its signed history still permits replay after leave.
+			move, known := retainedMoves[issue.UID]
+			to, _ := StringValue(PayloadMap(move.Payload)["to_project_uid"])
+			if !known || to != issue.ProjectUID {
+				return nil, errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)
+			}
+			winner = move
 		}
 		if !active {
 			return nil, ErrNotFound
@@ -400,7 +420,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		fromProject, _ := StringValue(payload["from_project_uid"])
 		fromShort, _ := StringValue(payload["from_short_id"])
 		var reference *FederationMovedReference
-		if sourceProject.UID != fromProject || sourceShort != fromShort {
+		if winner.Type == "issue.moved" && (sourceProject.UID != fromProject || sourceShort != fromShort) {
 			reference = &FederationMovedReference{IssueUID: issue.UID, FromProjectUID: sourceProject.UID, FromShortID: sourceShort, MoveEventUID: winner.UID}
 		}
 		if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, reference, insertResetControl); err != nil {

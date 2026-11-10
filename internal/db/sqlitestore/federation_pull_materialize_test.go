@@ -455,3 +455,66 @@ func TestFullPulledMaterializationLockedFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "new", got.Title)
 }
+
+func TestPulledSnapshotRelocationFallsBackToFullReplay(t *testing.T) {
+	for _, full := range []bool{false, true} {
+		t.Run(fmt.Sprint(full), func(t *testing.T) {
+			ctx := t.Context()
+			d, source, issue := incrementalTestStore(t)
+			target, err := d.CreateProject(ctx, "snapshot-target")
+			require.NoError(t, err)
+			for _, project := range []db.Project{source, target} {
+				_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+				require.NoError(t, err)
+			}
+			snapshot := incrementalRemoteEvent(t, target, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"relocated snapshot","author":"tester","status":"open"}`, issue.UID, issue.ShortID), 9_000_000_000_000)
+			page := []db.RemoteEvent{snapshot}
+			if full {
+				page = append(page, incrementalRemoteEvent(t, target, "", "project.updated", `{"name":"snapshot-target"}`, 9_000_000_000_001))
+			}
+			_, err = d.InsertRemoteEvents(ctx, target.ID, page)
+			require.NoError(t, err)
+			var uids []string
+			for _, event := range page {
+				uids = append(uids, event.EventUID)
+			}
+			require.NoError(t, d.MaterializeFederatedEvents(ctx, target.ID, uids))
+			got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, issue.ID, got.ID)
+			require.Equal(t, target.ID, got.ProjectID)
+			require.Equal(t, "relocated snapshot", got.Title)
+		})
+	}
+}
+
+func TestFullPulledSnapshotRetriesNewerSourceCreation(t *testing.T) {
+	ctx := t.Context()
+	d, source, _ := incrementalTestStore(t)
+	target, err := d.CreateProject(ctx, "concurrent-snapshot-target")
+	require.NoError(t, err)
+	for _, project := range []db.Project{source, target} {
+		_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+		require.NoError(t, err)
+	}
+	issueUID := "01HZNQ7VFPK1XGD8R5MABCD4EX"
+	snapshot := incrementalRemoteEvent(t, target, issueUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"d4ex","title":"concurrent snapshot","author":"tester","status":"open"}`, issueUID), 9_000_000_000_000)
+	projectEvent := incrementalRemoteEvent(t, target, "", "project.updated", `{"name":"concurrent-snapshot-target"}`, 9_000_000_000_001)
+	_, err = d.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{snapshot, projectEvent})
+	require.NoError(t, err)
+	attempts := 0
+	var held db.Issue
+	d.federationIngestPrepared = func() {
+		attempts++
+		if attempts == 1 {
+			held, _, err = d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, UID: issueUID, Title: "concurrent source", Author: "tester"})
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, target.ID, []string{snapshot.EventUID, projectEvent.EventUID}))
+	got, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, held.ID, got.ID)
+	require.Equal(t, source.ID, got.ProjectID, "a prepared destination snapshot cannot supersede the newer source creation")
+	require.Equal(t, "concurrent source", got.Title)
+}
