@@ -616,11 +616,11 @@ setup as well as polling. Top-level `reason` remains `matched` or `timeout`.
 With `any: true`, an `until` wait returns after the first matching issue. A
 status wait reads the current snapshot before returning a match, or returns at
 the deadline if a completed read matched. Otherwise every issue must match;
-observed `until` completions are retained while the others finish. With
-`any: true`, issues with permanent lookup errors are omitted. An `until` wait
-also omits an issue after three consecutive transient errors. If no issues
-remain, the wait returns a lookup error. Before the deadline, a status wait
-returns a transient lookup error even if another issue matched.
+observed `until` completions are retained while the others finish. An `until`
+wait with `any: true` omits issues with permanent lookup errors or three
+consecutive transient errors. If no issues remain, it returns a lookup error.
+Before the deadline, a status wait returns a lookup error even if another issue
+matched.
 
 ## Scheduling and someday
 

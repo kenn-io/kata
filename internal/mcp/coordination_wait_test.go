@@ -456,7 +456,15 @@ func TestMCPCoordinationWaitAnyWithMissingIssue(t *testing.T) {
 				}
 			})
 			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
-			out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{tc.ref, "def1"}, tc.field: tc.value, "any": true, "timeout_seconds": 2})
+			args := map[string]any{"refs": []string{tc.ref, "def1"}, tc.field: tc.value, "any": true, "timeout_seconds": 2}
+			if tc.field == "status" {
+				result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.wait", Arguments: args})
+				require.NoError(t, err)
+				require.True(t, result.IsError, string(mustJSON(t, result.Content)))
+				require.Contains(t, string(mustJSON(t, result.Content)), "404")
+				return
+			}
+			out := callCoordinationTool(t, session, "kata.wait", args)
 			require.Equal(t, "matched", out["reason"])
 			if tc.unavailable {
 				require.Equal(t, int64(3), failures.Load())

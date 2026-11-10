@@ -99,15 +99,10 @@ func (h toolHandlers) waitStatus(parent, ctx context.Context, input WaitInput, s
 	targets := make([]waitTarget, len(input.Refs))
 	seen := make([]bool, len(input.Refs))
 	pending := len(targets)
-	var missing error
 	for {
 		states := make([]WaitState, 0, len(targets))
-		matches, available := 0, 0
+		matches := 0
 		for _, target := range targets {
-			if target.missing != nil {
-				continue
-			}
-			available++
 			if target.state.Ref != "" {
 				states = append(states, target.state)
 			}
@@ -120,9 +115,6 @@ func (h toolHandlers) waitStatus(parent, ctx context.Context, input WaitInput, s
 		}
 		if pending == 0 && (input.Any && matches > 0 || matches == len(targets)) {
 			return successResult(), WaitOutput{Reason: "matched", States: states}, nil
-		}
-		if available == 0 {
-			return nil, WaitOutput{}, missing
 		}
 		select {
 		case <-ctx.Done():
@@ -143,13 +135,7 @@ func (h toolHandlers) waitStatus(parent, ctx context.Context, input WaitInput, s
 				if ctx.Err() != nil {
 					continue
 				}
-				if !input.Any || !permanentWaitError(res.err) {
-					return nil, WaitOutput{}, res.err
-				}
-				res.target.missing = res.err
-				if missing == nil {
-					missing = res.err
-				}
+				return nil, WaitOutput{}, res.err
 			}
 			targets[res.index] = res.target
 		}
