@@ -799,3 +799,37 @@ func TestDaemonRunningProfileDoesNotRequireProject(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing_project")
 }
+
+func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	t.Setenv("KATA_HTTP_TIMEOUT", "2s")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(server.Close)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": server.URL}})
+	require.NoError(t, err)
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+	require.NoError(t, err)
+	var result daemonDiagnosis
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, "local_unreachable", result.State)
+	require.NotContains(t, out, "kata daemon restart")
+	require.Equal(t, os.Getpid(), result.PID)
+	require.Contains(t, result.Endpoint, server.Listener.Addr().String())
+	recoverCommand := "kata --daemon work daemon recover"
+	if runtime.GOOS == "windows" {
+		recoverCommand = "kata --daemon 'work' daemon recover"
+	}
+	for _, text := range []string{filepath.Join(ns.DataDir, "daemon.log"), server.URL + "/debug/pprof/goroutine?debug=2", recoverCommand, "after it exits"} {
+		require.Contains(t, result.NextAction, text)
+	}
+	require.NotContains(t, result.NextAction, "kata daemon restart")
+	_, _, err = executeRootCapture(t, t.Context(), "list")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), recoverCommand)
+	require.Contains(t, err.Error(), fmt.Sprint(os.Getpid()))
+}

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -346,6 +347,20 @@ func probeDaemonSelection(
 	}
 	if err != nil {
 		result.Message = err.Error()
+		if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+			result.PID, result.Endpoint = unreachable.PID, unreachable.Address
+			result.Message = unreachable.Summary()
+			recoverCommand := ""
+			if result.Profile != "" {
+				profileArg := shellQuoteArg(result.Profile)
+				if runtime.GOOS == "windows" {
+					// Use PowerShell literal quoting for names containing shell metacharacters.
+					profileArg = "'" + strings.ReplaceAll(result.Profile, "'", "''") + "'"
+				}
+				recoverCommand = "kata --daemon " + profileArg + " daemon recover"
+			}
+			result.NextAction = fmt.Sprintf("daemon pid %d at %s: %s", unreachable.PID, unreachable.Address, unreachable.RecoveryAdvice(recoverCommand))
+		}
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"
 			if mismatch, ok := errors.AsType[*client.LocalProfileIdentityError](err); ok {
@@ -476,6 +491,10 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	switch result.State {
 	case "ready":
 		result.NextAction = "selected daemon is ready"
+	case "local_unreachable":
+		if result.NextAction == "" {
+			result.NextAction = "inspect the selected process and its credentials; do not switch databases"
+		}
 	case "unhealthy":
 		result.NextAction = "inspect the selected daemon's health report and logs"
 	case "stopped_local_profile":

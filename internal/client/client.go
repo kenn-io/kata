@@ -12,7 +12,9 @@ import (
 	"iter"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -69,23 +71,51 @@ type PingInfo struct {
 // recorded endpoint could not be reached.
 var ErrLocalDaemonUnreachable = errors.New("local daemon is unreachable")
 
-type localDaemonUnreachableError struct {
-	pid     int
-	address string
-	cause   error
+// LocalDaemonUnreachableError retains the failed process and its evidence paths.
+type LocalDaemonUnreachableError struct {
+	PID       int
+	Address   string
+	dataDir   string
+	webOrigin string
+	cause     error
 }
 
-func (e *localDaemonUnreachableError) Error() string {
-	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v",
-		e.pid, e.address, e.cause)
+func (e *LocalDaemonUnreachableError) Error() string {
+	return e.Summary() + "; " + e.RecoveryAdvice("")
 }
 
-func (e *localDaemonUnreachableError) Unwrap() error {
+// Summary describes the probe failure without assuming a recovery target.
+func (e *LocalDaemonUnreachableError) Summary() string {
+	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v", e.PID, e.Address, e.cause)
+}
+
+func (e *LocalDaemonUnreachableError) Unwrap() error {
 	return e.cause
 }
 
-func (e *localDaemonUnreachableError) Is(target error) bool {
+func (e *LocalDaemonUnreachableError) Is(target error) bool {
 	return target == ErrLocalDaemonUnreachable
+}
+
+// RecoveryAdvice describes manual evidence capture and recovery. A nonempty
+// recoverCommand must be a safely quoted command for the selected local profile.
+func (e *LocalDaemonUnreachableError) RecoveryAdvice(recoverCommand string) string {
+	advice := fmt.Sprintf("inspect %q or the supervisor stderr log", filepath.Join(e.dataDir, "daemon.log"))
+	origin, err := url.Parse(e.webOrigin)
+	if err == nil && (origin.Scheme == "http" || origin.Scheme == "https") && origin.Host != "" && origin.User == nil && origin.Path == "" && origin.RawQuery == "" && origin.Fragment == "" {
+		advice += "; if responsive, capture " + e.webOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner authentication (a signed-in browser alone is insufficient)"
+	}
+	if goruntime.GOOS != "windows" {
+		advice += fmt.Sprintf("; fallback: kill -QUIT %d dumps goroutines to stderr and terminates the daemon", e.PID)
+	} else if recoverCommand != "" {
+		advice += fmt.Sprintf("; stop the failed process with taskkill /PID %d /F", e.PID)
+	}
+	if recoverCommand != "" {
+		advice += "; after it exits, run " + recoverCommand
+	} else {
+		advice += "; run kata daemon restart with the original KATA_HOME and storage environment"
+	}
+	return advice
 }
 
 // liveDaemon is one runtime record that answered /api/v1/ping: the record
@@ -140,10 +170,12 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 					yield(liveDaemon{}, err)
 					return
 				}
-				if !yield(liveDaemon{}, &localDaemonUnreachableError{
-					pid:     r.PID,
-					address: address,
-					cause:   probeErr,
+				if !yield(liveDaemon{}, &LocalDaemonUnreachableError{
+					PID:       r.PID,
+					Address:   address,
+					dataDir:   dataDir,
+					webOrigin: r.Metadata["web_origin"],
+					cause:     probeErr,
 				}) {
 					return
 				}
