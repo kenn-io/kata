@@ -46,7 +46,7 @@ func FederationPayloadReferencedIssueUIDs(ev RemoteEvent, payload map[string]jso
 		return nil, err
 	}
 	refs = append(refs, changedRefs...)
-	links, err := payloadLinks(ev)
+	links, err := FederationPayloadLinks(ev)
 	if err != nil {
 		return nil, fmt.Errorf("%w: decode links: %v", ErrFederationIngestValidation, err)
 	}
@@ -102,16 +102,18 @@ func FederationPayloadLinksChangedIssueUIDs(
 	return refs, nil
 }
 
-type payloadLink struct {
+// FederationPayloadLink is a link embedded in a creation or move snapshot.
+type FederationPayloadLink struct {
 	Type       string `json:"type"`
 	ToIssueUID string `json:"to_issue_uid"`
 	Incoming   bool   `json:"incoming"`
 }
 
-func payloadLinks(ev RemoteEvent) ([]payloadLink, error) {
+// FederationPayloadLinks decodes links embedded in an event payload.
+func FederationPayloadLinks(ev RemoteEvent) ([]FederationPayloadLink, error) {
 	ev = FederationMoveSnapshotEvent(ev)
 	var created struct {
-		Links []payloadLink `json:"links"`
+		Links []FederationPayloadLink `json:"links"`
 	}
 	if err := json.Unmarshal(ev.Payload, &created); err != nil {
 		return nil, err

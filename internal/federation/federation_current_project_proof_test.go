@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
@@ -199,6 +200,10 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
 			sender := newMoveDeliverySpoke(t, hub, projects[:1])
+			definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+			require.NoError(t, err)
+			job, _, err := hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: projects[0].ID, Name: "Review", Actor: "worker", Definition: definition})
+			require.NoError(t, err)
 			moved, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved", Author: "worker"})
 			require.NoError(t, err)
 			require.NoError(t, sender.sync(t, 0))
@@ -209,6 +214,10 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 				body = strings.Repeat("x", 400<<10)
 			}
 			created, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Dependent creation", Body: body, Author: "worker", Links: []db.InitialLink{{ToNumber: local.ID, Type: "related"}}})
+			require.NoError(t, err)
+			runUID, err := uid.New()
+			require.NoError(t, err)
+			_, err = sender.env.DB.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: sender.projects[0].ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, IssueUID: &created.UID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}})
 			require.NoError(t, err)
 			_, _, err = sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: created.ID, Author: "worker", Body: "Dependent comment" + body})
 			require.NoError(t, err)
@@ -234,6 +243,8 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			require.NoError(t, err)
 			_, err = hub.DB.IssueByUID(t.Context(), created.UID, db.IncludeDeletedNo)
 			require.ErrorIs(t, err, db.ErrNotFound)
+			_, err = hub.DB.CronRun(t.Context(), projects[0].ID, runUID)
+			require.ErrorIs(t, err, db.ErrNotFound)
 			err = pushDirectSpoke(t.Context(), pushStore, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{})
 			require.ErrorContains(t, err, "pending federation events remain")
 			target, err := sender.env.DB.CreateProjectWithUID(t.Context(), projects[1].Name, projects[1].UID)
@@ -244,6 +255,9 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			require.NoError(t, err)
 			sender.credentials[projects[1].UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: grant.Token, Actor: "worker"}
 			require.NoError(t, pushDirectSpoke(t.Context(), pushStore, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{}))
+			run, err := hub.DB.CronRun(t.Context(), projects[0].ID, runUID)
+			require.NoError(t, err)
+			require.Equal(t, &created.UID, run.IssueUID)
 			got, err := hub.DB.IssueByUID(t.Context(), child.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			comments, err := hub.DB.CommentsByIssue(t.Context(), got.ID)

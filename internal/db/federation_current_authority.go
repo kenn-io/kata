@@ -3,14 +3,13 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"strings"
 )
 
 // AuthorizeFederationCurrentIssue checks every issue affected by a fresh event.
-func AuthorizeFederationCurrentIssue(ctx context.Context, tx *sql.Tx, p FederationIngestParams, event RemoteEvent, moveSnapshots *FederationMoveSnapshotValidator, staged map[string]int64, checked map[int64]bool, primaryIssueUID func(RemoteEvent, map[string]jsontext.Value) (string, error), referencedIssueUIDs func(RemoteEvent, map[string]jsontext.Value) ([]string, error), authorize func(context.Context, int64, string) error) error {
+func AuthorizeFederationCurrentIssue(ctx context.Context, tx *sql.Tx, p FederationIngestParams, event RemoteEvent, moveSnapshots *FederationMoveSnapshotValidator, staged map[string]int64, checked map[int64]bool, authorize func(context.Context, int64, string) error) error {
 	referenceEvent, err := moveSnapshots.UnprovenReferences(ctx, event)
 	if err != nil {
 		return err
@@ -21,11 +20,11 @@ func AuthorizeFederationCurrentIssue(ctx context.Context, tx *sql.Tx, p Federati
 	case strings.HasPrefix(event.Type, "issue."):
 		payload := PayloadMap(event.Payload)
 		var err error
-		primary, err = primaryIssueUID(event, payload)
+		primary, err = FederationPayloadIssueUID(event, payload)
 		if err != nil {
 			return err
 		}
-		refs, err = referencedIssueUIDs(referenceEvent, PayloadMap(referenceEvent.Payload))
+		refs, err = FederationPayloadReferencedIssueUIDs(referenceEvent, PayloadMap(referenceEvent.Payload))
 		if err != nil {
 			return err
 		}

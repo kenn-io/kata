@@ -1973,6 +1973,9 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered)
+	// The interrupted pull inserted the replay but did not deliver it. A push
+	// acknowledgment of that replay must not suppress its first notification.
+	require.NoError(t, spoke.DB.RecordFederationSyncReset(ctx, project.ID, localEvent.CreatedAt.Add(time.Millisecond)))
 	if acknowledged {
 		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
 		require.NoError(t, err)

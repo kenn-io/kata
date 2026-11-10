@@ -2227,7 +2227,7 @@ issues. A newer CLI feature may also need a newer daemon API; see the
 
 ### When a spoke is newer than its hub
 
-Push requests declare the spoke's current schema version.
+Push requests declare the minimum wire schema version needed by their events, starting at version 30.
 A hub accepts older positive schema versions, but rejects a version newer
 than its own with `unsupported_federation_schema`. The spoke treats that error as transient
 version skew: it records the sync error, leaves the push cursor unchanged, does
@@ -2263,12 +2263,10 @@ batch. Quarantine blocks further push and can block reset.
 
 On newer main builds, a direct spoke continues independent pushes when an
 issue has moved into a project it has not joined. Both peers must support
-per-event rejections, and the hub must accept the spoke's schema version. A
-schema 51 spoke cannot reach this ingest path on a schema 50 hub; upgrade the
-hub first. The status error names the issue and its current project
-and says the spoke has no enrollment there. Independent events in the batch
-still reach the hub. A later page that depends on a rejected creation can
-block further pushes until the spoke joins the named project. Push rejection
+per-event rejections. Upgrade the hub first so it understands partial acknowledgments.
+The status error names the issue and its current project and says the spoke
+has no enrollment there. Independent events reach the hub across later pages,
+while events that depend on a rejected creation wait for enrollment. Push rejection
 does not stop the pull phase, but
 a source-only spoke can still encounter the separate missing-destination pull
 limitation when it receives the move.

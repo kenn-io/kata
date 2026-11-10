@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -125,6 +124,7 @@ func (d *Store) ingestFederationEventsOnce(
 	}
 	prepared := make([]preparedFederationIngestEvent, 0, len(p.Events))
 	seenBatch := map[string]string{}
+	observedBatch := map[string]string{}
 	rejectedCreations := db.FederationRejectedCreations{}
 	// Projection writes happen after validation; later moves can depend on
 	// fully validated creations earlier in this batch.
@@ -146,17 +146,10 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		// The subject is portable identity; live source checks apply only to
 		// fresh moves after duplicate recognition and content integrity checks.
-		temporaryUID := ""
 		if ev.Type == "issue.moved" && ev.IssueUID != nil {
-			if _, known := knownIssueUIDs[*ev.IssueUID]; !known {
-				temporaryUID = *ev.IssueUID
-				knownIssueUIDs[temporaryUID] = struct{}{}
-			}
+			knownIssueUIDs[*ev.IssueUID] = struct{}{}
 		}
 		validationErr := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, rejectedCreations.ValidationUIDs(knownIssueUIDs))
-		if temporaryUID != "" {
-			delete(knownIssueUIDs, temporaryUID)
-		}
 		if validationErr != nil {
 			return db.FederationIngestResult{}, validationErr
 		}
@@ -166,6 +159,10 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := validateFederationEventHash(ev); err != nil {
 			return db.FederationIngestResult{}, err
 		}
+		if hash, ok := observedBatch[ev.EventUID]; ok && !strings.EqualFold(hash, ev.ContentHash) {
+			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s", db.ErrRemoteEventConflict, ev.EventUID)
+		}
+		observedBatch[ev.EventUID] = ev.ContentHash
 		if existingHash, ok := seenBatch[ev.EventUID]; ok {
 			matches, err := federationEventHashMatches(ev, existingHash, boundActor, adoptionSnapshotAuthorState.overrideSnapshotAuthors)
 			if err != nil {
@@ -228,12 +225,12 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := rejectFreshCreateSnapshotForKnownIssue(ev, knownIssueUIDs); err != nil {
 			return db.FederationIngestResult{}, err
 		}
-		if rejection, dependent, err := rejectedCreations.Dependent(ev, db.FederationPayloadIssueUID, db.FederationPayloadReferencedIssueUIDs); err != nil {
+		if rejection, dependent, err := rejectedCreations.Dependent(ev); err != nil {
 			return db.FederationIngestResult{}, err
 		} else if dependent {
 			rejection.SourceEventID, rejection.EventUID = in.SourceEventID, ev.EventUID
 			result.RejectedEvents = append(result.RejectedEvents, rejection)
-			rejectedCreations.Remember(ev, rejection, db.FederationPayloadIssueUID)
+			rejectedCreations.Remember(ev, rejection)
 			continue
 		}
 		var moveFrom, moveTo int64
@@ -260,7 +257,7 @@ func (d *Store) ingestFederationEventsOnce(
 				if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
 					rejection := missing.Rejection(in.SourceEventID, ev.EventUID)
 					result.RejectedEvents = append(result.RejectedEvents, rejection)
-					rejectedCreations.Remember(ev, rejection, db.FederationPayloadIssueUID)
+					rejectedCreations.Remember(ev, rejection)
 					continue
 				}
 				return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
@@ -1146,7 +1143,7 @@ func payloadDeferredLinkIssueUIDs(
 		}
 
 	case "issue.created", "issue.snapshot", "issue.moved":
-		links, err := payloadLinks(ev)
+		links, err := db.FederationPayloadLinks(ev)
 		if err != nil {
 			return nil, fmt.Errorf("%w: decode links: %v", db.ErrFederationIngestValidation, err)
 		}
@@ -1299,23 +1296,6 @@ func payloadLinkEndpointUID(
 	return canonical, canonicalOK, nil
 }
 
-type payloadLink struct {
-	Type       string `json:"type"`
-	ToIssueUID string `json:"to_issue_uid"`
-	Incoming   bool   `json:"incoming"`
-}
-
-func payloadLinks(ev db.RemoteEvent) ([]payloadLink, error) {
-	ev = db.FederationMoveSnapshotEvent(ev)
-	var created struct {
-		Links []payloadLink `json:"links"`
-	}
-	if err := json.Unmarshal(ev.Payload, &created); err != nil {
-		return nil, err
-	}
-	return created.Links, nil
-}
-
 // Only identities referenced by this batch participate in admission checks.
 // Resolve them from both current rows and retained creation/move history, just
 // as the complete set does for relay ingress.
@@ -1417,7 +1397,7 @@ func rememberIngestIssueUIDs(ev db.RemoteEvent, known map[string]struct{}) {
 	payload := db.PayloadMap(ev.Payload)
 	if uid, err := db.FederationPayloadIssueUID(ev, payload); err == nil && uid != "" {
 		switch ev.Type {
-		case "issue.created", "issue.snapshot", "issue.moved":
+		case "issue.created", "issue.snapshot":
 			known[uid] = struct{}{}
 		}
 	}
@@ -1471,7 +1451,7 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 }
 
 func (d *Store) authorizeFederationCurrentIssueTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, input preparedFederationIngestEvent, moveSnapshots *db.FederationMoveSnapshotValidator, staged map[string]int64, checked map[int64]bool) error {
-	return db.AuthorizeFederationCurrentIssue(ctx, tx, p, input.Event, moveSnapshots, staged, checked, db.FederationPayloadIssueUID, db.FederationPayloadReferencedIssueUIDs, func(ctx context.Context, projectID int64, projectUID string) error {
+	return db.AuthorizeFederationCurrentIssue(ctx, tx, p, input.Event, moveSnapshots, staged, checked, func(ctx context.Context, projectID int64, projectUID string) error {
 		return d.authorizeFederationAffectedProjectTx(ctx, tx, p, projectID, projectUID)
 	})
 }

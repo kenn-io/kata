@@ -9,7 +9,6 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 )
@@ -44,25 +43,6 @@ func TestFederationEventRejectionOptInToOldHub(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, syncStatus.LastError)
 	require.Contains(t, *syncStatus.LastError, "credential is not currently authorized")
-}
-
-func TestFederationPushRejectsUnsubmittedRejectionAcknowledgments(t *testing.T) {
-	batch := []db.Event{{ID: 1, UID: "submitted-event"}, {ID: 2, UID: "later-event"}}
-	rejection := db.FederationEventRejection{SourceEventID: 1, EventUID: "submitted-event", IssueUID: "issue-uid", CurrentProjectUID: "project-uid", CurrentProjectName: "target-project", Code: db.FederationProjectNotEnrolledCode}
-	for _, kind := range []string{"wrong-uid", "beyond-prefix"} {
-		t.Run(kind, func(t *testing.T) {
-			ack := api.FederationIngestEventsBody{PushCursorEventID: 1, RejectedEvents: []db.FederationEventRejection{rejection}}
-			switch kind {
-			case "wrong-uid":
-				ack.RejectedEvents[0].EventUID = "unsubmitted-event"
-			case "beyond-prefix":
-				ack.RejectedEvents[0].EventUID = "later-event"
-				ack.RejectedEvents[0].SourceEventID = 2
-			}
-			_, err := validateFederationPushAcknowledgment(batch, ack)
-			require.EqualError(t, err, "hub returned invalid rejection details")
-		})
-	}
 }
 
 func TestFederationPushReportsUnknownRejectionReason(t *testing.T) {

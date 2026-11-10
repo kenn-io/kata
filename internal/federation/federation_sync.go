@@ -303,11 +303,11 @@ func pushDirectSpoke(
 				var deferred []db.Event
 				var baselineRejection db.FederationEventRejection
 				for _, event := range batch {
-					remote := db.RemoteEvent{Type: event.Type, IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID, Payload: jsontext.Value(event.Payload)}
-					rejection, dependent, parseErr := retained.Dependent(remote, db.FederationPayloadIssueUID, db.FederationPayloadReferencedIssueUIDs)
+					remote := db.RemoteEventFromStored(event)
+					rejection, dependent, parseErr := retained.Dependent(remote)
 					if parseErr == nil && dependent {
 						baselineRejection = rejection
-						retained.Remember(remote, rejection, db.FederationPayloadIssueUID)
+						retained.Remember(remote, rejection)
 						deferred = append(deferred, event)
 					} else {
 						send = append(send, event)
@@ -317,8 +317,8 @@ func pushDirectSpoke(
 					deferred = batch
 					send = nil
 					for _, event := range batch {
-						remote := db.RemoteEvent{Type: event.Type, IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID, Payload: jsontext.Value(event.Payload)}
-						retained.Remember(remote, baselineRejection, db.FederationPayloadIssueUID)
+						remote := db.RemoteEventFromStored(event)
+						retained.Remember(remote, baselineRejection)
 					}
 				}
 				rejectedEvents = append(rejectedEvents, deferred...)
@@ -351,19 +351,14 @@ func pushDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				for _, event := range rejected {
-					if firstRejected == 0 || event.ID < firstRejected {
-						firstRejected = event.ID
+				for _, item := range rejected {
+					if firstRejected == 0 || item.event.ID < firstRejected {
+						firstRejected = item.event.ID
 					}
-					for _, rejection := range ack.RejectedEvents {
-						if rejection.EventUID == event.UID {
-							remote := db.RemoteEvent{Type: event.Type, IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID, Payload: jsontext.Value(event.Payload)}
-							retained.Remember(remote, rejection, db.FederationPayloadIssueUID)
-						}
-					}
+					retained.Remember(db.RemoteEventFromStored(item.event), item.rejection)
+					rejectedEvents = append(rejectedEvents, item.event)
 				}
 				acknowledged += ack.Accepted + ack.Duplicates
-				rejectedEvents = append(rejectedEvents, rejected...)
 				rejections = append(rejections, ack.RejectedEvents...)
 				durableCursor := ack.PushCursorEventID
 				if firstRejected > 0 {
@@ -395,30 +390,27 @@ func pushDirectSpoke(
 	return nil
 }
 
+type rejectedFederationEvent struct {
+	event     db.Event
+	rejection db.FederationEventRejection
+}
+
 // Match rejected local identities before holding the durable cursor behind them.
-func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIngestEventsBody) ([]db.Event, error) {
+func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIngestEventsBody) ([]rejectedFederationEvent, error) {
 	if ack.PushCursorEventID < batch[0].ID {
 		return nil, errors.New("federation push cursor did not advance")
 	}
 	if ack.PushCursorEventID > batch[len(batch)-1].ID {
 		return nil, errors.New("federation push cursor advanced beyond submitted batch")
 	}
-	submitted := map[string]db.Event{}
-	for _, event := range batch {
-		submitted[event.UID] = event
-	}
-	seen := map[string]bool{}
+	byUID := make(map[string]db.FederationEventRejection, len(ack.RejectedEvents))
 	for _, rejection := range ack.RejectedEvents {
-		event, found := submitted[rejection.EventUID]
-		if !found || event.ID != rejection.SourceEventID || event.ID > ack.PushCursorEventID {
-			return nil, errors.New("hub returned invalid rejection details")
-		}
-		seen[event.UID] = true
+		byUID[rejection.EventUID] = rejection
 	}
-	var rejected []db.Event
+	var rejected []rejectedFederationEvent
 	for _, event := range batch {
-		if seen[event.UID] {
-			rejected = append(rejected, event)
+		if rejection, ok := byUID[event.UID]; ok {
+			rejected = append(rejected, rejectedFederationEvent{event: event, rejection: rejection})
 		}
 	}
 	return rejected, nil
@@ -461,17 +453,7 @@ func federationEventRejectionMessage(rejected []db.FederationEventRejection, ack
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.
 // The caller holds shared federation coordination for the complete operation.
 func PushDirectSpoke(ctx context.Context, store db.Storage, binding db.FederationBinding, hubProjectID int64, client *Client) error {
-	if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{}); err != nil {
-		return err
-	}
-	pending, _, err := store.PendingFederationPushStats(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
-	if err != nil {
-		return err
-	}
-	if pending > 0 {
-		return errors.New("pending federation events remain; inspect federation status before retrying")
-	}
-	return nil
+	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{})
 }
 
 // CredentialHTTPClient builds a bearer-pinned, signing-aware HTTP client for
@@ -671,9 +653,9 @@ func syncDirectSpoke(
 				var err error
 				if ev.OriginInstanceUID == localInstanceUID {
 					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, ev)
-				} else if ev.OriginInstanceUID != localInstanceUID && insertedThisPull[ev.EventUID] {
+				} else if insertedThisPull[ev.EventUID] {
 					deliver[i] = true
-				} else if ev.OriginInstanceUID != localInstanceUID {
+				} else {
 					deliver[i], invalidate, err = recovery.recover(ctx, ev)
 				}
 				if err != nil {
