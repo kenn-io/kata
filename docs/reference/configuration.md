@@ -624,7 +624,7 @@ date-time `scheduled_on` and `deadline_on` values without an issue-level
 `timezone`. If no zone is set, Kata uses UTC. RFC 3339 values ending in `Z`
 are UTC instants and do not use this setting.
 
-New civil writes using this default require a [portable timezone](metadata.md).
+New civil writes using this default require a [portable timezone](metadata.md). New schedules retain the effective zone and its timezone-data version when this default changes.
 If rejected, set a portable issue `timezone`, or change this setting to `UTC`
 and restart the daemon. Existing configurations keep loading.
 

@@ -231,6 +231,10 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 		}
+		frozenMetadata, err := freezeIssueSchedules(nil, in.Body.Metadata, cfg.DefaultTimezone, "")
+		if err != nil {
+			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
+		}
 		var archivedTarget *db.LinkTargetArchivedError
 		issue, evt, err := cfg.DB.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID:              in.ProjectID,
@@ -246,7 +250,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			// Metadata is validated above (validateCreateMetadata); the store
 			// re-validates defensively. On idempotent reuse this handler
 			// returns before reaching here, so replayed metadata is ignored.
-			Metadata: in.Body.Metadata,
+			Metadata: frozenMetadata,
 		})
 		switch {
 		case errors.Is(err, metadata.ErrInvalidValue):

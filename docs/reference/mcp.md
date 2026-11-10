@@ -596,7 +596,7 @@ fields. Accepted `scheduled_on` forms are:
 
 Civil date and time values use the supplied IANA timezone. Numeric offsets are
 rejected. Use `clear_scheduled_on` or `clear_timezone` when editing.
-New scheduling writes follow the [portable timezone rules](metadata.md).
+New scheduling writes follow the [portable timezone rules](metadata.md). Stored metadata includes the effective zone and timezone-data version; legacy strings remain readable.
 
 `kata.set_schedule` writes the reserved `scheduled_on` metadata key. Pass
 `schedule` to set a value or `clear_schedule: true` to remove it.

@@ -66,6 +66,20 @@ offsets are rejected because they pin an instant while duplicating the named
 timezone. `deadline_on` accepts the same three forms and uses the same timezone
 rules. It is a deadline only; it does not control `ready` or `next`.
 
+New writes store each date with its effective zone and an immutable timezone-data
+bundle version. For example, `scheduled_on` is stored as
+`{"value":"2026-11-12T09:00","timezone":"Europe/Paris","tzdata_version":"sha256:..."}`.
+The `value` retains the supplied text; UTC instants use `UTC`. Older stored
+strings remain readable using the issue and daemon defaults. An unknown bundle
+version makes the date unreadable and the planning-date endpoint returns HTTP
+422. Changing or removing an issue timezone rebinds its existing civil dates.
+Echoing the same date preserves its saved rules.
+
+Stop every older daemon sharing a database before starting the new version,
+and keep those older daemons stopped. Older versions skip object-backed dates
+in notification sweeps. A recurrence using `Local` must be changed to a named
+IANA timezone before it can create another occurrence.
+
 New or changed issue `timezone` values from API, CLI, MCP, TUI and web writes
 must be `UTC`, `Etc/UTC`, or exact case-sensitive bundled names under `Africa/`,
 `America/`, `Antarctica/`, `Arctic/`, `Asia/`, `Atlantic/`, `Australia/`,
@@ -88,8 +102,8 @@ keep working.
 its key is absent or its stored value cannot be read, so one bad value never
 fails the list. These are the names and values the web UI's snapshot
 uses, resolved by one shared rule. A date-only value keeps its written date. A
-local date-time resolves in the issue `timezone`, then the daemon's top-level
-`timezone`, then UTC, as above. For a recurring occurrence without `timezone`
+local date-time resolves with its saved zone and rules. Legacy strings use the
+issue `timezone`, then the daemon's top-level `timezone`, then UTC, as above. For a recurring occurrence without `timezone`
 metadata, `scheduled_on` resolves in the recurrence's timezone before the
 daemon's; `deadline_on` does not. An RFC 3339 `Z` instant is read in that same
 zone chain, so it can fall on a different calendar date than its UTC date.

@@ -95,9 +95,9 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 				}
 			}
 		} else {
-			if err := db.ProjectUIDeadlineDate(&selected, query); err != nil {
+			if err := db.ProjectUIPlanningDates(ctx, tx, &selected, query); err != nil {
 				return db.UISnapshotData{}, fmt.Errorf(
-					"read UI selected issue %s deadline: %w", selected.UID, err,
+					"read UI selected issue %s planning dates: %w", selected.UID, err,
 				)
 			}
 			data.SelectedState = "available"

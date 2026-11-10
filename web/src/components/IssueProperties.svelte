@@ -8,6 +8,7 @@
   import { Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
   import { Button, Chip, SelectDropdown } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
+  import { scheduleText } from '../lib/kata/view'
   import type { KataTaskDetail } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
 
@@ -201,7 +202,11 @@
   }
 
   function scheduledLabel(): string {
-    const value = issue.issue.metadata.scheduled_on
+    const value =
+      issue.issue.scheduled_on_date ??
+      (typeof issue.issue.metadata.scheduled_on === 'string'
+        ? issue.issue.metadata.scheduled_on
+        : undefined)
     return value ? formatDate(value) : 'When'
   }
 
@@ -211,7 +216,10 @@
   }
 
   function deadlineDate(): string {
-    return issue.issue.deadline_on_date ?? issue.issue.metadata.deadline_on ?? ''
+    return (
+      issue.issue.deadline_on_date ??
+      (typeof issue.issue.metadata.deadline_on === 'string' ? issue.issue.metadata.deadline_on : '')
+    )
   }
 
   function priorityLabel(): string {
@@ -223,9 +231,12 @@
     if (actionsDisabled) return
     activeProperty = property
     if (property === 'scheduled') {
-      scheduledDraft = issue.issue.metadata.scheduled_on ?? ''
+      scheduledDraft = scheduleText(issue.issue.metadata.scheduled_on) ?? ''
     } else if (property === 'due') {
-      dueDraft = deadlineDate()
+      dueDraft =
+        typeof issue.issue.metadata.deadline_on === 'string'
+          ? deadlineDate()
+          : (scheduleText(issue.issue.metadata.deadline_on) ?? '')
     } else {
       priorityDraft =
         issue.issue.priority === undefined || issue.issue.priority === null

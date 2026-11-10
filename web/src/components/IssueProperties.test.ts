@@ -218,6 +218,18 @@ describe('IssueProperties', () => {
     expect(onPatchMetadata).not.toHaveBeenCalled()
   })
 
+  it('shows an object-backed schedule in its editor', async () => {
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2026-06-01',
+        metadata: { scheduled_on: { value: '2026-06-01', timezone: 'UTC', tzdata_version: 'v' } },
+      }),
+    })
+    expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('Jun 1')
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    expect(screen.getByRole('button', { name: /Scheduled: Jun 1/ })).toBeTruthy()
+  })
+
   it('patches scheduled and due dates and closes editors on accepted replacement', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     const view = renderProperties({ onPatchMetadata, draftResetGeneration: 0 })

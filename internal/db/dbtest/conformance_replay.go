@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Storage) error {
@@ -508,4 +509,41 @@ func CollectImportRecords(
 		}
 	}
 	return records, nil
+}
+
+func checkScheduleReplay(t *testing.T, target db.Storage, backend Backend) error {
+	ctx := t.Context()
+	source := backend.Open(t)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "schedule-replay")
+	require.NoError(t, err)
+	saved, err := metadata.NewScheduleValue("2026-11-12T09:00", "Europe/Paris")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "scheduled", Author: "worker", Metadata: map[string]jsontext.Value{"scheduled_on": saved}})
+	require.NoError(t, err)
+	records, err := CollectImportRecords(ctx, source, db.ExportFilter{IncludeDeleted: true})
+	require.NoError(t, err)
+	require.NoError(t, target.ImportReplay(ctx, records, db.ImportOptions{}))
+	restored, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.JSONEq(t, string(issue.Metadata), string(restored.Metadata))
+	value, zone, at, present, err := metadata.ScheduleFieldInstant(string(restored.Metadata), "scheduled_on", "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	require.Equal(t, "2026-11-12T09:00", value)
+	require.Equal(t, "Europe/Paris", zone)
+	require.Equal(t, "2026-11-12T08:00:00Z", at.Format(time.RFC3339))
+	_, err = target.EnableProjectFederation(ctx, restored.ProjectID, "worker")
+	require.NoError(t, err)
+	before, err := target.MaxEventID(ctx)
+	require.NoError(t, err)
+	_, err = target.ReadFederation(ctx, db.FederationReadParams{ProjectID: restored.ProjectID, Metadata: true})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	after, err := target.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	result, err := target.ReadFederation(ctx, db.FederationReadParams{ProjectID: restored.ProjectID, Metadata: true, Features: db.SupportedEventFeatures})
+	require.NoError(t, err)
+	require.Contains(t, result.RequiredFeatures, db.IssueScheduleEventFeature)
+	return nil
 }

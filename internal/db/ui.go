@@ -2,8 +2,8 @@ package db
 
 import (
 	"context"
-
-	"go.kenn.io/kata/internal/metadata"
+	"database/sql"
+	"errors"
 )
 
 // UIStore is the narrow coherent-read contract used by the browser API.
@@ -91,16 +91,25 @@ func MatchUICalendarView(
 	}
 }
 
-// ProjectUIDeadlineDate gives a selected issue the same browser-calendar
-// deadline projection as collection rows.
-func ProjectUIDeadlineDate(issue *UIIssue, query UISnapshotQuery) error {
-	deadlineDate, _, err := metadata.DeadlineOnCalendarDate(
-		string(issue.Metadata), query.TimeZone, query.DefaultTimezone,
-	)
-	if err != nil {
+// ProjectUIPlanningDates gives a selected issue the same dates as collection rows.
+func ProjectUIPlanningDates(ctx context.Context, tx *sql.Tx, issue *UIIssue, query UISnapshotQuery) error {
+	scheduledDefault := query.DefaultTimezone
+	if issue.RecurrenceID != nil {
+		var zone string
+		err := tx.QueryRowContext(ctx, `SELECT timezone FROM recurrences WHERE id=$1 AND project_id=$2`, *issue.RecurrenceID, issue.ProjectID).Scan(&zone)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if zone != "" {
+			scheduledDefault = zone
+		}
+	}
+	dates := resolvePlanningCalendarDates(string(issue.Metadata), &query.TimeZone, scheduledDefault, query.DefaultTimezone)
+	if err := dates.err(); err != nil {
 		return err
 	}
-	issue.DeadlineOnDate = deadlineDate
+	issue.ScheduledOnDate = dates.scheduledOn
+	issue.DeadlineOnDate = dates.deadlineOn
 	return nil
 }
 

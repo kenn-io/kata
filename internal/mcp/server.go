@@ -793,7 +793,7 @@ type SetDeadlineInput struct {
 	Revision      *int64  `json:"revision,omitempty" jsonschema:"Required current issue revision for a conditional write"`
 }
 
-// SetScheduleInput sets or clears the scheduled_on metadata primitive.
+// SetScheduleInput sets or clears the scheduled_on metadata value.
 type SetScheduleInput struct {
 	Ref           string  `json:"ref" jsonschema:"Issue reference in the bound project"`
 	Schedule      *string `json:"schedule,omitempty" jsonschema:"Schedule date, local date-time, or RFC 3339 UTC instant ending in Z"`
@@ -868,8 +868,8 @@ type IssueSummary struct {
 	UpdatedAt           string    `json:"updated_at"`
 	ScheduledOn         *string   `json:"scheduled_on,omitempty"`
 	Timezone            *string   `json:"timezone,omitempty"`
-	ScheduledOnDate     *string   `json:"scheduled_on_date,omitempty" jsonschema:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable or the daemon predates API 0.36.0"`
-	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`
+	ScheduledOnDate     *string   `json:"scheduled_on_date,omitempty" jsonschema:"scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable or the daemon predates API 0.36.0"`
+	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`
 	updatedAt           time.Time
 	metadata            map[string]any
 	// oversized marks a compact row the daemon sent as identity only.

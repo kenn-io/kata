@@ -27,10 +27,8 @@ func (d *Store) ListDueNotificationIssueIDs(ctx context.Context, now time.Time) 
 		   AND i.status = 'open'
 		   AND NOT (COALESCE(fb.enabled, 0) = 1 AND fb.role = 'spoke')
 		   AND (
-			 (json_type(i.metadata, '$.scheduled_on') = 'text'
-			  AND json_extract(i.metadata, '$.scheduled_on') <= ?)
-			 OR (json_type(i.metadata, '$.deadline_on') = 'text'
-			  AND json_extract(i.metadata, '$.deadline_on') <= ?)
+			 (CASE json_type(i.metadata, '$.scheduled_on') WHEN 'text' THEN json_extract(i.metadata, '$.scheduled_on') WHEN 'object' THEN json_extract(i.metadata, '$.scheduled_on.value') END <= ?)
+			 OR (CASE json_type(i.metadata, '$.deadline_on') WHEN 'text' THEN json_extract(i.metadata, '$.deadline_on') WHEN 'object' THEN json_extract(i.metadata, '$.deadline_on.value') END <= ?)
 			 OR EXISTS (
 				 SELECT 1 FROM json_each(i.metadata) entry
 				  WHERE entry.key LIKE 'notify.%'

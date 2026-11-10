@@ -10,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
@@ -67,9 +68,15 @@ type issueMetadata struct {
 
 // scheduledOn, deadlineOn and timezone are the raw stored values, "" when
 // absent.
-func (i Issue) scheduledOn() string { return rawString(i.Metadata.ScheduledOn) }
-func (i Issue) deadlineOn() string  { return rawString(i.Metadata.DeadlineOn) }
-func (i Issue) timezone() string    { return rawString(i.Metadata.Timezone) }
+func (i Issue) scheduledOn() string {
+	value, _ := metadata.ScheduleValueText(i.Metadata.ScheduledOn)
+	return value
+}
+func (i Issue) deadlineOn() string {
+	value, _ := metadata.ScheduleValueText(i.Metadata.DeadlineOn)
+	return value
+}
+func (i Issue) timezone() string { return rawString(i.Metadata.Timezone) }
 
 func rawString(v jsontext.Value) string {
 	var s string

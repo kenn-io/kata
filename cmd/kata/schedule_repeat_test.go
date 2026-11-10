@@ -16,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -77,7 +78,12 @@ func TestScheduleRepeatStartsRecurrenceFromTheIssue(t *testing.T) {
 	assert.Nil(t, recs[0].TemplateOwner, "the owner must not carry to later occurrences")
 
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"scheduled_on":"2026-11-02","timezone":"Europe/Paris"}`, string(issue.Issue.Metadata))
+	var fields map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(issue.Issue.Metadata, &fields))
+	value, err := metadata.ScheduleValueText(fields["scheduled_on"])
+	require.NoError(t, err)
+	require.Equal(t, "2026-11-02", value)
+	require.JSONEq(t, `"Europe/Paris"`, string(fields["timezone"]))
 }
 
 // A daemon older than API 0.24.0 returns labels only in the top-level labels

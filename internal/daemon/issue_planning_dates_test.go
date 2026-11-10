@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -83,4 +84,39 @@ func TestIssuePlanningDatesHistoricalReference(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &response))
 	require.Equal(t, issue.UID, response.IssueUID)
 	require.Equal(t, moved.NewRevision, response.Revision)
+}
+
+func TestPlanningDatesKeepWriterZoneAcrossDaemons(t *testing.T) {
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "UTC" })
+	project := seedProject(t, env, "example-project")
+	status, raw := cronHTTP(t, env, http.MethodPost, projectPath(project.ID)+"/issues", map[string]any{"actor": "worker", "title": "portable", "force_new": true, "metadata": map[string]any{"scheduled_on": "2026-11-12T09:00", "deadline_on": "2026-11-13T09:00"}})
+	require.Equal(t, 200, status, string(raw))
+	var created struct {
+		Issue struct {
+			UID string `json:"uid"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &created))
+	require.NotEmpty(t, created.Issue.UID)
+	server := httptest.NewServer(daemon.NewServer(daemon.ServerConfig{DB: env.DB, DefaultTimezone: "Europe/Paris", Broadcaster: daemon.NewEventBroadcaster()}).Handler())
+	t.Cleanup(server.Close)
+	reader := &testenv.Env{URL: server.URL, HTTP: server.Client()}
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/planning-dates", project.ID, created.Issue.UID)
+	status, raw = cronHTTP(t, reader, http.MethodGet, path, nil)
+	require.Equal(t, 200, status, string(raw))
+	var response struct {
+		ScheduledOn struct {
+			Timezone string `json:"timezone"`
+			Instant  string `json:"instant"`
+		} `json:"scheduled_on"`
+		DeadlineOn struct {
+			Timezone string `json:"timezone"`
+			Instant  string `json:"instant"`
+		} `json:"deadline_on"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &response))
+	require.Equal(t, "UTC", response.ScheduledOn.Timezone)
+	require.Equal(t, "2026-11-12T09:00:00Z", response.ScheduledOn.Instant)
+	require.Equal(t, "UTC", response.DeadlineOn.Timezone)
+	require.Equal(t, "2026-11-13T09:00:00Z", response.DeadlineOn.Instant)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -78,8 +79,20 @@ func (h *datesHarness) stored() map[string]string {
 	h.t.Helper()
 	current, err := h.env.DB.IssueByUID(h.t.Context(), h.issue.UID, db.IncludeDeletedNo)
 	require.NoError(h.t, err)
+	var fields map[string]jsontext.Value
+	require.NoError(h.t, json.Unmarshal([]byte(current.Metadata), &fields))
 	out := map[string]string{}
-	require.NoError(h.t, json.Unmarshal([]byte(current.Metadata), &out))
+	for key, raw := range fields {
+		if key == "scheduled_on" || key == "deadline_on" {
+			value, err := metadata.ScheduleValueText(raw)
+			require.NoError(h.t, err)
+			out[key] = value
+			continue
+		}
+		var value string
+		require.NoError(h.t, json.Unmarshal(raw, &value))
+		out[key] = value
+	}
 	return out
 }
 
@@ -449,4 +462,9 @@ func TestDetailStripShowsBothDates(t *testing.T) {
 	got = render(Issue{})
 	assert.NotContains(t, got, "scheduled:")
 	assert.NotContains(t, got, "deadline:")
+}
+
+func TestDatesFormReadsSavedSchedule(t *testing.T) {
+	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-06-01","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}`)}}
+	require.Equal(t, "2026-06-01", issue.scheduledOn())
 }

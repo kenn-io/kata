@@ -80,12 +80,21 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	if strings.Contains(query, "SELECT EXISTS") {
 		return &featureProbeRows{presence: true}, nil
 	}
+	if strings.Contains(query, "SELECT i.metadata FROM issues") {
+		return &emptyFeatureRows{}, nil
+	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++
 		return &featureProbeRows{}, nil
 	}
 	return nil, errors.New("unexpected feature probe query")
 }
+
+type emptyFeatureRows struct{}
+
+func (*emptyFeatureRows) Columns() []string         { return []string{"metadata"} }
+func (*emptyFeatureRows) Close() error              { return nil }
+func (*emptyFeatureRows) Next([]driver.Value) error { return io.EOF }
 
 type featureProbeRows struct{ presence, seen bool }
 
@@ -139,4 +148,22 @@ func FuzzRecurringMetadataFeatures(f *testing.F) {
 			require.ErrorIs(t, db.RequireEventFeatures("", features), db.ErrUnsupportedEventFeatures)
 		}
 	})
+}
+
+func TestSchedulePayloadFeatures(t *testing.T) {
+	for _, tc := range []struct{ kind, payload string }{
+		{"issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}}`},
+		{"issue.metadata_updated", `{"diff":{"deadline_on":{"from":null,"to":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}}}`},
+		{"projection.issue", `{"metadata":{"deadline_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}}`},
+		{"issue.moved", `{"snapshot":{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}}}`},
+	} {
+		got, err := db.PayloadRequiredFeatures(tc.kind, tc.payload)
+		require.NoError(t, err)
+		require.Contains(t, got, "issue_schedule_v1")
+	}
+}
+
+func TestSchedulePayloadRejectsUnknownRules(t *testing.T) {
+	_, err := db.PayloadRequiredFeatures("issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"unknown"}}}`)
+	require.Error(t, err)
 }

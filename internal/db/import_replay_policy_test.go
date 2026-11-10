@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -90,4 +91,10 @@ func TestOrderImportRecordsPlacesDependenciesFirst(t *testing.T) {
 		db.ImportKindMeta, db.ImportKindProject,
 		db.ImportKindIssue, db.ImportKindEvent,
 	}, kinds)
+}
+
+func TestValidateImportRejectsUnknownScheduleRules(t *testing.T) {
+	issue := &db.IssueExport{Metadata: jsontext.Value(`{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"unknown"}}`)}
+	err := db.ValidateImportRecords([]db.ImportRecord{issue})
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }

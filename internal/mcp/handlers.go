@@ -1357,6 +1357,11 @@ func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSumma
 
 func metadataString(values map[string]any, key string) *string {
 	value, ok := values[key].(string)
+	if !ok && (key == "scheduled_on" || key == "deadline_on") {
+		if object, valid := values[key].(map[string]any); valid {
+			value, ok = object["value"].(string)
+		}
+	}
 	if !ok {
 		return nil
 	}

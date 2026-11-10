@@ -9,8 +9,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Schedule consistently across hosts with [portable zones](reference/metadata.md)
-  for new issue writes, preserving stored values, recurrences and create retries.
+- Keep issue schedules consistent across daemons by saving each date's zone and
+  timezone-data version. Stop older daemons sharing the database before upgrading;
+  their notification sweeps skip the new values. See [schedule metadata](reference/metadata.md).
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
   stop on a failed selected source without fallback. See

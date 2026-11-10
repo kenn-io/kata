@@ -66,11 +66,11 @@ func Validate(registry map[string]Entry, key string, raw jsontext.Value) error {
 }
 
 func validateSchedule(raw jsontext.Value) error {
-	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return fmt.Errorf("%w: schedule must be a JSON string: %v", ErrInvalidValue, err)
+	value, _, err := decodeScheduleValue(raw)
+	if err != nil || value == nil {
+		return fmt.Errorf("%w: invalid schedule: %v", ErrInvalidValue, err)
 	}
-	if _, _, _, err := classifyScheduledOn(s); err != nil {
+	if _, _, _, err := classifyScheduledOn(*value); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidValue, err)
 	}
 	return nil

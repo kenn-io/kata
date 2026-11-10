@@ -1221,7 +1221,7 @@ time can use `YYYY-MM-DD`, local `YYYY-MM-DDTHH:MM[:SS]`, or an RFC 3339 UTC
 instant that ends in `Z`. A local value uses the issue timezone, then the daemon
 timezone, then UTC. Numeric offsets are not accepted. `--if-match` has the same
 revision behavior as the metadata commands.
-New scheduling writes follow the [portable timezone rules](metadata.md).
+New scheduling writes follow the [portable timezone rules](metadata.md). Stored metadata contains the date, its effective zone, and the timezone-data version.
 
 Use `scheduled_on` to keep an issue out of `ready` and `next` until a date or
 time. Use `someday=true` to park it with no date. A deadline value is only a

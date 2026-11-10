@@ -74,7 +74,7 @@ The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
 
 Issue scheduling writes that violate the [portable timezone rules](metadata.md)
-return HTTP 400 `invalid_metadata_value`.
+return HTTP 400 `invalid_metadata_value`. Schedule metadata stores the input text, effective zone, and timezone-data version together. Unknown versions are unreadable and the planning-date endpoint returns HTTP 422.
 
 ## Recurrence timezones
 
@@ -96,7 +96,7 @@ value `Local` with HTTP 400 and error code `validation`. Changing another
 timezone to `Local` through PATCH returns the same error. `Local` depends on
 the daemon host, so moving the daemon could change the schedule's timezone.
 
-Existing recurrences stored with `Local` still run and remain readable. PATCH
+Existing recurrences stored with `Local` remain readable, but cannot materialize an occurrence until changed to a named timezone. PATCH
 may omit `timezone` or echo `Local` while editing their schedule or template.
 To make an existing schedule portable, PATCH its timezone to an IANA zone or
 `UTC`. PATCH requires the current `If-Match: "rev-N"` revision; stale requests

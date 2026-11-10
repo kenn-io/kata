@@ -21,12 +21,6 @@ const (
 	localSecondLayout = "2006-01-02T15:04:05"
 )
 
-type scheduleMetadata struct {
-	ScheduledOn *string `json:"scheduled_on"`
-	DeadlineOn  *string `json:"deadline_on"`
-	Timezone    string  `json:"timezone"`
-}
-
 // ScheduleDueCutoff returns a byte-order upper bound for dates that may be due.
 // A planning value sorting after it cannot be due at now in any timezone.
 // It skips values more than 24 hours past UTC now, which guarantees every issue
@@ -62,22 +56,11 @@ func ScheduleFieldDue(
 	if len(raw) == 0 {
 		return "", false, false, nil
 	}
-	values, err := decodeScheduleMetadata(raw)
-	if err != nil {
-		return "", false, false, err
+	value, _, at, present, err := ScheduleFieldInstant(raw, field, defaultTimezone)
+	if err != nil || !present {
+		return "", present, false, err
 	}
-	value := values.ScheduledOn
-	if field == "deadline_on" {
-		value = values.DeadlineOn
-	}
-	if value == nil {
-		return "", false, false, nil
-	}
-	due, err := scheduleValueDue(*value, values.Timezone, now, defaultTimezone)
-	if err != nil {
-		return "", false, false, err
-	}
-	return *value, true, due, nil
+	return value, true, !now.Before(at), nil
 }
 
 // ScheduleFieldInstant resolves a planning field with the same civil-time
@@ -92,16 +75,9 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 	if raw == "" {
 		return
 	}
-	values, err := decodeScheduleMetadata(raw)
-	if err != nil {
-		return
-	}
-	input := values.ScheduledOn
-	if field == "deadline_on" {
-		input = values.DeadlineOn
-	}
-	if input == nil {
-		return
+	input, issueTimezone, savedLocation, err := decodePlanningField(raw, field)
+	if err != nil || input == nil {
+		return "", "", time.Time{}, false, err
 	}
 	value, present = *input, true
 	kind, layout, instant, err := classifyScheduledOn(value)
@@ -111,7 +87,10 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 	if kind == scheduledOnInstant {
 		return value, "UTC", instant.UTC(), true, nil
 	}
-	location, err := loadScheduleLocation(values.Timezone, defaultTimezone)
+	location := savedLocation
+	if location == nil {
+		location, err = loadScheduleLocation(issueTimezone, defaultTimezone)
+	}
 	if err != nil {
 		return
 	}
@@ -123,28 +102,6 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 	at, err = resolveLocalSchedule(wall, layout, location)
 	at = at.UTC()
 	return
-}
-
-func scheduleValueDue(value, issueTimezone string, now time.Time, defaultTimezone string) (bool, error) {
-	kind, layout, instant, err := classifyScheduledOn(value)
-	if err != nil {
-		return false, err
-	}
-	if kind == scheduledOnDate || kind == scheduledOnLocalTime {
-		location, err := loadScheduleLocation(issueTimezone, defaultTimezone)
-		if err != nil {
-			return false, err
-		}
-		if kind == scheduledOnDate {
-			return value <= now.In(location).Format(layout), nil
-		}
-		resolved, err := resolveLocalSchedule(value, layout, location)
-		if err != nil {
-			return false, err
-		}
-		return !now.Before(resolved), nil
-	}
-	return !now.Before(instant), nil
 }
 
 // ScheduledOnCalendarDate returns the display calendar date for scheduled_on.
@@ -187,7 +144,7 @@ func CalendarDate(
 	if len(raw) == 0 {
 		return "", false, nil
 	}
-	value, issueTimezone, err := decodePlanningField(raw, field)
+	value, issueTimezone, savedLocation, err := decodePlanningField(raw, field)
 	if err != nil {
 		return "", false, err
 	}
@@ -204,7 +161,10 @@ func CalendarDate(
 		return scheduleValue, true, nil
 	}
 	if kind == scheduledOnLocalTime {
-		location, err := loadScheduleLocation(issueTimezone, defaultTimezone)
+		location := savedLocation
+		if location == nil {
+			location, err = loadScheduleLocation(issueTimezone, defaultTimezone)
+		}
 		if err != nil {
 			return "", false, err
 		}
@@ -217,6 +177,8 @@ func CalendarDate(
 	switch {
 	case displayTimezone != nil:
 		display = *displayTimezone
+	case savedLocation != nil:
+		display = savedLocation.String()
 	case issueTimezone != "":
 		display = issueTimezone
 	default:
@@ -225,7 +187,10 @@ func CalendarDate(
 	if display == "" {
 		display = "UTC"
 	}
-	displayLocation, err := time.LoadLocation(display)
+	displayLocation := savedLocation
+	if displayTimezone != nil || displayLocation == nil {
+		displayLocation, err = time.LoadLocation(display)
+	}
 	if err != nil {
 		return "", false, fmt.Errorf("load display timezone %q: %w", display, err)
 	}
@@ -234,30 +199,23 @@ func CalendarDate(
 
 // decodePlanningField reads one planning field and the issue timezone, so a
 // non-string sibling field cannot hide a valid date.
-func decodePlanningField(raw, field string) (value *string, timezone string, err error) {
+func decodePlanningField(raw, field string) (value *string, timezone string, location *time.Location, err error) {
 	var members map[string]jsontext.Value
-	if err := json.Unmarshal([]byte(raw), &members); err != nil {
-		return nil, "", fmt.Errorf("decode schedule metadata: %w", err)
+	if err = json.Unmarshal([]byte(raw), &members); err != nil {
+		return nil, "", nil, fmt.Errorf("decode schedule metadata: %w", err)
 	}
-	if member, ok := members[field]; ok {
-		if err := json.Unmarshal(member, &value); err != nil {
-			return nil, "", fmt.Errorf("decode schedule metadata %s: %w", field, err)
+	value, location, err = decodeScheduleValue(members[field])
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("decode schedule metadata %s: %w", field, err)
+	}
+	if location == nil && value != nil {
+		if member, ok := members["timezone"]; ok {
+			if err = json.Unmarshal(member, &timezone); err != nil {
+				return nil, "", nil, fmt.Errorf("decode schedule metadata timezone: %w", err)
+			}
 		}
 	}
-	if member, ok := members["timezone"]; ok {
-		if err := json.Unmarshal(member, &timezone); err != nil {
-			return nil, "", fmt.Errorf("decode schedule metadata timezone: %w", err)
-		}
-	}
-	return value, timezone, nil
-}
-
-func decodeScheduleMetadata(raw string) (scheduleMetadata, error) {
-	var values scheduleMetadata
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		return scheduleMetadata{}, fmt.Errorf("decode schedule metadata: %w", err)
-	}
-	return values, nil
+	return
 }
 
 func loadScheduleLocation(issueTimezone, defaultTimezone string) (*time.Location, error) {

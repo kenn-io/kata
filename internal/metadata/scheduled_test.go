@@ -336,3 +336,57 @@ func TestScheduleDueCutoffCoversEveryZone(t *testing.T) {
 		}
 	}
 }
+
+func TestSavedScheduleUsesItsOwnZone(t *testing.T) {
+	raw, err := NewScheduleValue("2026-11-12T09:00", "Europe/Paris")
+	require.NoError(t, err)
+	metadata := `{"scheduled_on":` + string(raw) + `,"deadline_on":false}`
+	value, zone, at, present, err := ScheduleFieldInstant(metadata, "scheduled_on", "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	require.Equal(t, "2026-11-12T09:00", value)
+	require.Equal(t, "Europe/Paris", zone)
+	require.Equal(t, "2026-11-12T08:00:00Z", at.Format(time.RFC3339))
+	date, present, err := CalendarDate(metadata, "scheduled_on", nil, "America/Los_Angeles")
+	require.NoError(t, err)
+	require.True(t, present)
+	require.Equal(t, "2026-11-12", date)
+}
+
+func TestSavedScheduleErrorsAndProjection(t *testing.T) {
+	raw, err := NewScheduleValue("2026-11-12T00:30", "Europe/Paris")
+	require.NoError(t, err)
+	doc := `{"scheduled_on":` + string(raw) + `,"deadline_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`
+	viewer := "America/Los_Angeles"
+	date, present, err := CalendarDate(doc, "scheduled_on", &viewer, "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	require.Equal(t, "2026-11-11", date)
+	_, _, err = CalendarDate(doc, "deadline_on", nil, "UTC")
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
+	dateOnly, err := NewScheduleValue("2026-11-12", "Europe/Paris")
+	require.NoError(t, err)
+	date, _, err = CalendarDate(`{"scheduled_on":`+string(dateOnly)+`}`, "scheduled_on", &viewer, "UTC")
+	require.NoError(t, err)
+	require.Equal(t, "2026-11-12", date)
+}
+
+func TestSavedScheduleTransitions(t *testing.T) {
+	for _, tc := range []struct{ value, want string }{
+		{"2026-03-08T02:30", "2026-03-08T07:00:00Z"},
+		{"2026-11-01T01:30", "2026-11-01T05:30:00Z"},
+	} {
+		raw, err := NewScheduleValue(tc.value, "America/New_York")
+		require.NoError(t, err)
+		_, _, at, present, err := ScheduleFieldInstant(`{"scheduled_on":`+string(raw)+`}`, "scheduled_on", "UTC")
+		require.NoError(t, err)
+		require.True(t, present)
+		require.Equal(t, tc.want, at.Format(time.RFC3339))
+	}
+}
+
+func TestSavedInstantRequiresUTCZone(t *testing.T) {
+	raw := `{"scheduled_on":{"value":"2026-11-12T09:00:00Z","timezone":"Europe/Paris","tzdata_version":"` + ScheduleTZDataVersion + `"}}`
+	_, _, _, _, err := ScheduleFieldInstant(raw, "scheduled_on", "UTC")
+	require.Error(t, err)
+}

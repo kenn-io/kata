@@ -1,5 +1,6 @@
 import { localDateString } from './dates'
 import type {
+  ScheduleValue,
   KataProjectSummary,
   KataTaskGroup,
   KataTaskSummary,
@@ -17,8 +18,12 @@ interface BuildKataTaskViewOptions {
 
 type ProjectLookup = Map<string, KataProjectSummary>
 
-function issueDate(value: string | undefined): string | undefined {
-  return value?.slice(0, 10)
+export function scheduleText(value: ScheduleValue | undefined): string | undefined {
+  return typeof value === 'string' ? value : value?.value
+}
+
+function issueDate(value: ScheduleValue | undefined): string | undefined {
+  return typeof value === 'string' ? value.slice(0, 10) : undefined
 }
 
 function scheduledDate(issue: KataTaskSummary): string | undefined {

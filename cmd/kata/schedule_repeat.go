@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"go.kenn.io/kata/internal/metadata"
 	"net/http"
 	"strings"
 
@@ -187,6 +188,10 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 }
 
 func metadataString(md map[string]jsontext.Value, key string) string {
+	if (key == "scheduled_on" || key == "deadline_on") && len(md[key]) > 0 {
+		value, _ := metadata.ScheduleValueText(md[key])
+		return value
+	}
 	var s string
 	if raw, ok := md[key]; ok && json.Unmarshal(raw, &s) == nil {
 		return s

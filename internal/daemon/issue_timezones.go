@@ -13,8 +13,12 @@ import (
 
 // portableIssueTimezone admits names from the pinned bundle, never host files.
 func portableIssueTimezone(zone string) bool {
-	_, ok := slices.BinarySearch(portableIssueTimezones[:], zone)
-	return ok
+	area, _, _ := strings.Cut(zone, "/")
+	if zone != "UTC" && zone != "Etc/UTC" && !slices.Contains([]string{"Africa", "America", "Antarctica", "Arctic", "Asia", "Atlantic", "Australia", "Europe", "Indian", "Pacific"}, area) {
+		return false
+	}
+	_, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion)
+	return err == nil
 }
 
 // issueTimezoneWriteRelevant excludes unrelated agent metadata from admission.
@@ -68,8 +72,8 @@ func validateIssueTimezoneWrite(current jsontext.Value, patch map[string]jsontex
 		}
 		// The patch hook precedes shared grammar validation; invalid changed values
 		// still fail before commit. Classify exposed stored values conservatively.
-		var value *string
-		if err := json.Unmarshal(raw, &value); err == nil && (value == nil || strings.HasSuffix(*value, "Z")) {
+		value, valueErr := metadata.ScheduleValueText(raw)
+		if valueErr == nil && strings.HasSuffix(value, "Z") {
 			continue
 		}
 		issueZone := zoneValue(values["timezone"])
@@ -88,4 +92,82 @@ func validateIssueTimezoneWrite(current jsontext.Value, patch map[string]jsontex
 		}
 	}
 	return nil
+}
+
+// freezeIssueSchedules saves the effective rules with changed civil values.
+func freezeIssueSchedules(current jsontext.Value, patch map[string]jsontext.Value, defaultZone, recurrenceZone string) (map[string]jsontext.Value, error) {
+	effective, err := db.ApplyMetadataPatch(current, patch)
+	if err != nil {
+		return nil, err
+	}
+	var before, after map[string]jsontext.Value
+	if len(current) > 0 {
+		if err := json.Unmarshal(current, &before); err != nil {
+			return nil, err
+		}
+	}
+	if err := json.Unmarshal(effective, &after); err != nil {
+		return nil, err
+	}
+	result := make(map[string]jsontext.Value, len(patch)+2)
+	for k, v := range patch {
+		result[k] = v
+	}
+	_, zonePatched := patch["timezone"]
+	changedZone := zonePatched && string(before["timezone"]) != string(after["timezone"]) && !(string(before["timezone"]) == `""` && len(after["timezone"]) == 0)
+	var issueZone string
+	zoneErr := json.Unmarshal(after["timezone"], &issueZone)
+	if len(after["timezone"]) == 0 {
+		zoneErr = nil
+	}
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		raw, exists := after[field]
+		if !exists || string(raw) == "null" {
+			continue
+		}
+		_, patched := patch[field]
+		if !patched && !changedZone {
+			continue
+		}
+		value, err := metadata.ScheduleValueText(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
+		}
+		if patched && !changedZone && len(before[field]) > 0 {
+			previous, err := metadata.ScheduleValueText(before[field])
+			if err == nil && previous == value {
+				result[field] = before[field]
+				continue
+			}
+		}
+		if strings.HasSuffix(value, "Z") {
+			stamped, err := metadata.NewScheduleValue(value, "UTC")
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", metadata.ErrInvalidValue, err)
+			}
+			result[field] = stamped
+			continue
+		}
+		if zoneErr != nil {
+			return nil, fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (effective issue timezone %q)", metadata.ErrInvalidValue, field, after["timezone"])
+		}
+		zone := issueZone
+		if zone == "" && field == "scheduled_on" && recurrenceZone != "" {
+			zone = recurrenceZone
+		}
+		if zone == "" {
+			zone = defaultZone
+		}
+		if recurrenceZone == "" || zone != recurrenceZone {
+			if !portableIssueTimezone(zone) && zone != "" {
+				return nil, fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (effective issue timezone %q)", metadata.ErrInvalidValue, field, zone)
+			}
+		}
+		stamped, err := metadata.NewScheduleValue(value, zone)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", metadata.ErrInvalidValue, err)
+		}
+		result[field] = stamped
+	}
+	return result, nil
 }

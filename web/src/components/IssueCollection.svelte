@@ -1079,7 +1079,9 @@
 {#snippet row(issue: KataTaskSummary, depth = 0)}
   {@const priority = priorityLabel(issue.priority)}
   {@const labels = issue.labels?.join(' · ') ?? ''}
-  {@const deadline = issue.deadline_on_date ?? issue.metadata.deadline_on}
+  {@const deadline =
+    issue.deadline_on_date ??
+    (typeof issue.metadata.deadline_on === 'string' ? issue.metadata.deadline_on : undefined)}
   {@const expandable = hasChildren(issue)}
   {@const isExpanded = expanded[issue.uid] === true}
   {@const titleId = `kata-issue-title-${issue.uid}`}
