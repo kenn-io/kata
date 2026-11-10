@@ -14,6 +14,7 @@ import (
 
 // registerMoveHandlers installs POST /api/v1/projects/{project_id}/issues/{ref}/actions/move.
 func registerMoveHandlers(humaAPI huma.API, cfg ServerConfig) {
+	huma.Register(humaAPI, huma.Operation{OperationID: "moveIssues", Method: "POST", Path: "/api/v1/issues/actions/move"}, moveIssuesHandler(cfg))
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "moveIssue",
 		Method:      "POST",
@@ -142,6 +143,9 @@ func moveIssueAPIError(err error) error {
 }
 
 func moveIssueRuleAPIError(err error) *api.APIError {
+	if errors.Is(err, db.ErrIssueMoveTreeChanged) {
+		return api.NewError(409, "issue_move_tree_changed", "issue subtree changed during claim validation", "retry the move to validate the current subtree", nil)
+	}
 	if errors.Is(err, db.ErrIssueMoveDescendantArchived) {
 		return api.NewError(409, "issue_move_descendant_archived",
 			"issue is in an archived project", "restore its project or remove its parent link before moving the subtree", nil)

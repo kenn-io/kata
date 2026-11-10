@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # CLI reference
@@ -969,6 +969,68 @@ daemon API 0.23.0 or newer. The CLI checks compatibility before sending new
 request fields.
 A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
+
+### Move many issues
+
+With daemon API 0.45.0 or newer, route many issues in one command:
+
+```sh
+kata move source-project#abc4 source-project#def5 target-project --comment "routed"
+kata move --refs-from routing.tsv --agent
+kata move --refs-from - target-project < refs.txt
+kata move --from-project source-project --label triaged target-project
+kata move --from-project source-project --query "installer" target-project --dry
+```
+
+Batch mode starts with multiple refs, `--refs-from`, `--from-project`, or
+`--subtree`. Its default is to move only each selected issue. Add `--subtree`
+to include descendants. `--single` is also accepted. A single positional ref
+without a batch flag keeps the existing subtree default and output.
+
+A ref file contains one `ref` or `ref<TAB>project` per line. A line's target
+project overrides the positional target. Each line needs a target from one
+of those sources. Bare short IDs resolve in `--project` or the workspace's
+project; qualified refs and UIDs can span projects. Blank lines and lines
+starting with `# ` are skipped. UTF-8 BOMs, CRLF endings, and surrounding
+whitespace are accepted. Positional refs, file refs, and selector results
+are combined in that order.
+
+`--from-project` accepts `--label`, `--no-label`, `--status`, `--owner`,
+`--unowned`, and `--meta`, with the same filters as `kata list`. Status
+defaults to `all`, including closed history. `--query` adds lexical search;
+semantic and hybrid modes are refused. Supply at least one filter. To move
+a whole project, use `kata projects merge`.
+
+Each input returns `moved`, `unchanged`, or `refused`; previews return
+`would_move`. Agent output prints every result in input order. JSON output
+contains `dry_run`, `summary`, and `results`, including each input's `index`,
+`ref`, result code, new short ID, collision extension flag, and event ID.
+Human output summarizes the batch and lists refusals and extended short IDs;
+use `-v` for every row. Descendants are listed under their selected root.
+
+| Result code | Meaning |
+| --- | --- |
+| `already_in_target` | The issue is already in its requested target. |
+| `duplicate_item` | An earlier input names the same issue and target. |
+| `conflicting_target` | An issue, or overlapping subtree, names different targets. Nothing in that conflict moves. |
+| `covered_by_subtree` | Another selected root moves this issue to the same target. |
+| `revision_conflict` | A selected issue changed after selection. Rerun to select its current revision. |
+| `issue_move_tree_changed` | Subtree membership changed after validation. Retry to validate every member. |
+
+Other refusals retain the single-move rule codes and explain how to resolve
+them. One refusal leaves successful items committed. A denied descendant
+refuses its whole selected subtree. `--comment` adds the comment, including
+teammate attribution, to each issue that moves in the same transaction.
+Unchanged issues receive no comment, so rerunning an old ref file is safe
+while its move-history aliases remain available.
+
+The CLI splits large inputs into requests of at most 5,000 items and 1 MiB.
+The daemon commits chunks and returns a continuation after its soft four-second
+budget; the CLI continues automatically. Exit 0 means every item succeeded
+or was unchanged; exit 5 means at least one refusal; exit 2 means invalid input
+before a move request. A transport failure prints received results and exits 7.
+Rerun the same input to finish any remaining items. Batch commands fail closed
+with `daemon_api_too_old` against older daemons.
 
 Federated moves require both projects to use the same active hub. Spokes require
 both projects to be joined, use the same federation actor, and have push enabled

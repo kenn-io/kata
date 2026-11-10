@@ -339,6 +339,8 @@ var storageScenarios = []scenario{
 	{name: "issue move tree expanded fence", methods: []string{"MoveIssueProject"}, run: checkMoveTreeExpandedFence},
 	{name: "issue move tree mapping collision", methods: []string{"MoveIssueProject"}, run: checkMoveTreeMappingCollision},
 	{name: "issue move merge reservations", methods: []string{"MoveIssueProject", "MergeProjects"}, run: checkMergeMoveReservations},
+	{name: "move batch collision", methods: []string{"MoveIssuesBatch"}, run: checkMoveBatchCollision},
+	{name: "move batch", methods: []string{"MoveIssuesBatch", "CheckIssueMovePair"}, run: checkMoveBatch},
 	{name: "issue move tree", methods: []string{"MoveIssueProject"}, run: checkMoveTree},
 	{name: "issue move tree guards", methods: []string{"MoveIssueProject"}, run: checkMoveTreeGuards},
 	{name: "issue move tree stops at deleted issue", methods: []string{"MoveIssueProject", "SoftDeleteIssue"}, run: checkMoveTreeStopsAtDeletedIssue},

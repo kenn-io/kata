@@ -548,6 +548,8 @@ type ProjectMergeResult struct {
 
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
 type MoveIssueProjectIn struct {
+	// Savepoint keeps authorization refusal inside the batch item transaction.
+	Savepoint bool
 	// AuthorizeProjects checks source project UIDs resolved inside the transaction.
 	AuthorizeProjects func([]string) error
 	// ExpectedIssueIDs fences externally validated subtree membership.
@@ -573,6 +575,25 @@ type MoveIssueProjectOut struct {
 	NewShortID  string
 	NewRevision int64
 }
+
+// MoveIssuesBatchIn moves independent roots in one transaction.
+type MoveIssuesBatchIn struct {
+	Items                    []MoveIssueProjectIn
+	DryRun                   bool
+	Actor, Comment, Teammate string
+	AuthorizeProjects        func([]string) error
+}
+
+// MoveIssueBatchResult retains one root move or its isolated refusal.
+type MoveIssueBatchResult struct {
+	Out             MoveIssueProjectOut
+	Err             error
+	CommentEvent    *Event
+	ShortIDExtended bool
+}
+
+// MoveIssuesBatchOut preserves input ordering after the chunk commits.
+type MoveIssuesBatchOut struct{ Results []MoveIssueBatchResult }
 
 // IfMatch wraps a revision for the optional IfMatchRev fields on the
 // metadata patch inputs (nil = unconditional last-write-wins).

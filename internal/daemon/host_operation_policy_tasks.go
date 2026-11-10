@@ -30,7 +30,7 @@ func registerTaskOperationPolicies(policies map[string]HostOperationPolicy) {
 		"createLink", "deleteLink", "assignIssue", "unassignIssue", "claimIssue",
 		"setIssuePriority", "closeIssue", "reopenIssue", "deleteIssue", "restoreIssue",
 		"createRecurrence", "patchRecurrence", "deleteRecurrence", "patchIssueMetadata", "addAttachment", "linkAttachment",
-		"moveIssue", "importIssues", "acquireIssueLease", "renewIssueLease", "releaseIssueLease")
+		"moveIssue", "moveIssues", "importIssues", "acquireIssueLease", "renewIssueLease", "releaseIssueLease")
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationTaskAdministration, Capability: hostCapabilityManage, Mutation: true,

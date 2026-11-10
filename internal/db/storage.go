@@ -167,6 +167,8 @@ type Storage interface {
 	// reserved reset cursor that invalidates its deleted lifecycle events.
 	HardDeleteProject(ctx context.Context, id int64) (resetID int64, err error)
 	MergeProjects(ctx context.Context, p MergeProjectsParams) (ProjectMergeResult, error)
+	CheckIssueMovePair(ctx context.Context, from, to int64) error
+	MoveIssuesBatch(ctx context.Context, in MoveIssuesBatchIn) (MoveIssuesBatchOut, error)
 	MoveIssueProject(ctx context.Context, in MoveIssueProjectIn) (MoveIssueProjectOut, error)
 	PatchProjectMetadata(ctx context.Context, in PatchProjectMetadataIn) (PatchProjectMetadataOut, error)
 	DesignateInboxProject(ctx context.Context, in DesignateInboxProjectIn) (DesignateInboxProjectOut, error)

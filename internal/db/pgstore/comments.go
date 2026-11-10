@@ -19,6 +19,14 @@ const commentSelect = `SELECT ` + commentColumns + ` FROM comments`
 
 // CreateComment appends a comment and its issue.commented event atomically.
 func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams) (db.Comment, db.Event, error) {
+	return s.createComment(ctx, params, s.withSerializableTx)
+}
+
+func (s *Store) createCommentTx(ctx context.Context, tx *sql.Tx, params db.CreateCommentParams) (db.Comment, db.Event, error) {
+	return s.createComment(ctx, params, func(_ context.Context, run transactionFunc) error { return run(tx) })
+}
+
+func (s *Store) createComment(ctx context.Context, params db.CreateCommentParams, runTx func(context.Context, transactionFunc) error) (db.Comment, db.Event, error) {
 	db.RetainCommentEvents(ctx)
 	if err := teammate.Validate(params.Teammate); err != nil {
 		return db.Comment{}, db.Event{}, err
@@ -29,7 +37,7 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 	var comment db.Comment
 	var event db.Event
 	var committedEvents []db.Event
-	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+	err := runTx(ctx, func(tx *sql.Tx) error {
 		comment, event, committedEvents = db.Comment{}, db.Event{}, nil
 		projectUID, err := issueProjectUIDTx(ctx, tx, params.IssueID)
 		if err != nil {

@@ -17,25 +17,56 @@ import (
 )
 
 func newMoveCmd() *cobra.Command {
-	var dryRun, single bool
+	var dryRun, single, subtree, verbose bool
+	var refsFrom, mode string
+	var selector moveSelector
 	cmd := &cobra.Command{
-		Use:   "move <issue-ref> <project>",
-		Short: "move an issue subtree to another project",
+		Use:   "move <issue-ref>... <project>",
+		Short: "move issues to another project",
 		Long: `Move an issue and all its descendants to another project.
 Use --single to move only the selected issue.
+
+Multiple refs, --refs-from or --from-project select a batch. Batches move
+single issues by default; --subtree includes descendants. Each result reports
+success, an unchanged issue, or a refusal without undoing other successful moves.
 
 The issue keeps its UID, comments, history, and all of its links
 (parent, blocks/blocked-by, related) — relationships are never severed
 by a move and may span projects afterward. A fresh short_id is
 assigned in the target project.`,
-		Example: `  kata move abc4 example-project --dry --agent`,
-		Args:    cobra.ExactArgs(2),
+		Example: `  kata move abc4 example-project --dry --agent
+  kata move source-project#abc4 source-project#def5 target-project --agent
+  kata move --refs-from routing.tsv --comment "routed"
+  kata move --from-project source-project --label triaged target-project`,
+		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMove(cmd, args[0], args[1], dryRun, single)
+			if len(args) == 2 && refsFrom == "" && selector.Project == "" && !subtree {
+				return runMove(cmd, args[0], args[1], dryRun, single)
+			}
+			if single && subtree {
+				return moveBatchUsage("--single and --subtree are mutually exclusive")
+			}
+			if mode != "lexical" {
+				return moveBatchUsage("batch move selectors require lexical search")
+			}
+			selector.StatusSet = cmd.Flags().Changed("status")
+			return runMoveBatchCommand(cmd, args, refsFrom, selector, moveBatchOptions{DryRun: dryRun, Subtree: subtree, Verbose: verbose})
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry", false, "validate and preview without mutating")
 	cmd.Flags().BoolVar(&single, "single", false, "move only the selected issue")
+	cmd.Flags().BoolVar(&subtree, "subtree", false, "move each selected issue with its descendants")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "print every batch result")
+	cmd.Flags().StringVar(&refsFrom, "refs-from", "", "read ref or ref<TAB>project per line from file or -")
+	cmd.Flags().StringVar(&selector.Project, "from-project", "", "select issues from this project")
+	cmd.Flags().StringSliceVar(&selector.Labels, "label", nil, "select issues with label (repeatable)")
+	cmd.Flags().StringSliceVar(&selector.NoLabels, "no-label", nil, "exclude label (repeatable)")
+	cmd.Flags().StringArrayVar(&selector.Meta, "meta", nil, "select metadata key or key=value (repeatable)")
+	cmd.Flags().StringVar(&selector.Status, "status", "all", "select open, closed or all issues")
+	cmd.Flags().StringVar(&selector.Owner, "owner", "", "select owner's issues")
+	cmd.Flags().BoolVar(&selector.Unowned, "unowned", false, "select unowned issues")
+	cmd.Flags().StringVar(&selector.Query, "query", "", "select lexical search matches")
+	cmd.Flags().StringVar(&mode, "mode", "lexical", "selector search mode (lexical only)")
 	addCommentFlag(cmd)
 	return cmd
 }

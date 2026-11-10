@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Federation
@@ -80,6 +80,16 @@ active downstream relays. A preview
 checks the whole tree without changing issues, claims, or cursors. Use `--single`
 to move only the selected issue. The [CLI reference](../reference/cli.md) owns
 the per-issue restrictions.
+
+Route many issues with `kata move <ref>... <project>` or `--refs-from` on
+daemon API 0.45.0 or newer. Batch moves default to single issues; add
+`--subtree` to include descendants. Each source/target pair follows the same
+hub, actor, push, and relay rules above. A refused item leaves other successful
+moves committed. Batch comments travel after their issue's existing
+`issue.moved` event; reruns do not add comments to unchanged issues. No new
+federation event feature is required. See the
+[batch CLI contract](../reference/cli.md#move-many-issues) for input formats,
+selectors, continuation, result codes, and retry behavior.
 
 Spokes must join both projects before applying a move. Sync refuses the batch
 without partial writes when a project is missing; join it and retry sync. Upgrade
