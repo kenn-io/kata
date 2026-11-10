@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"maps"
-	"reflect"
 	"slices"
 
 	"go.kenn.io/kata/internal/db"
@@ -70,10 +69,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			}
 		}
 	}
-	result.moveUIDs = make([]string, 0, len(result.moved))
-	for uid := range result.moved {
-		result.moveUIDs = append(result.moveUIDs, uid)
-	}
+	result.moveUIDs = slices.AppendSeq([]string{}, maps.Keys(result.moved))
 	result.moveStamp, err = federationEventStamp(ctx, tx, 0, nil, result.moveUIDs)
 	if err != nil {
 		return preparedFederationRebuild{}, err
@@ -102,7 +98,6 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		p.moved.Issues = maps.Clone(p.projection.Issues)
 		p.moved.Comments = maps.Clone(p.projection.Comments)
 		p.moved.Labels = maps.Clone(p.projection.Labels)
-		p.moved.IssueMetadata = maps.Clone(p.projection.IssueMetadata)
 		p.moved.ProjectMetadata = nil
 		db.RestrictFoldProjectWhere(&p.projection, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return !ok })
 		db.RestrictFoldProjectWhere(&p.moved, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return ok })
@@ -183,7 +178,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			if err != nil {
 				return err
 			}
-			if !reflect.DeepEqual(decisions, p.decisions) {
+			if !slices.Equal(decisions, p.decisions) {
 				return errStaleFederationPreparation
 			}
 		}
@@ -202,11 +197,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				return err
 			}
 			if len(p.moved.Issues) > 0 {
-				scope := make([]string, 0, len(p.moved.Issues))
-				for uid := range p.moved.Issues {
-					scope = append(scope, uid)
-				}
-				slices.Sort(scope)
+				scope := slices.Sorted(maps.Keys(p.moved.Issues))
 				moved := federationMaterialization{projection: p.moved, binding: m.binding}
 				if err := moved.prepareRows(ctx, tx, p.id, scope); err != nil {
 					return err

@@ -179,17 +179,15 @@ func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
 	require.NoError(t, err)
 	second, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: secondSource.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EC", ShortIDOverride: "d4ec", Title: "second", Author: "tester"})
 	require.NoError(t, err)
-	for _, entry := range []struct {
+	entries := []struct {
 		issue  db.Issue
 		source db.Project
-	}{{first, firstSource}, {second, secondSource}} {
+	}{{first, firstSource}, {second, secondSource}}
+	for _, entry := range entries {
 		_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: entry.issue.ID, FromProjectID: entry.source.ID, ToProjectID: destination.ID, IfMatchRev: entry.issue.Revision, Actor: "tester"})
 		require.NoError(t, err)
 	}
-	for _, entry := range []struct {
-		issue  db.Issue
-		source db.Project
-	}{{first, firstSource}, {second, secondSource}} {
+	for _, entry := range entries {
 		_, err := d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, entry.source.ID, entry.issue.ShortID, entry.issue.ID)
 		require.NoError(t, err)
 	}

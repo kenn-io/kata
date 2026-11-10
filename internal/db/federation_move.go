@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -351,11 +352,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEven
 		}
 		decisions = append(decisions, decision)
 	}
-	var destinations []int64
-	for id := range projects {
-		destinations = append(destinations, id)
-	}
-	slices.Sort(destinations)
+	destinations := slices.Sorted(maps.Keys(projects))
 	return decisions, destinations, nil
 }
 
