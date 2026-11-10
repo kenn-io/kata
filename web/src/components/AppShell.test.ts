@@ -595,6 +595,34 @@ describe('AppShell', () => {
     })
   })
 
+  test.each(['Settings', 'Credentials'])('opens a task while %s is pending', async (screenName) => {
+    const current = snapshot()
+    current.capabilities.token_audit_read = true
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const onNavigate = vi.fn()
+    const props = {
+      route,
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate,
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    await fireEvent.click(screen.getByRole('button', { name: screenName }))
+    await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+    expect(onNavigate).toHaveBeenLastCalledWith({
+      ...route,
+      issueUID: '01J00000000000000000000001',
+    })
+  })
+
   const project = '01J00000000000000000000002'
   const issue = '01J00000000000000000000001'
   const repeatedFilters = {

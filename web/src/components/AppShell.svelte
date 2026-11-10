@@ -272,6 +272,8 @@
   let searchFilters = $derived(searchFiltersForRoute(route, viewName))
   let filterRoute = $derived(
     requestedRoute &&
+      requestedRoute.view !== 'settings' &&
+      requestedRoute.view !== 'credentials' &&
       viewNameForRoute(requestedRoute) === viewName &&
       requestedRoute.projectUID === route.projectUID
       ? requestedRoute
