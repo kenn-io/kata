@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "2c573a26533e056618e458d7addc7836bf7d95e98b0ad258b6b7c2a50725186d"
-	canonicalConstraintFingerprint = "21a6429d8b06093928339598c69f71d48d65330c78e3274cbe8bcabc9fd5ed14"
-	canonicalIndexFingerprint      = "49e4ef892933e98de9171cc6932d8137221b410d3caba1486c5bcbe3f8aca876"
+	canonicalColumnFingerprint     = "435931cf7e0f4b0a4dad5cd04176d31241b162b14b86767ed939dbbb491d0bad"
+	canonicalConstraintFingerprint = "2fd6fde103e9b3a634ff19e510e695c5334af81d6c4a95fd48aec5b898377a03"
+	canonicalIndexFingerprint      = "09be4079c19ead46d0941e69df533d9a4345b148ac0781ce9013a948b33295a3"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -24,6 +24,7 @@ const (
 
 //nolint:gosec // This manifest lists canonical schema columns, including credential column names, not secret values.
 var canonicalTableColumns = map[string]string{
+	"federation_local_replays":       "event_uid",
 	"mcp_event_subscriptions":        "id,principal_authority,principal_subject,principal_key,actor,event_name,arguments,callback_url,secret_enc,previous_secret_enc,previous_secret_until,verified_at,incarnation,generation,state,end_reason,expires_at,dirty,catalog_version,pending_kind,pending_message_id,pending_body,attempt_count,next_attempt_at,claim_token,claim_until,failed_since,failed_attempts,last_delivery_at,last_error,dead_letter_count,ended_at,created_at,updated_at",
 	"cron_runs":                      "id,uid,project_id,job_uid,definition_event_uid,workflow_uid,workflow_definition_event_uid,occurrence_key,issue_uid,actor,teammate,executor_label,status,summary_json,revision,created_at,started_at,ended_at,updated_at",
 	"cron_workflows":                 "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",

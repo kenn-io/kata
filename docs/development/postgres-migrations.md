@@ -463,3 +463,7 @@ place, with an atomic schema-version update.
 Start the matching schema 50 binary after migration. Older binaries cannot open
 schema 50. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 51: federation replay tracking
+
+The 50 to 51 migration adds `federation_local_replays` to track local-origin events restored by a pull. It starts empty. Stop the daemon, back up the database, and run `kata storage postgres migrate` with schema-owner credentials before starting the new binary. Grant the runtime role access to the new table using the normal PostgreSQL role setup. Older binaries cannot reopen schema 51; rollback requires the backup and matching older binary.

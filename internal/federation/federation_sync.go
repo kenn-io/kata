@@ -249,7 +249,6 @@ func pushDirectSpoke(
 	validateLease func(context.Context) error,
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
-	acceptedEchoes ...map[string]bool,
 ) error {
 	if binding.PushEnabled {
 		scanCursor := binding.PushCursorEventID
@@ -318,17 +317,6 @@ func pushDirectSpoke(
 				rejected, err := validateFederationPushAcknowledgment(batch, ack)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				if len(acceptedEchoes) > 0 {
-					rejectedUIDs := make(map[string]bool, len(rejected))
-					for _, event := range rejected {
-						rejectedUIDs[event.UID] = true
-					}
-					for _, event := range batch {
-						if event.ID <= ack.PushCursorEventID && !rejectedUIDs[event.UID] {
-							acceptedEchoes[0][event.UID] = true
-						}
-					}
 				}
 				for _, event := range rejected {
 					if firstRejected == 0 || event.ID < firstRejected {
@@ -481,11 +469,9 @@ func syncDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) (resultErr error) {
-	runStartBinding := binding
-	acceptedEchoes := map[string]bool{}
 	var pushErr error
 	if pushThisTurn {
-		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts, acceptedEchoes); err != nil {
+		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
 			if _, ok := errors.AsType[*federationPartialPushError](err); !ok {
 				return err
 			}
@@ -644,8 +630,8 @@ func syncDirectSpoke(
 			var invalidate bool
 			if duplicate[i] && shouldDeliverPage {
 				var err error
-				if ev.OriginInstanceUID == localInstanceUID && !acceptedEchoes[ev.EventUID] {
-					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, runStartBinding, ev)
+				if ev.OriginInstanceUID == localInstanceUID {
+					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, ev)
 				} else if ev.OriginInstanceUID != localInstanceUID && insertedThisPull[ev.EventUID] {
 					deliver[i] = true
 				} else if ev.OriginInstanceUID != localInstanceUID {
@@ -774,7 +760,6 @@ func shouldDeliverDuplicateLocalEcho(
 	ctx context.Context,
 	store db.Storage,
 	binding db.FederationBinding,
-	runStartBinding db.FederationBinding,
 	ev api.EventEnvelope,
 ) (bool, error) {
 	projectID := binding.ProjectID
@@ -785,18 +770,8 @@ func shouldDeliverDuplicateLocalEcho(
 		}
 		projectID = project.ID
 	}
-	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
-	if err != nil {
-		return false, err
-	}
-	if len(events) != 1 {
-		return false, nil
-	}
-	event := events[0]
-	// Duplicate local history uses its own stream's acknowledgement boundary.
-	// Its former source's cursor cannot tell whether the move was pushed.
 	if projectID != binding.ProjectID {
-		actualBinding, err := store.FederationBindingByProject(ctx, projectID)
+		source, err := store.FederationBindingByProject(ctx, projectID)
 		if errors.Is(err, db.ErrNotFound) {
 			// This local event was already applied before its source left.
 			// Backfilling it through a destination needs no new delivery or
@@ -806,36 +781,13 @@ func shouldDeliverDuplicateLocalEcho(
 		if err != nil {
 			return false, err
 		}
-		binding, runStartBinding = actualBinding, actualBinding
+		if source.PullCursorEventID >= ev.EventID {
+			return false, nil
+		}
 	}
-	// A reconciled local echo was already applied locally. The retry cursor
-	// may lag behind an accepted suffix while another event needs enrollment.
-	if event.IssueID == nil && event.IssueUID != nil {
-		return true, nil
-	}
-	if event.ID <= runStartBinding.PushCursorEventID {
-		return false, nil
-	}
-	if runStartBinding.PullCursorEventID != runStartBinding.ReplayHorizonEventID-1 {
-		return false, nil
-	}
-	status, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
-	if errors.Is(err, db.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if status.LastResetAt == nil {
-		return false, nil
-	}
-	if !event.CreatedAt.Before(*status.LastResetAt) {
-		return false, nil
-	}
-	if status.LastPullSuccessAt != nil && !status.LastPullSuccessAt.Before(*status.LastResetAt) {
-		return false, nil
-	}
-	return true, nil
+	// A push acknowledgment cannot prove that a replay reached its pull
+	// consumers. The pull cursor is the delivery boundary for this page.
+	return store.IsFederationLocalReplay(ctx, ev.EventUID)
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {

@@ -214,6 +214,11 @@ func (s *Store) insertRemoteEventTx(
 	if err != nil {
 		return false, err
 	}
+	if remote.OriginInstanceUID == s.instanceUID {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid) VALUES($1)`, remote.EventUID); err != nil {
+			return false, fmt.Errorf("record local federation replay: %w", err)
+		}
+	}
 	return true, nil
 }
 
@@ -254,4 +259,11 @@ func (s *Store) ReconcileLocalFederationEcho(
 		return mapSQLError(err, nil)
 	})
 	return found, err
+}
+
+// IsFederationLocalReplay reports whether a local-origin event was pulled.
+func (s *Store) IsFederationLocalReplay(ctx context.Context, eventUID string) (bool, error) {
+	var exists bool
+	err := s.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_local_replays WHERE event_uid=$1)`, eventUID).Scan(&exists)
+	return exists, err
 }
