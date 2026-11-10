@@ -303,7 +303,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	}
 	targets := map[string]string{}
 	targetErrors := map[string]error{}
-	var indexes []int
+	indexes := make([]int, 0, len(items))
 	var results []api.MoveIssuesResult
 	for i, item := range items {
 		uid, err := moveBatchTarget(a, item, targets, targetErrors)
