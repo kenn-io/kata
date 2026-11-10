@@ -213,7 +213,7 @@ func (h toolHandlers) waitUntil(parent, ctx context.Context, input WaitInput, un
 				return successResult(), WaitOutput{Reason: "timeout", States: states()}, nil
 			}
 			if res.err != nil {
-				if !input.Any || !permanentWaitError(res.err) {
+				if !input.Any {
 					return nil, WaitOutput{}, res.err
 				}
 				res.target.missing = res.err

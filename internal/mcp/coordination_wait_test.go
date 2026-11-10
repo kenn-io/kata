@@ -645,3 +645,27 @@ func TestMCPCoordinationWaitUntilPersistentFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPCoordinationWaitAnyContinuesAfterRetryLimit(t *testing.T) {
+	var failures atomic.Int64
+	var laterReads atomic.Int64
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/projects/1/issues/abc1":
+			failures.Add(1)
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		default:
+			issue := issueJSON(1, "spoke-project", "def1")
+			if failures.Load() >= 3 && laterReads.Add(1) > 1 {
+				issue["metadata"] = map[string]any{"work.attention": "stuck"}
+			}
+			writeJSON(w, map[string]any{"issue": issue})
+		}
+	})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 1, ProjectName: "spoke-project", Actor: "worker", Version: "test"})
+	out := callCoordinationTool(t, session, "kata.wait", map[string]any{"refs": []string{"abc1", "def1"}, "until": "attention", "any": true, "timeout_seconds": 2})
+	require.Equal(t, "matched", out["reason"])
+	require.Equal(t, int64(3), failures.Load())
+}
