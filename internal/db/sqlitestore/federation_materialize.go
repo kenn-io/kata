@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -484,10 +485,18 @@ func canonicalFederatedLinkKey(key db.FoldLinkKey) db.FoldLinkKey {
 }
 
 func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {
+	return m.prepareLinksWithIssues(ctx, tx, projectID, issueScope, nil, nil)
+}
+
+func (m *federationMaterialization) prepareLinksWithIssues(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string, included map[string]int64, excluded map[string]bool) error {
 	ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, projectID, m.issueIDs, issueScope)
 	if err != nil {
 		return err
 	}
+	for uid := range excluded {
+		delete(ids, uid)
+	}
+	maps.Copy(ids, included)
 	// New endpoints have no row ID yet. Presence is sufficient for graph
 	// validation; application substitutes their IDs after sorted issue inserts.
 	for uid := range m.projection.Issues {

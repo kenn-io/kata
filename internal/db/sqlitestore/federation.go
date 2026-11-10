@@ -1180,8 +1180,21 @@ func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 		}
 		return db.ApplyTransactionFence(original, tx)
 	})
-	return d.RetryTransient(ctx, func() error {
-		return d.materializeFederatedProject(ctx, projectID)
+	return d.retryFederationPreparation(ctx, func(locked bool) error {
+		if locked {
+			return d.materializeFederatedProject(ctx, projectID)
+		}
+		prepared, err := d.prepareFederationRebuild(ctx, projectID)
+		if errors.Is(err, errFederationRebuildWithoutMoves) {
+			return d.materializeFederatedProject(ctx, projectID)
+		}
+		if err != nil {
+			return err
+		}
+		if d.federationIngestPrepared != nil {
+			d.federationIngestPrepared()
+		}
+		return d.applyFederationRebuild(ctx, prepared)
 	})
 }
 
@@ -1274,46 +1287,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
-	destinations, err := db.RehomeFederatedMovedIssues(ctx, tx, events, projection, func(pid int64, issue db.FoldIssue) (string, error) {
-		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
-	}, func(id, source, target int64) error {
-		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
-			return err
-		}
-		if err := rejectIssueMoveExternalRootIssueSyncTx(ctx, tx, id, source, target); err != nil {
-			return err
-		}
-		collisions, err := issueMoveImportMappingCollisions(ctx, tx, id, source, target)
-		if err != nil {
-			return err
-		}
-		if len(collisions) > 0 {
-			return &db.ProjectMergeImportMappingCollisionError{Mappings: collisions}
-		}
-		var issueUID string
-		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, id).Scan(&issueUID); err != nil {
-			return err
-		}
-		return db.CheckNativeRecurringParentMove(ctx, tx, false, source, issueUID)
-	}, func(issueUID, targetProjectUID string) error {
-		if err := bumpProjectAccess(ctx, tx); err != nil {
-			return err
-		}
-		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
-	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
-		payload := "{}"
-		var issueUID *string
-		if reference != nil {
-			encoded, err := json.Marshal(reference)
-			if err != nil {
-				return 0, err
-			}
-			payload = string(encoded)
-			issueUID = &reference.IssueUID
-		}
-		event, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: issueUID, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: payload, SkipRelay: true})
-		return event.ID, err
-	})
+	destinations, err := d.rehomeFederatedMovedIssues(ctx, tx, events, projection, acceptedEventUIDs)
 	if err != nil {
 		return err
 	}
@@ -1367,6 +1341,49 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		return err
 	}
 	return updateFederatedProjectMetadataTx(ctx, tx, projectID, projection.ProjectMetadata[binding.HubProjectUID])
+}
+
+func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, projection db.FoldProjection, acceptedEventUIDs []string) ([]int64, error) {
+	return db.RehomeFederatedMovedIssues(ctx, tx, events, projection, func(pid int64, issue db.FoldIssue) (string, error) {
+		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
+	}, func(id, source, target int64) error {
+		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
+			return err
+		}
+		if err := rejectIssueMoveExternalRootIssueSyncTx(ctx, tx, id, source, target); err != nil {
+			return err
+		}
+		collisions, err := issueMoveImportMappingCollisions(ctx, tx, id, source, target)
+		if err != nil {
+			return err
+		}
+		if len(collisions) > 0 {
+			return &db.ProjectMergeImportMappingCollisionError{Mappings: collisions}
+		}
+		var issueUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, id).Scan(&issueUID); err != nil {
+			return err
+		}
+		return db.CheckNativeRecurringParentMove(ctx, tx, false, source, issueUID)
+	}, func(issueUID, targetProjectUID string) error {
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return err
+		}
+		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
+		payload := "{}"
+		var issueUID *string
+		if reference != nil {
+			encoded, err := json.Marshal(reference)
+			if err != nil {
+				return 0, err
+			}
+			payload = string(encoded)
+			issueUID = &reference.IssueUID
+		}
+		event, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: issueUID, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: payload, SkipRelay: true})
+		return event.ID, err
+	})
 }
 
 func updateFederatedProjectMetadataTx(ctx context.Context, tx *sql.Tx, projectID int64, raw jsontext.Value) error {

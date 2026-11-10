@@ -145,6 +145,13 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}
+	if err := checkFullPullPreparation(ctx, tx, projectID, m); err != nil {
+		return err
+	}
+	return applyPulledFederationMaterialization(ctx, tx, projectID, eventUIDs, m)
+}
+
+func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, m federationMaterialization) error {
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err != nil {
 		return err
@@ -225,7 +232,7 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 			return errStaleFederationPreparation
 		}
 	}
-	return applyPulledFederationMaterialization(ctx, tx, projectID, eventUIDs, m)
+	return nil
 }
 
 func applyPulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, m federationMaterialization) error {

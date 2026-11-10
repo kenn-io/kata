@@ -309,9 +309,67 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 	return project, nil
 }
 
+// FederatedMoveDecision records the state used to decide whether to rehome an
+// issue. It can be compared with a fresh decision before applying a snapshot.
+type FederatedMoveDecision struct {
+	IssueUID, ProjectUID, SourceUID, SourceName, SourceShortID string
+	IssueID, SourceID, TargetID                                int64
+	RecurrenceID                                               sql.NullInt64
+	Active, Joined, Exists                                     bool
+}
+
+// PlanFederatedMovedIssues reads move decisions without changing any rows.
+func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection) ([]FederatedMoveDecision, []int64, error) {
+	moved := map[string]bool{}
+	for _, event := range events {
+		if event.Type == "issue.moved" {
+			moved[event.IssueUID] = true
+		}
+	}
+	var decisions []FederatedMoveDecision
+	projects := map[int64]bool{}
+	for _, issue := range p.SortedIssues() {
+		if !moved[issue.UID] {
+			continue
+		}
+		decision := FederatedMoveDecision{IssueUID: issue.UID, ProjectUID: issue.ProjectUID}
+		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&decision.TargetID, &decision.Active); err != nil {
+			return nil, nil, err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.TargetID).Scan(&decision.Joined); err != nil {
+			return nil, nil, err
+		}
+		if decision.Joined {
+			err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, nil, err
+			}
+			decision.Exists = err == nil
+			if decision.Active {
+				projects[decision.TargetID] = true
+			}
+		}
+		decisions = append(decisions, decision)
+	}
+	var destinations []int64
+	for id := range projects {
+		destinations = append(destinations, id)
+	}
+	slices.Sort(destinations)
+	return decisions, destinations, nil
+}
+
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
 func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
+	decisions, _, err := PlanFederatedMovedIssues(ctx, tx, events, p)
+	if err != nil {
+		return nil, err
+	}
+	return applyFederatedMovedIssues(ctx, tx, events, p, decisions, assign, validate, afterRehome, acceptedEventUIDs, insertResetControl)
+}
+
+func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
 	moved := map[string]FoldEvent{}
 	for _, e := range events {
 		if e.Type == "issue.moved" {
@@ -321,36 +379,23 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		}
 	}
 	projects := map[int64]bool{}
-	for _, issue := range p.SortedIssues() {
-		winner, known := moved[issue.UID]
-		if !known {
-			continue
-		}
-		var target int64
-		var active bool
-		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&target, &active); err != nil {
-			return nil, err
-		}
-		// A detached destination retains standalone data. Its former streams
-		// may keep syncing, but cannot reconcile that destination's projection.
-		var joined bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, target).Scan(&joined); err != nil {
-			return nil, err
-		}
-		if !joined {
+	for _, decision := range decisions {
+		issue := p.Issues[decision.IssueUID]
+		winner := moved[issue.UID]
+		target, active := decision.TargetID, decision.Active
+		// A detached destination retains standalone data.
+		if !decision.Joined {
 			delete(p.Issues, issue.UID)
 			continue
 		}
-		var id, source int64
-		var sourceProject Project
-		var recurrence *int64
-		var sourceShort string
-		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&id, &source, &recurrence, &sourceProject.UID, &sourceProject.Name, &sourceShort)
-		if errors.Is(err, sql.ErrNoRows) {
+		id, source := decision.IssueID, decision.SourceID
+		sourceProject := Project{UID: decision.SourceUID, Name: decision.SourceName}
+		sourceShort := decision.SourceShortID
+		if !decision.Exists {
 			if active {
 				projects[target] = true
-				// A cold replica can expose an empty projection at the append
-				// cursor before this fold creates the destination issue row.
+				// A cold replica can expose an empty projection before this fold
+				// creates the destination issue row.
 				from, _ := StringValue(PayloadMap(winner.Payload)["from_project_uid"])
 				if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, from).Scan(&sourceProject.ID, &sourceProject.UID, &sourceProject.Name); err != nil {
 					return nil, err
@@ -362,9 +407,6 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 				delete(p.Issues, issue.UID)
 			}
 			continue
-		}
-		if err != nil {
-			return nil, err
 		}
 		if source == target {
 			if active {
@@ -378,7 +420,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		projects[target] = true
 		// Move ingress has already checked its authority and endpoints. Replaying
 		// trusted history must also work after a former source has left.
-		if recurrence != nil {
+		if decision.RecurrenceID.Valid {
 			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
 		}
 		if err := validate(id, source, target); err != nil {
