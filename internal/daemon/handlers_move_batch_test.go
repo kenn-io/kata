@@ -25,7 +25,7 @@ type batchReply struct {
 	NextIndex int `json:"next_index"`
 }
 
-func postMoveBatch(t *testing.T, env *testenv.Env, body string) batchReply {
+func postMoveBatch(t testing.TB, env *testenv.Env, body string) batchReply {
 	t.Helper()
 	resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
 	defer func() { _ = resp.Body.Close() }()

@@ -103,7 +103,7 @@ func WithRootSigning(key ed25519.PrivateKey) Option {
 // KATA_AUTH_TOKEN env var inside the test process so any in-process
 // client construction picks the token up automatically. Called by
 // New / NewFromDB after options are folded into cfg.
-func applyClientAuthEnv(t *testing.T, cfg daemon.ServerConfig) {
+func applyClientAuthEnv(t testing.TB, cfg daemon.ServerConfig) {
 	t.Helper()
 	if cfg.Auth.Token != "" {
 		t.Setenv("KATA_AUTH_TOKEN", cfg.Auth.Token)
@@ -119,7 +119,7 @@ func WithInsecureReadonly() Option {
 
 // New launches a daemon listening on a free loopback port. The DB lives under
 // a temp KATA_HOME. Cleanup is wired via t.Cleanup.
-func New(t *testing.T, opts ...Option) *Env {
+func New(t testing.TB, opts ...Option) *Env {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -185,7 +185,7 @@ func (e *Env) RequireOK(t *testing.T, path string) []byte {
 // shutdown wait) is wired via t.Cleanup. Callers are responsible for closing d
 // in a separately registered cleanup so LIFO ordering closes the DB after
 // Serve returns.
-func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *http.Client, *daemon.EventBroadcaster) {
+func serveDaemon(t testing.TB, d *sqlitestore.Store, opts ...Option) (string, *http.Client, *daemon.EventBroadcaster) {
 	t.Helper()
 	// Bind the listener once and hand it directly to Server.Serve so no other
 	// process can grab the port between bind and serve (the close-then-reopen

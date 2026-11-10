@@ -188,7 +188,7 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 			break
 		}
 		if page.NextCursor == cursor {
-			return nil, fmt.Errorf("list cursor did not advance")
+			return nil, fmt.Errorf("could not list all issues")
 		}
 		cursor = page.NextCursor
 	}
@@ -227,7 +227,7 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 			break
 		}
 		if page.NextCursor == cursor {
-			return nil, fmt.Errorf("search cursor did not advance")
+			return nil, fmt.Errorf("could not complete search")
 		}
 		cursor = page.NextCursor
 	}
@@ -326,7 +326,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
 				return err
 			}
-			message := "batch move transport failed; rerun the same input to continue"
+			message := "Connection failed; rerun the same input to continue"
 			if callErr != nil {
 				message += ": " + callErr.Error()
 			}
@@ -346,7 +346,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			return err
 		}
 		if reply.NextIndex <= request.Body.StartIndex || reply.NextIndex > len(request.Body.Items) {
-			return fmt.Errorf("invalid move batch continuation index %d", reply.NextIndex)
+			return fmt.Errorf("could not continue batch move")
 		}
 		results = append(results, reply.Results...)
 		request.Body.StartIndex = reply.NextIndex
@@ -362,7 +362,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	}
 	for _, r := range results {
 		if r.Result == "refused" {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict}
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
 		}
 	}
 	return nil

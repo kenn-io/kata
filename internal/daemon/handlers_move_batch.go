@@ -23,6 +23,9 @@ type moveBatchItem struct {
 }
 
 func moveBatchRefusal(result *api.MoveIssuesResult, err error) {
+	if errors.Is(err, db.ErrTransactionFinalizationFailed) {
+		err = internalAPIError(err)
+	}
 	mapped, ok := errors.AsType[*api.APIError](err)
 	if !ok {
 		mapped = moveIssueAPIError(err).(*api.APIError)
@@ -52,7 +55,8 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		targets := map[string]db.Project{}
 		pairs := map[[2]int64]error{}
 		targetErrors := map[string]error{}
-		seen := map[string][]int{}
+		seen := map[int64][]int{}
+		selectedRevisions := map[int64]int64{}
 		authorize := func(uids []string) error { _, err := authorizeHostProjectScope(ctx, nil, uids, false); return err }
 		for j, input := range in.Body.Items {
 			r := &results[j]
@@ -101,16 +105,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
-			pair := [2]int64{issue.ProjectID, target.ID}
-			if issue.ProjectID != target.ID {
-				if _, known := pairs[pair]; !known {
-					pairs[pair] = cfg.DB.CheckIssueMovePair(ctx, pair[0], pair[1])
-				}
-				if err := pairs[pair]; err != nil {
-					moveBatchRefusal(r, err)
-					continue
-				}
-			}
 			r.UID = issue.UID
 			r.OldShortID = issue.ShortID
 			r.FromProjectUID = source.UID
@@ -124,7 +118,23 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			items[j].issue = issue
 			items[j].target = target
 			items[j].move = db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: target.ID, IfMatchRev: rev, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: authorize}
-			seen[issue.UID] = append(seen[issue.UID], j)
+			seen[issue.ID] = append(seen[issue.ID], j)
+			if previous, selected := selectedRevisions[issue.ID]; selected && previous != rev {
+				// No revision can satisfy incompatible duplicate preconditions.
+				selectedRevisions[issue.ID] = -1
+			} else {
+				selectedRevisions[issue.ID] = rev
+			}
+			pair := [2]int64{issue.ProjectID, target.ID}
+			if issue.ProjectID != target.ID {
+				if _, known := pairs[pair]; !known {
+					pairs[pair] = cfg.DB.CheckIssueMovePair(ctx, pair[0], pair[1])
+				}
+				if err := pairs[pair]; err != nil {
+					moveBatchRefusal(r, err)
+					continue
+				}
+			}
 		}
 		for _, indexes := range seen {
 			target := items[indexes[0]].target.UID
@@ -137,7 +147,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					results[j].Result = "refused"
 					results[j].Code = "conflicting_target"
 					results[j].Message = "issue requested for different targets"
-				} else if k > 0 {
+				} else if k > 0 && results[j].Result == "" {
 					results[j].Result = "unchanged"
 					results[j].Code = "duplicate_item"
 				}
@@ -160,6 +170,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			if !in.Body.Subtree {
 				continue
 			}
+			item.move.ExpectedRevisions = selectedRevisions
 			preview := item.move
 			preview.DryRun = true
 			out, err := cfg.DB.MoveIssueProject(ctx, preview)
@@ -168,17 +179,18 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				continue
 			}
 			item.tree = out.Issues
+			item.move.ExpectedIssueIDs = out.TreeIssueIDs
 		}
 		if in.Body.Subtree {
 			for j := range items {
 				if items[j].tree == nil {
 					continue
 				}
-				for _, member := range items[j].tree {
-					if member.ID == items[j].issue.ID {
+				for _, memberID := range items[j].move.ExpectedIssueIDs {
+					if memberID == items[j].issue.ID {
 						continue
 					}
-					for _, k := range seen[member.UID] {
+					for _, k := range seen[memberID] {
 						if items[k].target.UID != items[j].target.UID {
 							for _, idx := range []int{j, k} {
 								results[idx].Result = "refused"
@@ -273,11 +285,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 						results[j].Descendants = items[j].tree[1:]
 						continue
 					}
-					move := items[j].move
-					for _, issue := range items[j].tree {
-						move.ExpectedIssueIDs = append(move.ExpectedIssueIDs, issue.ID)
-					}
-					write = append(write, move)
+					write = append(write, items[j].move)
 					written = append(written, j)
 				}
 				if len(write) > 0 {

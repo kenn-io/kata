@@ -554,6 +554,8 @@ type MoveIssueProjectIn struct {
 	AuthorizeProjects func([]string) error
 	// ExpectedIssueIDs fences externally validated subtree membership.
 	ExpectedIssueIDs []int64
+	// ExpectedRevisions preserves selected descendants' revision preconditions.
+	ExpectedRevisions map[int64]int64
 	// DryRun validates inside the move transaction, then rolls back without moving.
 	DryRun bool
 	// Single moves only the selected issue; the default includes descendants.
@@ -567,13 +569,15 @@ type MoveIssueProjectIn struct {
 
 // MoveIssueProjectOut carries results from a successful MoveIssueProject call.
 type MoveIssueProjectOut struct {
-	Issues      []Issue
-	Events      []Event
-	Issue       Issue
-	Event       *Event `json:"-"`
-	EventID     int64
-	NewShortID  string
-	NewRevision int64
+	// TreeIssueIDs includes logical descendants already in the destination.
+	TreeIssueIDs []int64 `json:"-"`
+	Issues       []Issue
+	Events       []Event
+	Issue        Issue
+	Event        *Event `json:"-"`
+	EventID      int64
+	NewShortID   string
+	NewRevision  int64
 }
 
 // MoveIssuesBatchIn moves independent roots in one transaction.

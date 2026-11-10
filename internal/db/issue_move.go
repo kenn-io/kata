@@ -96,9 +96,6 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 			items = append(items, IssueMoveTreeItem{In: in})
 			continue
 		}
-		if item.FromProjectID == in.ToProjectID {
-			continue
-		}
 		if projectArchived {
 			archived = append(archived, descendant)
 		}
@@ -125,6 +122,13 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 	// Report archived projects only after the caller may see every source project.
 	if len(archived) > 0 {
 		return nil, &IssueMoveDescendantError{Descendant: archived[0], Err: ErrIssueMoveDescendantArchived}
+	}
+	// Retain explicit descendant preconditions for the native backend validator;
+	// fresh discovery must not silently refresh a caller's expected revision.
+	for index := range items {
+		if revision, selected := in.ExpectedRevisions[items[index].In.IssueID]; selected {
+			items[index].In.IfMatchRev = revision
+		}
 	}
 	if err := validateIssueMoveTreeMappings(ctx, tx, items, in.ToProjectID); err != nil {
 		return nil, err

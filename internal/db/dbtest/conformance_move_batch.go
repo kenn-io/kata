@@ -187,3 +187,71 @@ func checkMoveBatchCollision(t *testing.T, store db.Storage) error {
 	require.Greater(t, len(out.Results[1].Out.NewShortID), len(out.Results[0].Out.NewShortID))
 	return nil
 }
+
+// Contract: selected descendant revisions survive preview and are checked in
+// the same transaction as the enclosing move and routing comments, on both stores.
+func checkMoveBatchSelectedRevisions(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	source, err := store.CreateProject(ctx, "selected-source")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "selected-target")
+	require.NoError(t, err)
+	root, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "worker"})
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	in := db.MoveIssuesBatchIn{Actor: "worker", Comment: "routed", DryRun: true, Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, ExpectedRevisions: map[int64]int64{child.ID: child.Revision}}}}
+	preview, err := store.MoveIssuesBatch(ctx, in)
+	require.NoError(t, err)
+	require.NoError(t, preview.Results[0].Err)
+	title := "changed child"
+	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: child.ID, Title: &title, Actor: "worker"})
+	require.NoError(t, err)
+	for _, dry := range []bool{true, false} {
+		in.DryRun = dry
+		out, err := store.MoveIssuesBatch(ctx, in)
+		require.NoError(t, err)
+		require.ErrorAs(t, out.Results[0].Err, new(*db.RevisionConflictError))
+		for _, issue := range []db.Issue{root, child} {
+			got, err := store.IssueByID(ctx, issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, source.ID, got.ProjectID)
+			comments, err := store.CommentsByIssue(ctx, issue.ID)
+			require.NoError(t, err)
+			require.Empty(t, comments)
+		}
+	}
+	return nil
+}
+
+// Logical membership includes no-op descendants. Both stores must return the
+// same discovery fence without moving, revising or commenting those members.
+func checkMoveBatchLogicalMembership(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	source, err := store.CreateProject(ctx, "logical-source")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "logical-target")
+	require.NoError(t, err)
+	root, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "worker"})
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "already at target", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	in := db.MoveIssuesBatchIn{Actor: "worker", Comment: "routed", DryRun: true, Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision}}}
+	preview, err := store.MoveIssuesBatch(ctx, in)
+	require.NoError(t, err)
+	require.NoError(t, preview.Results[0].Err)
+	require.ElementsMatch(t, []int64{root.ID, child.ID}, preview.Results[0].Out.TreeIssueIDs)
+	require.Len(t, preview.Results[0].Out.Issues, 1)
+	in.Items[0].ExpectedIssueIDs = preview.Results[0].Out.TreeIssueIDs
+	in.DryRun = false
+	out, err := store.MoveIssuesBatch(ctx, in)
+	require.NoError(t, err)
+	require.NoError(t, out.Results[0].Err)
+	got, err := store.IssueByID(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, child, got)
+	comments, err := store.CommentsByIssue(ctx, child.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments)
+	return nil
+}

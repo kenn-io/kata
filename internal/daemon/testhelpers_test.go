@@ -496,7 +496,7 @@ func broadcastEvent(b *daemon.EventBroadcaster, projectID, eventID int64) {
 // doReqEnv is the workhorse for testenv-based HTTP helpers. It sets the
 // auth bearer (the testenv default token), Content-Type when a body is
 // present, and an If-Match header when ifMatch is non-empty.
-func doReqEnv(t *testing.T, env *testenv.Env, method, url, body, ifMatch string) *http.Response {
+func doReqEnv(t testing.TB, env *testenv.Env, method, url, body, ifMatch string) *http.Response {
 	t.Helper()
 	var r io.Reader
 	if body != "" {
@@ -524,7 +524,7 @@ func doPost(t *testing.T, env *testenv.Env, url, body string) *http.Response {
 	return doReqEnv(t, env, http.MethodPost, url, body, "")
 }
 
-func doPostWithIfMatch(t *testing.T, env *testenv.Env, url, body, ifMatch string) *http.Response {
+func doPostWithIfMatch(t testing.TB, env *testenv.Env, url, body, ifMatch string) *http.Response {
 	return doReqEnv(t, env, http.MethodPost, url, body, ifMatch)
 }
 

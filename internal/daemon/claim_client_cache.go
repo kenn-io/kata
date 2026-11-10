@@ -8,6 +8,15 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// These are the binding inputs consumed by claimForwardClient. Sync cursors
+// and timestamps do not affect transport identity.
+type claimClientBinding struct {
+	projectID     int64
+	hubURL        string
+	hubProjectID  int64
+	allowInsecure bool
+}
+
 type claimClientEntry struct {
 	client     *claimHubClient
 	credential config.FederationCredential
@@ -17,19 +26,20 @@ type claimClientEntry struct {
 // A cache lives only for one batch request and pins each client to its binding.
 type claimClientCache struct {
 	mu      sync.Mutex
-	entries map[int64]claimClientEntry
+	entries map[claimClientBinding]claimClientEntry
 }
 
 func (c *claimClientCache) get(ctx context.Context, cfg ServerConfig, binding db.FederationBinding) (*claimHubClient, config.FederationCredential, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
-		c.entries = map[int64]claimClientEntry{}
+		c.entries = map[claimClientBinding]claimClientEntry{}
 	}
-	entry, ok := c.entries[binding.ProjectID]
+	key := claimClientBinding{binding.ProjectID, binding.HubURL, binding.HubProjectID, binding.AllowInsecure}
+	entry, ok := c.entries[key]
 	if !ok {
 		entry.client, entry.credential, entry.err = claimForwardClient(ctx, cfg, binding)
-		c.entries[binding.ProjectID] = entry
+		c.entries[key] = entry
 	}
 	return entry.client, entry.credential, entry.err
 }

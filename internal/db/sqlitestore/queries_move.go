@@ -63,6 +63,11 @@ func (d *Store) moveTreeTx(ctx context.Context, tx *sql.Tx, in db.MoveIssueProje
 		return out, err
 	}
 	for _, item := range inputs {
+		// Logical members already at the destination participate in fences and
+		// overlap checks but require no move, claim or routing comment.
+		if item.Descendant != nil && item.In.FromProjectID == item.In.ToProjectID {
+			continue
+		}
 		result, err := d.moveIssueProjectTx(ctx, tx, item.In)
 		if err != nil {
 			return db.MoveIssueProjectOut{}, item.Refusal(err)
@@ -73,6 +78,9 @@ func (d *Store) moveTreeTx(ctx context.Context, tx *sql.Tx, in db.MoveIssueProje
 		}
 		out.Issues = append(out.Issues, result.Issue)
 		out.Events = append(out.Events, result.Events...)
+	}
+	for _, item := range inputs {
+		out.TreeIssueIDs = append(out.TreeIssueIDs, item.In.IssueID)
 	}
 	return out, nil
 }
