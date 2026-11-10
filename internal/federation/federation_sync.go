@@ -630,7 +630,10 @@ func syncDirectSpoke(
 			for j, i := range pending {
 				batch[j] = remoteEventFromEnvelope(body.Events[i])
 			}
-			inserted, err := store.InsertRemoteEvents(ctx, binding.ProjectID, batch)
+			// An intervening push can acknowledge these new replays before
+			// the page is applied. Preserve their delivery debt at insert.
+			insertCtx := db.WithFederationLocalReplayDelivery(ctx, shouldDeliverPage)
+			inserted, err := store.InsertRemoteEvents(insertCtx, binding.ProjectID, batch)
 			if err != nil {
 				return err
 			}

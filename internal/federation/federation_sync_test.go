@@ -1996,9 +1996,14 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, failPollAfterPu
 		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
 		require.NoError(t, err)
 		require.Len(t, replayed, 1)
-		// A subsequent interrupted turn may acknowledge the replayed event's new
-		// local ID before projecting this still-unadvanced pull page.
+		// Model an older acknowledged replay whose marker carries no delivery
+		// debt. Newly inserted pull pages record debt before any later push.
 		require.NoError(t, spoke.DB.AdvanceFederationPushCursor(ctx, project.ID, replayed[0].ID))
+		marker, err := spoke.DB.ExecContext(ctx, `UPDATE federation_local_replays SET delivery_due=0 WHERE event_uid=?`, localEvent.UID)
+		require.NoError(t, err)
+		changed, err := marker.RowsAffected()
+		require.NoError(t, err)
+		require.Equal(t, int64(1), changed)
 		_, err = spoke.DB.ExecContext(ctx, `UPDATE projects SET metadata='{}' WHERE id=?`, project.ID)
 		require.NoError(t, err)
 	}

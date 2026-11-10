@@ -875,7 +875,7 @@ func (d *Store) insertRemoteEventTx(
 		return false, err
 	}
 	if ev.OriginInstanceUID == d.instanceUID {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid) VALUES($1)`, ev.EventUID); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1,$2)`, ev.EventUID, boolInt(db.FederationLocalReplayDeliveryDue(ctx))); err != nil {
 			return false, fmt.Errorf("record local federation replay: %w", err)
 		}
 	}

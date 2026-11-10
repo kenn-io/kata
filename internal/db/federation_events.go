@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -11,6 +12,21 @@ import (
 
 // EventTimestampFormat is the millisecond UTC representation covered by portable event hashes.
 const EventTimestampFormat = "2006-01-02T15:04:05.000Z"
+
+type federationLocalReplayDeliveryKey struct{}
+
+// WithFederationLocalReplayDelivery records delivery debt for new local-origin
+// replays inserted for a pull page that has not advanced its cursor.
+func WithFederationLocalReplayDelivery(ctx context.Context, due bool) context.Context {
+	return context.WithValue(ctx, federationLocalReplayDeliveryKey{}, due)
+}
+
+// FederationLocalReplayDeliveryDue reports whether the current pull insert
+// must commit replay delivery debt along with the event.
+func FederationLocalReplayDeliveryDue(ctx context.Context) bool {
+	due, _ := ctx.Value(federationLocalReplayDeliveryKey{}).(bool)
+	return due
+}
 
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a
 // synthetic from-empty diff for a federation adoption baseline.
