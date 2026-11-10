@@ -592,6 +592,23 @@ func protectAgentHookCommands(agent agenthook.Agent, data []byte, entries, desir
 			}
 		}
 	}
+	// Kit retains group fields during reinstall. Move owned handlers out of
+	// conditional groups so the requested default registration can run.
+	for _, entry := range slices.Backward(entries) {
+		if entry.GroupIndex < 0 || classifyAgentHookHandlerFromEntry(entry) != kind || sameAgentHookGroupBehavior(entry.GroupFields, nil) {
+			continue
+		}
+		groups := hooks[entry.Event].([]any)
+		group := groups[entry.GroupIndex].(map[string]any)
+		handlers := group["hooks"].([]any)
+		handlers = append(handlers[:entry.HandlerIndex], handlers[entry.HandlerIndex+1:]...)
+		if len(handlers) == 0 {
+			groups = append(groups[:entry.GroupIndex], groups[entry.GroupIndex+1:]...)
+			hooks[entry.Event] = groups
+		} else {
+			group["hooks"] = handlers
+		}
+	}
 	staged, err := marshalAgentHookJSON(document)
 	restore := func(planned []byte) ([]byte, error) {
 		var root map[string]any
