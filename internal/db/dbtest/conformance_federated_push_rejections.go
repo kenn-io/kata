@@ -40,6 +40,8 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				bad = newRemoteEvent(t, source, &freshUID, "issue.created", "worker", origin, at, payload)
 			}
 			if kind == "rejected-move" {
+				// A spoke can retain a move authored while target enrollment was valid,
+				// then lose that enrollment before delivering it through the source.
 				payload, err := json.Marshal(map[string]any{"issue_uid": moved.UID, "from_project_uid": target.UID, "from_short_id": moved.ShortID, "to_project_uid": source.UID, "to_short_id": moved.ShortID, "snapshot": map[string]string{"uid": moved.UID, "title": moved.Title, "author": "worker", "short_id": moved.ShortID, "status": "open"}})
 				require.NoError(t, err)
 				bad = newRemoteEvent(t, source, &moved.UID, "issue.moved", "worker", origin, at, payload)
@@ -69,7 +71,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 			}
 			result, err := store.IngestFederationEvents(ctx, params)
 			if kind == "dependent-on-rejected-create" {
-				require.Error(t, err, "a rejected creation cannot prove a later primary issue")
+				require.ErrorIs(t, err, db.ErrFederationIngestValidation, "a rejected creation cannot prove a later primary issue")
 				after, err := store.MaxEventID(ctx)
 				require.NoError(t, err)
 				require.Equal(t, before, after, "ordinary dependent validation still rolls back atomically")
@@ -102,25 +104,49 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				}
 				require.Equal(t, "Arrived", got.Title)
 			}
-			got, err = store.IssueByID(ctx, moved.ID)
-			require.NoError(t, err)
-			require.Equal(t, moved.Title, got.Title)
-			if kind == "mixed" {
-				current, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push,pull", Actor: "worker"})
+			if kind != "moved-peer" && kind != "rejected-move" {
+				got, err = store.IssueByID(ctx, moved.ID)
 				require.NoError(t, err)
-				params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: current.Enrollment.ID}
-				accepted, err := store.IngestFederationEvents(ctx, params)
-				require.NoError(t, err)
-				require.Equal(t, 1, accepted.Accepted)
-				require.Equal(t, 1, accepted.Duplicates)
-				require.NoError(t, store.RevokeFederationEnrollment(ctx, current.Enrollment.ID))
-				params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: 0}
-				duplicate, err := store.IngestFederationEvents(ctx, params)
-				require.NoError(t, err, "accepted history acknowledges after supplemental proof disappears")
-				require.Equal(t, 2, duplicate.Duplicates)
-				require.Empty(t, duplicate.RejectedEvents)
+				require.Equal(t, moved.Title, got.Title)
 			}
 		})
 	}
+	t.Run("adoption-baseline-atomic", func(t *testing.T) { checkRejectedAdoptionBaseline(t, store) })
 	return nil
+}
+
+// The adoption author grant is one-shot: missing enrollment cannot consume its
+// marker while retaining a fresh snapshot that must be deliverable after join.
+func checkRejectedAdoptionBaseline(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	source, target, moved, _ := federatedRehomeFixture(t, store, "baseline-rejection")
+	_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: moved.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &source.ID, Capabilities: "push,pull", Actor: "worker", AllowAdoptionSnapshotAuthors: true})
+	require.NoError(t, err)
+	snapshotUID, err := uid.New()
+	require.NoError(t, err)
+	payload, err := json.Marshal(map[string]any{"uid": snapshotUID, "title": "Historical linked issue", "author": "historical-author", "status": "open", "created_at": "2026-05-23T12:00:00.000Z", "links": []map[string]string{{"type": "related", "to_issue_uid": moved.UID}}})
+	require.NoError(t, err)
+	snapshot := newRemoteEvent(t, source, &snapshotUID, "issue.snapshot", "worker", origin, time.Now().UnixMilli(), payload)
+	metadata := newRemoteEvent(t, source, nil, "project.metadata_updated", "worker", origin, time.Now().UnixMilli(), []byte(`{"project_uid":"`+source.UID+`","metadata":{"adopted":true}}`))
+	params := db.FederationIngestParams{AllowEventRejections: true, ProjectID: source.ID, FederationEnrollmentID: grant.Enrollment.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, AllowSnapshotAuthorPreservation: true, AdoptionBaseline: db.FederationAdoptionBaselineComplete, AdoptionBaselineEndSourceEventID: 2, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: metadata}, {SourceEventID: 2, Event: snapshot}}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized, "a baseline with missing enrollment stays atomic")
+	enrollment, err := federationEnrollmentByID(ctx, store, grant.Enrollment.ID)
+	require.NoError(t, err)
+	require.True(t, enrollment.AllowAdoptionSnapshotAuthors, "a failed baseline retains the one-shot grant")
+	_, err = store.EventsByUIDs(ctx, source.ID, []string{metadata.EventUID})
+	require.ErrorIs(t, err, db.ErrNotFound, "independent baseline metadata must roll back too")
+	current, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push,pull", Actor: "worker"})
+	require.NoError(t, err)
+	params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: current.Enrollment.ID}
+	result, err := store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err, "joining allows the original baseline to retry")
+	require.Equal(t, 2, result.Accepted)
+	retained, err := store.IssueByUID(ctx, snapshotUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "historical-author", retained.Author)
 }

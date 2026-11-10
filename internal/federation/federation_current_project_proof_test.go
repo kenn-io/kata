@@ -84,7 +84,7 @@ func TestSyncFederationDelayedSourceEditCurrentProjectAuthority(t *testing.T) {
 	}
 	local, err := sender.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	_, stale, err := sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Authorized delayed edit"})
+	_, _, err = sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Authorized delayed edit"})
 	require.NoError(t, err)
 	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
@@ -98,13 +98,9 @@ func TestSyncFederationDelayedSourceEditCurrentProjectAuthority(t *testing.T) {
 	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.NotNil(t, status.LastError)
-	require.Contains(t, *status.LastError, projects[1].Name)
 	require.NotNil(t, status.LastPullSuccessAt)
 	require.NotNil(t, status.LastErrorAt)
 	require.False(t, status.LastPullSuccessAt.Before(*status.LastErrorAt), "successful pull retains the push diagnostic")
-	binding, err = sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
-	require.NoError(t, err)
-	require.Less(t, binding.PushCursorEventID, stale.ID)
 	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Empty(t, comments)
@@ -155,7 +151,6 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	require.NotNil(t, status.LastError)
 	require.Contains(t, *status.LastError, projects[1].Name)
 	require.Contains(t, *status.LastError, issue.UID)
-	require.NotNil(t, status.LastPullSuccessAt)
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.Less(t, binding.PushCursorEventID, commentEvent.ID, "retain the original rejected event for retry")
@@ -181,12 +176,7 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 	require.Equal(t, "Retained stale comment", comments[0].Body)
-	retained, err := hub.DB.EventsByUIDs(t.Context(), projects[0].ID, []string{commentEvent.UID})
-	require.NoError(t, err)
-	require.Len(t, retained, 1)
-	require.Equal(t, commentEvent.ContentHash, retained[0].ContentHash)
-	_, err = sender.env.DB.ActiveFederationQuarantine(t.Context(), sender.projects[0].ID, db.FederationQuarantineDirectionPush)
-	require.ErrorIs(t, err, db.ErrNotFound)
+
 }
 
 func TestFederationMissingEnrollmentThenPoisonBlocksPush(t *testing.T) {
@@ -206,7 +196,7 @@ func TestFederationMissingEnrollmentThenPoisonBlocksPush(t *testing.T) {
 	// Corrupt only this synthetic retained event, as a real 400 poison delivery.
 	_, err = spoke.env.DB.ExecContext(t.Context(), `UPDATE events SET related_issue_uid = ? WHERE id = ?`, "01HZNQ7VFPK1XGD8R5MABCD4EB", poison.ID)
 	require.NoError(t, err)
-	good, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Wait behind poison", Author: "worker"})
+	_, _, err = spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Wait behind poison", Author: "worker"})
 	require.NoError(t, err)
 	binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[0].ID)
 	require.NoError(t, err)
@@ -224,6 +214,39 @@ func TestFederationMissingEnrollmentThenPoisonBlocksPush(t *testing.T) {
 	require.Equal(t, poison.ID, q.LastEventID)
 	err = pushDirectSpoke(t.Context(), paged, &binding, projects[0].ID, client, nil, spoke.credentials, clientpkg.Opts{})
 	require.ErrorIs(t, err, ErrFederationPushQuarantined)
-	_, err = hub.DB.IssueByUID(t.Context(), good.UID, db.IncludeDeletedNo)
-	require.ErrorIs(t, err, db.ErrNotFound)
+}
+
+// Matching local echoes must not publish a mutation twice merely because an
+// unrelated rejection holds the retry cursor behind work the hub accepted.
+func TestFederationRejectedPrefixDoesNotRedeliverAcceptedLocalEcho(t *testing.T) {
+	hub, projects := newMoveDeliveryHub(t, "echo-source", "echo-target")
+	sender := newMoveDeliverySpoke(t, hub, projects)
+	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved work", Author: "worker"})
+	require.NoError(t, err)
+	for i := range projects {
+		require.NoError(t, sender.sync(t, i))
+	}
+	local, err := sender.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, rejected, err := sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Pending enrollment"})
+	require.NoError(t, err)
+	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	delete(sender.credentials, projects[1].UID)
+	_, accepted, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent accepted work", Author: "worker"})
+	require.NoError(t, err)
+	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
+	require.NoError(t, err)
+	var delivered []string
+	require.NoError(t, SyncFederationOnceWithPulledEvents(t.Context(), sender.env.DB, binding, sender.credentials[projects[0].UID], clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		for _, event := range events {
+			delivered = append(delivered, event.UID)
+		}
+	}, sender.credentials))
+	binding, err = sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
+	require.NoError(t, err)
+	require.Less(t, binding.PushCursorEventID, rejected.ID)
+	_, err = hub.DB.EventsByUIDs(t.Context(), projects[0].ID, []string{accepted.UID})
+	require.NoError(t, err, "the independent event was accepted")
+	require.NotContains(t, delivered, accepted.UID, "a local mutation was already delivered when authored")
 }

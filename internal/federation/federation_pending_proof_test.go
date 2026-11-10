@@ -1,7 +1,6 @@
 package federation
 
 import (
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,7 +42,7 @@ func TestSyncFederationPendingProofCannotAuthorizeCurrentOwner(t *testing.T) {
 	}
 	local, err := spoke.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Delayed work needing target authority"})
+	_, retained, err := spoke.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Delayed work needing target authority"})
 	require.NoError(t, err)
 	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
@@ -51,12 +50,15 @@ func TestSyncFederationPendingProofCannotAuthorizeCurrentOwner(t *testing.T) {
 	credential.LeavePending = true
 	spoke.credentials[projects[1].UID] = credential
 	err = spoke.sync(t, 0)
-	var status *HubStatusError
-	require.ErrorAs(t, err, &status, "the hub, rather than an unrelated proof builder, rejects missing current-owner authority")
-	if status == nil {
-		t.Fatal("missing hub denial")
-	}
-	require.Equal(t, http.StatusForbidden, status.StatusCode)
+	require.NoError(t, err, "a suppressed pending proof is missing enrollment, not a supplied invalid credential")
+	binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[0].ID)
+	require.NoError(t, err)
+	require.Less(t, binding.PushCursorEventID, retained.ID, "pending proof cannot acknowledge the retained comment")
+	status, err := spoke.env.DB.FederationSyncStatusByProject(t.Context(), spoke.projects[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, status.LastError)
+	require.Contains(t, *status.LastError, projects[1].Name)
+	require.Contains(t, *status.LastError, "no enrollment")
 	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Empty(t, comments)

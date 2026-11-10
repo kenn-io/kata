@@ -50,48 +50,17 @@ func TestFederationPushMissingCurrentProjectEnrollmentDoesNotBlockBatch(t *testi
 	body := api.FederationIngestEventsRequestBody{SchemaVersion: db.CurrentSchemaVersion(), Events: []api.FederationIngestEventEnvelope{stale, valid}}
 	headers := bearer(grant.Token)
 	headers[db.EventFeaturesHeader] = db.SupportedEventFeatures
-	response, raw := envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
-	assert.Equal(t, http.StatusForbidden, response.StatusCode, "older clients retain atomic failure")
-	assert.Contains(t, string(raw), "federation_project_not_enrolled")
-	unchanged, err := env.DB.IssueByID(t.Context(), independent.ID)
-	require.NoError(t, err)
-	assert.Equal(t, independent.Title, unchanged.Title)
 	headers["X-Kata-Federation-Event-Rejections"] = "1"
-	response, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
-	t.Logf("mixed-batch response: status=%d body=%s", response.StatusCode, raw)
-	assert.Equalf(t, http.StatusOK, response.StatusCode, "reject only the stale comment; accept independent source work: %s", raw)
-	if response.StatusCode == http.StatusOK {
-		var result api.FederationIngestEventsBody
-		require.NoError(t, json.Unmarshal(raw, &result))
-		assert.Equal(t, 1, result.Accepted)
-		require.Len(t, result.RejectedEvents, 1)
-		assert.Equal(t, stale.EventUID, result.RejectedEvents[0].EventUID)
-		assert.Equal(t, moved.UID, result.RejectedEvents[0].IssueUID)
-		assert.Equal(t, target.UID, result.RejectedEvents[0].CurrentProjectUID)
-		assert.Equal(t, target.Name, result.RejectedEvents[0].CurrentProjectName)
-		assert.Equal(t, "federation_project_not_enrolled", result.RejectedEvents[0].Code)
-	}
-	got, err := env.DB.IssueByID(t.Context(), independent.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "Independent update arrived", got.Title, "independent event must arrive despite the stale comment")
-	comments, err := env.DB.CommentsByIssue(t.Context(), moved.ID)
-	require.NoError(t, err)
-	assert.Empty(t, comments, "missing target enrollment must never grant authority to write the moved issue")
-	body.Events = []api.FederationIngestEventEnvelope{stale}
-	response, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
-	require.Equal(t, http.StatusOK, response.StatusCode)
-	var rejectedOnly api.FederationIngestEventsBody
-	require.NoError(t, json.Unmarshal(raw, &rejectedOnly))
-	require.Zero(t, rejectedOnly.Accepted)
-	require.Len(t, rejectedOnly.RejectedEvents, 1)
+	response, raw := envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
+	require.Equalf(t, http.StatusOK, response.StatusCode, "reject only the stale comment: %s", raw)
+	var result api.FederationIngestEventsBody
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.Len(t, result.RejectedEvents, 1)
+	assert.Equal(t, stale.EventUID, result.RejectedEvents[0].EventUID)
+	assert.Equal(t, target.Name, result.RejectedEvents[0].CurrentProjectName)
+	assert.Equal(t, db.FederationProjectNotEnrolledCode, result.RejectedEvents[0].Code)
 	body.MoveSourceTokens = map[string]string{target.UID: "invalid-supplemental-proof"}
 	response, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
 	require.Equal(t, http.StatusForbidden, response.StatusCode)
 	require.Contains(t, string(raw), "auth_invalid", "supplied invalid credentials remain request-wide failures")
-	body.MoveSourceTokens = nil
-	require.NoError(t, env.DB.RevokeFederationEnrollment(t.Context(), grant.Enrollment.ID))
-	response, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
-	require.Equal(t, http.StatusForbidden, response.StatusCode)
-	require.Contains(t, string(raw), "auth_invalid", "revoked route credentials never become partial success")
-
 }

@@ -112,7 +112,7 @@ func checkFederatedFreshCurrentProjectAuthority(t *testing.T, store db.Storage) 
 			require.NoError(t, err)
 			require.Equal(t, event.ContentHash, stored[0].ContentHash, "authority checks preserve the original event envelope/hash")
 			require.NoError(t, store.RevokeFederationEnrollment(ctx, targetGrant.Enrollment.ID))
-			params.MoveSourceEnrollmentIDs = nil
+			params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: 0}
 			currentHostChecked = false
 			duplicate, err := store.IngestFederationEvents(ctx, params)
 			require.NoError(t, err, "persisted duplicates do not need new current-project authority")
