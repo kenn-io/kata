@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/mcpicon"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/storageadmin"
 	"go.kenn.io/kata/internal/teammate"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -29,8 +30,30 @@ const (
 	toolCallConcurrency = 8
 )
 
+// ToolAdmission bounds tool-call rate and concurrency. Share one between the
+// servers of a process so two protocol paths cannot double the limits.
+type ToolAdmission struct {
+	limiter    *rate.Limiter
+	concurrent chan struct{}
+}
+
+// NewToolAdmission creates the default process-wide tool-call limits.
+func NewToolAdmission() *ToolAdmission {
+	return newToolAdmission(toolCallsPerSecond, toolCallBurst, toolCallConcurrency)
+}
+
+func newToolAdmission(perSecond rate.Limit, burst, concurrency int) *ToolAdmission {
+	return &ToolAdmission{limiter: rate.NewLimiter(perSecond, burst), concurrent: make(chan struct{}, concurrency)}
+}
+
 // Options fixes the Kata daemon scope and actor for one MCP process.
 type Options struct {
+	// Events registers the MCP Events methods, which forward to the daemon. Set
+	// it for stdio and the 2026-07-28 HTTP server only; the legacy-session
+	// server must not serve Events.
+	Events bool
+	// Admission is shared across servers of one process; nil creates its own.
+	Admission         *ToolAdmission
 	Client            *kataclient.Client
 	LongRunningClient *kataclient.Client
 	Scope             *Scope
@@ -47,7 +70,7 @@ type Options struct {
 	ObserveToolCall func()
 }
 
-// New creates a tools-only MCP server for one startup project scope.
+// New creates a scoped MCP server with optional native webhook Events.
 func New(options Options) (*sdkmcp.Server, error) {
 	if options.Client == nil {
 		return nil, errors.New("kata API client is required")
@@ -119,16 +142,25 @@ func New(options Options) (*sdkmcp.Server, error) {
 			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
 	})
+	if options.Admission == nil {
+		options.Admission = NewToolAdmission()
+	}
 	server.AddReceivingMiddleware(toolAdmissionMiddleware(
-		rate.NewLimiter(toolCallsPerSecond, toolCallBurst),
-		make(chan struct{}, toolCallConcurrency),
+		options.Admission.limiter,
+		options.Admission.concurrent,
 		options.ObserveToolCall,
 	))
 	server.AddReceivingMiddleware(cacheHintsMiddleware)
+	if options.Events {
+		if err := registerNativeEvents(server, options.Client, options.LongRunningClient, options.Scope); err != nil {
+			return nil, err
+		}
+	}
 	if err := registerSectionLoaders(server, options); err != nil {
 		return nil, err
 	}
 	registerSkillsTool(server)
+	registerToolSearch(server, options)
 	return server, nil
 }
 
@@ -181,7 +213,7 @@ func registerIssueDiscoveryTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.list", "List issues", "List compact issue summaries in the selected project scope with bounded filters.", read, handlers.list)
 	addTool(server, "kata.next", "Next issue", "Select the highest-priority ready issue.", read, handlers.next)
 	addTool(server, "kata.ready", "List ready issues", "List open issues with no open blocking predecessor in the selected project scope.", read, handlers.ready)
-	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work.", searchRead, handlers.search)
+	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work. Lexical results contain every query word, so use one or two distinctive words.", searchRead, handlers.search)
 	addTool(server, "kata.show", "Show issue", "Read one issue with its body, metadata, relationships, and a bounded comment history.", read, handlers.show)
 }
 
@@ -284,6 +316,11 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 	}
 
 	switch toolName {
+	case "kata.search_tools":
+		setStringBounds("query", 1, toolSearchQueryBytes)
+		setNumberBounds("limit", 1, toolSearchMaxResults)
+		property("limit").Type = "integer"
+		property("limit").Types = nil
 	case "kata.skills":
 		setStringBounds("name", 0, 64)
 		property("name").Description = "Guide name: " + strings.Join(SkillGuides(), ", ") + "; omit to list the guides"
@@ -525,6 +562,8 @@ func evidenceVariant(kind string) *jsonschema.Schema {
 		MinItems: &pathMinimum,
 	}
 	switch kind {
+	case "attachment":
+		return variant(kind, "attachment_id", stringValue(1, 256))
 	case "commit":
 		sha := stringValue(7, 40)
 		sha.Pattern = `^[0-9a-fA-F]{7,40}$`
@@ -555,7 +594,7 @@ func evidenceSchemaFor(kinds ...string) *jsonschema.Schema {
 }
 
 func evidenceSchema() *jsonschema.Schema {
-	return evidenceSchemaFor("commit", "pr", "test", "reviewed-paths", "external", "no-change-audit", "duplicate-of", "superseded-by")
+	return evidenceSchemaFor("attachment", "commit", "pr", "test", "reviewed-paths", "external", "no-change-audit", "duplicate-of", "superseded-by")
 }
 
 func closeReasonSchemas() []*jsonschema.Schema {
@@ -580,7 +619,7 @@ func closeReasonSchemas() []*jsonschema.Schema {
 			Required: []string{"reason", "message", "evidence"},
 		}
 	}
-	done := variant("done", 40, 1, -1, "commit", "pr", "test", "reviewed-paths", "external")
+	done := variant("done", 40, 1, -1, "attachment", "commit", "pr", "test", "reviewed-paths", "external")
 	wontfix := variant("wontfix", 60, 0, 0, "commit")
 	duplicate := variant("duplicate", 20, 1, 1, "duplicate-of")
 	superseded := variant("superseded", 20, 1, 1, "superseded-by")
@@ -645,6 +684,10 @@ type ListInput struct {
 	Labels        []string `json:"labels,omitempty" jsonschema:"Labels that every issue must have"`
 	ExcludeLabels []string `json:"exclude_labels,omitempty" jsonschema:"Labels that issues must not have"`
 	Metadata      []string `json:"metadata,omitempty" jsonschema:"Metadata filters as key or key=value"`
+
+	// compact asks for rows without bodies and with only the filtered
+	// metadata keys. It is set by callers inside this package, not by tools.
+	compact bool
 }
 
 // ReadyInput filters unblocked open work.
@@ -767,14 +810,15 @@ type SetMetadataInput struct {
 
 // Evidence is a typed completion proof accepted by Kata close.
 type Evidence struct {
-	Type      string   `json:"type" jsonschema:"Evidence type: commit, pr, test, reviewed-paths, external, no-change-audit, duplicate-of, or superseded-by"`
-	SHA       string   `json:"sha,omitempty" jsonschema:"Commit SHA for commit evidence"`
-	URL       string   `json:"url,omitempty" jsonschema:"Pull request URL for pr evidence"`
-	Command   string   `json:"command,omitempty" jsonschema:"Executed command for test evidence"`
-	Paths     []string `json:"paths,omitempty" jsonschema:"Reviewed paths for reviewed-paths evidence"`
-	Account   string   `json:"account,omitempty" jsonschema:"Free-text account of where and how externally completed work was done"`
-	Rationale string   `json:"rationale,omitempty" jsonschema:"Rationale for no-change-audit evidence"`
-	IssueRef  string   `json:"issue_ref,omitempty" jsonschema:"Target issue for duplicate-of or superseded-by evidence"`
+	AttachmentID string   `json:"attachment_id,omitempty" jsonschema:"Existing attachment ID for attachment evidence"`
+	Type         string   `json:"type" jsonschema:"Evidence type: attachment, commit, pr, test, reviewed-paths, external, no-change-audit, duplicate-of, or superseded-by"`
+	SHA          string   `json:"sha,omitempty" jsonschema:"Commit SHA for commit evidence"`
+	URL          string   `json:"url,omitempty" jsonschema:"Pull request URL for pr evidence"`
+	Command      string   `json:"command,omitempty" jsonschema:"Executed command for test evidence"`
+	Paths        []string `json:"paths,omitempty" jsonschema:"Reviewed paths for reviewed-paths evidence"`
+	Account      string   `json:"account,omitempty" jsonschema:"Free-text account of where and how externally completed work was done"`
+	Rationale    string   `json:"rationale,omitempty" jsonschema:"Rationale for no-change-audit evidence"`
+	IssueRef     string   `json:"issue_ref,omitempty" jsonschema:"Target issue for duplicate-of or superseded-by evidence"`
 }
 
 // CloseInput makes the completion assertion explicit.
@@ -802,6 +846,7 @@ type ProjectIdentity struct {
 
 // IssueSummary is the compact issue form used by list-like tools.
 type IssueSummary struct {
+	projectUID          string
 	Author              string    `json:"author,omitempty"`
 	AccountableActor    *string   `json:"accountable_actor,omitempty"`
 	SourceActor         *string   `json:"source_actor,omitempty"`
@@ -827,6 +872,8 @@ type IssueSummary struct {
 	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`
 	updatedAt           time.Time
 	metadata            map[string]any
+	// oversized marks a compact row the daemon sent as identity only.
+	oversized bool
 }
 
 // IssueListOutput is a bounded collection without issue bodies or comments.
@@ -851,8 +898,9 @@ type SearchHit struct {
 
 // SearchOutput reports the effective mode and any semantic fallback.
 type SearchOutput struct {
-	Complete   bool    `json:"complete"`
-	NextCursor *string `json:"next_cursor,omitempty"`
+	Hints      []searchhint.Hint `json:"hints,omitempty"`
+	Complete   bool              `json:"complete"`
+	NextCursor *string           `json:"next_cursor,omitempty"`
 
 	Project        *ProjectIdentity  `json:"project,omitempty"`
 	Projects       []ProjectIdentity `json:"projects,omitempty"`

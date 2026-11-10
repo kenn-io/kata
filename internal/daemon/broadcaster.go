@@ -194,6 +194,10 @@ func (p EventPublisher) Event(projectID int64, ev db.Event) {
 // work caused by an already-admitted parent operation. A nil acquire preserves
 // the ordinary sink behavior used by request handlers.
 func (p EventPublisher) EventFrom(projectID int64, ev db.Event, acquire activity.Admission) {
+	if ev.Type == db.ProjectScopeResetEventType {
+		p.Reset(projectID, ev.ID)
+		return
+	}
 	p.Broadcaster.Broadcast(NewEventMsg(projectID, ev))
 	hooks.EnqueueFrom(p.Hooks, ev, acquire)
 }
@@ -223,9 +227,7 @@ func (p EventPublisher) EventsByProject(evs []db.Event) {
 	}
 }
 
-// Reset broadcasts a purge reset. It deliberately does not enqueue: a reset is
-// a stream-control frame, not a durable event, and hooks have never received
-// one.
+// Reset broadcasts an identity-free stream control without enqueuing hook work.
 func (p EventPublisher) Reset(projectID, resetAfterID int64) {
 	p.Broadcaster.Broadcast(NewResetMsg(projectID, resetAfterID))
 }

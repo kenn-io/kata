@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-11-02
+last_edited: 2026-11-06
 ---
 
 # Metadata
@@ -120,9 +120,9 @@ taken only when the daemon starts to attach real semantics to the key.
 The project metadata value `"role": "inbox"` designates the Inbox project,
 regardless of the project's name. The TUI Inbox shows its open tasks, and the
 web UI captures new tasks there. The web Inbox view itself lists open tasks from
-every project. In the web UI, the first **New task** asks you to choose the
-project when none is designated, and **Change** in the **New task** dialog
-switches it later.
+every project. In the web UI, **New task** asks you to choose a project when
+none is designated. With no projects, it asks you to create one and makes it
+Inbox. **Change** in the **New task** dialog switches it later.
 
 API clients can designate it with a project metadata patch:
 

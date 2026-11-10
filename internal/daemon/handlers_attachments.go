@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -16,10 +17,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/metadata"
@@ -64,6 +67,9 @@ var docbankContentErrors = map[int]error{
 }
 
 func docbankError(err error, statusErrors map[int]error) error {
+	if _, ok := errors.AsType[*docbank.KeyError](err); ok {
+		return docbankKeyUnavailable(err)
+	}
 	if e, ok := errors.AsType[*docbank.Error](err); ok {
 		if mapped := statusErrors[e.Status]; mapped != nil {
 			return mapped
@@ -73,6 +79,16 @@ func docbankError(err error, statusErrors map[int]error) error {
 		}
 	}
 	return attachmentError(502, "docbank_unreachable")
+}
+
+// docbankKeyUnavailable gives clients the reason but not the key source, which
+// names a daemon-host path or environment variable; health and the daemon log carry it.
+func docbankKeyUnavailable(err error) error {
+	message := "Docbank API key unavailable"
+	if e, ok := errors.AsType[*config.CredentialSourceError](err); ok {
+		message += ": " + e.Reason
+	}
+	return api.NewError(http.StatusServiceUnavailable, "docbank_key_unavailable", message, "Run kata doctor on the daemon host to see which [docbank] key source failed.", nil)
 }
 
 // The ten extension entries work even on hosts without a MIME database.
@@ -158,7 +174,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, docbankError(err, docbankUploadErrors)
 		}
-		return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, e)
+		return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, e, nil)
 	})
 	huma.Register(h, huma.Operation{OperationID: "attachmentContent", Method: "GET", Path: attachmentPath + "/{attachment_id}/content", Responses: map[string]*huma.Response{"200": {Description: "Attachment content.", Content: binaryContent("*/*")}}}, func(ctx context.Context, in *api.AttachmentReadRequest) (*huma.StreamResponse, error) {
 		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -203,7 +219,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 	})
 }
 
-func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string, e metadata.Attachment) (*api.AddAttachmentResponse, error) {
+func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string, e metadata.Attachment, reuseVersion *uuid.UUID) (*api.AddAttachmentResponse, error) {
 	e.MediaType = "application/octet-stream"
 	if typ := attachmentTypes[strings.ToLower(path.Ext(e.Name))]; typ != "" {
 		e.MediaType = typ
@@ -219,7 +235,22 @@ func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss 
 	if err := recheckAttachmentWrite(ctx, cfg, projectID, iss, actor); err != nil {
 		return nil, err
 	}
-	res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor, Patch: map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}})
+	patch := map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}
+	if reuseVersion != nil {
+		// Recheck under the metadata write transaction so concurrent retries
+		// cannot each observe an absent reference and create a second one.
+		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
+			existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion})
+			if err != nil {
+				return nil, err
+			}
+			if existingID != "" {
+				return map[string]jsontext.Value{}, nil
+			}
+			return patch, nil
+		})
+	}
+	res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor, Patch: patch})
 	if errors.Is(err, db.ErrFederatedReadOnly) {
 		return nil, federationReadOnlyError(err)
 	}
@@ -228,6 +259,15 @@ func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss 
 	}
 	if res.Changed {
 		cfg.Publish().Event(res.Event.ProjectID, res.Event)
+	}
+	if reuseVersion != nil {
+		id, e, err = attachmentForVersion(res.Issue, docbank.Version{ID: *reuseVersion})
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		if id == "" {
+			return nil, internalAPIError(errors.New("reused attachment missing after metadata patch"))
+		}
 	}
 	return &api.AddAttachmentResponse{Body: api.AddAttachmentResponseBody{ID: id, Attachment: e}}, nil
 }

@@ -1,7 +1,7 @@
 ---
 title: Agent output format
 description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
-last_edited: 2026-10-12
+last_edited: 2026-11-05
 ---
 
 # Agent output format
@@ -82,6 +82,8 @@ Hint: run "kata init --project <name>" in the workspace root, or pass --project 
 - Create idempotency and look-alike conflicts append the existing issues'
   qualified refs, for example
   `ERR create conflict: 1 existing issue matches this title (example-project#abc4)`.
+  Human-mode look-alike refusals include the same refs after the message,
+  for example `kata: 1 existing issue matches this title (example-project#abc4)`.
 - `<kind>` reuses the CLI error taxonomy: `usage`, `validation`, `not_found`,
   `conflict`, `confirm`, `daemon_unavailable`, `checks_failed`, `internal`.
   `checks_failed` means `kata doctor` completed and found failed checks;

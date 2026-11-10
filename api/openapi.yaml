@@ -1654,6 +1654,21 @@ components:
       required:
         - revoked
       type: object
+    DocbankHealth:
+      additionalProperties: true
+      properties:
+        credential:
+          description: Docbank API key state, ok or missing; an advisory warning that does not change health.ok.
+          type: string
+        credential_reason:
+          description: Why the key source cannot supply a key.
+          type: string
+        credential_source:
+          description: "Key source that failed: file:<path> or env:<NAME>; never the key value."
+          type: string
+      required:
+        - credential
+      type: object
     DoctorResponseBody:
       additionalProperties: true
       properties:
@@ -1862,10 +1877,10 @@ components:
           format: int64
           type: integer
         last_error:
-          description: Sanitized credential rejection; cleared after the next successful embedding call.
+          description: Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call.
           type: string
         last_error_at:
-          description: Time of the credential rejection; cleared after the next successful embedding call.
+          description: Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call.
           format: date-time
           type: string
         last_error_status:
@@ -2074,6 +2089,8 @@ components:
       additionalProperties: false
       properties:
         account:
+          type: string
+        attachment_id:
           type: string
         command:
           type: string
@@ -2624,6 +2641,11 @@ components:
           items:
             $ref: "#/components/schemas/FederationIngestEventEnvelope"
           type: array
+        move_source_tokens:
+          additionalProperties:
+            type: string
+          description: Supplemental project credentials proving move-source or current-project authority for fresh delayed events; transport-only, never persisted in event history.
+          type: object
         schema_version:
           format: int64
           type: integer
@@ -3017,6 +3039,8 @@ components:
           type: string
         db_path:
           type: string
+        docbank:
+          $ref: "#/components/schemas/DocbankHealth"
         embeddings:
           $ref: "#/components/schemas/EmbeddingsHealth"
         federation_config:
@@ -3583,6 +3607,9 @@ components:
           type: object
         occurrence_key:
           type: string
+        oversized:
+          description: Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+          type: boolean
         owner:
           type: string
         parent:
@@ -3996,6 +4023,9 @@ components:
           type: integer
         path:
           type: string
+        reuse_existing:
+          description: When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
+          type: boolean
         version_id:
           format: uuid
           type: string
@@ -4216,6 +4246,9 @@ components:
           type: object
         occurrence_key:
           type: string
+        oversized:
+          description: Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+          type: boolean
         owner:
           type: string
         parent:
@@ -4349,6 +4382,278 @@ components:
       required:
         - tokens
         - observed_at
+      type: object
+    LocalEmbeddingsIndexing:
+      additionalProperties: true
+      properties:
+        done:
+          format: int64
+          type: integer
+        eta_seconds:
+          format: int64
+          type: integer
+        failed:
+          type: boolean
+        total:
+          format: int64
+          type: integer
+      required:
+        - done
+        - total
+        - failed
+      type: object
+    LocalEmbeddingsJob:
+      additionalProperties: true
+      properties:
+        downloaded:
+          format: int64
+          type: integer
+        error:
+          type: string
+        state:
+          type: string
+        total:
+          format: int64
+          type: integer
+      required:
+        - state
+        - downloaded
+        - total
+      type: object
+    LocalEmbeddingsStatus:
+      additionalProperties: true
+      properties:
+        can_change:
+          type: boolean
+        download_bytes:
+          format: int64
+          type: integer
+        indexing:
+          $ref: "#/components/schemas/LocalEmbeddingsIndexing"
+        job:
+          $ref: "#/components/schemas/LocalEmbeddingsJob"
+        ollama_available:
+          type: boolean
+        provider:
+          enum:
+            - none
+            - ollama
+            - built_in
+            - other
+          type: string
+      required:
+        - provider
+        - download_bytes
+        - ollama_available
+        - can_change
+      type: object
+    MCPEventsArguments:
+      additionalProperties: false
+      properties:
+        all_projects:
+          type: boolean
+        for:
+          type: string
+        issue_uid:
+          type: string
+        project_uids:
+          items:
+            type: string
+          type: array
+      required:
+        - for
+      type: object
+    MCPEventsDelivery:
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+        secret:
+          type: string
+        url:
+          type: string
+      required:
+        - mode
+        - url
+      type: object
+    MCPEventsDeliveryStatus:
+      additionalProperties: true
+      properties:
+        active:
+          type: boolean
+        failed_since:
+          format: date-time
+          type: string
+        last_delivery_at:
+          format: date-time
+          type: string
+        last_error:
+          type: string
+      required:
+        - active
+      type: object
+    MCPEventsEventDefinition:
+      additionalProperties: true
+      properties:
+        delivery:
+          items:
+            type: string
+          type: array
+        description:
+          type: string
+        input_schema:
+          additionalProperties: true
+          type: object
+        name:
+          type: string
+        payload_schema:
+          additionalProperties: true
+          type: object
+      required:
+        - name
+        - description
+        - delivery
+        - input_schema
+        - payload_schema
+      type: object
+    MCPEventsForwarderScope:
+      additionalProperties: false
+      properties:
+        all:
+          type: boolean
+        projects:
+          items:
+            type: string
+          type: array
+      type: object
+    MCPEventsListResponseBody:
+      additionalProperties: true
+      properties:
+        events:
+          items:
+            $ref: "#/components/schemas/MCPEventsEventDefinition"
+          type: array
+      required:
+        - events
+      type: object
+    MCPEventsSubscribeBody:
+      additionalProperties: false
+      properties:
+        arguments:
+          $ref: "#/components/schemas/MCPEventsArguments"
+        delivery:
+          $ref: "#/components/schemas/MCPEventsDelivery"
+        forwarder_scope:
+          $ref: "#/components/schemas/MCPEventsForwarderScope"
+        name:
+          type: string
+        no_expiry:
+          type: boolean
+        ttl_ms:
+          format: int64
+          type: integer
+      required:
+        - name
+        - arguments
+        - delivery
+      type: object
+    MCPEventsSubscribeResponseBody:
+      additionalProperties: true
+      properties:
+        delivery_status:
+          $ref: "#/components/schemas/MCPEventsDeliveryStatus"
+        id:
+          type: string
+        refresh_before:
+          format: date-time
+          type:
+            - string
+            - "null"
+      required:
+        - id
+        - refresh_before
+        - delivery_status
+      type: object
+    MCPEventsSubscriptionStatus:
+      additionalProperties: true
+      properties:
+        dead_letter_count:
+          format: int64
+          type: integer
+        delivery:
+          $ref: "#/components/schemas/MCPEventsDeliveryStatus"
+        end_reason:
+          type: string
+        failed_attempts:
+          format: int64
+          type: integer
+        id:
+          type: string
+        issue_uid:
+          type: string
+        name:
+          type: string
+        pending_control:
+          type: string
+        project_uids:
+          items:
+            type: string
+          type: array
+        recipient:
+          type: string
+        refresh_before:
+          format: date-time
+          type:
+            - string
+            - "null"
+        state:
+          type: string
+      required:
+        - id
+        - name
+        - recipient
+        - state
+        - refresh_before
+        - delivery
+        - failed_attempts
+        - dead_letter_count
+      type: object
+    MCPEventsSubscriptionsResponseBody:
+      additionalProperties: true
+      properties:
+        enabled:
+          type: boolean
+        reason:
+          type: string
+        subscriptions:
+          items:
+            $ref: "#/components/schemas/MCPEventsSubscriptionStatus"
+          type: array
+      required:
+        - enabled
+        - subscriptions
+      type: object
+    MCPEventsUnsubscribeBody:
+      additionalProperties: false
+      properties:
+        arguments:
+          $ref: "#/components/schemas/MCPEventsArguments"
+        delivery:
+          $ref: "#/components/schemas/MCPEventsDelivery"
+        name:
+          type: string
+      required:
+        - name
+        - arguments
+        - delivery
+      type: object
+    MCPEventsUnsubscribeResponseBody:
+      additionalProperties: true
+      properties:
+        unsubscribed:
+          type: boolean
+      required:
+        - unsubscribed
       type: object
     MapConnectorFieldRequestBody:
       additionalProperties: false
@@ -4748,6 +5053,8 @@ components:
     PollEventsBody:
       additionalProperties: true
       properties:
+        effective_close_event_uid:
+          type: string
         events:
           items:
             $ref: "#/components/schemas/EventEnvelope"
@@ -5400,6 +5707,9 @@ components:
           type: object
         occurrence_key:
           type: string
+        oversized:
+          description: Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+          type: boolean
         owner:
           type: string
         parent:
@@ -7235,7 +7545,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.38.0
+  version: 0.44.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -7496,6 +7806,61 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/embeddings/local:
+    get:
+      operationId: getLocalEmbeddings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalEmbeddingsStatus"
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+    post:
+      operationId: turnOnLocalEmbeddings
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalEmbeddingsStatus"
+          description: Accepted
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
   /api/v1/events:
     get:
       operationId: pollEvents
@@ -8005,6 +8370,13 @@ paths:
           schema:
             description: Count all matching issues, ignoring cursor and limit
             type: boolean
+        - description: Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+          explode: false
+          in: query
+          name: compact
+          schema:
+            description: Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+            type: boolean
         - explode: false
           in: query
           name: project_id
@@ -8147,6 +8519,86 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/mcp-events/list:
+    post:
+      operationId: mcpEventsList
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MCPEventsListResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: List the MCP Events this daemon can deliver
+  /api/v1/mcp-events/subscribe:
+    post:
+      operationId: mcpEventsSubscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MCPEventsSubscribeBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MCPEventsSubscribeResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Create or refresh an MCP Events webhook subscription
+  /api/v1/mcp-events/subscriptions:
+    get:
+      operationId: mcpEventSubscriptions
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MCPEventsSubscriptionsResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: List the caller's MCP Events subscriptions and whether Events is running
+  /api/v1/mcp-events/unsubscribe:
+    post:
+      operationId: mcpEventsUnsubscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MCPEventsUnsubscribeBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MCPEventsUnsubscribeResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: End an MCP Events webhook subscription
   /api/v1/ping:
     get:
       operationId: ping
@@ -9048,6 +9500,13 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: Include the effective native close event UID in issue history when available.
+          explode: false
+          in: query
+          name: include_effective_close_event_uid
+          schema:
+            description: Include the effective native close event UID in issue history when available.
+            type: boolean
       responses:
         "200":
           content:
@@ -9172,6 +9631,13 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: Read retained history only for an issue currently owned by this project, independently of the project cursor.
+          explode: false
+          in: query
+          name: issue_uid
+          schema:
+            description: Read retained history only for an issue currently owned by this project, independently of the project cursor.
+            type: string
         - explode: false
           in: query
           name: limit
@@ -9748,6 +10214,13 @@ paths:
           name: include_total
           schema:
             description: Count all matching issues, ignoring cursor and limit
+            type: boolean
+        - description: Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+          explode: false
+          in: query
+          name: compact
+          schema:
+            description: Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
             type: boolean
         - in: path
           name: project_id
@@ -11573,6 +12046,16 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+            enum:
+              - priority
+              - ""
+            type: string
         - explode: false
           in: query
           name: limit
@@ -11888,6 +12371,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/SearchResponseBody"
           description: OK
+          headers:
+            X-Kata-Embeddings-Configured:
+              schema:
+                description: Whether the daemon has an embeddings provider configured.
+                type: string
         "400":
           content:
             application/json:
@@ -11940,6 +12428,16 @@ paths:
     get:
       operationId: readyIssuesGlobal
       parameters:
+        - description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+            enum:
+              - priority
+              - ""
+            type: string
         - explode: false
           in: query
           name: limit

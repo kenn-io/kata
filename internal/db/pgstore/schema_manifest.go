@@ -11,19 +11,20 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "e39313e493aca5629098c150076ee7e1aa04a8d747d8704001e741401fe3df50"
-	canonicalConstraintFingerprint = "ec4c05a641252558d8b52b92ed9ff97c9310064e5f8ad2ab8c636fba65344a17"
-	canonicalIndexFingerprint      = "c3057366dc5aee347095bf78e57fc5de9ae5e87fbc0f3b8f346ee53eb2f256e4"
+	canonicalColumnFingerprint     = "2c573a26533e056618e458d7addc7836bf7d95e98b0ad258b6b7c2a50725186d"
+	canonicalConstraintFingerprint = "21a6429d8b06093928339598c69f71d48d65330c78e3274cbe8bcabc9fd5ed14"
+	canonicalIndexFingerprint      = "49e4ef892933e98de9171cc6932d8137221b410d3caba1486c5bcbe3f8aca876"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
-	canonicalTriggerFingerprint    = "34f80f8e2b61c6cb1705bb8effb1548164e91f181fb58b68cf929ac90a190154"
-	canonicalFunctionFingerprint   = "f96c6a857ec7bc7c3e5c1cebdd3d7b795547f4399f8f65ea0aa9befa98681741"
+	canonicalTriggerFingerprint    = "d027a602b31936d09dee01e5182c092c9245faf34edb2c0445ac36795a4a3b46"
+	canonicalFunctionFingerprint   = "be74ea17e4c0192144ab7f75740b168dc1eb7cc45de15a34aaf3a69c1ffdb7f8"
 	canonicalTextSearchFingerprint = "1206eb613d5e4cf9c00c447998c337ece326819f8b3261668f7a8c685571db06"
 )
 
 //nolint:gosec // This manifest lists canonical schema columns, including credential column names, not secret values.
 var canonicalTableColumns = map[string]string{
+	"mcp_event_subscriptions":        "id,principal_authority,principal_subject,principal_key,actor,event_name,arguments,callback_url,secret_enc,previous_secret_enc,previous_secret_until,verified_at,incarnation,generation,state,end_reason,expires_at,dirty,catalog_version,pending_kind,pending_message_id,pending_body,attempt_count,next_attempt_at,claim_token,claim_until,failed_since,failed_attempts,last_delivery_at,last_error,dead_letter_count,ended_at,created_at,updated_at",
 	"cron_runs":                      "id,uid,project_id,job_uid,definition_event_uid,workflow_uid,workflow_definition_event_uid,occurrence_key,issue_uid,actor,teammate,executor_label,status,summary_json,revision,created_at,started_at,ended_at,updated_at",
 	"cron_workflows":                 "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
 	"cron_jobs":                      "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
@@ -73,17 +74,19 @@ var optionalVectorTableColumns = map[string]string{
 }
 
 var canonicalIndexes = strings.Fields(`
-idx_cron_jobs_project_name idx_cron_workflows_project_name idx_cron_runs_project_time idx_cron_runs_job_time idx_events_project_cron
+idx_mcp_event_subscriptions_due idx_mcp_event_subscriptions_principal_callback idx_mcp_event_subscriptions_ended
+idx_cron_jobs_project_name idx_cron_workflows_project_name idx_cron_runs_project_time idx_cron_runs_job_time idx_events_project_cron idx_events_cron_run_uid
 idx_embedding_artifacts_input idx_embedding_artifacts_staging
 idx_relay_outbox_pending idx_relay_inbox_prefix
 uniq_federation_root_active
 idx_team_memberships_actor idx_project_access_teams_team
 idx_projects_active idx_project_aliases_project recurrences_project
 idx_issues_project_status_updated idx_issues_project_updated idx_issues_owner idx_issues_assignment_expires_on
+idx_issues_project_created idx_issues_created idx_issues_uid_prefix idx_issues_project_uid_prefix
 uniq_issues_project_short_id issues_recurrence_occurrence_uniq idx_comments_issue idx_comments_reply_to idx_comments_uid_handle
 uniq_one_parent_per_child idx_links_from idx_links_to idx_links_from_uid idx_links_to_uid
 idx_issue_labels_label idx_events_project idx_events_issue idx_events_related
-idx_events_issue_uid idx_events_moved_from idx_events_reply_to idx_events_related_issue_uid idx_events_origin_instance
+idx_events_issue_uid idx_events_resolved_issue_uid idx_events_moved_from idx_events_moved_from_id idx_events_reset_from idx_events_reply_to idx_events_related_issue_uid idx_events_origin_instance
 idx_events_origin_project_id idx_events_hlc idx_events_content_hash idx_events_idempotency
 idx_purge_log_reset idx_purge_log_project_reset idx_purge_log_issue idx_purge_log_issue_uid
 idx_purge_log_project_uid idx_purge_log_origin_instance idx_purge_log_short_id
@@ -93,7 +96,7 @@ idx_external_field_mappings_active
 idx_issue_sync_bindings_due idx_issue_sync_status_project idx_issue_sync_status_due
 uniq_federation_quarantine_active idx_federation_enrollments_scope idx_federation_enrollments_spoke
 uniq_issue_claims_live_issue idx_issue_claims_project_issue idx_issue_claims_timed_expiry
-uniq_pending_claim_active idx_issues_search_tsv idx_import_mappings_issue
+uniq_pending_claim_active idx_issues_search_tsv idx_comments_search idx_import_mappings_issue
 idx_import_mappings_comment idx_import_mappings_link`)
 
 var optionalVectorIndexes = []string{"idx_issue_vector_chunks_generation"}
@@ -101,8 +104,7 @@ var optionalVectorIndexes = []string{"idx_issue_vector_chunks_generation"}
 var canonicalTriggers = strings.Fields(`
 trg_links_uid_consistency_insert trg_links_uid_consistency_update
 trg_projects_uid_immutable trg_issues_uid_immutable trg_issue_sync_binding_immutable
-issues_search_after_issue_insert issues_search_after_issue_update
-issues_search_after_comment_insert issues_search_after_comment_update issues_search_after_comment_delete`)
+issues_search_after_issue_insert issues_search_after_issue_update`)
 
 var canonicalFunctions = strings.Fields(`
 enforce_links_uid_consistency()
@@ -110,10 +112,7 @@ enforce_uid_immutable()
 rewrite_project_uid_for_adoption(bigint,text)
 enforce_issue_sync_binding_immutable()
 rebuild_issue_search(bigint)
-issues_search_trigger_on_issue()
-issues_search_trigger_on_comment_insert()
-issues_search_trigger_on_comment_update()
-issues_search_trigger_on_comment_delete()`)
+issues_search_trigger_on_issue()`)
 
 func (s *Store) validateSchemaManifest(ctx context.Context) error {
 	vectorsInstalled, err := s.vectorRelationsInstalled(ctx)

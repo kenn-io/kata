@@ -18,6 +18,7 @@ import (
 
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -190,8 +191,13 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		results = results[:limit]
 		truncated = true
 	}
+	var hints []searchhint.Hint
+	if len(searches) > 0 {
+		hints = searchhint.EmptyLexical(query, effectiveMode, len(results), input.Cursor == "")
+	}
 	project, outputProjects := outputProjectScope(projects)
 	return successResult(), SearchOutput{
+		Hints:          hints,
 		Project:        project,
 		Projects:       outputProjects,
 		Query:          query,
@@ -1268,7 +1274,13 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 	if qualified == "" {
 		qualified = project.Name + "#" + issue.ShortID
 	}
+	projectUID := project.UID
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
 	return IssueSummary{
+		oversized:           issue.Oversized != nil && *issue.Oversized,
+		projectUID:          projectUID,
 		Author:              issue.Author,
 		AccountableActor:    issue.AccountableActor,
 		SourceActor:         issue.SourceActor,
@@ -1298,7 +1310,13 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 }
 
 func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
+	projectUID := ""
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
 	return IssueSummary{
+		oversized:        issue.Oversized != nil && *issue.Oversized,
+		projectUID:       projectUID,
 		Author:           issue.Author,
 		AccountableActor: issue.AccountableActor,
 		SourceActor:      issue.SourceActor,
@@ -1537,7 +1555,7 @@ func linkPeerSummary(peer *generated.LinkPeer) *LinkPeerSummary {
 func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdentity, input Evidence) (generated.Evidence, error) {
 	typeName := strings.TrimSpace(input.Type)
 	allowed := map[string]bool{
-		"commit": true, "pr": true, "test": true, "reviewed-paths": true,
+		"attachment": true, "commit": true, "pr": true, "test": true, "reviewed-paths": true,
 		"external": true, "no-change-audit": true, "duplicate-of": true, "superseded-by": true,
 	}
 	if !allowed[typeName] {
@@ -1545,6 +1563,9 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	}
 	paths := compactStrings(input.Paths)
 	result := generated.Evidence{Type: typeName, Paths: paths}
+	if strings.TrimSpace(input.AttachmentID) != "" {
+		result.AttachmentID = new(input.AttachmentID)
+	}
 	result.Sha = optionalString(input.SHA)
 	result.URL = optionalString(input.URL)
 	result.Command = optionalString(input.Command)
@@ -1558,6 +1579,11 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 		result.IssueRef = &target.IssueUID
 	}
 	switch typeName {
+	case "attachment":
+		if result.AttachmentID == nil {
+			return generated.Evidence{}, errors.New("attachment evidence requires attachment_id")
+		}
+
 	case "commit":
 		if result.Sha == nil {
 			return generated.Evidence{}, errors.New("commit evidence requires sha")

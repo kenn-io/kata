@@ -11,7 +11,7 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 )
 
-func TestSearchKitBuildersPreserveFieldsScopeAndOrdering(t *testing.T) {
+func TestSearchFTSScopeFiltersAndTieBreak(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires isolated PostgreSQL")
 	}
@@ -46,6 +46,13 @@ func TestSearchKitBuildersPreserveFieldsScopeAndOrdering(t *testing.T) {
 				"cafe": {"title"}, "session": {"body"}, "browser": {"comments"},
 				"login session browser": {"title", "body", "comments"},
 			} {
+				if name == "any" {
+					if query == "browser" {
+						continue
+					} else if query == "login session browser" {
+						fields = []string{"title", "body"}
+					}
+				}
 				hits, err := search(ctx, db.SearchFTSParams{
 					ProjectID: project.ID, Query: query, Limit: 1, Status: "open", Labels: []string{"BUG"},
 					IssueScope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID},
@@ -67,6 +74,44 @@ func TestSearchKitBuildersPreserveFieldsScopeAndOrdering(t *testing.T) {
 			hits, err = search(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: "login", Limit: 1, ExcludeLabels: []string{"BUG"}})
 			require.NoError(t, err)
 			require.Empty(t, hits)
+		})
+	}
+}
+
+func TestSearchFTS_PunctuationLexemes(t *testing.T) {
+	ctx := t.Context()
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login http://a.example/x'y", Body: "browser", Author: "tester"})
+	require.NoError(t, err)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "timeout"})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, query string
+		any         bool
+		fields      []string
+	}{
+		{"all_across_documents", "login,browser,timeout", false, []string{"title", "body", "comments"}},
+		{"any_lexeme", "login,absent", true, []string{"title"}},
+		{"distinct_lexemes", "login,login timeout", false, []string{"title", "comments"}},
+		{"literal_url_all", "http://a.example/x'y", false, []string{"title"}},
+		{"literal_url_any", "http://a.example/x'y", true, []string{"title"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			search := store.SearchFTS
+			if tc.any {
+				search = store.SearchFTSAny
+			}
+			hits, err := search(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: tc.query})
+			require.NoError(t, err)
+			require.Len(t, hits, 1)
+			require.Equal(t, issue.ID, hits[0].Issue.ID)
+			require.Equal(t, tc.fields, hits[0].MatchedIn)
 		})
 	}
 }

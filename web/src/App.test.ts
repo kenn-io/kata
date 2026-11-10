@@ -4,7 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
+vi.mock('./lib/kata/projection', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./lib/kata/projection')>()
+  return { ...original, normalizeKataUISnapshot: vi.fn(original.normalizeKataUISnapshot) }
+})
+
 import App from './App.svelte'
+import { normalizeKataUISnapshot } from './lib/kata/projection'
 import { preferencesStorageKey } from './lib/state/preferences'
 
 describe('App', () => {
@@ -21,6 +27,48 @@ describe('App', () => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('keeps the normalized collection when focus revalidation returns unchanged', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const requests: Request[] = []
+    let referencesRequested = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/references')) {
+          referencesRequested = true
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        requests.push(request)
+        if (request.headers.get('If-None-Match') === '"snapshot-1"')
+          return new Response(null, { status: 304 })
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await screen.findByRole('button', { name: /Example issue/ })
+    await waitFor(() => expect(referencesRequested).toBe(true))
+    await tick()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    expect(normalizations).toBeGreaterThan(0)
+    await fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(requests).toHaveLength(2))
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).not.toBe('true'),
+    )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
   it.each([
@@ -1617,6 +1665,76 @@ describe('App', () => {
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('admin-session')
   })
 
+  it.each(['accepted', 'rejected-session'] as const)(
+    'turns on search directly for a selected local daemon and handles %s',
+    async (outcome) => {
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const off = {
+        provider: 'none',
+        can_change: true,
+        download_bytes: 289184780,
+        ollama_available: false,
+      }
+      const posts: Request[] = []
+      let statusPath: string | undefined
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const target = new URL(request.url)
+          if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (target.pathname === '/api/v1/ui/daemons') {
+            return Response.json({
+              daemons: daemonRoster().daemons.map((daemon) => ({ ...daemon, local: true })),
+            })
+          }
+          if (target.pathname.endsWith('/references')) {
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          }
+          if (target.pathname.endsWith('/embeddings/local')) {
+            if (request.method === 'POST') {
+              posts.push(request)
+              return outcome === 'accepted'
+                ? Response.json(
+                    { ...off, can_change: false, job: { state: 'restart' } },
+                    { status: 202 },
+                  )
+                : new Response('', { status: 401 })
+            }
+            statusPath = target.pathname
+            return Response.json(off)
+          }
+          if (target.pathname.endsWith('/snapshot')) {
+            return Response.json(snapshot(), {
+              headers: { ETag: '"snapshot"', 'X-Kata-Web-Authentication': 'login' },
+            })
+          }
+          throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+        }),
+      )
+      render(App)
+      await screen.findByRole('button', { name: /Example issue/ })
+      await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+      await fireEvent.click(await screen.findByRole('button', { name: 'Turn on' }))
+
+      if (outcome === 'accepted') {
+        await waitFor(() => expect(posts).toHaveLength(1))
+        expect(sessionStorage.getItem('kata.web.session.v1')).toContain('tab-session')
+      } else {
+        await screen.findByRole('form', { name: 'Log in to Kata' })
+        expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
+      }
+      expect(statusPath).toBe('/api/v1/ui/proxy/api/v1/embeddings/local')
+      expect(posts).toHaveLength(1)
+      expect(posts[0]!.headers.get('X-Kata-Web-Daemon')).toBeNull()
+      expect(posts[0]!.headers.get('X-Kata-Web-Session')).toBe('tab-session')
+      expect(posts[0]!.headers.get('X-Kata-CSRF')).toBe('tab-csrf')
+    },
+  )
+
   it('routes a credential-list 401 through the existing authentication-loss transition', async () => {
     history.replaceState(null, '', '/kata?view=credentials#direct=1')
     sessionStorage.setItem(
@@ -1970,6 +2088,153 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
+
+  it.each(['success', 'creation refusal', 'designation retry', 'conflict', 'event overlap'])(
+    'creates the first project as Inbox before opening task capture: %s',
+    async (outcome) => {
+      history.replaceState(null, '', '/kata#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const created = snapshot()
+      created.collection = []
+      created.catalog[0]!.project.revision = 1
+      if (outcome === 'event overlap') created.capabilities.updates = 'sse'
+      const empty = { ...created, catalog: [] }
+      let accepted: typeof created = empty
+      const requests: Request[] = []
+      let recoveryReads = 0
+      let designationRefused = false
+      let projectExists = false
+      let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+      let finishCreation: (() => void) | undefined
+      let release: (() => void) | undefined
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          requests.push(request)
+          const path = new URL(request.url).pathname
+          if (path === '/api/v1/events/stream')
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  stream = controller
+                  request.signal.addEventListener('abort', () => controller.close(), { once: true })
+                },
+              }),
+              { headers: { 'Content-Type': 'text/event-stream' } },
+            )
+          if (path === '/api/v1/ui/snapshot' && finishCreation) {
+            const complete = finishCreation
+            finishCreation = undefined
+            complete()
+            return new Promise<Response>((resolve) => {
+              release = () => resolve(Response.json(created))
+            })
+          }
+          if (request.method === 'POST' && path === '/api/v1/projects') {
+            if (outcome === 'creation refusal')
+              return Response.json(
+                { error: { code: 'validation', message: 'Project creation refused' } },
+                { status: 422 },
+              )
+            accepted = created
+            const response = Response.json({
+              created: !projectExists,
+              project: created.catalog[0]!.project,
+            })
+            projectExists = true
+            if (outcome === 'event overlap') {
+              stream!.enqueue(
+                new TextEncoder().encode('id: 13\nevent: project.created\ndata: {}\n\n'),
+              )
+              return new Promise<Response>((resolve) => (finishCreation = () => resolve(response)))
+            }
+            return response
+          }
+          if (request.method === 'POST' && path === '/api/v1/projects/7/metadata') {
+            if (
+              (outcome === 'designation retry' || outcome === 'conflict') &&
+              !designationRefused
+            ) {
+              designationRefused = true
+              return Response.json(
+                {
+                  error: {
+                    code: outcome === 'conflict' ? 'revision_conflict' : 'validation',
+                    message: 'Inbox designation refused',
+                  },
+                },
+                { status: outcome === 'conflict' ? 412 : 422 },
+              )
+            }
+            created.catalog[0]!.project.metadata.role = 'inbox'
+            created.catalog[0]!.project.revision = 2
+            return Response.json({ changed: true, project: created.catalog[0]!.project })
+          }
+          if (designationRefused && path === '/api/v1/ui/snapshot') recoveryReads += 1
+          return new Response(JSON.stringify(accepted), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${requests.length}"` },
+          })
+        }),
+      )
+      render(App)
+      await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+      const input = screen.getByRole('textbox', { name: 'New project name' })
+      await fireEvent.input(input, { target: { value: 'example-project' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      if (
+        outcome === 'creation refusal' ||
+        outcome === 'designation retry' ||
+        outcome === 'conflict'
+      ) {
+        await waitFor(() => {
+          expect(
+            requests.some(
+              (request) =>
+                request.method === 'POST' && new URL(request.url).pathname === '/api/v1/projects',
+            ),
+          ).toBe(true)
+          expect((input as HTMLInputElement).disabled).toBe(false)
+        })
+        if (outcome === 'creation refusal') {
+          expect(
+            requests.some((request) => new URL(request.url).pathname.endsWith('/metadata')),
+          ).toBe(false)
+          return
+        }
+        expect(await screen.findByRole('button', { name: /example-project/ })).not.toBeNull()
+        await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false))
+        expect(recoveryReads).toBe(1)
+        if (outcome !== 'conflict') await fireEvent.keyDown(input, { key: 'Enter' })
+      }
+      if (outcome !== 'conflict')
+        expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
+      const designation = requests.findLast(
+        (request) =>
+          request.method === 'POST' &&
+          new URL(request.url).pathname === '/api/v1/projects/7/metadata',
+      )!
+      expect(await designation.json()).toEqual({ actor: 'kata-web', patch: { role: 'inbox' } })
+      expect(designation.headers.get('If-Match')).toBe('"rev-1"')
+      if (outcome === 'conflict') return
+      expect(screen.getByRole('dialog', { name: 'New task' }).textContent).toContain(
+        'example-project',
+      )
+      if (outcome === 'event overlap') {
+        expect(release).toBeDefined()
+        release!()
+        await waitFor(() =>
+          expect(
+            (screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).disabled,
+          ).toBe(false),
+        )
+      }
+    },
+  )
 
   it('designates the capture Inbox from New task on a fresh catalog', async () => {
     history.replaceState(null, '', '/kata#direct=1')
@@ -2707,8 +2972,12 @@ describe('App', () => {
         }
         if (target.pathname === '/api/v1/ui/snapshot') {
           snapshotRequests.push(request)
+          const etag = snapshotRequests.length === 1 ? '"snapshot-1"' : '"snapshot-2"'
+          if (request.headers.get('If-None-Match') === etag) {
+            return new Response(null, { status: 304 })
+          }
           return Response.json(snapshotRequests.length === 1 ? initial : refreshed, {
-            headers: { ETag: `"snapshot-${snapshotRequests.length}"` },
+            headers: { ETag: etag },
           })
         }
         throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
@@ -2735,10 +3004,98 @@ describe('App', () => {
     )
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
-    expect(snapshotRequests[1]?.headers.has('If-None-Match')).toBe(false)
+    expect(snapshotRequests[1]?.headers.get('If-None-Match')).toBe('"snapshot-1"')
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /Revoked project issue/ })).toBeNull(),
     )
+  })
+
+  it('revalidates without normalizing again when SSE opens after load and row selection', async () => {
+    history.replaceState(null, '', '/kata?view=inbox#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const current = snapshot()
+    current.capabilities.updates = 'sse'
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/events/stream') {
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                init?.signal?.addEventListener('abort', () => controller.close(), { once: true })
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        }
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          if (target.searchParams.has('selected_issue_uid')) {
+            if (request.headers.get('If-None-Match') === '"snapshot-selected"') {
+              return new Response(null, { status: 304 })
+            }
+            return Response.json(
+              {
+                ...current,
+                selected: {
+                  state: 'available',
+                  issue: current.collection[0],
+                  comments: [],
+                  labels: [],
+                  links: [],
+                  recurrences: [],
+                  history: [],
+                },
+              },
+              { headers: { ETag: '"snapshot-selected"' } },
+            )
+          }
+          if (request.headers.get('If-None-Match') === '"snapshot-1"') {
+            return new Response(null, { status: 304 })
+          }
+          return Response.json(current, { headers: { ETag: '"snapshot-1"' } })
+        }
+        throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    render(App)
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(2))
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 1)
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(4))
+    expect(new URL(snapshotRequests[2]!.url).searchParams.get('selected_issue_uid')).toBe(
+      '01J00000000000000000000001',
+    )
+    expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
+    expect(snapshotRequests[3]?.headers.get('If-None-Match')).toBe('"snapshot-selected"')
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 2)
   })
 
   it('refreshes membership after an SSE reconnect opens', async () => {

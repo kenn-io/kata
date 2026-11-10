@@ -14,6 +14,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
@@ -360,15 +361,6 @@ func TestUndoCloseWithoutBacklogReopensDirectly(t *testing.T) {
 	}
 }
 
-func TestReopenBacklogModalFooterShowsChoices(t *testing.T) {
-	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
-	m, _ := updateModel(listReopenModel(t, spy), tea.WindowSizeMsg{Width: 120, Height: 40})
-	m, _ = pressReopen(t, m)
-	footer := stripANSI(m.View().Content)
-	require.Contains(t, footer, "reopen")
-	require.Contains(t, footer, "cancel")
-}
-
 // Without a backlog reader the key still reopens, with the row's project, ref and actor.
 func TestReopenDispatchesRowAndActor(t *testing.T) {
 	for name, model := range map[string]func(*testing.T, *reopenSpyAPI) Model{"list": listReopenModel, "detail": detailReopenModel} {
@@ -705,7 +697,7 @@ type slowPreflightUndoAPI struct {
 	delay time.Duration
 }
 
-func (s *slowPreflightUndoAPI) GetIssueDetail(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
+func (s *slowPreflightUndoAPI) readIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
 	<-time.After(s.delay)
 	return s.undoTestAPI.GetIssueDetail(ctx, projectID, ref)
 }
@@ -788,5 +780,116 @@ func TestReopenBacklogActionsSurviveNarrowResize(t *testing.T) {
 		require.Contains(t, view, "reopen")
 		require.Contains(t, view, "n/esc")
 		require.Contains(t, view, "cancel")
+	}
+}
+
+// An undo backlog answer that lands after the user opened Help must not open a
+// confirmation there: Help hides the issue it would reopen, and the modal would
+// swallow the `?` that leaves Help. The close stays undoable.
+func TestUndoBacklogAnswerAfterHelpKeepsEntryAndHelpExit(t *testing.T) {
+	m, f := undoCloseModel(t, 5, nil)
+	m = resizeModel(m, 120, 40)
+	updated, cmd := m.Update(runeKey('u'))
+	require.NotNil(t, cmd)
+	m = updated.(Model)
+	reply := cmd()
+	m, _ = updateModel(m, runeKey('?'))
+	require.Equal(t, viewHelp, m.view)
+
+	m, cmd = updateModel(m, reply)
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Nil(t, m.reopenPrompt)
+	require.False(t, m.undoInFlight)
+	require.Len(t, m.undoHistory.entries, 1, "the close stays undoable")
+	require.Zero(t, f.reopenCalls)
+
+	m, _ = updateModel(m, runeKey('?'))
+	require.Equal(t, viewList, m.view, "? still leaves Help")
+
+	m, _ = pressUndo(t, m)
+	require.Equal(t, modalReopenBacklog, m.modal, "undo asks again once the list is back")
+	require.Zero(t, f.reopenCalls)
+}
+
+// A reopen lookup that lands after the user opened Help is dropped the same way.
+func TestReopenBacklogAnswerAfterHelpIsDropped(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m := resizeModel(listReopenModel(t, spy), 200, 40)
+	require.Equal(t, splitlayout.Split, m.layout)
+	m, cmd := updateModel(m, runeKey('r'))
+	require.NotNil(t, cmd)
+	reply := cmd()
+	m, _ = updateModel(m, runeKey('?'))
+	require.Equal(t, viewHelp, m.view)
+
+	m, cmd = updateModel(m, reply)
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Zero(t, spy.reopens)
+}
+
+// The compact confirmation clears the underlying list or detail view.
+func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
+	for _, origin := range []string{"list", "detail"} {
+		for _, size := range [][2]int{{100, 8}, {40, 2}} {
+			t.Run(fmt.Sprintf("%s/%dx%d", origin, size[0], size[1]), func(t *testing.T) {
+				spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+				model := listReopenModel
+				if origin == "detail" {
+					model = detailReopenModel
+				}
+				m, _ := updateModel(model(t, spy), tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+				m, _ = pressReopen(t, m)
+				require.Equal(t, modalReopenBacklog, m.modal)
+				view := stripANSI(m.View().Content)
+				require.NotContains(t, view, "Parent", "the compact confirmation clears the underlying view")
+			})
+		}
+	}
+}
+
+// Undo names the issue with its project, so a long reference must not push the
+// issue ID or backlog count off a narrow compact confirmation.
+func TestReopenBacklogConfirmationFitsSupportedSizes(t *testing.T) {
+	type testCase struct {
+		ref    string
+		wantID string
+		count  int
+		width  int
+		height int
+	}
+	var cases []testCase
+	for _, ref := range []string{"#abcd", "spoke-project#abcd", strings.Repeat("p", 48) + "#abcd"} {
+		for _, count := range []int{3, 12, 168} {
+			for _, width := range []int{40, 41, 47, 55, 80, 130} {
+				for _, height := range []int{2, 3, 4, 8, 14} {
+					cases = append(cases, testCase{ref, "#abcd", count, width, height})
+				}
+			}
+		}
+	}
+	cases = append(cases,
+		testCase{"#abcd", "#abcd", 123456, 40, 2},
+		testCase{backlogParentUID, backlogParentUID, 2503, 40, 8},
+		testCase{"#abcdefgh", "#abcdefgh", 123456, 40, 2},
+	)
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s/%d/%dx%d", tc.ref, tc.count, tc.width, tc.height), func(t *testing.T) {
+			m := resizeModel(newTestModel(), tc.width, tc.height)
+			m.modal = modalReopenBacklog
+			m.reopenPrompt = &reopenPrompt{ref: tc.ref, count: tc.count, undoEntryID: 1}
+			view := stripANSI(m.View().Content)
+			lines := strings.Split(view, "\n")
+			require.LessOrEqual(t, len(lines), tc.height)
+			for _, line := range lines {
+				require.LessOrEqual(t, lipgloss.Width(line), tc.width)
+			}
+			require.Contains(t, view, tc.wantID)
+			text := strings.Join(strings.Fields(strings.ReplaceAll(view, "│", "")), " ")
+			require.Contains(t, text, fmt.Sprintf("%d recurring child issues", tc.count))
+			require.Contains(t, lines[len(lines)-1], "y reopen")
+			require.Contains(t, lines[len(lines)-1], "n/esc cancel")
+		})
 	}
 }

@@ -1,6 +1,18 @@
-# kata カタ
+<h1 align="center">kata カタ</h1>
 
-The issue tracker built for coding agents and the humans steering them.
+<p align="center">
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/kenn-io/kata" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://katatracker.com/docs/"><img src="https://img.shields.io/badge/Docs-katatracker.com-blue" alt="Documentation"></a>
+</p>
+
+<p align="center">
+  <a href="https://katatracker.com/docs/">Documentation</a> ·
+  <a href="https://katatracker.com/docs/get-started/quickstart/">Setup Guide</a> ·
+  <a href="https://katatracker.com/docs/#two-ways-to-supervise">Interactive TUI</a>
+</p>
+
+**The issue tracker built for coding agents and the humans steering them.**
 
 Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the
@@ -9,29 +21,43 @@ same work in a terminal UI. By default, issue state lives in a local SQLite
 database, so your repo stays clean and no hosted tracker is required. When a team
 of humans and agents needs to share, you can opt into a remote daemon or
 federation; a shared daemon can use Postgres by setting `KATA_DSN`.
-Production Postgres deployments can use separate schema-owner and runtime roles;
-see the [operator ceremony](docs/operations/postgres.md).
-Go applications can instead mount kata's listener-free HTTP service in-process;
-see [Embedding kata in Go](docs/development/embedding.md).
-MCP clients can start Kata's native server over stdio or Streamable HTTP with
-`kata mcp serve`. It binds the current workspace's project by default, and can
-serve a fixed allowlist or the complete daemon catalog on request. Section
-loaders progressively expose Kata's typed issue, administration,
-automation, and event workflows. See the [MCP reference](docs/reference/mcp.md).
 
-The documentation in [`docs/`](docs/) is the definitive guide, published with
-Zensical at <https://katatracker.com/>.
+## What you can do
 
-> **Stable:** Since v0.14.0, kata releases preserve backward compatibility
-> across upgrades.
+- **Track work from the CLI.** Create, claim, relate, and close issues with
+  evidence that records what was done and who did it.
+- **Supervise in the terminal or browser.** Browse and triage the same work with
+  `kata tui` or `kata ui`. See the [Web UI guide](docs/guide/web-ui.md).
+- **Automate recurring work.** Schedule `kata cron` jobs and workflows that run
+  on triggers, keep per-run evidence, and let you preview and prune old terminal
+  runs in batches. See the [cron reference](docs/reference/cron.md).
+- **Request attention where the work is.** `kata notify <ref> --to
+  <actor>/<teammate>` flags an issue for a person or agent with a reason and
+  resolves it with `--clear` once handled. See the
+  [CLI reference](docs/reference/cli.md).
+- **Give subagents their own identity.** `KATA_TEAMMATE` attributes a helper's
+  comments and new issues, while `KATA_INBOX_USER` points `kata inbox` and the
+  TUI at that helper's own inbox, so delegated work stays separable. See
+  [Configuration](docs/reference/configuration.md).
+- **Answer evidence with evidence.** Reply to any comment, or record a verdict
+  with `kata comment --confirm`, `--refute`, or `--supersede`, each backed by
+  its own evidence note. See
+  [Teammate requests](docs/reference/cli.md#teammate-requests).
+- **Share when you need to.** Opt into a remote daemon or
+  [federation](docs/operations/federation.md). Shared daemons can use Postgres
+  with `KATA_DSN`, including separate schema-owner and runtime roles; see the
+  [Postgres operator guide](docs/operations/postgres.md).
+- **Connect MCP clients.** Run `kata mcp serve` over stdio or Streamable HTTP.
+  It defaults to the workspace's project, with optional project allowlists or
+  the full daemon catalog and section loaders for typed workflows. See the
+  [MCP reference](docs/reference/mcp.md).
+- **Embed kata in Go.** Mount its listener-free HTTP service in your own
+  application. See [Embedding kata in Go](docs/development/embedding.md).
+- **Keep installations current.** Follow [Updating Kata](docs/get-started/install.md#updating-kata)
+  for installation and federation upgrade guidance, and the
+  [changelog](docs/changelog.md) for release notes.
 
-The latest release is [0.20.0](docs/changelog.md#0200). It adds an Attention
-inbox to the terminal UI, requests for replies to specific comments,
-participant broadcasts, and events for reached schedules. See
-[Updating Kata](docs/get-started/install.md#updating-kata) for installation
-and federation upgrade guidance.
-
-## Install
+## Installation
 
 macOS:
 
@@ -81,40 +107,22 @@ Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin` (often
 [Install](docs/get-started/install.md) for package downloads, manual release
 downloads, and build-from-source steps.
 
+Coding agents follow this loop. `kata quickstart` covers subagents, inboxes,
+attention signals, and scheduling.
+
 ```mermaid
 flowchart TB
-  arrive{"Work arrives"} --> search["Search first:<br/>kata search #34;#60;terms#62;#34; --agent<br/>Same work: reuse the open issue, else create one.<br/>Related work: link each hit with --parent #60;ref#62; #124; --related #60;ref#62;.<br/>If create refuses a look-alike, reuse it;<br/>--force-new only if the work truly differs.<br/>No bound workspace: refs are #60;project#62;##60;id#62;,<br/>or pass --project #60;project#62;."]
-  search --> route{"Work it, or delegate it?"}
-
-  subgraph workside[" "]
-    direction TB
-    claim["Claim and mark it tracked:<br/>kata claim #60;ref#62;<br/>kata meta set #60;ref#62; work.attention ok"]
-    branch["If the work happens on a dedicated branch, stamp it once:<br/>kata meta set #60;ref#62; work.branch #60;branch#62;<br/>or bind at creation:<br/>kata create ... --meta work.branch=#60;branch#62; --idempotency-key #60;key#62;"]
-    live["Keep state current:<br/>kata meta set #60;ref#62; work.attention stuck#124;needs-human#124;ok<br/>kata meta set #60;ref#62; work.attention_msg #34;#60;why#62;#34;<br/>stuck = blocked; needs-human = input/review; ok = unblocked.<br/>Record progress:<br/>kata comment #60;ref#62; -m #34;#60;what changed#62;#34;<br/>Respond to a comment:<br/>kata comment #60;ref#62; --reply#124;--confirm#124;--refute#124;--supersede c:#60;id#62; -m #34;#60;evidence#62;#34;<br/>Request attention:<br/>kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --message #60;reason#62;"]
-    claim --> branch --> live
-  end
-
-  subgraph delegateside[" "]
-    direction TB
-    fanout["Tracked children: --parent #60;ref#62;, --meta work.branch=#60;branch#62;,<br/>--idempotency-key #60;key#62;, --json; capture .issue.short_id.<br/>Subagents: distinct KATA_TEAMMATE and<br/>KATA_INBOX_USER=#60;actor#62;/#60;teammate#62;; keep the actor.<br/>Read requests: kata inbox --for #60;actor#62;[/#60;teammate#62;].<br/>After handling: kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --clear."]
-    join["Join with kata wait #60;refs#62; --until attention --any<br/>Matches needs-human or stuck; a close also completes the wait,<br/>and the reported reason distinguishes which. Use --timeout so a<br/>wrapper can tell timeout from satisfaction."]
-    coord["Read delegated work.*; never write it."]
-    fanout --> join --> coord
-  end
-
-  route -->|work it| claim
-  route -->|delegate it| fanout
-  route -->|record only| park
-  live --> done
-  coord --> done
-
-  done{"Verified complete?"}
-  done -->|yes| close["kata close #60;ref#62; --done --message #34;#60;scope and verification, 40+ chars#62;#34;<br/>--evidence commit:#60;sha#62; #124; pr:#60;url#62; #124; test:#60;cmd#62; #124; reviewed-paths:#60;path#62;<br/>(or --commit, --pr, --test, --reviewed)"]
-  done -->|duplicate, superseded or dropped| retire["kata close #60;ref#62; --message #34;#60;why#62;#34;<br/>--duplicate-of #60;ref#62; #124; --superseded-by #60;ref#62; (20+ chars)<br/>#124; --wontfix (60+ chars)"]
-  done -->|no| park{"Park it?"}
-  park -->|start date known| schedule["kata schedule #60;ref#62; #60;date-or-time#62;<br/>sets scheduled_on; clear with -"]
-  park -->|start date unknown| someday["kata meta set #60;ref#62; someday true --json-value<br/>clear with kata meta unset #60;ref#62; someday"]
-  park -->|needs review| review["kata label add #60;ref#62; needs-review --comment #34;#60;what remains#62;#34;"]
+  arrive{"Does the request change this workspace?"} -->|no: a question or review| answer["Answer without kata"]
+  arrive -->|yes| search["kata search #34;#60;one or two words#62;#34; --agent"]
+  search --> found{"Open issue covers it?"}
+  found -->|yes| claim["kata claim #60;ref#62;"]
+  found -->|no| create["kata create #34;#60;title#62;#34; --idempotency-key #60;key#62; --agent"]
+  create -->|work it| claim
+  create -->|record only| stop["Leave it open"]
+  claim --> work["Do the work; comment findings a later reader needs"]
+  work --> done{"Verified complete?"}
+  done -->|yes| close["kata close #60;ref#62; --done --message #34;#60;what and how verified#62;#34; --test #60;cmd#62;"]
+  done -->|no| review["kata label add #60;ref#62; needs-review --comment #34;#60;what remains#62;#34;"]
 ```
 
 ## Quickstart
@@ -220,6 +228,7 @@ The [docs site](docs/) is the definitive reference:
   [Changelog](docs/changelog.md)
 - Guide: [Concepts](docs/guide/concepts.md) ·
   [Workspaces and projects](docs/guide/workspaces-projects.md) ·
+  [Issue attachments](docs/guide/attachments.md) ·
   [Semantic search](docs/guide/semantic-search.md) ·
   [Migrating from Beads](docs/guide/migrating-from-beads.md)
 - Reference: [CLI](docs/reference/cli.md) ·
@@ -254,7 +263,8 @@ verified. Close each verified issue promptly with valid evidence and a
 substantive message. [Agent workflows](docs/workflows/agents.md) is the same
 contract in long form.
 
-On `main`, install the contract in every coding-agent session on this machine:
+On `main`, install the contract in every coding-agent session that starts
+inside a kata workspace on this machine:
 
 ```sh
 kata agent-hook install
@@ -281,15 +291,6 @@ Contract output is marker-free, has no terminal framing, works without an
 initialized workspace, and performs no workspace mutation. It is rendered from
 the same canonical body that `kata init --with-agents` places between its
 managed markers, so static and session-injected guidance cannot drift.
-
-If you want silence outside Kata workspaces, use this alternative Claude Code
-SessionStart command instead of the every-session installer:
-
-```sh
-if test -f "$CLAUDE_PROJECT_DIR/.kata.toml"; then
-  kata quickstart --format contract --workspace "$CLAUDE_PROJECT_DIR"
-fi
-```
 
 For a Codex SessionStart response without a stdin payload, run
 `kata agent-contract-hook`. To replace the prompt, use

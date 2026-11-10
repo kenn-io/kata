@@ -4,5 +4,9 @@
 
 export type PollFederationProjectEventsParams = {
   after_id?: number
+  /**
+   * Read retained history only for an issue currently owned by this project, independently of the project cursor.
+   */
+  issue_uid?: string
   limit?: number
 }

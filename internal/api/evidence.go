@@ -14,6 +14,7 @@ type EvidenceType string
 // action's evidence array. See spec §3.3 and the per-reason validation
 // matrix in §3.5.
 const (
+	EvidenceAttachment    EvidenceType = "attachment"
 	EvidenceCommit        EvidenceType = "commit"
 	EvidencePR            EvidenceType = "pr"
 	EvidenceTest          EvidenceType = "test"
@@ -30,16 +31,18 @@ const (
 type Evidence struct {
 	Type EvidenceType `json:"type"`
 
-	SHA       string   `json:"sha,omitempty"`       // commit
-	URL       string   `json:"url,omitempty"`       // pr
-	Command   string   `json:"command,omitempty"`   // test
-	Paths     []string `json:"paths,omitempty"`     // reviewed-paths
-	Account   string   `json:"account,omitempty"`   // external
-	Rationale string   `json:"rationale,omitempty"` // no-change-audit
-	IssueRef  string   `json:"issue_ref,omitempty"` // duplicate-of, superseded-by
+	AttachmentID string   `json:"attachment_id,omitempty"` // attachment
+	SHA          string   `json:"sha,omitempty"`           // commit
+	URL          string   `json:"url,omitempty"`           // pr
+	Command      string   `json:"command,omitempty"`       // test
+	Paths        []string `json:"paths,omitempty"`         // reviewed-paths
+	Account      string   `json:"account,omitempty"`       // external
+	Rationale    string   `json:"rationale,omitempty"`     // no-change-audit
+	IssueRef     string   `json:"issue_ref,omitempty"`     // duplicate-of, superseded-by
 }
 
 var validEvidenceTypes = map[EvidenceType]struct{}{
+	EvidenceAttachment:    {},
 	EvidenceCommit:        {},
 	EvidencePR:            {},
 	EvidenceTest:          {},
@@ -60,6 +63,11 @@ func (e *Evidence) UnmarshalJSON(bs []byte) error {
 	}
 	if _, ok := validEvidenceTypes[r.Type]; !ok {
 		return fmt.Errorf("evidence: unknown type %q", r.Type)
+	}
+	if r.Type == EvidenceAttachment {
+		if err := json.Unmarshal(bs, &r, json.RejectUnknownMembers(true)); err != nil {
+			return err
+		}
 	}
 	*e = Evidence(r)
 	return nil

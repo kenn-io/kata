@@ -14,6 +14,12 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
+func TestUISnapshotGraphReachContract(t *testing.T) {
+	dbtest.RunUISnapshotGraphReachContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotMutationCursorContract(t *testing.T) {
 	dbtest.RunUISnapshotMutationCursorContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
@@ -41,6 +47,15 @@ func TestReadUISnapshotPastPostgresParameterLimit(t *testing.T) {
 		SELECT lpad(n::text, 26, '0'), $1, lpad(n::text, 8, '0'), 'Filler issue', 'user-a'
 		FROM generate_series(1, 32768) AS filler(n)`, project.ID)
 	require.NoError(t, err)
+	// Connect every filler issue to the source through a binary tree.
+	_, err = store.ExecContext(ctx, `
+		INSERT INTO links (from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+		SELECT parent.id, child.id, parent.uid, child.uid, 'blocks', 'user-a'
+		FROM issues child JOIN issues parent ON parent.id = child.id / 2
+		WHERE child.project_id = $1 AND child.id > $2`, project.ID, neighbor.ID)
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, "ANALYZE issues, links")
+	require.NoError(t, err)
 
 	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{
 		View: "all-open", IncludeGraph: true, SelectedIssueUID: source.UID,
@@ -49,7 +64,7 @@ func TestReadUISnapshotPastPostgresParameterLimit(t *testing.T) {
 	require.Len(t, snapshot.Issues, 32770)
 	require.Len(t, snapshot.GraphIssues, 32770)
 	for _, links := range [][]db.UILink{snapshot.CollectionLinks, snapshot.GraphLinks} {
-		require.Len(t, links, 1)
+		require.Len(t, links, 32769)
 		require.Equal(t, source.UID, links[0].FromIssueUID)
 		require.Equal(t, neighbor.UID, links[0].ToIssueUID)
 		require.Equal(t, "blocks", links[0].Type)
@@ -317,13 +332,26 @@ func TestReadUIReferences(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	references, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Query: "example", Limit: 20})
+	statsReads := 0
+	store.uiProjectStatsRead = func() { statsReads++ }
+	references, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Limit: 20})
 	require.NoError(t, err)
+	assert.Zero(t, statsReads)
 	require.Len(t, references.Projects, 2)
 	require.Len(t, references.Issues, 1)
 	assert.Equal(t, "example-project#"+issue.ShortID, references.Issues[0].QualifiedID)
 	assert.Equal(t, []string{"user-a"}, references.Owners)
 	assert.Equal(t, []string{"ready"}, references.Labels)
+	assert.Greater(t, references.Cursor, int64(0))
+
+	references, err = store.ReadUIReferences(ctx, db.UIReferencesQuery{Query: "example", Limit: 20})
+	require.NoError(t, err)
+	assert.Zero(t, statsReads)
+	assert.Equal(t, []db.Project{}, references.Projects)
+	assert.Equal(t, []string{}, references.Owners)
+	assert.Equal(t, []string{}, references.Labels)
+	require.Len(t, references.Issues, 1)
+	assert.Equal(t, issue.UID, references.Issues[0].UID)
 	assert.Greater(t, references.Cursor, int64(0))
 }
 

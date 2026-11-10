@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-08
+last_edited: 2026-11-07
 ---
 
 # Data model and durability
@@ -123,16 +123,110 @@ mistaken reuse is caught.
 **Look-alike soft-block.** Independently, `create` runs a full-text and
 similarity search and refuses when an existing issue is too close, returning the
 candidates so the caller can comment instead. This check is bypassable with
-`force_new`.
+`force_new`. If fewer than 20 candidates qualify, an exact-title fallback
+checks up to 20 issues, shortest bodies first, when full-text search fills
+its page or the title lacks searchable terms. Non-ASCII title text also
+keeps the fallback because store tokenizers may differ. See
+[issue lifecycle](../reference/cli.md#issue-lifecycle) for matching rules
+and limits.
 
 Where the two interact, **idempotency wins**: an idempotent reuse never emits a
 duplicate even when `force_new` is set. The retry-safety guarantee takes
 precedence over the force-new escape hatch.
 
-## Schema evolution by JSONL cutover
+## MCP Events subscriptions
 
-kata does not evolve its schema with in-place table-rebuild migrations. Instead
-it exports the current database to JSONL exactly as stored, imports that JSONL
+The daemon stores each MCP Events subscription in the `mcp_event_subscriptions`
+table. There is no separate delivery journal: the `events` table is the ordered
+durable log, and the delivery worker reads it once for every subscription. A row
+holds:
+
+- **Identity:** the `sub_` ID, which hashes the owner, event name, canonical
+  arguments, and callback URL. The owner is stored as an authority and a subject.
+- **Endpoint:** the callback URL, the AES-256-GCM sealed signing secret, the
+  previous secret during the 60-second rotation window, and the time the endpoint
+  was verified.
+- **Lifecycle:** state (`active` or `ended`), an end reason, and an optional
+  expiry. A null expiry means no expiry.
+- **Fences:** a random `incarnation` set when the row is created, and a
+  `generation` that rises on unsubscribe, end, and reactivation.
+- **Change flag:** `dirty`, set when an archive change may have changed the
+  recipient's inbox and cleared when a ping is queued for it.
+- **Visible projects:** `catalog_version`, a fingerprint of the selected
+  projects the owner could see when the subscription was activated or last
+  rechecked. After an access, team, or project creation, archive, restore or
+  merge event, the worker recomputes it and marks the row dirty only if it changed,
+  so a loss of access wakes the receiver and an unrelated owner hears
+  nothing. A worker stores fingerprints only if no such event or purge
+  followed the archive head it scanned to. Otherwise another worker may have
+  stored newer ones, and the later scan that reads the change recomputes them.
+  When visibility may have changed unseen, the value becomes `unknown`, which
+  matches no fingerprint, so the next recomputation marks the row. That
+  happens when the owner's authority cannot be checked during a refresh, and
+  when such a change committed while a subscription was being activated.
+- **Delivery:** one pending item (a ping or a terminated notice) with its exact
+  body, its stable message ID, attempt count, next attempt time, and claim token
+  and deadline.
+- **Diagnostics:** failure aging, dead-letter count, and a failure category.
+
+The `meta` row `mcp_events_scan_position` is the daemon-wide `events.id` the
+worker has matched up to. The worker reads events after it, marks the
+subscriptions each one concerns dirty, and advances it with a conditional
+update, so daemons that share a database never move it backwards. Marking is
+idempotent, so a range scanned twice costs at most an extra ping. Because the
+position is stored, events committed while no daemon runs are matched at the
+next start.
+
+A federation pull commits remote events before it applies them, so the worker
+can match a pulled event against projections the pull has not updated. The
+transaction that applies the pull writes the `meta` row `mcp_events_rematch`:
+the lowest and highest events applied since a worker last matched them, and a
+fresh token. Events replayed after a federation reset count too, even when
+they originated on this daemon. A worker on any daemon matches the part of
+that range up to the published scan position again. Another worker may still
+hold later events it read before the pull applied them, so the worker then
+moves the start of the range past what it matched, or deletes the row once
+it matched all of it. Either change happens only if the token is unchanged,
+so a pull applied meanwhile is not lost.
+
+One global `events.id` order is safe as a scan position because event ids
+become visible in id order. PostgreSQL inserts hold an advisory lock from
+before the insert until commit, and SQLite has a single writer. The position
+starts at the archive head, which includes the reserved purge-reset positions,
+so it never rediscovers a purge that has already passed. A purge or project
+stream reset after it removed events the worker can no longer read, so it marks
+the subscriptions whose owners can see that project dirty.
+
+Several daemon processes can serve one PostgreSQL database, so delivery is
+claimed in the database with a conditional update. Every settlement is
+conditional on the incarnation, generation, message ID, and claim token. Fencing
+protects stored state, not bytes already on the network, so delivery is at least
+once.
+
+The `meta` row `mcp_events_key_check` holds an HMAC of a fixed string under the
+Events key. It proves which key sealed the rows without revealing it. The Events
+key itself lives in a file outside the database.
+
+Subscriptions are JSONL kind `mcp_event_subscription`. Full-database export,
+backup, and the SQLite cutover carry them and the key-check row, but never the
+scan position. A restored database therefore starts a new position and marks
+every active subscription dirty once, because a restore can roll an inbox back
+without any new event. Project
+exports, merges, and `--as-standalone` normalization exclude both, and no
+partial import writes or replaces the destination's key check. See
+[MCP Events](../operations/mcp-events.md) for operator behavior.
+
+## Schema evolution
+
+SQLite upgrades that only add indexes, or add a table that starts empty, register
+a complete version chain in `inPlaceUpgrades` in
+`internal/db/sqlitestore/schema_upgrade.go`. Startup applies the canonical
+tables and indexes and the schema-version stamp in one transaction under the
+cutover lock. Schemas 41 through 49 can reach schema 50 this way; the 49→50
+step adds the empty `mcp_event_subscriptions` table and its indexes.
+
+Changes to existing tables, triggers, or FTS use JSONL cutover. Kata exports the current
+database to JSONL exactly as stored, imports that JSONL
 into a fresh database at the binary's current schema, applies deterministic fill
 rules for anything an older export version lacked, validates, and atomically
 swaps the database files into place.
@@ -165,7 +259,7 @@ inside backend packages, SQLite-specific JSONL cutover code, and tests that
 assert SQL details.
 
 SQLite bootstraps a fresh database from its canonical `schema.sql` and upgrades
-older files through the JSONL cutover path described above. Postgres also
+older files through the upgrade paths described above. Postgres also
 installs fresh databases from a canonical current `schema.sql`. Because no
 Postgres backend predates its first public release, development-only versions
 are not represented as compatibility migrations. The first released Postgres

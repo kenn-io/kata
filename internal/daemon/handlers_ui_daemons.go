@@ -433,8 +433,26 @@ func (g *webDaemonGateway) targetAllowsWebDaemonMutation(
 	if instance.ContractVersion != api.UISnapshotContractVersion {
 		return false, errWebDaemonUpgradeRequired
 	}
-	return instance.Capabilities.Writable &&
-		instance.Capabilities.ActorPolicy == source.actorPolicy, nil
+	_, compatible := webDaemonEffectiveActorPolicy(instance.Capabilities.ActorPolicy, source.actorPolicy)
+	return instance.Capabilities.Writable && compatible, nil
+}
+
+// webDaemonEffectiveActorPolicy reports the actor policy a proxied write runs
+// under and whether the source may write through the target at all. A
+// request-actor source may write through a target credential bound to an
+// account: the target records each write as that account, as it does for the
+// CLI using the same catalog token, so the browser cannot claim another actor.
+// An identity-bound source stays read-only through any target because Kata has
+// no delegated-identity protocol to carry its account across the hop.
+func webDaemonEffectiveActorPolicy(target, source string) (string, bool) {
+	switch {
+	case target == source:
+		return source, true
+	case source == "request" && target == "identity":
+		return target, true
+	default:
+		return source, false
+	}
 }
 
 func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
@@ -696,6 +714,10 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 					}
 				}
 			}
+			if response.Request.URL.Path == "/api/v1/embeddings/local" && response.StatusCode == http.StatusOK {
+				administrator := localEmbeddingsAdministrator(response.Request.Context(), g.insecureReadonly, g.sessions)
+				return restrictWebDaemonLocalEmbeddings(response, administrator)
+			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
@@ -772,10 +794,10 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	if err := json.Unmarshal(envelope["capabilities"], &capabilities); err != nil {
 		return fmt.Errorf("decode daemon capabilities: %w", err)
 	}
-	capabilities.Writable = capabilities.Writable && policy.writable &&
-		capabilities.ActorPolicy == policy.actorPolicy
+	actorPolicy, compatible := webDaemonEffectiveActorPolicy(capabilities.ActorPolicy, policy.actorPolicy)
+	capabilities.Writable = capabilities.Writable && policy.writable && compatible
 	capabilities.Updates = "poll"
-	capabilities.ActorPolicy = policy.actorPolicy
+	capabilities.ActorPolicy = actorPolicy
 	// Target credentials stay server-side and may not upgrade the source
 	// browser into a token-audit principal.
 	capabilities.TokenAuditRead = false
@@ -789,6 +811,35 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	if err != nil {
 		return fmt.Errorf("encode daemon capability response: %w", err)
 	}
+	response.Body = io.NopCloser(bytes.NewReader(body))
+	response.ContentLength = int64(len(body))
+	response.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	return nil
+}
+
+// restrictWebDaemonLocalEmbeddings applies the source viewer's authority to
+// a target's setup status. The target answered with the catalog credential, so
+// its can_change and owner-only details describe that credential, not the
+// browser. Remote setup is never changeable through the gateway.
+func restrictWebDaemonLocalEmbeddings(response *http.Response, administrator bool) error {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("read daemon embeddings response: %w", err)
+	}
+	_ = response.Body.Close()
+	var status api.LocalEmbeddingsStatus
+	if err := json.Unmarshal(body, &status); err != nil {
+		return fmt.Errorf("decode daemon embeddings response: %w", err)
+	}
+	status.CanChange = false
+	if !administrator {
+		redactLocalEmbeddingsStatus(&status)
+	}
+	body, err = json.Marshal(status)
+	if err != nil {
+		return fmt.Errorf("encode daemon embeddings response: %w", err)
+	}
+	response.Header.Del("ETag")
 	response.Body = io.NopCloser(bytes.NewReader(body))
 	response.ContentLength = int64(len(body))
 	response.Header.Set("Content-Length", strconv.Itoa(len(body)))
@@ -844,6 +895,9 @@ func webDaemonOutboundHeaders(in http.Header) http.Header {
 }
 
 func webDaemonProxyRequestAllowed(r *http.Request, path string) bool {
+	if path == "/api/v1/embeddings/local" {
+		return r.Method == http.MethodGet
+	}
 	// Project sync status is a source-origin read. Target credentials must not
 	// expose federation topology through the ordinary SPA gateway.
 	if strings.Contains(path, "/federation/") {

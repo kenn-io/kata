@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -43,6 +45,54 @@ func validateCreateMetadata(md map[string]jsontext.Value) error {
 // entries. Each raw string is "key" or "key=value", split on the FIRST "=".
 // The key is a flat metadata key that MAY contain dots — it is never a JSON
 // path. An empty key is a 400 validation error.
+// compactRowMaxBytes bounds one compact row, so a page of at most 100 rows
+// stays small however large an imported issue's fields are.
+const compactRowMaxBytes = 64 << 10
+
+// compactIssueOuts drops each row's body and every metadata key the filters
+// do not name. Imports accept bodies, titles and metadata far larger than one
+// list response should carry, so a reader that needs only the filtered keys
+// asks for this. A row still larger than compactRowMaxBytes keeps only its
+// identity and status and is marked oversized; the page cursor does not
+// depend on rows, so pagination still moves past it.
+func compactIssueOuts(outs []api.IssueOut, filters []db.MetaFilter) error {
+	for i := range outs {
+		outs[i].Body = ""
+		if outs[i].Metadata == "" {
+			continue
+		}
+		var values map[string]jsontext.Value
+		if err := json.Unmarshal([]byte(outs[i].Metadata), &values); err != nil {
+			return fmt.Errorf("compact issue metadata: %w", err)
+		}
+		kept := map[string]jsontext.Value{}
+		for _, filter := range filters {
+			if value, ok := values[filter.Key]; ok {
+				kept[filter.Key] = value
+			}
+		}
+		compacted, err := json.Marshal(kept, json.Deterministic(true))
+		if err != nil {
+			return fmt.Errorf("compact issue metadata: %w", err)
+		}
+		outs[i].Metadata = db.JSONBlob(compacted)
+	}
+	for i, out := range outs {
+		encoded, err := json.Marshal(out)
+		if err != nil {
+			return fmt.Errorf("measure compact issue: %w", err)
+		}
+		if len(encoded) <= compactRowMaxBytes {
+			continue
+		}
+		stub := api.IssueOut{QualifiedID: out.QualifiedID, Oversized: true}
+		stub.ID, stub.UID, stub.ProjectID, stub.ProjectUID, stub.ShortID = out.ID, out.UID, out.ProjectID, out.ProjectUID, out.ShortID
+		stub.Status, stub.Revision, stub.CreatedAt, stub.UpdatedAt = out.Status, out.Revision, out.CreatedAt, out.UpdatedAt
+		outs[i] = stub
+	}
+	return nil
+}
+
 func parseMetaFilters(raw []string) ([]db.MetaFilter, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -295,6 +345,9 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		issueOuts, err := hydrateIssueOuts(ctx, cfg.DB, cfg.DefaultTimezone, in.ProjectID, issues)
 		out := &api.ListIssuesResponse{}
+		if err == nil && in.Compact {
+			err = compactIssueOuts(issueOuts, metaFilters)
+		}
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
@@ -398,6 +451,9 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 
 		issueOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, cfg.DefaultTimezone, issues)
+		if err == nil && in.Compact {
+			err = compactIssueOuts(issueOuts, metaFilters)
+		}
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
@@ -1478,12 +1534,8 @@ func loadLinkOuts(ctx context.Context, store db.Storage, issueID int64) ([]api.L
 	return out, nil
 }
 
-const (
-	// idempotencyWindow is the 7-day lookback per spec §3.6.
-	idempotencyWindow = 7 * 24 * time.Hour
-	// similarityThreshold is the soft-block trigger per spec §3.7.
-	similarityThreshold = 0.7
-)
+// idempotencyWindow is the 7-day lookback per spec §3.6.
+const idempotencyWindow = 7 * 24 * time.Hour
 
 // tryIdempotencyMatch runs the §3.6 idempotency lookup. Returns the fingerprint
 // (so the caller can fold it into the issue.created event payload) and, when a
@@ -1584,32 +1636,53 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 	return fp, out, nil
 }
 
-// runLookalikeCheck runs the §3.7 soft-block: SearchFTSAny over the
-// 500-code-point title and body prefixes used by the scorer
-// (OR-of-tokens for high recall), scores each candidate via similarity.Score,
-// and returns a 409 duplicate_candidates error if any candidate is at or
-// above the 0.7 threshold. nil means proceed. The OR variant is required
-// because near-duplicates that differ by even one token would be filtered
-// out by SearchFTS's implicit-AND before similarity scoring runs.
+// runLookalikeCheck scores exact full-title matches and SearchFTSAny results
+// over the scorer's 500-code-point title and body prefixes. OR retrieval keeps
+// near-duplicates that differ by a token. A score at or above 0.7 returns a
+// 409 duplicate_candidates error; nil means proceed. Spec §3.7.
 func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssueRequest, projectName string) error {
 	q := similarity.LookalikeQuery(in.Body.Title, in.Body.Body)
 	candidates, err := cfg.DB.SearchFTSAny(ctx, db.SearchFTSParams{
-		ProjectID: in.ProjectID, Query: q, Limit: 20, IssueScope: issueScopeFromContext(ctx),
+		ProjectID: in.ProjectID, Query: q, TitleQuery: similarity.TitlePrefix(in.Body.Title), TitleBody: in.Body.Body, Limit: 20, IssueScope: issueScopeFromContext(ctx),
 	})
 	if err != nil {
 		return internalAPIError(err)
 	}
 	matched := []map[string]any{}
-	for _, c := range candidates {
-		score := similarity.Score(in.Body.Title, in.Body.Body, c.Issue.Title, c.Issue.Body)
-		if score >= similarityThreshold {
+	addMatch := func(issue db.Issue) {
+		score := similarity.Score(in.Body.Title, in.Body.Body, issue.Title, issue.Body)
+		if score >= similarity.Threshold {
 			matched = append(matched, map[string]any{
-				"uid":          c.Issue.UID,
-				"short_id":     c.Issue.ShortID,
-				"qualified_id": qualifiedID(projectName, c.Issue.ShortID),
-				"title":        c.Issue.Title,
+				"uid":          issue.UID,
+				"short_id":     issue.ShortID,
+				"qualified_id": qualifiedID(projectName, issue.ShortID),
+				"title":        issue.Title,
 				"score":        score,
 			})
+		}
+	}
+	seen := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		seen[c.Issue.UID] = true
+		addMatch(c.Issue)
+	}
+	titleHasWord := similarity.TitlePrefix(in.Body.Title) == in.Body.Title && titleHasPortableToken(in.Body.Title)
+	// An underfull FTS page already includes every issue sharing a title token.
+	if len(matched) < 20 && (len(candidates) == 20 || !titleHasWord) {
+		exact, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
+			ProjectID: in.ProjectID, ExactTitle: in.Body.Title, Limit: 20,
+			ShortestBodyFirst: true, IssueScope: issueScopeFromContext(ctx),
+		})
+		if err != nil {
+			return internalAPIError(err)
+		}
+		for _, issue := range exact {
+			if !seen[issue.UID] {
+				addMatch(issue)
+				if len(matched) == 20 {
+					break
+				}
+			}
 		}
 	}
 	if len(matched) == 0 {
@@ -1619,6 +1692,16 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 		formatDuplicateMessage(matched),
 		"comment on an existing issue, or pass --force-new to create anyway",
 		map[string]any{"candidates": matched})
+}
+
+// titleHasPortableToken accepts ASCII letters, digits, and spaces, with at
+// least one letter or digit. SQLite unicode61 and PostgreSQL simple search
+// both index these titles. Punctuation and Unicode keep the exact-title fallback.
+func titleHasPortableToken(title string) bool {
+	return !strings.ContainsFunc(title, func(r rune) bool {
+		return r > unicode.MaxASCII || r != ' ' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) &&
+		strings.ContainsFunc(title, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) })
 }
 
 // formatDuplicateMessage produces a singular/plural-aware human message for

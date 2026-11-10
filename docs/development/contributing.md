@@ -147,11 +147,13 @@ migrations](postgres-migrations.md) before proposing a schema change.
 
 `make test-stress` runs randomized and failpoint tests through gotestsum. It
 reruns a failed test up to twice, lists those reruns in its summary, and writes
-the test events to `gotestsum/`. If Rapid prints a failing seed, reproduce it
-with the seed from the failure output:
+the test events to `gotestsum/`. The target sets
+`RAPID_CHECKS=5`; a direct test run defaults to 100 generated cases. Rapid
+shrinks failing inputs, saves them for replay, and prints a failing seed.
+Reproduce a failure with that seed and the same case count:
 
 ```sh
-RAPID_SEED=<seed> go test -tags federation_stress ./e2e \
+RAPID_CHECKS=5 RAPID_SEED=<seed> go test -tags federation_stress ./e2e \
   -run TestFederationStressRandomizedWorkload \
   -count=1 \
   -timeout 2m
@@ -231,6 +233,15 @@ renders the reference site from the Markdown pages listed in
 `docs/zensical.toml`. The build combines both into `docs/site/`: the website at
 `/`, the introductory guide at `/guide/`, and the documentation at `/docs/`.
 Keep `docs/llms.txt` links aligned with those public routes.
+
+Pages must not paint before their stylesheets and fonts load. The build embeds
+each `/fonts/<name>.woff2` that `docs/website/styles/site.css` references, and
+inlines `docs/website/hold-first-paint.js` right after each built page's
+`<meta charset="utf-8">`. The Zensical theme's font loading stays off;
+`docs/stylesheets/extra.css` sets the docs faces. The First paint CI job reads
+the HTML and CSS of the built site and of the web UI the daemon serves. When
+you move that job's pin, copy the pinned commit's `hold-first-paint.js` code
+too.
 
 When changing behavior:
 

@@ -156,6 +156,37 @@ describe('IssueDetail', () => {
     expect(shared.queryByRole('button', { name: 'Weekly example' })).toBeNull()
   })
 
+  it('shows attachment evidence without a broken link in edit mode', async () => {
+    const id = '01K7E222222222222222222222222'
+    const attachment = {
+      name: 'report.pdf',
+      media_type: 'application/pdf',
+      size: 12,
+      docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
+    }
+    renderDetail({
+      issue: makeIssue({ metadata: { [`attachment.${id}`]: attachment } }),
+      events: [
+        {
+          event_id: 1,
+          event_uid: 'close-1',
+          origin_instance_uid: 'instance-example',
+          type: 'issue.closed',
+          project_id: 1,
+          project_uid: 'project-1',
+          project_name: 'example-project',
+          actor: 'user-a',
+          created_at: '2026-06-01T12:31:00Z',
+          payload: { evidence: [{ type: 'attachment', attachment_id: id, attachment }] },
+        },
+      ],
+    })
+    expect(screen.getByRole('link', { name: /report.pdf/ })).toBeTruthy()
+    await openEditor()
+    expect(screen.getByText(/report.pdf.*12 bytes/)).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /report.pdf/ })).toBeNull()
+  })
+
   it('edits title and description through the issue edit callback', async () => {
     const onEditIssue = vi.fn(async () => true)
     renderDetail({ onEditIssue })

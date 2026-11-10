@@ -254,6 +254,8 @@ func TestPurgeIssue_RemovesAllDependentsAndAudits(t *testing.T) {
 		target.ID, target.ID)
 	assertRowCount(ctx, t, d, 0, "FTS row removed",
 		`SELECT count(*) FROM issues_fts WHERE rowid = ?`, target.ID)
+	assertRowCount(ctx, t, d, 0, "comment FTS tokens removed",
+		`SELECT count(*) FROM comments_fts WHERE comments_fts MATCH 'comment'`)
 
 	// keeper's events.created is the only event attributed to keeper that
 	// survives — keeper's issue.linked was deleted because related_issue_id

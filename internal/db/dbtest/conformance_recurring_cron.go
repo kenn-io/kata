@@ -119,7 +119,7 @@ func checkRecurringCron(t *testing.T, s db.Storage, b Backend) error {
 		out, e := s.DispatchRecurringCron(ctx, in)
 		require.NoError(t, e)
 		require.Empty(t, out.Events)
-		ids, e := s.ListDueNotificationIssueIDs(ctx)
+		ids, e := s.ListDueNotificationIssueIDs(ctx, in.Now)
 		require.NoError(t, e)
 		require.Empty(t, ids)
 		children, e = s.ListIssues(ctx, db.ListIssuesParams{ProjectID: p.ID})
@@ -677,7 +677,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	probe.candidates = nil
 	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
-	require.Equal(t, db.MergeEventFeatures(db.SupportedEventFeatures), features)
+	require.Equal(t, db.CronEventFeature, features)
 	require.Equal(t, []int{1}, probe.candidates, "escaped native definition remains the only candidate")
 	return nil
 }
@@ -867,9 +867,13 @@ func checkRecurringAdoptionSnapshots(t *testing.T, s db.Storage) error {
 		afterRead, err := s.MaxEventID(ctx)
 		require.NoError(t, err)
 		require.Equal(t, beforeRead, afterRead)
-		page, err := s.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: "cron_v1", Limit: 100})
+		features := db.CronEventFeature
+		if i == 2 {
+			features = db.MergeEventFeatures(features, db.IssueMoveEventFeature)
+		}
+		page, err := s.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: features, Limit: 100})
 		require.NoError(t, err)
-		require.Equal(t, "cron_v1", page.RequiredFeatures)
+		require.Equal(t, features, page.RequiredFeatures)
 	}
 	return nil
 }

@@ -51,10 +51,24 @@ func (m Model) lookupInboxProject() (Model, tea.Cmd) {
 	}
 }
 
+// jsonString reads a metadata value that holds a string; anything else is "".
+func jsonString(raw []byte) string {
+	var s string
+	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// isInboxProject reports whether the project's role metadata designates it as
+// the Inbox, the way the Inbox lookup reads it.
+func isInboxProject(p ProjectSummary) bool {
+	return jsonString(p.Metadata.Role) == "inbox"
+}
+
 func designatedInboxProject(projects []ProjectSummary) (ProjectSummary, bool) {
 	for _, project := range projects {
-		var role string
-		if project.ID > 0 && json.Unmarshal(project.Metadata.Role, &role) == nil && role == "inbox" {
+		if project.ID > 0 && isInboxProject(project) {
 			return project, true
 		}
 	}
@@ -126,7 +140,11 @@ func (m Model) leaveInbox() (Model, tea.Cmd) {
 		// foreground view stays untouched.
 		fetch = m.fetchInitial()
 	}
-	if refetch := m.restoredDetailRefetch(); refetch != nil {
+	if m.layout == splitlayout.Split && m.detail.issue == nil && m.detail.readRef == "" && len(m.detail.navStack) == 0 {
+		var follow tea.Cmd
+		m, follow = m.scheduleDetailFollow()
+		fetch = tea.Batch(fetch, follow)
+	} else if refetch := m.restoredDetailRefetch(); refetch != nil {
 		fetch = tea.Batch(fetch, refetch)
 	}
 	return m, fetch

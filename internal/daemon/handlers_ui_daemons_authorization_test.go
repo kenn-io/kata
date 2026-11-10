@@ -200,6 +200,102 @@ func TestWebDaemonGatewayPreservesIdentitySourceAttribution(t *testing.T) {
 	assert.Equal(t, 0, mutationCalls)
 }
 
+// A request-actor browser may write through a hub token bound to an account.
+// The hub records those writes as the token's account, as it does for the CLI,
+// so the gateway reports that identity policy and the page omits its own actor.
+func TestWebDaemonGatewayLetsRequestActorSourceWriteThroughAccountBoundTarget(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		target          api.UICapabilities
+		wantWritable    bool
+		wantActorPolicy string
+	}{
+		{
+			name:         "account bound target",
+			target:       api.UICapabilities{Writable: true, Updates: "sse", ActorPolicy: "identity", Account: "member-one"},
+			wantWritable: true, wantActorPolicy: "identity",
+		},
+		{
+			name:         "request actor target",
+			target:       api.UICapabilities{Writable: true, Updates: "sse", ActorPolicy: "request"},
+			wantWritable: true, wantActorPolicy: "request",
+		},
+		{
+			name:            "read only account bound target",
+			target:          api.UICapabilities{Writable: false, Updates: "sse", ActorPolicy: "identity"},
+			wantActorPolicy: "identity",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.UISnapshotResponseBody{
+					ContractVersion: api.UISnapshotContractVersion,
+					Cursor:          7,
+					Capabilities:    test.target,
+				})
+			}))
+			t.Cleanup(upstream.Close)
+
+			handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+				Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+			})
+			issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+			require.NoError(t, err)
+
+			response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet,
+				"/api/v1/ui/snapshot", nil, "")
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var snapshot api.UISnapshotResponseBody
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &snapshot))
+			assert.Equal(t, test.wantWritable, snapshot.Capabilities.Writable)
+			assert.Equal(t, test.wantActorPolicy, snapshot.Capabilities.ActorPolicy)
+			assert.Equal(t, test.target.Account, snapshot.Capabilities.Account)
+		})
+	}
+}
+
+// A write through an account-bound hub token lands as that account even when
+// the browser sends another actor, so the gateway grants no actor forgery.
+func TestWebDaemonGatewayAccountBoundTargetAttributesWritesToTokenAccount(t *testing.T) {
+	targetStore := openAuthTestDB(t)
+	project, err := targetStore.CreateProject(t.Context(), "example-workspace")
+	require.NoError(t, err)
+	_, _, err = targetStore.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "member-token", Actor: "member-one", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	targetDaemon := NewServer(ServerConfig{
+		DB: targetStore, StartedAt: time.Now().UTC(),
+		Auth: config.AuthConfig{Token: "bootstrap-token", RequireTokenIdentity: true},
+	})
+	t.Cleanup(func() { _ = targetDaemon.Close() })
+	target := httptest.NewServer(targetDaemon.Handler())
+	t.Cleanup(target.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: target.URL, Token: "member-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+
+	response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodPost,
+		fmt.Sprintf("/api/v1/projects/%d/issues", project.ID),
+		bytes.NewBufferString(`{"title":"written from the switcher","actor":"forged"}`), "")
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var created struct {
+		Issue struct {
+			ID     int64  `json:"id"`
+			Author string `json:"author"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &created))
+	got, err := targetStore.IssueByID(t.Context(), created.Issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "member-one", got.Author)
+}
+
 // The lower gateway layer also preserves identity policy when a trusted host
 // supplies an otherwise admitted source; a target never upgrades it to writes.
 func TestDelegatedWebDaemonPolicyPreservesIdentitySourceAttribution(t *testing.T) {
@@ -226,11 +322,11 @@ func TestWebDaemonGatewayChecksTargetAuthorityBeforeMutation(t *testing.T) {
 			want: http.StatusForbidden,
 		},
 		{
-			name: "identity target",
+			name: "account bound target",
 			capabilities: api.UICapabilities{
 				Writable: true, Updates: "poll", ActorPolicy: "identity",
 			},
-			want: http.StatusForbidden,
+			want: http.StatusNoContent, wantMutation: 1,
 		},
 		{
 			name: "compatible request actor target",
@@ -807,6 +903,51 @@ func TestWebDaemonGatewayStreamsEventsForTokenSessionOnLocalTarget(t *testing.T)
 			n, err := response.Body.Read(handshake)
 			require.NoError(t, err)
 			require.Contains(t, string(handshake[:n]), ": connected", "the stream flushes its handshake before any event")
+		})
+	}
+}
+
+func TestWebDaemonGatewayRestrictsEmbeddingsByViewer(t *testing.T) {
+	for _, administrator := range []bool{false, true} {
+		t.Run(fmt.Sprintf("viewer administrator=%t", administrator), func(t *testing.T) {
+			targetDaemon := NewServer(ServerConfig{
+				DB: openAuthTestDB(t), StartedAt: time.Now().UTC(),
+				Auth:            config.AuthConfig{Token: "target-token"},
+				LocalEmbeddings: &localEmbeddingsFixture{},
+				ReconcilerHealth: func() ReconcilerHealth {
+					return ReconcilerHealth{Configured: true, Embedded: 40, Backlog: 172, ETASeconds: new(int64(30))}
+				},
+			})
+			t.Cleanup(func() { _ = targetDaemon.Close() })
+			target := httptest.NewServer(targetDaemon.Handler())
+			t.Cleanup(target.Close)
+			handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+				Name: "example-remote", URL: target.URL, Token: "target-token", AllowInsecure: true,
+			})
+			principal := Principal{Kind: PrincipalBootstrap}
+			if !administrator {
+				token, _, err := manager.db.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+					PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor,
+				})
+				require.NoError(t, err)
+				principal = Principal{Kind: PrincipalDBToken, Actor: "member", TokenID: token.ID}
+			}
+			issued, err := manager.IssueSession(principal, "/kata")
+			require.NoError(t, err)
+			response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet, "/api/v1/embeddings/local", nil, "")
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var got api.LocalEmbeddingsStatus
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
+			assert.False(t, got.CanChange)
+			require.NotNil(t, got.Indexing)
+			if administrator {
+				assert.Equal(t, int64(212), got.Indexing.Total)
+				require.NotNil(t, got.Indexing.ETASeconds)
+				assert.Equal(t, int64(30), *got.Indexing.ETASeconds)
+			} else {
+				assert.Zero(t, got.Indexing.Total)
+				assert.Nil(t, got.Indexing.ETASeconds)
+			}
 		})
 	}
 }

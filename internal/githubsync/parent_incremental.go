@@ -23,16 +23,24 @@ const (
 var parentIssueAlias = regexp.MustCompile(`i[0-9]+:issue\(number:([0-9]+)\)`)
 
 func targetedParentGraphQLQuery(numbers []int) string {
+	return targetedIssueGraphQLQuery(numbers, "number fullDatabaseId parent { number fullDatabaseId }")
+}
+
+func targetedStatusGraphQLQuery(numbers []int) string {
+	return targetedIssueGraphQLQuery(numbers, "fullDatabaseId number state stateReason closedAt updatedAt repository { databaseId }")
+}
+
+func targetedIssueGraphQLQuery(numbers []int, fields string) string {
 	var query strings.Builder
 	query.WriteString("query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) {")
 	for i, number := range numbers {
-		_, _ = fmt.Fprintf(&query, " i%d: issue(number: %d) { number fullDatabaseId parent { number fullDatabaseId } }", i, number)
+		_, _ = fmt.Fprintf(&query, " i%d: issue(number: %d) { %s }", i, number, fields)
 	}
 	query.WriteString(" } }")
 	return query.String()
 }
 
-func matchesTargetedParentQuery(query string) bool {
+func matchesTargetedQuery(query string, build func([]int) string) bool {
 	compact := compactGraphQLQuery(query)
 	matches := parentIssueAlias.FindAllStringSubmatch(compact, -1)
 	if len(matches) == 0 || len(matches) > parentQueryBatchSize {
@@ -46,7 +54,7 @@ func matchesTargetedParentQuery(query string) bool {
 		}
 		numbers[i] = n
 	}
-	return compact == compactGraphQLQuery(targetedParentGraphQLQuery(numbers))
+	return compact == compactGraphQLQuery(build(numbers))
 }
 
 // parentErrorsWithoutMissingChildren drops NOT_FOUND errors for aliases that

@@ -327,6 +327,7 @@ func TestWebDaemonProxyRestrictsDownstreamOperations(t *testing.T) {
 		{name: "ordinary metadata", path: "/api/v1/projects/7/metadata", body: `{}`, want: http.StatusNoContent},
 		{name: "project lookup", path: "/api/v1/projects/resolve", body: `{"name":"example-project"}`, want: http.StatusNoContent},
 		{name: "filesystem project", path: "/api/v1/projects", body: `{"start_path":" "}`, want: http.StatusForbidden},
+		{name: "local embeddings setup", path: "/api/v1/embeddings/local", body: `{}`, want: http.StatusForbidden},
 		{name: "federation", path: "/api/v1/federation/replicas", body: `{}`, want: http.StatusForbidden},
 		{name: "purge", path: "/api/v1/projects/7/actions/purge", body: `{}`, want: http.StatusForbidden},
 	} {

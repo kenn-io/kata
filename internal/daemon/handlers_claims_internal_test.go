@@ -246,6 +246,91 @@ func TestApplyForwardedAssignmentClaimNoOpNormalizesEmptyEvents(t *testing.T) {
 	assert.Contains(t, string(raw), `"events":[]`)
 }
 
+func TestApplyForwardedAssignmentClaimFollowsMovedIssueProject(t *testing.T) {
+	ctx := t.Context()
+	hub, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "hub.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, hub.Close()) })
+	spoke, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "spoke.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spoke.Close()) })
+
+	hubSource, err := hub.CreateProject(ctx, "example-source")
+	require.NoError(t, err)
+	hubTarget, err := hub.CreateProject(ctx, "example-target")
+	require.NoError(t, err)
+	issueUID, err := katauid.New()
+	require.NoError(t, err)
+	hubIssue, created, err := hub.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: hubSource.ID, UID: issueUID, Title: "claim after move", Author: "worker",
+	})
+	require.NoError(t, err)
+	for _, project := range []db.Project{hubSource, hubTarget} {
+		_, err := hub.EnableProjectFederation(ctx, project.ID, "worker")
+		require.NoError(t, err)
+	}
+
+	// The local source's numeric ID matches the hub destination's ID. Routing
+	// the response by the original project ID would therefore read the wrong
+	// project even though the envelopes identify the destination by UID.
+	_, err = spoke.CreateProject(ctx, "example-leading-project")
+	require.NoError(t, err)
+	localSource, err := spoke.CreateProjectWithUID(ctx, "spoke-source", hubSource.UID)
+	require.NoError(t, err)
+	localTarget, err := spoke.CreateProjectWithUID(ctx, "spoke-target", hubTarget.UID)
+	require.NoError(t, err)
+	for _, pair := range []struct {
+		local db.Project
+		hub   db.Project
+	}{{localSource, hubSource}, {localTarget, hubTarget}} {
+		_, err := spoke.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID: pair.local.ID, Role: db.FederationRoleSpoke,
+			HubURL: "https://hub.example", HubProjectID: pair.hub.ID,
+			HubProjectUID: pair.hub.UID, Actor: "worker", Enabled: true, PushEnabled: true,
+		})
+		require.NoError(t, err)
+	}
+	_, err = spoke.InsertRemoteEvent(ctx, localSource.ID, remoteEventFromStoredEvent(created))
+	require.NoError(t, err)
+	require.NoError(t, spoke.MaterializeFederatedProject(ctx, localSource.ID))
+	localIssue, err := spoke.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, localSource.ID, localIssue.ProjectID, "the spoke has not pulled the hub move yet")
+
+	moved, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: hubIssue.ID, FromProjectID: hubSource.ID, ToProjectID: hubTarget.ID,
+		IfMatchRev: hubIssue.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, moved.Event)
+	inserted, err := spoke.InsertRemoteEvent(ctx, localTarget.ID, remoteEventFromStoredEvent(*moved.Event))
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, spoke.MaterializeFederatedProject(ctx, localTarget.ID))
+	movedIssue, err := spoke.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, localTarget.ID, movedIssue.ProjectID)
+	assigned := forwardedHubWireEvent(t, hubTarget, issueUID, "issue.assigned", "worker", hub.InstanceUID(),
+		moved.Event.HLCPhysicalMS+1,
+		`{"owner":"worker","assignment_expires_on":"2026-11-03T04:00:00.000Z","updated_at":"2026-11-03T03:00:00.000Z"}`)
+	broadcaster := NewEventBroadcaster()
+	targetEvents := broadcaster.Subscribe(SubFilter{ProjectID: localTarget.ID})
+	defer targetEvents.Unsub()
+
+	response, err := applyForwardedAssignmentClaim(ctx, ServerConfig{DB: spoke, Broadcaster: broadcaster},
+		localSource.ID, issueUID, api.ClaimResponseBody{
+			Changed: true, Events: []db.Event{assigned},
+		})
+	require.NoError(t, err)
+	require.Equal(t, localTarget.ID, response.Body.Issue.ProjectID,
+		"forwarded assignment routing must use the moved issue's current project")
+	require.Len(t, response.Body.Events, 1)
+	assert.Equal(t, assigned.UID, response.Body.Events[0].UID)
+	got := receiveInternalMsg(t, targetEvents.Ch, "current project assignment broadcast")
+	require.NotNil(t, got.Event)
+	assert.Equal(t, assigned.UID, got.Event.UID)
+}
+
 // forwardedHubWireEvent builds a hub-side event as the claim response would
 // carry it across federation: full payload, hub instance identity, and a valid
 // portable content hash so the spoke's insert accepts it.

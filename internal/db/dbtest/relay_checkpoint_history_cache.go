@@ -1,7 +1,11 @@
 package dbtest
 
 import (
+	"context"
+	"encoding/json/jsontext"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -59,14 +63,52 @@ func RunRelayCheckpointHistoryValidationCache(t *testing.T, store db.Storage, ba
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "New identity", Author: "member"})
 	require.NoError(t, err)
 	check()
-	require.Equal(t, 4, fullScans, "identity changes invalidate both retained-checkpoint validations")
+	require.Equal(t, 2, fullScans, "unrelated creations preserve both retained-checkpoint validations")
 	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: other.ID, Actor: "operator", Force: true})
 	require.NoError(t, err)
 	_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: other.ID, Actor: "operator"})
 	require.NoError(t, err)
 	check()
 	check()
-	require.Equal(t, 6, fullScans, "purge invalidation remains active for retained checkpoints")
+	require.Equal(t, 4, fullScans, "purge invalidation remains active for retained checkpoints")
+
+	unrelated, err := store.CreateProject(ctx, "snapshot-project")
+	require.NoError(t, err)
+	unrelatedIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: unrelated.ID, Title: "Unrelated snapshot issue", Author: "member",
+	})
+	require.NoError(t, err)
+	check()
+	require.Equal(t, 4, fullScans, "unrelated snapshot issue creation preserves checkpoint validations")
+	snapshotOther := newRemoteEvent(t, unrelated, &unrelatedIssue.UID, "issue.snapshot", "member", grants[0].SpokeInstanceUID, 650,
+		jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Unrelated snapshot issue","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[]}`, unrelatedIssue.UID)))
+	_, err = store.InsertRemoteEvents(ctx, unrelated.ID, []db.RemoteEvent{snapshotOther})
+	require.NoError(t, err)
+	check()
+	require.Equal(t, 4, fullScans, "unrelated snapshots preserve both checkpoint validations")
+
+	// A snapshot in the checkpoints' own project requires fresh validation.
+	snapshotIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: fixture.project.ID, Title: "Checkpoint snapshot issue", Author: "member",
+	})
+	require.NoError(t, err)
+	check()
+	require.Equal(t, 4, fullScans, "same-project snapshot issue creation preserves checkpoint validations")
+	snapshot := newRemoteEvent(t, fixture.project, &snapshotIssue.UID, "issue.snapshot", "member", grants[0].SpokeInstanceUID, 700,
+		jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Checkpoint snapshot issue","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[]}`, snapshotIssue.UID)))
+	_, err = store.InsertRemoteEvents(ctx, fixture.project.ID, []db.RemoteEvent{snapshot})
+	require.NoError(t, err)
+	bootstrap := store.(db.RelayResetBootstrapStore)
+	_, _, err = requireWriteDuringRelayScan(t, store, backend, fixture.sibling.ID, func() (bool, error) {
+		_, err := store.(db.RelayResetStore).CreateRelayReset(ctx, grants[1].RelayBindingUID, fixture.signer)
+		return false, err
+	}, func() {
+		otherKeyCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		_, err := bootstrap.RelayEnrollmentNeedsReset(otherKeyCtx, grants[0].RelayBindingUID)
+		require.NoError(t, err, "another cache key must progress during the scan")
+	})
+	require.NoError(t, err)
 	require.NoError(t, store.RevokeFederationEnrollment(ctx, grants[0].ID))
 	_, err = store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, grants[0].RelayBindingUID)
 	require.ErrorIs(t, err, db.ErrNotFound, "cached validation cannot bypass revocation")

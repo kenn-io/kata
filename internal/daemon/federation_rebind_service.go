@@ -191,6 +191,14 @@ func RebindFederationReplica(
 			"",
 		)
 	}
+	if credential.NativeLeave != nil {
+		ensureFederationReplicaMu.Unlock()
+		return RebindFederationReplicaResult{}, federationReplicaError(
+			ErrFederationReplicaLeavePending,
+			"explicit federation leave is pending",
+			"abort or finish the leave before reconnecting",
+		)
+	}
 	if err := validateFederationRebindIdentity(project, binding, credential, p.HubCatalog.Name); err != nil {
 		ensureFederationReplicaMu.Unlock()
 		return RebindFederationReplicaResult{}, err
@@ -254,7 +262,7 @@ func RebindFederationReplica(
 			"reread federation credential after rebind validation",
 		)
 	}
-	if !found || currentCredential.LeavePending {
+	if !found || currentCredential.LeavePending || currentCredential.NativeLeave != nil {
 		return RebindFederationReplicaResult{}, federationReplicaError(
 			ErrFederationReplicaLeavePending,
 			"federation credential is pending leave",

@@ -25,6 +25,34 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return compareClock(clockOf(ordered[i]), clockOf(ordered[j])) < 0
 	})
+	// A destination cursor can start after creation. Seed its first available
+	// move snapshot before replaying deltas, including deltas preceding the move.
+	// The snapshot is a baseline rather than a later content edit.
+	baselines := map[string]bool{}
+	for _, e := range ordered {
+		if e.Type == "issue.created" || e.Type == "issue.snapshot" {
+			if uid := issueUID(e, PayloadMap(e.Payload)); uid != "" {
+				baselines[uid] = true
+			}
+		}
+	}
+	for _, e := range ordered {
+		payload := PayloadMap(e.Payload)
+		uid := issueUID(e, payload)
+		if uid == "" || baselines[uid] {
+			continue
+		}
+		if e.Type == "issue.moved" {
+			if raw := payload["snapshot"]; len(raw) > 0 {
+				snapshot := e
+				snapshot.Type, snapshot.Payload = "issue.snapshot", raw
+				snapshot.ProjectUID, _ = stringValue(payload["to_project_uid"])
+				snapshot.HLCPhysicalMS, snapshot.HLCCounter = 0, 0
+				p.applyIssueCreated(snapshot)
+				baselines[uid] = true
+			}
+		}
+	}
 	for _, e := range ordered {
 		p.apply(e)
 	}
@@ -703,6 +731,17 @@ func FederationEventIssueUID(issueUID *string, payload string) string {
 		envelope = *issueUID
 	}
 	return resolveIssueUID(envelope, PayloadMap(jsontext.Value(payload)))
+}
+
+// FederationReadIssueUIDExpr returns the SQL expression that matches
+// FederationEventIssueUID for the federation-read event alias e. Payload
+// identity is used only for issue events; unrelated event payloads may mention
+// issue UIDs without becoming part of that issue's history.
+func FederationReadIssueUIDExpr(postgres bool) string {
+	if postgres {
+		return `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),e.payload::jsonb->>'issue_uid',e.payload::jsonb->>'uid') ELSE NULLIF(e.issue_uid,'') END`
+	}
+	return `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
 }
 
 func resolveIssueUID(envelope string, payload map[string]jsontext.Value) string {

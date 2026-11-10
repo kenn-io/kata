@@ -2,6 +2,7 @@ package vector
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -11,9 +12,13 @@ import (
 type fakeStorage struct {
 	db.Storage // nil embed: only ListIssueContent may be called
 	issues     []db.IssueContent
+	pageErr    error
 }
 
 func (f *fakeStorage) ListIssueContent(_ context.Context, afterID int64, limit int) ([]db.IssueContent, error) {
+	if afterID > 0 && f.pageErr != nil {
+		return nil, f.pageErr
+	}
 	var out []db.IssueContent
 	for _, ic := range f.issues {
 		if ic.ID > afterID {
@@ -26,6 +31,32 @@ func (f *fakeStorage) ListIssueContent(_ context.Context, afterID int64, limit i
 	return out, nil
 }
 
+func TestRefreshMirrorFeedFailureKeepsUnseenRows(t *testing.T) {
+	ctx := t.Context()
+	ix := openTestIndex(t)
+	st := &fakeStorage{issues: []db.IssueContent{
+		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a", ContentRevision: 1},
+		{ID: 2, UID: "u2", ProjectUID: "p1", Title: "b", Body: "body", ContentRevision: 1},
+	}}
+	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	st.issues = st.issues[:1]
+	st.issues[0].ContentRevision = 2
+	st.pageErr = errors.New("feed interrupted")
+	changed, err := ix.RefreshMirror(ctx, st)
+	if !errors.Is(err, st.pageErr) || changed != 1 {
+		t.Fatalf("interrupted refresh = (%d, %v), want (1, feed error)", changed, err)
+	}
+	var content string
+	if err := ix.db.QueryRowContext(ctx, `SELECT content FROM issue_mirror WHERE issue_uid = 'u2'`).Scan(&content); err != nil {
+		t.Fatal(err)
+	}
+	if content != "b\n\nbody" {
+		t.Fatalf("unseen row content = %q, want original title and body", content)
+	}
+}
+
 func openTestIndex(t *testing.T) *Index {
 	t.Helper()
 	ix, err := Open(t.Context(), filepath.Join(t.TempDir(), "vectors.db"))
@@ -34,6 +65,25 @@ func openTestIndex(t *testing.T) *Index {
 	}
 	t.Cleanup(func() { _ = ix.Close() })
 	return ix
+}
+
+func TestRefreshMirrorWithNothingChangedWritesNothing(t *testing.T) {
+	ctx := t.Context()
+	ix := openTestIndex(t)
+	st := &fakeStorage{issues: []db.IssueContent{
+		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a", Body: "b", ContentRevision: 1},
+	}}
+	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	ix.db.SetMaxOpenConns(1)
+	if _, err := ix.db.ExecContext(ctx, `PRAGMA query_only = ON`); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := ix.RefreshMirror(ctx, st)
+	if err != nil || changed != 0 {
+		t.Fatalf("unchanged refresh = (%d, %v), want (0, nil)", changed, err)
+	}
 }
 
 // TestClosePostgresIndexLeavesTheCallersPoolOpen pins that a Postgres-backed

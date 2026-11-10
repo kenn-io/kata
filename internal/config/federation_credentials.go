@@ -48,6 +48,25 @@ type FederationCredential struct {
 	RelayEnrollmentPending bool                          `toml:"relay_enrollment_pending,omitempty"`
 	PendingEnrollmentID    int64                         `toml:"pending_enrollment_id,omitempty"`
 	Provider               *FederationProviderCredential `toml:"provider,omitempty"`
+	NativeLeave            *FederationNativeLeaveState   `toml:"native_leave,omitempty"`
+}
+
+// FederationNativeLeaveState preserves the native binding fence needed to
+// abort a leave after a daemon restart. It lives beside the credential because
+// it is temporary local recovery state, not federated project data.
+type FederationNativeLeaveState struct {
+	Enabled           bool                               `toml:"enabled"`
+	PushEnabled       bool                               `toml:"push_enabled"`
+	CreatedCredential bool                               `toml:"created_credential,omitempty"`
+	Preparations      []FederationNativeLeavePreparation `toml:"preparations"`
+}
+
+// FederationNativeLeavePreparation identifies the transition keys held by
+// one client leave preparation. Keys are retained because a project may be
+// renamed before the client aborts its request.
+type FederationNativeLeavePreparation struct {
+	ID   string   `toml:"id"`
+	Keys []string `toml:"keys"`
 }
 
 // FederationTransportCredential combines secret-bearing credential metadata

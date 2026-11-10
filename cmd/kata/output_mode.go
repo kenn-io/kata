@@ -376,31 +376,36 @@ func emitAgentError(w io.Writer, command string, err error) {
 	message := firstLine(cli.Message)
 	switch cli.Code {
 	case "idempotency_mismatch", "idempotency_deleted", "duplicate_candidates":
-		var data struct {
-			QualifiedID string `json:"qualified_id"`
-			Candidates  []struct {
-				QualifiedID string `json:"qualified_id"`
-			} `json:"candidates"`
-		}
-		if json.Unmarshal(cli.Data, &data) == nil {
-			var refs []string
-			if data.QualifiedID != "" {
-				refs = append(refs, agentValue(data.QualifiedID))
-			}
-			for _, candidate := range data.Candidates {
-				if candidate.QualifiedID != "" {
-					refs = append(refs, agentValue(candidate.QualifiedID))
-				}
-			}
-			if len(refs) > 0 {
-				message += " (" + strings.Join(refs, ", ") + ")"
-			}
-		}
+		message = appendCreateConflictRefs(message, cli)
 	}
 	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, message) //nolint:gosec // G705: CLI stderr error text, not HTML.
 	if cli.Hint != "" {
 		_, _ = fmt.Fprintln(w, "Hint:", firstLine(cli.Hint))
 	}
+}
+
+func appendCreateConflictRefs(message string, cli *cliError) string {
+	var data struct {
+		QualifiedID string `json:"qualified_id"`
+		Candidates  []struct {
+			QualifiedID string `json:"qualified_id"`
+		} `json:"candidates"`
+	}
+	if json.Unmarshal(cli.Data, &data) == nil {
+		var refs []string
+		if data.QualifiedID != "" {
+			refs = append(refs, agentValue(data.QualifiedID))
+		}
+		for _, candidate := range data.Candidates {
+			if candidate.QualifiedID != "" {
+				refs = append(refs, agentValue(candidate.QualifiedID))
+			}
+		}
+		if len(refs) > 0 {
+			message += " (" + strings.Join(refs, ", ") + ")"
+		}
+	}
+	return message
 }
 
 func agentValue(s string) string {

@@ -103,7 +103,7 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 		}
 	}
 	parentLinkBackfill = ghConfig.NeedsParentLinkBackfill() && parentData.Scan == ParentScanComplete
-	comments, err := r.fetchComments(ctx, fetcher, ghConfig, issues)
+	comments, err := r.fetchComments(ctx, fetcher, binding, ghConfig, issues, cutoff)
 	if err != nil {
 		return issuesync.Prepared{Binding: binding}, err
 	}
@@ -174,7 +174,7 @@ func (r *adapter) parentRequest(ctx context.Context, binding db.IssueSyncBinding
 	}
 	// Relationship changes do not update updatedAt. Event discovery uses the
 	// cursor overlap even if the issue cutoff excludes an already imported child.
-	childrenOf, err := r.firstImportsBeforeCutoff(ctx, binding, issues, cutoff)
+	childrenOf, err := r.firstImportsBefore(ctx, binding, issues, cutoff)
 	if err != nil {
 		return ParentRequest{}, err
 	}
@@ -253,44 +253,94 @@ func (r *adapter) fetcherForBinding(ctx context.Context, binding Binding) (Fetch
 	return r.config.Fetcher, nil
 }
 
-func (r *adapter) fetchComments(ctx context.Context, fetcher Fetcher, ghConfig Config, issues []Issue) (map[int][]Comment, error) {
-	out := make(map[int][]Comment)
-	fetchBinding := ghConfig.Binding()
-	total := 0
-	for _, issue := range issues {
-		if !IsPullRequestIssue(issue) {
-			total++
-		}
+func (r *adapter) fetchComments(ctx context.Context, fetcher Fetcher, binding db.IssueSyncBinding, ghConfig Config, issues []Issue, cutoff *time.Time) (map[int][]Comment, error) {
+	window := syncSince(binding.LastCursorAt)
+	if window == nil {
+		window = cutoff
 	}
-	reportProgress(ctx, "comments", 0, total)
-	completed := 0
+	var commented, older []Issue
+	totalComments := 0
 	for _, issue := range issues {
-		if IsPullRequestIssue(issue) {
+		totalComments += issue.Comments
+		if IsPullRequestIssue(issue) || issue.Comments <= 0 {
 			continue
 		}
-		if issue.Comments > 0 {
-			comments, err := fetcher.Comments(ctx, fetchBinding, issue.Number)
-			if err != nil {
-				return nil, err
-			}
-			out[issue.Number] = comments
+		commented = append(commented, issue)
+		if window != nil && (issue.CreatedAt == nil || issue.CreatedAt.Before(*window)) {
+			older = append(older, issue)
 		}
-		completed++
-		reportProgress(ctx, "comments", completed, total)
+	}
+	fullHistory := make(map[int]bool)
+	if binding.LastCursorAt == nil {
+		// A cleared cursor can retain imports while missing comments made
+		// before the new cutoff. Those issues need their full history again.
+		for _, issue := range older {
+			fullHistory[issue.Number] = true
+		}
+	} else {
+		numbers, err := r.firstImportsBefore(ctx, binding, older, window)
+		if err != nil {
+			return nil, err
+		}
+		for _, number := range numbers {
+			fullHistory[number] = true
+		}
+	}
+	out := make(map[int][]Comment)
+	var windowed, individual []Issue
+	individualPages := 0
+	for _, issue := range commented {
+		if fullHistory[issue.Number] {
+			individual = append(individual, issue)
+		} else {
+			windowed = append(windowed, issue)
+			individualPages += (issue.Comments + 99) / 100
+		}
+	}
+	// Without a cursor, PR comments can make the repository feed more
+	// expensive than individual reads, or push it to the truncation limit.
+	repositoryPages := (totalComments + 99) / 100
+	if binding.LastCursorAt == nil && (repositoryPages >= repositoryCommentsPageLimit || repositoryPages > individualPages) {
+		individual = append(individual, windowed...)
+		windowed = nil
+	}
+	if len(windowed) > 0 {
+		reportProgress(ctx, "comments", 0, 0)
+		comments, complete, err := fetcher.RepositoryComments(ctx, ghConfig.Binding(), window)
+		if err != nil {
+			return nil, err
+		}
+		if complete {
+			for _, issue := range windowed {
+				out[issue.Number] = comments[issue.Number]
+			}
+		} else {
+			individual = append(individual, windowed...)
+		}
+	}
+	if len(individual) > 0 || len(commented) == 0 {
+		reportProgress(ctx, "comments", 0, len(individual))
+	}
+	for i, issue := range individual {
+		comments, err := fetcher.Comments(ctx, ghConfig.Binding(), issue.Number)
+		if err != nil {
+			return nil, err
+		}
+		out[issue.Number] = comments
+		reportProgress(ctx, "comments", i+1, len(individual))
 	}
 	return out, nil
 }
 
-// firstImportsBeforeCutoff returns issues created before the cutoff that have no
-// import mapping yet. Earlier runs dropped links from imported children to these
-// issues, so their children need a parent check once they are imported.
-func (r *adapter) firstImportsBeforeCutoff(ctx context.Context, binding db.IssueSyncBinding, issues []Issue, cutoff *time.Time) ([]int, error) {
-	if cutoff == nil {
+// firstImportsBefore returns issues created at or before the given time that
+// have no import mapping yet.
+func (r *adapter) firstImportsBefore(ctx context.Context, binding db.IssueSyncBinding, issues []Issue, before *time.Time) ([]int, error) {
+	if before == nil {
 		return nil, nil
 	}
 	var numbers []int
 	for _, issue := range issues {
-		if IsPullRequestIssue(issue) || issue.Number <= 0 || issue.CreatedAt == nil || issue.CreatedAt.After(*cutoff) {
+		if IsPullRequestIssue(issue) || issue.Number <= 0 || issue.CreatedAt == nil || issue.CreatedAt.After(*before) {
 			continue
 		}
 		externalID := issueExternalID(issue)

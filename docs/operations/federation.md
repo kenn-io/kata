@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-03
+last_edited: 2026-11-09
 ---
 
 # Federation
@@ -66,15 +66,61 @@ Roles apply to a project, not to an entire daemon.
 
 ## Moving issues between projects
 
-Cross-project issue moves involving a federated project are unsupported on hubs
-and spokes. Federation replay cannot apply the move event. Disabling sync retains
-the federation binding and replica state, so it does not enable moves.
+Move an issue and its active descendants between projects on the same hub:
 
-`kata move <issue-ref> <project> --dry` validates this restriction through the
-daemon and returns the same `federated_move_unsupported` conflict as a real move.
-The preview does not change issues or refresh claims. It validates the current
-state without reserving a future move. See the [CLI reference](../reference/cli.md)
-for the other move restrictions.
+```sh
+kata move intake-project#abc4 repository-project --dry
+kata move intake-project#abc4 repository-project
+```
+
+Both projects must have active federation bindings. On a spoke, both must use
+that hub's HTTP(S) origin, use the same federation actor, and have push enabled
+for a local move. Relay-connected projects are unsupported, including hubs with
+active downstream relays. A preview
+checks the whole tree without changing issues, claims, or cursors. Use `--single`
+to move only the selected issue. The [CLI reference](../reference/cli.md) owns
+the per-issue restrictions.
+
+Spokes must join both projects before applying a move. Sync refuses the batch
+without partial writes when a project is missing; join it and retry sync. Upgrade
+both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+move history instead of applying a payload they cannot understand. Moves preserve
+stable UIDs, nesting, state, comments, and links. Established author and
+teammate attribution must match trusted history, and a spoke cannot change
+hub-owned recurrence provenance through a move snapshot. Old references
+resolve while move history and the original project identity remain. Purging that history or
+merging the former project can end compatibility; the move returns the current
+reference, and the stable issue UID stays unchanged. If a spoke previously
+assigned a longer short ID to avoid a local collision, that former reference
+also remains reserved while its move history remains.
+
+Destination sync recovers retained source history even when its cursor has
+already passed those events. This preserves missed changes and comments without
+replacing newer edits. Once the move is received, leaving the source does not
+discard that recovered history; its original project identity and move history
+must remain for historical references to keep resolving.
+
+Leaving or archiving a former project preserves its identity for delayed events.
+Purging, merging, or adopting it under a different project UID is refused while
+another joined project's retained move history still needs that identity.
+This includes source and transit streams even when the current destination has
+left. Leave the dependent projects before removing the former identity;
+unrelated bindings and history covered by a standalone
+adoption baseline do not prevent ordinary cleanup.
+
+A standalone move is covered by the first retained federation baseline after
+that move, including after leaving and reenrolling in federation. Spokes can
+receive later moves without joining the former local project; later edits and
+comments still synchronize normally.
+
+The spoke sends the source project's existing enrollment credential with the
+move batch, alongside the destination credential, only to their shared hub
+origin. Both grants must permit push for the same spoke and actor. Joining both
+projects supplies these credentials automatically; no additional setup is needed.
+
+Moves between different hubs, mixed local/federated projects, and paused bindings
+return `federated_move_unsupported`. Create an issue in the target project and link
+it to the original issue instead. Disabling sync retains the binding.
 
 ## Connect a project through the daemon catalog
 
@@ -115,6 +161,14 @@ issues. The error says whether the links are on the hub or in this daemon's copy
 of the project. Remove them on that side and retry; ask an operator there to
 remove links to projects you cannot access. Links that were already removed do
 not count.
+
+Fresh direct-spoke pushes also reject additions, close parents, and
+duplicate or superseded evidence that name a stored sibling issue when either
+project has a relay binding or an active relay enrollment. The whole batch
+returns `400 validation` and the spoke quarantines it; see
+[Quarantine](#quarantine) before retrying or skipping. Removals and missing
+peers remain admissible. Already accepted events retain their delivery order and
+retry identities; retained crossing history uses the existing checkpoint recovery.
 
 The hub runs this check, so preflight reports `hub_links_checked`. It is `false`
 when the hub predates API `0.31.0`; the preview is still ready, and the CLI warns
@@ -1712,9 +1766,15 @@ credential changes while leave is cleaning it up, the API returns
 and retry `kata federation leave <project>`.
 
 After confirmation, the CLI asks the spoke daemon to prepare the leave before
-it contacts the hub. Preparation durably marks a config-managed reservation,
-blocks new reconciliation work for that mapping, and waits for earlier hub
-enrollment or rotation requests to finish. Any completed enrollment is recorded
+it contacts the hub. On a native spoke using local credentials, preparation
+refuses while another project still owes a locally authored move from this
+source; sync that destination and retry. Otherwise it atomically pauses writes
+on the leaving binding so a new move cannot race hub revocation. Preparation
+then durably marks a config-managed reservation, blocks new reconciliation
+work for that mapping,
+and waits for earlier hub enrollment or rotation requests to finish. If writing
+the credential marker fails, the binding stays paused; retry the same leave
+command to finish preparation. Any completed enrollment is recorded
 and revoked idempotently before local teardown. If the command or daemon stops
 midway, rerun the same leave command; the marker prevents automatic
 re-enrollment and carries the cleanup forward. A successful leave suppresses
@@ -1858,7 +1918,14 @@ This section describes direct-spoke transport. Negotiated relays use
 A spoke polls the hub for events after its pull cursor. It applies hub events
 in order, deduplicates by event UID and content hash, folds portable payloads
 into the local projection, and advances its pull cursor only after successful
-application.
+application. SQLite cron-only pull pages replay the project's complete cron
+definition history and use indexed lookups for the runs carried by the page.
+Run-history work follows the runs the pull brings, preserving their complete
+observation history without reconciling unrelated runs, issues, or short IDs.
+A cron-only pull leaves run rows it didn't carry unchanged; a full rebuild
+still repairs every run. Mixed pages combine complete cron history with only
+the issues they touch. Project, move, and unidentified events keep a complete
+fold, as do touched issues with retained move history.
 
 A push-enabled spoke scans for local-origin events above its push cursor and
 sends them to the hub as an all-or-nothing batch. The hub authenticates the
@@ -1867,15 +1934,41 @@ belongs to the bound spoke origin and actor, verifies schema version,
 deduplicates same-hash retries, rejects same-UID/different-hash conflicts,
 materializes the batch, and returns the advanced push cursor.
 
-Ingest work is bounded by the accepted batch: metadata, comment, label,
-status, and claim-only batches skip the federation group's link rebuild because
-they cannot change link state. Link mutations, snapshots, and issue lifecycle
-events that can change endpoint resolution still run the full reconciliation.
+On SQLite, ordinary issue pushes fold the histories of touched issues and
+reconcile only their projection rows. Cron events add the project's complete
+cron history without widening that scope, so a cron-only push reconciles no
+issue rows. Batches touching more than 500 issues keep complete preparation to
+stay within SQLite query limits. Project, move, and unidentified events also
+keep a complete fold. Retained moves in a touched issue's history also
+require a complete fold. Feature negotiation and some history queries still
+scan retained events, so ingest time is not strictly bounded by batch size.
+Other storage backends retain their existing complete materialization.
+
+Metadata, comment, label, status, and claim-only batches skip the federation
+group's link rebuild because they cannot change link state. Link mutations,
+snapshots, and issue lifecycle events that can change endpoint resolution still
+run the full link reconciliation.
 
 Federation push and poll requests have a 60-second default budget, separate
 from the shorter interactive CLI default. `KATA_HTTP_TIMEOUT` overrides that
-budget when a large, healthy hub needs more time. A timed-out request leaves
-the cursor unchanged and retries through the normal sync loop.
+budget when a large, healthy hub needs more time. Set it in the environment
+that starts the daemon; local-profile autostart preserves the value. A running
+daemon keeps the environment it started with. To apply a changed value, stop
+that daemon and let the next command autostart it. For a profile with its own
+home, run `KATA_HOME=/absolute/profile-home kata daemon stop`; the stop command
+rejects `--daemon` (see
+[Local daemon profiles](local-daemon-profiles.md#reboots-idle-shutdown-and-clients)).
+A timed-out
+request leaves the cursor unchanged and retries through the normal sync loop.
+
+SQLite push and pull application first prepare without holding the writer.
+If a concurrent write invalidates that snapshot, Kata tries once more the same
+way, unless the invalidated preparation took a second or longer. After that,
+the next attempt acquires the writer before preparing. Optimistic preparation
+time does not consume that fallback's contention retry budget; caller
+cancellation and deadlines still stop the operation. While the fallback holds
+the writer, other local writes wait, so a slow preparation can make local CLI
+writes time out until it commits.
 
 If a response is lost after the hub commits, retrying the same batch is safe.
 Permanent validation failures or hash conflicts record a quarantine on the
@@ -1941,6 +2034,13 @@ A complete issue read on a spoke, including `kata show`, makes an optional
 lease-status refresh from the hub. That refresh gets a 500 ms budget; if it
 times out or the hub is unavailable, the read still returns the locally cached
 lease state.
+In Kata 0.23.0 and later, local cache updates share an outer 600 ms optional-work budget,
+including the 500 ms hub request. A busy local writer or a federation endpoint
+change therefore leaves the read using its committed local cache. Cache
+transactions already committed remain visible if a later update times out.
+When the cache is available, failed hub refreshes still record their retry
+suppression marker. Caller cancellation and local authorization or storage
+errors remain errors.
 This is a budget for the optional hub refresh, not a deadline for the complete
 issue read. Project-local projections such as `kata meta get` do not perform
 the refresh.
@@ -2169,6 +2269,14 @@ validation shape. Current hubs accept a missing link peer as deferred state,
 so the original batch can advance and the edge materializes after both endpoint
 projects reach the same hub federation group.
 
+A fresh cross-project addition involving a relayed project also returns
+`400 validation` and quarantines the whole push batch, including earlier valid
+events. The error names the offending event UID. Unlinking locally and retrying
+resends the same stored addition, so it is refused again while either project
+still uses a relay. Inspect the retained event range before using the explicit
+skip command below. Skipping advances past every event in that batch; none of
+that skipped work reaches the hub, and later removals do not restore it.
+
 Unknown primary issues are different: errors such as `issue.updated references
 unknown issue` still indicate a poisoned mutation, remain quarantined, and stop
 before another network request. Fix the root cause and explicitly retry other
@@ -2184,6 +2292,49 @@ For legacy spokes, retry supports push quarantines. It marks the quarantine
 resolved without advancing the push cursor, so the same local events are sent
 again on the next sync. Retrying a legacy pull quarantine returns
 `federation_quarantine_retry_unsupported`.
+
+#### Direct-spoke history after an actor change
+
+A direct spoke can reoffer events that the hub accepted under an earlier
+enrollment actor. A hub running the actor-rebind retry fix acknowledges an
+exact retained event UID and content hash as a duplicate, even when its actor
+differs from the current enrollment. Project, origin and content integrity
+checks still apply. The hub does not insert, reattribute, materialize or
+broadcast that event again. New events must still match the enrollment actor.
+Snapshot author canonicalization cannot turn a changed event from another
+actor into a duplicate.
+
+Before retrying an actor-mismatch quarantine, compare the original outbound
+events with retained hub events by UID and hash. If the hub already retains
+every earlier-actor event, upgrade the hub to a build containing the fix and
+retry the quarantine. Keep the source events, their order and the spoke's push
+cursor intact.
+
+Missing earlier-actor events need separate admission; upgrading and retrying
+alone cannot admit them. An authorized hub owner can create a temporary
+project-scoped, push-only enrollment for the original spoke instance and
+earlier actor. In identity mode, that actor must name an existing hub account
+that can access the project. Use enrollment creation, not rotation, so the
+current enrollment stays valid. Do not install the temporary credential on the
+spoke or change its bound actor.
+
+Send the reviewed historical prefix to
+`POST /api/v1/projects/{project_id}/federation/events:ingest` with that temporary
+transport credential, preserving every original envelope field, content hash
+and source `event_id`, in source order. Supply the source `schema_version` and
+required event-feature headers. Ordinary daemon-owner credentials are not
+transport credentials for this route. Stop on a missing predecessor, hash
+conflict or any rejection; never skip the range or synthesize replacement
+events. If actors alternate, review and admit each contiguous prefix under its
+matching grant before proceeding to the next prefix.
+
+Verify exact UID/hash coverage and the resulting issues and comments on the
+hub, then revoke only the temporary enrollment. With the fix installed, the
+unchanged current enrollment can acknowledge the recovered prefix as exact
+duplicates and continue with its own events. Explicitly retry the spoke's push
+quarantine only after that proof. Verify the push backlog drains and both push
+and pull succeed independently. A successful push does not establish that a
+separate pull failure is repaired.
 
 Negotiated project relays quarantine rejected canonical data in either
 direction. The retained range names hop sequence numbers, and the event UID list
@@ -2311,14 +2462,17 @@ Federation has expected stale or deferred states:
 - Purge causes spoke re-bootstrap.
 - Enrollment creation uses normal daemon auth; the generated enrollment token
   only authorizes the spoke transport grant and is not a user daemon API token.
-- Direct-spoke push binds event actors to the enrollment actor. A spoke that
-  pushes a different actor is rejected and records the batch in quarantine.
+- Direct-spoke push binds fresh event actors to the enrollment actor. A spoke
+  that pushes a new event with a different actor is rejected and records the
+  batch in quarantine. Exact retained history can be acknowledged after an
+  [actor change](#direct-spoke-history-after-an-actor-change).
   Negotiated relays preserve source actors separately from accountable
   attribution; see [Project boundaries and attribution](#project-boundaries-and-attribution).
-- Direct-spoke links may span projects; negotiated relays reject cross-project
-  links. For direct spokes, a missing peer does not quarantine push: the event
-  and cursor advance while the edge remains absent. The edge materializes when
-  both endpoint projects are enabled through the same hub federation group.
+- Direct-spoke links may span projects when neither project uses a relay;
+  negotiated relays reject cross-project links. For direct spokes, a missing peer
+  does not quarantine push: the event and cursor advance while the edge remains
+  absent. The edge materializes when both endpoint projects are enabled through
+  the same hub federation group.
   Pulling clients must enroll both projects and use the same normalized hub URL
   origin to project it locally. Unfederated peers, different hub origins, and
   peers that never arrive stay absent. Malformed events, unknown primary

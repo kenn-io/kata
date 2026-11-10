@@ -170,7 +170,7 @@ func (d *Store) seedRelayLocalEventsTx(ctx context.Context, tx *sql.Tx, grant db
 // brand-new namespace. Current authority is checked under the native fence.
 func (d *Store) RelayEnrollmentNeedsReset(ctx context.Context, bindingUID string) (bool, error) {
 	var required bool
-	err := d.relayTx(ctx, func(tx *sql.Tx) error {
+	err := d.relayTxFilled(ctx, func(tx *sql.Tx, scan bool) error {
 		grant, err := d.relayGrantTx(ctx, tx, bindingUID, "pull")
 		if err != nil {
 			return err
@@ -192,14 +192,14 @@ func (d *Store) RelayEnrollmentNeedsReset(ctx context.Context, bindingUID string
 			if err := json.Unmarshal([]byte(raw), &checkpoint, json.RejectUnknownMembers(true)); err != nil {
 				return err
 			}
-			required, err = d.relayCheckpointNeedsRefreshTx(ctx, tx, projectUID, checkpoint)
+			required, err = d.relayCheckpointNeedsRefreshTx(ctx, tx, projectUID, checkpoint, scan)
 			required = required || checkpoint.Translation.Authority.Epoch != grant.RelayResetEpoch
 			return err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		required, err = d.relayHistoryNeedsResetCachedTx(ctx, tx, *grant.ProjectID, projectUID, nil)
+		required, err = d.relayHistoryNeedsResetCachedTx(ctx, tx, *grant.ProjectID, projectUID, nil, scan)
 		return err
 	})
 	return required, err
@@ -220,7 +220,7 @@ func relayHistoryNeedsResetTx(ctx context.Context, tx *sql.Tx, projectID int64, 
 
 // Retained checkpoints are exact retry identities until a later root purge,
 // history boundary or installed upstream checkpoint makes them obsolete.
-func (d *Store) relayCheckpointNeedsRefreshTx(ctx context.Context, tx *sql.Tx, projectUID string, checkpoint db.RelayResetCheckpoint) (bool, error) {
+func (d *Store) relayCheckpointNeedsRefreshTx(ctx context.Context, tx *sql.Tx, projectUID string, checkpoint db.RelayResetCheckpoint, scan bool) (bool, error) {
 	pin, err := rootPinTx(ctx, tx, projectUID, "")
 	if err != nil {
 		return false, err
@@ -242,7 +242,7 @@ func (d *Store) relayCheckpointNeedsRefreshTx(ctx context.Context, tx *sql.Tx, p
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=?`, projectUID).Scan(&projectID); err != nil {
 			return false, err
 		}
-		return d.relayHistoryNeedsResetCachedTx(ctx, tx, projectID, projectUID, &checkpoint)
+		return d.relayHistoryNeedsResetCachedTx(ctx, tx, projectID, projectUID, &checkpoint, scan)
 	}
 	var raw string
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, db.RelayResetMetadataPrefix+projectUID).Scan(&raw); err != nil {
@@ -300,4 +300,27 @@ func (d *Store) seedRelayArtifactManifestsTx(ctx context.Context, tx *sql.Tx, gr
 		}
 		after = page[len(page)-1].digest
 	}
+}
+
+// relayTxFilled checks authority before filling history outside the writer.
+// One refill keeps the common scan read-only. The second attempt may scan
+// under the fence so repeated invalidations cannot starve the request.
+func (d *Store) relayTxFilled(ctx context.Context, op func(*sql.Tx, bool) error) error {
+	err := d.relayTx(ctx, func(tx *sql.Tx) error { return op(tx, false) })
+	miss, ok := errors.AsType[*relayHistoryCacheMiss](err)
+	if !ok {
+		return err
+	}
+	if err := d.RetryTransient(ctx, func() error {
+		tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		_, err = d.relayHistoryNeedsResetCachedTx(ctx, tx, miss.projectID, miss.projectUID, miss.checkpoint, true)
+		return err
+	}); err != nil {
+		return err
+	}
+	return d.relayTx(ctx, func(tx *sql.Tx) error { return op(tx, true) })
 }

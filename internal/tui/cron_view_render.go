@@ -389,7 +389,7 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 	if len(m.cron.stack) == 0 {
 		rows = slices.Insert(rows, 2, helplayout.HelpItem{Key: "/", Description: "filter"})
 	}
-	if m.cronJobsScope() {
+	if m.cronJobsScope() || m.cronScope(cronWorkflows) {
 		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"})
 	}
 	return rows

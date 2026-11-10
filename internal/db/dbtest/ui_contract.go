@@ -12,6 +12,73 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// RunUISnapshotGraphReachContract checks that graph traversal stays within visible issues.
+func RunUISnapshotGraphReachContract(t *testing.T, open func(*testing.T) db.Storage) {
+	t.Helper()
+	store := open(t)
+	ctx := t.Context()
+	project := createCursorProject(ctx, t, store)
+	spoke, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	archived, err := store.CreateProject(ctx, "archived-project")
+	require.NoError(t, err)
+	source := createCursorIssue(ctx, t, store, project.ID, "S")
+	a := createCursorIssue(ctx, t, store, project.ID, "A")
+	b := createCursorIssue(ctx, t, store, project.ID, "B")
+	x := createCursorIssue(ctx, t, store, project.ID, "X")
+	y := createCursorIssue(ctx, t, store, project.ID, "Y")
+	d := createCursorIssue(ctx, t, store, project.ID, "D")
+	z := createCursorIssue(ctx, t, store, project.ID, "Z")
+	removed := createCursorIssue(ctx, t, store, archived.ID, "Archived bridge")
+	w := createCursorIssue(ctx, t, store, project.ID, "W")
+	p := createCursorIssue(ctx, t, store, spoke.ID, "P")
+	q := createCursorIssue(ctx, t, store, project.ID, "Q")
+	for _, link := range []struct {
+		from, to db.Issue
+		kind     string
+	}{
+		{source, a, "blocks"}, {b, a, "parent"}, {x, y, "related"},
+		{source, d, "related"}, {d, z, "blocks"},
+		{source, removed, "related"}, {removed, w, "blocks"},
+		{source, p, "related"}, {p, q, "blocks"},
+	} {
+		createCursorLink(ctx, t, store, link.from, link.to, link.kind)
+	}
+	_, _, _, err = store.SoftDeleteIssue(ctx, d.ID, "user-a")
+	require.NoError(t, err)
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: archived.ID, Actor: "user-a", Force: true})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name   string
+		ctx    context.Context
+		query  db.UISnapshotQuery
+		issues []string
+		links  [][3]string
+	}{
+		{"reachable", ctx, db.UISnapshotQuery{SelectedIssueUID: source.UID},
+			[]string{source.UID, a.UID, b.UID, p.UID, q.UID},
+			[][3]string{{source.UID, a.UID, "blocks"}, {b.UID, a.UID, "parent"}, {source.UID, p.UID, "related"}, {p.UID, q.UID, "blocks"}}},
+		{"authorized projects", db.WithAuthorizedProjects(ctx, []string{project.UID}), db.UISnapshotQuery{SelectedIssueUID: source.UID},
+			[]string{source.UID, a.UID, b.UID}, [][3]string{{source.UID, a.UID, "blocks"}, {b.UID, a.UID, "parent"}}},
+		{"allowlist", ctx, db.UISnapshotQuery{SelectedIssueUID: source.UID, AllowedIssueIDs: []int64{source.ID, b.ID}},
+			[]string{source.UID}, nil},
+		{"no selection", ctx, db.UISnapshotQuery{}, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.query.View = "all-open"
+			tc.query.IncludeGraph = true
+			snapshot, err := store.(db.UIStore).ReadUISnapshot(tc.ctx, tc.query)
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.issues, uiIssueUIDs(snapshot.GraphIssues))
+			links := make([][3]string, 0, len(snapshot.GraphLinks))
+			for _, link := range snapshot.GraphLinks {
+				links = append(links, [3]string{link.FromIssueUID, link.ToIssueUID, link.Type})
+			}
+			require.ElementsMatch(t, tc.links, links)
+		})
+	}
+}
+
 // RunUISnapshotCompletenessContract verifies that an unbounded browser
 // snapshot returns the complete matching authority set.
 func RunUISnapshotCompletenessContract(t *testing.T, open func(*testing.T) db.Storage) {

@@ -55,7 +55,7 @@ import (
 
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "manage the kata daemon"}
-	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonLocateCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd(), daemonDiagnoseCmd(), daemonRecoverCmd())
+	cmd.AddCommand(daemonLocalEmbeddingsCmd(), daemonStartCmd(), daemonStatusCmd(), daemonLocateCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd(), daemonDiagnoseCmd(), daemonRecoverCmd())
 	return cmd
 }
 
@@ -280,6 +280,7 @@ func daemonStartCmd() *cobra.Command {
 			if foreground {
 				ctx, cancel := context.WithCancel(cmd.Context())
 				defer cancel()
+				daemonProcessEntered = true
 				return runDaemonForeground(ctx, listen, insecureReadonly, noAutoToken)
 			}
 			out, err := startDetachedDaemonLocked(cmd.Context(), listen, insecureReadonly, noAutoToken)
@@ -901,10 +902,8 @@ func daemonRestartCmd() *cobra.Command {
 				return err
 			}
 			defer release()
-			for _, rec := range running {
-				if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
-					return unsupportedDaemonRestartError(rec)
-				}
+			if err := requireRestartable(running); err != nil {
+				return err
 			}
 			pids := make([]int, 0, len(running))
 			var out daemonStartOutput
@@ -917,23 +916,15 @@ func daemonRestartCmd() *cobra.Command {
 					return err
 				}
 			} else {
-				target := newDaemonRestart(io.Discard)
-				if target == nil {
-					return fmt.Errorf("cannot resolve the installed restart executable")
-				}
 				var flags []string
 				for _, name := range []string{"listen", "insecure-readonly", "no-auto-token"} {
 					if f := cmd.Flags().Lookup(name); f.Changed {
 						flags = append(flags, "--"+name+"="+f.Value.String())
 					}
 				}
-				for _, rec := range running {
-					replacement, err := requestDaemonRestart(cmd.Context(), ns, rec, target.executable, flags)
-					if err != nil {
-						return err
-					}
-					pids = append(pids, rec.PID)
-					out = daemonStartOutputFromRecord("restarted", replacement)
+				pids, out, err = restartRunningDaemons(cmd.Context(), ns, running, flags)
+				if err != nil {
+					return err
 				}
 			}
 			switch currentOutputMode() {
@@ -1621,10 +1612,7 @@ func runDaemonProcess(
 	if err != nil {
 		return fmt.Errorf("build embedded web handler: %w", err)
 	}
-	var docbankClient *docbank.Client
-	if dcfg.Docbank.Enabled() {
-		docbankClient = docbank.NewClient(dcfg.Docbank.URL, dcfg.Docbank.ResolveKey)
-	}
+	docbankClient := docbank.New(dcfg.Docbank)
 	var mcpHandler http.Handler
 	if dcfg.MCP.Enabled {
 		mcpHandler, err = newDaemonMCPHandler(ctx, store, dcfg.MCP, startup.MCPToken, runtimeEndpoint, dcfg.Auth)
@@ -1634,7 +1622,25 @@ func runDaemonProcess(
 			rec.Metadata["mcp"] = "unavailable"
 		}
 	}
+	localSetup := &localEmbeddingsSetup{
+		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
+		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
+	}
+	if pg, ok := store.(*pgstore.Store); ok {
+		localSetup.vectorReady = func(ctx context.Context) error {
+			idx, err := vector.OpenPostgres(ctx, pg.DB)
+			if err != nil {
+				return fmt.Errorf("install pgvector in this daemon's database, then try again: %w", err)
+			}
+			return idx.Close()
+		}
+	}
+
+	// Start the Events worker only after the last fallible startup step, so an
+	// earlier failure cannot leave it running past the store closing.
+	mcpEvents, mcpEventsReason := startDaemonMCPEvents(ctx, workers, dcfg, ns.DBHash, store, broadcaster, daemonLog)
 	srv := daemon.NewServer(daemon.ServerConfig{
+		LocalEmbeddings:           localSetup,
 		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,
@@ -1645,45 +1651,50 @@ func runDaemonProcess(
 		Endpoint:                  &endpoint,
 		Hooks:                     disp,
 		Broadcaster:               broadcaster,
+		MCPEvents:                 mcpEvents,
+		MCPEventsDisabledReason:   mcpEventsReason,
 		FederationWake:            federationWake,
-		EmbeddingWake:             embeddingWake,
-		FederationCatalog:         append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		WebDaemons:                append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		ActiveWebDaemon:           dcfg.ActiveDaemon,
-		GitHubSyncFetcher:         gitHubSyncFetcher,
-		GitHubSyncConfig:          dcfg.GitHubSync,
-		GitHubSyncWake:            gitHubSyncWake,
-		GitHubSyncProgress:        gitHubSyncProgress,
-		NotionSyncFetcher:         notionSyncFetcher,
-		NotionSyncConfig:          dcfg.NotionSync,
-		NotionSyncWake:            notionSyncWake,
-		NotionSyncProgress:        notionSyncProgress,
-		TickTickSyncFetcher:       tickTickSyncFetcher,
-		TickTickSyncConfig:        dcfg.TickTickSync,
-		TickTickSyncWake:          tickTickSyncWake,
-		TickTickSyncProgress:      tickTickSyncProgress,
-		PlaneSyncFetcher:          planeSyncFetcher,
-		PlaneSyncConfig:           dcfg.PlaneSync,
-		PlaneSyncWake:             planeSyncWake,
-		PlaneSyncProgress:         planeSyncProgress,
-		LinearSyncFetcher:         linearSyncFetcher,
-		LinearSyncConfig:          dcfg.LinearSync,
-		LinearSyncWake:            linearSyncWake,
-		LinearSyncProgress:        linearSyncProgress,
-		TwentySyncFetcher:         twentySyncFetcher,
-		TwentySyncConfig:          dcfg.TwentySync,
-		TwentySyncWake:            twentySyncWake,
-		TwentySyncProgress:        twentySyncProgress,
-		TodoistSyncFetcher:        todoistSyncFetcher,
-		TodoistSyncConfig:         dcfg.TodoistSync,
-		TodoistSyncWake:           todoistSyncWake,
-		TodoistSyncProgress:       todoistSyncProgress,
-		ExternalRootRegistry:      externalRootRegistry,
-		ExternalRootService:       externalRootService,
-		ExternalRootReconciler:    externalRootReconciler,
-		ExternalRootWake:          externalRootWake,
-		FederationPushPending:     federation.DirectSpokePushPending(store),
-		FederationHubClient:       federation.CredentialHTTPClient,
+		FederationPullOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
+		},
+		EmbeddingWake:          embeddingWake,
+		FederationCatalog:      append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		WebDaemons:             append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		ActiveWebDaemon:        dcfg.ActiveDaemon,
+		GitHubSyncFetcher:      gitHubSyncFetcher,
+		GitHubSyncConfig:       dcfg.GitHubSync,
+		GitHubSyncWake:         gitHubSyncWake,
+		GitHubSyncProgress:     gitHubSyncProgress,
+		NotionSyncFetcher:      notionSyncFetcher,
+		NotionSyncConfig:       dcfg.NotionSync,
+		NotionSyncWake:         notionSyncWake,
+		NotionSyncProgress:     notionSyncProgress,
+		TickTickSyncFetcher:    tickTickSyncFetcher,
+		TickTickSyncConfig:     dcfg.TickTickSync,
+		TickTickSyncWake:       tickTickSyncWake,
+		TickTickSyncProgress:   tickTickSyncProgress,
+		PlaneSyncFetcher:       planeSyncFetcher,
+		PlaneSyncConfig:        dcfg.PlaneSync,
+		PlaneSyncWake:          planeSyncWake,
+		PlaneSyncProgress:      planeSyncProgress,
+		LinearSyncFetcher:      linearSyncFetcher,
+		LinearSyncConfig:       dcfg.LinearSync,
+		LinearSyncWake:         linearSyncWake,
+		LinearSyncProgress:     linearSyncProgress,
+		TwentySyncFetcher:      twentySyncFetcher,
+		TwentySyncConfig:       dcfg.TwentySync,
+		TwentySyncWake:         twentySyncWake,
+		TwentySyncProgress:     twentySyncProgress,
+		TodoistSyncFetcher:     todoistSyncFetcher,
+		TodoistSyncConfig:      dcfg.TodoistSync,
+		TodoistSyncWake:        todoistSyncWake,
+		TodoistSyncProgress:    todoistSyncProgress,
+		ExternalRootRegistry:   externalRootRegistry,
+		ExternalRootService:    externalRootService,
+		ExternalRootReconciler: externalRootReconciler,
+		ExternalRootWake:       externalRootWake,
+		FederationPushPending:  federation.DirectSpokePushPending(store),
+		FederationHubClient:    federation.CredentialHTTPClient,
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
 			SiblingBurstWindow:  closeThrottleWindow,
@@ -2093,7 +2104,7 @@ func preflightEmbeddingStartup(
 	if !ec.Enabled() {
 		return nil, "", nil
 	}
-	embedder, err := embedding.New(embedding.Config{
+	cfg := embedding.Config{
 		BaseURL:             ec.BaseURL,
 		Model:               ec.Model,
 		Credential:          ec.ResolveCredential(),
@@ -2107,7 +2118,15 @@ func preflightEmbeddingStartup(
 		BatchSize:           ec.BatchSize,
 		Timeout:             time.Duration(ec.TimeoutSeconds) * time.Second,
 		TrustPrivateNetwork: ec.TrustPrivateNetwork,
-	})
+	}
+	if ec.UsesLocal() {
+		cfg.Endpoint = func(ctx context.Context) (string, error) {
+			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
+				return false, errors.New("run kata daemon local-embeddings to approve the download")
+			})
+		}
+	}
+	embedder, err := embedding.New(cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
 	}

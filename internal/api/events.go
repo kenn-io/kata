@@ -79,10 +79,11 @@ type EventReset struct {
 // should pass on the next request. Limit defaults to 100 and is clamped to
 // 1000 server-side; explicit zero or negative Limit returns 400 validation.
 type PollEventsRequest struct {
-	ProjectID int64       `path:"project_id"`
-	Issue     string      `query:"issue,omitempty" doc:"Filter subject history by issue short ID, qualified ref, or UID."`
-	AfterID   int64       `query:"after_id,omitempty"`
-	Limit     OptionalInt `query:"limit,omitempty"`
+	ProjectID                     int64       `path:"project_id"`
+	Issue                         string      `query:"issue,omitempty" doc:"Filter subject history by issue short ID, qualified ref, or UID."`
+	AfterID                       int64       `query:"after_id,omitempty"`
+	Limit                         OptionalInt `query:"limit,omitempty"`
+	IncludeEffectiveCloseEventUID bool        `query:"include_effective_close_event_uid,omitempty" doc:"Include the effective native close event UID in issue history when available."`
 }
 
 // PollEventsGlobalRequest is GET /api/v1/events (cross-project). Same semantics
@@ -95,10 +96,11 @@ type PollEventsGlobalRequest struct {
 
 // PollEventsBody is the response body for both polling endpoints.
 type PollEventsBody struct {
-	ResetRequired bool            `json:"reset_required"`
-	ResetAfterID  int64           `json:"reset_after_id,omitzero"`
-	Events        []EventEnvelope `json:"events"`        // always non-nil; empty array on no rows
-	NextAfterID   int64           `json:"next_after_id"` // = max events.id in response, or after_id if empty
+	ResetRequired          bool            `json:"reset_required"`
+	ResetAfterID           int64           `json:"reset_after_id,omitzero"`
+	Events                 []EventEnvelope `json:"events"`        // always non-nil; empty array on no rows
+	NextAfterID            int64           `json:"next_after_id"` // = max events.id in response, or after_id if empty
+	EffectiveCloseEventUID string          `json:"effective_close_event_uid,omitempty"`
 }
 
 // PollEventsResponse is the response for both polling endpoints. ResetRequired

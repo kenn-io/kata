@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"go.kenn.io/kit/tui/termtext"
 )
 
 // renderInputBar formats the inline command bar as a bordered box.
@@ -80,7 +81,7 @@ func renderPanelPrompt(s inputState, width int) string {
 // radio for the Status axis instead of a textinput.
 func renderCenteredForm(s inputState, width, height int, now time.Time) string {
 	if width < formMinWidth || height < formMinHeight {
-		return renderTinyFormFallback(s)
+		return renderTinyFormFallback(s, width)
 	}
 	innerW := formInnerWidth(width)
 	innerH := formInnerHeight(height)
@@ -93,6 +94,10 @@ func renderCenteredForm(s inputState, width, height int, now time.Time) string {
 		return renderCloseForm(s, innerW, innerH)
 	case inputDatesForm:
 		return renderDatesForm(s, innerW, now)
+	case inputDeleteForm:
+		return renderDeleteForm(s, innerW)
+	case inputRecurrenceForm:
+		return renderRecurrenceForm(s, min(innerW, width-4), height, now)
 	}
 	return renderSingleFieldForm(s, innerW, innerH)
 }
@@ -285,17 +290,16 @@ func renderNewIssueField(s inputState, idx, innerW int) string {
 	} else {
 		label = subtleStyle.Render(label)
 	}
-	var view string
 	switch f.kind {
 	case fieldMultiLine:
-		view = f.area.View()
+		return label + "\n" + f.area.View()
 	case fieldRadio:
-		view = renderRadio(f.radio, idx == s.active)
+		return label + "\n" + renderRadio(f.radio, idx == s.active)
 	default:
 		f.input.SetWidth(innerW - 2)
-		view = f.input.View()
+		f.input.SetCursor(f.input.Position())
+		return label + "\n" + f.input.View()
 	}
-	return label + "\n" + view
 }
 
 // renderFormFooter is the footer-hint row inside the panel. While
@@ -304,12 +308,16 @@ func renderNewIssueField(s inputState, idx, innerW int) string {
 // hint with a "(body only)" parenthetical, used by the new-issue
 // form when a single-line field has focus.
 func renderFormFooter(s inputState, innerW int, allowEditor bool) string {
-	if s.saving {
-		return statusStyle.Render("saving…")
-	}
 	hint := "ctrl+o save · esc cancel · ctrl+e $EDITOR"
 	if !allowEditor {
 		hint = "ctrl+o save · esc cancel · tab next · ctrl+e (body only)"
+	}
+	return renderFormFooterHint(s, innerW, hint)
+}
+
+func renderFormFooterHint(s inputState, innerW int, hint string) string {
+	if s.saving {
+		return statusStyle.Render("saving…")
 	}
 	if len(hint) > innerW {
 		hint = "ctrl+o save · esc cancel"
@@ -330,12 +338,12 @@ func renderFormStatus(s inputState) string {
 // than the form's minimum size. Just dumps the textarea so the user
 // can still type; no border / no centering. Useful in narrow CI
 // terminals or test fixtures.
-func renderTinyFormFallback(s inputState) string {
+func renderTinyFormFallback(s inputState, width int) string {
 	f := s.activeField()
 	if f == nil {
 		return ""
 	}
-	return s.title + "\n" + f.value()
+	return strings.Join(termtext.Wrap(sanitizeForLine(s.title), max(width, 1)), "\n") + "\n" + strings.Join(termtext.Wrap(f.value(), max(width, 1)), "\n")
 }
 
 // formInnerWidth picks the centered form's interior width. ~70% of

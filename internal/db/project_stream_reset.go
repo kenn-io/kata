@@ -18,10 +18,11 @@ type projectStreamResetQuery interface {
 
 // PurgeResetProjects finds streams whose retained events will disappear.
 // Move payloads also identify former streams when their creation was compacted.
-func PurgeResetProjects(ctx context.Context, tx projectStreamResetQuery, issue Issue) ([]string, error) {
+func PurgeResetProjects(ctx context.Context, tx projectStreamResetQuery, issue Issue, postgres bool) ([]string, error) {
+	issueUIDExpr := FederationReadIssueUIDExpr(postgres)
 	rows, err := tx.QueryContext(ctx, `SELECT p.uid,e.type,e.payload FROM events e
  JOIN projects p ON p.id=e.project_id
- WHERE e.issue_id=$1 OR e.issue_uid=$2 OR ((e.related_issue_id=$1 OR e.related_issue_uid=$2)
+ WHERE e.issue_id=$1 OR `+issueUIDExpr+`=$2 OR ((e.related_issue_id=$1 OR e.related_issue_uid=$2)
  AND e.type NOT IN ('issue.links_changed','issue.commented'))`, issue.ID, issue.UID)
 	if err != nil {
 		return nil, err

@@ -18,7 +18,7 @@ env:
 jobs:
   changes:
     if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-linux-1cpu
     timeout-minutes: 5
     permissions:
       pull-requests: read
@@ -240,6 +240,76 @@ jobs:
           docker stop "$CONTAINER_ID" || true
           docker rm --force "$CONTAINER_ID"
 
+  first-paint:
+    name: First paint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 26.12.1
+
+      - name: Set up Bun
+        uses: step-security/setup-bun@v2.1.3
+        with:
+          bun-version: 1.4.4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.2
+
+      - name: Install frozen web dependencies
+        run: make web-install
+
+      - name: Build kata with the embedded web UI
+        run: make build
+
+      - name: Build the docs site
+        run: make docs-install docs-build
+
+      # Check the web UI as the daemon serves it.
+      - name: Start an isolated daemon
+        env:
+          KATA_HOME: ${{ runner.temp }}/kata-first-paint/home
+          KATA_DB: ${{ runner.temp }}/kata-first-paint/home/kata.db
+          KATA_WORKSPACE: ${{ runner.temp }}/kata-first-paint/workspace
+        run: |
+          mkdir -p "$KATA_HOME" "$KATA_WORKSPACE"
+          install -m 600 /dev/null "$KATA_HOME/config.toml"
+          printf '[web]\nlisten = "127.0.0.1:7777"\npublic_origin = "http://127.0.0.1:7777"\n' \
+            > "$KATA_HOME/config.toml"
+          cd "$KATA_WORKSPACE"
+          env -u KATA_AUTH_TOKEN "$GITHUB_WORKSPACE/kata" daemon start --foreground \
+            > "$RUNNER_TEMP/kata-first-paint/daemon.log" 2>&1 &
+          # workflowretry: allow Poll the local daemon for readiness.
+          curl --fail --silent --show-error --output /dev/null --retry 60 --retry-delay 1 \
+            --retry-all-errors --header 'Accept: text/html' http://127.0.0.1:7777/kata
+
+      # The daemon serves the shell at /kata only to requests that accept HTML,
+      # and the check's fetch does not ask for it. /index.html is the same page
+      # with the same headers.
+      - name: Check first paint
+        uses: kenn-io/actions/first-paint@6a8b4227ec7ce3c28c6b042b735781b1601211f4  # main
+        with:
+          dist: docs/site
+          urls: http://127.0.0.1:7777/index.html
+
+      - name: Show the daemon log
+        if: failure()
+        run: cat "$RUNNER_TEMP/kata-first-paint/daemon.log"
+
   go:
     needs: changes
     if: *go-frontend-changes
@@ -271,6 +341,25 @@ jobs:
           key: linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ github.sha }}
           restore-keys: |
             linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-
+
+      - name: Track Linux Go cache use
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
+        run: |
+          cache=$(go env GOCACHE)
+          modules=$(go env GOMODCACHE)
+          mkdir -p "$cache" "$modules/cache/download"
+          echo 'Restored Go cache sizes:'
+          du -sh "$cache" "$modules"
+          mv "$modules" "$RUNNER_TEMP/go-mod-cache"
+          mkdir -p "$modules/cache/download"
+          if [ -d "$RUNNER_TEMP/go-mod-cache/cache/download/sumdb" ]; then
+            cp -a "$RUNNER_TEMP/go-mod-cache/cache/download/sumdb" "$modules/cache/download/"
+          fi
+          printf 'GOPROXY=file://%s/go-mod-cache/cache/download|%s\n' "$RUNNER_TEMP" "$GOPROXY" >> "$GITHUB_ENV"
+          # Go refreshes entry mtimes at most hourly; age them so every use is recorded.
+          find "$cache" -mindepth 2 -maxdepth 2 -path "$cache/[0-9a-f][0-9a-f]/*" \( -name '*-a' -o -name '*-d' \) \
+            -exec touch -d '2 hours ago' -- {} +
+          touch "$RUNNER_TEMP/go-cache-used-after"
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
@@ -332,6 +421,18 @@ jobs:
           path: gotestsum/go-e2e.json
           retention-days: 14
           if-no-files-found: ignore
+
+      - name: Trim unused Linux Go cache entries
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
+        run: |
+          cache=$(go env GOCACHE)
+          modules=$(go env GOMODCACHE)
+          echo 'Go cache sizes before trimming:'
+          du -sh "$cache" "$modules"
+          find "$cache" -mindepth 2 -maxdepth 2 -path "$cache/[0-9a-f][0-9a-f]/*" \( -name '*-a' -o -name '*-d' \) \
+            ! -newer "$RUNNER_TEMP/go-cache-used-after" -exec rm -rf -- {} +
+          echo 'Go cache sizes after trimming:'
+          du -sh "$cache" "$modules"
 
       - name: Save Linux Go cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
@@ -539,7 +640,8 @@ jobs:
           --jsonfile "gotestsum/postgres-$POSTGRES_MATRIX.json" --rerun-fails=2
           --rerun-fails-report "gotestsum/postgres-$POSTGRES_MATRIX-reruns.txt"
           --packages ". ./internal/testenv ./internal/client ./internal/db/pgstore
-          ./internal/db/storeopen ./internal/daemon ./internal/jsonl ./internal/vector" -- -count=1 -p 4
+          ./internal/db/storeopen ./internal/daemon ./internal/mcp ./internal/mcpevents
+          ./internal/jsonl ./internal/vector" -- -count=1 -p 4
 
       - name: Upload PostgreSQL test results
         if: failure() || github.run_attempt > 1 || hashFiles(format('gotestsum/postgres-{0}-reruns.txt', matrix.postgres)) != ''
@@ -717,8 +819,10 @@ jobs:
           persist-credentials: false
 
       - name: Install mise tools
-        uses: jdx/mise-action@v5.2.2
+        uses: jdx/mise-action@v5.2.4
         with:
+          # Rebuild older caches so they include mise's signed checksums.
+          cache_key_prefix: mise-v2
           cache: true
           install: true
 
@@ -787,8 +891,9 @@ jobs:
           persist-credentials: false
 
       - name: Install mise tools
-        uses: jdx/mise-action@v5.2.2
+        uses: jdx/mise-action@v5.2.4
         with:
+          cache_key_prefix: mise-v2
           cache: true
           install: true
 

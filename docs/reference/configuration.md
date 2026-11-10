@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-02
+last_edited: 2026-11-09
 ---
 
 # Configuration
@@ -36,6 +36,17 @@ Before attaching a transcript, `kata close` checks the daemon's API version. An 
 causes a warning on stderr, and the close proceeds without the transcript.
 With attachment disabled, close requests remain unchanged.
 
+To turn attachment on or off for one process without editing the file, set
+`KATA_CLOSE_TRANSCRIPT_ENABLED` to a boolean such as `true` or `false`. `true`
+attaches transcripts even without a config file; `agentsview_url` and
+`session_id_env` still come from the file. `false` attaches nothing, even when
+the file enables attachment, and ignores the file's other transcript settings,
+so a mistake there doesn't warn. A value that isn't a boolean warns on stderr,
+and the close proceeds without a transcript. Unset or empty leaves the file in
+charge. An agent integration can set it with `KATA_TRANSCRIPT_AGENT` and
+`KATA_TRANSCRIPT_SESSION_ID` to attach its own sessions without changing
+transcripts for other agents on the machine.
+
 When `kata close` supplies evidence, it attaches a separate `transcript` object
 to the same durable `issue.closed` event. Evidence and substantive-message
 requirements still apply: a chat identifier is provenance, not proof that work
@@ -46,13 +57,25 @@ closes do not infer a session from the daemon's environment.
 Kata always checks `CLAUDE_CODE_SESSION_ID` for `claude`, then
 `CODEX_THREAD_ID` and `CODEX_SESSION_ID` for `codex`, in that fixed order.
 The `session_id_env` table maps each additional agent name to one session
-variable:
+variable. pi passes its session ID to shell commands as `PI_SESSION_ID`:
 
 ```toml
 [close.transcript.session_id_env]
 pi = "PI_SESSION_ID"
-omp = "OMP_SESSION_ID"
 ```
+
+oh-my-pi passes its session ID in the same `PI_SESSION_ID` variable, so map
+that variable to `omp` when you close issues from oh-my-pi:
+
+```toml
+[close.transcript.session_id_env]
+omp = "PI_SESSION_ID"
+```
+
+One configuration can't map the variable to both agents: Kata would treat
+every pi or oh-my-pi session as ambiguous and skip attachment. If you use
+both, set `KATA_TRANSCRIPT_AGENT` and `KATA_TRANSCRIPT_SESSION_ID` as shown
+below.
 
 The agent name must match the ID prefix AgentsView uses for the agent's sessions, such as `pi` or `omp`,
 for the link to open. Names must match `^[a-z0-9][a-z0-9-]*$` and contain
@@ -113,7 +136,8 @@ original session, evidence, actor, and other request fields unchanged. The
 AgentsView link is not part of retry identity, so changing `agentsview_url`
 does not break a retry. Retrying from another chat with different automatic
 context conflicts; set `KATA_TRANSCRIPT_SESSION_ID` to the original session ID and
-`KATA_TRANSCRIPT_AGENT` to the original agent.
+`KATA_TRANSCRIPT_AGENT` to the original agent. If the original close turned
+attachment on with `KATA_CLOSE_TRANSCRIPT_ENABLED`, set it again for the retry.
 `--dry` validates without writing an event or attaching persistent provenance.
 
 Readers can open the session link in the web issue's **Events** history, or
@@ -144,6 +168,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
+| `KATA_CLOSE_TRANSCRIPT_ENABLED` | Overrides `[close.transcript].enabled` for the process that runs `kata close`. Takes a boolean; `false` also ignores the file's other transcript settings. An invalid value warns and the close proceeds without a transcript. Set it again when retrying a keyed close that used it. |
 | `KATA_TRANSCRIPT_AGENT` | Agent name for an explicit `KATA_TRANSCRIPT_SESSION_ID`, using the token rules above; setting it skips variable discovery, and an agent alone warns and skips attachment. Preserves the original agent when replaying a keyed close from another shell. |
 | `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session ID. Used only when close transcript attachment is enabled; overrides the configured session variables. |
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted and the TUI Attention view (`T`), which otherwise falls back to the authenticated actor. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
@@ -176,7 +201,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `TELEMETRY_ENABLED` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `DO_NOT_TRACK` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `CI` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
-| `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
+| `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget, including in autostarted local-profile daemons. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
 | `KATA_TWENTY_TOKEN` | Default daemon-side Twenty API key; `[twenty_sync].token_env` can select another environment variable. |
@@ -277,6 +302,8 @@ it does not dial Postgres or stat SQLite paths.
 `.kata.toml` is committed with the project:
 
 ```toml
+# This repository tracks its work in kata.
+# Coding agents: read `kata quickstart --format contract` before changing code here.
 version = 1
 
 [project]
@@ -403,9 +430,10 @@ default_priority = 3
 ```
 
 Values are integers from `0` (highest) through `4` (lowest). An explicit
-`--priority` overrides the default, including `--priority 0`. Remove or comment
-out `default_priority` to leave priority unset when the flag is omitted; TOML
-has no `null` value. With no setting, creation keeps its existing behavior.
+`--priority` overrides the default, including `--priority 0`. Use
+`--priority none` to leave one creation unprioritized without changing the
+default. Remove or comment out `default_priority` to leave priority unset when
+the flag is omitted; TOML has no `null` value. With no setting, creation keeps its existing behavior.
 
 The CLI reads this setting for each creation, so no daemon restart is needed.
 It uses the invoking client's config even when connecting to a remote or named
@@ -509,14 +537,21 @@ Missing or archived configured projects disable `/mcp` (503, reason logged); RES
 and the web UI keep serving. Create or restore the project, then restart.
 `kata daemon status` reports the endpoint as `serving` or `unavailable`.
 
-Set `token_file` or `token_env` for the separate MCP bearer. The file wins; secrets resolve at startup.
+Outside identity mode, set `token_file` or `token_env` for the separate MCP
+bearer. The file wins; secrets resolve at startup.
 Set `startup_sections` to existing section IDs to publish their typed tools in
 the first `tools/list` after every restart. An omitted or empty array preserves
 loader-only progressive loading. Loaders remain available in both modes.
 Unknown, duplicate, or unavailable sections disable `/mcp` (503, reason logged);
 REST and the web UI keep serving. Correct the setting and restart. See
 [Startup sections](mcp.md#startup-sections) for IDs and availability rules.
-Identity mode (`[auth] require_token_identity`) requires `kata mcp serve --http` with a user token.
+In Kata 0.23.0 and later, identity mode (`[auth] require_token_identity = true`)
+uses each caller's identity bearer at `/mcp`. Remove `[mcp] token_file` and
+`token_env`; either setting stops startup in identity mode. The token determines
+the actor, so `[mcp] actor` is ignored. See
+[Daemon mount with identity tokens](mcp.md#daemon-mount-with-identity-tokens)
+for authentication and session behavior. Kata 0.21.0 and 0.22.0 require
+`kata mcp serve --http` with a user token in this mode.
 Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header. The sidecar must reach the daemon through a REST listener outside `trusted_proxy_listeners` or through the proxy that sets the actor header.
 See [MCP transport](mcp.md#transport) for gateway setup and scope.
 
@@ -540,9 +575,9 @@ database path still apply.
 Daemon bearer credentials use `[auth].token` > `[auth].token_file` >
 `[auth].token_env` (the name of a variable containing the token). A nonempty
 `KATA_AUTH_TOKEN` overrides the inline token. Token files follow the
-[embedding credential file restrictions](#semantic-search): absolute or `~/`
-paths, regular files owned by the daemon user, no Unix group/world permissions
-or Windows access for other users, and at most 64 KiB. Whitespace and a
+[key file rules](#credentials-and-batching): absolute or `~/` paths, regular
+files owned by the daemon user, no Unix group/world permissions, no inherited
+Windows permissions or access for other users, and at most 64 KiB. Whitespace and a
 trailing newline are trimmed. An unusable
 selected file or named environment variable fails loudly without falling back.
 For example, mount a `0600` secret file owned by the daemon user and set
@@ -578,9 +613,11 @@ discovers the local browser gateway and initially selects `active_daemon`; chang
 side. Use `kata ui --daemon <name>` only when opening one named target directly
 is preferred. Identity-authenticated tabs can read remote gateway targets, but
 must open the target directly for writes because the gateway does not delegate
-browser identities. Request-actor tabs remain writable only when the target
-advertises the same request-actor policy; the gateway rechecks that target's
-authenticated capabilities immediately before every mutation.
+browser identities. Request-actor tabs can write when the target advertises
+the same request-actor policy or its `[[daemon]]` token belongs to an account.
+An account-bound target records each write as the token's account, the same as
+`kata --daemon <name>`. The gateway rechecks that target's authenticated
+capabilities immediately before every mutation.
 
 `[web].listen` selects the browser listener when the normal daemon transport
 cannot also serve HTTP. If omitted, Kata binds `127.0.0.1:0`, lets the operating
@@ -961,16 +998,78 @@ typed evidence required by the normal close contract. The TUI discovers that
 requirement from `/instance`; it does not trust its own `source=tui` marker to
 widen authority. Structural guards still apply to every transport.
 
+## MCP Events
+
+`[mcp_events]` turns on daemon-owned MCP Events. The daemon then stores
+webhook subscriptions and delivers signed inbox events to them while the
+daemon runs. `kata mcp serve` only forwards requests to it.
+
+```toml
+[mcp_events]
+enabled = false
+max_ttl = "720h"
+allow_no_expiry = true
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Starts Events delivery and accepts subscriptions. |
+| `max_ttl` | `"720h"` (30 days) | Longest lifetime of a finite subscription grant. Go duration syntax; at least `"60s"`. |
+| `allow_no_expiry` | `true` | Honors requests for a subscription that never expires. Set `false` to give those requests a `max_ttl` grant instead. |
+
+Subscribers choose their own lifetime. A request without one gets 24 hours
+capped by `max_ttl`, and a finite request is clamped to between 60 seconds and
+`max_ttl`. A request for no expiry is honored unless `allow_no_expiry = false`.
+Subscriptions created before you change the setting keep their lifetime until
+the subscriber next refreshes.
+
+The daemon seals subscription secrets with a 32-byte key in
+`<KATA_HOME>/runtime/<storage-id>/mcp-events.key`. It creates the file, readable
+only by its owner, the first time Events starts against a database that has no
+Events data. Daemons that share one PostgreSQL database must use the same key
+file.
+
+Events failures never stop the daemon. If the key file is missing, unreadable
+or different from the one the database was written under, Events stays
+disabled, the daemon logs why, and every other daemon function keeps working.
+The daemon never replaces a key that is missing or corrupt. The status route,
+`GET /api/v1/mcp-events/subscriptions`, reports `enabled: false` and a
+`reason`: `events_not_configured`, `events_key_unavailable`,
+`events_key_mismatch` or `events_start_failed`.
+
+Programs that embed the Go `Service` set `Config.MCPEvents.Enabled` and
+supply `Config.MCPEvents.Key` instead. `Config.MCPEvents.MaxTTL` and
+`Config.MCPEvents.RefuseNoExpiry` match `max_ttl` and `allow_no_expiry = false`. Without a key provider, Events is
+disabled with `events_not_configured` and the other workers still run.
+
 ## Semantic search
 
 This section is the field reference; see the
 [Semantic search guide](../guide/semantic-search.md) for setup and behavior.
 
-Semantic (vector) search is opt-in. With no `[search.embeddings]` section,
-`kata search` behaves exactly as before (lexical FTS only) and the daemon
-makes no embedding network calls. Adding the section enables hybrid search: the
-daemon embeds each issue's title and body through an OpenAI-compatible
-`/embeddings` endpoint and fuses vector results with the lexical leg.
+Semantic search is opt-in. Run `kata daemon local-embeddings` to use a running
+Ollama in a home without embeddings configured, or download the shared
+built-in server with your consent. Running it again switches a configured
+provider to the built-in server:
+
+```toml
+[search.embeddings]
+local = true
+```
+
+`local` uses `nomic-embed-text` with 768 dimensions by default. It accepts
+`nomic-embed-text`, `nomic-embed-text:latest`, and `nomic-embed-text:v1.5`, and
+widths up to 768. Widths below 768 require `request_dimensions = true`. A
+`base_url` from any source, including `KATA_SEARCH_EMBEDDINGS_BASE_URL`, takes
+precedence over `local = true`. API key settings are ignored only while the
+built-in server is selected. The setup command refuses while that environment
+variable is set and restores the config if a daemon refuses its restart.
+The daemon reuses
+installed files and asks you to run the setup command if a download is needed.
+Older Kata releases reject the `local` key.
+
+With embeddings disabled, search matches words only. To use an external
+OpenAI-compatible provider, set `local = false` and configure its endpoint and model:
 
 ```toml
 [search.embeddings]
@@ -993,7 +1092,7 @@ model    = "nomic-embed-text"
 # trust_private_network = false # allow plaintext HTTP to literal non-public IPs
 ```
 
-`base_url` and `model` are both required once the section exists; setting only
+For an external provider, `base_url` and `model` are both required; setting only
 one is a startup error rather than a silent disable. With no credential source
 configured, requests omit the `Authorization` header. Keyless local providers
 such as Ollama need only `base_url` and `model`.
@@ -1061,10 +1160,14 @@ daemon user's home directory (not `KATA_HOME`). Other relative paths are
 rejected. Symlinks are accepted, and there is no parent-directory ownership or
 permission policy. Kata validates the opened file: it must be regular and
 owned by the daemon's effective user. On Unix, group/world permissions are
-rejected (`chmod 600`). On Windows, the file ACL must restrict access to the
-current user, SYSTEM, and Administrators. Files larger than 64 KiB are refused,
-and reads are bounded to enforce that limit. File contents are trimmed,
-including a trailing newline.
+rejected (`chmod 600`). On Windows, the file must not inherit permissions from
+its folder, and it may grant access only to the current user, SYSTEM, and
+Administrators. A file created in a user profile inherits its folder's
+permissions and is rejected even when they list only those accounts. To fix
+it, run this in PowerShell as the daemon user:
+`icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R"`. Files larger than
+64 KiB are refused, and reads are bounded to enforce that limit.
+File contents are trimmed, including a trailing newline.
 
 Kata resolves the selected credential once at startup and once per
 `kata daemon reload`. Reload wakes the embedding backlog; changes to provider
@@ -1451,21 +1554,29 @@ for access tokens, field ownership, completion writeback, and recovery limits.
 
 ## Docbank attachments
 
-On main after 0.19.0, `[docbank]` enables issue file uploads and reads through a
-separately hosted Docbank. See [Issue attachments](../guide/attachments.md) for
-setup and the shared-vault trust boundary.
+Kata 0.21.0 and later: `[docbank]` enables issue file uploads and reads through a
+Docbank, either separately hosted (`url`) or running on the same machine
+(`local`). `kata docbank setup` writes and checks this section. See
+[Issue attachments](../guide/attachments.md#configure-the-daemon) for setup and
+the shared-vault trust boundary.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `url` | empty (disabled) | Docbank base URL; HTTPS or loopback HTTP, without userinfo, query, or fragment. |
 | `api_key` | empty | Inline key, preferred over file and environment sources. |
-| `api_key_file` | empty | Mode-0600 key file, preferred over the environment source. |
+| `api_key_file` | empty | Key file, preferred over the environment source; it must follow the [key file rules](#credentials-and-batching). |
 | `api_key_env` | empty | Name of the environment variable containing the key. |
 | `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
+| `local` | `false` | Use the Docbank running on this machine, found through its runtime record. |
 
-A configured URL requires a key source. A broken selected credential
-source fails explicitly; Kata does not fall back to another source. Keys are
-resolved on each request.
+A configured URL requires a key source. If the selected source cannot supply a
+key, Kata does not fall back to another source and sends nothing to Docbank;
+attachment requests fail with `docbank_key_unavailable` (see
+[attachment endpoints](http-api.md#attachment-endpoints)). `kata doctor`
+(`daemon.docbank`) shows the failing source. Keys are resolved on each request.
+
+A `url` in the file or `KATA_DOCBANK_URL` wins over `local`. With `local`,
+`api_key`, `api_key_file`, and `api_key_env` are unused. `folder` still applies.
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.

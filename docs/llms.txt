@@ -34,11 +34,15 @@ for machine readers.
   and flag
 - [MCP reference](https://katatracker.com/docs/reference/mcp.md): stdio and
   Streamable HTTP transports, tool loading
+- [MCP Events webhooks](https://katatracker.com/docs/operations/mcp-events.md):
+  daemon-owned signed inbox wakes, subscriptions, keys and recovery
 - [Agent output format](https://katatracker.com/docs/reference/agent-output.md):
   the `--agent` output contract
 - [Go client](https://katatracker.com/docs/reference/go-client.md): typed Go
   client, daemon discovery, and an in-process test server
 - [Web UI](https://katatracker.com/docs/guide/web-ui.md): the browser workspace
+- [Issue attachments](https://katatracker.com/docs/guide/attachments.md):
+  Docbank file attachments, image and video previews, and close evidence
 - [Semantic search](https://katatracker.com/docs/guide/semantic-search.md):
   opt-in embeddings
 - [Gated workflows](https://katatracker.com/docs/workflows/gated-workflows.md):

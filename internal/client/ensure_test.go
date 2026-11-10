@@ -681,7 +681,11 @@ func TestNewHTTPClientWithoutAuthSkipsLiveTCPRuntimeBeforeUnix(t *testing.T) {
 	tcpProcess, _ := startLongLivedTestProcess(t)
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, tcpProcess.Process.Pid, tcpAddress))
 
-	socket := filepath.Join(t.TempDir(), "kata.sock")
+	// This test's name makes a t.TempDir socket path exceed the macOS limit.
+	socketDir, err := os.MkdirTemp("", "sock-")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
+	socket := filepath.Join(socketDir, "kata.sock")
 	ln, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })

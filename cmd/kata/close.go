@@ -32,6 +32,7 @@ func newCloseCmd() *cobra.Command {
 		sugarPR            []string
 		sugarTest          []string
 		sugarReviewed      []string
+		sugarDocbank       []string
 	)
 	cmd := &cobra.Command{
 		Use:   "close <issue-ref>",
@@ -140,6 +141,11 @@ The close message has a minimum length that depends on the reason:
 					Message: fmt.Sprintf("flag conflict: duplicate evidence item %s (provided more than once via canonical and/or sugar)", dup)}
 			}
 
+			parsed, err = prepareCloseAttachments(cmd, args[0], reason, message, parsed, sugarDocbank, dryRun)
+			if err != nil {
+				return err
+			}
+
 			extra := map[string]any{
 				"reason":   reason,
 				"message":  message,
@@ -181,7 +187,7 @@ The close message has a minimum length that depends on the reason:
 	cmd.Flags().StringArrayVar(&evidence, "evidence", nil,
 		"typed evidence, repeatable: commit:<sha>, pr:<url>, test:<cmd>, "+
 			"reviewed-paths:<path>, external:<account>, no-change-audit:<text>, "+
-			"duplicate-of:<N>, superseded-by:<N>")
+			"duplicate-of:<N>, superseded-by:<N>, attachment:<id-or-suffix>")
 	cmd.Flags().BoolVar(&dryRun, "dry", false,
 		"validate without mutating; reports the would-be close event")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "",
@@ -198,6 +204,7 @@ The close message has a minimum length that depends on the reason:
 	cmd.Flags().StringArrayVar(&sugarPR, "pr", nil, "sugar for --evidence pr:<url>, repeatable")
 	cmd.Flags().StringArrayVar(&sugarTest, "test", nil, "sugar for --evidence test:<command>, repeatable")
 	cmd.Flags().StringArrayVar(&sugarReviewed, "reviewed", nil, "sugar for --evidence reviewed-paths:<path>, repeatable")
+	cmd.Flags().StringArrayVar(&sugarDocbank, "docbank", nil, "link a Docbank node id or absolute path as done evidence, repeatable")
 	addCommentFlag(cmd)
 	cmd.Flags().SetNormalizeFunc(normalizeCloseBodyFlag)
 	return cmd
@@ -217,6 +224,11 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 		}
 		kind, value := api.EvidenceType(before), after
 		switch kind {
+		case api.EvidenceAttachment:
+			if strings.TrimSpace(value) == "" {
+				return nil, evidenceValueError("attachment requires an id or unique suffix")
+			}
+			out = append(out, api.Evidence{Type: kind, AttachmentID: value})
 		case api.EvidenceCommit:
 			out = append(out, api.Evidence{Type: kind, SHA: value})
 		case api.EvidencePR:
@@ -390,6 +402,8 @@ func findDuplicateEvidence(items []api.Evidence) string {
 
 func evidencePayloadKey(e api.Evidence) string {
 	switch e.Type {
+	case api.EvidenceAttachment:
+		return e.AttachmentID
 	case api.EvidenceCommit:
 		return e.SHA
 	case api.EvidencePR:

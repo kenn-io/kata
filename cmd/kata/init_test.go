@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -387,7 +386,7 @@ func TestInit_AgentOutputChangedWhenOnlyGitignoreUpdated(t *testing.T) {
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"), //nolint:gosec // test fixture matches production .kata.toml mode
-		[]byte(`version = 1
+		[]byte("# Read kata quickstart --format contract first.\n"+`version = 1
 
 [project]
 identity = "github.com/wesm/kata"
@@ -398,6 +397,72 @@ name     = "kata"
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
+}
+
+func TestInit_AddsHeaderToHeaderlessKataToml(t *testing.T) {
+	resetFlags(t)
+	flags.Mode = outputAgent
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	original := "# Keep this comment.\nversion = 1\n\n[project]\nname = \"spoke-project\"\n"
+	path := filepath.Join(dir, ".kata.toml")
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o644))                                         //nolint:gosec // test fixture matches production .kata.toml mode
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".kata.local.toml\n"), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	out, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
+	require.NoError(t, err)
+	content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "kata quickstart --format contract")
+	assert.Contains(t, string(content), original)
+	assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=true\n", out)
+
+	out, err = callInit(t.Context(), env.URL, dir, callInitOpts{})
+	require.NoError(t, err)
+	assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=false\n", out)
+}
+
+func TestInit_HeaderWriteFailureWarns(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions don't block writes")
+	}
+	for _, mode := range []outputMode{outputHuman, outputAgent, outputJSON} {
+		t.Run(string(mode), func(t *testing.T) {
+			resetFlags(t)
+			flags.Mode = mode
+			env := testenv.New(t)
+			_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			dir := t.TempDir()
+			original := "version = 1\n[project]\nname = \"spoke-project\"\n"
+			path := filepath.Join(dir, ".kata.toml")
+			require.NoError(t, os.WriteFile(path, []byte(original), 0o644)) //nolint:gosec // test fixture matches committed binding mode
+			require.NoError(t, os.Chmod(dir, 0o555))                        //nolint:gosec // read-only directory makes the header update fail
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })                  //nolint:gosec // restore test fixture permissions for cleanup
+			var out string
+			stderr := captureProcessStderr(t, func() {
+				out, err = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
+			})
+			require.NoError(t, err)
+			warning := stderr
+			switch mode {
+			case outputJSON:
+				var body struct {
+					Warning string `json:"agent_guidance_warning"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(out), &body))
+				warning = body.Warning
+			case outputAgent:
+				assert.Contains(t, out, "agent_guidance_warning=")
+				warning = out
+			}
+			assert.Contains(t, warning, ".kata.toml")
+			assert.Contains(t, warning, "AGENTS.md", "guidance setup must continue after the failed header update")
+		})
+	}
 }
 
 func TestInit_AgentOutputQuotesProjectName(t *testing.T) {
@@ -472,9 +537,8 @@ func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) {
 
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
-	assert.Contains(t, string(content), agentsBlockBegin)
-	assert.Contains(t, string(content), agentsBlockEnd)
-	assert.Contains(t, string(content), "Kata is the system of record for intent.")
+	assert.Contains(t, string(content), agentsBlockBegin+"\n"+agentContractText+agentsBlockEnd,
+		"the managed block must hold the contract the hooks inject, verbatim")
 }
 
 func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) {
@@ -599,58 +663,9 @@ func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.NotContains(t, string(content), "old kata guidance that should be replaced")
-	assert.Contains(t, string(content), "Kata is the system of record for intent.")
+	assert.Contains(t, string(content), agentContractText)
 	assert.Contains(t, string(content), "# House rules", "content outside the markers must survive")
 	assert.Equal(t, 1, strings.Count(string(content), agentsBlockBegin))
-}
-
-// TestInit_WithAgents_BlockIncludesWorkflowConventions pins the distinction
-// between incomplete work, attention state, and delegation in the managed
-// briefing installed for agents.
-func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
-	env := testenv.New(t)
-	dir := t.TempDir()
-	runGit(t, dir, "init", "--quiet")
-	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
-
-	flags.Mode = outputJSON
-	t.Cleanup(func() { flags.Mode = "" })
-
-	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
-	require.NoError(t, err)
-
-	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	got := string(content)
-	require.Contains(t, got, agentsManagedBlock(), "managed guidance must embed the canonical contract verbatim")
-	assert.Contains(t, got, "Never `kata delete` or `kata purge` without explicit user authorization.")
-	assert.Contains(t, got, "kata meta set <ref> work.attention stuck|needs-human|ok")
-	assert.Contains(t, got, "kata close <ref> --done")
-	assert.Contains(t, got, "kata label add <ref> needs-review")
-	assert.Contains(t, got, "kata notify <ref> --to <actor>[/<teammate>] --message <reason>")
-	assert.Contains(t, got, "KATA_INBOX_USER=<actor>/<teammate>")
-}
-
-func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testing.T) {
-	env := testenv.New(t)
-	dir := t.TempDir()
-	runGit(t, dir, "init", "--quiet")
-	runGit(t, dir, "remote", "add", "origin", "https://github.com/example/example-project.git")
-
-	flags.Mode = outputJSON
-	t.Cleanup(func() { flags.Mode = "" })
-
-	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
-	require.NoError(t, err)
-
-	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	got := string(content)
-	assert.Contains(t, got, "kata schedule <ref> <date-or-time>")
-	assert.Contains(t, got, "kata deadline <ref> <date-or-time>")
-	assert.Contains(t, got, "kata meta set <ref> someday true --json-value")
-	assert.Contains(t, got, "kata meta unset <ref> someday")
-	assert.Contains(t, got, "Reached schedules and deadlines use notify.*")
 }
 
 // oldAgentsBlockBody is the managed-block body kata shipped before the work.*
@@ -693,9 +708,8 @@ func TestInit_WithAgents_RefreshesPreWorkConventionsBlock(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	got := string(content)
-	assert.Contains(t, got, "Kata is the system of record for intent.",
+	assert.Contains(t, got, agentContractText,
 		"refresh must install the current intent workflow over an older block")
-	assert.Contains(t, got, "digraph kata {")
 	assert.Contains(t, got, "# House rules", "content before the markers must survive")
 	assert.Contains(t, got, "Keep this line.")
 	assert.Contains(t, got, "## Trailing section", "content after the markers must survive")
@@ -740,7 +754,7 @@ func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(proposed), "Legacy notes.")
 	assert.Contains(t, string(proposed), agentsBlockBegin)
-	assert.Contains(t, string(proposed), "Kata is the system of record for intent.")
+	assert.Contains(t, string(proposed), agentContractText)
 	assert.NotContains(t, string(proposed), beadsBlockBeginPrefix)
 	assert.NotContains(t, string(proposed), beadsBlockEnd)
 
@@ -906,20 +920,23 @@ func TestInit_WithAgents_AgentsBeadsSymlinkNotMigrated(t *testing.T) {
 func captureProcessStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr
-	r, w, err := os.Pipe()
+	// A pipe drained only after fn returns can fill while fn prints a warning.
+	// Use a fixture file so capture cannot block on the platform's pipe capacity.
+	w, err := os.CreateTemp(t.TempDir(), "stderr")
 	require.NoError(t, err)
 	os.Stderr = w
-	t.Cleanup(func() { os.Stderr = old })
+	defer func() {
+		os.Stderr = old
+		_ = w.Close()
+	}()
 
 	fn()
 
-	require.NoError(t, w.Close())
-	var buf bytes.Buffer
-	_, err = io.Copy(&buf, r)
+	_, err = w.Seek(0, io.SeekStart)
 	require.NoError(t, err)
-	require.NoError(t, r.Close())
-	os.Stderr = old
-	return buf.String()
+	data, err := io.ReadAll(w)
+	require.NoError(t, err)
+	return string(data)
 }
 
 func TestRewriteGuidanceFileKeepsFileMode(t *testing.T) {

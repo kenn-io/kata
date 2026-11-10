@@ -2,6 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"strings"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -62,5 +65,32 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 	if !metadata.ValidAttachmentName(node.Name) {
 		return nil, attachmentError(400, "attachment_invalid")
 	}
-	return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, metadata.Attachment{Name: node.Name, Size: version.Size, DocbankVersion: version.ID})
+	attachment := metadata.Attachment{Name: node.Name, Size: version.Size, DocbankVersion: version.ID}
+	if input.ReuseExisting {
+		return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, &version.ID)
+	}
+	return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, nil)
+}
+
+func attachmentForVersion(iss db.Issue, version docbank.Version) (string, metadata.Attachment, error) {
+	var values map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(iss.Metadata), &values); err != nil {
+		return "", metadata.Attachment{}, err
+	}
+	var bestID string
+	var best metadata.Attachment
+	for key, raw := range values {
+		id, ok := strings.CutPrefix(key, metadata.AttachmentPrefix)
+		if !ok || id == "" {
+			continue
+		}
+		attachment, valid := metadata.Valid(raw)
+		if !valid || attachment.DocbankVersion != version.ID {
+			continue
+		}
+		if bestID == "" || id < bestID {
+			bestID, best = id, attachment
+		}
+	}
+	return bestID, best, nil
 }

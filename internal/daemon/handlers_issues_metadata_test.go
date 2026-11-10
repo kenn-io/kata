@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -206,6 +207,71 @@ func TestListIssues_MetaQueryFilters(t *testing.T) {
 		projectPath(projectID)+"/issues?meta=work.attention", nil, &presOut)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Len(t, presOut.Issues, 2)
+}
+
+// A compact list leaves out bodies and every metadata key the filters do not
+// name, on both list routes. Without compact the rows are unchanged.
+func TestListIssues_CompactRowsCarryOnlyFilteredMetadata(t *testing.T) {
+	env := testenv.New(t)
+	projectID := mkProject(t, env, "github.com/test/a", "a")
+	resp := envDoJSON(t, env, http.MethodPost, projectPath(projectID)+"/issues", map[string]any{
+		"actor": "tester", "title": "compact one", "body": "a long body",
+		"metadata": map[string]jsontext.Value{
+			"work.attention": jsontext.Value(`"stuck"`),
+			"other.key":      jsontext.Value(`{"large":"value"}`),
+		},
+	}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	type row struct {
+		Body     string                    `json:"body"`
+		Metadata map[string]jsontext.Value `json:"metadata"`
+	}
+	for _, path := range []string{projectPath(projectID) + "/issues?sort=created&", "/api/v1/issues?"} {
+		var compact, full struct {
+			Issues []row `json:"issues"`
+		}
+		resp = envDoJSON(t, env, http.MethodGet, path+"meta=work.attention&compact=true", nil, &compact)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Len(t, compact.Issues, 1, path)
+		assert.Empty(t, compact.Issues[0].Body, path)
+		assert.Equal(t, map[string]jsontext.Value{"work.attention": jsontext.Value(`"stuck"`)}, compact.Issues[0].Metadata, path)
+
+		resp = envDoJSON(t, env, http.MethodGet, path+"meta=work.attention", nil, &full)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Len(t, full.Issues, 1, path)
+		assert.Equal(t, "a long body", full.Issues[0].Body, path)
+		assert.Len(t, full.Issues[0].Metadata, 2, path)
+	}
+}
+
+// A compact row too large to send whole keeps only its identity and status,
+// so a page of compact rows stays small and its cursor still moves on.
+func TestListIssues_CompactOversizedRowKeepsOnlyIdentity(t *testing.T) {
+	env := testenv.New(t)
+	projectID := mkProject(t, env, "github.com/test/a", "a")
+	var created struct {
+		Issue db.Issue `json:"issue"`
+	}
+	resp := envDoJSON(t, env, http.MethodPost, projectPath(projectID)+"/issues", map[string]any{
+		"actor": "tester", "title": strings.Repeat("t", 80<<10),
+		"metadata": map[string]jsontext.Value{"work.attention": jsontext.Value(`"stuck"`)},
+	}, &created)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	for _, path := range []string{projectPath(projectID) + "/issues?sort=created&", "/api/v1/issues?"} {
+		var page struct {
+			Issues []map[string]jsontext.Value `json:"issues"`
+		}
+		resp = envDoJSON(t, env, http.MethodGet, path+"meta=work.attention&compact=true", nil, &page)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Len(t, page.Issues, 1, path)
+		row := page.Issues[0]
+		assert.JSONEq(t, `true`, string(row["oversized"]), path)
+		assert.JSONEq(t, `"`+created.Issue.UID+`"`, string(row["uid"]), path)
+		assert.JSONEq(t, `""`, string(row["title"]), path)
+		assert.Less(t, len(row["metadata"]), 16, path)
+	}
 }
 
 // TestListIssues_MetaEmptyKeyRejected pins that a meta param with an empty key

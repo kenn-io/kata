@@ -259,6 +259,10 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if handled {
 			return next, cmd
 		}
+		next, cmd, handled = m.routeCronWorkflowKey(key, lines, *cursor)
+		if handled {
+			return next, cmd
+		}
 	case key == "enter" || key == "l":
 		if len(lines) > 0 && lines[*cursor].target.uid != "" {
 			m.cron.stack = append(m.cron.stack, cronFrame{ref: lines[*cursor].target})

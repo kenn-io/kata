@@ -2,8 +2,8 @@
 // and sqlite:// DSNs open SQLite; postgres:// and postgresql:// DSNs open
 // Postgres.
 //
-// Open peeks the on-disk schema, runs JSONL cutover for SQLite DBs whose
-// schema_version predates db.CurrentSchemaVersion(), and hands the path to
+// Open peeks the on-disk schema, applies additive upgrades in place or runs
+// JSONL cutover under the cutover lock for older SQLite DBs, and hands the path to
 // the backend's Open, which bootstraps a fresh DB from its canonical schema.sql
 // inside a transaction. Every Open returns a ready-to-use Storage or a
 // concrete error explaining why it couldn't.
@@ -222,11 +222,9 @@ func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.O
 		if ver == 0 && !hasTables {
 			break
 		}
-		// Pre-current SQLite gets upgraded through JSONL cutover, which
-		// exports the legacy shape and re-imports it into a fresh
-		// baseline-shaped DB. Re-peek afterwards to confirm the cutover
-		// landed; the error from peek surfaces if the on-disk state is
-		// somehow worse than the source was.
+		// AutoCutover applies additive upgrades in place under the cutover
+		// lock; other older schemas use JSONL cutover. Re-peek afterwards
+		// to confirm the upgraded database is readable.
 		if err := jsonl.AutoCutover(ctx, path); err != nil {
 			return nil, err
 		}

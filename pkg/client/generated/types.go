@@ -1933,6 +1933,21 @@ type DisconnectRelayResponseBody struct {
 	Revoked bool `json:"revoked"`
 }
 
+type DocbankHealth struct {
+	// Credential Docbank API key state, ok or missing; an advisory warning that does not change health.ok.
+	Credential string `json:"credential" validate:"required"`
+
+	// CredentialReason Why the key source cannot supply a key.
+	CredentialReason *string `json:"credential_reason,omitempty"`
+
+	// CredentialSource Key source that failed: file:<path> or env:<NAME>; never the key value.
+	CredentialSource *string `json:"credential_source,omitempty"`
+}
+
+func (d DocbankHealth) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
 type DoctorResponseBody struct {
 	Hooks Hooks `json:"hooks"`
 }
@@ -2166,10 +2181,10 @@ type EmbeddingsHealth struct {
 	ErrorPresent     *bool   `json:"error_present,omitempty"`
 	EtaSeconds       *int64  `json:"eta_seconds,omitempty"`
 
-	// LastError Sanitized credential rejection; cleared after the next successful embedding call.
+	// LastError Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call.
 	LastError *string `json:"last_error,omitempty"`
 
-	// LastErrorAt Time of the credential rejection; cleared after the next successful embedding call.
+	// LastErrorAt Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call.
 	LastErrorAt     *time.Time `json:"last_error_at,omitempty"`
 	LastErrorStatus *int64     `json:"last_error_status,omitempty"`
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
@@ -2309,14 +2324,15 @@ func (e EventEnvelope) Validate() error {
 }
 
 type Evidence struct {
-	Account   *string  `json:"account,omitempty"`
-	Command   *string  `json:"command,omitempty"`
-	IssueRef  *string  `json:"issue_ref,omitempty"`
-	Paths     []string `json:"paths,omitempty"`
-	Rationale *string  `json:"rationale,omitempty"`
-	Sha       *string  `json:"sha,omitempty"`
-	Type      string   `json:"type" validate:"required"`
-	URL       *string  `json:"url,omitempty"`
+	Account      *string  `json:"account,omitempty"`
+	AttachmentID *string  `json:"attachment_id,omitempty"`
+	Command      *string  `json:"command,omitempty"`
+	IssueRef     *string  `json:"issue_ref,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+	Rationale    *string  `json:"rationale,omitempty"`
+	Sha          *string  `json:"sha,omitempty"`
+	Type         string   `json:"type" validate:"required"`
+	URL          *string  `json:"url,omitempty"`
 }
 
 func (e Evidence) Validate() error {
@@ -2766,7 +2782,10 @@ type FederationIngestEventsRequestBody struct {
 	AdoptionBaseline           *string                         `json:"adoption_baseline,omitempty"`
 	AdoptionBaselineEndEventID *int64                          `json:"adoption_baseline_end_event_id,omitempty"`
 	Events                     []FederationIngestEventEnvelope `json:"events,omitempty"`
-	SchemaVersion              int64                           `json:"schema_version"`
+
+	// MoveSourceTokens Supplemental project credentials proving move-source or current-project authority for fresh delayed events; transport-only, never persisted in event history.
+	MoveSourceTokens map[string]string `json:"move_source_tokens,omitempty"`
+	SchemaVersion    int64             `json:"schema_version"`
 }
 
 func (f FederationIngestEventsRequestBody) Validate() error {
@@ -3059,6 +3078,7 @@ func (h HLC) Validate() error {
 type HealthResponseBody struct {
 	APISchemaVersion *string                 `json:"api_schema_version,omitempty"`
 	DBPath           *string                 `json:"db_path,omitempty"`
+	Docbank          *DocbankHealth          `json:"docbank,omitempty"`
 	Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 	FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 	IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
@@ -3072,6 +3092,13 @@ type HealthResponseBody struct {
 
 func (h HealthResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if h.Docbank != nil {
+		if v, ok := any(h.Docbank).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Docbank", err)
+			}
+		}
+	}
 	if h.Embeddings != nil {
 		if v, ok := any(h.Embeddings).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -3578,15 +3605,18 @@ type IssueOut struct {
 	Labels         []string       `json:"labels,omitempty"`
 	Metadata       map[string]any `json:"metadata"`
 	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
-	Owner          *string        `json:"owner,omitempty"`
-	Parent         *LinkPeer      `json:"parent,omitempty"`
-	Priority       *int64         `json:"priority,omitempty"`
-	ProjectID      int64          `json:"project_id"`
-	ProjectUID     *string        `json:"project_uid,omitempty"`
-	QualifiedID    string         `json:"qualified_id" validate:"required"`
-	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
-	Related        []LinkPeer     `json:"related,omitempty"`
-	Revision       int64          `json:"revision"`
+
+	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+	Oversized    *bool      `json:"oversized,omitempty"`
+	Owner        *string    `json:"owner,omitempty"`
+	Parent       *LinkPeer  `json:"parent,omitempty"`
+	Priority     *int64     `json:"priority,omitempty"`
+	ProjectID    int64      `json:"project_id"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	QualifiedID  string     `json:"qualified_id" validate:"required"`
+	RecurrenceID *int64     `json:"recurrence_id,omitempty"`
+	Related      []LinkPeer `json:"related,omitempty"`
+	Revision     int64      `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string               `json:"scheduled_on_date,omitempty"`
@@ -3962,10 +3992,13 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 }
 
 type LinkAttachmentInput struct {
-	Actor     *string    `json:"actor,omitempty"`
-	NodeID    *int64     `json:"node_id,omitempty"`
-	Path      *string    `json:"path,omitempty"`
-	VersionID *uuid.UUID `json:"version_id,omitempty"`
+	Actor  *string `json:"actor,omitempty"`
+	NodeID *int64  `json:"node_id,omitempty"`
+	Path   *string `json:"path,omitempty"`
+
+	// ReuseExisting When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
+	ReuseExisting *bool      `json:"reuse_existing,omitempty"`
+	VersionID     *uuid.UUID `json:"version_id,omitempty"`
 }
 
 func (l LinkAttachmentInput) Validate() error {
@@ -4231,16 +4264,19 @@ type ListGlobalIssueOut struct {
 	Labels         []string       `json:"labels,omitempty"`
 	Metadata       map[string]any `json:"metadata"`
 	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
-	Owner          *string        `json:"owner,omitempty"`
-	Parent         *LinkPeer      `json:"parent,omitempty"`
-	Priority       *int64         `json:"priority,omitempty"`
-	ProjectID      int64          `json:"project_id"`
-	ProjectName    string         `json:"project_name" validate:"required"`
-	ProjectUID     *string        `json:"project_uid,omitempty"`
-	QualifiedID    string         `json:"qualified_id" validate:"required"`
-	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
-	Related        []LinkPeer     `json:"related,omitempty"`
-	Revision       int64          `json:"revision"`
+
+	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+	Oversized    *bool      `json:"oversized,omitempty"`
+	Owner        *string    `json:"owner,omitempty"`
+	Parent       *LinkPeer  `json:"parent,omitempty"`
+	Priority     *int64     `json:"priority,omitempty"`
+	ProjectID    int64      `json:"project_id"`
+	ProjectName  string     `json:"project_name" validate:"required"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	QualifiedID  string     `json:"qualified_id" validate:"required"`
+	RecurrenceID *int64     `json:"recurrence_id,omitempty"`
+	Related      []LinkPeer `json:"related,omitempty"`
+	Revision     int64      `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string                         `json:"scheduled_on_date,omitempty"`
@@ -4453,6 +4489,291 @@ func (l ListTokensResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type LocalEmbeddingsIndexing struct {
+	Done       int64  `json:"done"`
+	EtaSeconds *int64 `json:"eta_seconds,omitempty"`
+	Failed     bool   `json:"failed"`
+	Total      int64  `json:"total"`
+}
+
+type LocalEmbeddingsJob struct {
+	Downloaded int64   `json:"downloaded"`
+	ErrorData  *string `json:"error,omitempty"`
+	State      string  `json:"state" validate:"required"`
+	Total      int64   `json:"total"`
+}
+
+func (l LocalEmbeddingsJob) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type LocalEmbeddingsStatus struct {
+	CanChange       bool                          `json:"can_change"`
+	DownloadBytes   int64                         `json:"download_bytes"`
+	Indexing        *LocalEmbeddingsIndexing      `json:"indexing,omitempty"`
+	Job             *LocalEmbeddingsJob           `json:"job,omitempty"`
+	OllamaAvailable bool                          `json:"ollama_available"`
+	Provider        LocalEmbeddingsStatusProvider `json:"provider" validate:"required"`
+}
+
+func (l LocalEmbeddingsStatus) Validate() error {
+	var errors runtime.ValidationErrors
+	if l.Indexing != nil {
+		if v, ok := any(l.Indexing).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Indexing", err)
+			}
+		}
+	}
+	if l.Job != nil {
+		if v, ok := any(l.Job).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Job", err)
+			}
+		}
+	}
+	if v, ok := any(l.Provider).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Provider", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsArguments struct {
+	AllProjects *bool    `json:"all_projects,omitempty"`
+	For         string   `json:"for" validate:"required"`
+	IssueUID    *string  `json:"issue_uid,omitempty"`
+	ProjectUids []string `json:"project_uids,omitempty"`
+}
+
+func (m MCPEventsArguments) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
+}
+
+type MCPEventsDelivery struct {
+	Mode   string  `json:"mode" validate:"required"`
+	Secret *string `json:"secret,omitempty"`
+	URL    string  `json:"url" validate:"required"`
+}
+
+func (m MCPEventsDelivery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
+}
+
+type MCPEventsDeliveryStatus struct {
+	Active         bool       `json:"active"`
+	FailedSince    *time.Time `json:"failed_since,omitempty"`
+	LastDeliveryAt *time.Time `json:"last_delivery_at,omitempty"`
+	LastError      *string    `json:"last_error,omitempty"`
+}
+
+type MCPEventsEventDefinition struct {
+	Delivery      []string       `json:"delivery" validate:"required"`
+	Description   string         `json:"description" validate:"required"`
+	InputSchema   map[string]any `json:"input_schema"`
+	Name          string         `json:"name" validate:"required"`
+	PayloadSchema map[string]any `json:"payload_schema"`
+}
+
+func (m MCPEventsEventDefinition) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
+}
+
+type MCPEventsForwarderScope struct {
+	All      *bool    `json:"all,omitempty"`
+	Projects []string `json:"projects,omitempty"`
+}
+
+type MCPEventsListResponseBody struct {
+	Events []MCPEventsEventDefinition `json:"events" validate:"required"`
+}
+
+func (m MCPEventsListResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(m.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
+	}
+	for i, item := range m.Events {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Events[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsSubscribeBody struct {
+	Arguments      MCPEventsArguments       `json:"arguments"`
+	Delivery       MCPEventsDelivery        `json:"delivery"`
+	ForwarderScope *MCPEventsForwarderScope `json:"forwarder_scope,omitempty"`
+	Name           string                   `json:"name" validate:"required"`
+	NoExpiry       *bool                    `json:"no_expiry,omitempty"`
+	TTLMs          *int64                   `json:"ttl_ms,omitempty"`
+}
+
+func (m MCPEventsSubscribeBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(m.Arguments).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Arguments", err)
+		}
+	}
+	if v, ok := any(m.Delivery).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Delivery", err)
+		}
+	}
+	if m.ForwarderScope != nil {
+		if v, ok := any(m.ForwarderScope).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ForwarderScope", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(m.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsSubscribeResponseBody struct {
+	DeliveryStatus MCPEventsDeliveryStatus `json:"delivery_status"`
+	ID             string                  `json:"id" validate:"required"`
+	RefreshBefore  *time.Time              `json:"refresh_before" validate:"required"`
+}
+
+func (m MCPEventsSubscribeResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(m.DeliveryStatus).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("DeliveryStatus", err)
+		}
+	}
+	if err := typesValidator.Var(m.ID, "required"); err != nil {
+		errors = errors.Append("ID", err)
+	}
+	if m.RefreshBefore != nil {
+		if err := typesValidator.Var(m.RefreshBefore, "required"); err != nil {
+			errors = errors.Append("RefreshBefore", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsSubscriptionStatus struct {
+	DeadLetterCount int64                   `json:"dead_letter_count"`
+	Delivery        MCPEventsDeliveryStatus `json:"delivery"`
+	EndReason       *string                 `json:"end_reason,omitempty"`
+	FailedAttempts  int64                   `json:"failed_attempts"`
+	ID              string                  `json:"id" validate:"required"`
+	IssueUID        *string                 `json:"issue_uid,omitempty"`
+	Name            string                  `json:"name" validate:"required"`
+	PendingControl  *string                 `json:"pending_control,omitempty"`
+	ProjectUids     []string                `json:"project_uids,omitempty"`
+	Recipient       string                  `json:"recipient" validate:"required"`
+	RefreshBefore   *time.Time              `json:"refresh_before" validate:"required"`
+	State           string                  `json:"state" validate:"required"`
+}
+
+func (m MCPEventsSubscriptionStatus) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(m.Delivery).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Delivery", err)
+		}
+	}
+	if err := typesValidator.Var(m.ID, "required"); err != nil {
+		errors = errors.Append("ID", err)
+	}
+	if err := typesValidator.Var(m.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if err := typesValidator.Var(m.Recipient, "required"); err != nil {
+		errors = errors.Append("Recipient", err)
+	}
+	if m.RefreshBefore != nil {
+		if err := typesValidator.Var(m.RefreshBefore, "required"); err != nil {
+			errors = errors.Append("RefreshBefore", err)
+		}
+	}
+	if err := typesValidator.Var(m.State, "required"); err != nil {
+		errors = errors.Append("State", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsSubscriptionsResponseBody struct {
+	Enabled       bool                          `json:"enabled"`
+	Reason        *string                       `json:"reason,omitempty"`
+	Subscriptions []MCPEventsSubscriptionStatus `json:"subscriptions" validate:"required"`
+}
+
+func (m MCPEventsSubscriptionsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(m.Subscriptions, "required"); err != nil {
+		errors = errors.Append("Subscriptions", err)
+	}
+	for i, item := range m.Subscriptions {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Subscriptions[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsUnsubscribeBody struct {
+	Arguments MCPEventsArguments `json:"arguments"`
+	Delivery  MCPEventsDelivery  `json:"delivery"`
+	Name      string             `json:"name" validate:"required"`
+}
+
+func (m MCPEventsUnsubscribeBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(m.Arguments).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Arguments", err)
+		}
+	}
+	if v, ok := any(m.Delivery).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Delivery", err)
+		}
+	}
+	if err := typesValidator.Var(m.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type MCPEventsUnsubscribeResponseBody struct {
+	Unsubscribed bool `json:"unsubscribed"`
 }
 
 type MapConnectorFieldRequestBody struct {
@@ -4897,10 +5218,11 @@ func (p PingResponseBody) Validate() error {
 }
 
 type PollEventsBody struct {
-	Events        []EventEnvelope `json:"events" validate:"required"`
-	NextAfterID   int64           `json:"next_after_id"`
-	ResetAfterID  *int64          `json:"reset_after_id,omitempty"`
-	ResetRequired bool            `json:"reset_required"`
+	EffectiveCloseEventUID *string         `json:"effective_close_event_uid,omitempty"`
+	Events                 []EventEnvelope `json:"events" validate:"required"`
+	NextAfterID            int64           `json:"next_after_id"`
+	ResetAfterID           *int64          `json:"reset_after_id,omitempty"`
+	ResetRequired          bool            `json:"reset_required"`
 }
 
 func (p PollEventsBody) Validate() error {
@@ -5472,16 +5794,19 @@ type ReadyGlobalIssueOut struct {
 	Labels         []string       `json:"labels,omitempty"`
 	Metadata       map[string]any `json:"metadata"`
 	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
-	Owner          *string        `json:"owner,omitempty"`
-	Parent         *LinkPeer      `json:"parent,omitempty"`
-	Priority       *int64         `json:"priority,omitempty"`
-	ProjectID      int64          `json:"project_id"`
-	ProjectName    string         `json:"project_name" validate:"required"`
-	ProjectUID     *string        `json:"project_uid,omitempty"`
-	QualifiedID    string         `json:"qualified_id" validate:"required"`
-	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
-	Related        []LinkPeer     `json:"related,omitempty"`
-	Revision       int64          `json:"revision"`
+
+	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
+	Oversized    *bool      `json:"oversized,omitempty"`
+	Owner        *string    `json:"owner,omitempty"`
+	Parent       *LinkPeer  `json:"parent,omitempty"`
+	Priority     *int64     `json:"priority,omitempty"`
+	ProjectID    int64      `json:"project_id"`
+	ProjectName  string     `json:"project_name" validate:"required"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	QualifiedID  string     `json:"qualified_id" validate:"required"`
+	RecurrenceID *int64     `json:"recurrence_id,omitempty"`
+	Related      []LinkPeer `json:"related,omitempty"`
+	Revision     int64      `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
 	ScheduledOnDate *string                          `json:"scheduled_on_date,omitempty"`

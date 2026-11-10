@@ -8,25 +8,30 @@ import (
 
 // EventIssueLookup resolves the issues one event read names. It memoizes each
 // lookup, including not-found results, so a page that names the same issue
-// many times resolves it once. Both lookups must honor the caller's project
+// many times resolves it once. All lookups must honor the caller's project
 // boundary, so a hidden issue resolves as not found and is never recorded.
 type EventIssueLookup struct {
-	byUID     func(string) (Issue, error)
-	byRef     func(string, string) (Issue, error)
-	uidIssues map[string]Issue
-	uidMissed map[string]struct{}
-	refIssues map[string]Issue
-	refMissed map[string]struct{}
+	byUID         func(string) (Issue, error)
+	byRef         func(string, string) (Issue, error)
+	byCommentUID  func(string) (Issue, error)
+	uidIssues     map[string]Issue
+	uidMissed     map[string]struct{}
+	refIssues     map[string]Issue
+	refMissed     map[string]struct{}
+	commentIssues map[string]Issue
+	commentMissed map[string]struct{}
 }
 
-// NewEventIssueLookup memoizes byUID and byRef for one event read.
+// NewEventIssueLookup memoizes issue and comment-owner references for one read.
 func NewEventIssueLookup(
 	byUID func(string) (Issue, error), byRef func(string, string) (Issue, error),
+	byCommentUID func(string) (Issue, error),
 ) *EventIssueLookup {
 	return &EventIssueLookup{
-		byUID: byUID, byRef: byRef,
+		byUID: byUID, byRef: byRef, byCommentUID: byCommentUID,
 		uidIssues: make(map[string]Issue), uidMissed: make(map[string]struct{}),
 		refIssues: make(map[string]Issue), refMissed: make(map[string]struct{}),
+		commentIssues: make(map[string]Issue), commentMissed: make(map[string]struct{}),
 	}
 }
 
@@ -39,6 +44,14 @@ func (l *EventIssueLookup) IssueByUID(uid string) (Issue, error) {
 func (l *EventIssueLookup) IssueByRef(projectUID, ref string) (Issue, error) {
 	return memoizedIssue(l.refIssues, l.refMissed, projectUID+"\x00"+ref,
 		func() (Issue, error) { return l.byRef(projectUID, ref) })
+}
+
+// CommentIssueByUID resolves the current owning issue of a snapshot reply target.
+func (l *EventIssueLookup) CommentIssueByUID(uid string) (Issue, error) {
+	if l.byCommentUID == nil {
+		return Issue{}, ErrNotFound
+	}
+	return memoizedIssue(l.commentIssues, l.commentMissed, uid, func() (Issue, error) { return l.byCommentUID(uid) })
 }
 
 func memoizedIssue(
@@ -66,7 +79,7 @@ func memoizedIssue(
 // check already resolved, so the project access release withholds a response
 // whose issue moved into a hidden project after it was read.
 func (l *EventIssueLookup) RequiresProjectScopeReset(ctx context.Context, event Event) (bool, error) {
-	reset, err := EventRequiresProjectScopeReset(ctx, event, l.IssueByUID, l.IssueByRef)
+	reset, err := EventRequiresProjectScopeReset(ctx, event, l.IssueByUID, l.IssueByRef, l.CommentIssueByUID)
 	if err != nil || reset {
 		return reset, err
 	}

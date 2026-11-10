@@ -148,6 +148,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				scopedCloseRefusal(ctx, err.Error(), "issue has open children; close them before closing the parent"), "", nil)
 		}
 		now := time.Now()
+		if _, err := db.ResolveAttachmentEvidence(issue, dbEvidence); err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		}
 		// Burst/prose throttles are opt-in via [close.throttle] enabled=true
 		// for operators who want stricter pacing.
 		if cfg.CloseThrottle.SiblingBurstEnabled {
@@ -239,6 +242,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 					}
 					return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 				}
+			}
+			if errors.Is(err, db.ErrAttachmentEvidence) {
+				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
 			if revisionConflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 				return nil, api.NewError(412, "revision_conflict",
@@ -478,7 +484,19 @@ func scopedMutationEvent(
 func projectScopedMutationEvent(
 	ctx context.Context, store db.Storage, event *db.Event,
 ) (*db.Event, error) {
-	reset, err := db.EventRequiresProjectScopeReset(ctx, *event,
+	lookup := newProjectScopeEventIssueLookup(ctx, store)
+	reset, err := db.EventRequiresProjectScopeReset(ctx, *event, lookup.IssueByUID, lookup.IssueByRef, lookup.CommentIssueByUID)
+	if err != nil {
+		return nil, err
+	}
+	if reset {
+		return nil, nil
+	}
+	return event, nil
+}
+
+func newProjectScopeEventIssueLookup(ctx context.Context, store db.Storage) *db.EventIssueLookup {
+	return db.NewEventIssueLookup(
 		func(uid string) (db.Issue, error) {
 			return store.IssueByUID(ctx, uid, db.IncludeDeletedYes)
 		},
@@ -500,16 +518,30 @@ func projectScopedMutationEvent(
 			if err != nil {
 				return db.Issue{}, err
 			}
-			return store.IssueByShortID(ctx, project.ID, parsed.ShortID, db.IncludeDeletedYes)
+			issue, err := store.IssueByShortID(ctx, project.ID, parsed.ShortID, db.IncludeDeletedYes)
+			if err != nil {
+				return db.Issue{}, err
+			}
+			// Event projection uses direct reference lookup. IssueByShortID can
+			// follow historical moved aliases, so reject a result that is not the
+			// current row for this exact project-local reference.
+			if issue.ProjectID != project.ID || issue.ShortID != parsed.ShortID {
+				return db.Issue{}, db.ErrNotFound
+			}
+			return issue, nil
+		},
+		func(uid string) (db.Issue, error) {
+			owners, err := store.CommentIssueIDsByUIDs(ctx, []string{uid})
+			if err != nil {
+				return db.Issue{}, err
+			}
+			id, found := owners[uid]
+			if !found {
+				return db.Issue{}, db.ErrNotFound
+			}
+			return store.IssueByID(ctx, id)
 		},
 	)
-	if err != nil {
-		return nil, err
-	}
-	if reset {
-		return nil, nil
-	}
-	return event, nil
 }
 
 // scopedMutationEvents is the multi-event form of scopedMutationEvent for
@@ -627,14 +659,15 @@ func evidenceToDB(in []api.Evidence) []db.Evidence {
 	out := make([]db.Evidence, len(in))
 	for i, e := range in {
 		out[i] = db.Evidence{
-			Type:      string(e.Type),
-			SHA:       e.SHA,
-			URL:       e.URL,
-			Command:   e.Command,
-			Paths:     e.Paths,
-			Account:   e.Account,
-			Rationale: e.Rationale,
-			IssueRef:  e.IssueRef,
+			Type:         string(e.Type),
+			SHA:          e.SHA,
+			URL:          e.URL,
+			Command:      e.Command,
+			Paths:        e.Paths,
+			Account:      e.Account,
+			Rationale:    e.Rationale,
+			IssueRef:     e.IssueRef,
+			AttachmentID: e.AttachmentID,
 		}
 	}
 	return out

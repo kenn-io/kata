@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-03
+last_edited: 2026-11-09
 ---
 
 # HTTP API schema
@@ -14,6 +14,18 @@ Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
 transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
 discovery. [Cron](cron.md) documents job and workflow resources.
+
+## Search configuration header
+
+Search responses include `X-Kata-Embeddings-Configured: true` when the answering daemon has an embeddings provider, even while its index is empty or read-only mode forces lexical search. The value is `false` when no provider is configured. The response body is unchanged.
+
+## Local embeddings setup
+
+`GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, setup job, indexing progress, and `can_change`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. Issue-scoped credentials can read the status.
+
+`POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It shares the CLI's download and config checks, saves the setting, and reports the `restart` job state until the daemon restarts. Run `kata daemon restart` locally, or restart the daemon on its host. Reopen `kata ui` or sign in again afterward to see indexing progress.
+
+Setup is available only when no embeddings provider is configured and no setup job is active. It requires a local owner browser session, a bootstrap token, or a static daemon token, with a writable browser session manager when present. It returns `403` for other viewers and through the daemon switcher proxy, `404` when setup is unavailable, and `409` while setup is already running. The switcher proxy permits status reads.
 
 ## Getting the schema
 
@@ -201,6 +213,12 @@ Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
 API contract versions advance independently of Kata release versions.
+Kata 0.23.0 includes API `0.43.0`. Local embeddings setup requires `0.42.0`,
+and MCP Events require `0.43.0`.
+
+Kata 0.22.0 includes API `0.41.0`, and Kata 0.21.0 includes API `0.40.0`, the
+changes from `0.32.0` through `0.40.0` below.
+
 Kata 0.20.0 includes API `0.31.0`, the changes from `0.29.0` through `0.31.0`
 below. Bridge preflight checks for cross-project issue links require hub API
 `0.31.0`; acknowledging a request in the TUI Attention inbox requires `0.13.0`.
@@ -229,8 +247,17 @@ reference or full UID within the URL project. `after_id` and `limit` page
 through that history; omitting `issue` polls the project feed. Filtered history
 never returns `reset_required`: purging another issue removes only events that
 name it, and events that name an issue the caller cannot see are omitted.
-Scoped credentials receive the same authorized history projection as issue
-detail.
+History includes events from earlier projects after a move only when the caller
+can access those projects. Scoped credentials receive the same authorized
+history projection as issue detail.
+
+Clients that need close evidence can set
+`include_effective_close_event_uid=true`. The response includes
+`effective_close_event_uid` when a visible native close currently supplies the
+issue's closed status. The daemon selects the event using the same federation
+clock order as issue projection, so scoped clients do not need the redacted
+origin identity or status transitions to choose evidence. If no visible
+effective close exists, the field is omitted.
 
 Every successful filtered response includes `X-Kata-Events-Issue-UID` with the
 resolved issue UID, including empty pages. Clients should require
@@ -242,6 +269,12 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
+| `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. Both issue list routes accept `compact=true`. |
+| `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |
+| `0.41.0` | Adds `sort=priority` to both ready routes. `kata next` and MCP `kata.next` request one priority-ordered row; older daemons retain the full-queue fetch and client-side selection. |
+| `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |
+| `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |
 | `0.38.0` | Publishes `POST /projects/{project_id}/issues/{ref}/attachments/links`, which saves a reference to an existing Docbank file version without uploading its bytes. `kata docbank attachments link` refuses older daemons. |
 | `0.37.0` | `POST /projects/{project_id}/recurrences` accepts `If-Match: "rev-N"` with `initial_issue_ref`; a different issue revision returns 412 `revision_conflict` and writes nothing. An empty `If-Match` returns 400. Older daemons ignore the header. |
 | `0.36.0` | Issue list rows, show output and ready rows carry `scheduled_on_date` and `deadline_on_date`, the `scheduled_on` and `deadline_on` metadata as `YYYY-MM-DD` calendar dates, each omitted when its key is absent or its value cannot be read. Older daemons omit both fields. |
@@ -288,8 +321,8 @@ request schema and are rejected for strict request objects.
 ## Health diagnostics
 
 `GET /api/v1/health` without credentials provides liveness and version fields.
-`db_path`, `embeddings`, `federation_config`, and `root_signing` are optional
-diagnostics:
+`db_path`, `embeddings`, `docbank`, `federation_config`, and `root_signing` are
+optional diagnostics:
 daemon-owner credentials and genuine owner-local transport receive them
 when configured. Public remote probes and scoped credentials do not. An
 explicit scoped bearer remains scoped over loopback; an invalid bearer returns
@@ -305,6 +338,17 @@ hub project it roots:
 | `key_loaded` | Whether the daemon holds a usable signing key. |
 | `key_problem` | Why no key is loaded, such as `key file is missing`. |
 | `projects` | Hub projects whose pin the loaded key cannot satisfy. Signed writes to them return `409 root_signing_key_unavailable`. |
+
+`docbank` appears when `[docbank]` names a key source. With `local = true` and
+no `url`, the key comes from the local Docbank's runtime record and the block
+is absent. The daemon resolves its key source for each health request without
+contacting Docbank:
+
+| Field | Meaning |
+| --- | --- |
+| `credential` | `ok` when the key resolves, otherwise `missing`. |
+| `credential_source` | The source that failed, `file:<path>` or `env:<NAME>`; absent when `ok`. |
+| `credential_reason` | Why that source cannot supply a key; absent when `ok`. |
 
 `GET /api/v1/federation/status` adds `root_signing_key` (`available` or
 `unavailable`) to each hub project this daemon roots, and
@@ -499,6 +543,17 @@ an empty alias object. These placeholders do not expose private project data.
 The [scope guide](../design/issue-scoped-credentials.md) owns membership,
 operation constraints, and [event invalidation and revocation](../design/issue-scoped-credentials.md#events-concurrency-and-revocation).
 
+## Ready issues
+
+Request `sort=priority` to select ready issues by lowest priority number first, with unprioritized issues last. Ties use `updated_at DESC, id DESC`. Omit `sort`, or send an empty value, to keep the default ready order. Other values return 400.
+
+| Route | Parameter | Values |
+| --- | --- | --- |
+| `GET /api/v1/projects/{project_id}/ready` | `sort` | `priority` or empty; requires API `0.41.0`. |
+| `GET /api/v1/ready` | `sort` | `priority` or empty; requires API `0.41.0`. |
+
+Combine `sort=priority` with `limit=1` to fetch the highest-priority due issue. Parked issues do not consume the limit. The CLI and MCP `next` check the API version first; older daemons keep the full-queue fetch and client-side selection.
+
 ## Temporary assignments
 
 `POST /api/v1/projects/{project_id}/issues/{ref}/actions/claim` accepts an
@@ -569,6 +624,14 @@ another page exists. Pass the opaque `next_cursor` as `cursor` with the same
 explicit sort and filters. `limit=0` returns all remaining matches. Optional
 `include_total=true` adds `total`, a SQL count with the same filters and
 permissions, independent of the cursor and page size.
+
+`compact=true` returns each row without its `body` and with only the metadata
+keys that `meta` filters name. Use it when only those keys matter: an imported
+issue can carry a body, title, or metadata value larger than a client is
+willing to read. A compact row larger than 64 KiB carries only the issue's
+identity and status, with `oversized: true`, so a page of up to 100 compact
+rows stays under 8 MiB and still reaches the next cursor. It requires API 0.43.0;
+older daemons ignore it and return full rows.
 
 Use `priority=none` for issues with unset priority. It is mutually exclusive
 with `max_priority`; numeric `priority` accepts 0 through 4. `max_priority`
@@ -668,9 +731,10 @@ endpoints published in OpenAPI:
   selected detail/history/graph projection, capability envelope, durable event
   cursor, and strong ETag.
 - `GET /api/v1/ui/references` returns bounded projects, owners, labels, and
-  qualified issue references for pickers and typeahead. Repeating `issue_uid`
-  hydrates summaries for up to 200 stable issue UIDs and composes with the
-  existing project and text filters.
+  qualified issue references for pickers and typeahead. A `q` search returns
+  only issue references, with empty projects, owners, and labels. Repeating
+  `issue_uid` hydrates summaries for up to 200 stable issue UIDs and composes
+  with the existing project and text filters.
 - `GET /api/v1/ui/launch-target?issue_uid=<uid>` validates one active issue and
   returns a safe absolute route into the standalone browser application:
 
@@ -684,6 +748,11 @@ endpoints published in OpenAPI:
   remain not found. The `#direct=1` fragment keeps the standalone application
   on the daemon that issued the target even when its roster defaults to a
   different remote daemon.
+
+With `include_graph=true`, the snapshot returns only issues and links reachable
+from the selected issue through parent, blocks, or related links in either
+direction. Traversal stays within issues the caller can read. The graph is
+empty without an available selected issue.
 
 Clients can count a parent's open and total children from the snapshot alone,
 without a second `GET /api/v1/issues` request. `collection_links` contains
@@ -753,6 +822,13 @@ session header and `Last-Event-ID` through `fetch`. In unauthenticated
 snapshots because the event stream remains protected.
 
 ## Federation Enrollment and Health Endpoints
+
+`POST /api/v1/projects/{project_id}/federation/events:ingest` returns
+`400 validation` when a fresh event names a stored sibling-project issue through
+an added link, close parent, or duplicate/superseded evidence and either project
+uses a relay. The error identifies the event UID, and the whole batch rolls back.
+See [quarantine recovery](../operations/federation.md#quarantine) before retrying
+or skipping a refused batch.
 
 `POST /api/v1/federation/enrollments` accepts an optional `token`. Omitting it
 preserves create-once behavior and returns a newly generated plaintext
@@ -906,7 +982,7 @@ federated event log.
 uploads the raw request body as `application/octet-stream` to Docbank and
 returns the new `attachment_id` with its stored reference. `GET
 /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
-streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. All three routes return `docbank_not_configured` when the daemon has no Docbank. See [Issue attachments](../guide/attachments.md).
+streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. All three routes return `docbank_not_configured` when the daemon has no Docbank, and `503 docbank_key_unavailable` without contacting Docbank when the daemon cannot resolve its Docbank key; the message gives the reason, and the health `docbank` block names the source. See [Issue attachments](../guide/attachments.md).
 
 ## Project Hygiene Endpoints
 

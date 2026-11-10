@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -28,8 +30,8 @@ func newSearchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search <query>...",
 		Short: "search issues by title/body/comments",
-		Long: `Find issues whose title, body, or comments match the words. Run this before
-kata create and reuse an open match.
+		Long: `Find issues whose title, body, or comments contain every word. Run this before
+kata create and reuse an open match; one or two distinctive words find the most.
 Searches the bound project (or --project), open and closed unless --status.
 Mode is auto by default: hybrid when embeddings are configured, else
 lexical. --agent prints "OK search count=N" then one "- issue=<ref> ..." row
@@ -84,18 +86,16 @@ per match.`,
 			if err != nil {
 				return err
 			}
-			ctx, baseURL, err := ensureDaemonContext(ctx)
+			daemon, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
+			ctx, baseURL := daemon.ctx, daemon.baseURL
 			pid, err := resolveProjectID(ctx, baseURL, start)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
+			client := daemon.client
 			if lexical {
 				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionDiscoveryPagination, "lexical search pagination"); err != nil {
 					return err
@@ -140,8 +140,22 @@ per match.`,
 				return err
 			}
 			bs := response.Body
+			if r := response.JSON200; r != nil {
+				for _, hint := range searchhint.EmptyLexical(r.Query, r.Mode, len(r.Results), cursor == "") {
+					if bs, err = reportHint(cmd, bs, cliHint{Code: hint.Code, Message: hint.Message}); err != nil {
+						return err
+					}
+				}
+			}
 			if err := printSearchResults(cmd, bs); err != nil {
 				return err
+			}
+			if r := response.JSON200; !daemon.resolved.ConfiguredRemote() && cursor == "" && r != nil && r.Mode == "lexical" && !flags.Quiet && currentOutputMode() != outputAgent {
+				if response.Headers200 != nil && response.Headers200.XKataEmbeddingsConfigured == "false" {
+					if _, err := fmt.Fprintln(cmd.ErrOrStderr(), searchByMeaningOffHint(daemon.resolved.LocalProfile)); err != nil {
+						return err
+					}
+				}
 			}
 			if cursor == "" && response.JSON200 != nil && len(response.JSON200.Results) == 0 {
 				reportCLIEmptySearch(cmd, query)
@@ -159,6 +173,16 @@ per match.`,
 	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
 	cmd.Flags().StringSliceVar(&noLabels, "no-label", nil, "exclude issues with this label (repeatable)")
 	return cmd
+}
+
+// searchByMeaningOffHint names the searched profile's home, since Settings and
+// the setup command both administer whichever KATA_HOME they run under.
+func searchByMeaningOffHint(profile *client.LocalProfileIdentity) string {
+	hint := "turn it on in Settings (kata ui) or run kata daemon local-embeddings."
+	if profile != nil {
+		return "Search by meaning is off. Set KATA_HOME to " + profile.Home + ", then " + hint
+	}
+	return "Search by meaning is off; " + hint
 }
 
 // printSearchResults renders a search response in the active output mode:

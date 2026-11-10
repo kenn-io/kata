@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -295,14 +296,36 @@ func TestRunnerClaimFences(t *testing.T) {
 type failureStore struct {
 	db.Storage
 	calls, failAt int
+	sizes         []int
 }
 
 func (s *failureStore) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
 	s.calls++
+	s.sizes = append(s.sizes, len(p.Items))
 	if s.calls == s.failAt {
 		return db.ImportBatchResult{}, nil, errors.New("import failed")
 	}
 	return s.Storage.ImportBatch(ctx, p)
+}
+
+func TestRunnerDefaultChunksBoundWriterHold(t *testing.T) {
+	s := testStore(t)
+	b := testBinding(t, s, "example-project", "synthetic")
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const itemCount = 201
+	a := &testAdapter{prepare: func(_ context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
+		p := testPrepared(binding, at)
+		p.Batch.Items = nil
+		for i := range itemCount {
+			p.Batch.Items = append(p.Batch.Items, db.ImportItem{ExternalID: fmt.Sprintf("item-%d", i), Title: "task", Author: "author", Status: "open", CreatedAt: at, UpdatedAt: at})
+		}
+		return p, nil
+	}}
+	store := &failureStore{Storage: s}
+	r := NewRunner(RunnerConfig{Store: store, Adapter: a, Clock: func() time.Time { return at }})
+	_, err := r.RunOnce(t.Context(), b.ID)
+	require.NoError(t, err)
+	require.Equal(t, []int{200, 1}, store.sizes)
 }
 
 // A bounded finalizer must observe both the binding deadline and parent cancellation.

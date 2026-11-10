@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const BatchProjectStatsSQLForTest = batchProjectStatsSQL
+
 // NewStoreForTesting builds a Store with the given dsn but no live *sql.DB.
 // EXPORTED FOR TESTS ONLY — production callers cannot reach this. Used by
 // Path() redaction tests that don't need to open a real connection.
@@ -38,3 +40,7 @@ func InstallRelayHistoryFullScanObserverForTest(store *Store, observe func()) fu
 	store.relayHistoryFullScanObserver = observe
 	return func() { store.relayHistoryFullScanObserver = previous }
 }
+
+const EventSelectForTest = eventSelect
+
+var ScanEventForTest = scanEvent

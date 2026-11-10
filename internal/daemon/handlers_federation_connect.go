@@ -276,7 +276,7 @@ func reserveFederationBridgeCredential(ctx context.Context, store db.Storage, cr
 		return config.FederationCredential{}, internalAPIError(err)
 	}
 	if found {
-		if current.LeavePending || current.Provider != nil || current.HubURL != body.HubURL || current.HubProjectID != body.HubProjectID || current.Actor != body.UpstreamAccount || current.HubCatalog != body.HubCatalog || current.SpokeProjectName != body.ProjectName || current.RequestedActor != body.LocalAccount || current.AllowInsecure != allowInsecure || current.Capabilities != "claim,pull,push" || current.Token == "" {
+		if current.LeavePending || current.NativeLeave != nil || current.Provider != nil || current.HubURL != body.HubURL || current.HubProjectID != body.HubProjectID || current.Actor != body.UpstreamAccount || current.HubCatalog != body.HubCatalog || current.SpokeProjectName != body.ProjectName || current.RequestedActor != body.LocalAccount || current.AllowInsecure != allowInsecure || current.Capabilities != "claim,pull,push" || current.Token == "" {
 			return config.FederationCredential{}, api.NewError(409, "federation_credential_conflict", "existing project credential differs from the selected bridge", "resolve the existing binding before connecting", nil)
 		}
 		if current.Signing != nil || signing == nil {

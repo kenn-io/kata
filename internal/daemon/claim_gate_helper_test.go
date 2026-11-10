@@ -95,7 +95,7 @@ func TestClaimGateHelperSpokeRefreshesHubStatusBeforeCheckingCache(t *testing.T)
 	called := false
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		require.Equal(t, "/api/v1/projects/99/issues/"+issue.ShortID+"/lease", r.URL.Path)
+		require.Equal(t, "/api/v1/projects/99/issues/"+issue.UID+"/lease", r.URL.Path)
 		_ = json.NewEncoder(w).Encode(api.ClaimStatusBody{
 			Held: true,
 			Holder: api.ClaimPrincipalOut{
@@ -167,7 +167,7 @@ func TestClaimGateHelperRelayOfflineResponseFallsBackToCachedClaim(t *testing.T)
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/projects/99/issues/"+issue.ShortID+"/lease", r.URL.Path)
+		require.Equal(t, "/api/v1/projects/99/issues/"+issue.UID+"/lease", r.URL.Path)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": http.StatusServiceUnavailable,
@@ -308,7 +308,7 @@ func TestClaimGateHelperSpokeHubNotFoundFallsBackForPendingPushIssue(t *testing.
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/projects/99/issues/"+issue.ShortID+"/lease", r.URL.Path)
+		require.Equal(t, "/api/v1/projects/99/issues/"+issue.UID+"/lease", r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": http.StatusNotFound,
@@ -331,7 +331,7 @@ func TestClaimGateHelperSpokeHubNotFoundStillFailsAfterIssuePushed(t *testing.T)
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/projects/99/issues/"+issue.ShortID+"/lease", r.URL.Path)
+		require.Equal(t, "/api/v1/projects/99/issues/"+issue.UID+"/lease", r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": http.StatusNotFound,
@@ -358,7 +358,7 @@ func TestClaimGateHelperSpokeHubProjectNotFoundStillFailsForPendingPushIssue(t *
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/projects/99/issues/"+issue.ShortID+"/lease", r.URL.Path)
+		require.Equal(t, "/api/v1/projects/99/issues/"+issue.UID+"/lease", r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": http.StatusNotFound,
