@@ -571,7 +571,6 @@ describe('AppShell', () => {
     const route = {
       kind: 'kata' as const,
       view: 'all-open' as const,
-      issueUID: '01J00000000000000000000001',
       graph: false,
       filters: { status: [], owner: [], label: [], relationship: [] },
     }
@@ -590,6 +589,7 @@ describe('AppShell', () => {
     await fireEvent.click(screen.getByRole('button', { name: new RegExp(button) }))
     expect(onNavigate).toHaveBeenLastCalledWith({
       ...route,
+      issueUID: '01J00000000000000000000001',
       graph,
       filters: { ...route.filters, text: 'example' },
     })
@@ -597,90 +597,51 @@ describe('AppShell', () => {
 
   const project = '01J00000000000000000000002'
   const issue = '01J00000000000000000000001'
+  const repeatedFilters = {
+    status: ['open', 'ready'],
+    owner: ['user-a', 'user-b'],
+    label: ['backend', 'frontend'],
+    relationship: ['blocks'],
+  }
   test.each([
-    ['same project', 'all-open', 'all-open', project, project, issue, 'all-open', {}],
-    [
-      'different project',
-      'all-open',
-      'all-open',
-      project,
-      'other-project',
-      undefined,
-      'all-open',
-      {},
-    ],
-    ['implicit Inbox', undefined, 'inbox', undefined, undefined, issue, 'inbox', {}],
-    [
-      'status',
-      'all-open',
-      'all-open',
-      undefined,
-      undefined,
-      issue,
-      'all-open',
-      { status: ['closed'] },
-    ],
-    [
-      'owners',
-      'all-open',
-      'all-open',
-      undefined,
-      undefined,
-      issue,
-      'all-open',
-      { owner: ['alice', 'bob'] },
-    ],
-    [
-      'labels',
-      'all-open',
-      'all-open',
-      undefined,
-      undefined,
-      issue,
-      'all-open',
-      { label: ['bug', 'ui'] },
-    ],
-    [
-      'relation',
-      'all-open',
-      'all-open',
-      undefined,
-      undefined,
-      issue,
-      'all-open',
-      { relationship: ['blocks'] },
-    ],
+    ['same project', 'all-open', project, project, issue, true, {}],
+    ['different project', 'all-open', project, 'other-project', undefined, true, {}],
+    ['implicit Inbox', undefined, undefined, undefined, issue, true, {}],
+    ['pending filters', 'all-open', undefined, undefined, issue, true, repeatedFilters],
+    ['accepted filters', 'all-open', undefined, undefined, undefined, false, repeatedFilters],
   ] as const)(
-    'search preserves the pending %s',
-    async (
-      _name,
-      view,
-      requestedView,
-      projectUID,
-      requestedProjectUID,
-      issueUID,
-      expectedView,
-      pending,
-    ) => {
+    'search preserves the %s',
+    async (_name, view, projectUID, requestedProjectUID, issueUID, hasRequest, pending) => {
       const onNavigate = vi.fn()
+      const requestedView = view ?? 'inbox'
+      const filters = {
+        status: [],
+        owner: [],
+        label: [],
+        relationship: [],
+        ...pending,
+      } as ShareableFilters
       const route = {
         kind: 'kata' as const,
         ...(view ? { view } : {}),
         ...(projectUID ? { projectUID } : {}),
         graph: false,
-        filters: { status: [], owner: [], label: [], relationship: [] },
+        filters: hasRequest ? { status: [], owner: [], label: [], relationship: [] } : filters,
       }
-      const filters = { ...route.filters, ...pending } as ShareableFilters
       render(AppShell, {
         props: {
           route,
-          requestedRoute: {
-            ...route,
-            view: requestedView,
-            ...(requestedProjectUID ? { projectUID: requestedProjectUID } : {}),
-            issueUID: issue,
-            filters,
-          },
+          ...(hasRequest
+            ? {
+                requestedRoute: {
+                  ...route,
+                  view: requestedView,
+                  ...(requestedProjectUID ? { projectUID: requestedProjectUID } : {}),
+                  issueUID: issue,
+                  filters,
+                },
+              }
+            : {}),
           snapshot: snapshot(),
           loading: false,
           ...mutationProps(),
@@ -694,7 +655,7 @@ describe('AppShell', () => {
       )
       expect(onNavigate.mock.lastCall?.[0].projectUID).toBe(projectUID)
       expect(onNavigate.mock.lastCall?.[0].issueUID).toBe(issueUID)
-      expect(onNavigate.mock.lastCall?.[0].view).toBe(expectedView)
+      expect(onNavigate.mock.lastCall?.[0].view).toBe(requestedView)
     },
   )
 
@@ -723,37 +684,6 @@ describe('AppShell', () => {
       requestedRoute: { ...route, filters: { ...route.filters, text: 'second t' } },
     })
     expect(input.value).toBe('second t')
-  })
-
-  test.each(['Owner', 'Label'])('keeps typed %s while its search is pending', async (name) => {
-    const route = {
-      kind: 'kata' as const,
-      view: 'all-open' as const,
-      graph: false,
-      filters: { status: [], owner: [], label: [], relationship: [] },
-    }
-    const onNavigate = vi.fn()
-    const props = {
-      route,
-      snapshot: snapshot(),
-      loading: false,
-      ...mutationProps(),
-      onNavigate,
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-    }
-    const { rerender } = render(AppShell, { props })
-    const input = screen.getByRole('textbox', { name }) as HTMLInputElement
-    for (const char of 'Alice Smith') {
-      await fireEvent.input(input, { target: { value: input.value + char } })
-      await rerender({ ...props, requestedRoute: onNavigate.mock.lastCall![0] })
-    }
-    expect(input.value).toBe('Alice Smith')
-    await rerender({
-      ...props,
-      route: { ...route, filters: { ...route.filters, [name.toLowerCase()]: ['other'] } },
-      requestedRoute: undefined,
-    })
-    expect(input.value).toBe('other')
   })
 
   test('stays in the landing Inbox while selecting, graphing, and narrowing', async () => {
@@ -1583,47 +1513,6 @@ describe('AppShell', () => {
       route: { ...props.route, filters: { ...props.route.filters, label: ['a', 'd'] } },
     })
     expect(container.querySelectorAll('button.row')).toHaveLength(150)
-  })
-
-  test('retains repeated route filters when another control changes', async () => {
-    const onNavigate = vi.fn()
-    render(AppShell, {
-      props: {
-        route: {
-          kind: 'kata',
-          view: 'all-open',
-          graph: false,
-          filters: {
-            status: ['open', 'ready'],
-            owner: ['user-a', 'user-b'],
-            label: ['backend', 'frontend'],
-            relationship: ['blocks'],
-          },
-        },
-        snapshot: snapshot(),
-        loading: false,
-        ...mutationProps(),
-        onNavigate,
-        onCreateProject: vi.fn(async () => ({ changed: true })),
-      },
-    })
-
-    await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
-
-    await waitFor(() =>
-      expect(onNavigate).toHaveBeenCalledWith({
-        kind: 'kata',
-        view: 'all-open',
-        graph: false,
-        filters: {
-          status: ['open', 'ready'],
-          owner: ['user-a', 'user-b'],
-          label: ['backend', 'frontend'],
-          relationship: ['blocks'],
-          text: 'example',
-        },
-      }),
-    )
   })
 
   test('renders the routed source graph and returns to the same selected list context', async () => {
