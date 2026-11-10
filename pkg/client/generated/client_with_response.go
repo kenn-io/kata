@@ -4070,6 +4070,83 @@ func (c *Client) GetProjectFederationStatusWithResponse(ctx context.Context, opt
 	}
 }
 
+func (c *Client) ShareFederationIssueAgentsViewWithResponse(ctx context.Context, options *ShareFederationIssueAgentsViewRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShareFederationIssueAgentsViewResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/transcript-service/issues/{ref}",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/octet-stream",
+	}
+
+	// Keep binary bodies out of the runtime's JSON encoder.
+	if options != nil {
+		reqParams.Options = binaryRequestOptions{RequestOptions: options}
+	}
+	reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
+		if options == nil || options.Body == nil {
+			return nil
+		}
+		body, err := options.Body.Reader()
+		if err != nil {
+			return err
+		}
+		req.Body = body
+		req.ContentLength = options.Body.FileSize()
+		req.GetBody = options.Body.Reader
+		return nil
+	}}, reqEditors...)
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/transcript-service/issues/{ref}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ShareFederationIssueAgentsViewResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ShareFederationIssueAgentsViewResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ShareFederationIssueAgentsViewResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		out.Headers200 = &ShareFederationIssueAgentsViewResp200Headers{
+			CacheControl: resp.Headers.Get("Cache-Control"),
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(ShareFederationIssueAgentsViewErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
 func (c *Client) ImportIssuesWithResponse(ctx context.Context, options *ImportIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ImportIssuesResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
@@ -6678,6 +6755,83 @@ func (c *Client) IssuePlanningDatesWithResponse(ctx context.Context, options *Is
 	default:
 		if len(resp.Content) > 0 {
 			body := new(IssuePlanningDatesErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ShareIssueAgentsViewWithResponse(ctx context.Context, options *ShareIssueAgentsViewRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShareIssueAgentsViewResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/transcript-share",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/octet-stream",
+	}
+
+	// Keep binary bodies out of the runtime's JSON encoder.
+	if options != nil {
+		reqParams.Options = binaryRequestOptions{RequestOptions: options}
+	}
+	reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
+		if options == nil || options.Body == nil {
+			return nil
+		}
+		body, err := options.Body.Reader()
+		if err != nil {
+			return err
+		}
+		req.Body = body
+		req.ContentLength = options.Body.FileSize()
+		req.GetBody = options.Body.Reader
+		return nil
+	}}, reqEditors...)
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/transcript-share")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ShareIssueAgentsViewResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ShareIssueAgentsViewResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ShareIssueAgentsViewResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		out.Headers200 = &ShareIssueAgentsViewResp200Headers{
+			CacheControl: resp.Headers.Get("Cache-Control"),
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(ShareIssueAgentsViewErrorResponse)
 			if json.Unmarshal(resp.Content, body) == nil {
 				out.JSONDefault = body
 				if errTarget, ok := any(*body).(error); ok {

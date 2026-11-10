@@ -295,6 +295,10 @@ type GetProjectFederationStatusResponse = FederationStatusBody
 
 type GetProjectFederationStatusErrorResponse = ErrorEnvelope
 
+type ShareFederationIssueAgentsViewResponse = Receipt
+
+type ShareFederationIssueAgentsViewErrorResponse = ErrorEnvelope
+
 type ImportIssuesResponse = ImportBatchResult
 
 type ImportIssuesErrorResponse = ErrorEnvelope
@@ -478,6 +482,10 @@ type NotifyIssueErrorResponse = ErrorEnvelope
 type IssuePlanningDatesResponse = IssuePlanningDates
 
 type IssuePlanningDatesErrorResponse = ErrorEnvelope
+
+type ShareIssueAgentsViewResponse = Receipt
+
+type ShareIssueAgentsViewErrorResponse = ErrorEnvelope
 
 type ListLabelsResponse = LabelsListResponseBody
 
@@ -1223,6 +1231,19 @@ type GetProjectFederationStatusResp struct {
 	JSONDefault  *GetProjectFederationStatusErrorResponse
 }
 
+type ShareFederationIssueAgentsViewResp200Headers struct {
+	CacheControl string `header:"Cache-Control"`
+}
+
+type ShareFederationIssueAgentsViewResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ShareFederationIssueAgentsViewResponse
+	Headers200   *ShareFederationIssueAgentsViewResp200Headers
+	JSONDefault  *ShareFederationIssueAgentsViewErrorResponse
+}
+
 type ImportIssuesResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -1673,6 +1694,19 @@ type IssuePlanningDatesResp struct {
 	StatusCode   int
 	JSON200      *IssuePlanningDatesResponse
 	JSONDefault  *IssuePlanningDatesErrorResponse
+}
+
+type ShareIssueAgentsViewResp200Headers struct {
+	CacheControl string `header:"Cache-Control"`
+}
+
+type ShareIssueAgentsViewResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ShareIssueAgentsViewResponse
+	Headers200   *ShareIssueAgentsViewResp200Headers
+	JSONDefault  *ShareIssueAgentsViewErrorResponse
 }
 
 type ListLabelsResp struct {

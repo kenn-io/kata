@@ -78,6 +78,17 @@ type DisconnectRelayEnrollmentHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 
+type ShareFederationIssueAgentsViewHeaders struct {
+	Authorization          *string `json:"Authorization,omitempty"`
+	ContentEncoding        *string `json:"Content-Encoding,omitempty"`
+	XKataActor             *string `json:"X-Kata-Actor,omitempty"`
+	XKataTranscriptControl string  `json:"X-Kata-Transcript-Control" validate:"required"`
+}
+
+func (s ShareFederationIssueAgentsViewHeaders) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
 type CreateIssueHeaders struct {
 	// XKataSurface Client interface for action telemetry (web, tui, or cli); other values are ignored.
 	XKataSurface *string `json:"X-Kata-Surface,omitempty"`
@@ -168,6 +179,17 @@ type NotifyIssueHeaders struct {
 
 	// XKataProjectAliasKind Workspace alias kind; required with X-Kata-Project-Alias
 	XKataProjectAliasKind *string `json:"X-Kata-Project-Alias-Kind,omitempty"`
+}
+
+type ShareIssueAgentsViewHeaders struct {
+	Authorization          *string `json:"Authorization,omitempty"`
+	ContentEncoding        *string `json:"Content-Encoding,omitempty"`
+	XKataActor             *string `json:"X-Kata-Actor,omitempty"`
+	XKataTranscriptControl string  `json:"X-Kata-Transcript-Control" validate:"required"`
+}
+
+func (s ShareIssueAgentsViewHeaders) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
 }
 
 type PatchProjectMetadataHeaders struct {

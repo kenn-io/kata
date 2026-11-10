@@ -3458,6 +3458,68 @@ func (o *GetProjectFederationStatusRequestOptions) GetHeader() (map[string]strin
 	return nil, nil
 }
 
+// ShareFederationIssueAgentsViewRequestOptions is the options needed to make a request to ShareFederationIssueAgentsView.
+type ShareFederationIssueAgentsViewRequestOptions struct {
+	PathParams *ShareFederationIssueAgentsViewPath
+	Body       *ShareFederationIssueAgentsViewBody
+	Header     *ShareFederationIssueAgentsViewHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ShareFederationIssueAgentsViewRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ShareFederationIssueAgentsViewRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ShareFederationIssueAgentsViewRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ShareFederationIssueAgentsViewRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *ShareFederationIssueAgentsViewRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
 // ImportIssuesRequestOptions is the options needed to make a request to ImportIssues.
 type ImportIssuesRequestOptions struct {
 	PathParams *ImportIssuesPath
@@ -6011,6 +6073,68 @@ func (o *IssuePlanningDatesRequestOptions) GetBody() any {
 // GetHeader returns the headers as a map.
 func (o *IssuePlanningDatesRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
+}
+
+// ShareIssueAgentsViewRequestOptions is the options needed to make a request to ShareIssueAgentsView.
+type ShareIssueAgentsViewRequestOptions struct {
+	PathParams *ShareIssueAgentsViewPath
+	Body       *ShareIssueAgentsViewBody
+	Header     *ShareIssueAgentsViewHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ShareIssueAgentsViewRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ShareIssueAgentsViewRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ShareIssueAgentsViewRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ShareIssueAgentsViewRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *ShareIssueAgentsViewRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
 }
 
 // ListLabelsRequestOptions is the options needed to make a request to ListLabels.

@@ -669,18 +669,28 @@ func (c ClaimViolationOut) Validate() error {
 }
 
 type CloseActionRequestBody struct {
-	Actor         *string                              `json:"actor,omitempty"`
-	DryRun        *bool                                `json:"dry_run,omitempty"`
-	Evidence      []Evidence                           `json:"evidence,omitempty"`
-	Message       *string                              `json:"message,omitempty"`
-	Reason        *CloseActionRequestBodyReason        `json:"reason,omitempty"`
-	RetryProtocol *CloseActionRequestBodyRetryProtocol `json:"retry_protocol,omitempty"`
-	Source        *CloseActionRequestBodySource        `json:"source,omitempty"`
-	Transcript    *Transcript                          `json:"transcript,omitempty"`
+	Actor                 *string                                   `json:"actor,omitempty"`
+	AgentsviewAssociation map[string]any                            `json:"agentsview_association,omitempty"`
+	AgentsviewDiscovery   map[string]any                            `json:"agentsview_discovery,omitempty"`
+	AgentsviewProtocol    *CloseActionRequestBodyAgentsviewProtocol `json:"agentsview_protocol,omitempty"`
+	DryRun                *bool                                     `json:"dry_run,omitempty"`
+	Evidence              []Evidence                                `json:"evidence,omitempty"`
+	Message               *string                                   `json:"message,omitempty"`
+	Reason                *CloseActionRequestBodyReason             `json:"reason,omitempty"`
+	RetryProtocol         *CloseActionRequestBodyRetryProtocol      `json:"retry_protocol,omitempty"`
+	Source                *CloseActionRequestBodySource             `json:"source,omitempty"`
+	Transcript            *Transcript                               `json:"transcript,omitempty"`
 }
 
 func (c CloseActionRequestBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if c.AgentsviewProtocol != nil {
+		if v, ok := any(c.AgentsviewProtocol).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("AgentsviewProtocol", err)
+			}
+		}
+	}
 	for i, item := range c.Evidence {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -5665,6 +5675,28 @@ func (r RebindFederationReplicaResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type Receipt struct {
+	AcceptedAt     time.Time `json:"accepted_at" validate:"required"`
+	Agent          string    `json:"agent" validate:"required"`
+	AuthorityUID   string    `json:"authority_uid" validate:"required"`
+	CloseEventUID  string    `json:"close_event_uid" validate:"required"`
+	IssueUID       string    `json:"issue_uid" validate:"required"`
+	KeyID          string    `json:"key_id" validate:"required"`
+	Locator        string    `json:"locator" validate:"required"`
+	ProjectUID     string    `json:"project_uid" validate:"required"`
+	ServiceID      string    `json:"service_id" validate:"required"`
+	SessionID      string    `json:"session_id" validate:"required"`
+	Signature      *string   `json:"signature,omitempty"`
+	SnapshotBytes  int64     `json:"snapshot_bytes"`
+	SnapshotSha256 string    `json:"snapshot_sha256" validate:"required"`
+	Status         string    `json:"status" validate:"required"`
+	V              int64     `json:"v"`
+}
+
+func (r Receipt) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
 type ReconcileExternalRootByKeyRequestBody struct {

@@ -30,6 +30,7 @@ type agentsViewShareRequest struct {
 	Authorization string `header:"Authorization"`
 	Encoding      string `header:"Content-Encoding"`
 	Actor         string `header:"X-Kata-Actor"`
+	Control       string `header:"X-Kata-Transcript-Control" required:"true"`
 	body          io.Reader
 	control       []string
 	headerBytes   int
@@ -59,7 +60,7 @@ func registerAgentsViewShareHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if federation {
 			operation, path = "shareFederationIssueAgentsView", "/api/v1/projects/{project_id}/federation/transcript-service/issues/{ref}"
 		}
-		huma.Register(humaAPI, huma.Operation{OperationID: operation, Method: "POST", Path: path, MaxBodyBytes: agentsviewrelay.MaxSnapshotBytes}, func(ctx context.Context, in *agentsViewShareRequest) (*agentsViewShareResponse, error) {
+		huma.Register(humaAPI, huma.Operation{OperationID: operation, Method: "POST", Path: path, MaxBodyBytes: agentsviewrelay.MaxSnapshotBytes, RequestBody: &huma.RequestBody{Required: true, Content: binaryContent("application/octet-stream")}}, func(ctx context.Context, in *agentsViewShareRequest) (*agentsViewShareResponse, error) {
 			ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 			defer cancel()
 			if cfg.AgentsViewRelay == nil || cfg.AgentsViewRelay.Selection == nil || cfg.AgentsViewRelay.Spool == nil {

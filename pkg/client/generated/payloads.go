@@ -72,6 +72,8 @@ type AckRelayDeliveriesBody = RelayAckRequestBody
 
 type DisconnectRelayEnrollmentBody = DisconnectRelayRequestBody
 
+type ShareFederationIssueAgentsViewBody = runtime.File
+
 type ImportIssuesBody = ImportRequestBody
 
 type DisableIssueSyncBody = DisableIssueSyncRequestBody
@@ -139,6 +141,8 @@ type CreateLinkBody = CreateLinkRequestBody
 type PatchIssueMetadataBody = PatchIssueMetadataRequestBody
 
 type NotifyIssueBody = NotifyIssueRequestBody
+
+type ShareIssueAgentsViewBody = runtime.File
 
 type MergeProjectBody = MergeProjectRequestBody
 

@@ -325,6 +325,15 @@ type GetProjectFederationStatusPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type ShareFederationIssueAgentsViewPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (s ShareFederationIssueAgentsViewPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
 type ImportIssuesPath struct {
 	ProjectID int64 `json:"project_id"`
 }
@@ -735,6 +744,15 @@ type IssuePlanningDatesPath struct {
 
 func (i IssuePlanningDatesPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(i))
+}
+
+type ShareIssueAgentsViewPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (s ShareIssueAgentsViewPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
 }
 
 type ListLabelsPath struct {

@@ -763,3 +763,27 @@ func TestOpenAPIDocumentShowIssueCarriesLabelStrings(t *testing.T) {
 
 	require.NotContains(t, schemas["Issue"].Properties, "labels")
 }
+
+func TestOpenAPIAgentsViewUploadContract(t *testing.T) {
+	doc := OpenAPIDocument()
+	for _, path := range []string{
+		"/api/v1/projects/{project_id}/issues/{ref}/transcript-share",
+		"/api/v1/projects/{project_id}/federation/transcript-service/issues/{ref}",
+	} {
+		t.Run(path, func(t *testing.T) {
+			op := doc.Paths[path].Post
+			require.NotNil(t, op.RequestBody)
+			require.True(t, op.RequestBody.Required)
+			body := op.RequestBody.Content["application/octet-stream"]
+			require.NotNil(t, body)
+			require.Equal(t, "binary", body.Schema.Format)
+			var found bool
+			for _, p := range op.Parameters {
+				if strings.EqualFold(p.Name, "X-Kata-Transcript-Control") && p.In == "header" && p.Required {
+					found = true
+				}
+			}
+			require.True(t, found, "required transcript control header missing")
+		})
+	}
+}

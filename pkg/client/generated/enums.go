@@ -64,6 +64,23 @@ func (c CaptureTelemetryEventResponseBodyStatus) Validate() error {
 	}
 }
 
+type CloseActionRequestBodyAgentsviewProtocol string
+
+const (
+	CloseActionRequestBodyAgentsviewProtocolEmpty CloseActionRequestBodyAgentsviewProtocol = ""
+	RelayV1                                       CloseActionRequestBodyAgentsviewProtocol = "relay-v1"
+)
+
+// Validate checks if the CloseActionRequestBodyAgentsviewProtocol value is valid
+func (c CloseActionRequestBodyAgentsviewProtocol) Validate() error {
+	switch c {
+	case CloseActionRequestBodyAgentsviewProtocolEmpty, RelayV1:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CloseActionRequestBodyAgentsviewProtocol value, got: %v", c))
+	}
+}
+
 type CloseActionRequestBodyReason string
 
 const (

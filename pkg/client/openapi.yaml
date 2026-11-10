@@ -491,6 +491,17 @@ components:
       properties:
         actor:
           type: string
+        agentsview_association:
+          additionalProperties: true
+          type: object
+        agentsview_discovery:
+          additionalProperties: true
+          type: object
+        agentsview_protocol:
+          enum:
+            - relay-v1
+            - ""
+          type: string
         dry_run:
           type: boolean
         evidence:
@@ -5371,6 +5382,58 @@ components:
         - new_origin
         - state
       type: object
+    Receipt:
+      properties:
+        accepted_at:
+          format: date-time
+          type: string
+        agent:
+          type: string
+        authority_uid:
+          type: string
+        close_event_uid:
+          type: string
+        issue_uid:
+          type: string
+        key_id:
+          type: string
+        locator:
+          type: string
+        project_uid:
+          type: string
+        service_id:
+          type: string
+        session_id:
+          type: string
+        signature:
+          format: base64
+          type: string
+        snapshot_bytes:
+          format: int64
+          type: integer
+        snapshot_sha256:
+          type: string
+        status:
+          type: string
+        v:
+          format: int64
+          type: integer
+      required:
+        - v
+        - project_uid
+        - authority_uid
+        - service_id
+        - issue_uid
+        - close_event_uid
+        - snapshot_sha256
+        - snapshot_bytes
+        - agent
+        - session_id
+        - locator
+        - status
+        - accepted_at
+        - key_id
+      type: object
     ReconcileExternalRootByKeyRequestBody:
       additionalProperties: false
       properties:
@@ -7040,7 +7103,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.41.0
+  version: 0.43.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -9391,6 +9454,63 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/federation/transcript-service/issues/{ref}:
+    post:
+      operationId: shareFederationIssueAgentsView
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - in: header
+          name: Content-Encoding
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Actor
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Transcript-Control
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              format: binary
+              type: string
+              x-contentMediaType: application/octet-stream
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/imports:
     post:
       operationId: importIssues
@@ -11287,6 +11407,63 @@ paths:
               schema:
                 $ref: "#/components/schemas/IssuePlanningDates"
           description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/transcript-share:
+    post:
+      operationId: shareIssueAgentsView
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - in: header
+          name: Content-Encoding
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Actor
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Transcript-Control
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              format: binary
+              type: string
+              x-contentMediaType: application/octet-stream
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
         default:
           content:
             application/json:
