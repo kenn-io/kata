@@ -70,16 +70,7 @@ func previewMoveBatch(ctx context.Context, store db.Storage, items []moveBatchIt
 }
 
 func finishUnchangedMove(ctx context.Context, store db.Storage, item moveBatchItem, result *api.MoveIssuesResult, prior api.MoveIssuesResult) error {
-	issue, err := resolveLinkTargetRef(ctx, store, 0, item.issue.UID, db.IncludeDeletedNo)
-	if err == nil {
-		_, err = activeProjectByID(ctx, store, issue.ProjectID)
-	}
-	if err == nil {
-		_, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
-	}
-	if err == nil {
-		err = authorizeIssueScopedIssue(ctx, store, issue)
-	}
+	issue, _, err := resolveMoveBatchIssue(ctx, store, 0, item.issue.UID)
 	if err != nil {
 		if moveIssueAPIError(err).(*api.APIError).Status >= 500 {
 			return err
@@ -161,17 +152,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				moveBatchRefusal(r, err)
 				continue
 			}
-			issue, err := resolveLinkTargetRef(ctx, cfg.DB, in.Body.DefaultProjectID, input.Ref, db.IncludeDeletedNo)
-			var source db.Project
-			if err == nil {
-				source, err = activeProjectByID(ctx, cfg.DB, issue.ProjectID)
-			}
-			if err == nil {
-				_, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
-			}
-			if err == nil {
-				err = authorizeIssueScopedIssue(ctx, cfg.DB, issue)
-			}
+			issue, source, err := resolveMoveBatchIssue(ctx, cfg.DB, in.Body.DefaultProjectID, input.Ref)
 			if err != nil {
 				moveBatchRefusal(r, err)
 				continue
@@ -375,4 +356,19 @@ func moveBatchError(err error, results []api.MoveIssuesResult, next int) error {
 
 func moveBatchCompleted(prior, current []api.MoveIssuesResult) []api.MoveIssuesResult {
 	return slices.DeleteFunc(append(prior, current...), func(r api.MoveIssuesResult) bool { return r.Result == "" })
+}
+
+func resolveMoveBatchIssue(ctx context.Context, store db.Storage, projectID int64, ref string) (db.Issue, db.Project, error) {
+	issue, err := resolveLinkTargetRef(ctx, store, projectID, ref, db.IncludeDeletedNo)
+	var project db.Project
+	if err == nil {
+		project, err = activeProjectByID(ctx, store, issue.ProjectID)
+	}
+	if err == nil {
+		_, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+	}
+	if err == nil {
+		err = authorizeIssueScopedIssue(ctx, store, issue)
+	}
+	return issue, project, err
 }

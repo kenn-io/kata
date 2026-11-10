@@ -530,3 +530,26 @@ func TestMoveIssuesBatch_ReportsRefusalsOnChunkError(t *testing.T) {
 		})
 	}
 }
+
+func TestMoveIssuesBatch_ReadFailureBeforeCommittedNeighbor(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	_, other := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	resident, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "agent"})
+	require.NoError(t, err)
+	wrapped := &batchAfterWriteStore{Storage: store}
+	wrapped.afterWrite = func() { wrapped.failUID = resident.UID }
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: resident.UID}, {Ref: other.UID}}
+	_, err = moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr)
+	rows, ok := apiErr.Data["results"].([]api.MoveIssuesResult)
+	require.True(t, ok)
+	require.Len(t, rows, 1)
+	require.Equal(t, "moved", rows[0].Result)
+	require.Equal(t, 1, rows[0].Index)
+	require.Equal(t, 0, apiErr.Data["next_index"])
+}

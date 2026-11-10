@@ -92,7 +92,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
 			for _, issue := range res.Issues {
-				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun); err != nil {
+				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun, nil); err != nil {
 					return nil, err
 				}
 			}
