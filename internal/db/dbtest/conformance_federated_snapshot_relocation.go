@@ -114,6 +114,41 @@ func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, hub db.Storage, back
 	after, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, cursor, after, "repeated pulls must not create synthetic moves or reset controls")
+	t.Run("source pause retains discussion", func(t *testing.T) {
+		binding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
+		require.NoError(t, err)
+		binding.Enabled = false
+		_, err = spoke.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+		defer func() {
+			binding.Enabled = true
+			_, err := spoke.UpsertFederationBinding(ctx, binding)
+			require.NoError(t, err)
+		}()
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, localTarget.ID))
+		retained, err := spoke.CommentsByIssue(ctx, got.ID)
+		require.NoError(t, err)
+		require.Equal(t, comments, retained, "pausing the old source must preserve relocated discussion and comment IDs")
+	})
+	t.Run("destination leave preserves standalone issue", func(t *testing.T) {
+		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
+		_, err := spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.NoError(t, err)
+		body := "standalone destination edit"
+		_, _, _, err = spoke.EditIssue(ctx, db.EditIssueParams{IssueID: got.ID, Body: &body, Actor: "worker"})
+		require.NoError(t, err)
+		before, err := spoke.IssueByID(ctx, got.ID)
+		require.NoError(t, err)
+		beforeComments, err := spoke.CommentsByIssue(ctx, got.ID)
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, localSource.ID), "leaving the destination must not stall source pulls")
+		after, err := spoke.IssueByID(ctx, got.ID)
+		require.NoError(t, err)
+		require.Equal(t, before, after, "source replay must preserve standalone destination state")
+		afterComments, err := spoke.CommentsByIssue(ctx, got.ID)
+		require.NoError(t, err)
+		require.Equal(t, beforeComments, afterComments)
+	})
 	return nil
 }
 
