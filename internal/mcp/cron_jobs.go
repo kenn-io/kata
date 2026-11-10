@@ -27,6 +27,46 @@ type CronJobUpdateInput struct {
 	ExpectedEventUID string `json:"expected_event_uid"`
 }
 
+// CronJobHistoryInput selects a page of locally retained definition versions.
+type CronJobHistoryInput struct {
+	CronIdentityInput
+	Limit          *int64 `json:"limit,omitempty" jsonschema:"Results from 1 through 100; omit for 20"`
+	BeforeEventUID string `json:"before_event_uid,omitempty" jsonschema:"next_before_event_uid from the preceding page"`
+}
+
+func (h toolHandlers) cronJobHistory(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobHistoryInput) (*sdkmcp.CallToolResult, generated.ListCronJobVersionsResponse, error) {
+	var out generated.ListCronJobVersionsResponse
+	id, err := cronUID(in.UID)
+	if err != nil {
+		return nil, out, err
+	}
+	limit := int64(defaultResultLimit)
+	if in.Limit != nil {
+		limit = *in.Limit
+	}
+	if limit < 1 || limit > maximumResultLimit {
+		return nil, out, errors.New("limit must be from 1 through 100")
+	}
+	if in.BeforeEventUID != "" {
+		in.BeforeEventUID, err = cronUID(in.BeforeEventUID)
+		if err != nil {
+			return nil, out, err
+		}
+	}
+	p, err := h.createTarget(ctx, in.Project)
+	if err != nil {
+		return nil, out, err
+	}
+	response, err := h.options.Client.ListCronJobVersions(ctx, &generated.ListCronJobVersionsRequestOptions{
+		PathParams: &generated.ListCronJobVersionsPath{ProjectID: p.ID, CronUID: id},
+		Query:      &generated.ListCronJobVersionsQuery{Limit: &limit, BeforeEventUID: optionalString(in.BeforeEventUID)},
+	})
+	if err != nil {
+		return nil, out, err
+	}
+	return successResult(), *response, nil
+}
+
 func (h toolHandlers) cronJobs(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronListInput) (*sdkmcp.CallToolResult, *generated.ListCronJobsResponse, error) {
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {

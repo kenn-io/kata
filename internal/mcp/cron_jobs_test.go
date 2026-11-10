@@ -339,6 +339,7 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 		arguments map[string]any
 	}{
 		{"cron_capabilities", map[string]any{}},
+		{"cron_job_history", map[string]any{"uid": cronNewUID(t, scoped)}},
 		{"cron_job_create", map[string]any{"uid": cronNewUID(t, scoped), "name": "Denied", "definition": cronDefinition()}},
 	} {
 		denied := cronCall(t, scoped, tc.name, tc.arguments)
