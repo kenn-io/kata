@@ -617,7 +617,9 @@ setup as well as polling. Top-level `reason` remains `matched` or `timeout`.
 With `any: true`, an `until` wait returns after the first matching issue. A
 status wait reads the current snapshot before returning a match, or returns at
 the deadline if a completed read matched. Otherwise every issue must match;
-observed `until` completions are retained while the others finish.
+observed `until` completions are retained while the others finish. With
+`any: true`, missing issues are omitted from the result; if none remain, the
+wait returns a lookup error.
 
 ## Scheduling and someday
 

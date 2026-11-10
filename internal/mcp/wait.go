@@ -22,6 +22,7 @@ type waitTarget struct {
 	uid       string
 	recipient string
 	evaluator wait.Evaluator
+	missing   error
 	state     WaitState
 }
 
@@ -90,7 +91,7 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		results := make(chan result, len(targets))
 		var pending sync.WaitGroup
 		for i, raw := range input.Refs {
-			if until != "" && targets[i].state.Matched {
+			if targets[i].missing != nil || until != "" && targets[i].state.Matched {
 				continue
 			}
 			pending.Add(1)
@@ -105,6 +106,10 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		matchedAny := false
 		for res := range results {
 			if res.err != nil {
+				if input.Any && res.target.missing != nil {
+					targets[res.index] = res.target
+					continue
+				}
 				if firstErr == nil {
 					firstErr = res.err
 				}
@@ -118,8 +123,16 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		}
 		stopRound()
 		states := make([]WaitState, 0, len(targets))
-		matches := 0
+		matches, available := 0, 0
+		var missing error
 		for _, target := range targets {
+			if target.missing != nil {
+				if missing == nil {
+					missing = target.missing
+				}
+				continue
+			}
+			available++
 			if target.state.Ref != "" {
 				states = append(states, target.state)
 			}
@@ -127,11 +140,17 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				matches++
 			}
 		}
+		if ctx.Err() != nil {
+			return nil, WaitOutput{}, ctx.Err()
+		}
 		if matchedAny || firstErr == nil && (input.Any && matches > 0 || matches == len(targets)) || input.Any && matches > 0 && errors.Is(waitContext.Err(), context.DeadlineExceeded) {
 			return successResult(), WaitOutput{Reason: "matched", States: states}, nil
 		}
 		if firstErr != nil {
 			return finishError(firstErr)
+		}
+		if available == 0 {
+			return nil, WaitOutput{}, missing
 		}
 		lastStates = states
 		select {
@@ -153,6 +172,9 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 		Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
 	})
 	if err != nil {
+		if kataclient.StatusCode(err) == http.StatusNotFound {
+			target.missing = err
+		}
 		return target, err
 	}
 	project, err = h.currentIssueProject(ctx, project, issueFromShow(shown.Issue))
@@ -172,7 +194,7 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 	} else {
 		attention, _ := shown.Issue.Metadata["work.attention"].(string)
 		var reply []byte
-		if until == "reply" && state.Status != "closed" {
+		if until == "reply" && shown.Issue.Status != "closed" {
 			recipient := explicitRecipient
 			if recipient == "" {
 				recipient = target.recipient
@@ -200,7 +222,7 @@ func (h toolHandlers) pollWaitTarget(ctx context.Context, raw string, target wai
 				return target, err
 			}
 		}
-		state.Matched, state.Reason = target.evaluator.Eval(until, state.Status, attention, reply)
+		state.Matched, state.Reason = target.evaluator.Eval(until, shown.Issue.Status, attention, reply)
 		if state.Reason == "attention" {
 			state.Attention = attention
 			state.AttentionMsg, _ = shown.Issue.Metadata["work.attention_msg"].(string)
