@@ -47,6 +47,8 @@
 
   interface Props {
     selectedCommentUID?: string | undefined
+    // True while the task shows the list's copy and its comments load.
+    pending?: boolean | undefined
     navigationActive?: boolean | undefined
     returnComment?: { issueUID: string; commentUID: string } | undefined
     commentError?: string | undefined
@@ -97,6 +99,7 @@
   let {
     issue,
     selectedCommentUID,
+    pending = false,
     navigationActive = true,
     commentError = undefined,
     events = [],
@@ -554,6 +557,7 @@
     <Comments
       {selectedCommentUID}
       {navigationActive}
+      {pending}
       {issue}
       {searchReferences}
       {actionsDisabled}
@@ -564,7 +568,7 @@
       onOpenComment={(uid, commentUID, returnComment) =>
         void onSelectIssue?.({ uid, commentUID, returnComment })}
     />
-    <IssueHistory {events} metadata={issue.issue.metadata} attachmentLinks={false} />
+    <IssueHistory {events} metadata={issue.issue.metadata} attachmentLinks={false} {pending} />
   {/key}
 </section>
 
