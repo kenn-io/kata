@@ -69,7 +69,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 			}
 			if kind == "dependent-on-rejected-create" {
 				dependent := newRemoteEvent(t, source, &freshUID, "issue.updated", "worker", origin, at, []byte(`{"uid":"`+freshUID+`","title":"Must not be known"}`))
-				params.Events = append(params.Events, db.FederationIngestEvent{SourceEventID: 3, Event: dependent})
+				params.Events = []db.FederationIngestEvent{{SourceEventID: 1, Event: bad}, {SourceEventID: 2, Event: dependent}, {SourceEventID: 3, Event: valid}}
 			}
 			if kind == "rejected-move" {
 				afterMove := newRemoteEvent(t, source, &moved.UID, "issue.updated", "worker", origin, at, []byte(`{"uid":"`+moved.UID+`","title":"Must not acquire route authority"}`))
@@ -84,7 +84,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				params.MoveSourceEnrollmentIDs = nil
 			}
 			result, err := store.IngestFederationEvents(ctx, params)
-			if kind == "dependent-on-rejected-create" || kind == "malformed-comment" || kind == "known-create" || kind == "known-snapshot" {
+			if kind == "malformed-comment" || kind == "known-create" || kind == "known-snapshot" {
 				require.ErrorIs(t, err, db.ErrFederationIngestValidation, "independent payload validation remains atomic despite missing enrollment")
 				after, err := store.MaxEventID(ctx)
 				require.NoError(t, err)
@@ -92,7 +92,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				return
 			}
 			require.NoError(t, err, "only missing current-project enrollment is an event rejection")
-			if kind == "rejected-move" {
+			if kind == "rejected-move" || kind == "dependent-on-rejected-create" {
 				require.Len(t, result.RejectedEvents, 2)
 			} else {
 				require.Len(t, result.RejectedEvents, 1)
@@ -111,12 +111,28 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 			} else {
 				require.Equal(t, 1, result.Accepted)
 				require.Equal(t, []string{valid.EventUID}, result.InsertedEventUIDs)
-				if kind == "rejected-move" {
+				if kind == "rejected-move" || kind == "dependent-on-rejected-create" {
 					require.Equal(t, int64(3), result.PushCursorEventID)
 				} else {
 					require.Equal(t, int64(2), result.PushCursorEventID)
 				}
 				require.Equal(t, "Arrived", got.Title)
+			}
+			if kind == "dependent-on-rejected-create" {
+				require.Equal(t, params.Events[1].Event.EventUID, result.RejectedEvents[1].EventUID)
+				_, err := store.IssueByUID(ctx, freshUID, db.IncludeDeletedNo)
+				require.ErrorIs(t, err, db.ErrNotFound)
+				current, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push,pull", Actor: "worker"})
+				require.NoError(t, err)
+				params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: current.Enrollment.ID}
+				retry, err := store.IngestFederationEvents(ctx, params)
+				require.NoError(t, err)
+				require.Empty(t, retry.RejectedEvents)
+				require.Equal(t, 2, retry.Accepted)
+				require.Equal(t, 1, retry.Duplicates)
+				created, err := store.IssueByUID(ctx, freshUID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, "Must not be known", created.Title)
 			}
 			if kind != "moved-peer" && kind != "rejected-move" {
 				got, err = store.IssueByID(ctx, moved.ID)

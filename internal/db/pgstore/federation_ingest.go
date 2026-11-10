@@ -96,6 +96,7 @@ func (s *Store) IngestFederationEvents(
 		}
 		prepared := make([]preparedFederationIngestEvent, 0, len(params.Events))
 		seenBatch := map[string]string{}
+		rejectedCreations := db.FederationRejectedCreations{}
 		// Projection writes happen after validation; later moves can depend on
 		// fully validated creations earlier in this batch.
 		batchIssueProjects := map[string]int64{}
@@ -124,7 +125,7 @@ func (s *Store) IngestFederationEvents(
 				}
 			}
 			validationErr := validateFederationProjectEvent(
-				projectUID, params.SpokeInstanceUID, event, knownIssueUIDs,
+				projectUID, params.SpokeInstanceUID, event, rejectedCreations.ValidationUIDs(knownIssueUIDs),
 			)
 			if temporaryUID != "" {
 				delete(knownIssueUIDs, temporaryUID)
@@ -199,6 +200,14 @@ func (s *Store) IngestFederationEvents(
 			if err := rejectFreshCreateSnapshotForKnownIssue(event, knownIssueUIDs); err != nil {
 				return err
 			}
+			if rejection, dependent, err := rejectedCreations.Dependent(event, payloadIssueUID, payloadReferencedIssueUIDs); err != nil {
+				return err
+			} else if dependent {
+				rejection.SourceEventID, rejection.EventUID = input.SourceEventID, event.EventUID
+				result.RejectedEvents = append(result.RejectedEvents, rejection)
+				rejectedCreations.Remember(event, rejection, payloadIssueUID)
+				continue
+			}
 			var moveFrom, moveTo int64
 			if event.Type == "issue.moved" {
 				var err error
@@ -221,7 +230,9 @@ func (s *Store) IngestFederationEvents(
 				candidate := preparedFederationIngestEvent{sourceEventID: input.SourceEventID, event: event}
 				if err := s.authorizeFederationCurrentIssueTx(ctx, tx, params, candidate, moveSnapshots, authorityProjects, authorityChecked); err != nil {
 					if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
-						result.RejectedEvents = append(result.RejectedEvents, missing.Rejection(input.SourceEventID, event.EventUID))
+						rejection := missing.Rejection(input.SourceEventID, event.EventUID)
+						result.RejectedEvents = append(result.RejectedEvents, rejection)
+						rejectedCreations.Remember(event, rejection, payloadIssueUID)
 						continue
 					}
 					return db.FinishTransactionRollback(ctx, err, tx.Rollback())

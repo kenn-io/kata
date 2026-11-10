@@ -50,7 +50,7 @@ func TestSyncFederationPendingProofCannotAuthorizeCurrentOwner(t *testing.T) {
 	credential.LeavePending = true
 	spoke.credentials[projects[1].UID] = credential
 	err = spoke.sync(t, 0)
-	require.NoError(t, err, "a suppressed pending proof is missing enrollment, not a supplied invalid credential")
+	require.ErrorContains(t, err, "no enrollment", "a suppressed pending proof reports missing enrollment")
 	binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[0].ID)
 	require.NoError(t, err)
 	require.Less(t, binding.PushCursorEventID, retained.ID, "pending proof cannot acknowledge the retained comment")

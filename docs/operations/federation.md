@@ -2224,7 +2224,7 @@ issues. A newer CLI feature may also need a newer daemon API; see the
 
 ### When a spoke is newer than its hub
 
-Push requests declare the schema version required by their event payloads.
+Push requests declare the spoke's current schema version.
 A hub accepts older positive schema versions, but rejects a version newer
 than its own with `unsupported_federation_schema`. The spoke treats that error as transient
 version skew: it records the sync error, leaves the push cursor unchanged, does
@@ -2260,13 +2260,22 @@ batch. Quarantine blocks further push and can block reset.
 
 On newer main builds, a direct spoke continues independent pushes when an
 issue has moved into a project it has not joined. Both peers must support
-per-event rejections. The status error names the issue and its current project
-and says the spoke has no enrollment there. Other events in the batch and later
-pages still reach the hub. Push rejection does not stop the pull phase, but
+per-event rejections, and the hub must accept the spoke's schema version. A
+schema 51 spoke cannot reach this ingest path on a schema 50 hub; upgrade the
+hub first. The status error names the issue and its current project
+and says the spoke has no enrollment there. Independent events in the batch
+still reach the hub. A later page that depends on a rejected creation can
+block further pushes until the spoke joins the named project. Push rejection
+does not stop the pull phase, but
 a source-only spoke can still encounter the separate missing-destination pull
-limitation when it receives the move. Join that destination to resume that pull.
+limitation when it receives the move.
 
-Join the named project to recover the event automatically on the next sync.
+Join the named project. Once the join completes, the next sync retries the push.
+If the spoke already holds a moved issue in the source project, joining the
+destination can leave pulls for both projects failing on a duplicate issue UID.
+The pull fix is tracked in [kata#1049](https://github.com/kenn-io/kata/issues/1049).
+Keep the local data and wait for a build with that fix before relying on the
+join to restore pull.
 The event keeps its original UID and content hash. Until recovery, the durable
 push cursor stays before the earliest rejected event, so accepted later events
 can safely replay as duplicates. The status diagnostic counts the other events

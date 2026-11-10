@@ -1,7 +1,9 @@
 package db
 
 import (
+	"encoding/json/jsontext"
 	"fmt"
+	"strings"
 )
 
 // FederationProjectNotEnrolledCode identifies a missing current-project enrollment.
@@ -40,4 +42,56 @@ func (e *FederationProjectNotEnrolledError) Unwrap() error {
 // Rejection describes the source event retained until its project is enrolled.
 func (e *FederationProjectNotEnrolledError) Rejection(sourceID int64, eventUID string) FederationEventRejection {
 	return FederationEventRejection{SourceEventID: sourceID, EventUID: eventUID, IssueUID: e.IssueUID, CurrentProjectUID: e.ProjectUID, CurrentProjectName: e.ProjectName, Code: FederationProjectNotEnrolledCode, Message: e.Error()}
+}
+
+// FederationRejectedCreations tracks unavailable issues within one push batch.
+type FederationRejectedCreations map[string]FederationEventRejection
+
+// ValidationUIDs lets validation recognize retained creations without treating
+// them as accepted by subsequent events.
+func (r FederationRejectedCreations) ValidationUIDs(known map[string]struct{}) map[string]struct{} {
+	if len(r) == 0 {
+		return known
+	}
+	all := make(map[string]struct{}, len(known)+len(r))
+	for uid := range known {
+		all[uid] = struct{}{}
+	}
+	for uid := range r {
+		all[uid] = struct{}{}
+	}
+	return all
+}
+
+// Dependent returns the original rejection for an event needing a retained creation.
+func (r FederationRejectedCreations) Dependent(event RemoteEvent, primary func(RemoteEvent, map[string]jsontext.Value) (string, error), references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) (FederationEventRejection, bool, error) {
+	if len(r) == 0 || !strings.HasPrefix(event.Type, "issue.") {
+		return FederationEventRejection{}, false, nil
+	}
+	payload := PayloadMap(event.Payload)
+	uid, err := primary(event, payload)
+	if err != nil {
+		return FederationEventRejection{}, false, err
+	}
+	refs, err := references(event, payload)
+	if err != nil {
+		return FederationEventRejection{}, false, err
+	}
+	refs = append(refs, uid)
+	for _, ref := range refs {
+		if rejection, ok := r[ref]; ok {
+			return rejection, true, nil
+		}
+	}
+	return FederationEventRejection{}, false, nil
+}
+
+// Remember records a rejected creation so dependent events remain pending too.
+func (r FederationRejectedCreations) Remember(event RemoteEvent, rejection FederationEventRejection, primary func(RemoteEvent, map[string]jsontext.Value) (string, error)) {
+	if event.Type != "issue.created" && event.Type != "issue.snapshot" {
+		return
+	}
+	if uid, err := primary(event, PayloadMap(event.Payload)); err == nil && uid != "" {
+		r[uid] = rejection
+	}
 }
