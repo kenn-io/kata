@@ -341,7 +341,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			return err
 		}
 		if len(results) > 0 {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict}
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
 		}
 		return nil
 	}
@@ -436,7 +436,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	}
 	for _, r := range results {
 		if r.Result == "refused" {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict}
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
 		}
 	}
 	return nil

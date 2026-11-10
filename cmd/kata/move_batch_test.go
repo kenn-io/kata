@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"fmt"
@@ -454,4 +455,35 @@ func TestMoveBatchCLI_HumanShowsEveryResult(t *testing.T) {
 	require.Contains(t, out, "result=unchanged")
 	require.Contains(t, out, "ref="+first.ShortID)
 	require.Contains(t, out, "ref="+second.ShortID)
+}
+
+func TestMoveBatchCLI_RefusalOutput(t *testing.T) {
+	for _, mode := range []outputMode{outputHuman, outputJSON, outputAgent} {
+		for _, allInvalid := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s all-invalid=%t", mode, allInvalid), func(t *testing.T) {
+				env, dir, _, dst, issue := setupMoveCLIProjects(t)
+				input := "\tdst\n"
+				if !allInvalid {
+					input += issue.UID + "\t" + dst.Name + "\n"
+				}
+				args := []string{"--workspace", dir, "move", "--refs-from", "-"}
+				if mode == outputJSON {
+					args = append(args, "--json")
+				} else if mode == outputAgent {
+					args = append(args, "--agent")
+				}
+				out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, args...)
+				require.Error(t, err)
+				require.Equal(t, ExitConflict, exitCodeForErr(err, true))
+				var stderr bytes.Buffer
+				emitErrorForMode(&stderr, err, mode, true)
+				if mode == outputHuman {
+					require.Contains(t, out, "1 refused")
+					require.Empty(t, stderr.String())
+				} else {
+					require.Contains(t, stderr.String(), "some issues were refused")
+				}
+			})
+		}
+	}
 }
