@@ -2,12 +2,10 @@ package sqlitestore
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"maps"
 	"reflect"
 	"slices"
-	"strings"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -74,7 +72,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			}
 		}
 	}
-	result.moveStamp, err = federationMovedHistoryStamp(ctx, tx, result.moved)
+	result.moveStamp, err = federationEventStamp(ctx, tx, 0, nil, result.moved)
 	if err != nil {
 		return preparedFederationRebuild{}, err
 	}
@@ -104,8 +102,8 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		p.moved.Labels = maps.Clone(p.projection.Labels)
 		p.moved.IssueMetadata = maps.Clone(p.projection.IssueMetadata)
 		p.moved.ProjectMetadata = nil
-		db.RestrictFoldProject(&p.projection, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return !ok })
-		db.RestrictFoldProject(&p.moved, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return ok })
+		db.RestrictFoldProjectWhere(&p.projection, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return !ok })
+		db.RestrictFoldProjectWhere(&p.moved, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return ok })
 		m.projection = p.projection
 		m.cronAffected = true
 		if err := m.prepareRows(ctx, tx, p.id, nil); err != nil {
@@ -165,7 +163,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 
 func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFederationRebuild) error {
 	return d.withFederationMaterialization(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		stamp, err := federationMovedHistoryStamp(ctx, tx, prepared.moved)
+		stamp, err := federationEventStamp(ctx, tx, 0, nil, prepared.moved)
 		if err != nil {
 			return err
 		}
@@ -244,27 +242,4 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		}
 		return nil
 	})
-}
-
-func federationMovedHistoryStamp(ctx context.Context, tx *sql.Tx, moved map[string]db.FederatedMoveDecision) ([32]byte, error) {
-	uids := make([]string, 0, len(moved))
-	for uid := range moved {
-		uids = append(uids, uid)
-	}
-	slices.Sort(uids)
-	h := sha256.New()
-	for start := 0; start < len(uids); start += federationIngestIssueScopeLimit {
-		end := min(start+federationIngestIssueScopeLimit, len(uids))
-		args := make([]any, 0, end-start)
-		for _, uid := range uids[start:end] {
-			args = append(args, uid)
-		}
-		// The expression matches the existing resolved issue identity index.
-		//nolint:gosec // Only a fixed identity expression and generated placeholders enter the query.
-		query := `SELECT id,content_hash FROM events e WHERE ` + db.FederationReadIssueUIDExpr(false) + ` IN (?` + strings.Repeat(",?", len(args)-1) + `) ORDER BY id`
-		if err := hashFederationEventRows(ctx, tx, h, query, args...); err != nil {
-			return [32]byte{}, err
-		}
-	}
-	return [32]byte(h.Sum(nil)), nil
 }

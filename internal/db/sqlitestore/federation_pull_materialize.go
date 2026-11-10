@@ -156,7 +156,7 @@ func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, 
 	if err != nil {
 		return err
 	}
-	stamp, err := federationEventStamp(ctx, tx, projectID, nil)
+	stamp, err := federationEventStamp(ctx, tx, projectID, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -207,7 +207,7 @@ func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, 
 			}
 		}
 		for id, expected := range m.linkStamps {
-			stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+			stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes(), nil)
 			if err != nil {
 				return err
 			}

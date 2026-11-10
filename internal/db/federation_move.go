@@ -474,7 +474,12 @@ func WithMovedProjectPass(ctx context.Context) context.Context {
 }
 
 // RestrictFoldProject gives the existing reconcilers only their own issue view.
-func RestrictFoldProject(p *FoldProjection, projectUID string, keep func(string) bool) {
+func RestrictFoldProject(p *FoldProjection, projectUID string) {
+	RestrictFoldProjectWhere(p, projectUID, nil)
+}
+
+// RestrictFoldProjectWhere applies an additional issue filter to a project view.
+func RestrictFoldProjectWhere(p *FoldProjection, projectUID string, keep func(string) bool) {
 	for uid, issue := range p.Issues {
 		if issue.ProjectUID != projectUID || (keep != nil && !keep(uid)) {
 			delete(p.Issues, uid)

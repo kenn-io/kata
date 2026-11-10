@@ -1307,7 +1307,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	if err != nil {
 		return err
 	}
-	db.RestrictFoldProject(&projection, projectUID, nil)
+	db.RestrictFoldProject(&projection, projectUID)
 
 	if db.CronMaterializationNeeded(events, acceptedEventUIDs) {
 		if validator == nil {
