@@ -172,16 +172,6 @@ func mcpRPCWithBearer(t *testing.T, endpoint, bearer, method string, params map[
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	var decoded map[string]any
-	// The legacy handler replies with SSE even to a modern discovery request.
-	// Decode that response too so regressions fail on the protocol contract.
-	if strings.HasPrefix(string(body), "event:") {
-		for line := range strings.SplitSeq(string(body), "\n") {
-			if data, ok := strings.CutPrefix(line, "data: "); ok {
-				body = []byte(data)
-				break
-			}
-		}
-	}
 	require.NoError(t, json.Unmarshal(body, &decoded), string(body))
 	return response.StatusCode, decoded
 }

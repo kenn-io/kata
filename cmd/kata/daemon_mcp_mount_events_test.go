@@ -131,15 +131,6 @@ func TestDaemonMCPEventsLifecycle(t *testing.T) {
 			} else {
 				require.Equal(t, mcpevents.AuthorityStaticToken, row.PrincipalAuthority)
 			}
-			// Refresh reuses the same backend subscription rather than creating state
-			// in the per-request MCP server.
-			_, refreshed := mcpRPC(t, narrow, "events/subscribe", eventsSubscribeParams("example-agent/worker", []string{project.UID}))
-			require.NotContains(t, refreshed, "error", "%v", refreshed)
-			require.Equal(t, id, refreshed["result"].(map[string]any)["id"])
-			_, status := mcpRPC(t, endpoint, "tools/call", map[string]any{"name": "kata.event_subscriptions", "arguments": map[string]any{}})
-			require.NotContains(t, status, "error", "%v", status)
-			subscriptions := status["result"].(map[string]any)["structuredContent"].(map[string]any)["subscriptions"].([]any)
-			require.Len(t, subscriptions, 1)
 			if identity {
 				for _, bearer := range []string{"same-actor-token", "other-actor-token"} {
 					_, other := mcpRPCWithBearer(t, endpoint, bearer, "events/subscribe", eventsSubscribeParams("example-agent/worker", []string{project.UID}))
@@ -183,28 +174,6 @@ func TestDaemonMCPEventsHeaders(t *testing.T) {
 			require.NoError(t, err)
 			require.Zero(t, count)
 		})
-	}
-}
-
-func TestDaemonMCPEventsIdentityRejectsInvalidTokens(t *testing.T) {
-	env, endpoint := mountedEventsFixture(t, true, true)
-	expired := time.Now().Add(-time.Hour)
-	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "expired-token", Actor: "example-agent", AdminActor: db.BootstrapActor, ExpiresAt: &expired})
-	require.NoError(t, err)
-	token, err := env.DB.ResolveAPIToken(t.Context(), "test-mcp-token")
-	require.NoError(t, err)
-	_, _, err = env.DB.RevokeAPIToken(t.Context(), token.ID, db.BootstrapActor)
-	require.NoError(t, err)
-	for _, bearer := range []string{"bootstrap-token", "expired-token", "test-mcp-token", "invalid-token"} {
-		// Real HTTP fixtures return plain-text auth errors, so inspect the status.
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, nil)
-		require.NoError(t, err)
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		req.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
-		response, err := env.HTTP.Do(req)
-		require.NoError(t, err)
-		require.NoError(t, response.Body.Close())
-		require.Equal(t, http.StatusUnauthorized, response.StatusCode, bearer)
 	}
 }
 

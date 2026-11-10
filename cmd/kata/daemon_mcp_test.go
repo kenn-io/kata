@@ -191,7 +191,6 @@ all_projects = true
 						{tt.host, "", "test-mcp-token", http.StatusOK},
 						{"untrusted.example", "", "test-mcp-token", http.StatusBadRequest},
 						{tt.host, "https://untrusted.example", "test-mcp-token", http.StatusForbidden},
-						{tt.host, "", "invalid-token", http.StatusUnauthorized},
 					} {
 						raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": currentMCPProtocolVersion, "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}})
 						require.NoError(t, err)

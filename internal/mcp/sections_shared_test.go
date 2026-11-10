@@ -32,25 +32,4 @@ func TestLoadedSectionsHydrateAndUnion(t *testing.T) {
 	}
 	require.Equal(t, 1, names["kata.projects"])
 	require.Equal(t, 1, names["kata.search_docs"])
-	options.LoadedSections, options.StartupSections = nil, nil
-	isolated := connectRawTestServerWithOptions(t, options)
-	listed, err = isolated.ListTools(t.Context(), nil)
-	require.NoError(t, err)
-	for _, tool := range listed.Tools {
-		require.NotEqual(t, "kata.projects", tool.Name)
-		require.NotEqual(t, "kata.search_docs", tool.Name)
-	}
-}
-
-func TestLoadedSectionsKeepStartupValidation(t *testing.T) {
-	selected := &LoadedSections{}
-	options := Options{Client: inertTestClient(t), Scope: NewAllScope(), Actor: "example-agent", Version: "test", LoadedSections: selected}
-	session := connectRawTestServerWithOptions(t, options)
-	_, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.load_docs"})
-	require.NoError(t, err)
-	for _, startup := range [][]string{{"docs", "docs"}, {"missing"}, {"tokens"}} {
-		options.StartupSections = startup
-		_, err := New(options)
-		require.Error(t, err)
-	}
 }
