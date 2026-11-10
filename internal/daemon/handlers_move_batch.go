@@ -185,6 +185,10 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				continue
 			}
 			item, expected := items[j], in.Body.Items[j].ExpectedRevision
+			if conflicts[item.issue.ID] == "unsupported_move_proof_version" {
+				moveBatchRefusal(&results[j], api.NewError(409, "unsupported_move_proof_version", "move proof version is unsupported", "", nil))
+				continue
+			}
 			prior := priorMoves[item.issue.ID]
 			if expected != 0 && expected != item.issue.Revision && !(prior.targetID == item.target.ID && prior.revision == item.issue.Revision && expected == prior.revision-1) {
 				moveBatchRefusal(&results[j], &db.RevisionConflictError{CurrentRevision: item.issue.Revision})
@@ -237,7 +241,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		}
 		var conflictedPreviews []int
 		for j := in.Body.StartIndex; j < n; j++ {
-			if results[j].Result == "" && conflicts[items[j].issue.ID] && len(items[j].tree) == 0 && moveBatchShouldPreview(&results[j], items[j], in.Body.Subtree) {
+			if results[j].Result == "" && conflicts[items[j].issue.ID] == "conflicting_target" && len(items[j].tree) == 0 && moveBatchShouldPreview(&results[j], items[j], in.Body.Subtree) {
 				conflictedPreviews = append(conflictedPreviews, j)
 			}
 		}
@@ -245,7 +249,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
 		}
 		for j := in.Body.StartIndex; j < n; j++ {
-			if results[j].Result == "" && conflicts[items[j].issue.ID] {
+			if results[j].Result == "" && conflicts[items[j].issue.ID] == "conflicting_target" {
 				results[j].Result, results[j].Code, results[j].Message = "refused", "conflicting_target", "issue requested for different targets"
 			}
 		}
