@@ -366,13 +366,6 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 	if err != nil {
 		return nil, err
 	}
-	if err := applyFederatedMovedIssues(ctx, tx, events, p, decisions, assign, validate, afterRehome, acceptedEventUIDs, insertResetControl); err != nil {
-		return nil, err
-	}
-	return destinations, nil
-}
-
-func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
 	moved := map[string]FoldEvent{}
 	for _, e := range events {
 		if e.Type == "issue.moved" {
@@ -400,10 +393,10 @@ func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEve
 				// cursor before this fold creates the destination issue row.
 				from, _ := StringValue(PayloadMap(winner.Payload)["from_project_uid"])
 				if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, from).Scan(&sourceProject.ID, &sourceProject.UID, &sourceProject.Name); err != nil {
-					return err
+					return nil, err
 				}
 				if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, nil, insertResetControl); err != nil {
-					return err
+					return nil, err
 				}
 			} else {
 				delete(p.Issues, issue.UID)
@@ -414,26 +407,26 @@ func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEve
 			continue
 		}
 		if !active {
-			return ErrNotFound
+			return nil, ErrNotFound
 		}
 		// Move ingress has already checked its authority and endpoints. Replaying
 		// trusted history must also work after a former source has left.
 		if decision.RecurrenceID.Valid {
-			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
+			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
 		}
 		if err := validate(id, source, target); err != nil {
-			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
+			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 		}
 
 		short, err := assign(target, issue)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET project_id=$1,short_id=$2,revision=revision+1 WHERE id=$3`, target, short, id); err != nil {
-			return err
+			return nil, err
 		}
 		if err := afterRehome(issue.UID, issue.ProjectUID); err != nil {
-			return err
+			return nil, err
 		}
 		sourceProject.ID = source
 		payload := PayloadMap(winner.Payload)
@@ -444,7 +437,7 @@ func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEve
 			reference = &FederationMovedReference{IssueUID: issue.UID, FromProjectUID: sourceProject.UID, FromShortID: sourceShort, MoveEventUID: winner.UID}
 		}
 		if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, reference, insertResetControl); err != nil {
-			return err
+			return nil, err
 		}
 		for _, query := range []string{
 			`UPDATE issue_claims SET project_id=$1 WHERE issue_id=$2`,
@@ -453,11 +446,11 @@ func applyFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEve
 			`UPDATE external_root_bindings SET project_id=$1 WHERE issue_id=$2`,
 		} {
 			if _, err := tx.ExecContext(ctx, query, target, id); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	return nil
+	return destinations, nil
 }
 
 type movedProjectPassKey struct{}

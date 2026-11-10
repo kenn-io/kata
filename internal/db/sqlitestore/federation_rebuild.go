@@ -24,6 +24,7 @@ type preparedFederationRebuild struct {
 	projects  []preparedFederationRebuildProject
 	moved     map[string]db.FederatedMoveDecision
 	moveStamp [32]byte
+	moveUIDs  []string
 }
 
 func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (preparedFederationRebuild, error) {
@@ -48,14 +49,11 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err != nil {
 			return nil, err
 		}
-		for _, decision := range decisions {
-			result.moved[decision.IssueUID] = decision
-		}
 		moveProjection := db.FoldProjection{Issues: make(map[string]db.FoldIssue, len(decisions))}
 		for _, decision := range decisions {
+			result.moved[decision.IssueUID] = decision
 			moveProjection.Issues[decision.IssueUID] = projection.Issues[decision.IssueUID]
 		}
-		projection.Issues = maps.Clone(projection.Issues)
 		result.projects = append(result.projects, preparedFederationRebuildProject{id: id, events: events, projection: projection, moveProjection: moveProjection, decisions: decisions})
 		return destinations, nil
 	}
@@ -72,7 +70,11 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			}
 		}
 	}
-	result.moveStamp, err = federationEventStamp(ctx, tx, 0, nil, result.moved)
+	result.moveUIDs = make([]string, 0, len(result.moved))
+	for uid := range result.moved {
+		result.moveUIDs = append(result.moveUIDs, uid)
+	}
+	result.moveStamp, err = federationEventStamp(ctx, tx, 0, nil, result.moveUIDs)
 	if err != nil {
 		return preparedFederationRebuild{}, err
 	}
@@ -154,7 +156,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 				excluded[uid] = true
 			}
 		}
-		if err := p.materialization.prepareLinksWithIssues(ctx, tx, p.id, nil, included, excluded); err != nil {
+		if err := p.materialization.prepareLinks(ctx, tx, p.id, nil, included, excluded); err != nil {
 			return preparedFederationRebuild{}, err
 		}
 	}
@@ -163,7 +165,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 
 func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFederationRebuild) error {
 	return d.withFederationMaterialization(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		stamp, err := federationEventStamp(ctx, tx, 0, nil, prepared.moved)
+		stamp, err := federationEventStamp(ctx, tx, 0, nil, prepared.moveUIDs)
 		if err != nil {
 			return err
 		}
@@ -187,9 +189,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		}
 		// The existing move routine keeps its live claim, recurrence, and import guards.
 		for _, p := range prepared.projects {
-			projection := p.moveProjection
-			projection.Issues = maps.Clone(projection.Issues)
-			if _, err := d.rehomeFederatedMovedIssues(ctx, tx, p.events, projection, nil); err != nil {
+			if _, err := d.rehomeFederatedMovedIssues(ctx, tx, p.events, p.moveProjection, nil); err != nil {
 				return err
 			}
 		}

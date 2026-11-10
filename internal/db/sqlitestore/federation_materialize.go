@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"slices"
@@ -187,7 +188,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 	}
 	if m.linkProjects != nil {
-		if err := m.prepareLinks(ctx, tx, projectID, issueScope); err != nil {
+		if err := m.prepareLinks(ctx, tx, projectID, issueScope, nil, nil); err != nil {
 			return federationMaterialization{}, err
 		}
 	}
@@ -335,60 +336,44 @@ func (m *federationMaterialization) stampFullHistoryRows(ctx context.Context, tx
 	return err
 }
 
-func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes []string, moved map[string]db.FederatedMoveDecision) ([32]byte, error) {
-	h := sha256.New()
-	var uids []string
-	for uid := range moved {
-		uids = append(uids, uid)
-	}
-	slices.Sort(uids)
-	batches := 1
-	if moved != nil {
-		batches = (len(uids) + federationIngestIssueScopeLimit - 1) / federationIngestIssueScopeLimit
-	}
-	for batch := 0; batch < batches; batch++ {
-		query := `SELECT id, content_hash FROM events WHERE project_id=?`
-		args := []any{projectID}
-		if moved != nil {
-			start := batch * federationIngestIssueScopeLimit
-			end := min(start+federationIngestIssueScopeLimit, len(uids))
-			args = make([]any, 0, end-start)
-			for _, uid := range uids[start:end] {
-				args = append(args, uid)
-			}
-			//nolint:gosec // The identity expression is fixed and UIDs are bound.
-			query = `SELECT id,content_hash FROM events e WHERE ` + db.FederationReadIssueUIDExpr(false) + ` IN (?` + strings.Repeat(",?", len(args)-1) + `)`
-		} else if len(eventTypes) > 0 {
-			//nolint:gosec // Only generated placeholders enter the query; event types are bound.
-			query += ` AND type IN (?` + strings.Repeat(",?", len(eventTypes)-1) + `)`
-			for _, eventType := range eventTypes {
-				args = append(args, eventType)
-			}
-		}
-		query += ` ORDER BY id`
-		rows, err := tx.QueryContext(ctx, query, args...)
+func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, movedUIDs []string) ([32]byte, error) {
+	query := `SELECT id, content_hash FROM events WHERE project_id=?`
+	args := []any{projectID}
+	if movedUIDs != nil {
+		encoded, err := json.Marshal(movedUIDs)
 		if err != nil {
-			return [32]byte{}, fmt.Errorf("list federation event stamps: %w", err)
-		}
-		for rows.Next() {
-			var id int64
-			var contentHash string
-			if err := rows.Scan(&id, &contentHash); err != nil {
-				_ = rows.Close()
-				return [32]byte{}, fmt.Errorf("scan federation event stamp: %w", err)
-			}
-			var encoded [8]byte
-			binary.BigEndian.PutUint64(encoded[:], uint64(id)) //nolint:gosec // Preserve every bit of the SQLite row ID.
-			_, _ = h.Write(encoded[:])
-			_, _ = h.Write([]byte(contentHash))
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
 			return [32]byte{}, err
 		}
-		if err := rows.Close(); err != nil {
-			return [32]byte{}, err
+		//nolint:gosec // The identity expression is fixed and UIDs are bound.
+		query = `SELECT id,content_hash FROM events e WHERE ` + db.FederationReadIssueUIDExpr(false) + ` IN (SELECT value FROM json_each(?))`
+		args = []any{string(encoded)}
+	} else if len(eventTypes) > 0 {
+		//nolint:gosec // Only generated placeholders enter the query; event types are bound.
+		query += ` AND type IN (?` + strings.Repeat(",?", len(eventTypes)-1) + `)`
+		for _, eventType := range eventTypes {
+			args = append(args, eventType)
 		}
+	}
+	query += ` ORDER BY id`
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("list federation event stamps: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	h := sha256.New()
+	for rows.Next() {
+		var id int64
+		var contentHash string
+		if err := rows.Scan(&id, &contentHash); err != nil {
+			return [32]byte{}, fmt.Errorf("scan federation event stamp: %w", err)
+		}
+		var encoded [8]byte
+		binary.BigEndian.PutUint64(encoded[:], uint64(id)) //nolint:gosec // Preserve every bit of the SQLite row ID.
+		_, _ = h.Write(encoded[:])
+		_, _ = h.Write([]byte(contentHash))
+	}
+	if err := rows.Err(); err != nil {
+		return [32]byte{}, err
 	}
 	return [32]byte(h.Sum(nil)), nil
 }
@@ -518,11 +503,7 @@ func canonicalFederatedLinkKey(key db.FoldLinkKey) db.FoldLinkKey {
 	return key
 }
 
-func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {
-	return m.prepareLinksWithIssues(ctx, tx, projectID, issueScope, nil, nil)
-}
-
-func (m *federationMaterialization) prepareLinksWithIssues(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string, included map[string]int64, excluded map[string]bool) error {
+func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string, included map[string]int64, excluded map[string]bool) error {
 	ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, projectID, m.issueIDs, issueScope)
 	if err != nil {
 		return err
