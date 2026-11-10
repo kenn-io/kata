@@ -183,6 +183,33 @@ all_projects = true
 					require.NoError(t, response.Body.Close())
 					require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 				}
+				if tt.checkMountPolicy {
+					for _, policy := range []struct {
+						host, origin, bearer string
+						want                 int
+					}{
+						{tt.host, "", "test-mcp-token", http.StatusOK},
+						{"untrusted.example", "", "test-mcp-token", http.StatusBadRequest},
+						{tt.host, "https://untrusted.example", "test-mcp-token", http.StatusForbidden},
+						{tt.host, "", "invalid-token", http.StatusUnauthorized},
+					} {
+						raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": currentMCPProtocolVersion, "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}})
+						require.NoError(t, err)
+						request, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(raw))
+						require.NoError(t, err)
+						request.Host = policy.host
+						request.Header.Set("Authorization", "Bearer "+policy.bearer)
+						request.Header.Set("Origin", policy.origin)
+						request.Header.Set("Content-Type", "application/json")
+						request.Header.Set("Accept", "application/json, text/event-stream")
+						request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
+						request.Header.Set("Mcp-Method", "server/discover")
+						response, err := httpClient.Do(request)
+						require.NoError(t, err)
+						require.NoError(t, response.Body.Close())
+						require.Equal(t, policy.want, response.StatusCode, "%+v", policy)
+					}
+				}
 				mcpTransport := newAuthenticatedMCPHTTPTestTransport(endpoint)
 				mcpTransport.HTTPClient.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
 					clone := request.Clone(request.Context())
@@ -193,7 +220,7 @@ all_projects = true
 					}
 					return transport.RoundTrip(clone)
 				})
-				session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, nil)
+				session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, &sdkmcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 				require.NoError(t, err)
 				defer func() { _ = session.Close() }()
 				assertMCPHTTPPublicIcon(t, httpClient, endpoint, tt.host, session.InitializeResult().ServerInfo)

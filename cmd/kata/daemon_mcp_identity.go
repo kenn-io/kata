@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
+	"sync"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,10 +21,10 @@ import (
 )
 
 func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg config.MCPConfig, scope *mcpserver.Scope, endpoint kitdaemon.Endpoint, auth config.AuthConfig) (http.Handler, error) {
-	// Each session owns its clients and reporter; release returns them when the
-	// session ends. The daemon's Unix listener never times out idle
-	// connections, so a session that kept its pool would hold them forever.
-	newServer := func(reqCtx context.Context, bearer, actor string) (*sdkmcp.Server, func(), error) {
+	// Each legacy session or modern request owns its clients and reporter.
+	// The daemon's Unix listener never times out idle connections, so a
+	// session that kept its pool would hold them forever.
+	newServer := func(reqCtx context.Context, bearer, actor string, events bool, admission *mcpserver.ToolAdmission, loaded *mcpserver.LoadedSections) (*sdkmcp.Server, func(), error) {
 		resolved := client.ResolvedDaemon{
 			Address: endpoint.Address, Network: endpoint.Network, BaseURL: endpoint.BaseURL(),
 			Token: bearer, TrustPrivateNetwork: auth.TrustPrivateNetwork, Direct: true,
@@ -60,7 +60,7 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 			Client: apiClient, LongRunningClient: longRunningClient,
 			Scope: scope, Actor: actor, Version: version.Version,
 			StartupSections: cfg.StartupSections,
-			ObserveToolCall: observe,
+			ObserveToolCall: observe, Events: events, Admission: admission, LoadedSections: loaded,
 		})
 		if err != nil {
 			release()
@@ -70,19 +70,28 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 	}
 	// Validate startup sections now, retaining the mount's existing 503 behavior.
 	// This server is never served and has no credential or bootstrap authority.
-	_, release, err := newServer(ctx, "", "identity-token")
+	_, release, err := newServer(ctx, "", "identity-token", false, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	release()
 	type serverKey struct{}
-	stream := sdkmcp.NewStreamableHTTPHandler(func(r *http.Request) *sdkmcp.Server {
+	selectServer := func(r *http.Request) *sdkmcp.Server {
 		server, _ := r.Context().Value(serverKey{}).(*sdkmcp.Server)
 		return server
-	}, &sdkmcp.StreamableHTTPOptions{
-		SessionTimeout: 30 * time.Minute, PropagateRequestCancellation: true,
+	}
+	stream := mcpserver.NewHTTPHandler(selectServer, selectServer, mcpserver.HTTPOptions{
 		DisableLocalhostProtection: true, // daemon listener policy validates Host
 	})
+	// Modern requests share admission and section selections only within one
+	// verified credential. Legacy sessions retain their own limits and catalog.
+	// No credentials, clients, reporters or servers are cached.
+	type modernTokenState struct {
+		admission *mcpserver.ToolAdmission
+		sections  mcpserver.LoadedSections
+	}
+	var modernTokens sync.Map // verified token ID -> *modernTokenState
+
 	verify := func(ctx context.Context, bearer string, _ *http.Request) (*sdkauth.TokenInfo, error) {
 		if auth.Token != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(auth.Token)) == 1 {
 			return nil, sdkauth.ErrInvalidToken
@@ -106,16 +115,29 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 		return info, nil
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Mcp-Session-Id") == "" {
+		modern := mcpserver.IsModernRequest(r)
+		if modern || r.Header.Get("Mcp-Session-Id") == "" {
 			info := sdkauth.TokenInfoFromContext(r.Context())
 			bearer := strings.Fields(r.Header.Get("Authorization"))[1] // verified by SDK middleware
-			server, release, err := newServer(r.Context(), bearer, info.Extra["actor"].(string))
+			var admission *mcpserver.ToolAdmission
+			var loaded *mcpserver.LoadedSections
+			if modern {
+				shared, _ := modernTokens.LoadOrStore(info.UserID, &modernTokenState{admission: mcpserver.NewToolAdmission()})
+				state := shared.(*modernTokenState)
+				admission, loaded = state.admission, &state.sections
+			}
+			server, release, err := newServer(r.Context(), bearer, info.Extra["actor"].(string), modern, admission, loaded)
 			if err != nil {
 				http.Error(w, "MCP session unavailable", http.StatusServiceUnavailable)
 				return
 			}
+			if modern {
+				defer release()
+			}
 			stream.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), serverKey{}, server)))
-			releaseWhenSessionsEnd(server, release)
+			if !modern {
+				releaseWhenSessionsEnd(server, release)
+			}
 			return
 		}
 		stream.ServeHTTP(w, r)
