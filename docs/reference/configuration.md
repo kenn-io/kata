@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Configuration
@@ -554,6 +554,12 @@ for authentication and session behavior. Kata 0.21.0 and 0.22.0 require
 `kata mcp serve --http` with a user token in this mode.
 Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header. The sidecar must reach the daemon through a REST listener outside `trusted_proxy_listeners` or through the proxy that sets the actor header.
 See [MCP transport](mcp.md#transport) for gateway setup and scope.
+
+Local startup policy is configured at the top level of `<KATA_HOME>/config.toml`:
+
+| Key | Default | Behavior |
+| --- | --- | --- |
+| `autostart` | `true` | `false` prevents implicit daemon starts, including `kata daemon recover`. Commands wait up to 30 seconds (or their shorter deadline) for the service manager's daemon, then fail. Explicit `kata daemon start` remains available. |
 
 Idle shutdown is intended for the default owner-local daemon rather than the
 shared-daemon configuration above. Its minimal configuration is:

@@ -1370,8 +1370,22 @@ func patchEnsureHooks(t *testing.T, version, startedURL string) *ensurePatchStat
 }
 
 func TestEnsureRunningReplacesCapableDaemonInPlace(t *testing.T) {
+	for _, supervised := range []bool{false, true} {
+		t.Run(fmt.Sprintf("supervised=%t", supervised), func(t *testing.T) {
+			if supervised && runtime.GOOS == "windows" {
+				t.Skip("Windows cannot retain the supervisor process through replacement")
+			}
+			testEnsureRunningReplacesCapableDaemonInPlace(t, supervised)
+		})
+	}
+}
+
+func testEnsureRunningReplacesCapableDaemonInPlace(t *testing.T, supervised bool) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	home := setupKataEnv(t)
+	if supervised {
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+	}
 	stageStorageSchema(t, filepath.Join(home, "kata.db"), db.CurrentSchemaVersion())
 	_, addr := startMockDaemonPing(t, map[string]any{
 		"ok": true, "service": "kata", "version": "v0.1.0", "pid": os.Getpid(),

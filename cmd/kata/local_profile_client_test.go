@@ -181,3 +181,11 @@ func TestLocalProfileTargetErrorsAreStructured(t *testing.T) {
 		})
 	}
 }
+
+func TestManagedExternallyTargetErrorIsStructured(t *testing.T) {
+	err := cliDaemonTargetError(client.ErrDaemonManagedExternally)
+	var target *cliError
+	require.ErrorAs(t, err, &target)
+	assert.Equal(t, ExitDaemonUnavail, target.ExitCode)
+	assert.Equal(t, client.ErrDaemonManagedExternally.Error(), target.Message)
+}

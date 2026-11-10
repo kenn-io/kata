@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	goruntime "runtime"
+	"sync"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/oklog/ulid/v2"
@@ -149,6 +152,12 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 
 func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, error) {
 	profile := *selection.Profile
+	enabled := profile.Config.AutostartEnabled()
+	if !enabled {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, daemonStartupWait)
+		defer cancel()
+	}
 	inspector, err := installedStorageInspector()
 	if err != nil {
 		return selection.Resolved, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, err)
@@ -168,8 +177,12 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 	}
 	found, release, err := discoverForStart(ctx, resolved.LocalProfile.DataDir)
 	if err != nil {
+		if !enabled && (errors.Is(err, ErrLocalDaemonUnreachable) || ctx.Err() != nil) {
+			return waitForSupervisedProfile(ctx, resolved, profile)
+		}
 		return resolved, err
 	}
+	release = sync.OnceFunc(release)
 	defer release()
 	if found.Outcome != daemonScanNone {
 		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
@@ -183,7 +196,7 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 		if err := refuseDaemonDowngrade(found.Daemon.Info); err != nil {
 			return resolved, err
 		}
-		if canRestartLocalDaemon(found.Daemon.Record) {
+		if canRestartLocalDaemon(found.Daemon.Record) && (enabled || goruntime.GOOS != "windows") {
 			ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 			if err != nil {
 				return resolved, err
@@ -195,9 +208,16 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 			resolved = resolved.WithRunning(running)
 			return resolved, verifyLocalProfileInstance(ctx, resolved)
 		}
+		if !enabled {
+			return resolved, externallyManagedVersionError(found.Daemon.Info)
+		}
 		if err := stopRunningDaemonsForEnsure(ctx, resolved.LocalProfile.DataDir, profile.StorageID); err != nil {
 			return resolved, err
 		}
+	}
+	if !enabled {
+		release()
+		return waitForSupervisedProfile(ctx, resolved, profile)
 	}
 	env, err := config.LocalProfileEnvironment(profile, true)
 	if err != nil {
@@ -239,4 +259,13 @@ func EnsureSameLocalProfile(ctx context.Context, resolved ResolvedDaemon) (Resol
 		return resolved, errors.New("local profile snapshot is unavailable")
 	}
 	return EnsureLocalProfileSelection(ctx, DaemonSelection{Resolved: resolved, Profile: resolved.profileConfig})
+}
+
+func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, profile config.LocalProfileConfig) (ResolvedDaemon, error) {
+	running, err := waitForSupervisedDaemon(ctx, resolved.LocalProfile.DataDir, filepath.Join(profile.Home, "config.toml"), profile.DSN)
+	if err != nil {
+		return resolved, err
+	}
+	resolved = resolved.WithRunning(running)
+	return resolved, verifyLocalProfileInstance(ctx, resolved)
 }

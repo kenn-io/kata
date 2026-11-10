@@ -37,6 +37,8 @@ type DaemonConfig struct {
 	// AutostartIdleTimeout stops implicitly auto-started local daemons after
 	// foreground inactivity. Empty or zero disables idle shutdown.
 	AutostartIdleTimeout string `toml:"autostart_idle_timeout"`
+	// Autostart permits implicit client starts; absent means enabled.
+	Autostart *bool `toml:"autostart"`
 	// ActiveDaemon names the daemon catalog entry selected by default.
 	// Empty preserves the legacy implicit endpoint resolution.
 	ActiveDaemon string `toml:"active_daemon"`
@@ -90,6 +92,23 @@ type MCPConfig struct {
 	StartupSections []string `toml:"startup_sections"`
 	TokenFile       string   `toml:"token_file"`
 	TokenEnv        string   `toml:"token_env"`
+}
+
+// AutostartEnabled reports whether clients may start this home's daemon.
+func (c DaemonConfig) AutostartEnabled() bool {
+	return c.Autostart == nil || *c.Autostart
+}
+
+// ReadAutostartEnabled reads only the home startup policy, without resolving
+// daemon credentials or applying the caller's deployment environment.
+func ReadAutostartEnabled() (bool, error) {
+	var file struct {
+		Autostart *bool `toml:"autostart"`
+	}
+	if _, err := decodeConfigSection("autostart", &file); err != nil {
+		return false, err
+	}
+	return (DaemonConfig{Autostart: file.Autostart}).AutostartEnabled(), nil
 }
 
 // MinAutostartIdleTimeout leaves enough time for detached startup discovery

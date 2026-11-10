@@ -1,7 +1,7 @@
 ---
 title: Local daemon profiles
 description: Keep personal and work spokes separate and recover a stopped spoke without changing its database identity.
-last_edited: 2026-11-07
+last_edited: 2026-11-10
 ---
 
 # Local daemon profiles
@@ -69,6 +69,10 @@ override is ignored; a broader ancestor does not bypass workspace boundaries.
 
 Registration is opt-in. Kata does not convert loopback URLs into profiles,
 remove overrides, enroll a project, or merge same-named projects.
+
+A profile obeys top-level `autostart = false` in its selected home's
+`config.toml`: ordinary commands and `kata daemon recover` wait up to 30 seconds
+for its service manager instead of starting a daemon.
 
 ## Diagnose and recover
 

@@ -7,8 +7,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.kenn.io/kata/internal/config"
@@ -80,6 +82,9 @@ const (
 	skipDaemonVersionEnvVar = "KATA_SKIP_DAEMON_VERSION_CHECK"
 	daemonStartupWait       = 30 * time.Second
 )
+
+// ErrDaemonManagedExternally means the home's supervisor owns implicit startup.
+var ErrDaemonManagedExternally = errors.New("kata daemon is not running; it is managed externally (autostart = false)")
 
 // ErrDaemonNotReplaceable means this binary left a live daemon of another
 // version running because it cannot open that daemon's storage or is an older
@@ -181,10 +186,36 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	if err != nil {
 		return RunningDaemon{}, err
 	}
-	found, release, err := discoverForStart(ctx, ns.DataDir)
+	// Bound discovery and lock acquisition too, while retaining normal auto-start
+	// migration waiting when the home permits implicit starts.
+	supervisedCtx, cancel := context.WithTimeout(ctx, daemonStartupWait)
+	defer cancel()
+	found, err := discoverForEnsure(supervisedCtx, ns.DataDir)
+	if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
+		return RunningDaemon{}, err
+	}
+	if found.Outcome == daemonScanCompatible {
+		return runningDaemonForLive(found.Daemon), nil
+	}
+	enabled, err := config.ReadAutostartEnabled()
 	if err != nil {
 		return RunningDaemon{}, err
 	}
+	configPath, err := config.DaemonConfigPath()
+	if err != nil {
+		return RunningDaemon{}, err
+	}
+	if !enabled {
+		ctx = supervisedCtx
+	}
+	found, release, err := discoverForStart(ctx, ns.DataDir)
+	if err != nil {
+		if !enabled && (errors.Is(err, ErrLocalDaemonUnreachable) || ctx.Err() != nil) {
+			return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, "")
+		}
+		return RunningDaemon{}, err
+	}
+	release = sync.OnceFunc(release)
 	defer release()
 	switch found.Outcome {
 	case daemonScanCompatible:
@@ -193,14 +224,77 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		if err := checkDaemonReplaceable(ctx, found.Daemon.Info); err != nil {
 			return RunningDaemon{}, err
 		}
-		if canRestartLocalDaemon(found.Daemon.Record) {
+		if canRestartLocalDaemon(found.Daemon.Record) && (enabled || runtime.GOOS != "windows") {
 			return restartLocalDaemon(ctx, ns, found.Daemon.Record)
+		}
+		if !enabled {
+			return RunningDaemon{}, externallyManagedVersionError(found.Daemon.Info)
 		}
 		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
 			return RunningDaemon{}, err
 		}
 	}
+	if !enabled {
+		release()
+		return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, "")
+	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
+}
+
+func externallyManagedVersionError(info PingInfo) error {
+	return fmt.Errorf("%w: running kata daemon %s differs from this kata binary %s; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable, daemonVersionLabel(info), currentVersionForEnsure())
+}
+
+func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath, dsn string) (RunningDaemon, error) {
+	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
+	defer cancel()
+	var running RunningDaemon
+	var unreachable error
+	err := waitForDaemonStartup(ctx, nil, daemonStartupWait, nil, func(ctx context.Context) (bool, error) {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		found, err := discoverDaemonForAutoStart(ctx, dataDir)
+		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
+			return false, err
+		}
+		if err != nil {
+			unreachable = err
+		}
+		switch found.Outcome {
+		case daemonScanCompatible:
+			running = runningDaemonForLive(found.Daemon)
+			return true, nil
+		case daemonScanStale:
+			return false, externallyManagedVersionError(found.Daemon.Info)
+		}
+		return false, nil
+	}, false)
+	if err == nil {
+		return running, nil
+	}
+	if !errors.Is(err, ErrLocalDaemonUnreachable) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		return RunningDaemon{}, err
+	}
+	// This nonblocking lock probe distinguishes a still-running migration without
+	// extending the readiness budget or resolving supervisor-only credentials.
+	migrating := false
+	if dsn != "" {
+		migrating = sqliteCutoverLockedForPath(ctx, dsn)
+	} else {
+		migrating = sqliteCutoverLocked(ctx)
+	}
+	if migrating {
+		return RunningDaemon{}, fmt.Errorf("%w: storage migration is in progress; retry after the service manager's daemon becomes ready (%s)", ErrLocalDaemonUnreachable, configPath)
+	}
+	if unreachable != nil {
+		return RunningDaemon{}, unreachable
+	}
+	message := fmt.Errorf("%w; waited up to %s; start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
+	if ctx.Err() != nil {
+		return RunningDaemon{}, fmt.Errorf("%w: %w", message, ctx.Err())
+	}
+	return RunningDaemon{}, message
 }
 
 func canRestartLocalDaemon(record kitdaemon.RuntimeRecord) bool {
