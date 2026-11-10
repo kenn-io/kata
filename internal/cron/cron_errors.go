@@ -11,7 +11,10 @@ import (
 	"go.kenn.io/kata/internal/textsafe"
 )
 
-const directiveRule = "a TZ= or CRON_TZ= zone name ends at the first ASCII space, and a schedule must follow it, such as TZ=UTC 0 9 * * *"
+const (
+	zoneEndRule   = "a TZ= or CRON_TZ= zone name ends at the first ASCII space"
+	directiveRule = zoneEndRule + ", and a schedule must follow it, such as TZ=UTC 0 9 * * *"
+)
 
 // explainCron only describes a rejection; cronParser remains the grammar owner.
 func explainCron(expression string, err error) error {
@@ -32,7 +35,7 @@ func explainCron(expression string, err error) error {
 			return explainTimezone(zone, err, "; "+directiveRule)
 		}
 		if strings.HasPrefix(detail, "missing fields after timezone") {
-			return reject(directiveRule + "; " + detail)
+			return reject(zoneEndRule + ", such as TZ=UTC 0 9 * * *; " + detail)
 		}
 		expression = strings.TrimSpace(rest)
 	}
@@ -69,16 +72,17 @@ func explainCron(expression string, err error) error {
 			probe[i] = token
 			if _, fieldErr := cronParser.Parse(strings.Join(probe, " ")); fieldErr != nil && fieldErr.Error() == detail {
 				reason := fieldErr.Error()
+				if number, ok := errors.AsType[*strconv.NumError](fieldErr); ok {
+					reason = strings.TrimSuffix(reason, number.Error()) + number.Err.Error()
+					if errors.Is(number.Err, strconv.ErrSyntax) {
+						reason = "use numeric values or field-appropriate names; " + reason
+					}
+				}
 				if i == 2 || i == 4 {
-					reason = daySyntaxReason(i, token)
-					if reason == "" {
-						reason = fieldErr.Error()
-						if strings.HasPrefix(reason, "failed to parse int from") {
-							reason = "use numeric values or field-appropriate names; " + reason
-						}
-						if i == 2 && strings.ContainsAny(strings.ToUpper(token), "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
-							reason = "day of month takes numbers 1-31"
-						}
+					if day := daySyntaxReason(i, token); day != "" {
+						reason = day
+					} else if i == 2 && strings.ContainsAny(strings.ToUpper(token), "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+						reason = "day of month takes numbers 1-31"
 					}
 				}
 				if strings.Contains(fieldErr.Error(), "hash option") {
@@ -118,7 +122,7 @@ var (
 
 // Recognize unsupported constructs, including list components, solely for advice.
 func daySyntaxReason(field int, token string) string {
-	for _, part := range strings.Split(strings.ToUpper(token), ",") {
+	for part := range strings.SplitSeq(strings.ToUpper(token), ",") {
 		switch {
 		case field == 2 && part == "LW", field == 4 && weekdayToken.MatchString(part) && strings.HasSuffix(part, "L"):
 			return "last-weekday syntax is not supported and has no five-field equivalent"

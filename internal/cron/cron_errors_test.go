@@ -37,8 +37,9 @@ func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
 		{"@daily extra", "supported descriptors, such as @daily, must match exactly", "unknown descriptor", ""},
 		{"@daily ", "supported descriptors, such as @daily, must match exactly", "unknown descriptor", ""},
 		{"0 9 * * 5#", "nth-weekday", "option", ""},
-		{"0 9 L BAD *", `month "BAD": failed to parse int from "BAD"`, "last-day", `failed to parse int from "BAD": strconv.Atoi: parsing "BAD": invalid syntax`},
-		{"99 9 * * H", `day of week "H": choose a fixed value`, `minute "99"`, "h expressions require hash option to be enabled"},
+		{"0 9 L BAD *", `month "BAD": use numeric values or field-appropriate names; failed to parse int from "BAD": invalid syntax`, "last-day", `failed to parse int from "BAD": strconv.Atoi: parsing "BAD": invalid syntax`},
+		{"0 9 * 99999999999999999999 *", `month "99999999999999999999": failed to parse int from "99999999999999999999": value out of range`, "numeric values", `failed to parse int from "99999999999999999999": strconv.Atoi: parsing "99999999999999999999": value out of range`},
+		{"99 9 * * H", `day of week "H": choose a fixed value; hashed schedules (H) are not supported`, `minute "99"`, "h expressions require hash option to be enabled"},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
 			if tc.producer != "" {
@@ -49,6 +50,9 @@ func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
 			require.ErrorIs(t, err, ErrInvalid)
 			require.Contains(t, err.Error(), "invalid cron document: invalid cron expression: ")
 			require.Contains(t, err.Error(), tc.detail)
+			if tc.producer != "" {
+				require.EqualError(t, err, "invalid cron document: invalid cron expression: "+tc.detail)
+			}
 			if tc.forbidden != "" {
 				require.NotContains(t, err.Error(), tc.forbidden)
 			}
@@ -77,10 +81,10 @@ func TestCronDirectiveFormatAdvice(t *testing.T) {
 		{"0 9 * * * TZ=UTC", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
 		{"TZ=UTC CRON_TZ=UTC 0 9 * * *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
 		{"0 9 * TZ=UTC *", "one uppercase TZ= or CRON_TZ= directive", "seconds or year"},
-		{"TZ=UTC\t0\t9\t*\t*\t*", "such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
-		{"TZ=UTC", "such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
-		{"TZ=UTC ", "such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
-		{"CRON_TZ=UTC", "such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
+		{"TZ=UTC\t0\t9\t*\t*\t*", "first ASCII space, such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
+		{"TZ=UTC", "first ASCII space, such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
+		{"TZ=UTC ", "first ASCII space, such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
+		{"CRON_TZ=UTC", "first ASCII space, such as TZ=UTC 0 9 * * *; missing fields after timezone", "invalid timezone"},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
 			_, err := ParseCron(tc.expression)

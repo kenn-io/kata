@@ -552,7 +552,7 @@ func TestCronValidationMessagesRemainVisible(t *testing.T) {
 	require.Error(t, err)
 	m, cmd := press(m, ctrlKey('o'))
 	require.Nil(t, cmd)
-	require.Contains(t, strings.Join(strings.Fields(stripANSI(m.viewBody())), " "), err.Error())
+	require.Contains(t, strings.Join(strings.Fields(stripANSI(m.viewBody())), ""), strings.Join(strings.Fields(err.Error()), ""))
 }
 
 func TestCronEditorReturnKeepsDraftOnErrorAndIgnoresClosedForm(t *testing.T) {
