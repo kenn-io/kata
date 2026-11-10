@@ -89,6 +89,11 @@ func (s *Store) IngestFederationEvents(
 		if err != nil {
 			return err
 		}
+		// An adoption marker admits a whole baseline, including legacy unmarked
+		// snapshots. Partial acceptance would consume its one-shot retry authority.
+		if params.AdoptionBaseline != "" || adoptionState.allowAuthorPreservation || adoptionState.overrideSnapshotAuthors {
+			params.AllowEventRejections = false
+		}
 		prepared := make([]preparedFederationIngestEvent, 0, len(params.Events))
 		seenBatch := map[string]string{}
 		// Projection writes happen after validation; later moves can depend on
@@ -177,6 +182,20 @@ func (s *Store) IngestFederationEvents(
 				return fmt.Errorf("%w: event %s actor %q does not match bound actor",
 					db.ErrFederationIngestValidation, event.EventUID, event.Actor)
 			}
+			if adoptionState.overrideSnapshotAuthors {
+				event, err = db.CanonicalizeFederationSnapshotAuthors(event, boundActor)
+				if err != nil {
+					return err
+				}
+			}
+			if err := db.ValidateFederationBoundActorPayload(ctx, event, db.FederationBoundActorCheck{
+				BoundActor:                      boundActor,
+				AllowSnapshotAuthorPreservation: adoptionState.allowAuthorPreservation,
+				AdoptionBaseline:                adoptionState.allowAuthorPreservation || adoptionState.overrideSnapshotAuthors,
+				Known:                           db.FederationAttributionSQL{Tx: tx, ProjectID: params.ProjectID},
+			}); err != nil {
+				return err
+			}
 			var moveFrom, moveTo int64
 			if event.Type == "issue.moved" {
 				var err error
@@ -231,21 +250,7 @@ func (s *Store) IngestFederationEvents(
 				return fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
 					db.ErrFederationIngestValidation, event.EventUID)
 			}
-			if adoptionState.overrideSnapshotAuthors {
-				event, err = db.CanonicalizeFederationSnapshotAuthors(event, boundActor)
-				if err != nil {
-					return err
-				}
-			}
 			if err := validateLegacyRelayAdmissionTx(ctx, tx, params.ProjectID, event); err != nil {
-				return err
-			}
-			if err := db.ValidateFederationBoundActorPayload(ctx, event, db.FederationBoundActorCheck{
-				BoundActor:                      boundActor,
-				AllowSnapshotAuthorPreservation: adoptionState.allowAuthorPreservation,
-				AdoptionBaseline:                adoptionState.allowAuthorPreservation || adoptionState.overrideSnapshotAuthors,
-				Known:                           db.FederationAttributionSQL{Tx: tx, ProjectID: params.ProjectID},
-			}); err != nil {
 				return err
 			}
 			if err := moveSnapshots.Validate(ctx, event, boundActor); err != nil {

@@ -2272,10 +2272,14 @@ push cursor stays before the earliest rejected event, so accepted later events
 can safely replay as duplicates. The status diagnostic counts the other events
 the hub acknowledged. Pending push includes accepted later events as replays
 until recovery, and each sync sends that growing tail again. Missing enrollment
-alone does not create a quarantine or offer a skip action. A later poisoned batch retains both the rejected events and the
-poison batch in blocking quarantine. Only that quarantined range can be skipped;
-skip deliberately abandons its outbound events. Older peers keep atomic batch failure; an upgraded hub reports the
-missing project separately from invalid-credential errors.
+alone does not create a quarantine or offer a skip action. A later poisoned
+batch retains both the rejected events and the poison batch in blocking
+quarantine. Only that quarantined range can be skipped;
+skip deliberately abandons its outbound events. Older peers keep atomic batch
+failure; an upgraded hub reports the missing project separately from
+invalid-credential errors. Adoption snapshot
+baselines remain atomic: a missing enrollment keeps the whole baseline pending
+until joining allows its original snapshots to retry.
 
 Inspect the retained event range and error before choosing any disposition:
 

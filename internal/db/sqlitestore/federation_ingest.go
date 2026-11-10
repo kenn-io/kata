@@ -118,6 +118,11 @@ func (d *Store) ingestFederationEventsOnce(
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
+	// An adoption marker admits a whole baseline, including legacy unmarked
+	// snapshots. Partial acceptance would consume its one-shot retry authority.
+	if p.AdoptionBaseline != "" || adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors {
+		p.AllowEventRejections = false
+	}
 	prepared := make([]preparedFederationIngestEvent, 0, len(p.Events))
 	seenBatch := map[string]string{}
 	// Projection writes happen after validation; later moves can depend on
@@ -204,6 +209,21 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s actor %q does not match bound actor",
 				db.ErrFederationIngestValidation, ev.EventUID, ev.Actor)
 		}
+		if adoptionSnapshotAuthorState.overrideSnapshotAuthors {
+			var err error
+			ev, err = canonicalizeFederationSnapshotAuthors(ev, boundActor)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+		}
+		if err := db.ValidateFederationBoundActorPayload(ctx, ev, db.FederationBoundActorCheck{
+			BoundActor:                      boundActor,
+			AllowSnapshotAuthorPreservation: adoptionSnapshotAuthorState.allowAuthorPreservation,
+			AdoptionBaseline:                adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors,
+			Known:                           db.FederationAttributionSQL{Tx: tx, ProjectID: p.ProjectID},
+		}); err != nil {
+			return db.FederationIngestResult{}, err
+		}
 		var moveFrom, moveTo int64
 		if ev.Type == "issue.moved" {
 			var err error
@@ -258,22 +278,7 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
 				db.ErrFederationIngestValidation, ev.EventUID)
 		}
-		if adoptionSnapshotAuthorState.overrideSnapshotAuthors {
-			var err error
-			ev, err = canonicalizeFederationSnapshotAuthors(ev, boundActor)
-			if err != nil {
-				return db.FederationIngestResult{}, err
-			}
-		}
 		if err := validateLegacyRelayAdmissionTx(ctx, tx, p.ProjectID, ev); err != nil {
-			return db.FederationIngestResult{}, err
-		}
-		if err := db.ValidateFederationBoundActorPayload(ctx, ev, db.FederationBoundActorCheck{
-			BoundActor:                      boundActor,
-			AllowSnapshotAuthorPreservation: adoptionSnapshotAuthorState.allowAuthorPreservation,
-			AdoptionBaseline:                adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors,
-			Known:                           db.FederationAttributionSQL{Tx: tx, ProjectID: p.ProjectID},
-		}); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if err := moveSnapshots.Validate(ctx, ev, boundActor); err != nil {

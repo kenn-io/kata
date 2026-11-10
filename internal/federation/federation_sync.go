@@ -401,7 +401,17 @@ func federationEventRejectionMessage(rejected []db.FederationEventRejection, ack
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.
 // The caller holds shared federation coordination for the complete operation.
 func PushDirectSpoke(ctx context.Context, store db.Storage, binding db.FederationBinding, hubProjectID int64, client *Client) error {
-	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{})
+	if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{}); err != nil {
+		return err
+	}
+	pending, _, err := store.PendingFederationPushStats(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
+	if err != nil {
+		return err
+	}
+	if pending > 0 {
+		return errors.New("pending federation events remain; inspect federation status before retrying")
+	}
+	return nil
 }
 
 // CredentialHTTPClient builds a bearer-pinned, signing-aware HTTP client for
@@ -754,9 +764,8 @@ func shouldDeliverDuplicateLocalEcho(
 		}
 		binding, runStartBinding = actualBinding, actualBinding
 	}
-	if event.ID > binding.PushCursorEventID {
-		return true, nil
-	}
+	// A reconciled local echo was already applied locally. The retry cursor
+	// may lag behind an accepted suffix while another event needs enrollment.
 	if event.IssueID == nil && event.IssueUID != nil {
 		return true, nil
 	}
