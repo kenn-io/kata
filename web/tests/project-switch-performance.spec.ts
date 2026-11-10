@@ -70,9 +70,9 @@ for (const { daemon, roundTripMilliseconds } of daemons) {
   })
 }
 
-// Clicks the project in the sidebar and returns the time until the frame after
-// the list shows that project's tasks, its header count equals the sidebar
-// count, and no snapshot load is pending.
+// Clicks the project in the sidebar and returns the time until the browser has
+// painted a frame in which the list shows that project's tasks, its header
+// count equals the sidebar count, and no snapshot load is pending.
 async function switchTo(page: Page, name: string): Promise<number> {
   return page.evaluate(
     async ({ name, timeout }) => {
@@ -82,7 +82,7 @@ async function switchTo(page: Page, name: string): Promise<number> {
       if (!button) throw new Error(`no sidebar entry for ${name}`)
       const expected = button.querySelector('.project-count')?.textContent?.trim() ?? ''
       const shown = (): boolean => {
-        const header = document.querySelector('.collection-shell h2, h2')
+        const header = document.querySelector('h2')
         if (header?.textContent?.trim() !== name) return false
         const count = header.parentElement?.querySelector('.count')?.textContent?.trim()
         if (count !== `${expected} ${expected === '1' ? 'task' : 'tasks'}`) return false
@@ -102,15 +102,16 @@ async function switchTo(page: Page, name: string): Promise<number> {
         button.click()
         const check = (): void => {
           if (shown()) {
-            // Count the frame that paints the list.
-            requestAnimationFrame(() => setTimeout(() => resolve(performance.now() - start), 0))
+            // check runs in an animation frame callback, before that frame
+            // paints. A task queued now runs after the paint.
+            setTimeout(() => resolve(performance.now() - start), 0)
           } else if (performance.now() - start > timeout) {
             reject(new Error(`${name} did not render within ${timeout} ms`))
           } else {
             requestAnimationFrame(check)
           }
         }
-        check()
+        requestAnimationFrame(check)
       })
     },
     { name, timeout: 10_000 },
