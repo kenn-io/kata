@@ -154,6 +154,18 @@ func federationPushEventTypeCondition(column string) string {
 	return column + " IN (" + db.FederationPushEventTypesSQL() + ")"
 }
 
+// FederationPushAcceptedThrough finds the accepted prefix before the next pending event.
+func (d *Store) FederationPushAcceptedThrough(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, error) {
+	var id sql.NullInt64
+	err := d.QueryRowContext(ctx, `SELECT MAX(a.event_id) FROM federation_push_accepted a JOIN events accepted ON accepted.id=a.event_id
+		WHERE a.project_id=? AND accepted.project_id=a.project_id AND accepted.origin_instance_uid=? AND a.event_id>? AND a.event_id < COALESCE((
+			SELECT MIN(e.id) FROM events e WHERE e.project_id=? AND e.origin_instance_uid=? AND e.id>?
+			AND `+federationPushEventTypeCondition("e.type")+`
+			AND NOT EXISTS (SELECT 1 FROM federation_push_accepted p WHERE p.project_id=e.project_id AND p.event_id=e.id)
+		), 9223372036854775807)`, projectID, originInstanceUID, afterID, projectID, originInstanceUID, afterID).Scan(&id)
+	return id.Int64, err
+}
+
 // RecordFederationPushAccepted retains acknowledgements above the binding cursor.
 func (d *Store) RecordFederationPushAccepted(ctx context.Context, projectID int64, eventIDs []int64) error {
 	return d.RetryTransient(ctx, func() error {

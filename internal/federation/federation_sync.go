@@ -252,6 +252,14 @@ func pushDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) error {
+	return pushDirectSpokeTracked(ctx, store, binding, hubProjectID, client, validateLease, credentials, opts, nil)
+}
+
+func pushDirectSpokeTracked(
+	ctx context.Context, store db.Storage, binding *db.FederationBinding, hubProjectID int64,
+	client *Client, validateLease func(context.Context) error, credentials config.FederationCredentialStore,
+	opts clientpkg.Opts, acceptedThisTurn map[int64]bool,
+) error {
 	if binding.PushEnabled {
 		scanCursor := binding.PushCursorEventID
 		acknowledged := 0
@@ -290,6 +298,19 @@ func pushDirectSpoke(
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			if len(pending) == 0 {
+				through, err := store.FederationPushAcceptedThrough(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
+				if err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				if through > binding.PushCursorEventID {
+					if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+						return err
+					}
+					if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, through); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+					binding.PushCursorEventID = through
+				}
 				break
 			}
 			scanCursor = pending[len(pending)-1].ID
@@ -358,23 +379,49 @@ func pushDirectSpoke(
 					retained.Remember(db.RemoteEventFromStored(item.event), item.rejection)
 					rejectedEvents = append(rejectedEvents, item.event)
 				}
+				rejectedIDs := make(map[int64]bool, len(rejected))
+				for _, item := range rejected {
+					rejectedIDs[item.event.ID] = true
+				}
+				var acceptedIDs []int64
+				for _, event := range batch {
+					if event.ID <= ack.PushCursorEventID && !rejectedIDs[event.ID] {
+						acceptedIDs = append(acceptedIDs, event.ID)
+						if acceptedThisTurn != nil {
+							acceptedThisTurn[event.ID] = true
+						}
+					}
+				}
 				acknowledged += ack.Accepted + ack.Duplicates
 				rejections = append(rejections, ack.RejectedEvents...)
 				durableCursor := ack.PushCursorEventID
 				if firstRejected > 0 {
 					durableCursor = min(durableCursor, firstRejected-1)
 				}
-				if err := federationFailpoint("before_spoke_push_cursor_advance"); err != nil {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 					return err
+				}
+				if err := store.RecordFederationPushAccepted(ctx, binding.ProjectID, acceptedIDs); err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				if err := federationFailpoint("before_spoke_push_cursor_advance"); err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
 				if durableCursor > binding.PushCursorEventID {
 					if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, durableCursor); err != nil {
 						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 					}
 					binding.PushCursorEventID = durableCursor
+				}
+				through, err := store.FederationPushAcceptedThrough(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
+				if err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				if through > binding.PushCursorEventID {
+					if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, through); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+					binding.PushCursorEventID = through
 				}
 				pending = append(pendingFederationEventsAfterCursor(batch, ack.PushCursorEventID), pending...)
 			}
@@ -509,9 +556,11 @@ func syncDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) (resultErr error) {
+	runStartBinding := binding
+	acceptedThisTurn := map[int64]bool{}
 	var pushErr error
 	if pushThisTurn {
-		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
+		if err := pushDirectSpokeTracked(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts, acceptedThisTurn); err != nil {
 			if _, ok := errors.AsType[*federationPartialPushError](err); !ok {
 				return err
 			}
@@ -671,7 +720,7 @@ func syncDirectSpoke(
 			if duplicate[i] && shouldDeliverPage {
 				var err error
 				if ev.OriginInstanceUID == localInstanceUID {
-					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, eventProjects[i], ev)
+					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, runStartBinding, eventProjects[i], ev, acceptedThisTurn)
 				} else if insertedThisPull[ev.EventUID] {
 					deliver[i] = true
 				} else {
@@ -800,9 +849,16 @@ func shouldDeliverDuplicateLocalEcho(
 	ctx context.Context,
 	store db.Storage,
 	binding db.FederationBinding,
+	runStartBinding db.FederationBinding,
 	projectID int64,
 	ev api.EventEnvelope,
+	acceptedThisTurn map[int64]bool,
 ) (bool, error) {
+	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
+	if err != nil || len(events) != 1 {
+		return false, err
+	}
+	event := events[0]
 	if projectID != binding.ProjectID {
 		source, err := store.FederationBindingByProject(ctx, projectID)
 		if errors.Is(err, db.ErrNotFound) {
@@ -810,11 +866,37 @@ func shouldDeliverDuplicateLocalEcho(
 			// destination needs no delivery or retired-stream acknowledgement.
 			return false, nil
 		}
-		if err != nil || source.PullCursorEventID >= ev.EventID {
+		if err != nil {
 			return false, err
 		}
+		binding, runStartBinding = source, source
+		acceptedThisTurn = nil
 	}
-	return store.FederationLocalReplay(ctx, ev.EventUID)
+	accepted, err := store.FederationPushAccepted(ctx, binding.ProjectID, event.ID)
+	if err != nil {
+		return false, err
+	}
+	if event.ID > binding.PushCursorEventID && !accepted {
+		return true, nil
+	}
+	if event.IssueID == nil && event.IssueUID != nil {
+		return true, nil
+	}
+	if event.ID <= runStartBinding.PushCursorEventID || !acceptedThisTurn[event.ID] {
+		return false, nil
+	}
+	if runStartBinding.PullCursorEventID != runStartBinding.ReplayHorizonEventID-1 {
+		return false, nil
+	}
+	status, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return status.LastResetAt != nil && event.CreatedAt.Before(*status.LastResetAt) &&
+		(status.LastPullSuccessAt == nil || status.LastPullSuccessAt.Before(*status.LastResetAt)), nil
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {

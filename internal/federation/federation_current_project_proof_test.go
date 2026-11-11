@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -189,7 +191,7 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			require.NoError(t, err)
 			_, _, err = sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: child.ID, Author: "worker", Body: "Child comment"})
 			require.NoError(t, err)
-			independent, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent", Author: "worker"})
+			independent, independentEvent, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent", Author: "worker"})
 			require.NoError(t, err)
 			_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: moved.Revision, Actor: "worker"})
 			require.NoError(t, err)
@@ -203,6 +205,9 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			}
 			err = pushDirectSpoke(t.Context(), pushStore, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{})
 			require.ErrorContains(t, err, "pending federation events remain")
+			accepted, err := sender.env.DB.FederationPushAccepted(t.Context(), binding.ProjectID, independentEvent.ID)
+			require.NoError(t, err)
+			require.True(t, accepted)
 			_, err = hub.DB.IssueByUID(t.Context(), independent.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			_, err = hub.DB.IssueByUID(t.Context(), created.UID, db.IncludeDeletedNo)
@@ -219,6 +224,7 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			require.NoError(t, err)
 			sender.credentials[projects[1].UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: grant.Token, Actor: "worker"}
 			require.NoError(t, pushDirectSpoke(t.Context(), pushStore, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{}))
+			require.GreaterOrEqual(t, binding.PushCursorEventID, independentEvent.ID)
 			run, err := hub.DB.CronRun(t.Context(), projects[0].ID, runUID)
 			require.NoError(t, err)
 			require.Equal(t, &created.UID, run.IssueUID)
@@ -354,4 +360,44 @@ func TestFederationRejectedPrefixDoesNotRedeliverAcceptedLocalEcho(t *testing.T)
 	_, err = hub.DB.EventsByUIDs(t.Context(), projects[0].ID, []string{accepted.UID})
 	require.NoError(t, err, "the independent event was accepted")
 	require.NotContains(t, delivered, accepted.UID, "a local mutation was already delivered when authored")
+}
+
+func TestFederationPullOnlySuppressesAcceptedEchoAfterReopen(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "echo-source", "echo-target")
+	sender := newMoveDeliverySpoke(t, hub, projects)
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved work", Author: "worker"})
+	require.NoError(t, err)
+	for i := range projects {
+		require.NoError(t, sender.sync(t, i))
+	}
+	local, err := sender.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, rejected, err := sender.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Pending enrollment"})
+	require.NoError(t, err)
+	_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	delete(sender.credentials, projects[1].UID)
+	_, accepted, err := sender.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent", Author: "worker"})
+	require.NoError(t, err)
+	binding, err := sender.env.DB.FederationBindingByProject(ctx, sender.projects[0].ID)
+	require.NoError(t, err)
+	client, err := NewClient(ctx, hub.URL, sender.credentials[projects[0].UID].Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	require.ErrorContains(t, pushDirectSpoke(ctx, sender.env.DB, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{}), "pending federation events remain")
+	require.Less(t, binding.PushCursorEventID, rejected.ID)
+
+	reopened, err := sqlitestore.Open(ctx, filepath.Join(sender.env.Home, "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reopened.Close() })
+	binding, err = reopened.FederationBindingByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	var delivered []string
+	err = syncDirectSpoke(ctx, reopened, binding, false, projects[0].ID, client, func(_ int64, events []db.Event) {
+		for _, event := range events {
+			delivered = append(delivered, event.UID)
+		}
+	}, nil, sender.credentials, clientpkg.Opts{})
+	require.NoError(t, err)
+	require.NotContains(t, delivered, accepted.UID)
 }

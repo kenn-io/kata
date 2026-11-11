@@ -18,6 +18,18 @@ func pgFederationPushEventTypeCondition(column string) string {
 	return column + ` IN ` + federationPushEventTypeList
 }
 
+// FederationPushAcceptedThrough finds the accepted prefix before the next pending event.
+func (s *Store) FederationPushAcceptedThrough(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, error) {
+	var id sql.NullInt64
+	err := s.QueryRowContext(ctx, `SELECT MAX(a.event_id) FROM federation_push_accepted a JOIN events accepted ON accepted.id=a.event_id
+		WHERE a.project_id=$1 AND accepted.project_id=a.project_id AND accepted.origin_instance_uid=$2 AND a.event_id>$3 AND a.event_id < COALESCE((
+			SELECT MIN(e.id) FROM events e WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3
+			AND `+pgFederationPushEventTypeCondition("e.type")+`
+			AND NOT EXISTS (SELECT 1 FROM federation_push_accepted p WHERE p.project_id=e.project_id AND p.event_id=e.id)
+		), 9223372036854775807)`, projectID, originInstanceUID, afterID).Scan(&id)
+	return id.Int64, err
+}
+
 // PendingFederationPushEvents returns supported local-origin events above one acknowledgement cursor.
 func (s *Store) PendingFederationPushEvents(
 	ctx context.Context,
