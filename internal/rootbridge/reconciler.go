@@ -566,7 +566,7 @@ func (r *Reconciler) reconcileField(
 	case MergeConflict:
 		return r.storeFieldConflict(ctx, snapshot, mapping, state, hasBaseline, kata, external, claimToken, result)
 	case MergeWriteKata:
-		patch, patchErr := codec.KataPatch(snapshot.issue, decision.Baseline)
+		patch, patchErr := prepareFieldPatch(ctx, r.store, codec, snapshot.issue, decision.Baseline)
 		if patchErr != nil {
 			return r.storeFieldConflict(ctx, snapshot, mapping, state, hasBaseline, kata, external, claimToken, result)
 		}

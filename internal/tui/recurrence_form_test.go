@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -132,6 +133,24 @@ func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
 	form := newRecurrenceForm(formTarget{}, issue, nil)
 	assert.Contains(t, form.err, "unsupported schedule tzdata version")
 	assert.Empty(t, form.fieldValue(fieldZone))
+
+	h := newRecurrenceHarness(t, viewDetail)
+	h.m.detail.issue.Metadata.ScheduledOn = issue.Metadata.ScheduledOn
+	h.open()
+	h.fill("FREQ=DAILY", "2026-11-12", "UTC")
+	before := h.revision()
+	assert.Nil(t, h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}))
+	assert.Contains(t, h.m.input.err, "unsupported schedule tzdata version")
+	assert.Equal(t, before, h.revision())
+	assert.Empty(t, h.rows())
+
+	h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+	h.startBehindTheTUI("FREQ=DAILY", "2026-11-12", "UTC")
+	h.m.detail.issue.Metadata.ScheduledOn = issue.Metadata.ScheduledOn
+	h.open()
+	h.fill("", "2026-11-12", "UTC")
+	h.save()
+	assert.Empty(t, h.rows(), "an unreadable schedule must not prevent stopping a repeat")
 }
 
 func TestRecurrenceDetailScheduleFieldsAt80Columns(t *testing.T) {
@@ -532,6 +551,38 @@ func TestSaveRecurrenceRequiresGuardedStartAPI(t *testing.T) {
 	require.Error(t, err)
 	assert.Zero(t, posts, "an older daemon cannot enforce a guarded start")
 	assert.Contains(t, err.Error(), "upgrade the daemon")
+}
+
+func TestSaveRecurrenceRejectsUnknownRulesOnReadback(t *testing.T) {
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		t.Run(field, func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				resp, err := h.env.HTTP.Do(r)
+				if err != nil || r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/issues/") {
+					return resp, err
+				}
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+				var wire map[string]any
+				require.NoError(t, json.Unmarshal(body, &wire))
+				issue := wire["issue"].(map[string]any)
+				issue["metadata"] = map[string]any{field: map[string]any{"value": "2026-11-12", "timezone": "UTC", "tzdata_version": "unknown"}}
+				body, err = json.Marshal(wire)
+				require.NoError(t, err)
+				resp.Body = io.NopCloser(strings.NewReader(string(body)))
+				return resp, nil
+			})}
+			client := NewClient(h.env.URL, hc)
+			_, err := client.SaveRecurrence(t.Context(), h.issue.ProjectID, h.issue.UID, RecurrenceInput{
+				Rule: "FREQ=DAILY", Start: "2026-11-12", Zone: "UTC", Actor: "alice", IssueRevision: h.issue.Revision,
+			})
+			require.ErrorContains(t, err, "unsupported schedule tzdata version")
+			assert.Empty(t, h.rows())
+			assert.Equal(t, h.issue.Revision, h.revision())
+		})
+	}
 }
 
 func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {

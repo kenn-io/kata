@@ -3,6 +3,7 @@
 package rootbridge
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -48,6 +49,19 @@ func fieldCodecsForTimezone(defaultTimezone string) map[string]FieldCodec {
 type scheduleCodec struct {
 	key             string
 	defaultTimezone string
+	recurrenceZone  string
+}
+
+func prepareFieldPatch(ctx context.Context, store db.Storage, codec FieldCodec, issue db.Issue, value connector.FieldValue) (map[string]jsontext.Value, error) {
+	if schedule, ok := codec.(scheduleCodec); ok && schedule.key == "scheduled_on" && issue.RecurrenceID != nil {
+		rec, err := store.GetRecurrenceByID(ctx, *issue.RecurrenceID)
+		if err != nil {
+			return nil, err
+		}
+		schedule.recurrenceZone = rec.Timezone
+		codec = schedule
+	}
+	return codec.KataPatch(issue, value)
 }
 
 func (c scheduleCodec) KataField() string {
@@ -75,7 +89,7 @@ func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (ma
 	if err := c.pinZone(issue, canonical, patch); err != nil {
 		return nil, err
 	}
-	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, "")
+	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, c.recurrenceZone)
 }
 
 // pinZone saves the zone a local date-time or first saved value resolves to, so
@@ -93,7 +107,11 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 	zone := canonical.Timezone
 	firstInstant := canonical.Kind == fieldKindInstant && saved == nil
 	if saved == nil && (canonical.Kind == fieldKindDate || firstInstant) {
-		if zone, err = metadataTimezone(values, c.defaultTimezone); err != nil && !firstInstant {
+		defaultZone := c.defaultTimezone
+		if c.key == "scheduled_on" && c.recurrenceZone != "" {
+			defaultZone = c.recurrenceZone
+		}
+		if zone, err = metadataTimezone(values, defaultZone); err != nil && !firstInstant {
 			return err
 		}
 	}

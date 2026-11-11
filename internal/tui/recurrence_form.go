@@ -20,6 +20,7 @@ import (
 type recurrenceFormState struct {
 	issueRevision int64
 	rec           *recurrenceclient.View
+	unreadable    string
 }
 
 func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.View) inputState {
@@ -43,13 +44,18 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 		input.Blur()
 		s.fields = append(s.fields, inputField{id: f.id, kind: fieldSingleLine, input: input, label: f.label})
 	}
-	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec}
+	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec, unreadable: issue.datesState().unreadable}
+	s.err = state.unreadable
 	var rule, start, zone string
 	if rec != nil {
 		rule, start, zone = rec.RRule, rec.DTStart, rec.Timezone
 	} else {
 		start = cmp.Or(issue.ScheduledOnDate, issue.scheduledOn())
-		zone, s.err = savedFormZone(issue)
+		var zoneErr string
+		zone, zoneErr = savedFormZone(issue)
+		if s.err == "" {
+			s.err = zoneErr
+		}
 	}
 	s.recurrence, s.target.projectID = state, issue.ProjectID
 	for i := range s.fields {
@@ -115,6 +121,10 @@ func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 	rule, zone := strings.TrimSpace(m.input.fieldValue(fieldRule)), m.input.fieldValue(fieldZone)
 	if state.rec != nil && rule == "" {
 		return m.saveRecurrence(RecurrenceInput{Stop: true, Recurrence: state.rec, Actor: m.list.actor})
+	}
+	if state.unreadable != "" {
+		m.input.err = state.unreadable
+		return m, nil
 	}
 	start, err := resolveDateInput(m.input.fieldValue(fieldStart), m.toastNow())
 	if err == nil && start == "" {
