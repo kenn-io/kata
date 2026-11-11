@@ -465,11 +465,12 @@ func rehearseMoveBatch(ctx context.Context, cfg ServerConfig, in *api.MoveIssues
 				moveBatchRefusal(&results[j], item.Err)
 				continue
 			}
-			results[j].Result = "would_move"
 			if item.Duplicate {
-				results[j].Code = "duplicate_item"
+				results[j].Result, results[j].Code = "unchanged", "duplicate_item"
+			} else {
+				results[j].Result = "would_move"
+				results[j].Descendants = item.Out.Issues[1:]
 			}
-			results[j].Descendants = item.Out.Issues[1:]
 		}
 	}
 	out := &api.MoveIssuesResponse{}

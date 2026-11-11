@@ -726,7 +726,10 @@ func TestMoveBatchDryContinuationAndRevisions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
 	require.Equal(t, "would_move", out.Body.Results[1].Result)
+	require.Equal(t, "unchanged", out.Body.Results[2].Result)
 	require.Equal(t, "duplicate_item", out.Body.Results[2].Code)
+	require.Equal(t, 1, out.Body.Summary.WouldMove)
+	require.Equal(t, 1, out.Body.Summary.Unchanged)
 	require.Equal(t, "revision_conflict", out.Body.Results[3].Code)
 	req.Body.StartIndex = 1
 	req.Body.Completed = []api.MoveIssuesCompleted{{Result: "refused"}}

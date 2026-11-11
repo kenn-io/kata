@@ -89,9 +89,9 @@ func TestMoveIssuesBatch_DuplicateConflictDryRun(t *testing.T) {
 				}
 			} else {
 				require.Equal(t, "duplicate_item", out.Results[1].Code)
+				require.Equal(t, "unchanged", out.Results[1].Result)
 				if mode == "dry" {
 					require.Equal(t, "would_move", out.Results[0].Result)
-					require.Equal(t, "would_move", out.Results[1].Result)
 				} else {
 					require.Equal(t, "moved", out.Results[0].Result)
 				}
