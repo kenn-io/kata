@@ -478,10 +478,11 @@ func TestDoctorUnreachableRecoveryGuidance(t *testing.T) {
 					cfg = "active_daemon='work'\n" + cfg
 				}
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0600))
-				if selection == "workspace profile" {
+				switch selection {
+				case "workspace profile":
 					require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"), []byte("version=1\n[project]\nname='example-project'\n"), 0600))
 					require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte("version=1\n[server]\ndaemon='work'\n"), 0600))
-				} else if selection == "explicit profile" {
+				case "explicit profile":
 					flags.Daemon = "work"
 				}
 				ns, err = daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
