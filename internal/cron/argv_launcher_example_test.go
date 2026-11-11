@@ -31,7 +31,7 @@ func (a *exampleAdapter) run(ctx context.Context, workflow generated.CronWorkflo
 	}
 	for _, step := range workflow.Steps {
 		if step.Kind != "command" && (step.Kind != "argv" || !a.supportsArgv) {
-			return exampleOutcome{status: "failed", message: "reason: unsupported_step\nstep: " + step.Key}
+			return exampleOutcome{status: "failed", message: "reason: unsupported_step\nstep: " + step.Key + "\nkind: " + step.Kind}
 		}
 	}
 	a.admissions++ // Stand-in for admission; no daemon or scheduler is involved.
