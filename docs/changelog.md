@@ -10,7 +10,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Keep accepted federation events from replaying after a project backup is restored.
-- Continue independent pushes when another project's credentials are stale.
+- Continue independent pushes when another project's enrollment is missing or revoked.
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
   build finishes, and an opener waiting for another opener's migration keeps

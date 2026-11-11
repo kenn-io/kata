@@ -81,7 +81,8 @@ checks the whole tree without changing issues, claims, or cursors. Use `--single
 to move only the selected issue. The [CLI reference](../reference/cli.md) owns
 the per-issue restrictions.
 
-Spokes must join both projects before applying a move. Upgrade both hub and
+Spokes must join both projects before applying a move. If a pull encounters a
+move whose project is missing, join that project and retry sync. Upgrade both hub and
 spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
