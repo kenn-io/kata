@@ -1,6 +1,6 @@
 import { expect, test } from './fixtures'
 
-test.use({ timezoneId: 'Asia/Tokyo', screenshot: 'off', trace: 'off', video: 'off' })
+test.use({ timezoneId: 'Asia/Tokyo' })
 
 test('saved schedules use their zone and expose the due date to the editor', async ({
   page,

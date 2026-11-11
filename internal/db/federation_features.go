@@ -112,6 +112,9 @@ func issueScheduleRequiredFeature(kind, payload string) (string, error) {
 				}
 				for _, value := range values {
 					if saved, err := metadata.DecodeSavedSchedule(value); err != nil {
+						if metadata.IsUnsupportedSchedule(err) {
+							return "", fmt.Errorf("%w: %s: %w", ErrUnsupportedEventFeatures, IssueScheduleEventFeature, err)
+						}
 						return "", err
 					} else if saved != nil {
 						required = IssueScheduleEventFeature

@@ -2,6 +2,7 @@ package federation_test
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/uid"
 )
 
 func TestRelaySavedScheduleRequiresPeerSupport(t *testing.T) {
@@ -137,4 +139,61 @@ func requireUnsupportedRelayFeature(t *testing.T, err error) {
 	require.ErrorAs(t, err, &status)
 	require.Equal(t, http.StatusConflict, status.HTTPStatus())
 	require.Contains(t, status.Body, "unsupported_event_features")
+}
+
+func TestRelayFutureScheduleRulesStayRetryable(t *testing.T) {
+	for _, direction := range []string{"push", "pull"} {
+		t.Run(direction, func(t *testing.T) {
+			ctx := t.Context()
+			root := newRecoveryRoot(t, "sqlite")
+			spoke := newRelayMatrixNode(t, "sqlite", "spoke-member")
+			enrollRelayMatrixReplica(t, root, spoke, "spoke-alias", false)
+			sender, receiver := spoke, root
+			if direction == "pull" {
+				sender, receiver = root, spoke
+			}
+			issue, created, err := sender.store.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: sender.project.ID, Title: "Future schedule", Author: sender.account,
+			})
+			require.NoError(t, err)
+			syncRelayMatrixNode(t, spoke)
+			binding, err := spoke.store.FederationBindingByProject(ctx, spoke.project.ID)
+			require.NoError(t, err)
+
+			source := db.RemoteEventFromStored(created)
+			source.EventUID, err = uid.New()
+			require.NoError(t, err)
+			source.Type = "issue.metadata_updated"
+			source.HLCCounter++
+			futureVersion := "sha256:" + strings.Repeat("f", 64)
+			source.Payload = jsontext.Value(fmt.Sprintf(`{"issue_uid":%q,"diff":{"scheduled_on":{"from":null,"to":{"value":"2026-11-12","timezone":"Europe/Paris","tzdata_version":%q}}}}`, issue.UID, futureVersion))
+			source.ContentHash, err = db.RemoteEventContentHash(source)
+			require.NoError(t, err)
+			inserted, err := sender.store.InsertRemoteEvent(ctx, sender.project.ID, source)
+			require.NoError(t, err)
+			require.True(t, inserted)
+
+			pending, err := sender.store.PendingRelayDeliveries(ctx, binding.RelayConfig.BindingUID, db.RelayStreamEvent, 100)
+			require.NoError(t, err)
+			require.Len(t, pending, 1)
+			require.Equal(t, source.EventUID, pending[0].SourceUID)
+			for range 2 {
+				err = federation.SyncFederationOnce(ctx, spoke.store, binding, spoke.credential)
+				active, listErr := spoke.store.ActiveFederationQuarantinesByProject(ctx, spoke.project.ID)
+				require.NoError(t, listErr)
+				require.Empty(t, active, "version skew must keep sync retryable")
+				if direction == "push" {
+					requireUnsupportedRelayFeature(t, err)
+				} else {
+					require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+				}
+			}
+			retained, err := sender.store.PendingRelayDeliveries(ctx, binding.RelayConfig.BindingUID, db.RelayStreamEvent, 100)
+			require.NoError(t, err)
+			require.Equal(t, pending, retained, "the rejected prefix remains unacknowledged")
+			got, err := receiver.store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.NotContains(t, got.Metadata, "scheduled_on", "the rejected edit does not reach the projection")
+		})
+	}
 }

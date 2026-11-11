@@ -669,12 +669,8 @@ func (s *Service) ResolveFieldConflict(
 		return resolved, events, ErrFieldConflictChanged
 	}
 	selected := storedKata
-	coordinatedTimezone := ""
 	if use == "external" {
 		selected = storedExternal
-		coordinatedTimezone = coordinatedConflictTimezone(
-			s.fieldCodecs, issue, mapping, claimedMappings, claimedStates, selected,
-		)
 	}
 	kataCandidateStable := fieldValuesEqual(kataValue, storedKata)
 	if use == "external" && !kataCandidateStable {
@@ -691,7 +687,7 @@ func (s *Service) ResolveFieldConflict(
 	}
 	projected := issue
 	if !fieldValuesEqual(kataValue, selected) {
-		patch, patchErr := kataPatchWithCoordinatedTimezone(codec, issue, selected, coordinatedTimezone)
+		patch, patchErr := codec.KataPatch(issue, selected)
 		if patchErr != nil {
 			return resolved, events, patchErr
 		}
@@ -761,58 +757,6 @@ func (s *Service) ResolveFieldConflict(
 	s.emitEvents(resolvedEvent)
 	events = append(events, resolvedEvent)
 	return resolved, events, nil
-}
-
-func coordinatedConflictTimezone(
-	codecs map[string]FieldCodec,
-	issue db.Issue,
-	mapping db.ExternalFieldMapping,
-	mappings []db.ExternalFieldMapping,
-	states []db.ExternalFieldState,
-	selected connector.FieldValue,
-) string {
-	if selected.Kind != fieldKindLocalDateTime || selected.Timezone == "" {
-		return ""
-	}
-	codec, ok := codecs[mapping.KataField]
-	if !ok {
-		return ""
-	}
-	current, err := readCanonicalKataField(codec, issue, mapping)
-	if err != nil || current.Kind != fieldKindLocalDateTime || current.Timezone == selected.Timezone {
-		return ""
-	}
-	stateByMapping := make(map[int64]db.ExternalFieldState, len(states))
-	for _, state := range states {
-		stateByMapping[state.MappingID] = state
-	}
-	foundSibling := false
-	for _, sibling := range mappings {
-		if !sibling.Active || sibling.ID == mapping.ID {
-			continue
-		}
-		siblingCodec, ok := codecs[sibling.KataField]
-		if !ok {
-			return ""
-		}
-		siblingKata, err := readCanonicalKataField(siblingCodec, issue, sibling)
-		if err != nil || siblingKata.Kind != fieldKindLocalDateTime || siblingKata.Timezone != current.Timezone {
-			return ""
-		}
-		siblingState, ok := stateByMapping[sibling.ID]
-		if !ok || !siblingState.Conflicted {
-			return ""
-		}
-		siblingExternal, ok, err := decodeCanonicalStoredFieldValue(siblingState.ConflictExternal, sibling)
-		if err != nil || !ok || siblingExternal.Kind != fieldKindLocalDateTime || siblingExternal.Timezone != selected.Timezone {
-			return ""
-		}
-		foundSibling = true
-	}
-	if !foundSibling {
-		return ""
-	}
-	return selected.Timezone
 }
 
 func coordinatedConflictKataDriftAllowed(

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 )
 
@@ -73,8 +74,9 @@ func requireRelayBodyFeatures(body []byte, incompatible error) error {
 // ValidateRelaySchedule checks that saved rules can be read before committing
 // a source event or activating its projection from a checkpoint.
 func ValidateRelaySchedule(event RemoteEvent) error {
-	if _, err := issueScheduleRequiredFeature(event.Type, string(event.Payload)); err != nil {
+	_, err := issueScheduleRequiredFeature(event.Type, string(event.Payload))
+	if err != nil && !errors.Is(err, ErrUnsupportedEventFeatures) {
 		return fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 	}
-	return nil
+	return err
 }
