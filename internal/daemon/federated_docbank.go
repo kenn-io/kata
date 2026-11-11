@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uuid"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
@@ -323,4 +325,27 @@ func exposedDocbankNode(cfg ServerConfig, node docbank.Node) error {
 		return api.NewError(http.StatusForbidden, "docbank_outside_scope", "file is outside the configured Docbank folder", "move the file into the configured folder", nil)
 	}
 	return nil
+}
+
+// attachmentPatchHook decides the patch under the metadata write transaction.
+// It rejects a write whose Docbank route changed since the handler read it, so
+// a reference never commits with an origin from a stale binding. A reuse
+// request also rechecks there, so concurrent retries cannot each observe an
+// absent reference and create a second one.
+func attachmentPatchHook(patch map[string]jsontext.Value, observed *db.FederationBinding, reuseVersion *uuid.UUID, origin string, localOrigins []string) db.MetadataPatchHook {
+	return func(ctx context.Context, tx *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
+		var role, hubURL, hubProjectUID string
+		err := tx.QueryRowContext(ctx, `SELECT role, hub_url, hub_project_uid FROM federation_bindings WHERE project_id=$1`, current.ProjectID).Scan(&role, &hubURL, &hubProjectUID)
+		if observed == nil && !errors.Is(err, sql.ErrNoRows) || observed != nil && (err != nil || role != string(observed.Role) || hubURL != observed.HubURL || hubProjectUID != observed.HubProjectUID) {
+			return nil, attachmentError(409, "attachment_route_changed")
+		}
+		if reuseVersion == nil {
+			return patch, nil
+		}
+		existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion}, origin, localOrigins)
+		if err != nil || existingID != "" {
+			return map[string]jsontext.Value{}, err
+		}
+		return patch, nil
+	}
 }

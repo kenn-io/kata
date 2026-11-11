@@ -2,21 +2,64 @@ package daemon_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"uuid"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestAttachmentWriteDuringFederationEnable(t *testing.T) {
+	for _, operation := range []string{"upload", "link"} {
+		t.Run(operation, func(t *testing.T) {
+			env, vault := attachmentEnv(t)
+			project, issue := seedProjectAndIssue(t, env)
+			seedLinkFile(vault)
+			var once sync.Once
+			enabled := make(chan error, 1)
+			vault.BeforeResponse = func(method, path string) {
+				if (operation == "upload" && method == http.MethodPost && path == "/api/v1/uploads") || (operation == "link" && method == http.MethodGet && path == "/api/v1/path") {
+					once.Do(func() {
+						_, err := env.DB.EnableProjectFederation(t.Context(), project.ID, "operator")
+						enabled <- err
+					})
+				}
+			}
+			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.UID)
+			var status int
+			var raw []byte
+			var err error
+			if operation == "upload" {
+				status, raw = attachmentUpload(t, env, endpoint, "file.pdf", strings.NewReader("fixture"))
+			} else {
+				status, raw, err = postAttachmentLink(t, env, endpoint+"/links", `{"path":"/reports/report.pdf","actor":"operator"}`)
+				require.NoError(t, err)
+			}
+			require.NoError(t, <-enabled)
+			if status == http.StatusOK {
+				var out api.AddAttachmentResponseBody
+				require.NoError(t, json.Unmarshal(raw, &out))
+				require.Equal(t, env.DB.InstanceUID(), out.Attachment.Origin, string(raw))
+			} else {
+				stored, err := env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.NotContains(t, stored.Metadata, "attachment.")
+			}
+		})
+	}
+}
 
 type failingDocbankBindingStore struct {
 	db.Storage

@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -162,7 +161,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 				e.Origin = cfg.DB.InstanceUID()
 			}
 		}
-		return saveAttachment(ctx, cfg, iss.ProjectID, iss, actor, e, nil)
+		return saveAttachment(ctx, cfg, iss.ProjectID, iss, actor, e, nil, binding)
 	})
 	huma.Register(h, huma.Operation{OperationID: "attachmentContent", Method: "GET", Path: attachmentPath + "/{attachment_id}/content", Responses: map[string]*huma.Response{"200": {Description: "Attachment content.", Content: binaryContent("*/*")}}}, func(ctx context.Context, in *api.AttachmentReadRequest) (*huma.StreamResponse, error) {
 		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -236,7 +235,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 	})
 }
 
-func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string, e metadata.Attachment, reuseVersion *uuid.UUID) (*api.AddAttachmentResponse, error) {
+func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string, e metadata.Attachment, reuseVersion *uuid.UUID, observed *db.FederationBinding) (*api.AddAttachmentResponse, error) {
 	id, err := uid.New()
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -256,19 +255,8 @@ func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss 
 			return nil, internalAPIError(err)
 		}
 		localOrigins = append(localOrigins, cfg.DB.InstanceUID())
-		// Recheck under the metadata write transaction so concurrent retries
-		// cannot each observe an absent reference and create a second one.
-		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
-			existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion}, e.Origin, localOrigins)
-			if err != nil {
-				return nil, err
-			}
-			if existingID != "" {
-				return map[string]jsontext.Value{}, nil
-			}
-			return patch, nil
-		})
 	}
+	ctx = db.WithMetadataPatchHook(ctx, attachmentPatchHook(patch, observed, reuseVersion, e.Origin, localOrigins))
 	res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor, Patch: patch})
 	if errors.Is(err, db.ErrFederatedReadOnly) {
 		return nil, federationReadOnlyError(err)
