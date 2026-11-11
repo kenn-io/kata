@@ -82,6 +82,9 @@ func TestRecurringDeliveryMigrationPostgres(t *testing.T) {
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
 	require.Equal(t, db.CurrentSchemaVersion(), version)
+	var indexExists bool
+	require.NoError(t, upgraded.QueryRowContext(ctx, `SELECT to_regclass('recurring_delivery_upgrade.idx_issues_recurring_delivery') IS NOT NULL`).Scan(&indexExists))
+	require.True(t, indexExists)
 	rows, err := upgraded.RecurringCronDelivery(ctx, db.CronDeliveryQuery{ProjectID: p.ID, JobUID: job.UID}, time.Now())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)

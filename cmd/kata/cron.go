@@ -623,6 +623,7 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 }
 
 func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID int64) ([]byte, error) {
+	include := "delivery"
 	if o.resource == "job" && (o.action == "list" || o.action == "show") {
 		if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionCronDelivery, "cron job delivery"); err != nil {
 			return nil, err
@@ -630,14 +631,12 @@ func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID in
 	}
 	switch {
 	case o.resource == "job" && o.action == "list":
-		include := "delivery"
 		response, err := c.ListCronJobsWithResponse(a.ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projectID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &o.includeDeleted, Include: &include}})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}
 		return cronCLIResponse(response.StatusCode, response.Body, err)
 	case o.resource == "job" && o.action == "show":
-		include := "delivery"
 		response, err := c.ShowCronJobWithResponse(a.ctx, &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: o.identity}, Query: &generated.ShowCronJobQuery{Include: &include}})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)

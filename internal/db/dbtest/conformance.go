@@ -51,6 +51,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "recurring delivery durable scan", run: checkRecurringDeliveryDurableScan},
 	{name: "recurring delivery status", methods: []string{"RecurringCronDelivery"}, run: checkRecurringDeliveryStatus},
 	{name: "recurring delivery evidence", runWithBackend: checkRecurringDeliveryEvidence},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
