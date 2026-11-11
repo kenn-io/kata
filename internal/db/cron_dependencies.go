@@ -40,6 +40,15 @@ func CheckCronDependencies(ctx context.Context, q interface {
 	if err := check("cron_workflows", "workflow", definition.Action.WorkflowUID); err != nil {
 		return err
 	}
+	if definition.Action.WorkflowUID != "" {
+		var document string
+		if err := q.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE project_id=$1 AND uid=$2`, projectID, definition.Action.WorkflowUID).Scan(&document); err != nil {
+			return err
+		}
+		if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
+			return fmt.Errorf("%w: workflow dependency is unsupported: %v", cron.ErrInvalid, err)
+		}
+	}
 	if cron.IsRecurringIssueJob(definition) {
 		return check("issues", "parent issue", definition.Issue.ParentUID)
 	}

@@ -256,6 +256,11 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 			if err := validator.validateLocalReference(ctx, project, ref.kind, *ref.id, *ref.event); err != nil {
 				return err
 			}
+			if ref.kind == "workflow" {
+				if err := checkRunnableWorkflowRevision(ctx, tx, a.Postgres, project.ID, *ref.id, *ref.event); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if value.IssueUID == nil {
@@ -267,6 +272,38 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 		return fmt.Errorf("%w: issue reference does not belong to project", cron.ErrInvalid)
 	}
 	return err
+}
+
+// A run may name an older revision, including one retained only by a snapshot.
+// Check that exact document without changing the historical reference rules.
+func checkRunnableWorkflowRevision(ctx context.Context, tx *sql.Tx, postgres bool, projectID int64, workflowUID, eventUID string) error {
+	var document string
+	err := tx.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE project_id=$1 AND uid=$2 AND definition_event_uid=$3`, projectID, workflowUID, eventUID).Scan(&document)
+	if errors.Is(err, sql.ErrNoRows) {
+		var payload string
+		err = tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, projectID, eventUID).Scan(&payload)
+		if errors.Is(err, sql.ErrNoRows) {
+			predicate := `json_extract(payload,'$.uid')=$2 AND json_extract(payload,'$.definition_event_uid')=$3`
+			if postgres {
+				predicate = `payload::jsonb->>'uid'=$2 AND payload::jsonb->>'definition_event_uid'=$3`
+			}
+			//nolint:gosec // The predicate is selected from two fixed backend expressions.
+			err = tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE project_id=$1 AND type='cron.workflow.snapshot' AND `+predicate+` ORDER BY id DESC LIMIT 1`, projectID, workflowUID, eventUID).Scan(&payload)
+		}
+		if err == nil {
+			var body CronDefinitionEvent
+			if err = json.Unmarshal([]byte(payload), &body); err == nil {
+				document = string(body.Definition)
+			}
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
+		return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
+	}
+	return nil
 }
 
 func (a CronSQL) insertCronRunEvent(ctx context.Context, tx *sql.Tx, project Project, value CronRun, actor string) (Event, error) {

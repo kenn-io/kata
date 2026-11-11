@@ -590,6 +590,21 @@ unknown, or failed advertisements remain distinct outcomes. This is an ordinary 
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
 
+### Held legacy workflows
+
+Older databases can contain workflows with a reserved `argv` step or a null
+definition, steps array, step, or step kind. Kata preserves these documents and
+their history during owner backup, restore, and SQLite upgrades. They remain
+unavailable to adapters and cannot be used in new jobs or runs. Workflow lists
+and federation snapshots for the affected project can also fail while a held
+workflow remains.
+
+To recover, keep an [owner backup](../operations/backup-restore.md#full-backup)
+and find the old workflow UID and its evidence in the JSONL. Create a supported
+workflow with a new UID, then update affected jobs to use it. The original UID and
+its evidence remain held; do not reuse that UID. The remaining work for argv
+support is tracked in [issue 1072](https://github.com/kenn-io/kata/issues/1072).
+
 ### Upgrade limits
 
 These limits apply to projects with cron data and the adapters that consume
