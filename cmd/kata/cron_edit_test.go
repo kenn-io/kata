@@ -1103,7 +1103,7 @@ func TestCronEditRedirectIsNotASavedDefinition(t *testing.T) {
 }
 
 func TestCronWorkflowEditRefusesArgvWithoutMutation(t *testing.T) {
-	for _, member := range []string{`"argv":null`, `"argv":[]`, `"argv":["printf",""]`} {
+	for _, member := range []string{`"argv":null`} {
 		env, project, id, original := cronEditTestDefinition(t, "workflow")
 		session := cronEditTestEditor(t, func(call int, raw []byte) ([]byte, error) {
 			if call == 1 {

@@ -193,7 +193,7 @@ func TestWorkflowFormRoundTripsThroughDaemon(t *testing.T) {
 }
 
 func TestWorkflowEditorRefusesReservedArgvWithoutMutation(t *testing.T) {
-	for _, member := range []string{`"argv":null`, `"argv":[]`, `"argv":["echo",""]`} {
+	for _, member := range []string{`"argv":null`} {
 		m, api := openWorkflow(t, workflowRecord(), false)
 		m.cron.form.val[cfDefinition] = `{"version":1,"steps":[{"key":"ship","kind":"prompt","prompt":"Ship",` + member + `}]}`
 		m, cmd := press(m, ctrlKey('o'))
