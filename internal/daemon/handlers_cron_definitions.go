@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"strings"
@@ -258,9 +260,15 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		return out, nil
 	}
 	huma.Register(h, huma.Operation{OperationID: "createCronWorkflow", Method: http.MethodPost, Path: path, DefaultStatus: 201}, func(ctx context.Context, in *api.CreateCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+		if err := decodeCronWorkflowBody(in.RawBody, &in.Body); err != nil {
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", false)
+		}
 		return put(ctx, in.ProjectID, "", in.Body, false)
 	})
 	huma.Register(h, huma.Operation{OperationID: "replaceCronWorkflow", Method: http.MethodPut, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.ReplaceCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+		if err := decodeCronWorkflowBody(in.RawBody, &in.Body); err != nil {
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false)
+		}
 		return put(ctx, in.ProjectID, in.UID, in.Body, false)
 	})
 	huma.Register(h, huma.Operation{OperationID: "showCronWorkflow", Method: http.MethodGet, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.CronDefinitionRequest) (*api.CronWorkflowResponse, error) {
@@ -311,4 +319,20 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 			return put(ctx, in.ProjectID, in.UID, api.PutCronWorkflowBody{Actor: in.Body.Actor, Name: value.Name, Definition: api.CronWorkflowDefinitionFrom(value.Definition), ExpectedEventUID: in.Body.ExpectedEventUID}, action.deleted)
 		})
 	}
+}
+
+// Parse the original definition before typed input can erase member presence.
+func decodeCronWorkflowBody(raw []byte, body *api.PutCronWorkflowBody) error {
+	var envelope struct {
+		Definition jsontext.Value `json:"definition"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return errors.Join(cron.ErrInvalid, err)
+	}
+	definition, err := cron.ParseWorkflow(envelope.Definition)
+	if err != nil {
+		return err
+	}
+	body.Definition = api.CronWorkflowDefinitionFrom(definition)
+	return nil
 }
