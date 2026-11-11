@@ -4910,8 +4910,6 @@ func (m MoveIssueResponseBody) Validate() error {
 
 type MoveIssuesCompleted struct {
 	Code     *string `json:"code,omitempty"`
-	EventID  *int64  `json:"event_id,omitempty"`
-	Proof    *string `json:"proof,omitempty"`
 	Result   string  `json:"result" validate:"required"`
 	Revision *int64  `json:"revision,omitempty"`
 	UID      *string `json:"uid,omitempty"`
@@ -5023,7 +5021,6 @@ type MoveIssuesResult struct {
 	Message         *string `json:"message,omitempty"`
 	NewShortID      *string `json:"new_short_id,omitempty"`
 	OldShortID      *string `json:"old_short_id,omitempty"`
-	Proof           *string `json:"proof,omitempty"`
 	Ref             string  `json:"ref" validate:"required"`
 	Result          string  `json:"result" validate:"required"`
 	Revision        *int64  `json:"revision,omitempty"`

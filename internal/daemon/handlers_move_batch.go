@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"net/http"
 	"strings"
@@ -130,10 +129,6 @@ func finishUnchangedMove(ctx context.Context, store db.Storage, item moveBatchIt
 }
 
 func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
-	proofKey := make([]byte, 32)
-	if _, err := rand.Read(proofKey); err != nil {
-		panic(err)
-	}
 	return func(ctx context.Context, in *api.MoveIssuesRequest) (out *api.MoveIssuesResponse, resultErr error) {
 		started := time.Now()
 		if in.Body.DryRun {
@@ -160,12 +155,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		}
 		if len(in.Body.Completed) != in.Body.StartIndex {
 			return nil, api.NewError(400, "validation", "completed must contain one outcome for each prior item", "", nil)
-		}
-		for _, completed := range in.Body.Completed {
-			if completed.Result == "moved" && !validMoveProof(proofKey, cfg.DB.InstanceUID(), completed, actor) {
-				err := api.NewError(http.StatusBadRequest, "invalid_continuation", "continuation proof is invalid or expired", "Keep the earlier results and start a new batch for the remaining items.", nil)
-				return nil, moveBatchError(err, nil, in.Body.StartIndex)
-			}
 		}
 		if in.Body.Subtree && len(in.Body.Items) > 1 {
 			return nil, api.NewError(400, "validation", "subtree move accepts one item", "", nil)
@@ -235,7 +224,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			items[j].move = db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: target.ID, IfMatchRev: rev, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: authorize, BindContext: func(ctx context.Context) context.Context { return bindBatchItemHostContext(ctx, itemCtx) }}
 		}
 		cache := &claimClientCache{}
-		succeeded, priorMoves, conflicts, err := seedMoveBatchContinuations(ctx, cfg, in, items, results)
+		succeeded, priorMoves, conflicts, err := seedMoveBatchContinuations(cfg.DB, in, items, results)
 		if err != nil {
 			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
 		}
@@ -245,28 +234,40 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 			item, expected := items[j], in.Body.Items[j].ExpectedRevision
 			prior := priorMoves[item.issue.ID]
-			if expected != 0 && expected != item.issue.Revision && (prior.targetID != item.target.ID || prior.revision != item.issue.Revision || expected != prior.revision-1) {
+			if expected != 0 && expected != item.issue.Revision && (!prior.moved || prior.targetUID != item.target.UID || prior.revision != item.issue.Revision || expected != prior.revision-1) {
 				moveBatchRefusal(&results[j], &db.RevisionConflictError{CurrentRevision: item.issue.Revision})
 			}
 		}
 		seen := map[int64][]int{}
-		for j := range items {
+		for j := in.Body.StartIndex; j < n; j++ {
 			if results[j].Result == "" {
 				seen[items[j].issue.ID] = append(seen[items[j].issue.ID], j)
 			}
 		}
+		conflicted := func(id int64, indexes []int) bool {
+			target := priorMoves[id].targetUID
+			if conflicts[id] {
+				return true
+			}
+			for _, j := range indexes {
+				if results[j].Result != "" {
+					continue
+				}
+				if target == "" {
+					target = items[j].target.UID
+				} else if target != items[j].target.UID {
+					return true
+				}
+			}
+			return false
+		}
 		var conflictPreviews []int
-		for _, indexes := range seen {
-			conflict := false
-			for _, j := range indexes {
-				conflict = conflict || items[j].target.ID != items[indexes[0]].target.ID
-			}
-			if !conflict {
-				continue
-			}
-			for _, j := range indexes {
-				if moveBatchShouldPreview(&results[j], items[j], in.Body.Subtree) {
-					conflictPreviews = append(conflictPreviews, j)
+		for id, indexes := range seen {
+			if conflicted(id, indexes) {
+				for _, j := range indexes {
+					if moveBatchShouldPreview(&results[j], items[j], in.Body.Subtree) {
+						conflictPreviews = append(conflictPreviews, j)
+					}
 				}
 			}
 		}
@@ -274,40 +275,13 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
 		}
 		checkMoveBatchClaims(ctx, cfg, items, results, conflictPreviews, actor, cache, !in.Body.DryRun)
-		for _, indexes := range seen {
-			var target int64
-			conflict := false
-			for _, j := range indexes {
-				if results[j].Result != "" {
-					continue
-				}
-				if target == 0 {
-					target = items[j].target.ID
-				} else {
-					conflict = conflict || items[j].target.ID != target
-				}
-			}
-			if conflict {
+		for id, indexes := range seen {
+			if conflicted(id, indexes) {
 				for _, j := range indexes {
 					if results[j].Result == "" {
 						results[j].Result, results[j].Code, results[j].Message = "refused", "conflicting_target", "issue requested for different targets"
 					}
 				}
-			}
-		}
-		var conflictedPreviews []int
-		for j := in.Body.StartIndex; j < n; j++ {
-			if results[j].Result == "" && conflicts[items[j].issue.ID] && len(items[j].tree) == 0 && moveBatchShouldPreview(&results[j], items[j], in.Body.Subtree) {
-				conflictedPreviews = append(conflictedPreviews, j)
-			}
-		}
-		if err := previewMoveBatch(ctx, cfg.DB, items, results, conflictedPreviews); err != nil {
-			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
-		}
-		checkMoveBatchClaims(ctx, cfg, items, results, conflictedPreviews, actor, cache, !in.Body.DryRun)
-		for j := in.Body.StartIndex; j < n; j++ {
-			if results[j].Result == "" && conflicts[items[j].issue.ID] {
-				results[j].Result, results[j].Code, results[j].Message = "refused", "conflicting_target", "issue requested for different targets"
 			}
 		}
 		if in.Body.DryRun {
@@ -380,7 +354,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					r := &results[j]
 					r.Result, r.NewShortID, r.ShortIDExtended = "moved", item.Out.NewShortID, len(item.Out.NewShortID) > len(items[j].issue.ShortID)
 					r.EventID, r.Revision = item.Out.EventID, item.Out.NewRevision
-					r.Proof = moveProof(proofKey, cfg.DB.InstanceUID(), r.EventID, r.UID, r.Revision, actor)
 					r.To, r.Descendants = items[j].target.Name+"#"+item.Out.NewShortID, item.Out.Issues[1:]
 					succeeded[items[j].issue.ID] = *r
 					events = append(events, item.Out.Events...)

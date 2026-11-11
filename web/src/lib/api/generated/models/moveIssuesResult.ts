@@ -14,7 +14,6 @@ export interface MoveIssuesResult {
   message?: string
   new_short_id?: string
   old_short_id?: string
-  proof?: string
   ref: string
   result: string
   revision?: number

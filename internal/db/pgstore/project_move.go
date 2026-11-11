@@ -185,7 +185,7 @@ SET project_id = $1 WHERE issue_id = $2`,
 		payloadFields := map[string]any{
 			"issue_uid": current.UID, "from_project_uid": source.UID,
 			"from_short_id": current.ShortID, "to_project_uid": target.UID,
-			"to_short_id": newShortID, "updated_at": updatedAt, "revision": newRevision,
+			"to_short_id": newShortID, "updated_at": updatedAt,
 		}
 		var federated bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, source.ID).Scan(&federated); err != nil {

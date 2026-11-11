@@ -1870,8 +1870,6 @@ type MoveIssuesCompleted struct {
 	Code     string `json:"code,omitempty"`
 	UID      string `json:"uid,omitempty"`
 	Revision int64  `json:"revision,omitempty"`
-	EventID  int64  `json:"event_id,omitempty"`
-	Proof    string `json:"proof,omitempty"`
 }
 
 // MoveIssuesItem selects an issue and its destination project.
@@ -1900,7 +1898,6 @@ type MoveIssuesResult struct {
 	ShortIDExtended bool       `json:"short_id_extended"`
 	EventID         int64      `json:"event_id,omitempty"`
 	Revision        int64      `json:"revision,omitempty"`
-	Proof           string     `json:"proof,omitempty"`
 	Descendants     []db.Issue `json:"descendants,omitempty"`
 }
 

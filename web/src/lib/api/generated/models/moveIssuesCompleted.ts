@@ -4,8 +4,6 @@
 
 export interface MoveIssuesCompleted {
   code?: string
-  event_id?: number
-  proof?: string
   result: string
   revision?: number
   uid?: string

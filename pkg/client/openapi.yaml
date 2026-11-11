@@ -4655,11 +4655,6 @@ components:
       properties:
         code:
           type: string
-        event_id:
-          format: int64
-          type: integer
-        proof:
-          type: string
         result:
           type: string
         revision:
@@ -4760,8 +4755,6 @@ components:
         new_short_id:
           type: string
         old_short_id:
-          type: string
-        proof:
           type: string
         ref:
           type: string

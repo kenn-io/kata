@@ -1,13 +1,6 @@
 package daemon
 
 import (
-	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json/v2"
-	"errors"
-	"fmt"
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
@@ -15,45 +8,23 @@ import (
 	"go.kenn.io/kata/internal/shortid"
 )
 
-func moveProof(key []byte, instance string, eventID int64, uid string, revision int64, actor string) string {
-	mac := hmac.New(sha256.New, key)
-	_, _ = fmt.Fprintf(mac, "%q:%q:%d:%q:%d:%q", "kata-move-continuation-v1", instance, eventID, uid, revision, actor)
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-func validMoveProof(key []byte, instance string, completed api.MoveIssuesCompleted, actor string) bool {
-	proof, err := hex.DecodeString(completed.Proof)
-	if err != nil {
-		return false
-	}
-	expected, _ := hex.DecodeString(moveProof(key, instance, completed.EventID, completed.UID, completed.Revision, actor))
-	return hmac.Equal(proof, expected)
-}
-
 type moveBatchPrior struct {
-	targetID int64
-	revision int64
+	targetUID string
+	revision  int64
+	moved     bool
 }
 
-func transientMoveBatchError(err error) bool {
-	return err != nil && moveIssueAPIError(err).(*api.APIError).Status >= 500
-}
-
-func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult) (map[int64]api.MoveIssuesResult, map[int64]moveBatchPrior, map[int64]bool, error) {
+func seedMoveBatchContinuations(store db.Storage, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult) (map[int64]api.MoveIssuesResult, map[int64]moveBatchPrior, map[int64]bool, error) {
 	succeeded := map[int64]api.MoveIssuesResult{}
 	moves := map[int64]moveBatchPrior{}
 	conflicts := map[int64]bool{}
 	pending := map[string]db.Issue{}
-	pendingIndexes := map[string][]int{}
 	for j := in.Body.StartIndex; j < len(items); j++ {
 		if results[j].Result == "" {
-			uid := strings.ToUpper(items[j].issue.UID)
-			pending[uid] = items[j].issue
-			pendingIndexes[uid] = append(pendingIndexes[uid], j)
+			pending[strings.ToUpper(items[j].issue.UID)] = items[j].issue
 		}
 	}
 	for j, completed := range in.Body.Completed {
-		itemCtx := items[j].ctx
 		switch completed.Result {
 		case "moved", "unchanged", "refused":
 		default:
@@ -64,123 +35,53 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 		if !relevant || (completed.Result == "refused" && completed.Code != "conflicting_target") {
 			continue
 		}
-		input := in.Body.Items[j]
-		targetUID := input.ToProjectUID
-		if targetUID == "" {
-			targetUID = in.Body.ToProjectUID
-		}
-		if _, err := authorizeHostProjectScope(itemCtx, nil, []string{targetUID}, false); err != nil {
-			if transientMoveBatchError(err) {
-				return nil, nil, nil, err
-			}
-			continue
-		}
-		target, err := activeProjectByUID(itemCtx, cfg.DB, targetUID)
+		itemCtx := items[j].ctx
+		ref, err := shortid.Parse(in.Body.Items[j].Ref)
 		if err != nil {
-			if transientMoveBatchError(err) {
+			continue
+		}
+		if ref.ULID == "" {
+			var project db.Project
+			if ref.Project != "" {
+				project, err = store.ProjectByNameIncludingArchived(itemCtx, ref.Project)
+			} else {
+				project, err = store.ProjectByID(itemCtx, in.Body.DefaultProjectID)
+			}
+			if err == nil {
+				_, err = authorizeHostProjectScope(itemCtx, []int64{project.ID}, nil, false)
+			}
+			if err == nil {
+				err = authorizeIssueScopedProject(itemCtx, project)
+			}
+		}
+		if err == nil {
+			var resolved db.Issue
+			resolved, _, err = resolveMoveBatchIssue(itemCtx, store, in.Body.DefaultProjectID, in.Body.Items[j].Ref)
+			if err == nil && resolved.ID != issue.ID {
+				continue
+			}
+		}
+		if err != nil {
+			if moveIssueAPIError(err).(*api.APIError).Status >= 500 {
 				return nil, nil, nil, err
 			}
 			continue
 		}
-		current, _, err := resolveMoveBatchIssue(itemCtx, cfg.DB, 0, issue.UID)
-		if transientMoveBatchError(err) {
-			return nil, nil, nil, err
-		}
-		if err != nil || current.ID != issue.ID {
+		id := issue.ID
+		if completed.Result == "refused" {
+			if completed.Code == "conflicting_target" {
+				conflicts[id] = true
+			}
 			continue
 		}
-		if completed.Result == "moved" {
-			valid, err := verifyMoveBatchEvent(itemCtx, cfg.DB, in.Body.DefaultProjectID, input, completed, current, target)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			if !valid {
-				continue
-			}
-			for _, k := range pendingIndexes[strings.ToUpper(current.UID)] {
-				expected := in.Body.Items[k].ExpectedRevision
-				if items[k].target.ID != target.ID && (expected == 0 || expected == current.Revision) {
-					conflicts[current.ID] = true
-					break
-				}
-			}
-			if current.Revision != completed.Revision || current.ProjectID != target.ID {
-				continue
-			}
-			items[j] = moveBatchItem{ctx: itemCtx, issue: current, target: target}
-			results[j].Result = ""
-			moves[current.ID] = moveBatchPrior{targetID: target.ID, revision: completed.Revision}
-			succeeded[current.ID] = api.MoveIssuesResult{Result: "moved", Revision: completed.Revision}
-			continue
+		target := in.Body.Items[j].ToProjectUID
+		if target == "" {
+			target = in.Body.ToProjectUID
 		}
-		resolved, _, err := resolveMoveBatchIssue(itemCtx, cfg.DB, in.Body.DefaultProjectID, input.Ref)
-		if transientMoveBatchError(err) {
-			return nil, nil, nil, err
-		}
-		if err != nil || resolved.ID != current.ID || (input.ExpectedRevision != 0 && input.ExpectedRevision != current.Revision) {
-			continue
-		}
-		if completed.Result == "refused" && completed.Code == "conflicting_target" {
-			conflicts[current.ID] = true
-			continue
-		}
-		if completed.Result == "unchanged" && current.ProjectID == target.ID {
-			items[j] = moveBatchItem{ctx: itemCtx, issue: current, target: target}
-			results[j].Result = ""
-			succeeded[current.ID] = api.MoveIssuesResult{Result: "unchanged", Revision: current.Revision}
+		moves[id] = moveBatchPrior{targetUID: target, revision: completed.Revision, moved: completed.Result == "moved"}
+		if issue.Revision == completed.Revision {
+			succeeded[id] = api.MoveIssuesResult{Result: completed.Result, Revision: completed.Revision}
 		}
 	}
 	return succeeded, moves, conflicts, nil
-}
-
-func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectID int64, input api.MoveIssuesItem, completed api.MoveIssuesCompleted, issue db.Issue, target db.Project) (bool, error) {
-	if completed.EventID <= 0 || completed.Revision <= 1 || (input.ExpectedRevision != 0 && input.ExpectedRevision != completed.Revision-1) {
-		return false, nil
-	}
-	events, err := store.EventsAfter(ctx, db.EventsAfterParams{AfterID: completed.EventID - 1, ThroughID: completed.EventID, IssueUID: issue.UID, Types: []string{"issue.moved"}, Limit: 1})
-	if err != nil {
-		return false, err
-	}
-	if len(events) != 1 || events[0].ID != completed.EventID || events[0].OriginInstanceUID != store.InstanceUID() {
-		return false, nil
-	}
-	var payload struct {
-		FromProjectUID string `json:"from_project_uid"`
-		ToProjectUID   string `json:"to_project_uid"`
-		Revision       int64  `json:"revision"`
-	}
-	if err := json.Unmarshal([]byte(events[0].Payload), &payload); err != nil || payload.ToProjectUID != target.UID || payload.Revision != completed.Revision {
-		return false, nil
-	}
-	ref, err := shortid.Parse(input.Ref)
-	if err != nil {
-		return false, nil
-	}
-	if ref.ULID != "" {
-		return strings.EqualFold(ref.ULID, issue.UID), nil
-	}
-	var project db.Project
-	if ref.Project != "" {
-		project, err = store.ProjectByNameIncludingArchived(ctx, ref.Project)
-	} else {
-		project, err = store.ProjectByID(ctx, defaultProjectID)
-	}
-	if err != nil {
-		if transientMoveBatchError(err) {
-			return false, err
-		}
-		return false, nil
-	}
-	if _, err := authorizeHostProjectScope(ctx, []int64{project.ID}, []string{payload.FromProjectUID}, false); err != nil {
-		if transientMoveBatchError(err) {
-			return false, err
-		}
-		return false, nil
-	}
-	// Resolve live or retained aliases to the stable UID, rejecting reassignment.
-	resolved, err := store.IssueByShortID(ctx, project.ID, ref.ShortID, db.IncludeDeletedNo)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return false, err
-	}
-	return err == nil && resolved.UID == issue.UID, nil
 }
