@@ -14,31 +14,44 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// Unsupported imported rows fail on reads, lists and snapshot construction,
-// including tombstones. Test-local SQL does not define production state.
+// Held rows are omitted from ordinary lists but remain fenced from reads and
+// snapshots, including tombstones. Test-local SQL does not define production state.
 func checkArgvCompatStoredReads(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Legacy", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "first", Kind: "command", Command: "true"}}}})
 	require.NoError(t, err)
+	healthy, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Replacement", Actor: "worker", Definition: workflow.Definition})
+	require.NoError(t, err)
 	q := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
-	for _, deleted := range []any{nil, "2026-11-08T12:00:00Z"} {
-		_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=$2 WHERE uid=$3`, `{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, deleted, workflow.UID)
-		require.NoError(t, err)
-		_, err = store.CronWorkflow(ctx, project.ID, workflow.UID)
-		require.Error(t, err)
-		_, err = store.ListCronWorkflows(ctx, db.CronList{ProjectID: project.ID, IncludeDeleted: true})
-		require.Error(t, err)
-		tx, err := q.BeginTx(ctx, nil)
-		require.NoError(t, err)
-		_, snapshotErr := db.CronDefinitionSnapshots(ctx, tx, project)
-		require.NoError(t, tx.Rollback())
-		require.Error(t, snapshotErr)
+	for _, document := range []string{`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, `null`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`} {
+		for _, deleted := range []any{nil, "2026-11-08T12:00:00Z"} {
+			_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=$2 WHERE uid=$3`, document, deleted, workflow.UID)
+			require.NoError(t, err)
+			_, err = store.CronWorkflow(ctx, project.ID, workflow.UID)
+			require.Error(t, err)
+			listed, err := store.ListCronWorkflows(ctx, db.CronList{ProjectID: project.ID, IncludeDeleted: true})
+			require.NoError(t, err)
+			require.Len(t, listed, 1)
+			require.Equal(t, healthy.UID, listed[0].UID)
+			tx, err := q.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			snapshot, snapshotErr := db.CronDefinitionSnapshots(ctx, tx, project)
+			require.NoError(t, tx.Rollback())
+			require.Error(t, snapshotErr)
+			require.Empty(t, snapshot)
+		}
 	}
+	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, `{"version":1,"unexpected":true}`, workflow.UID)
+	require.NoError(t, err)
+	_, err = store.ListCronWorkflows(ctx, db.CronList{ProjectID: project.ID, IncludeDeleted: true})
+	require.Error(t, err, "unrelated decode errors must remain visible")
+	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, `{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, workflow.UID)
+	require.NoError(t, err)
 	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET deleted_at=NULL WHERE uid=$1`, workflow.UID)
 	require.NoError(t, err)
 	olderUID, err := uid.New()
@@ -90,6 +103,15 @@ func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage) erro
 	require.NoError(t, err)
 	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, other.ID, other.UID, fold, nil), "another project's history does not block this project")
 	require.NoError(t, tx.Rollback())
+	for _, document := range []string{`null`, `{"steps":[]}`} {
+		bad := argvCompatRemoteWorkflow(t, project, origin, document)
+		projection := db.FoldEvents([]db.FoldEvent{{UID: bad.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: bad.Type, HLCPhysicalMS: bad.HLCPhysicalMS, Payload: bad.Payload}})
+		tx, err = q.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		err = db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, projection, nil)
+		require.ErrorIs(t, err, db.ErrFederationIngestValidation, "unrepresentable historical document %s must fence replay before SQL", document)
+		require.NoError(t, tx.Rollback())
+	}
 	return nil
 }
 
@@ -159,4 +181,142 @@ func checkArgvCompatRemoteRollback(t *testing.T, store db.Storage) error {
 	require.ErrorIs(t, err, db.ErrNotFound)
 	requireCursors()
 	return nil
+}
+
+// Complete retained history and projections fence direct reads, independent of page cursors.
+func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "feature-project")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "other-feature-project")
+	require.NoError(t, err)
+	workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Example", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "command", Command: "echo argv"}}}})
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(ctx, project.ID, "worker")
+	require.NoError(t, err)
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	})
+	features, err := db.ProjectRequiredEventFeatures(ctx, q, project.UID)
+	require.NoError(t, err)
+	require.Equal(t, db.CronEventFeature, features)
+	// Warm the native-job cache before introducing retained evidence.
+	parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Parent", Author: "worker"})
+	require.NoError(t, err)
+	job := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "worker", Message: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "latest"}
+	_, _, err = store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Native", Actor: "worker", Definition: job})
+	require.NoError(t, err)
+	_, err = db.ProjectRequiredEventFeatures(ctx, q, project.UID)
+	require.NoError(t, err)
+	legacy := `{"version":1,"steps":[{"kind":"command","command":"echo argv"}]}`
+	supported := `{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`
+	held := []string{`{"version":1,"steps":[{"kind":"argv"}]}`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`}
+	for _, deleted := range []any{nil, "2026-11-08T12:00:00Z"} {
+		_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=$2 WHERE uid=$3`, supported, deleted, workflow.UID)
+		require.NoError(t, err)
+		features, err = db.ProjectRequiredEventFeatures(ctx, q, project.UID)
+		require.NoError(t, err)
+		require.Equal(t, db.MergeEventFeatures(db.CronEventFeature, db.CronWorkflowArgvEventFeature), features)
+		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
+		require.NoError(t, err)
+		for _, definition := range held {
+			_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, definition, workflow.UID)
+			require.NoError(t, err)
+			_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		}
+	}
+	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=NULL WHERE uid=$2`, legacy, workflow.UID)
+	require.NoError(t, err)
+	for _, kind := range []string{"cron.workflow.created", "cron.workflow.updated", "cron.workflow.deleted", "cron.workflow.restored", "cron.workflow.snapshot"} {
+		event := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), supported)
+		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, kind, "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
+		require.NoError(t, err)
+		features, err = db.ProjectRequiredEventFeatures(ctx, q, project.UID)
+		require.NoError(t, err)
+		require.Contains(t, features, db.CronWorkflowArgvEventFeature)
+		require.ErrorIs(t, db.RequireEventFeatures(db.CronEventFeature+","+db.CronWorkflowArgvEventFeature+"_extra", features), db.ErrUnsupportedEventFeatures)
+		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: 1 << 60, Limit: 1, Features: db.SupportedEventFeatures})
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		_, err = q.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, `{"definition":null}`, event.EventUID)
+		require.NoError(t, err)
+		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		_, err = q.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, event.EventUID)
+		require.NoError(t, err)
+	}
+	features, err = db.ProjectRequiredEventFeatures(ctx, q, other.UID)
+	require.NoError(t, err)
+	require.Empty(t, features)
+	features, err = db.ProjectRequiredEventFeatures(ctx, q, project.UID)
+	require.NoError(t, err)
+	require.Equal(t, db.CronEventFeature, features)
+	return nil
+}
+
+// Destructive replacement must preserve unsupported retained history even when
+// the current workflow projection is a newer, readable definition.
+func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	for _, operation := range []string{"adopt", "reset", "conditional reset"} {
+		for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `{"version":1,"steps":null}`} {
+			project, err := store.CreateProject(ctx, "guard-"+uidForGuard(t))
+			require.NoError(t, err)
+			workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Current", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "command", Command: "true"}}}})
+			require.NoError(t, err)
+			event := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), definition)
+			var payload map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(event.Payload, &payload))
+			payload["uid"], err = json.Marshal(workflow.UID)
+			require.NoError(t, err)
+			raw, err := json.Marshal(payload)
+			require.NoError(t, err)
+			event = newRemoteEvent(t, project, nil, "cron.workflow.deleted", "worker", store.InstanceUID(), event.HLCPhysicalMS, raw)
+			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
+			require.NoError(t, err)
+			if operation == "adopt" {
+				target, err := uid.New()
+				require.NoError(t, err)
+				_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: target, ReplayHorizonEventID: 1, Actor: "worker"})
+			} else {
+				_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Enabled: true})
+				require.NoError(t, err)
+				if operation == "reset" {
+					err = store.ResetFederatedProject(ctx, project.ID, 20, 19)
+				} else {
+					err = store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, 20, 19, store.InstanceUID(), 0)
+				}
+			}
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, operation)
+			current, err := store.ProjectByID(ctx, project.ID)
+			require.NoError(t, err)
+			require.Equal(t, project.UID, current.UID)
+			_, err = store.CronWorkflow(ctx, project.ID, workflow.UID)
+			require.NoError(t, err)
+			events, err := store.EventsByUIDs(ctx, project.ID, []string{event.EventUID})
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			if operation == "adopt" {
+				_, err = store.FederationBindingByProject(ctx, project.ID)
+				require.ErrorIs(t, err, db.ErrNotFound)
+			} else {
+				binding, err := store.FederationBindingByProject(ctx, project.ID)
+				require.NoError(t, err)
+				require.NotEqual(t, int64(19), binding.PullCursorEventID)
+			}
+		}
+	}
+	return nil
+}
+
+func uidForGuard(t *testing.T) string {
+	t.Helper()
+	id, err := uid.New()
+	require.NoError(t, err)
+	return id
 }

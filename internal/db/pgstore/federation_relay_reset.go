@@ -142,3 +142,7 @@ func (b relayResetBackend) InsertRelayCursor(ctx context.Context, seed db.RelayC
 func (b relayResetBackend) ReserveAttributionUIReset(ctx context.Context, projectUID string) error {
 	return reserveAttributionUIResetTx(ctx, b.tx, projectUID)
 }
+
+func (b relayResetBackend) RequireLocalProjectWorkflows(ctx context.Context, projectUID string) error {
+	return db.RequireLocalProjectWorkflows(ctx, b.tx, projectUID)
+}

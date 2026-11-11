@@ -112,6 +112,10 @@ type RelayResetBackend interface {
 	RelayQuarantineOpen(ctx context.Context, projectID int64) (bool, error)
 	// ExternalRootBindingExists reports any external root binding row.
 	ExternalRootBindingExists(ctx context.Context, projectID int64) (bool, error)
+	// RequireLocalProjectWorkflows checks retained project workflow evidence.
+	RequireLocalProjectWorkflows(ctx context.Context, projectUID string) error
+	// UnemittedRelayEventEnvelopes returns exactly the event seeds a forward replaces.
+	UnemittedRelayEventEnvelopes(ctx context.Context, bindingUID string, epoch int64) ([]string, error)
 	// ValidateRelayResetEvents runs the backend's federation event validation
 	// over the decoded checkpoint events as a complete project replacement.
 	ValidateRelayResetEvents(projectUID string, events []RemoteEvent) error

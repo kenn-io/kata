@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -53,8 +54,27 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	resets, ok := store.(db.RelayResetStore)
 	require.True(t, ok)
 	signer := db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: signingKey}
+	_, _, err = store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: selected.ID, Name: "Checks", Actor: "member", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "check", Kind: "command", Command: "true"}}}})
+	require.NoError(t, err)
 	checkpoint, err := resets.CreateRelayReset(ctx, binding, signer)
 	require.NoError(t, err)
+	for _, section := range []string{"source", "entity"} {
+		for _, definition := range []string{`{"version":1,"steps":[{"key":"literal","kind":"argv"}]}`, `{"version":1,"steps":null}`} {
+			bad := checkpointWithWorkflowDefinition(t, checkpoint, selected, pin, signingKey, section, definition)
+			raw, err := json.Marshal(bad)
+			require.NoError(t, err)
+			require.NoError(t, writeMeta(ctx, db.RelayResetMetadataPrefix+selected.UID+"."+binding, string(raw)))
+			_, _, err = db.DecodeRootResetPayload(pin, bad.Snapshot)
+			require.NoError(t, err)
+			_, err = resets.CreateRelayReset(ctx, binding, signer)
+			require.Error(t, err, "cached content must be checked even when current rows are supported")
+			_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(ctx, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
+			require.Error(t, err, "held checkpoint cannot activate the next epoch")
+		}
+	}
+	rawCheckpoint, err := json.Marshal(checkpoint)
+	require.NoError(t, err)
+	require.NoError(t, writeMeta(ctx, db.RelayResetMetadataPrefix+selected.UID+"."+binding, string(rawCheckpoint)))
 	_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(ctx, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
 	require.NoError(t, err, "the spoke activates the prepared checkpoint")
 

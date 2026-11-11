@@ -43,7 +43,7 @@ func (t *relaySyncTurn) spent(batches int) bool {
 // syncRelayBinding runs one turn inside the existing per-project sync
 // coordination. The sole outbound connection carries both directions and
 // independent streams; each stream loop stops at the turn budget.
-func syncRelayBinding(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, turn *relaySyncTurn) error {
+func syncRelayBinding(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, turn *relaySyncTurn, pushThisTurn bool) error {
 	c := binding.RelayConfig
 	if err := c.Validate(store.InstanceUID()); err != nil {
 		return err
@@ -55,7 +55,7 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 	if err != nil {
 		return err
 	}
-	meta, err := client.ProjectFederation(ctx, remoteProjectID)
+	meta, peerFeatures, err := client.projectFederationFeatures(ctx, remoteProjectID)
 	if err != nil {
 		return err
 	}
@@ -66,6 +66,25 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 	handshake := meta.Relay
 	if handshake == nil || handshake.ProtocolVersion != db.RelayProtocolVersion || meta.ProjectUID != project.UID || project.UID != binding.HubProjectUID || handshake.BindingUID != c.BindingUID || handshake.UpstreamInstanceUID != c.UpstreamInstanceUID || handshake.Root.AuthorityUID != c.AuthorityUID || handshake.Root.ProjectUID != project.UID || !slices.Equal(handshake.HubPath, c.HubPath) {
 		return errors.New("relay metadata differs from the pinned project, hop or authority")
+	}
+	ctx = db.WithRelayPeerFeatures(ctx, c.BindingUID, peerFeatures)
+	if reader, ok := store.(db.RelayWorkflowFeatureReader); ok {
+		required, err := reader.RelayWorkflowRequiredFeatures(ctx, project.UID)
+		if err != nil {
+			return err
+		}
+		if err := db.RequireEventFeatures(peerFeatures, required); err != nil {
+			return err
+		}
+	}
+	if pushThisTurn {
+		if err := store.RecordFederationSyncPushStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
+			return err
+		}
+	} else {
+		if err := store.RecordFederationSyncPullStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
+			return err
+		}
 	}
 	transitions, err := relayRootTransitionPath(pin, handshake.Root, handshake.RootKeyTransitions)
 	if err != nil {
@@ -195,6 +214,9 @@ func syncRelayStreams(ctx context.Context, store db.Storage, binding db.Federati
 			}
 			if len(batch.Envelopes) == 0 {
 				break
+			}
+			if err := db.CheckRelayBatchFeatures(batch, db.SupportedEventFeatures); err != nil {
+				return err
 			}
 			accepted, err := store.AcceptRelayDeliveries(ctx, c.BindingUID, batch)
 			if err != nil {

@@ -17,8 +17,9 @@ type cronDefinitionReference struct {
 }
 type cronDefinitionIdentity struct{ kind, uid string }
 type cronReferenceIndex struct {
-	owners map[cronDefinitionIdentity]int64
-	events map[string]cronDefinitionReference
+	owners    map[cronDefinitionIdentity]int64
+	events    map[string]cronDefinitionReference
+	documents map[cronDefinitionReference]string
 }
 
 // Only relationship/document failures carry this marker. SQL query, scan,
@@ -38,7 +39,7 @@ func classifyCronReferenceError(err, validation error) error {
 }
 
 func newCronReferenceIndex() *cronReferenceIndex {
-	return &cronReferenceIndex{owners: map[cronDefinitionIdentity]int64{}, events: map[string]cronDefinitionReference{}}
+	return &cronReferenceIndex{owners: map[cronDefinitionIdentity]int64{}, events: map[string]cronDefinitionReference{}, documents: map[cronDefinitionReference]string{}}
 }
 func (idx *cronReferenceIndex) check(ref cronDefinitionReference) error {
 	if owner, known := idx.owners[cronDefinitionIdentity{ref.kind, ref.uid}]; known && owner != ref.projectID {
@@ -78,7 +79,7 @@ func cronRunReferences(projectID int64, run CronRun) ([]cronDefinitionReference,
 // a definition version. Ordinary unrelated event UIDs cannot serve as versions.
 func (idx *cronReferenceIndex) event(projectID int64, e FoldEvent) ([]cronDefinitionReference, error) {
 	if isCronDefinitionEvent(e.Type) {
-		_, value, err := parseCronDefinitionEvent(e)
+		body, value, err := parseCronDefinitionEvent(e)
 		if err != nil {
 			return nil, invalidCronReference(err)
 		}
@@ -86,8 +87,12 @@ func (idx *cronReferenceIndex) event(projectID int64, e FoldEvent) ([]cronDefini
 		if strings.HasPrefix(e.Type, "cron.job.") {
 			kind = "job"
 		}
-		if err := idx.add(cronDefinitionReference{projectID: projectID, kind: kind, uid: value.UID, event: value.DefinitionEventUID}); err != nil {
+		ref := cronDefinitionReference{projectID: projectID, kind: kind, uid: value.UID, event: value.DefinitionEventUID}
+		if err := idx.add(ref); err != nil {
 			return nil, err
+		}
+		if _, exists := idx.documents[ref]; !exists {
+			idx.documents[ref] = string(body.Definition)
 		}
 		if e.UID == value.DefinitionEventUID {
 			return nil, nil
@@ -208,7 +213,8 @@ func (v *CronReplayValidator) loadKnown(ctx context.Context, ref cronDefinitionR
 			table = "cron_workflows"
 		}
 		current := cronDefinitionReference{kind: ref.kind, uid: ref.uid}
-		err := v.tx.QueryRowContext(ctx, "SELECT project_id,definition_event_uid FROM "+table+" WHERE uid=$1", ref.uid).Scan(&current.projectID, &current.event)
+		var document string
+		err := v.tx.QueryRowContext(ctx, "SELECT project_id,definition_event_uid,definition_json FROM "+table+" WHERE uid=$1", ref.uid).Scan(&current.projectID, &current.event, &document)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -216,6 +222,7 @@ func (v *CronReplayValidator) loadKnown(ctx context.Context, ref cronDefinitionR
 			if err := v.idx.add(current); err != nil {
 				return err
 			}
+			v.idx.documents[current] = document
 		}
 		v.ownersLoaded[identity] = true
 	}
