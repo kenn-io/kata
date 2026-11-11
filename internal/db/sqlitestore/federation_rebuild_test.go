@@ -456,7 +456,7 @@ func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 }
 
 func TestMoveRebuildPreservesLinks(t *testing.T) {
-	for _, scenario := range []string{"archived", "absent-later-destination", "former-source"} {
+	for _, scenario := range []string{"archived", "absent-later-destination", "former-source", "former-source-changed"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := t.Context()
 			d, source, issue := incrementalTestStore(t)
@@ -465,7 +465,8 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 			_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
 			require.NoError(t, err)
 			peerProject := destination
-			if scenario == "former-source" {
+			formerSource := scenario == "former-source" || scenario == "former-source-changed"
+			if formerSource {
 				peerProject = source
 			}
 			peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, Title: "peer", Author: "tester"})
@@ -481,7 +482,7 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 				return result
 			}
 			projectID := destination.ID
-			if scenario == "former-source" {
+			if formerSource {
 				oldLink := link(d, "blocks")
 				link(d, "related")
 				hub := cloneIncrementalStore(t, d)
@@ -533,10 +534,16 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 			locked := cloneIncrementalStore(t, d)
 			require.NoError(t, locked.materializeFederatedProject(ctx, projectID))
 			attempts := 0
-			d.federationIngestPrepared = func() { attempts++ }
+			d.federationIngestPrepared = func() {
+				attempts++
+				if scenario == "former-source-changed" && attempts == 1 {
+					_, err := d.ExecContext(ctx, `UPDATE links SET author='competing' WHERE type='related' AND from_issue_id=?`, issue.ID)
+					require.NoError(t, err)
+				}
+			}
 			require.NoError(t, d.MaterializeFederatedProject(ctx, projectID))
-			if scenario == "former-source" {
-				require.Zero(t, attempts)
+			if scenario == "former-source-changed" {
+				require.Equal(t, 2, attempts)
 			} else {
 				require.Equal(t, 1, attempts)
 			}
@@ -555,7 +562,7 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 				require.Empty(t, got)
 			} else {
 				require.Len(t, want, 1)
-				if scenario == "former-source" {
+				if formerSource {
 					require.Equal(t, "related", want[0].Type)
 				}
 				require.Equal(t, want, got)

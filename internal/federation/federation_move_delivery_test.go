@@ -145,3 +145,48 @@ func TestSyncFederationDelayedSourceCommentAfterLeave(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"offline source comment", "destination follow-up"}, bodies)
 }
+
+func TestSyncFederationMovesLinksFromDetachedSource(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "link-source", "link-target")
+	spoke := newMoveDeliverySpoke(t, hub, projects)
+	first, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "first", Author: "worker"})
+	require.NoError(t, err)
+	second, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "second", Author: "worker"})
+	require.NoError(t, err)
+	params := db.LinkEventParams{EventType: "issue.linked", EventIssueID: first.ID, FromShortID: first.ShortID, FromUID: first.UID, ToShortID: second.ShortID, ToUID: second.UID, Actor: "worker"}
+	link, _, err := hub.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: first.ID, ToIssueID: second.ID, Type: "blocks", Author: "worker"}, params)
+	require.NoError(t, err)
+	_, _, err = hub.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: first.ID, ToIssueID: second.ID, Type: "related", Author: "worker"}, params)
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	require.NoError(t, spoke.sync(t, 1))
+	localFirst, err := spoke.env.DB.IssueByUID(ctx, first.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	localSecond, err := spoke.env.DB.IssueByUID(ctx, second.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = spoke.env.DB.LeaveFederationReplica(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	for _, issue := range []db.Issue{first, second} {
+		_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+		require.NoError(t, err)
+	}
+	params.EventType = "issue.unlinked"
+	_, err = hub.DB.DeleteLinkAndEvent(ctx, link, params)
+	require.NoError(t, err)
+	before, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[1].ID)
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 1))
+	after, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[1].ID)
+	require.NoError(t, err)
+	require.Greater(t, after.PullCursorEventID, before.PullCursorEventID)
+	got, err := spoke.env.DB.IssueByUID(ctx, first.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, localFirst.ID, got.ID)
+	require.Equal(t, spoke.projects[1].ID, got.ProjectID)
+	links, err := spoke.env.DB.LinksByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.Equal(t, "related", links[0].Type)
+	require.Equal(t, localSecond.ID, links[0].ToIssueID)
+}

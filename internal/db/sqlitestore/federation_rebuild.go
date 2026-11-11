@@ -140,13 +140,22 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 	}
 	for i := range result.projects {
 		p := &result.projects[i]
+		included := map[string]int64{}
 		// A former source outside this group can hold links until rehome.
 		for _, decision := range result.moved {
 			if isFederationRehome(decision) && slices.Contains(p.materialization.linkProjects, decision.TargetID) && !slices.Contains(p.materialization.linkProjects, decision.SourceID) {
-				return preparedFederationRebuild{}, errStaleFederationPreparation
+				p.materialization.movingLinkIDs = append(p.materialization.movingLinkIDs, decision.IssueID)
+				included[decision.IssueUID] = decision.IssueID
 			}
 		}
-		included := map[string]int64{}
+		if len(p.materialization.movingLinkIDs) > 0 {
+			slices.Sort(p.materialization.movingLinkIDs)
+			var err error
+			p.materialization.movingLinkRows, p.materialization.movingLinkStamp, err = federatedMovingLinkRows(ctx, tx, p.materialization.movingLinkIDs)
+			if err != nil {
+				return preparedFederationRebuild{}, err
+			}
+		}
 		excluded := map[string]bool{}
 		for _, other := range result.projects {
 			if !slices.Contains(p.materialization.linkProjects, other.id) {

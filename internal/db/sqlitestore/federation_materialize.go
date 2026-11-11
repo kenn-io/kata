@@ -45,6 +45,9 @@ type federationMaterialization struct {
 	staleIssues      map[string]int64
 	linkIDs          map[string]int64
 	linkRows         map[db.FoldLinkKey]federatedLinkRow
+	movingLinkIDs    []int64
+	movingLinkStamp  [32]byte
+	movingLinkRows   map[db.FoldLinkKey]federatedLinkRow
 }
 
 // Large issue sets keep the established complete queries. This bounds SQL
@@ -560,6 +563,33 @@ func canonicalFederatedLinkKey(key db.FoldLinkKey) db.FoldLinkKey {
 	return key
 }
 
+func federatedMovingLinkRows(ctx context.Context, tx *sql.Tx, issueIDs []int64) (map[db.FoldLinkKey]federatedLinkRow, [32]byte, error) {
+	encoded, err := json.Marshal(issueIDs)
+	if err != nil {
+		return nil, [32]byte{}, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id,from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,CAST(created_at AS TEXT)
+		FROM links WHERE from_issue_id IN (SELECT value FROM json_each(?)) OR to_issue_id IN (SELECT value FROM json_each(?)) ORDER BY id`, string(encoded), string(encoded))
+	if err != nil {
+		return nil, [32]byte{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	stamp := newFederationRowHasher(false)
+	result := map[db.FoldLinkKey]federatedLinkRow{}
+	for rows.Next() {
+		var row federatedLinkRow
+		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID, &row.typ, &row.author, &row.createdAt); err != nil {
+			return nil, [32]byte{}, err
+		}
+		stamp.write(5, row.id, row.fromID, row.toID, row.fromUID, row.toUID, row.typ, row.author, row.createdAt)
+		result[row.key()] = row
+	}
+	if err := rows.Err(); err != nil {
+		return nil, [32]byte{}, err
+	}
+	return result, stamp.sum(), nil
+}
+
 func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string, included map[string]int64, excluded map[string]bool) error {
 	ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, projectID, m.issueIDs, issueScope, m.rowHasher)
 	if err != nil {
@@ -580,6 +610,11 @@ func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx
 	existing, err := federatedLinkRows(ctx, tx, m.linkProjects, m.rowHasher)
 	if err != nil {
 		return err
+	}
+	for key, row := range m.movingLinkRows {
+		if ids[key.FromUID] == row.fromID && ids[key.ToUID] == row.toID {
+			existing[key] = row
+		}
 	}
 	m.linkRows = existing
 	byUID := make(map[db.FoldLinkKey]db.FoldLinkKey, len(existing))

@@ -223,6 +223,15 @@ func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, 
 	if rowStamp != m.rowStamp {
 		return errStaleFederationPreparation
 	}
+	if len(m.movingLinkIDs) > 0 {
+		_, stamp, err := federatedMovingLinkRows(ctx, tx, m.movingLinkIDs)
+		if err != nil {
+			return err
+		}
+		if stamp != m.movingLinkStamp {
+			return errStaleFederationPreparation
+		}
+	}
 	for _, check := range m.shortIDChecks {
 		shortID, err := resolveFederatedIssueShortID(ctx, tx, projectID, check.uid, check.preferred, &check.row)
 		if err != nil {
