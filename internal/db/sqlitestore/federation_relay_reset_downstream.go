@@ -63,3 +63,20 @@ func (b relayResetBackend) DeleteUnemittedRelayOutbox(ctx context.Context, bindi
 	_, err := b.tx.ExecContext(ctx, `DELETE FROM federation_relay_outbox WHERE binding_uid=? AND reset_epoch=? AND emitted=0`, bindingUID, epoch)
 	return err
 }
+
+func (b relayResetBackend) UnemittedRelayEventEnvelopes(ctx context.Context, bindingUID string, epoch int64) ([]string, error) {
+	rows, err := b.tx.QueryContext(ctx, `SELECT envelope FROM federation_relay_outbox WHERE binding_uid=? AND reset_epoch=? AND stream=? AND emitted=0`, bindingUID, epoch, db.RelayStreamEvent)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var envelopes []string
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		envelopes = append(envelopes, raw)
+	}
+	return envelopes, rows.Err()
+}

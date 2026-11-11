@@ -187,3 +187,14 @@ func retainedWorkflowEvidence(kind, payload string) (bool, bool) {
 	}
 	return argv, false
 }
+
+// RequireLocalProjectWorkflows protects retained evidence before destructive replacement.
+func RequireLocalProjectWorkflows(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectUID string) error {
+	required, err := ProjectWorkflowRequiredFeatures(ctx, q, projectUID)
+	if err != nil {
+		return err
+	}
+	return RequireEventFeatures(SupportedEventFeatures, required)
+}

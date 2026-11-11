@@ -190,6 +190,30 @@ func (p RelayResetProtocol) InstallReset(ctx context.Context, bindingUID string,
 	if err := p.Backend.ValidateRelayResetEvents(install.projectUID, install.events); err != nil {
 		return err
 	}
+	if err := p.Backend.RequireLocalProjectWorkflows(ctx, install.projectUID); err != nil {
+		return err
+	}
+	// Next-epoch seeds can outlive their source event rows. Check exactly the
+	// unemitted event rows ForwardToDownstream will discard during replacement.
+	for _, downstream := range install.downstream {
+		rawSeeds, err := p.Backend.UnemittedRelayEventEnvelopes(ctx, downstream.RelayBindingUID, downstream.RelayResetEpoch+1)
+		if err != nil {
+			return err
+		}
+		for _, rawSeed := range rawSeeds {
+			var envelope RelayEnvelope
+			if err := json.Unmarshal([]byte(rawSeed), &envelope, json.RejectUnknownMembers(true)); err != nil {
+				return err
+			}
+			event, err := DecodeRelaySourceEvent(envelope.Body)
+			if err != nil {
+				return err
+			}
+			if err := requireUsableResetEvents([]RemoteEvent{event}); err != nil {
+				return err
+			}
+		}
+	}
 	install.config = *binding.RelayConfig
 	install.config.ResetEpoch = translation.Authority.Epoch
 	return p.applyReset(ctx, install)
