@@ -158,14 +158,18 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByText('Pending: 2')).not.toBeNull()
   })
 
-  it.each([403, 404, 'mismatch'])(
+  it.each([403, 404, 'mismatch', 'malformed 403'])(
     'clears status after %s and waits for manual refresh',
     async (code) => {
       const fetcher = vi
         .fn()
         .mockResolvedValueOnce(response())
         .mockResolvedValueOnce(
-          code === 'mismatch' ? response(9) : new Response('', { status: Number(code) }),
+          code === 'mismatch'
+            ? response(9)
+            : code === 'malformed 403'
+              ? new Response('{', { status: 403, headers: { 'Content-Type': 'application/json' } })
+              : new Response('', { status: Number(code) }),
         )
         .mockResolvedValueOnce(response())
       setGeneratedFetch(fetcher)
