@@ -206,9 +206,13 @@ type batchResolveHookStore struct {
 	db.Storage
 	issueUID     string
 	afterResolve func()
+	delay        time.Duration
 }
 
 func (s *batchResolveHookStore) IssueByUID(ctx context.Context, uid string, include db.IncludeDeleted) (db.Issue, error) {
+	if s.delay > 0 {
+		time.Sleep(s.delay) //nolint:kennlint // sleeptest: Model slow issue resolution before the write budget starts.
+	}
 	out, err := s.Storage.IssueByUID(ctx, uid, include)
 	if err == nil && uid == s.issueUID && s.afterResolve != nil {
 		hook := s.afterResolve
@@ -216,6 +220,46 @@ func (s *batchResolveHookStore) IssueByUID(ctx context.Context, uid string, incl
 		hook()
 	}
 	return out, err
+}
+
+func TestMoveIssuesBatch_BudgetExcludesPreflight(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	source, first := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "budget-target")
+	require.NoError(t, err)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID}}
+	for range 100 {
+		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "route", Author: "agent"})
+		require.NoError(t, err)
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
+	}
+	wrapped := &batchResolveHookStore{Storage: store, delay: 10 * time.Millisecond}
+	//nolint:kennlint // deadlinetest: Preflight takes longer than the write budget.
+	out, err := moveIssuesHandler(ServerConfig{DB: wrapped, MoveBatchBudget: 500 * time.Millisecond})(t.Context(), req)
+	require.NoError(t, err)
+	require.Greater(t, out.Body.NextIndex, moveBatchChunkIssues)
+}
+
+func TestMoveIssuesBatch_CutoffIncludesPreflight(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	source, first := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "budget-target")
+	require.NoError(t, err)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID, ExpectedRevision: first.Revision + 1}}
+	for range 100 {
+		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "route", Author: "agent"})
+		require.NoError(t, err)
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision + 1})
+	}
+	wrapped := &batchResolveHookStore{Storage: store, delay: 5 * time.Millisecond}
+	//nolint:kennlint // deadlinetest: Preflight exceeds the request cutoff.
+	out, err := moveIssuesHandler(ServerConfig{DB: wrapped, MoveBatchBudget: 20 * time.Millisecond})(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, moveBatchChunkIssues, out.Body.NextIndex)
 }
 
 func TestMoveIssuesBatch_ResidentChangesAfterResolution(t *testing.T) {

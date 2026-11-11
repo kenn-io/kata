@@ -15,6 +15,7 @@ import (
 )
 
 const moveBatchBudget = 4 * time.Second
+const moveBatchWriteCutoff = 30 * time.Second // Stops new chunks well inside the hosted 60s write timeout.
 const moveBatchChunkIssues = 50
 const moveBatchClaimConcurrency = 16
 const moveBatchPreviewTimeout = 45 * time.Second
@@ -129,9 +130,24 @@ func finishUnchangedMove(ctx context.Context, store db.Storage, item moveBatchIt
 	return nil
 }
 
+// moveBatchDeadline returns when the handler stops starting chunks: the write budget
+// (clocked from now, after preflight) or the request-entry cutoff, whichever comes first.
+func moveBatchDeadline(received time.Time, budget time.Duration) time.Time {
+	if budget <= 0 {
+		budget = moveBatchBudget
+	}
+	// Scale in milliseconds; multiplying two Durations in nanoseconds overflows int64.
+	cutoff := budget * time.Duration(moveBatchWriteCutoff/time.Millisecond) / time.Duration(moveBatchBudget/time.Millisecond)
+	budgetEnd, cutoffEnd := time.Now().Add(budget), received.Add(cutoff)
+	if cutoffEnd.Before(budgetEnd) {
+		return cutoffEnd
+	}
+	return budgetEnd
+}
+
 func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
 	return func(ctx context.Context, in *api.MoveIssuesRequest) (out *api.MoveIssuesResponse, resultErr error) {
-		started := time.Now()
+		received := time.Now()
 		if in.Body.DryRun {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(ctx, moveBatchPreviewTimeout)
@@ -290,10 +306,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		}
 		out = &api.MoveIssuesResponse{}
 		out.Body.NextIndex = in.Body.StartIndex
-		budget := cfg.MoveBatchBudget
-		if budget <= 0 {
-			budget = moveBatchBudget
-		}
+		deadline := moveBatchDeadline(received, cfg.MoveBatchBudget)
 		for start := in.Body.StartIndex; start < n; {
 			end := min(start+moveBatchChunkIssues, n)
 			pending := map[int64]bool{}
@@ -372,7 +385,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			out.Body.Results = append(out.Body.Results, results[start:end]...)
 			out.Body.NextIndex = end
 			start = end
-			if time.Since(started) >= budget {
+			if !time.Now().Before(deadline) {
 				break
 			}
 		}
