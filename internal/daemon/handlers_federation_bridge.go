@@ -16,6 +16,9 @@ import (
 )
 
 func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
+	peerFeatures := huma.Middlewares{func(ctx huma.Context, next func(huma.Context)) {
+		next(huma.WithContext(ctx, db.WithRelayPeerFeatures(ctx.Context(), ctx.Header(db.EventFeaturesHeader))))
+	}}
 	huma.Register(humaAPI, huma.Operation{OperationID: "disconnectRelayEnrollment", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/relay:disconnect", Summary: "Revoke only the presented relay transport grant"}, func(ctx context.Context, in *api.DisconnectRelayRequest) (*api.DisconnectRelayResponse, error) {
 		token := ""
 		if after, ok := strings.CutPrefix(in.Authorization, authBearerPrefix); ok {
@@ -36,7 +39,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		return out, nil
 	})
 
-	huma.Register(humaAPI, huma.Operation{OperationID: "getRelayReset", Method: http.MethodGet, Path: "/api/v1/projects/{project_id}/federation/relay/reset"}, func(ctx context.Context, in *api.RelayResetRequest) (*api.RelayResetResponse, error) {
+	huma.Register(humaAPI, huma.Operation{OperationID: "getRelayReset", Method: http.MethodGet, Path: "/api/v1/projects/{project_id}/federation/relay/reset", Middlewares: peerFeatures}, func(ctx context.Context, in *api.RelayResetRequest) (*api.RelayResetResponse, error) {
 		ctx, principal, err := authorizeRelayRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull", "getRelayReset")
 		if err != nil {
 			return nil, err
@@ -55,7 +58,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		return &api.RelayResetResponse{Body: checkpoint}, nil
 	})
-	huma.Register(humaAPI, huma.Operation{OperationID: "offerRelayDeliveries", Method: http.MethodGet, Path: "/api/v1/projects/{project_id}/federation/relay"}, func(ctx context.Context, in *api.RelayOfferRequest) (*api.RelayOfferResponse, error) {
+	huma.Register(humaAPI, huma.Operation{OperationID: "offerRelayDeliveries", Method: http.MethodGet, Path: "/api/v1/projects/{project_id}/federation/relay", Middlewares: peerFeatures}, func(ctx context.Context, in *api.RelayOfferRequest) (*api.RelayOfferResponse, error) {
 		ctx, principal, err := authorizeRelayRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull", "offerRelayDeliveries")
 		if err != nil {
 			return nil, err
@@ -83,7 +86,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// skipped prefixes and deduplicates the retained envelopes after lost ACKs.
 		return &api.RelayOfferResponse{Body: db.RelayBatch{Stream: in.Stream, Envelopes: envelopes}}, nil
 	})
-	huma.Register(humaAPI, huma.Operation{OperationID: "acceptRelayDeliveries", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/relay:accept", MaxBodyBytes: 128 << 20}, func(ctx context.Context, in *api.RelayAcceptRequest) (*api.RelayAcceptResponse, error) {
+	huma.Register(humaAPI, huma.Operation{OperationID: "acceptRelayDeliveries", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/relay:accept", MaxBodyBytes: 128 << 20, Middlewares: peerFeatures}, func(ctx context.Context, in *api.RelayAcceptRequest) (*api.RelayAcceptResponse, error) {
 		ctx, principal, err := authorizeRelayRequest(ctx, cfg, in.Authorization, in.ProjectID, "push", "acceptRelayDeliveries")
 		if err != nil {
 			return nil, err
@@ -108,7 +111,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		return &api.RelayAcceptResponse{Body: result}, nil
 	})
-	huma.Register(humaAPI, huma.Operation{OperationID: "ackRelayDeliveries", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/relay:ack"}, func(ctx context.Context, in *api.RelayAckRequest) (*api.RelayAckResponse, error) {
+	huma.Register(humaAPI, huma.Operation{OperationID: "ackRelayDeliveries", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/relay:ack", Middlewares: peerFeatures}, func(ctx context.Context, in *api.RelayAckRequest) (*api.RelayAckResponse, error) {
 		ctx, principal, err := authorizeRelayRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull", "ackRelayDeliveries")
 		if err != nil {
 			return nil, err
@@ -134,6 +137,9 @@ func authorizeRelayRequest(ctx context.Context, cfg ServerConfig, auth string, p
 }
 
 func relayTransportError(err error) error {
+	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
+		return federationFeatureError(err)
+	}
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
 	}

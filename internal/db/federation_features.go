@@ -62,6 +62,23 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
+	schedules, err := issueScheduleRequiredFeature(kind, payload)
+	if err != nil {
+		return "", err
+	}
+	if schedules != "" {
+		required = MergeEventFeatures(required, schedules)
+	}
+	return required, nil
+}
+
+// issueScheduleRequiredFeature validates saved schedule descriptors while
+// classifying their wire format, including both sides of a metadata diff.
+func issueScheduleRequiredFeature(kind, payload string) (string, error) {
+	if payload == "" {
+		return "", nil
+	}
+	required := ""
 	if strings.HasPrefix(kind, "issue.") || kind == "projection.issue" {
 		var body map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(payload), &body); err != nil {
@@ -94,34 +111,16 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 					values = []jsontext.Value{change.From, change.To}
 				}
 				for _, value := range values {
-					if required, err = savedScheduleFeature(required, value); err != nil {
+					if saved, err := metadata.DecodeSavedSchedule(value); err != nil {
 						return "", err
+					} else if saved != nil {
+						required = IssueScheduleEventFeature
 					}
 				}
 			}
 		}
 	}
 	return required, nil
-}
-
-// savedScheduleFeature validates a saved schedule, including its tzdata
-// version, and requires its feature. Objects without a tzdata_version predate
-// saved schedules and pass through unchanged.
-func savedScheduleFeature(required string, value jsontext.Value) (string, error) {
-	if len(value) == 0 || value[0] != '{' {
-		return required, nil
-	}
-	var members map[string]jsontext.Value
-	if err := json.Unmarshal(value, &members); err != nil {
-		return "", err
-	}
-	if members["tzdata_version"] == nil {
-		return required, nil
-	}
-	if _, err := metadata.DecodeSavedSchedule(value); err != nil {
-		return "", err
-	}
-	return MergeEventFeatures(required, IssueScheduleEventFeature), nil
 }
 
 // payloadHasNativeRecurringState identifies hub-owned state independently of

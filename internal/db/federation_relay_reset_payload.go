@@ -78,6 +78,9 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 			if section == 1 && (event.OriginInstanceUID != pin.AuthorityUID || (!IsFederationSnapshotEvent(event.Type) && event.Type != "project.metadata_updated")) {
 				return nil, provenance, errors.New("reset entity section requires root snapshot records")
 			}
+			if err := ValidateRelaySchedule(event); err != nil {
+				return nil, provenance, err
+			}
 			if err := ValidateFederationEntries(event.Type, event.EventUID, event.Payload); err != nil {
 				return nil, provenance, err
 			}
