@@ -2,6 +2,8 @@ package jsonl_test
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,8 +75,11 @@ func crossProjectLinkEdges(t *testing.T, store db.Storage, issueUIDs ...string) 
 
 // Projects move one at a time. A link between two of them can only be created
 // when the second project arrives. With LinkExistingIssues it is created then.
-func checkMergeRestoresCrossProjectLinks(t *testing.T, target db.Storage) {
+func checkMergeRestoresCrossProjectLinks(t *testing.T, target db.Storage, secondFirst bool) {
 	source := newCrossProjectLinkSource(t)
+	if secondFirst {
+		source.firstExport, source.secondExport = source.secondExport, source.firstExport
+	}
 	merge := func(export []byte) {
 		require.NoError(t, jsonl.ImportWithOptions(t.Context(), bytes.NewReader(export), target,
 			jsonl.ImportOptions{MergeProject: true, LinkExistingIssues: true}))
@@ -86,13 +91,26 @@ func checkMergeRestoresCrossProjectLinks(t *testing.T, target db.Storage) {
 
 	merge(source.firstExport)
 	merge(source.secondExport)
-	require.ElementsMatch(t, source.edges, crossProjectLinkEdges(t, target, endpoints...),
+	require.ElementsMatch(t, undirectedRelatedEdges(source.edges), undirectedRelatedEdges(crossProjectLinkEdges(t, target, endpoints...)),
 		"every link between the two projects exists once both are merged")
 
 	links, err := target.LinksByIssue(t.Context(), mustIssueID(t, target, source.edges[0][0]))
 	require.NoError(t, err)
 	require.Len(t, links, 1)
 	require.Equal(t, "link-author", links[0].Author, "the link keeps its author")
+}
+
+// A related link has no direction. The store keeps the lower local issue ID
+// first, so which UID comes first depends on the order the issues arrived.
+func undirectedRelatedEdges(edges [][3]string) [][3]string {
+	out := make([][3]string, 0, len(edges))
+	for _, edge := range edges {
+		if edge[2] == "related" && edge[0] > edge[1] {
+			edge[0], edge[1] = edge[1], edge[0]
+		}
+		out = append(out, edge)
+	}
+	return out
 }
 
 func mustIssueID(t *testing.T, store db.Storage, issueUID string) int64 {
@@ -102,12 +120,60 @@ func mustIssueID(t *testing.T, store db.Storage, issueUID string) int64 {
 	return issue.ID
 }
 
+// Merge order must not matter. A related link is stored with its lower local
+// issue ID first, and the merge assigns new local IDs.
 func TestMergeRestoresCrossProjectLinksSQLite(t *testing.T) {
-	checkMergeRestoresCrossProjectLinks(t, openImportTargetDB(t))
+	for name, secondFirst := range map[string]bool{"source order": false, "reverse order": true} {
+		t.Run(name, func(t *testing.T) {
+			checkMergeRestoresCrossProjectLinks(t, openImportTargetDB(t), secondFirst)
+		})
+	}
 }
 
 func TestMergeRestoresCrossProjectLinksPostgres(t *testing.T) {
-	checkMergeRestoresCrossProjectLinks(t, openPostgresImportTarget(t))
+	for name, secondFirst := range map[string]bool{"source order": false, "reverse order": true} {
+		t.Run(name, func(t *testing.T) {
+			checkMergeRestoresCrossProjectLinks(t, openPostgresImportTarget(t), secondFirst)
+		})
+	}
+}
+
+// Ordinary link writes refuse a link between projects when either one is
+// relayed between hubs, because the relay cannot deliver it. A merge must
+// refuse the same link, and merge nothing.
+func checkMergeRefusesLinkAcrossRelayedProject(t *testing.T, target db.Storage) {
+	ctx := t.Context()
+	source := newCrossProjectLinkSource(t)
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(source.firstExport), target, jsonl.ImportOptions{MergeProject: true}))
+	first, err := target.ProjectByName(ctx, "first-project")
+	require.NoError(t, err)
+	_, err = target.EnableProjectFederation(ctx, first.ID, "operator")
+	require.NoError(t, err)
+	_, err = target.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", ProjectID: &first.ID, Actor: "operator", Capabilities: "pull,push",
+	})
+	require.NoError(t, err)
+	_, err = target.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}).ExecContext(ctx, `UPDATE federation_enrollments SET relay_protocol_version=1 WHERE project_id=$1`, first.ID)
+	require.NoError(t, err)
+
+	err = jsonl.ImportWithOptions(ctx, bytes.NewReader(source.secondExport), target,
+		jsonl.ImportOptions{MergeProject: true, LinkExistingIssues: true})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
+	_, err = target.ProjectByName(ctx, "second-project")
+	require.ErrorIs(t, err, db.ErrNotFound, "the refused merge changes nothing")
+
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(source.secondExport), target, jsonl.ImportOptions{MergeProject: true}),
+		"without the option the project still merges, and its links to the relayed project are skipped")
+}
+
+func TestMergeRefusesLinkAcrossRelayedProjectSQLite(t *testing.T) {
+	checkMergeRefusesLinkAcrossRelayedProject(t, openImportTargetDB(t))
+}
+
+func TestMergeRefusesLinkAcrossRelayedProjectPostgres(t *testing.T) {
+	checkMergeRefusesLinkAcrossRelayedProject(t, openPostgresImportTarget(t))
 }
 
 // Without the option a merge never touches another project's links.

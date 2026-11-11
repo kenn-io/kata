@@ -255,6 +255,14 @@ func PrepareProjectMergeRecords(
 			if err == nil {
 				payload.ToIssueID, err = resolveLinkIssue(payload.ToIssueID, payload.ToIssueUID)
 			}
+			// A related link has no direction and is stored with the lower
+			// issue ID first. New local IDs can reverse that order, so swap
+			// both ends together. Directed links keep their direction.
+			if err == nil && payload.Type == "related" && payload.FromIssueID > 0 && payload.ToIssueID > 0 &&
+				payload.FromIssueID > payload.ToIssueID {
+				payload.FromIssueID, payload.ToIssueID = payload.ToIssueID, payload.FromIssueID
+				payload.FromIssueUID, payload.ToIssueUID = payload.ToIssueUID, payload.FromIssueUID
+			}
 		case *ImportMappingExport:
 			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
 				payload.ID, err = addMergeOffset(payload.ID, offsets.ImportMapping, payload.ImportKind())

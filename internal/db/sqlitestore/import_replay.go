@@ -521,7 +521,7 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 	case *db.IssueLabelExport:
 		return linkSkipNone, importLabel(ctx, tx, rec)
 	case *db.LinkExport:
-		return importLink(ctx, tx, rec)
+		return importLink(ctx, tx, rec, opts.MergeProject)
 	case *db.ImportMappingExport:
 		return importMapping(ctx, tx, rec, skippedLinkIDs, opts.PreserveIssueSyncBindingEnabled && !opts.MergeProject)
 	case *db.ExternalFieldMappingExport:
@@ -775,7 +775,7 @@ func importLabel(ctx context.Context, tx *sql.Tx, l *db.IssueLabelExport) error 
 // the edge and the natural-key check below makes that re-delivery a no-op.
 // Both envelopes of one source DB agree on row ids, so equal natural key
 // implies equal id and the id-preserving INSERT can never collide.
-func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) (linkSkip, error) {
+func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, enforceRelayBoundary bool) (linkSkip, error) {
 	var present int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM issues WHERE id IN (?, ?)`,
@@ -797,6 +797,14 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) (linkSkip, e
 	}
 	if dup > 0 {
 		return linkSkipDuplicate, nil
+	}
+	// A merge can link the imported project to one already in the target.
+	// Refuse what an ordinary link write refuses: a relay cannot deliver a
+	// link between projects. A full restore keeps the links it exported.
+	if enforceRelayBoundary {
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); err != nil {
+			return linkSkipNone, fmt.Errorf("project merge link between issues %s and %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
+		}
 	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO links(id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author, created_at)

@@ -287,7 +287,7 @@ func (s *Store) importReplayRecord(
 	case *db.IssueLabelExport:
 		return replayLinkInserted, pgReplayLabel(ctx, tx, rec)
 	case *db.LinkExport:
-		return pgReplayLink(ctx, tx, rec)
+		return pgReplayLink(ctx, tx, rec, opts.MergeProject)
 	case *db.ImportMappingExport:
 		return pgReplayImportMapping(ctx, tx, rec, skippedLinkIDs, opts.PreserveIssueSyncBindingEnabled && !opts.MergeProject)
 	case *db.ExternalFieldMappingExport:

@@ -435,6 +435,10 @@ kata import --merge --link-existing --input backups/second-project.jsonl \
 - Pass the flag on every merge of a set of linked projects. A snapshot cannot
   be merged twice, so links skipped by a merge without the flag come back only
   from the peer project's merge.
+- The merge fails, and imports nothing, when such a link would join a project
+  that Kata relays between hubs. A relay cannot deliver a link between
+  projects, so the ordinary link commands refuse it too. Merge that snapshot
+  without the flag.
 
 To move linked projects to another hub one at a time, merge each project with
 `--link-existing` and then adopt it with
