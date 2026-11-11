@@ -18,8 +18,14 @@ const CronEventFeature = "cron_v1"
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
+// RepeatedAdoptionEventFeature identifies a spoke whose replay skips its own
+// adoption snapshot when a hub that already held the issue has a copy at
+// least as new. A hub accepts a repeated adoption snapshot only from such a
+// spoke; an older spoke would keep its stale copy.
+const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
+
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.

@@ -23,13 +23,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Repeat or resume an adoption push into a hub project that already holds
   some of the issues, or bring it up to date from a newer copy of the project.
-  A newer snapshot updates the issue, an older or identical one changes
-  nothing, and comments merge by UID with their original author and time.
-  Links are added and never removed. A push for an issue that another project
-  on the hub holds, including an archived one, now returns `400 validation`
-  naming the issue and is quarantined on the spoke; before, it returned 404 and
-  the spoke retried without showing an error. The hub and every spoke must run
-  this version to replay a repeated snapshot the same way. See
+  A snapshot with a newer `updated_at` updates the issue and merges its
+  comments by UID with their original author and time. An older or identical
+  one is acknowledged and writes nothing. Links are added and never removed.
+  The hub records a winning copy as ordinary change events, not as a second
+  snapshot. A push for an issue that another project on the hub holds,
+  including an archived one, now returns `400 validation` naming the issue and
+  is quarantined on the spoke; before, it returned 404 and the spoke retried
+  without showing an error. The hub and the pushing spoke must both run this
+  version. See
   [repeating an adoption](operations/federation.md#repeating-an-adoption).
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.

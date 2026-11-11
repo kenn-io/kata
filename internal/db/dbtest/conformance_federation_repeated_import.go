@@ -77,12 +77,17 @@ func newRepeatedImportHub(t *testing.T, source db.Storage, backend Backend) repe
 // the shape a migrate or adoption push uses.
 func pushRepeatedImportBaseline(t *testing.T, hub db.Storage, projectID, enrollmentID int64, spokeUID string, events []db.RemoteEvent) (db.FederationIngestResult, error) {
 	t.Helper()
+	return pushRepeatedImportBaselineWithFeatures(t, hub, projectID, enrollmentID, spokeUID, events, db.SupportedEventFeatures)
+}
+
+func pushRepeatedImportBaselineWithFeatures(t *testing.T, hub db.Storage, projectID, enrollmentID int64, spokeUID string, events []db.RemoteEvent, features string) (db.FederationIngestResult, error) {
+	t.Helper()
 	batch := make([]db.FederationIngestEvent, 0, len(events))
 	for index, event := range events {
 		batch = append(batch, db.FederationIngestEvent{SourceEventID: int64(index + 1), Event: event})
 	}
 	return hub.IngestFederationEvents(t.Context(), db.FederationIngestParams{
-		EventFeatures: db.CronEventFeature, ProjectID: projectID, FederationEnrollmentID: enrollmentID,
+		EventFeatures: features, ProjectID: projectID, FederationEnrollmentID: enrollmentID,
 		SpokeInstanceUID: spokeUID, BoundActor: "operator", AllowSnapshotAuthorPreservation: true,
 		AdoptionBaseline:                 db.FederationAdoptionBaselineComplete,
 		AdoptionBaselineEndSourceEventID: int64(len(batch)), Events: batch,
@@ -192,9 +197,20 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	resignNativeEvent(t, &extra)
 	newer = append(newer, extra)
 
+	// A spoke that cannot replay a repeated import keeps the old refusal.
+	_, err = pushRepeatedImportBaselineWithFeatures(t, hub, h.target.ID, newerEnrollment, newerOrigin, newer, db.CronEventFeature)
+	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	require.ErrorContains(t, err, "targets existing issue")
+
 	result, err := pushRepeatedImportBaseline(t, hub, h.target.ID, newerEnrollment, newerOrigin, newer)
 	require.NoError(t, err, "a repeated import of known issues is accepted")
-	require.Equal(t, len(newer), result.Accepted)
+	require.Equal(t, len(newer), result.Accepted+result.Duplicates)
+	// The hub writes ordinary events for the winning copy and stores no second
+	// snapshot, so every snapshot in its log stays a complete baseline.
+	snapshots, err := hub.EventsAfter(ctx, db.EventsAfterParams{ProjectID: h.target.ID, IssueUID: h.issueUID, Types: []string{"issue.snapshot"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, snapshots, 1)
+	require.Equal(t, h.firstUID, snapshots[0].OriginInstanceUID)
 
 	issue, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
@@ -225,11 +241,16 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	require.NoError(t, err)
 	require.Equal(t, "Untouched", untouched.Title)
 
-	// The same push again is a no-op that still succeeds.
+	// The same push again succeeds and writes nothing.
+	lastEvent, err := hub.MaxEventID(ctx)
+	require.NoError(t, err)
 	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, newerEnrollment, newerOrigin, newer)
 	require.NoError(t, err)
 	require.Zero(t, result.Accepted)
 	require.Equal(t, len(newer), result.Duplicates)
+	afterRetry, err := hub.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, lastEvent, afterRetry, "an identical copy writes no event")
 	again, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, issue.Revision, again.Revision)
@@ -239,9 +260,21 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 		repeatedImportShiftUpdatedAt(t, payload, -time.Hour)
 		payload["title"] = "Stale copy"
 		payload["labels"] = []string{"ancient"}
+		if stale, ok := payload["comments"].([]any); ok {
+			payload["comments"] = append(stale, map[string]any{
+				"comment_uid": "01ARZ3NDEKTSV4RRFFQ69G5FC3", "author": "dave",
+				"body": "only in the stale copy", "created_at": laterComment,
+			})
+		}
 	})
 	_, err = pushRepeatedImportBaseline(t, hub, h.target.ID, olderEnrollment, olderOrigin, older)
 	require.NoError(t, err, "an older copy is accepted and skipped")
+	afterStale, err := hub.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, lastEvent, afterStale, "an older copy writes no event")
+	comments, err = hub.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 2, "an older copy adds no comment")
 	kept, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "Current copy", kept.Title)

@@ -1742,32 +1742,46 @@ must keep the same issue UIDs, and it joins with its own adoption-enabled
 enrollment token.
 
 For each issue the hub already holds, the snapshot's `updated_at` decides the
-result:
+result. The hub compares it with the issue's `updated_at` to the millisecond.
+The order in which pushes arrive does not matter.
 
 | Incoming snapshot | Result on the hub |
 | --- | --- |
-| Newer than the hub issue | Title, body, status, owner, priority, closed and deleted state, labels, and metadata become the snapshot's. |
-| Same `updated_at` | The snapshot restates the issue. An identical copy changes nothing. |
-| Older than the hub issue | No field, label, or metadata changes. |
+| Newer than the hub issue | Title, body, status, owner, priority, closed and deleted state, labels, and metadata become the snapshot's. Comments merge. |
+| Same `updated_at`, older, or no `updated_at` | Nothing. The hub acknowledges the snapshot and writes no event. |
 
-These rules hold in every case:
+When a newer snapshot wins:
 
 - Comments merge by comment UID. A comment the hub lacks is added with its
   original author and created time. A comment the hub has keeps its author and
-  created time, and takes a later edit only from a newer snapshot.
+  created time, and takes the snapshot's text only when the snapshot carries a
+  later edit time. A comment only the hub has stays.
 - Links are added and never removed. Remove an unwanted link on the hub after
-  the push. An issue that already has a parent keeps it; change the parent on
-  the hub with `kata edit --parent`.
-- Issues the hub does not hold are created as usual.
-- Pushing the same snapshots twice from one Kata home is acknowledged as
-  duplicates and changes nothing.
+  the push. A link to an issue the hub does not hold is left out.
+- An issue that already has a parent keeps it. Change the parent on the hub
+  with `kata edit --parent`.
+- The issue keeps its author.
 
-Every replica applies the same rules when it replays the events, so the hub
-and its spokes reach the same state.
+The hub does not store the pushed snapshot for an issue it already holds. It
+writes its own ordinary events for the differences, such as `issue.updated`,
+`issue.labeled`, and `issue.commented`, with the pushing actor as their actor.
+Other spokes receive those events like any other change. An older or identical
+copy leaves no event, so pushing the same copy again changes nothing.
+
+Issues the hub does not hold are created as usual.
+
+The Kata home that pushed a copy then takes the hub's state on its next sync.
+If its copy was older, its own extra comments disappear from that home, and
+links only that home had stay on that home alone.
+
+Both sides must support this. The hub accepts a repeated snapshot only from a
+spoke that advertises the `repeated_adoption_v1` event feature. An older spoke
+gets `400 validation` with `targets existing issue`, as before, and
+quarantines the push; upgrade it and resume.
 
 The create-only rule still applies outside an adoption push. A fresh
 `issue.created`, or an `issue.snapshot` in an ordinary push, for an issue the
-project holds returns `400 validation` with `targets existing issue`.
+project holds returns the same `400 validation`.
 
 Issue UIDs are unique across a hub. A snapshot or creation for an issue that
 another project on the hub holds returns `400 validation` and names the issue,

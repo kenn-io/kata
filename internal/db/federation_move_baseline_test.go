@@ -102,9 +102,9 @@ func TestFederationMoveBaselineCoveredEditWithEqualTimestamp(t *testing.T) {
 	require.Equal(t, "later logical discussion", projection.Comments["comment"].Body, "known coverage clock takes precedence over wall time")
 }
 
-// A repeated import leaves several snapshots of one issue from different
-// origins. When the issue later moves, the latest of them by clock may be the
-// stale copy, so it must not become the only baseline.
+// The spoke that pushed an older copy of an issue still holds its own
+// snapshot. When the issue later moves, that snapshot may be the latest by
+// clock, and it must not become the baseline.
 func TestFederationMoveBaselineKeepsRepeatedImportFreshness(t *testing.T) {
 	events := []FoldEvent{
 		{UID: "current-copy", OriginInstanceUID: "spoke-a", ProjectUID: "source", IssueUID: "issue", Type: "issue.snapshot", HLCPhysicalMS: 2, Payload: jsontext.Value(`{"uid":"issue","author":"alice","title":"current title","labels":["kept"],"metadata":{"team":"core"},"comments":[{"comment_uid":"current-comment","author":"alice","body":"only in the current copy","created_at":"2026-05-01T10:00:00.000Z"}],"updated_at":"2026-06-01T09:00:00.000Z"}`)},
@@ -120,9 +120,9 @@ func TestFederationMoveBaselineKeepsRepeatedImportFreshness(t *testing.T) {
 	require.Equal(t, "only in the current copy", projection.Comments["current-comment"].Body)
 }
 
-// An issue created on the hub after federation was set up has no enrollment
-// snapshot. A stale copy imported later is then the only snapshot before a
-// move, and it must not replace the creation history it is older than.
+// An issue created on the hub has no enrollment snapshot. On the spoke that
+// pushed an older copy, that copy is then the only snapshot before a move, and
+// it must not replace the creation history it is older than.
 func TestFederationMoveBaselineKeepsCreationBeforeStaleImport(t *testing.T) {
 	events := []FoldEvent{
 		{UID: "creation", OriginInstanceUID: "hub", ProjectUID: "source", IssueUID: "issue", Type: "issue.created", HLCPhysicalMS: 1, CreatedAt: "2026-06-01T08:00:00.000Z", Payload: jsontext.Value(`{"uid":"issue","author":"alice","title":"first title","created_at":"2026-06-01T08:00:00.000Z"}`)},

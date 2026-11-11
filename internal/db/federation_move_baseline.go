@@ -8,9 +8,11 @@ import (
 // FederationMoveBaselineEvents assembles moved-issue replay from the effective
 // source enrollment baseline. Earlier initializers cannot restore an author
 // rewritten before enrollment. Only comment records covered by that baseline
-// are omitted; moves and other deltas remain. An earlier creation or snapshot
-// from another origin also remains, because the baseline is then a repeated
-// import that the fold orders by updated_at. Retained events and feeds do not change.
+// are omitted; moves and other deltas remain. A snapshot the fold treats as an
+// older copy of the issue is never a baseline: it changes nothing, so it
+// cannot stand for the issue's state. Only the spoke that pushed such a copy
+// holds one, because a hub does not store it. Retained events and feeds do not
+// change.
 func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 	type sourceKey struct{ issue, project string }
 	departures := map[sourceKey]FoldClock{}
@@ -31,7 +33,8 @@ func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 		}
 		departure, exists := departures[sourceKey{event.IssueUID, event.ProjectUID}]
 		clock := clockOf(event)
-		if exists && compareClock(clock, departure) < 0 && compareClock(clock, clockOf(baselines[event.IssueUID])) > 0 {
+		if exists && compareClock(clock, departure) < 0 && compareClock(clock, clockOf(baselines[event.IssueUID])) > 0 &&
+			!staleRepeatedSnapshot(events, event) {
 			baselines[event.IssueUID] = event
 		}
 	}
@@ -45,14 +48,7 @@ func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 		if exists && compareClock(clockOf(event), clockOf(baseline)) < 0 {
 			switch event.Type {
 			case "issue.created", "issue.snapshot":
-				// An initializer from another origin is not an earlier state of
-				// this baseline's node: the baseline is a repeated import of an
-				// issue that already existed. Keep the initializer so the fold
-				// can compare the copies by updated_at; the latest snapshot by
-				// clock may be the stale one.
-				if event.OriginInstanceUID == baseline.OriginInstanceUID {
-					continue
-				}
+				continue
 			case "issue.commented", "issue.comment_edited":
 				uid, body, version := federationCommentEditVersion(event)
 				comment, covered := comments[federationBaselineCommentKey{event.IssueUID, uid}]
@@ -64,6 +60,30 @@ func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 		out = append(out, event)
 	}
 	return out
+}
+
+// staleRepeatedSnapshot reports whether the fold would treat the snapshot as
+// an older copy of an issue that earlier events already initialised.
+func staleRepeatedSnapshot(events []FoldEvent, snapshot FoldEvent) bool {
+	var payload struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(snapshot.Payload, &payload); err != nil || payload.UpdatedAt == "" {
+		return false
+	}
+	var earlier []FoldEvent
+	initialised := false
+	for _, event := range events {
+		if event.IssueUID != snapshot.IssueUID || compareClock(clockOf(event), clockOf(snapshot)) >= 0 {
+			continue
+		}
+		earlier = append(earlier, event)
+		initialised = initialised || event.Type == "issue.created" || event.Type == "issue.snapshot"
+	}
+	if !initialised {
+		return false
+	}
+	return snapshotTimeBefore(payload.UpdatedAt, FoldEvents(earlier).Issues[snapshot.IssueUID].UpdatedAt)
 }
 
 type federationBaselineCommentKey struct{ issue, comment string }

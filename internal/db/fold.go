@@ -176,34 +176,37 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	}
 	issue := p.ensureIssue(uid)
 	// A snapshot for an issue that already has a baseline is a repeated import
-	// of the same issue, such as a second adoption push from a newer copy. Its
-	// updated_at decides what it may change:
-	//   - older than the folded state: it changes no field, label or metadata,
-	//     so a stale copy cannot overwrite newer edits;
-	//   - newer: it replaces the fields, labels and metadata;
+	// of the same issue, such as a second adoption push from another copy. A
+	// hub does not store one (see RepeatedSnapshotDeltas), so this runs on the
+	// spoke that pushed it and still holds its own snapshot. Its updated_at
+	// decides what it may change:
+	//   - older than the folded state: it changes no field, label, metadata or
+	//     comment, so a stale copy cannot overwrite newer edits;
+	//   - newer: it replaces the fields, labels and metadata, and merges its
+	//     comments by UID;
 	//   - equal, or no updated_at at all: it restates the issue additively, as
 	//     a baseline refresh always has.
-	// Comments merge by UID in every case. Links stay additive in every case:
-	// the link fold must give the same result from link-affecting events alone
-	// (see FederationLinkAffectingEventTypes), and updated_at depends on events
+	// Links stay additive in every case: the link fold must give the same
+	// result from link-affecting events alone (see
+	// FederationLinkAffectingEventTypes), and updated_at depends on events
 	// outside that set.
 	repeated := e.Type == "issue.snapshot" && p.baselined[uid] && in.UpdatedAt != ""
 	if p.baselined == nil {
 		p.baselined = map[string]bool{}
 	}
 	p.baselined[uid] = true
-	older := repeated && foldTimeBefore(in.UpdatedAt, issue.UpdatedAt)
-	newer := repeated && foldTimeBefore(issue.UpdatedAt, in.UpdatedAt)
+	older := repeated && snapshotTimeBefore(in.UpdatedAt, issue.UpdatedAt)
+	newer := repeated && snapshotTimeBefore(issue.UpdatedAt, in.UpdatedAt)
+	if older {
+		p.addSnapshotLinks(uid, e, in.Links)
+		return
+	}
 	for _, comment := range in.Comments {
 		if repeated {
 			p.mergeSnapshotComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e), newer)
 			continue
 		}
 		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
-	}
-	if older {
-		p.addSnapshotLinks(uid, e, in.Links, repeated)
-		return
 	}
 	if issue.UID == "" {
 		issue.UID = uid
@@ -247,7 +250,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	for _, label := range in.Labels {
 		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
 	}
-	p.addSnapshotLinks(uid, e, in.Links, repeated)
+	p.addSnapshotLinks(uid, e, in.Links)
 }
 
 // foldSnapshotLink is one link entry of an issue.created or issue.snapshot
@@ -261,11 +264,13 @@ type foldSnapshotLink struct {
 }
 
 // addSnapshotLinks adds a snapshot's links. An issue has one parent, so
-// setting a parent removes the previous one. A repeated snapshot must only add
-// links, so it leaves a child that already has a different parent alone.
-// repeated depends only on creation and snapshot events, which keeps the
-// result the same in a fold of link-affecting events.
-func (p *FoldProjection) addSnapshotLinks(uid string, e FoldEvent, links []foldSnapshotLink, repeated bool) {
+// setting a parent removes the previous one. A snapshot must only add links,
+// so it leaves a child that already has a different parent alone. That covers
+// a link the child's own snapshot carries and one a newly imported parent
+// carries. Reparenting goes through an ordinary link change. The check reads
+// link state only, which keeps the result the same in a fold of
+// link-affecting events.
+func (p *FoldProjection) addSnapshotLinks(uid string, e FoldEvent, links []foldSnapshotLink) {
 	for _, link := range links {
 		if link.ToIssueUID == "" {
 			continue
@@ -274,7 +279,7 @@ func (p *FoldProjection) addSnapshotLinks(uid string, e FoldEvent, links []foldS
 		if link.Incoming && link.Type != "related" {
 			from, to = to, from
 		}
-		if repeated && link.Type == "parent" && p.hasOtherParent(from, to) {
+		if e.Type == "issue.snapshot" && link.Type == "parent" && p.hasOtherParent(from, to) {
 			continue
 		}
 		author := link.Author
@@ -338,6 +343,19 @@ func foldTimeBefore(a, b string) bool {
 		return a < b
 	}
 	return left.Before(right)
+}
+
+// snapshotTimeBefore compares two issue updated_at values at millisecond
+// precision. The stores keep updated_at to the millisecond while event times
+// carry more, so a snapshot of the current state would otherwise look older
+// than the events that produced it.
+func snapshotTimeBefore(a, b string) bool {
+	left, leftErr := time.Parse(time.RFC3339Nano, a)
+	right, rightErr := time.Parse(time.RFC3339Nano, b)
+	if leftErr != nil || rightErr != nil {
+		return foldTimeBefore(a, b)
+	}
+	return left.Truncate(time.Millisecond).Before(right.Truncate(time.Millisecond))
 }
 
 func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsontext.Value) {

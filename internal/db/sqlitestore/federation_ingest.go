@@ -126,6 +126,9 @@ func (d *Store) ingestFederationEventsOnce(
 	moveSnapshots := db.NewFederationMoveSnapshotValidator(tx, false)
 	freshSnapshotSeen := false
 	boundActor := strings.TrimSpace(p.BoundActor)
+	var repeatedWinners []repeatedAdoptionSnapshot
+	repeatedSkipped := 0
+	batchIssueUIDs := db.FederationIngestBatchIssueUIDs(p.Events)
 	for _, in := range p.Events {
 		if in.SourceEventID <= 0 {
 			return db.FederationIngestResult{}, fmt.Errorf("%w: source event id must be positive", db.ErrFederationIngestValidation)
@@ -229,6 +232,21 @@ func (d *Store) ingestFederationEventsOnce(
 				}
 			}
 		}
+		// An adoption snapshot of an issue this project already holds is never
+		// stored. A copy that is not newer than the hub's is acknowledged and
+		// changes nothing; that includes the retry of a consumed baseline.
+		repeated, err := repeatedAdoptionSnapshotIssueTx(ctx, tx, p.ProjectID, ev, db.AllowsRepeatedIssueSnapshot(ev.Type,
+			adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors ||
+				adoptionSnapshotAuthorState.duplicateOnly, p.EventFeatures))
+		if err != nil {
+			return db.FederationIngestResult{}, err
+		}
+		if repeated != nil && !db.RepeatedSnapshotWins(ev.Payload, repeated.UpdatedAt) {
+			result.Duplicates++
+			repeatedSkipped++
+			freshSnapshotSeen = true
+			continue
+		}
 		if adoptionSnapshotAuthorState.duplicateOnly {
 			return db.FederationIngestResult{}, fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
 				db.ErrFederationIngestValidation, ev.EventUID)
@@ -258,8 +276,26 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, fmt.Errorf("%w: non-snapshot event %s follows snapshot baseline in same batch",
 				db.ErrFederationIngestValidation, ev.EventUID)
 		}
+		if repeated != nil {
+			// A newer copy becomes ordinary hub events, written after the
+			// batch's own events below.
+			current, err := d.federationIssueSnapshotPayload(ctx, tx, *repeated)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			deltas, err := db.RepeatedSnapshotDeltas(ev.Actor, jsontext.Value(current), ev.Payload,
+				db.RepeatedSnapshotSQLLookups(ctx, tx, batchIssueUIDs))
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			repeatedWinners = append(repeatedWinners, repeatedAdoptionSnapshot{issue: *repeated, deltas: deltas})
+			freshSnapshotSeen = true
+			seenBatch[ev.EventUID] = ev.ContentHash
+			continue
+		}
 		if err := rejectFreshCreateSnapshotForKnownIssue(ctx, tx, p.ProjectID, ev, knownIssueUIDs,
-			adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors); err != nil {
+			db.AllowsRepeatedIssueSnapshot(ev.Type, adoptionSnapshotAuthorState.allowAuthorPreservation ||
+				adoptionSnapshotAuthorState.overrideSnapshotAuthors, p.EventFeatures)); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if db.IsFederationSnapshotEvent(ev.Type) {
@@ -338,9 +374,26 @@ func (d *Store) ingestFederationEventsOnce(
 			result.InsertedEventUIDs = append(result.InsertedEventUIDs, auditEvent.UID)
 		}
 	}
+	for _, winner := range repeatedWinners {
+		for _, delta := range winner.deltas {
+			event, err := d.insertEventTx(ctx, tx, eventInsert{
+				ProjectID: p.ProjectID, ProjectUID: projectUID, ProjectName: projectName,
+				IssueID: &winner.issue.ID, IssueUID: &winner.issue.UID,
+				Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload),
+			})
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			result.Events = append(result.Events, event)
+			result.InsertedEventUIDs = append(result.InsertedEventUIDs, event.UID)
+		}
+		result.Accepted++
+	}
 	if result.Accepted > 0 {
 		var err error
-		if materialization.fullReplay {
+		// The hub's own events for a repeated snapshot are not part of the
+		// prepared batch, so they need the full replay.
+		if materialization.fullReplay || len(repeatedWinners) > 0 {
 			err = d.materializeFederatedProjectTx(ctx, tx, p.ProjectID, true, result.InsertedEventUIDs, cronValidator)
 		} else {
 			err = materialization.apply(ctx, tx, p.ProjectID, cronValidator)
@@ -348,6 +401,9 @@ func (d *Store) ingestFederationEventsOnce(
 		if err != nil {
 			return db.FederationIngestResult{}, err
 		}
+	}
+	// A chunk whose snapshots were all skipped still advances the adoption.
+	if result.Accepted > 0 || repeatedSkipped > 0 {
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {
 			if err := consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx,
 				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
@@ -1065,6 +1121,35 @@ func validateFederationProjectEvent(
 	return nil
 }
 
+type repeatedAdoptionSnapshot struct {
+	issue  db.Issue
+	deltas []db.RepeatedSnapshotDelta
+}
+
+// repeatedAdoptionSnapshotIssueTx returns the issue an adoption snapshot
+// repeats, or nil when the event is not one or the project does not hold the
+// issue yet. An issue held by another project is refused.
+func repeatedAdoptionSnapshotIssueTx(ctx context.Context, tx *sql.Tx, projectID int64, ev db.RemoteEvent, allowed bool) (*db.Issue, error) {
+	if !allowed {
+		return nil, nil
+	}
+	issueUID, err := payloadIssueUID(ev, db.PayloadMap(ev.Payload))
+	if err != nil || issueUID == "" {
+		return nil, err
+	}
+	if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
+		return nil, err
+	}
+	issue, err := eventIssueByUID(ctx, tx, issueUID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &issue, nil
+}
+
 // rejectFreshCreateSnapshotForKnownIssue keeps creation create-only, except
 // for an adoption baseline snapshot of an issue this project already holds.
 func rejectFreshCreateSnapshotForKnownIssue(ctx context.Context, tx *sql.Tx, projectID int64, ev db.RemoteEvent, knownIssueUIDs map[string]struct{}, adoptionBaseline bool) error {
@@ -1080,7 +1165,7 @@ func rejectFreshCreateSnapshotForKnownIssue(ctx context.Context, tx *sql.Tx, pro
 	if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
 		return err
 	}
-	if db.AllowsRepeatedIssueSnapshot(ev.Type, adoptionBaseline) {
+	if adoptionBaseline {
 		return nil
 	}
 	if _, ok := knownIssueUIDs[issueUID]; ok {

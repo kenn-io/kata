@@ -89,7 +89,7 @@ func TestFoldRepeatedSnapshotWithOlderStateKeepsIssue(t *testing.T) {
 	assert.ElementsMatch(t, []string{"bug", "stale"}, presentLabels(got, "issue-1"))
 	assert.Len(t, got.PresentLinks(), 1)
 	assert.JSONEq(t, `{"team":"core"}`, string(got.IssueMetadata["issue-1"]))
-	assert.Equal(t, "dave", got.Comments["comment-0"].Author, "a comment the hub lacks is never dropped")
+	assert.NotContains(t, got.Comments, "comment-0", "an older copy changes nothing, including comments")
 	assert.Contains(t, got.Comments, "comment-1")
 }
 
@@ -185,4 +185,25 @@ func TestFoldRepeatedSnapshotKeepsEstablishedParent(t *testing.T) {
 			assert.Equal(t, "other-parent", edge.Key.ToUID, "an explicit link change still reparents")
 		}
 	}
+}
+
+// A parent issue that arrives for the first time can carry the link from a
+// child the fold already knows. That link must not replace the child's
+// existing parent either.
+func TestFoldNewParentSnapshotKeepsChildsEstablishedParent(t *testing.T) {
+	child := repeatedSnapshotEvent(1, "spoke-a", `{"uid":"issue-1","title":"child","status":"open",
+"links":[{"type":"parent","to_issue_uid":"first-parent","author":"alice"}],
+"created_at":"2026-05-01T09:00:00.000Z","updated_at":"2026-05-02T09:00:00.000Z"}`)
+	parent := repeatedSnapshotEvent(10, "spoke-b", `{"uid":"other-parent","title":"new parent","status":"open",
+"links":[{"type":"parent","to_issue_uid":"issue-1","incoming":true,"author":"alice"}],
+"created_at":"2026-05-01T09:00:00.000Z","updated_at":"2026-06-01T09:00:00.000Z"}`)
+	parent.IssueUID = "other-parent"
+
+	var parents []string
+	for _, edge := range FoldEvents([]FoldEvent{child, parent}).PresentLinks() {
+		if edge.Key.Type == "parent" && edge.Key.FromUID == "issue-1" {
+			parents = append(parents, edge.Key.ToUID)
+		}
+	}
+	assert.Equal(t, []string{"first-parent"}, parents)
 }
