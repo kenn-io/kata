@@ -33,7 +33,7 @@ func TestSearch_ContinuationCommandKeepsQueryAndFilters(t *testing.T) {
 	require.NoError(t, os.Mkdir(workspace, 0o700))
 	t.Chdir(t.TempDir())
 	ctx := contextWithBaseURL(t.Context(), env.URL)
-	out, stderr, err := executeRootCapture(t, ctx, "search", "--project", "kata", "--workspace", workspace, "--lexical", "--status", "open", "--limit", "1", "--include-deleted", "--label", "bug", "--label", "ui", "--no-label", `"wont,fix"`, "--", "inventory", "--export")
+	out, stderr, err := executeRootCapture(t, ctx, "search", "--project", "kata", "--workspace", workspace, "--lexical", "--status", "open", "--limit", "1", "--include-deleted", "--label", "bug", "--label", "ui", "--no-label", `"wont,fix"`, "--no-label", ",excluded", "--", "inventory", "--export")
 	require.NoError(t, err, stderr)
 	assert.Contains(t, out, "inventory export first")
 	for _, title := range []string{"inventory export second", "inventory export third"} {

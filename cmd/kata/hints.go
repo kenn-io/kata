@@ -50,6 +50,10 @@ func retryCommand(cmd *cobra.Command, command string, set, keep []string) (agent
 		}
 		for _, value := range values {
 			if f.Value.Type() == "stringSlice" {
+				if value == "" {
+					parts = append(parts, "--"+name, `""`)
+					continue
+				}
 				var field strings.Builder
 				w := csv.NewWriter(&field)
 				_ = w.Write([]string{value}) // strings.Builder writes cannot fail.
