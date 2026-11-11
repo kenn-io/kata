@@ -634,8 +634,8 @@ event-truth. Recurrence materialization stays hub-only: running the scheduler on
 multiple spokes would each materialize duplicate occurrences, since the
 occurrence-uniqueness constraint is per-database and UIDs differ across nodes.
 Cross-project issue moves are supported within one active hub federation group.
-Spokes join both projects and use their existing project credentials to prove
-push authority at both endpoints. Fresh events authored under a former project
+To author a move, spokes join both projects and use their existing project
+credentials to prove push authority at both endpoints. Fresh events authored under a former project
 also require push, actor, and host authority for each affected issue’s current
 project. Spokes include their joined push credentials for the same hub origin and
 actor so delayed edits can prove that authority even before the sender learns of
