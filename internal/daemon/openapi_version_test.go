@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -191,12 +192,13 @@ func TestAPIVersionBaseRecords(t *testing.T) {
 	if !explicit {
 		ref = "origin/main"
 	}
-	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", ref+"^{commit}") //nolint:gosec // The base ref is supplied by the developer or CI.
+	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", "--quiet", ref+"^{commit}") //nolint:gosec // The base ref is supplied by the developer or CI.
 	if err := cmd.Run(); err != nil {
-		if explicit {
-			t.Fatalf("API version base %q unavailable: %v", ref, err)
+		var exitErr *exec.ExitError
+		if !explicit && t.Context().Err() == nil && errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			t.Skip("origin/main unavailable")
 		}
-		t.Skip("origin/main unavailable")
+		t.Fatalf("resolve API version base %q: %v", ref, err)
 	}
 	records, err := baseAPIVersionRecords(t, ref)
 	require.NoError(t, err)
@@ -209,7 +211,7 @@ func baseAPIVersionRecords(t *testing.T, ref string) ([]string, error) {
 	cmd.Dir = "../.."
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read API version records at %q: %w", ref, err)
 	}
 	var names []string
 	for name := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
