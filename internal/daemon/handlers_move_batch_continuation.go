@@ -2,13 +2,32 @@ package daemon
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json/v2"
+	"fmt"
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/shortid"
 )
+
+func moveProof(key []byte, instance string, eventID int64, uid string, revision int64, actor string) string {
+	mac := hmac.New(sha256.New, key)
+	_, _ = fmt.Fprintf(mac, "%q:%q:%d:%q:%d:%q", "kata-move-continuation-v1", instance, eventID, uid, revision, actor)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func validMoveProof(key []byte, instance string, completed api.MoveIssuesCompleted, actor string) bool {
+	proof, err := hex.DecodeString(completed.Proof)
+	if err != nil {
+		return false
+	}
+	expected, _ := hex.DecodeString(moveProof(key, instance, completed.EventID, completed.UID, completed.Revision, actor))
+	return hmac.Equal(proof, expected)
+}
 
 type moveBatchPrior struct {
 	targetID int64
@@ -53,7 +72,7 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 			continue
 		}
 		if completed.Result == "moved" {
-			valid, err := verifyMoveBatchEvent(ctx, cfg.DB, in.Body.DefaultProjectID, input, completed, current, target, actor)
+			valid, err := verifyMoveBatchEvent(ctx, cfg.DB, in.Body.DefaultProjectID, input, completed, current, target)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -103,7 +122,7 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 	return succeeded, moves, conflicts, nil
 }
 
-func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectID int64, input api.MoveIssuesItem, completed api.MoveIssuesCompleted, issue db.Issue, target db.Project, actor string) (bool, error) {
+func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectID int64, input api.MoveIssuesItem, completed api.MoveIssuesCompleted, issue db.Issue, target db.Project) (bool, error) {
 	if completed.EventID <= 0 || completed.Revision <= 1 || completed.Revision != issue.Revision || issue.ProjectID != target.ID || (input.ExpectedRevision != 0 && input.ExpectedRevision != completed.Revision-1) {
 		return false, nil
 	}
@@ -111,7 +130,7 @@ func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectI
 	if err != nil {
 		return false, err
 	}
-	if len(events) != 1 || events[0].ID != completed.EventID || events[0].Actor != actor || events[0].OriginInstanceUID != store.InstanceUID() {
+	if len(events) != 1 || events[0].ID != completed.EventID || events[0].OriginInstanceUID != store.InstanceUID() {
 		return false, nil
 	}
 	var payload struct {

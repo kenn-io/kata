@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -226,8 +227,9 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, 1, first.NextIndex)
 	require.Equal(t, "moved", first.Results[0].Result)
+	require.Len(t, first.Results[0].Proof, 64)
 	request["start_index"] = first.NextIndex
-	request["completed"] = []map[string]any{{"result": "moved", "uid": first.Results[0].UID, "revision": first.Results[0].Revision, "event_id": first.Results[0].EventID}}
+	request["completed"] = []map[string]any{{"result": "moved", "uid": first.Results[0].UID, "revision": first.Results[0].Revision, "event_id": first.Results[0].EventID, "proof": first.Results[0].Proof}}
 	status, second := post()
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "unchanged", second.Results[0].Result)
@@ -239,7 +241,7 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 	completed := request["completed"].([]map[string]any)[0]
-	for _, field := range []string{"event_id", "uid", "target", "actor", "alias"} {
+	for _, field := range []string{"event_id", "uid", "target", "actor", "alias", "proof", "missing_proof"} {
 		t.Run(field, func(t *testing.T) {
 			switch field {
 			case "event_id":
@@ -252,11 +254,20 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 				request["actor"] = "another-actor"
 			case "alias":
 				items[0]["ref"] = target.Name + "#" + issue.ShortID
+			case "proof":
+				completed["proof"] = strings.Repeat("0", 64)
+			case "missing_proof":
+				delete(completed, "proof")
 			}
 			status, result := post()
-			require.Equal(t, http.StatusOK, status)
-			require.Equal(t, "revision_conflict", result.Results[0].Code)
+			if field == "target" || field == "alias" {
+				require.Equal(t, http.StatusOK, status)
+				require.Equal(t, "revision_conflict", result.Results[0].Code)
+			} else {
+				require.Equal(t, http.StatusBadRequest, status)
+			}
 			completed["event_id"], completed["uid"] = first.Results[0].EventID, first.Results[0].UID
+			completed["proof"] = first.Results[0].Proof
 			delete(items[0], "to_project_uid")
 			items[0]["ref"] = source.Name + "#" + issue.ShortID
 			request["actor"] = "tester"
@@ -270,8 +281,8 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 	require.Equal(t, "revision_conflict", stale.Results[0].Code)
 	completed["revision"] = first.Results[0].Revision + 1
 	status, changed := post()
-	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, "revision_conflict", changed.Results[0].Code)
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Empty(t, changed.Results)
 	request["completed"] = []map[string]any{}
 	status, _ = post()
 	require.Equal(t, http.StatusBadRequest, status)

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -47,6 +48,7 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	moveProofKey []byte
 	// MoveBatchBudget overrides the soft request budget for deterministic tests.
 	MoveBatchBudget           time.Duration
 	FederationSigning         *federationsigning.Verifier
@@ -303,6 +305,10 @@ type ListenerBinding struct {
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
+	cfg.moveProofKey = make([]byte, 32)
+	if _, err := rand.Read(cfg.moveProofKey); err != nil {
+		panic(err)
+	}
 	if cfg.TwentySyncProgress == nil {
 		cfg.TwentySyncProgress = issuesync.NewProgressTracker()
 	}

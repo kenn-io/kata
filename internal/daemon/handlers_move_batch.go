@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -99,6 +101,12 @@ func finishUnchangedMove(ctx context.Context, store db.Storage, item moveBatchIt
 }
 
 func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
+	if len(cfg.moveProofKey) == 0 {
+		cfg.moveProofKey = make([]byte, 32)
+		if _, err := rand.Read(cfg.moveProofKey); err != nil {
+			panic(err)
+		}
+	}
 	return func(ctx context.Context, in *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
 		started := time.Now()
 		actor, err := attributedActor(ctx, in.Body.Actor)
@@ -110,6 +118,12 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		}
 		if len(in.Body.Completed) != in.Body.StartIndex {
 			return nil, api.NewError(400, "validation", "completed must contain one outcome for each prior item", "", nil)
+		}
+		for _, completed := range in.Body.Completed {
+			if completed.Result == "moved" && !validMoveProof(cfg.moveProofKey, cfg.DB.InstanceUID(), completed, actor) {
+				err := api.NewError(http.StatusBadRequest, "invalid_continuation", "continuation proof is invalid or expired", "Keep the earlier results and start a new batch for the remaining items.", nil)
+				return nil, moveBatchError(err, nil, in.Body.StartIndex)
+			}
 		}
 		if in.Body.Subtree && len(in.Body.Items) > 1 {
 			return nil, api.NewError(400, "validation", "subtree move accepts one item", "", nil)
@@ -339,6 +353,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					r := &results[j]
 					r.Result, r.NewShortID, r.ShortIDExtended = "moved", item.Out.NewShortID, len(item.Out.NewShortID) > len(items[j].issue.ShortID)
 					r.EventID, r.Revision = item.Out.EventID, item.Out.NewRevision
+					r.Proof = moveProof(cfg.moveProofKey, cfg.DB.InstanceUID(), r.EventID, r.UID, r.Revision, actor)
 					r.To, r.Descendants = items[j].target.Name+"#"+item.Out.NewShortID, item.Out.Issues[1:]
 					succeeded[items[j].issue.ID] = *r
 					events = append(events, item.Out.Events...)

@@ -71,6 +71,8 @@ func TestMoveBatchCLI_ContinuationAfterCompletedDuplicate(t *testing.T) {
 	require.Len(t, continuation.Body.Completed, 1)
 	require.Equal(t, reply.Results[0].EventID, continuation.Body.Completed[0].EventID)
 	require.Equal(t, reply.Results[0].Revision, continuation.Body.Completed[0].Revision)
+	require.NotEmpty(t, reply.Results[0].Proof)
+	require.Equal(t, reply.Results[0].Proof, continuation.Body.Completed[0].Proof)
 	require.Equal(t, issue.Revision, continuation.Body.Items[1].ExpectedRevision)
 }
 
@@ -486,7 +488,7 @@ func TestMoveBatchCLI_PartialErrorResults(t *testing.T) {
 }
 
 func TestMoveBatchCLI_ReportsEarlierResultsOnInvalidReply(t *testing.T) {
-	for _, mode := range []string{"decode", "continuation"} {
+	for _, mode := range []string{"decode", "continuation", "expired_proof"} {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, _, target, issue := setupMoveCLIProjects(t)
 			origin, err := url.Parse(env.URL)
@@ -506,6 +508,9 @@ func TestMoveBatchCLI_ReportsEarlierResultsOnInvalidReply(t *testing.T) {
 				} else if mode == "decode" {
 					_, err := io.WriteString(w, "{")
 					require.NoError(t, err)
+				} else if mode == "expired_proof" {
+					w.WriteHeader(http.StatusBadRequest)
+					require.NoError(t, json.MarshalWrite(w, map[string]any{"status": 400, "error": map[string]any{"code": "invalid_continuation", "message": "continuation proof is invalid or expired", "data": map[string]any{"results": []api.MoveIssuesResult{}, "next_index": 1}}}))
 				} else {
 					_, err := io.WriteString(w, `{"results":[],"next_index":1}`)
 					require.NoError(t, err)

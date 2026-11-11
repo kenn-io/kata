@@ -372,7 +372,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		return err
 	}
 	for range body.Items {
-		body.Completed = append(body.Completed, generated.MoveIssuesCompleted{Result: "moved", UID: new(strings.Repeat("Z", 26)), Revision: new(int64(math.MaxInt64)), EventID: new(int64(math.MaxInt64))})
+		body.Completed = append(body.Completed, generated.MoveIssuesCompleted{Result: "moved", UID: new(strings.Repeat("Z", 26)), Revision: new(int64(math.MaxInt64)), EventID: new(int64(math.MaxInt64)), Proof: new(strings.Repeat("f", 64))})
 	}
 	raw, err = json.Marshal(body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 	if err != nil {
@@ -454,6 +454,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			switch r.Result {
 			case "moved":
 				completed.UID, completed.Revision, completed.EventID = new(r.UID), new(r.Revision), new(r.EventID)
+				completed.Proof = new(r.Proof)
 			case "unchanged", "would_move":
 				completed.UID = new(r.UID)
 			case "refused":

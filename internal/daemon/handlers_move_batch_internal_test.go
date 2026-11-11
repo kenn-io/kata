@@ -139,6 +139,52 @@ func TestMoveIssuesBatch_BudgetResume(t *testing.T) {
 	}
 }
 
+func TestMoveIssuesBatch_BoundActorContinuation(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	source, issue := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "bound-target")
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ClaimStatusBody{HubNow: time.Now().UTC()})
+	}))
+	defer hub.Close()
+	enableClaimGateHelperSpoke(t, store, source, hub.URL, 99)
+	enableClaimGateHelperSpoke(t, store, target, hub.URL, 100)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor = "tester"
+	req.Body.ToProjectUID = target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision}, {Ref: issue.UID, ExpectedRevision: issue.Revision}}
+	//nolint:kennlint // deadlinetest: Yield after the first committed chunk.
+	handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
+	first, err := handler(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, 1, first.Body.NextIndex)
+	require.Equal(t, "moved", first.Body.Results[0].Result)
+	events, err := store.EventsAfter(t.Context(), db.EventsAfterParams{AfterID: first.Body.Results[0].EventID - 1, ThroughID: first.Body.Results[0].EventID, Limit: 1})
+	require.NoError(t, err)
+	require.Equal(t, "agent", events[0].Actor)
+	req.Body.Completed = completedMoveResults(first.Body.Results)
+	req.Body.StartIndex = first.Body.NextIndex
+	second, err := handler(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, "unchanged", second.Body.Results[0].Result)
+	require.Equal(t, "duplicate_item", second.Body.Results[0].Code)
+	req.Body.Actor = "other"
+	_, err = handler(t.Context(), req)
+	require.Error(t, err)
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "invalid_continuation", apiErr.Code)
+	req.Body.Actor = "tester"
+	restarted := moveIssuesHandler(ServerConfig{DB: store})
+	_, err = restarted(t.Context(), req)
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "invalid_continuation", apiErr.Code)
+	require.Equal(t, 1, apiErr.Data["next_index"])
+	require.Empty(t, apiErr.Data["results"])
+}
+
 type batchMoveRaceStore struct {
 	db.Storage
 	beforeWrite func()
@@ -520,7 +566,7 @@ func completedMoveResults(results []api.MoveIssuesResult) []api.MoveIssuesComple
 		entry := api.MoveIssuesCompleted{Result: result.Result}
 		switch result.Result {
 		case "moved":
-			entry.UID, entry.Revision, entry.EventID = result.UID, result.Revision, result.EventID
+			entry.UID, entry.Revision, entry.EventID, entry.Proof = result.UID, result.Revision, result.EventID, result.Proof
 		case "unchanged", "would_move":
 			entry.UID = result.UID
 		case "refused":
