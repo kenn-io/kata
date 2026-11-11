@@ -138,7 +138,6 @@
   let referenceGeneration = 0
   let credentialTokens = $state<TokenOut[]>([])
   let syncRefreshGeneration = $state(0)
-  let syncVisibilityGeneration = $state(0)
   let credentialLoading = $state(false)
   let credentialError = $state<string | undefined>()
   let credentialAbort: AbortController | undefined
@@ -309,7 +308,7 @@
     const visibility = () => {
       scheduler.visibilityChanged(!document.hidden)
       if (!document.hidden) {
-        syncVisibilityGeneration++
+        syncRefreshGeneration++
         if (!credentialLoading) void refreshCredentials()
       }
     }
@@ -1287,7 +1286,6 @@
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
       <AppShell
         {syncRefreshGeneration}
-        {syncVisibilityGeneration}
         {searchSettingsPostFetch}
         route={acceptedRoute ?? route}
         requestedRoute={route !== acceptedRoute ? route : undefined}

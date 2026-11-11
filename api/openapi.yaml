@@ -7545,7 +7545,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.45.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -10025,6 +10025,13 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: Omit relay checkpoint capacity measurement.
+          explode: false
+          in: query
+          name: compact
+          schema:
+            description: Omit relay checkpoint capacity measurement.
+            type: boolean
       responses:
         "200":
           content:

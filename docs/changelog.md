@@ -12,8 +12,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.
 
 - Watch project sync progress refresh every 30 seconds in a visible web tab and
-  when you return. A temporary read failure marks the last summary as stale;
-  use **Refresh sync** to retry after a permanent error.
+  when you return.
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 

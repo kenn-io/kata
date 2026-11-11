@@ -60,10 +60,12 @@ async function readResponseBody(response: Response): Promise<unknown> {
 
 export async function orvalFetch<T>(
   url: string,
-  options: RequestInit,
+  options: RequestInit & { onResponse?: (response: Response) => void },
   fetcher: typeof fetch = generatedFetch,
 ): Promise<T> {
-  const response = await fetcher(applicationURL(url), options)
+  const { onResponse, ...requestOptions } = options
+  const response = await fetcher(applicationURL(url), requestOptions)
+  onResponse?.(response)
   const data = await readResponseBody(response)
   return {
     data,

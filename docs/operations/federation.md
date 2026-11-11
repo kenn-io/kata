@@ -764,10 +764,8 @@ and each retained artifact's digest and state.
 
 The web project's sync summary shows pending delivery, the last successful sync,
 credential state, producer and retained-artifact counts. It refreshes every 30
-seconds while the tab is visible and when you return to the tab. A temporary
-read failure keeps the last summary with a stale warning. Use **Refresh sync**
-to read the state now or retry after a permanent error. This read requires
-current project access and does not
+seconds while the tab is visible and when you return to the tab. Use **Refresh sync**
+to read the state now. This read requires current project access and does not
 require credential inventory or administration. The summary clears when the
 session expires, the project leaves the visible catalog, or connection authority
 changes. It is available on the source daemon, including its local catalog

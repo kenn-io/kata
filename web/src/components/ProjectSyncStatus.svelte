@@ -1,21 +1,23 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { CopyButton } from '@kenn-io/kit-ui'
-  import { getProjectFederationStatus, type FederationProjectStatus } from '../lib/api/generated'
+  import type { FederationProjectStatus } from '../lib/api/generated'
+  import { readProjectSync } from '../lib/projectSyncRead'
 
   interface Props {
     projectID: number
     projectUID: string
     refreshGeneration?: number
-    visibilityGeneration?: number
   }
-  let { projectID, projectUID, refreshGeneration = 0, visibilityGeneration = 0 }: Props = $props()
+  let { projectID, projectUID, refreshGeneration = 0 }: Props = $props()
   let status = $state<FederationProjectStatus>()
   let loading = $state(true)
+  let reading = $state(false)
   let error = $state(false)
-  let hasResult = $state(false)
-  let refresh: ((manual: boolean, returning?: boolean) => void) | undefined
-  let seenVisibility = untrack(() => visibilityGeneration)
+  let stale = $state(false)
+  let hasResult = false
+  let queued = false
+  let refresh: ((manual?: boolean) => void) | undefined
   let identity = $derived(`${projectID}:${projectUID}`)
   let counts = $derived.by(() => {
     const result: Record<string, number> = {}
@@ -26,32 +28,38 @@
     return result
   })
 
+  function resetView(): void {
+    status = undefined
+    loading = true
+    error = false
+    stale = false
+    reading = false
+    hasResult = false
+    queued = false
+  }
+
+  function runQueued(): void {
+    const next = queued
+    queued = false
+    if (next) refresh?.()
+  }
+
   $effect(() => {
     void identity
     const [id, uid] = untrack(() => [projectID, projectUID] as const)
     let current: AbortController | undefined
-    let stopped = false
     let disposed = false
-    let pendingReturn = false
-    status = undefined
-    hasResult = false
-    loading = true
-    error = false
+    resetView()
 
-    async function read(manual: boolean, returning = false): Promise<void> {
-      if (manual) {
-        current?.abort()
-        stopped = false
-        pendingReturn = false
-        loading = true
-      } else {
-        if (document.hidden || stopped) return
-        if (current) {
-          if (returning) pendingReturn = true
-          return
-        }
+    async function read(manual = false): Promise<void> {
+      if (document.hidden) return
+      if (current) {
+        queued = true
+        return
       }
-      pendingReturn = false
+      error = false
+      loading = manual || !hasResult
+      reading = true
       const abort = new AbortController()
       current = abort
       const finish = () => {
@@ -60,57 +68,39 @@
         current = undefined
         if (disposed) return
         loading = false
-        if (pendingReturn && !document.hidden && !stopped) void read(false)
+        reading = false
+        runQueued()
       }
       const timeout = setTimeout(() => {
-        if (current !== abort || disposed) return
+        status = undefined
+        hasResult = false
         error = true
         abort.abort()
         finish()
       }, 120_000)
       abort.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
       try {
-        const response = await getProjectFederationStatus(
-          { projectId: id },
-          { signal: abort.signal },
-        )
-        if (abort.signal.aborted || disposed) return
-        if (response.status !== 200) {
-          stopped =
-            response.status >= 400 &&
-            response.status < 500 &&
-            response.status !== 408 &&
-            response.status !== 429
-          if ([401, 403, 404].includes(response.status)) {
+        const result = await readProjectSync(id, uid, abort.signal, status, () => {
+          if (!abort.signal.aborted && !disposed) {
             status = undefined
             hasResult = false
+            loading = true
           }
-          error = true
-          return
-        }
-        const found = response.data.statuses.find(
-          (entry) => entry.project_id === id && entry.project_uid === uid,
-        )
-        if (response.data.statuses.length && !found) {
+        })
+        if (abort.signal.aborted || disposed) return
+        ;({ status, stale } = result)
+        hasResult = true
+      } catch {
+        if (!abort.signal.aborted && !disposed) {
           status = undefined
           hasResult = false
-          stopped = true
           error = true
-          return
         }
-        status = found
-        hasResult = true
-        error = false
-      } catch {
-        if (!abort.signal.aborted && !disposed) error = true
       } finally {
         finish()
       }
     }
-    refresh = (manual, returning) => {
-      void read(manual, returning)
-    }
-    void read(false)
+    refresh = (manual) => void read(manual)
     return () => {
       disposed = true
       current?.abort()
@@ -119,28 +109,24 @@
   })
 
   $effect(() => {
+    void projectID
+    void projectUID
     void refreshGeneration
-    untrack(() => refresh?.(false))
-  })
-
-  $effect(() => {
-    const generation = visibilityGeneration
-    if (generation === seenVisibility) return
-    seenVisibility = generation
-    untrack(() => refresh?.(false, true))
+    untrack(() => refresh?.())
   })
 </script>
 
-<section class="project-sync" aria-label="Project sync" aria-busy={loading}>
+<section class="project-sync" aria-label="Project sync" aria-busy={reading}>
   <strong>Project sync</strong>
   {#if loading}
     <span role="status">Reading sync status…</span>
-  {:else if error && !hasResult}
+  {:else if error}
     <span role="status">Sync status unavailable. Refresh to retry.</span>
   {:else if !status}
     <span>Local project</span>
   {:else}
     <span>{status.enabled ? status.role : 'Sync disabled'}</span>
+    {#if stale}<span class="stale" role="status">Sync status may be out of date.</span>{/if}
     <span>Pending: {status.pending_push_count}</span>
     {#if status.last_successful_sync_at}
       <span
@@ -195,9 +181,9 @@
       >
     {/if}
   {/if}
-  {#if error && hasResult}<span class="stale" role="status">Sync status may be out of date.</span
-    >{/if}
-  <button type="button" onclick={() => refresh?.(true)}>Refresh sync</button>
+  <button type="button" disabled={loading || reading} onclick={() => refresh?.(true)}
+    >Refresh sync</button
+  >
 </section>
 
 <style>
