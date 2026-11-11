@@ -1197,6 +1197,13 @@ func abortFederationReplicaLeave(
 }
 
 func federationReplicaAPIError(err error) error {
+	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
+		return api.NewError(
+			http.StatusConflict, "unsupported_event_features", err.Error(),
+			"Projects with argv workflow history cannot be adopted yet; join an empty project and recreate the workflows.",
+			nil,
+		)
+	}
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
 	}

@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -4630,4 +4631,30 @@ func TestFederationIngestPublishesCommittedPeerEvents(t *testing.T) {
 	message := receiveMsg(t, sub.Ch, time.Second, "committed peer event")
 	require.Equal(t, peer.ID, message.ProjectID)
 	require.Equal(t, event.UID, message.Event.UID)
+}
+
+func TestFederationReplicaAdoptionRefusesArgvWithoutMovingCredential(t *testing.T) {
+	credentials := newReplicaCredentialStore()
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.FederationCredentials = credentials })
+	ctx := t.Context()
+	project, err := env.DB.CreateProjectWithUID(ctx, "spoke-project", federationTestSpokeUID)
+	require.NoError(t, err)
+	_, _, err = env.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "argv", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
+	require.NoError(t, err)
+	credential := config.FederationCredential{HubURL: "http://127.0.0.1:7373", HubProjectID: 42, Token: "push-token", Capabilities: "pull,push", Actor: "worker"}
+	credentials.put(project.UID, credential)
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url": credential.HubURL, "hub_project_id": 42, "hub_project_uid": replicaHubProjectUID,
+		"project_name": project.Name, "replay_horizon_event_id": 9, "actor": "worker", "token": credential.Token,
+		"capabilities": "pull,push", "push_enabled": true, "adopt_existing": true,
+	}, nil)
+	require.Equal(t, http.StatusConflict, resp.StatusCode, "response: %s", raw)
+	assert.Contains(t, string(raw), "unsupported_event_features")
+	got, found, err := credentials.FederationCredential(ctx, project.UID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, credential, got)
+	_, found, err = credentials.FederationCredential(ctx, replicaHubProjectUID)
+	require.NoError(t, err)
+	assert.False(t, found)
 }
