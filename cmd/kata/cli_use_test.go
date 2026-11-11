@@ -628,7 +628,7 @@ func TestDisabledTelemetrySharedAcrossTerminalCallers(t *testing.T) {
 					case "mcp":
 						c, err := kataclient.NewWithHTTPClient(target.url, http.DefaultClient)
 						require.NoError(t, err)
-						observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: target.url})
+						observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: target.url}, false)
 						observe()
 						synctest.Wait()
 						stop()
