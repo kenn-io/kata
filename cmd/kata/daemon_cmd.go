@@ -216,7 +216,7 @@ func locateDaemon(ctx context.Context) (daemonLocateOutput, error) {
 		defer cancel()
 		selection, err := client.InspectSelection(ctx, workspaceStartForRemote(), flags.Daemon)
 		if err != nil {
-			return daemonLocateOutput{}, cliDaemonTargetError(err)
+			return daemonLocateOutput{}, cliDaemonTargetError(err, "")
 		}
 		diagnosis, selection, err := probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection)
 		if err != nil {
@@ -518,7 +518,7 @@ func defaultLaunchDetachedDaemon(
 		if tail := daemonStartLogTail(dataDir); tail != "" {
 			err = fmt.Errorf("%w\n%s", err, tail)
 		}
-		return daemonStartOutput{}, cliDaemonTargetError(err)
+		return daemonStartOutput{}, cliDaemonTargetError(err, "")
 	}
 	action := "started"
 	if adoptedConcurrentDaemon {

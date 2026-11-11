@@ -172,7 +172,7 @@ func TestLocalProfileTargetErrorsAreStructured(t *testing.T) {
 		{client.ErrProfileSchemaMismatch, "version_mismatch"},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
-			err := cliDaemonTargetError(tc.cause)
+			err := cliDaemonTargetError(tc.cause, "")
 			var target *cliError
 			require.ErrorAs(t, err, &target)
 			assert.Equal(t, tc.code, target.Code)
