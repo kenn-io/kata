@@ -86,8 +86,8 @@ func (c scheduleCodec) kataPatch(issue db.Issue, value connector.FieldValue, rec
 }
 
 // pinZone saves the zone a local date-time or first saved value resolves to, so
-// an alias zone already on the issue or daemon survives without public
-// admission accepting it.
+// an alias zone already on the issue or daemon survives without changing
+// the issue's public timezone setting.
 func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, patch map[string]jsontext.Value, recurrenceZone string) error {
 	values, err := metadataObject(issue.Metadata)
 	if err != nil {

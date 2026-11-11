@@ -674,9 +674,7 @@ func (s *Service) ResolveFieldConflict(
 	}
 	kataCandidateStable := fieldValuesEqual(kataValue, storedKata)
 	if use == "external" && !kataCandidateStable {
-		kataCandidateStable = fieldValuesEqual(kataValue, selected) || coordinatedConflictKataDriftAllowed(
-			s.fieldCodecs, issue, mapping, claimedMappings, claimedStates, storedKata, kataValue, storedExternal,
-		)
+		kataCandidateStable = fieldValuesEqual(kataValue, selected)
 	}
 	externalCandidateStable := fieldValuesEqual(externalValue, storedExternal)
 	if use == "kata" && !externalCandidateStable {
@@ -757,52 +755,6 @@ func (s *Service) ResolveFieldConflict(
 	s.emitEvents(resolvedEvent)
 	events = append(events, resolvedEvent)
 	return resolved, events, nil
-}
-
-func coordinatedConflictKataDriftAllowed(
-	codecs map[string]FieldCodec,
-	issue db.Issue,
-	mapping db.ExternalFieldMapping,
-	mappings []db.ExternalFieldMapping,
-	states []db.ExternalFieldState,
-	storedKata connector.FieldValue,
-	currentKata connector.FieldValue,
-	selectedExternal connector.FieldValue,
-) bool {
-	if storedKata.Kind != fieldKindLocalDateTime || currentKata.Kind != fieldKindLocalDateTime ||
-		selectedExternal.Kind != fieldKindLocalDateTime || storedKata.Value != currentKata.Value ||
-		storedKata.Timezone == currentKata.Timezone || currentKata.Timezone != selectedExternal.Timezone {
-		return false
-	}
-	stateByMapping := make(map[int64]db.ExternalFieldState, len(states))
-	for _, state := range states {
-		stateByMapping[state.MappingID] = state
-	}
-	foundSibling := false
-	for _, sibling := range mappings {
-		if !sibling.Active || sibling.ID == mapping.ID {
-			continue
-		}
-		siblingCodec, ok := codecs[sibling.KataField]
-		if !ok {
-			return false
-		}
-		siblingKata, err := readCanonicalKataField(siblingCodec, issue, sibling)
-		if err != nil || siblingKata.Kind != fieldKindLocalDateTime || siblingKata.Timezone != selectedExternal.Timezone {
-			return false
-		}
-		siblingState, ok := stateByMapping[sibling.ID]
-		if !ok || siblingState.Conflicted {
-			return false
-		}
-		siblingBaseline, ok, err := decodeCanonicalStoredFieldValue(siblingState.Baseline, sibling)
-		if err != nil || !ok || siblingBaseline.Kind != fieldKindLocalDateTime ||
-			siblingBaseline.Timezone != selectedExternal.Timezone || !fieldValuesEqual(siblingBaseline, siblingKata) {
-			return false
-		}
-		foundSibling = true
-	}
-	return foundSibling
 }
 
 func (s *Service) requireInstance(id string) (Instance, error) {
