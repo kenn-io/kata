@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -114,28 +115,61 @@ func TestManagedExternallyDoesNotWaitForStartLock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		home := setupKataEnv(t)
 		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+		server, pings := restartGapDaemon(t, "", "")
+		require.NoError(t, writeRuntimeRecord(t, home, strings.TrimPrefix(server.URL, "http://")))
 		ns, err := daemonruntime.NewNamespace()
 		require.NoError(t, err)
 		release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
 		require.NoError(t, err)
 		defer release()
-		orig := discoverDaemonForSupervised
-		t.Cleanup(func() { discoverDaemonForSupervised = orig })
-		calls := 0
-		discoverDaemonForSupervised = func(context.Context, string) (ensureDiscovery, error) {
-			calls++
-			if calls == 1 {
-				return ensureDiscovery{}, nil
-			}
-			return compatibleEnsureDiscovery("127.0.0.1:7777"), nil
-		}
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
 		running, err := ensureLocalRunningTarget(ctx)
 		require.NoError(t, err)
-		require.Equal(t, "http://127.0.0.1:7777", running.BaseURL)
-		require.Equal(t, 2, calls)
+		require.Equal(t, server.URL, running.BaseURL)
+		require.GreaterOrEqual(t, pings.Load(), int32(2))
 	})
+}
+
+// A current home's runtime directory that has lost owner-only permissions is
+// repaired by ordinary discovery, as it is when autostart is enabled.
+func TestManagedExternallyRepairsCurrentHomeRuntimeDirectory(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		home := setupKataEnv(t)
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+		ns, err := daemonruntime.NewNamespace()
+		require.NoError(t, err)
+		makeRuntimeDirectoryInsecureForTest(t, ns.DataDir)
+		state := patchEnsureHooks(t, "v0.2.0", "http://spawned")
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		_, err = ensureLocalRunningTarget(ctx)
+		require.ErrorIs(t, err, ErrDaemonManagedExternally)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NoError(t, safefileio.ValidatePrivateDir(ns.DataDir))
+		require.Zero(t, state.startCalls)
+	})
+}
+
+// restartGapDaemon is a live daemon whose first ping fails, as during a
+// supervisor restart. Its instance endpoint requires the bearer token, if any.
+func restartGapDaemon(t *testing.T, uid, token string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	pings := new(atomic.Int32)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/instance" && r.Header.Get("Authorization") != "Bearer "+token:
+			w.WriteHeader(http.StatusUnauthorized)
+		case r.URL.Path == "/api/v1/instance":
+			_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+		case pings.Add(1) == 1:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, currentVersionForEnsure(), os.Getpid())
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, pings
 }
 
 func TestExternallyManagedVersionErrorGuidesByDirection(t *testing.T) {
@@ -163,36 +197,19 @@ func TestSupervisedProfileCatalogCredentialAuthenticatesLiveDaemon(t *testing.T)
 	require.NoError(t, err)
 	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
-	require.NoError(t, safefileio.EnsurePrivateDir(ns.DataDir)) // the supervised scan is read-only and never repairs the runtime directory
-	serve := func(uid string) *httptest.Server {
-		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("Authorization") != "Bearer client-token" {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
-		}))
+	require.NoError(t, safefileio.EnsurePrivateDir(ns.DataDir)) // profile directories are validated, never repaired
+	server, pings := restartGapDaemon(t, profile.InstanceUID, "client-token")
+	other, _ := restartGapDaemon(t, "01HZZZZZZZZZZZZZZZZZZZZZ01", "client-token")
+	publish := func(daemon *httptest.Server) {
+		_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Address: strings.TrimPrefix(daemon.URL, "http://"), Network: "tcp"})
+		require.NoError(t, err)
 	}
-	server, other := serve(profile.InstanceUID), serve("01HZZZZZZZZZZZZZZZZZZZZZ01")
-	defer server.Close()
-	defer other.Close()
-	target := server
-	orig := discoverDaemonForSupervised
-	t.Cleanup(func() { discoverDaemonForSupervised = orig })
-	calls := 0
-	discoverDaemonForSupervised = func(context.Context, string) (ensureDiscovery, error) {
-		calls++
-		address := strings.TrimPrefix(target.URL, "http://")
-		if calls == 1 {
-			address = "127.0.0.1:1"
-		}
-		return ensureDiscovery{Outcome: daemonScanCompatible, Daemon: liveDaemon{BaseURL: "http://" + address, Record: kitdaemon.RuntimeRecord{Address: address, Network: "tcp"}}}, nil
-	}
+	publish(server)
 	resolved, err := ensureLocalProfile(t.Context(), selection)
 	require.NoError(t, err)
 	require.Equal(t, server.URL, resolved.BaseURL)
-	require.Equal(t, 2, calls)
-	target = other
+	require.GreaterOrEqual(t, pings.Load(), int32(2))
+	publish(other)
 	_, err = ensureLocalProfile(t.Context(), selection)
 	require.ErrorIs(t, err, ErrProfileIdentityMismatch)
 }
