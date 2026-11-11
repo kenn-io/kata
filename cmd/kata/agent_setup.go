@@ -27,6 +27,9 @@ func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 	if err != nil {
 		return nativeAgentHookOptions{}, "", err
 	}
+	if len(targets) == 0 {
+		return nativeAgentHookOptions{}, "", agentHookUsage(fmt.Sprintf("unknown agent %q", name))
+	}
 	opts := targets[0].options
 	opts.Contract, opts.Attention = targets[0].capability.Contract, true
 	var exe, warning string

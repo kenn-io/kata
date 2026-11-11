@@ -263,7 +263,11 @@ Not in the latest release yet.
 kata agent setup
 ```
 
-For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness. Use `kata agent-hook install` for advanced options. See
+Not in the latest release yet.
+
+For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness.
+
+Use `kata agent-hook install` for advanced options. See
 [Contract in every session](docs/workflows/agents.md#contract-in-every-session)
 for all 18 targets, runtime requirements, attention capabilities and additional
 Codex homes. Contract and available attention hooks are enabled by default;
