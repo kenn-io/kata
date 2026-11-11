@@ -22,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func cronCLIUID(t *testing.T) string {
@@ -844,4 +845,41 @@ func TestCronWorkflowHTTPRefusesArgvWithoutMutation(t *testing.T) {
 	workflows, err := env.DB.ListCronWorkflows(t.Context(), db.CronList{ProjectID: project.ID})
 	require.NoError(t, err)
 	require.Empty(t, workflows)
+}
+
+func TestCronCLIAdmitsLiteralArgv(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	body := `{"name":"Literal","definition":{"version":1,"steps":[{"key":"run","kind":"argv","argv":["printf","","a b"]}]}}`
+	id := cronCLIUID(t)
+	out, _, err := executeCronCLI(t, env.URL, strings.NewReader(body), "workflow", "create", "--uid", id, "--file", "-")
+	require.NoError(t, err)
+	var result struct {
+		Workflow api.CronWorkflow `json:"workflow"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, []string{"printf", "", "a b"}, result.Workflow.Definition.Steps[0].Argv)
+	out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "show", id)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, []string{"printf", "", "a b"}, result.Workflow.Definition.Steps[0].Argv)
+}
+
+func TestCronCLIWorkflowRequestsAdvertiseArgv(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("X-Kata-Event-Features"))
+		http.Error(w, "fixture", http.StatusConflict)
+	}))
+	defer server.Close()
+	c, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+	a := daemonAPI{ctx: t.Context()}
+	for _, action := range []string{"list", "show"} {
+		o := cronCLIOptions{resource: "workflow", action: action, identity: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}
+		_, _ = o.callRead(a, c, 1)
+	}
+	require.Equal(t, []string{"cron_workflow_argv_v1", "cron_workflow_argv_v1"}, seen)
 }

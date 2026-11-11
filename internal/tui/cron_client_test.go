@@ -2,6 +2,8 @@ package tui
 
 import (
 	"encoding/json/v2"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -112,4 +114,18 @@ func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {
 	_, err := decodeCronJobRecord([]byte(body))
 	require.ErrorContains(t, err, "newer_member")
 	require.ErrorContains(t, err, "newer kata")
+}
+
+func TestCronWorkflowRequestsAdvertiseArgv(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("X-Kata-Event-Features"))
+		http.Error(w, "fixture", http.StatusConflict)
+	}))
+	defer server.Close()
+	c := NewClient(server.URL, server.Client())
+	_, _ = c.ListCronWorkflows(t.Context(), 1)
+	_, _ = c.ShowCronWorkflow(t.Context(), 1, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	_ = c.PutCronWorkflow(t.Context(), 1, "01ARZ3NDEKTSV4RRFFQ69G5FAV", api.PutCronWorkflowBody{})
+	require.Equal(t, []string{"cron_workflow_argv_v1", "cron_workflow_argv_v1", "cron_workflow_argv_v1"}, seen)
 }
