@@ -8,7 +8,8 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// inPlaceUpgrades add canonical tables, then canonical indexes.
+// inPlaceUpgrades add canonical tables, then canonical indexes. A table is
+// added only when it starts empty, so no existing row needs converting.
 var inPlaceUpgrades = []struct {
 	From, To int
 	Tables   []string

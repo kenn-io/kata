@@ -118,8 +118,8 @@ func (d *Store) seedRelayLocalEventsTx(ctx context.Context, tx *sql.Tx, grant db
 	projectID := *grant.ProjectID
 	after := afterID
 	for {
-		// #nosec G202 -- The event-type predicate is fixed native SQL; project and cursor values remain bound.
-		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+pgFederationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, d.instanceUID, after)
+		// #nosec G202 -- Predicates are fixed native SQL; project and cursor values remain bound.
+		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+pgFederationPushNotAccepted+` AND `+pgFederationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, d.instanceUID, after)
 		if err != nil {
 			return err
 		}

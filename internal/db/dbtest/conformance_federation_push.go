@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"fmt"
 	"testing"
@@ -69,6 +70,17 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 		require.NoError(t, err)
 		require.Len(t, events, 1)
 		require.Equal(t, pending.UID, events[0].UID)
+		const rootUID = "00000000000000000000000002"
+		public, _, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		require.NoError(t, reopened.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+		config := db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: project.UID, AuthorityUID: rootUID, UpstreamInstanceUID: rootUID, HubPath: []string{rootUID, reopened.InstanceUID()}, LocalActor: "tester", ResetEpoch: 1}
+		_, err = reopened.SetRelayBindingConfig(ctx, project.ID, config)
+		require.NoError(t, err)
+		offered, err := reopened.PendingRelayDeliveries(ctx, config.BindingUID, db.RelayStreamEvent, 10)
+		require.NoError(t, err)
+		require.Len(t, offered, 1)
+		require.Equal(t, pending.UID, offered[0].SourceUID)
 	})
 
 	return nil
