@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 )
 
@@ -28,7 +29,8 @@ type DiscoverRequest struct {
 	ReadOnly bool
 	// StartWith is a kata executable. When the selected local daemon has no
 	// live runtime, it runs `daemon start`, or `daemon recover` for a pinned
-	// local profile, and discovery looks again. A remote is never started.
+	// local profile, and discovery looks again. With autostart disabled, it waits
+	// for the supervisor instead. A remote is never started.
 	StartWith string
 }
 
@@ -144,6 +146,10 @@ type executableStart struct {
 }
 
 func (s executableStart) profile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
+	if !s.request.ReadOnly && !selection.Profile.Config.AutostartEnabled() {
+		resolved, err := waitForSupervisedProfile(ctx, selection.Resolved, *selection.Profile)
+		return resolved, err == nil, err
+	}
 	args := []string{"daemon", "recover"}
 	switch {
 	case s.request.Name != "":
@@ -155,6 +161,26 @@ func (s executableStart) profile(ctx context.Context, selection DaemonSelection)
 }
 
 func (s executableStart) local(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
+	if !s.request.ReadOnly {
+		enabled, configPath, err := config.ReadAutostartEnabled()
+		if err != nil {
+			return ResolvedDaemon{}, false, err
+		}
+		if !enabled {
+			ns, err := daemonruntime.NewNamespace()
+			if err != nil {
+				return ResolvedDaemon{}, false, err
+			}
+			running, err := waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true)
+			if err != nil {
+				return selection.Resolved, false, err
+			}
+			if selectsCurrentHomeDefault(selection) {
+				return resolvedForRunning(DaemonSourceLocalRuntime, "", running).withGlobalAuth(), true, nil
+			}
+			return selection.Resolved.WithRunning(running), true, nil
+		}
+	}
 	return s.startIfStopped(ctx, selection, s.discover.local, []string{"daemon", "start"})
 }
 

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"go.kenn.io/kata/internal/config"
@@ -190,18 +189,12 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		return RunningDaemon{}, err
 	}
 	if !enabled {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, daemonStartupWait)
-		defer cancel()
+		return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true)
 	}
 	found, release, err := discoverForStart(ctx, ns.DataDir)
 	if err != nil {
-		if !enabled && (errors.Is(err, ErrLocalDaemonUnreachable) || ctx.Err() != nil) {
-			return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true)
-		}
 		return RunningDaemon{}, err
 	}
-	release = sync.OnceFunc(release)
 	defer release()
 	switch found.Outcome {
 	case daemonScanCompatible:
@@ -210,19 +203,12 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		if err := checkDaemonReplaceable(ctx, found.Daemon.Info); err != nil {
 			return RunningDaemon{}, err
 		}
-		if enabled && canRestartLocalDaemon(found.Daemon.Record) {
+		if canRestartLocalDaemon(found.Daemon.Record) {
 			return restartLocalDaemon(ctx, ns, found.Daemon.Record)
-		}
-		if !enabled {
-			return RunningDaemon{}, externallyManagedVersionError(found.Daemon.Info)
 		}
 		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
 			return RunningDaemon{}, err
 		}
-	}
-	if !enabled {
-		release()
-		return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true)
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
 }
@@ -232,18 +218,27 @@ func externallyManagedVersionError(info PingInfo) error {
 }
 
 func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath string, migrationAllowed bool) (RunningDaemon, error) {
+	return waitForSupervisedDaemonUsing(ctx, dataDir, configPath, migrationAllowed, discoverDaemonForAutoStart, nil)
+}
+
+func waitForSupervisedDaemonUsing(ctx context.Context, dataDir, configPath string, migrationAllowed bool, scan func(context.Context, string) (ensureDiscovery, error), verify func(context.Context, liveDaemon) error) (RunningDaemon, error) {
+	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
+	defer cancel()
 	var running RunningDaemon
 	var unreachable error
 	err := waitForDaemonStartup(ctx, nil, daemonStartupWait, nil, func(ctx context.Context) (bool, error) {
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
-		found, err := discoverDaemonForAutoStart(ctx, dataDir)
+		found, err := scan(ctx, dataDir)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
 			return false, err
 		}
-		if err != nil {
-			unreachable = err
+		unreachable = err
+		if found.Outcome != daemonScanNone && verify != nil {
+			if err := verify(ctx, found.Daemon); err != nil {
+				return false, err
+			}
 		}
 		switch found.Outcome {
 		case daemonScanCompatible:
@@ -407,9 +402,13 @@ type ensureDiscovery struct {
 }
 
 func discoverForEnsure(ctx context.Context, dataDir string) (ensureDiscovery, error) {
+	return discoverForEnsureUsing(ctx, dataDir, liveDaemons)
+}
+
+func discoverForEnsureUsing(ctx context.Context, dataDir string, scan liveDaemonScanner) (ensureDiscovery, error) {
 	var stale ensureDiscovery
 	var unreachable error
-	for candidate, err := range liveDaemons(ctx, dataDir) {
+	for candidate, err := range scan(ctx, dataDir) {
 		if err != nil {
 			if errors.Is(err, ErrLocalDaemonUnreachable) {
 				if unreachable == nil {

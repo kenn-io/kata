@@ -202,6 +202,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `DO_NOT_TRACK` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `CI` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget, including in autostarted local-profile daemons. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
+| `KATA_AUTOSTART` | Internal process marker for an automatically started daemon; it does not override the client `autostart` policy. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
 | `KATA_TWENTY_TOKEN` | Default daemon-side Twenty API key; `[twenty_sync].token_env` can select another environment variable. |
@@ -559,7 +560,7 @@ Local startup policy is configured at the top level of `<KATA_HOME>/config.toml`
 
 | Key | Default | Behavior |
 | --- | --- | --- |
-| `autostart` | `true` | `false` prevents implicit daemon starts and replacement, including `kata daemon recover`. Commands wait up to 30 seconds (or their shorter deadline) for the service manager's daemon, then fail. Restart an incompatible daemon through its service manager. Explicit `kata daemon start` remains available. |
+| `autostart` | `true` | `false` prevents implicit daemon starts and replacement. Commands wait up to 30 seconds (or their shorter deadline) for the service manager's daemon, then fail. Recovery retains its storage and project checks before waiting. Restart an incompatible daemon through its service manager. Explicit `kata daemon start` remains available. |
 
 Idle shutdown is intended for the default owner-local daemon rather than the
 shared-daemon configuration above. Its minimal configuration is:

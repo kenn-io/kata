@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/oklog/ulid/v2"
@@ -153,9 +152,7 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 	profile := *selection.Profile
 	enabled := profile.Config.AutostartEnabled()
 	if !enabled {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, daemonStartupWait)
-		defer cancel()
+		return waitForSupervisedProfile(ctx, selection.Resolved, profile)
 	}
 	inspector, err := installedStorageInspector()
 	if err != nil {
@@ -176,12 +173,8 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 	}
 	found, release, err := discoverForStart(ctx, resolved.LocalProfile.DataDir)
 	if err != nil {
-		if !enabled && (errors.Is(err, ErrLocalDaemonUnreachable) || ctx.Err() != nil) {
-			return waitForSupervisedProfile(ctx, resolved, profile)
-		}
 		return resolved, err
 	}
-	release = sync.OnceFunc(release)
 	defer release()
 	if found.Outcome != daemonScanNone {
 		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
@@ -195,7 +188,7 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 		if err := refuseDaemonDowngrade(found.Daemon.Info); err != nil {
 			return resolved, err
 		}
-		if enabled && canRestartLocalDaemon(found.Daemon.Record) {
+		if canRestartLocalDaemon(found.Daemon.Record) {
 			ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 			if err != nil {
 				return resolved, err
@@ -207,16 +200,9 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 			resolved = resolved.WithRunning(running)
 			return resolved, verifyLocalProfileInstance(ctx, resolved)
 		}
-		if !enabled {
-			return resolved, externallyManagedVersionError(found.Daemon.Info)
-		}
 		if err := stopRunningDaemonsForEnsure(ctx, resolved.LocalProfile.DataDir, profile.StorageID); err != nil {
 			return resolved, err
 		}
-	}
-	if !enabled {
-		release()
-		return waitForSupervisedProfile(ctx, resolved, profile)
 	}
 	env, err := config.LocalProfileEnvironment(profile, true)
 	if err != nil {
@@ -260,11 +246,34 @@ func EnsureSameLocalProfile(ctx context.Context, resolved ResolvedDaemon) (Resol
 	return EnsureLocalProfileSelection(ctx, DaemonSelection{Resolved: resolved, Profile: resolved.profileConfig})
 }
 
+var discoverSupervisedProfile = func(ctx context.Context, dir string) (ensureDiscovery, error) {
+	return discoverForEnsureUsing(ctx, dir, liveDaemonsReadOnly)
+}
+
 func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, profile config.LocalProfileConfig) (ResolvedDaemon, error) {
-	running, err := waitForSupervisedDaemon(ctx, resolved.LocalProfile.DataDir, filepath.Join(profile.Home, "config.toml"), false)
+	scan := func(ctx context.Context, dir string) (ensureDiscovery, error) {
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			return ensureDiscovery{}, nil
+		} else if err != nil {
+			return ensureDiscovery{}, err
+		}
+		if err := safefileio.ValidatePrivateDir(dir); err != nil {
+			return ensureDiscovery{}, &LocalProfileDirError{Err: err}
+		}
+		return discoverSupervisedProfile(ctx, dir)
+	}
+	verify := func(ctx context.Context, candidate liveDaemon) error {
+		selected := resolved.WithRunning(runningDaemonForLive(candidate))
+		selected.UnixSocket = candidate.UnixSocket
+		if err := verifyLocalProfileInstance(ctx, selected); err != nil {
+			return err
+		}
+		resolved = selected
+		return nil
+	}
+	_, err := waitForSupervisedDaemonUsing(ctx, resolved.LocalProfile.DataDir, filepath.Join(profile.Home, "config.toml"), false, scan, verify)
 	if err != nil {
 		return resolved, err
 	}
-	resolved = resolved.WithRunning(running)
-	return resolved, verifyLocalProfileInstance(ctx, resolved)
+	return resolved, nil
 }

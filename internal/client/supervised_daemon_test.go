@@ -39,6 +39,9 @@ func TestManagedExternallyWaitReleasesStartLock(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
 	state := patchEnsureHooks(t, "v0.2.0", "http://spawned")
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
 	orig := discoverDaemonForAutoStart
 	t.Cleanup(func() { discoverDaemonForAutoStart = orig })
 	calls := 0
@@ -153,21 +156,42 @@ func TestManagedExternallyStaleDoesNotStop(t *testing.T) {
 	require.Zero(t, state.startCalls)
 }
 
-func TestManagedExternallyBoundsStartLockWait(t *testing.T) {
+func TestManagedExternallyDoesNotWaitForStartLock(t *testing.T) {
+	home := setupKataEnv(t)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	orig := discoverDaemonForAutoStart
+	t.Cleanup(func() { discoverDaemonForAutoStart = orig })
+	discoverDaemonForAutoStart = func(context.Context, string) (ensureDiscovery, error) {
+		return ensureDiscovery{Outcome: daemonScanCompatible, Daemon: liveDaemon{BaseURL: "http://supervised"}}, nil
+	}
+	running, err := ensureLocalRunningTarget(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "http://supervised", running.BaseURL)
+}
+
+func TestManagedExternallyClearsOldUnreachableDetail(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		home := setupKataEnv(t)
-		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
-		ns, err := daemonruntime.NewNamespace()
-		require.NoError(t, err)
-		release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
-		require.NoError(t, err)
-		defer release()
-		ctx, cancel := context.WithTimeout(t.Context(), 40*time.Millisecond)
+		cause := fmt.Errorf("old endpoint: %w", ErrLocalDaemonUnreachable)
+		orig := discoverDaemonForAutoStart
+		t.Cleanup(func() { discoverDaemonForAutoStart = orig })
+		calls := 0
+		discoverDaemonForAutoStart = func(context.Context, string) (ensureDiscovery, error) {
+			calls++
+			if calls == 1 {
+				return ensureDiscovery{}, cause
+			}
+			return ensureDiscovery{}, nil
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 		defer cancel()
-		started := time.Now()
-		_, err = ensureLocalRunningTarget(ctx)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.Less(t, time.Since(started), time.Second)
+		_, err := waitForSupervisedDaemon(ctx, t.TempDir(), "/example/config.toml", false)
+		require.ErrorIs(t, err, ErrDaemonManagedExternally)
+		require.NotErrorIs(t, err, cause)
 	})
 }
 
@@ -176,13 +200,16 @@ func TestManagedExternallyProfileWaitVerifiesIdentity(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n"), 0600))
 	selection, err := InspectSelection(t.Context(), root, "")
 	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"instance_uid":"01HZZZZZZZZZZZZZZZZZZZZZ01"}`)
 	}))
 	defer server.Close()
-	orig := discoverDaemonForAutoStart
-	t.Cleanup(func() { discoverDaemonForAutoStart = orig })
-	discoverDaemonForAutoStart = func(context.Context, string) (ensureDiscovery, error) {
+	orig := discoverSupervisedProfile
+	t.Cleanup(func() { discoverSupervisedProfile = orig })
+	discoverSupervisedProfile = func(context.Context, string) (ensureDiscovery, error) {
 		return ensureDiscovery{Outcome: daemonScanCompatible, Daemon: liveDaemon{BaseURL: server.URL, Record: kitdaemon.RuntimeRecord{Address: strings.TrimPrefix(server.URL, "http://"), Network: "tcp"}}}, nil
 	}
 	_, err = ensureLocalProfile(t.Context(), selection)
