@@ -1,9 +1,9 @@
 package daemon
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -21,8 +21,8 @@ import (
 )
 
 func TestCheckAPIVersionRecord(t *testing.T) {
-	const a = `{"info":{"version":"0.45.0"},"paths":{"/a":{}}}`
-	const b = `{"info":{"version":"0.45.0"},"paths":{"/b":{}}}`
+	const a = `{"info":{"version":""},"paths":{"/a":{}}}`
+	const b = `{"info":{"version":""},"paths":{"/b":{}}}`
 	const hashA = "a796a0b24a661cae44ecfaf054e4e53ee32d80f219424fb40c319a1d036aba5f"
 	const hashB = "95abbaa7a1794b458dae61670a105f01339b2978a65310dc6575f987536650c9"
 	for _, tc := range []struct {
@@ -64,25 +64,7 @@ func TestAPISchemaVersionMatchesRecordedContract(t *testing.T) {
 }
 
 func checkAPIVersionRecord(dir, version string, doc []byte) error {
-	var root map[string]jsontext.Value
-	if err := json.Unmarshal(doc, &root); err != nil {
-		return err
-	}
-	var info map[string]jsontext.Value
-	if err := json.Unmarshal(root["info"], &info); err != nil {
-		return err
-	}
-	info["version"] = jsontext.Value(`""`)
-	var err error
-	root["info"], err = json.Marshal(info)
-	if err != nil {
-		return err
-	}
-	raw, err := json.Marshal(root)
-	if err != nil {
-		return err
-	}
-	canonical := jsontext.Value(raw)
+	canonical := jsontext.Value(bytes.Clone(doc))
 	if err := canonical.Format(jsontext.ReorderRawObjects(true), jsontext.CanonicalizeRawInts(false), jsontext.CanonicalizeRawFloats(true)); err != nil {
 		return err
 	}
