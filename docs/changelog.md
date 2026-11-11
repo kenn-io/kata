@@ -11,6 +11,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Avoid publishing accepted federation events twice when another event is rejected.
 - Continue independent pushes when another project's enrollment is missing or revoked.
+- Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
+
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
   build finishes, and an opener waiting for another opener's migration keeps

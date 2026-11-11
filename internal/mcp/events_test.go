@@ -137,7 +137,7 @@ func TestForwarderScopeFollowsTheScopeMode(t *testing.T) {
 			options := Options{Client: client, Scope: tc.scope, Actor: "example-agent", Version: "test", Events: true}
 			server, err := New(options)
 			require.NoError(t, err)
-			handler := NewHTTPHandler(server, server)
+			handler := NewHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, func(*http.Request) *sdkmcp.Server { return server }, HTTPOptions{})
 			recorder, _ := serve(handler, currentRequest("events/subscribe", testEventName, eventsRPC("events/subscribe", eventsParams(""))))
 			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 			calls := daemon.calls()
@@ -260,7 +260,7 @@ func TestServerWithoutEventsAnswersMethodNotFound(t *testing.T) {
 	daemon, client := newRecordingDaemon(t)
 	server, err := New(Options{Client: client, Scope: boundTestScope(t), Actor: "example-agent", Version: "test"})
 	require.NoError(t, err)
-	handler := NewHTTPHandler(server, server)
+	handler := NewHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, func(*http.Request) *sdkmcp.Server { return server }, HTTPOptions{})
 	result := discover(t, handler)
 	assert.NotContains(t, result["capabilities"], "events")
 	assert.NotContains(t, result["capabilities"], "extensions")
@@ -406,7 +406,7 @@ func TestSubscribeOutlivesTheOrdinaryRequestTimeout(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	recorder, wire := serve(NewHTTPHandler(current, current), currentRequest("events/subscribe", testEventName, eventsRPC("events/subscribe", eventsParams(""))))
+	recorder, wire := serve(NewHTTPHandler(func(*http.Request) *sdkmcp.Server { return current }, func(*http.Request) *sdkmcp.Server { return current }, HTTPOptions{}), currentRequest("events/subscribe", testEventName, eventsRPC("events/subscribe", eventsParams(""))))
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	result, ok := wire["result"].(map[string]any)
 	require.True(t, ok, recorder.Body.String())
