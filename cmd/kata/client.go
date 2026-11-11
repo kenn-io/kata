@@ -136,7 +136,7 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 		if _, typed := errors.AsType[*client.LocalDaemonUnreachableError](err); typed {
 			return resolved, cliDaemonTargetError(err)
 		}
-		if resolved.LocalProfile != nil && err == nil {
+		if resolved.LocalProfile != nil {
 			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
 			if diagnoseErr != nil {
 				return resolved, diagnoseErr

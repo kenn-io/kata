@@ -102,7 +102,7 @@ func (e *LocalDaemonUnreachableError) Is(target error) bool {
 func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	advice := fmt.Sprintf("inspect %q or the supervisor stderr log", filepath.Join(e.dataDir, "daemon.log"))
 	if validWebOrigin(e.webOrigin) {
-		advice += "; if responsive, capture " + e.webOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner authentication (a signed-in browser alone is insufficient)"
+		advice += "; if responsive, capture " + e.webOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access; configured authentication requires the owner's credential"
 	}
 	if e.verifiedProcess && goruntime.GOOS != "windows" {
 		advice += fmt.Sprintf("; fallback: kill -QUIT %d dumps goroutines to stderr and terminates the daemon", e.PID)

@@ -337,6 +337,20 @@ func TestHealthSelectedProfileDoesNotUsePersonalRuntime(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestHealthSelectedProfileNonPrivateRuntimeIsStructured(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, ns.DataDir)
+
+	_, _, err = executeRootCapture(t, t.Context(), "health", "--json")
+	target := requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Equal(t, "local_unreachable", target.Code)
+	assertUnchanged()
+}
+
 func TestDaemonDiagnoseEmptyCurrentHomeDoesNotInitialize(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
