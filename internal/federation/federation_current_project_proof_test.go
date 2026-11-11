@@ -103,7 +103,7 @@ type boundedPushPageStore struct {
 	db.Storage
 }
 
-func (s *boundedPushPageStore) PendingFederationPushEvents(ctx context.Context, projectID int64, origin string, after int64, limit int) ([]db.Event, error) {
+func (s *boundedPushPageStore) PendingFederationPushEvents(ctx context.Context, projectID int64, origin string, after int64, _ int) ([]db.Event, error) {
 	return s.Storage.PendingFederationPushEvents(ctx, projectID, origin, after, 1)
 }
 

@@ -824,7 +824,7 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 	acceptedProjects := `accepted.projects`
 	acceptedJoin := `LEFT JOIN (SELECT event_id, json_group_array(project_id) AS projects FROM federation_push_accepted GROUP BY event_id) accepted ON accepted.event_id=events.id`
 	if f.ProjectID != nil {
-		acceptedProjects = `(SELECT json_group_array(project_id) FROM federation_push_accepted WHERE event_id=events.id AND project_id=events.project_id)`
+		acceptedProjects = `NULLIF((SELECT json_group_array(project_id) FROM federation_push_accepted WHERE event_id=events.id AND project_id=events.project_id), '[]')`
 		acceptedJoin = ``
 	}
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, events.project_name, ` + issueIDExpr + `, events.issue_uid,
