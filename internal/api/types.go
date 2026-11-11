@@ -1860,7 +1860,6 @@ type MoveIssuesBody struct {
 	Teammate         string           `json:"teammate,omitempty"`
 	Comment          string           `json:"comment,omitempty"`
 	DefaultProjectID int64            `json:"default_project_id,omitempty"`
-	ToProjectUID     string           `json:"to_project_uid,omitempty"`
 	Items            []MoveIssuesItem `json:"items" minItems:"1"`
 }
 

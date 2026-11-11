@@ -13,5 +13,4 @@ export interface MoveIssuesBody {
    */
   items: MoveIssuesItem[]
   teammate?: string
-  to_project_uid?: string
 }

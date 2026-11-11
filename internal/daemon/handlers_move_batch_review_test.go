@@ -33,8 +33,8 @@ func TestMoveIssuesBatch_TargetFailureIsPerItem(t *testing.T) {
 	target, err := store.CreateProject(t.Context(), "target")
 	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID}, {Ref: second.UID}}
+	req.Body.Actor = "agent"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID, ToProjectUID: target.UID}, {Ref: second.UID, ToProjectUID: target.UID}}
 	out, err := moveIssuesHandler(ServerConfig{DB: &batchTargetFailureStore{Storage: store, target: target.UID}})(t.Context(), req)
 	require.NoError(t, err)
 	require.Equal(t, "refused", out.Body.Results[0].Result)
@@ -57,8 +57,8 @@ func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, changed.Revision, child.Revision)
 	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: child.UID, ExpectedRevision: child.Revision}, {Ref: root.UID}}
+	req.Body.Actor, req.Body.Comment = "agent", "routed"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: child.UID, ExpectedRevision: child.Revision, ToProjectUID: target.UID}, {Ref: root.UID, ToProjectUID: target.UID}}
 	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
 	require.NoError(t, err)
 	require.Len(t, out.Body.Results, 2)

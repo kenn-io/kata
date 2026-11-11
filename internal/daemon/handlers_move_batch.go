@@ -75,9 +75,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			r.Ref = input.Ref
 			uid := input.ToProjectUID
 			if uid == "" {
-				uid = in.Body.ToProjectUID
-			}
-			if uid == "" {
 				moveBatchRefusal(r, api.NewError(400, "project_not_found", "target project is required", "", nil))
 				continue
 			}

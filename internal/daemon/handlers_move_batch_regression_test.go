@@ -135,8 +135,8 @@ func TestMoveBatchPreservesInheritedTransactionFence(t *testing.T) {
 	called := false
 	ctx := db.WithTransactionFence(t.Context(), func(context.Context, db.Transaction) error { called = true; return denied })
 	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}}
+	req.Body.Actor = "agent"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ToProjectUID: target.UID}}
 	_, err = moveIssuesHandler(ServerConfig{DB: store})(ctx, req)
 	var apiErr *api.APIError
 	require.ErrorAs(t, err, &apiErr)
@@ -153,14 +153,13 @@ func TestMoveBatchHostDenialIsolationHTTP(t *testing.T) {
 	target, err := store.CreateProject(t.Context(), "routing-target")
 	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
-	req.Body.ToProjectUID = target.UID
 	// A repeated denied issue must not poison the allowed neighbor's scope.
-	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID}, {Ref: first.UID}}
+	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID, ToProjectUID: target.UID}, {Ref: first.UID, ToProjectUID: target.UID}}
 	allowed, err := store.CreateProject(t.Context(), "allowed-source")
 	require.NoError(t, err)
 	permitted, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: allowed.ID, Title: "permitted", Author: "agent"})
 	require.NoError(t, err)
-	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: permitted.UID})
+	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: permitted.UID, ToProjectUID: target.UID})
 	srv := NewServer(ServerConfig{DB: store, HostAccess: batchDenyProject{denied: denied.ID}})
 	defer func() { _ = srv.Close() }()
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

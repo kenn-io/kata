@@ -148,7 +148,7 @@ func TestMoveIssuesBatch_ExtendedShortIDAtBothProjects(t *testing.T) {
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "move", Author: "tester"})
 	require.NoError(t, err)
 	require.Len(t, issue.ShortID, 5)
-	out := postMoveBatch(t, env, fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"items":[{"ref":%q}]}`, target.UID, issue.UID))
+	out := postMoveBatch(t, env, fmt.Sprintf(`{"actor":"tester","items":[{"ref":%q,"to_project_uid":%q}]}`, issue.UID, target.UID))
 	require.Len(t, out.Results, 1)
 	require.Equal(t, "moved", out.Results[0].Result)
 	require.Len(t, out.Results[0].NewShortID, 5)
@@ -160,7 +160,7 @@ func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
 	src, target, root := seedMovePair(t, env)
 	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "child", Author: "tester", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 	require.NoError(t, err)
-	body := fmt.Sprintf(`{"actor":"tester","subtree":true,"to_project_uid":%q,"items":[{"ref":%q},{"ref":%q}]}`, target.UID, root.UID, child.UID)
+	body := fmt.Sprintf(`{"actor":"tester","subtree":true,"items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, root.UID, target.UID, child.UID, target.UID)
 	resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
 	raw, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 			var body string
 			switch mode {
 			case "empty":
-				body = fmt.Sprintf(`{"actor":"tester","comment":"routed","to_project_uid":%q,"items":[{"ref":""},{"ref":%q}]}`, target.UID, issue.UID)
+				body = fmt.Sprintf(`{"actor":"tester","comment":"routed","items":[{"ref":"","to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, target.UID, issue.UID, target.UID)
 			case "negative":
 				body = fmt.Sprintf(`{"actor":"tester","comment":"routed","items":[{"ref":%q,"to_project_uid":%q,"expected_revision":-1},{"ref":%q,"to_project_uid":%q}]}`, issue.UID, other.UID, issue.UID, target.UID)
 			default:
@@ -222,7 +222,7 @@ func TestMoveIssuesBatch_RejectsInvalidOptions(t *testing.T) {
 		t.Run(option, func(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("tok"))
 			source, target, issue := seedMovePair(t, env)
-			body := fmt.Sprintf(`{"actor":"tester",%s,"to_project_uid":%q,"items":[{"ref":%q}]}`, option, target.UID, issue.UID)
+			body := fmt.Sprintf(`{"actor":"tester",%s,"items":[{"ref":%q,"to_project_uid":%q}]}`, option, issue.UID, target.UID)
 			resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
 			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 			require.NoError(t, resp.Body.Close())

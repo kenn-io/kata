@@ -63,14 +63,13 @@ func TestMoveIssuesBatch_ClaimsConcurrentAndIsolated(t *testing.T) {
 	enableClaimGateHelperSpoke(t, store, target, hub.URL, 100)
 	req := &api.MoveIssuesRequest{}
 	req.Body.Actor = "agent"
-	req.Body.ToProjectUID = target.UID
 	req.Body.Comment = "routed"
 	req.Body.Teammate = "router"
-	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: first.UID})
+	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: first.UID, ToProjectUID: target.UID})
 	for range 39 {
 		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "route", Author: "agent"})
 		require.NoError(t, err)
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ToProjectUID: target.UID})
 	}
 	creds := &batchCountingCredentials{FederationCredentialStore: config.DefaultFederationCredentialStore()}
 	out, err := moveIssuesHandler(ServerConfig{DB: store, FederationCredentials: creds})(t.Context(), req)
@@ -132,8 +131,8 @@ func TestMoveIssuesBatch_ResidentChangesAfterResolution(t *testing.T) {
 				require.NoError(t, err)
 			}}
 			req := &api.MoveIssuesRequest{}
-			req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-			req.Body.Items = []api.MoveIssuesItem{{Ref: resident.UID}, {Ref: other.UID}}
+			req.Body.Actor = "agent"
+			req.Body.Items = []api.MoveIssuesItem{{Ref: resident.UID, ToProjectUID: target.UID}, {Ref: other.UID, ToProjectUID: target.UID}}
 			out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
 			require.NoError(t, err)
 			require.Equal(t, "refused", out.Body.Results[0].Result)
@@ -155,8 +154,8 @@ func TestMoveIssuesBatch_DuplicateInterveningEdit(t *testing.T) {
 		require.Greater(t, changed.Revision, issue.Revision)
 	}}
 	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision}, {Ref: issue.UID, ExpectedRevision: issue.Revision}}
+	req.Body.Actor = "agent"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision, ToProjectUID: target.UID}, {Ref: issue.UID, ExpectedRevision: issue.Revision, ToProjectUID: target.UID}}
 	out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
 	require.NoError(t, err)
 	require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
@@ -189,8 +188,8 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, changed.Revision, first.Revision)
 	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID, ExpectedRevision: first.Revision}, {Ref: other.UID}, {}}
+	req.Body.Actor = "agent"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID, ExpectedRevision: first.Revision, ToProjectUID: target.UID}, {Ref: other.UID, ToProjectUID: target.UID}, {ToProjectUID: target.UID}}
 	_, err = moveIssuesHandler(ServerConfig{DB: batchFailureStore{store}})(t.Context(), req)
 	var apiErr *api.APIError
 	require.ErrorAs(t, err, &apiErr)
@@ -219,8 +218,8 @@ func TestMoveIssuesBatch_DuplicateAfterRefusal(t *testing.T) {
 	target, err := store.CreateProject(t.Context(), "target")
 	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}, {Ref: issue.UID}}
+	req.Body.Actor = "agent"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ToProjectUID: target.UID}, {Ref: issue.UID, ToProjectUID: target.UID}}
 	out, err := moveIssuesHandler(ServerConfig{DB: &batchFirstRefusal{Storage: store}})(t.Context(), req)
 	require.NoError(t, err)
 	require.Equal(t, "refused", out.Body.Results[0].Result)
@@ -241,8 +240,8 @@ func TestMoveBatchWriteContinuationAndRevisions(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, updated.Revision, issue.Revision)
 	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision}, {Ref: issue.UID, ExpectedRevision: updated.Revision}, {Ref: issue.UID, ExpectedRevision: updated.Revision}, {Ref: issue.UID, ExpectedRevision: issue.Revision}}
+	req.Body.Actor = "agent"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision, ToProjectUID: target.UID}, {Ref: issue.UID, ExpectedRevision: updated.Revision, ToProjectUID: target.UID}, {Ref: issue.UID, ExpectedRevision: updated.Revision, ToProjectUID: target.UID}, {Ref: issue.UID, ExpectedRevision: issue.Revision, ToProjectUID: target.UID}}
 	handler := moveIssuesHandler(ServerConfig{DB: store})
 	out, err := handler(t.Context(), req)
 	require.NoError(t, err)
