@@ -6,8 +6,51 @@ import (
 	"errors"
 )
 
-// RunMoveBatchTx executes item savepoints inside a backend-owned transaction.
-func RunMoveBatchTx(ctx context.Context, tx *sql.Tx, in MoveIssuesBatchIn, move func(context.Context, *sql.Tx, MoveIssueProjectIn) (MoveIssueProjectOut, error), comment func(context.Context, *sql.Tx, CreateCommentParams) (Comment, Event, error), isTransient func(error) bool) (MoveIssuesBatchOut, bool, error) {
+// RunMoveBatch coordinates the backend's retrying transaction and item savepoints.
+func RunMoveBatch(ctx context.Context, in MoveIssuesBatchIn, withTx func(context.Context, func(*sql.Tx) error, func(error, error) error) error, move func(context.Context, *sql.Tx, MoveIssueProjectIn) (MoveIssueProjectOut, error), comment func(context.Context, *sql.Tx, CreateCommentParams) (Comment, Event, error), bump func(context.Context, Transaction) error, isTransient func(error) bool) (MoveIssuesBatchOut, error) {
+	var out MoveIssuesBatchOut
+	pending := false
+	run := func(tx *sql.Tx) error {
+		var moved bool
+		var err error
+		out, moved, err = runMoveBatchTx(ctx, tx, in, move, comment, isTransient)
+		pending = true
+		if err != nil {
+			return err
+		}
+		if moved {
+			if err := bump(ctx, tx); err != nil {
+				return err
+			}
+		}
+		if in.DryRun || in.Rehearse {
+			return errBatchMovePreview
+		}
+		return nil
+	}
+	finish := func(err, rollbackErr error) error {
+		if in.Rehearse && rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			err = errors.Join(err, ErrTransactionFinalizationFailed, rollbackErr)
+		}
+		if pending {
+			pending = false
+			return finishMoveBatchAttempt(ctx, &out, err, rollbackErr)
+		}
+		return err
+	}
+	err := withTx(ctx, run, finish)
+	if errors.Is(err, errBatchMovePreview) && !errors.Is(err, ErrTransactionFinalizationFailed) {
+		err = nil
+	}
+	if err != nil {
+		return MoveIssuesBatchOut{}, err
+	}
+	return out, nil
+}
+
+var errBatchMovePreview = errors.New("batch move preview complete")
+
+func runMoveBatchTx(ctx context.Context, tx *sql.Tx, in MoveIssuesBatchIn, move func(context.Context, *sql.Tx, MoveIssueProjectIn) (MoveIssueProjectOut, error), comment func(context.Context, *sql.Tx, CreateCommentParams) (Comment, Event, error), isTransient func(error) bool) (MoveIssuesBatchOut, bool, error) {
 	out := MoveIssuesBatchOut{Results: make([]MoveIssueBatchResult, len(in.Items))}
 	moved := false
 	succeeded := map[int64]MoveIssueProjectOut{}
@@ -67,8 +110,8 @@ func RunMoveBatchTx(ctx context.Context, tx *sql.Tx, in MoveIssuesBatchIn, move 
 	return out, moved, nil
 }
 
-// FinishMoveBatchAttempt completes rejected items after the transaction ends.
-func FinishMoveBatchAttempt(ctx context.Context, out *MoveIssuesBatchOut, transactionErr, rollbackErr error) error {
+// finishMoveBatchAttempt completes rejected items after the transaction ends.
+func finishMoveBatchAttempt(ctx context.Context, out *MoveIssuesBatchOut, transactionErr, rollbackErr error) error {
 	for n := range out.Results {
 		if out.Results[n].Err == nil {
 			continue
