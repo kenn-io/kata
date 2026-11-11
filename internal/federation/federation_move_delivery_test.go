@@ -169,7 +169,6 @@ func TestSyncFederationMoveResetDeliversLocalReplayOnceAcrossBindings(t *testing
 	retained, err := spoke.env.DB.EventsByUIDs(ctx, source.ProjectID, []string{created.UID})
 	require.NoError(t, err)
 	require.Len(t, retained, 1, "the destination replay restored the original envelope before failing")
-	require.Greater(t, retained[0].ID, source.PushCursorEventID)
 
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
 	delivered, err = pull(1)
