@@ -26,6 +26,7 @@ func checkArgvCompatStoredReads(t *testing.T, store db.Storage, backend Backend)
 	require.NoError(t, err)
 	q := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
+		QueryRowContext(context.Context, string, ...any) *sql.Row
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
 	for _, document := range []string{`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`} {
@@ -79,6 +80,39 @@ func checkArgvCompatStoredReads(t *testing.T, store db.Storage, backend Backend)
 	require.NoError(t, err)
 	_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}})
 	require.ErrorIs(t, err, cron.ErrInvalid, "a new run must not cite a held revision")
+	terminalUID, err := uid.New()
+	require.NoError(t, err)
+	_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: terminalUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, Actor: "worker", Status: "succeeded", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err, "terminal evidence may cite the held revision")
+	wrongUID, err := uid.New()
+	require.NoError(t, err)
+	_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: wrongUID, WorkflowUID: &healthy.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, Actor: "worker", Status: "succeeded", Summary: cron.Summary{Version: 1}})
+	require.Error(t, err, "terminal evidence still requires exact revision identity")
+	// Model an owner restore that retains an unrepresentable event but cannot
+	// store its workflow row. Snapshot and adoption must preserve that evidence.
+	var original string
+	require.NoError(t, q.QueryRowContext(ctx, `SELECT payload FROM events WHERE uid=$1`, workflow.DefinitionEventUID).Scan(&original))
+	var body db.CronDefinitionEvent
+	require.NoError(t, json.Unmarshal([]byte(original), &body))
+	_, err = q.ExecContext(ctx, `DELETE FROM cron_workflows WHERE uid=$1`, workflow.UID)
+	require.NoError(t, err)
+	for _, document := range []string{`null`, `{"version":2,"steps":[]}`, `{"version":1,"steps":[{"kind":"command","future":true}]}`} {
+		body.Definition = jsontext.Value(document)
+		payload, err := json.Marshal(body)
+		require.NoError(t, err)
+		_, err = q.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, string(payload), workflow.DefinitionEventUID)
+		require.NoError(t, err)
+		tx, err := q.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		_, err = db.CronDefinitionSnapshots(ctx, tx, project)
+		require.Error(t, err, "snapshot must refuse retained %s", document)
+		_, err = db.PrepareCronAdoption(ctx, tx, project, project.UID, false)
+		require.Error(t, err, "adoption must refuse retained %s", document)
+		require.NoError(t, tx.Rollback())
+		var retained string
+		require.NoError(t, q.QueryRowContext(ctx, `SELECT payload FROM events WHERE uid=$1`, workflow.DefinitionEventUID).Scan(&retained))
+		require.JSONEq(t, string(payload), retained)
+	}
 	return nil
 }
 
@@ -103,7 +137,7 @@ func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage, back
 	require.NoError(t, err)
 	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, other.ID, other.UID, fold, db.NewCronReplayValidator(tx, backend.Name == "postgres")), "another project's history does not block this project")
 	require.NoError(t, tx.Rollback())
-	for _, document := range []string{`null`, `{"steps":[]}`} {
+	for _, document := range []string{`null`, `{"steps":[]}`, `{"version":1,"steps":[{"kind":"command","future":true}]}`} {
 		bad := argvCompatRemoteWorkflow(t, project, origin, document)
 		projection := db.FoldEvents([]db.FoldEvent{{UID: bad.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: bad.Type, HLCPhysicalMS: bad.HLCPhysicalMS, Payload: bad.Payload}})
 		tx, err = q.BeginTx(ctx, nil)

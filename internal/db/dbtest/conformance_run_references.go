@@ -181,6 +181,11 @@ func checkRunCompactedProvenance(t *testing.T, store db.Storage, backend Backend
 	require.NoError(t, err)
 	_, err = store.ObserveCronRun(t.Context(), historical)
 	require.ErrorIs(t, err, cron.ErrInvalid, "the exact historical workflow document must be supported")
+	historical.UID, err = uid.New()
+	require.NoError(t, err)
+	historical.Status = "succeeded"
+	_, err = store.ObserveCronRun(t.Context(), historical)
+	require.NoError(t, err, "terminal evidence can cite the exact held historical revision")
 	_, err = q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE uid=$2`, oldPayload, oldWorkflowEvent)
 	require.NoError(t, err)
 	for _, document := range []string{`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, `{"version":1,"steps":null}`} {

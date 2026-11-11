@@ -69,14 +69,17 @@ func TestArgvCompatReplayKeepsKindOnlyWinners(t *testing.T) {
 	}
 }
 
-func TestCronFoldStillWarnsForOrdinaryUnknownHistory(t *testing.T) {
-	older := cronFoldEvent(t, "workflow", 1, false)
-	newer := cronFoldEvent(t, "workflow", 2, false)
-	var payload map[string]jsontext.Value
-	require.NoError(t, json.Unmarshal(newer.Payload, &payload))
-	payload["definition"] = jsontext.Value(`{"steps":[{"kind":"command","unknown":true}]}`)
-	newer.Payload, _ = json.Marshal(payload)
-	projection := db.FoldEvents([]db.FoldEvent{older, newer})
-	require.NotEmpty(t, projection.Warnings)
-	require.Equal(t, older.UID, projection.CronWorkflows[foldCronUID].DefinitionEventUID)
+// Both updates and tombstones with unknown fields must block materialization.
+// The backend conformance test verifies the project-scoped refusal.
+func TestCronFoldWarnsForUnknownHistory(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		older := cronFoldEvent(t, "workflow", 1, false)
+		newer := cronFoldEvent(t, "workflow", 2, deleted)
+		var payload map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal(newer.Payload, &payload))
+		payload["definition"] = jsontext.Value(`{"version":1,"steps":[{"kind":"command","unknown":true}]}`)
+		newer.Payload, _ = json.Marshal(payload)
+		projection := db.FoldEvents([]db.FoldEvent{older, newer})
+		require.NotEmpty(t, projection.Warnings)
+	}
 }
