@@ -149,9 +149,10 @@ func (s *Store) InsertRemoteEvents(ctx context.Context, projectID int64, events 
 	inserted := make([]bool, len(events))
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		validator := db.NewCronReplayValidator(tx, true)
+		resolver := db.NewRemoteIssueProjectResolver(tx, projectID)
 		for i, remote := range events {
 			var err error
-			inserted[i], err = s.insertRemoteEventTx(ctx, tx, projectID, remote, payloads[i], createdAts[i], validator)
+			inserted[i], err = s.insertRemoteEventTx(ctx, tx, projectID, remote, payloads[i], createdAts[i], validator, resolver)
 			if err != nil {
 				return fmt.Errorf("remote event project %s event %s: %w", remote.ProjectUID, remote.EventUID, err)
 			}
@@ -172,9 +173,10 @@ func (s *Store) insertRemoteEventTx(
 	payload jsontext.Value,
 	createdAt string,
 	validator *db.CronReplayValidator,
+	resolver *db.RemoteIssueProjectResolver,
 ) (bool, error) {
 	var err error
-	projectID, err = db.RemoteIssueEventProject(ctx, tx, projectID, remote)
+	projectID, err = resolver.Resolve(ctx, remote)
 	if err != nil {
 		return false, err
 	}
