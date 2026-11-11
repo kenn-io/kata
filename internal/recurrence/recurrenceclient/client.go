@@ -205,7 +205,6 @@ func statusErr(status int, body []byte, httpResp *http.Response, callErr error) 
 // CronParent is the observed parent and its retained cron metadata.
 type CronParent struct {
 	Status    string                    `json:"status"`
-	Revision  int64                     `json:"revision"`
 	DeletedAt *time.Time                `json:"deleted_at"`
 	Metadata  map[string]jsontext.Value `json:"metadata"`
 }
