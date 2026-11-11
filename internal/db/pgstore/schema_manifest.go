@@ -13,12 +13,12 @@ import (
 const (
 	canonicalColumnFingerprint     = "2c573a26533e056618e458d7addc7836bf7d95e98b0ad258b6b7c2a50725186d"
 	canonicalConstraintFingerprint = "21a6429d8b06093928339598c69f71d48d65330c78e3274cbe8bcabc9fd5ed14"
-	canonicalIndexFingerprint      = "49e4ef892933e98de9171cc6932d8137221b410d3caba1486c5bcbe3f8aca876"
+	canonicalIndexFingerprint      = "87011d16a9240107f32c12d775c67bb47dfe0dac7c044b570b08fe713caba4c8"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
 	canonicalTriggerFingerprint    = "d027a602b31936d09dee01e5182c092c9245faf34edb2c0445ac36795a4a3b46"
-	canonicalFunctionFingerprint   = "be74ea17e4c0192144ab7f75740b168dc1eb7cc45de15a34aaf3a69c1ffdb7f8"
+	canonicalFunctionFingerprint   = "17dc83b7de442487814547c15285b0ac531e6c7ed5714b9e928b5064718c707d"
 	canonicalTextSearchFingerprint = "1206eb613d5e4cf9c00c447998c337ece326819f8b3261668f7a8c685571db06"
 )
 
@@ -74,6 +74,7 @@ var optionalVectorTableColumns = map[string]string{
 }
 
 var canonicalIndexes = strings.Fields(`
+idx_issues_recurring_delivery
 idx_mcp_event_subscriptions_due idx_mcp_event_subscriptions_principal_callback idx_mcp_event_subscriptions_ended
 idx_cron_jobs_project_name idx_cron_workflows_project_name idx_cron_runs_project_time idx_cron_runs_job_time idx_events_project_cron idx_events_cron_run_uid
 idx_embedding_artifacts_input idx_embedding_artifacts_staging
@@ -107,6 +108,7 @@ trg_projects_uid_immutable trg_issues_uid_immutable trg_issue_sync_binding_immut
 issues_search_after_issue_insert issues_search_after_issue_update`)
 
 var canonicalFunctions = strings.Fields(`
+kata_occurrence_key(jsonb)
 enforce_links_uid_consistency()
 enforce_uid_immutable()
 rewrite_project_uid_for_adoption(bigint,text)

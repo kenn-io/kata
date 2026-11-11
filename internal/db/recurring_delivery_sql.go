@@ -49,43 +49,50 @@ type RecurringChild struct {
 
 var errRecurringOccurrenceVersion = errors.New("unsupported recurring occurrence version")
 
-// LastRecurringChild consumes authorized child rows, retaining only the newest
-// supported occurrence. Only the returned evidence participates in response release.
+// RecurringOccurrenceKey orders supported occurrence instants and future versions.
+// Empty keys are not evidence; future versions sort before every supported instant.
+func RecurringOccurrenceKey(occurrence string) string {
+	var header struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(occurrence), &header); err != nil {
+		return ""
+	}
+	if header.Version > 1 {
+		return "~"
+	}
+	var value recurringOccurrence
+	if err := json.Unmarshal([]byte(occurrence), &value); err != nil || value.Version != 1 || value.ScheduledAt.IsZero() {
+		return ""
+	}
+	// The bias keeps RFC 3339 instants positive, including offsets around year zero.
+	return fmt.Sprintf("%012d.%09d", value.ScheduledAt.Unix()+62167478400, value.ScheduledAt.Nanosecond())
+}
+
+// LastRecurringChild decodes the first authorized row in occurrence-key order.
 func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, error) {
 	defer func() { _ = rows.Close() }()
-	var latest *RecurringChild
-	var latestID int64
-	for rows.Next() {
-		var id int64
-		var uid, occurrence string
-		if err := rows.Scan(&id, &uid, &occurrence); err != nil {
-			return nil, err
-		}
-		var header struct {
-			Version int `json:"version"`
-		}
-		if err := json.Unmarshal([]byte(occurrence), &header); err != nil {
-			continue
-		}
-		if header.Version > 1 {
-			return nil, errRecurringOccurrenceVersion
-		}
-		var value recurringOccurrence
-		if err := json.Unmarshal([]byte(occurrence), &value); err != nil || value.Version != 1 || value.ScheduledAt.IsZero() {
-			continue
-		}
-		child := RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}
-		if latest == nil || child.ScheduledAt.After(latest.ScheduledAt) || (child.ScheduledAt.Equal(latest.ScheduledAt) && child.UID > latest.UID) {
-			latest, latestID = &child, id
-		}
+	if !rows.Next() {
+		return nil, rows.Err()
 	}
-	if err := rows.Err(); err != nil {
+	var id int64
+	var uid, occurrence string
+	if err := rows.Scan(&id, &uid, &occurrence); err != nil {
 		return nil, err
 	}
-	if latest != nil {
-		RecordExposedIssue(ctx, latestID)
+	key := RecurringOccurrenceKey(occurrence)
+	if key == "~" {
+		return nil, errRecurringOccurrenceVersion
 	}
-	return latest, nil
+	if key == "" {
+		return nil, nil
+	}
+	var value recurringOccurrence
+	if err := json.Unmarshal([]byte(occurrence), &value); err != nil {
+		return nil, err
+	}
+	RecordExposedIssue(ctx, id)
+	return &RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}, rows.Err()
 }
 
 func recurringRecipient(j cron.JobDefinition, parent Issue) (string, error) {

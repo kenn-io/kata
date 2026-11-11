@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- See native recurring job delivery progress and child evidence together in job show and list. The CLI requires daemon API 0.45.0 or newer; upgrade an older daemon.
+- See native recurring job delivery progress and child evidence together in job show and list. An occurrence index keeps these reads practical as history grows. The CLI requires daemon API 0.45.0 or newer; upgrade an older daemon.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index

@@ -281,6 +281,20 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 			})
 		}
 		deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, latest.Metadata, latest.ID)
+		var metadata, occurrence map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal([]byte(older.Metadata), &metadata))
+		require.NoError(t, json.Unmarshal(metadata["cron.occurrence"], &occurrence))
+		occurrence["version"] = jsontext.Value("2")
+		occurrence["scheduled_at"] = jsontext.Value("false")
+		metadata["cron.occurrence"], err = json.Marshal(occurrence)
+		require.NoError(t, err)
+		raw, err := json.Marshal(metadata)
+		require.NoError(t, err)
+		deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, string(raw), older.ID)
+		d := deliveryRead(t, s, p, j, now)
+		require.Equal(t, "error", d.State)
+		require.Nil(t, d.LastChild)
+		deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, older.Metadata, older.ID)
 	})
 	t.Run("last child", func(t *testing.T) {
 		// Give the smaller UID the later occurrence, using fractional stamps that do not sort lexically.
@@ -294,11 +308,17 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 			deliveryStamp(t, s, child, stamp)
 		}
 		require.Equal(t, children[0].UID, deliveryRead(t, s, p, j, now).LastChild.UID)
+		for i, stamp := range []string{"2026-10-01T09:00:00.123456789Z", "2026-10-01T09:00:00.123456788Z"} {
+			parsed, err := time.Parse(time.RFC3339Nano, stamp)
+			require.NoError(t, err)
+			deliveryStamp(t, s, children[i], parsed)
+		}
+		require.Equal(t, children[0].UID, deliveryRead(t, s, p, j, now).LastChild.UID)
 		readCtx := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, []string{p.UID}))
 		_, err = s.RecurringCronDelivery(readCtx, db.CronDeliveryQuery{ProjectID: p.ID, JobUID: j.UID}, now)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []int64{parent.ID, children[0].ID}, db.ExposedIssues(readCtx))
-		tied, err := time.Parse(time.RFC3339Nano, stamps[0])
+		tied, err := time.Parse(time.RFC3339Nano, "2026-10-01T09:00:00.123456789Z")
 		require.NoError(t, err)
 		deliveryStamp(t, s, children[1], tied)
 		require.Equal(t, children[1].UID, deliveryRead(t, s, p, j, now).LastChild.UID, "larger UID wins an occurrence-time tie")
@@ -315,6 +335,9 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		require.NoError(t, err)
 		require.Equal(t, children[1].UID, out[0].Delivery.LastChild.UID)
 		require.ElementsMatch(t, []int64{parent.ID, children[1].ID}, db.ExposedIssues(scoped))
+		deliveryExec(t, s, `UPDATE projects SET deleted_at=$1 WHERE id=$2`, "2026-01-01T00:00:00Z", hidden.ID)
+		require.Equal(t, children[1].UID, deliveryRead(t, s, p, j, now).LastChild.UID)
+		deliveryExec(t, s, `UPDATE projects SET deleted_at=NULL WHERE id=$1`, hidden.ID)
 		moved, err := s.IssueByID(ctx, children[0].ID)
 		require.NoError(t, err)
 		_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: hidden.ID, ToProjectID: p.ID, IfMatchRev: moved.Revision, Actor: "operator"})

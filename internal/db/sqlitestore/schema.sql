@@ -62,6 +62,11 @@ CREATE TABLE issues (
   CHECK (short_id NOT GLOB '*[^0-9abcdefghjkmnpqrstvwxyz]*'),
   CHECK (short_id = lower(substr(uid, 27 - length(short_id), length(short_id))))
 );
+CREATE INDEX idx_issues_recurring_delivery ON issues(
+  json_extract(metadata,'$."cron.occurrence".job_uid'),
+  kata_occurrence_key(json_extract(metadata,'$."cron.occurrence"')) COLLATE BINARY DESC,
+  uid COLLATE BINARY DESC
+) WHERE deleted_at IS NULL AND kata_occurrence_key(json_extract(metadata,'$."cron.occurrence"')) IS NOT NULL;
 CREATE INDEX idx_issues_uid_prefix ON issues(uid COLLATE NOCASE, uid);
 CREATE INDEX idx_issues_project_uid_prefix ON issues(project_id, uid COLLATE NOCASE, uid);
 CREATE INDEX idx_issues_project_status_updated
