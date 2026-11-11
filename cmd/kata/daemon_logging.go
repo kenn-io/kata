@@ -22,7 +22,7 @@ func startDaemonLogging(_ context.Context) (io.Writer, io.Writer, func()) {
 	}
 	file := client.DaemonLogWriter(ns.DataDir)
 	if file == nil {
-		fmt.Fprintln(os.Stderr, "kata daemon: cannot open daemon.log in "+ns.DataDir+"; diagnostics remain on stderr")
+		fmt.Fprintln(os.Stderr, "kata daemon: cannot open daemon.log in "+ns.DataDir+". Diagnostics remain on stderr")
 		return os.Stderr, nil, func() {}
 	}
 	var writer io.Writer = daemonDiagnosticWriter{os.Stderr, file}
@@ -64,14 +64,8 @@ func (w daemonDiagnosticWriter) Write(p []byte) (int, error) {
 	if err != nil {
 		return n, err
 	}
-	if n != len(p) {
-		return n, io.ErrShortWrite
-	}
 	if fileErr != nil {
 		return fileN, fileErr
 	}
-	if fileN != len(p) {
-		return fileN, io.ErrShortWrite
-	}
-	return len(p), nil
+	return n, nil
 }
