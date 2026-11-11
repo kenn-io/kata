@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -363,7 +364,7 @@ func cliErrorForErr(err error, runEReached bool) *cliError {
 			ExitCode: exit,
 		}
 		if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-			cli.Hint = localDaemonGuidance(unreachable, "")
+			cli.Hint = daemonRecoveryAdvice(unreachable, "", runtime.GOOS)
 		}
 	}
 	return cli
