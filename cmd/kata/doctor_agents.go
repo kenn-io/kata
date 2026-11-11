@@ -15,7 +15,7 @@ func doctorAgent(ctx context.Context, name string) diagnostics.Check {
 	_, lookupErr := exec.LookPath(name)
 	opts, _, err := agentSetupOptions(name)
 	if err == errAgentSetupExecutables {
-		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: display + ": " + err.Error(), Fix: "kata agent-hook install --executable"}
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: display + ": " + err.Error(), Fix: agentSetupRecovery(name)}
 	}
 	if err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: display + ": " + err.Error()}
@@ -32,7 +32,11 @@ func doctorAgent(ctx context.Context, name string) diagnostics.Check {
 	}
 	probe, cancel := context.WithTimeout(ctx, doctorRequestTimeout)
 	defer cancel()
-	status, err := checkAgentSetup(probe, opts)
+	plan, err := planAgentSetup(&opts)
+	if err != nil {
+		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: display + ": " + err.Error()}
+	}
+	status, err := checkAgentSetup(probe, opts, plan)
 	if err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: display + ": " + err.Error()}
 	}

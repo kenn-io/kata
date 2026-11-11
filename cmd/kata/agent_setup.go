@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -41,6 +43,7 @@ func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 		}
 	} else {
 		opts.Contract, opts.Attention = target.capability.Contract, true
+		opts.Executable = "kata"
 		plan, err := planAgentSetup(&opts)
 		if err != nil {
 			return opts, "", err
@@ -55,38 +58,25 @@ func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 				if meta, err := parsePiAgentHookMetadata(change.Original); err == nil {
 					executable = meta.Executable
 				}
-			case "opencode":
+			case "opencode", "amp":
 				if meta, err := parsePluginAgentHookMetadata(change.Original); err == nil {
 					executable = meta.Executable
 				}
-			case "droid", "muse":
-				root, err := parseExtraJSON(change.Original, true)
+			case "openclaw":
+				line, _, _ := bytes.Cut(change.Original, []byte("\n"))
+				if metadata, ok := bytes.CutPrefix(line, []byte(openClawManagedPrefix)); ok {
+					var meta openClawManaged
+					if json.Unmarshal(metadata, &meta) == nil {
+						executable = meta.Executable
+					}
+				}
+			default:
+				values, err := agentSetupExtraExecutables(name, change.Original)
 				if err != nil {
 					return opts, "", err
 				}
-				section := root
-				if hooks, ok := root["hooks"].(map[string]any); ok {
-					section = hooks
-				}
-				registrations, err := extraJSONRegistrations(name, map[string]map[string]any{"": section})
-				if err != nil {
-					return opts, "", err
-				}
-				for _, registration := range registrations {
-					if extraHookKind(name, registration.handler) == "" {
-						continue
-					}
-					command, _ := registration.handler["command"].(string)
-					if runtime.GOOS == "windows" {
-						for _, key := range []string{"commandWindows", "command_windows"} {
-							if alternate, ok := registration.handler[key].(string); ok && alternate != "" {
-								command = alternate
-								break
-							}
-						}
-					}
-					value, err := agentHookCommandExecutable(command, runtime.GOOS, false)
-					if err != nil || (executable != "" && executable != value) {
+				for _, value := range values {
+					if executable != "" && executable != value {
 						return opts, "", errAgentSetupExecutables
 					}
 					executable = value
@@ -110,15 +100,100 @@ func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 	return opts, warning, nil
 }
 
-func agentSetupItem(name string, warn func(string)) ([]agentsetup.Item, error) {
-	opts, warning, err := agentSetupOptions(name)
-	if err != nil && !errors.Is(err, errAgentSetupExecutables) {
-		return nil, err
+func agentSetupExtraExecutables(name string, data []byte) ([]string, error) {
+	var handlers []map[string]any
+	if name == "kimi" || name == "kimi-code" {
+		blocks, err := parseExtraTOMLHooks(data)
+		if err != nil {
+			return nil, err
+		}
+		for _, block := range blocks {
+			handlers = append(handlers, block.fields)
+		}
+	} else {
+		root, err := parseExtraJSON(data, true)
+		if err != nil {
+			return nil, err
+		}
+		sections := map[string]map[string]any{}
+		if name == "antigravity" {
+			for key, value := range root {
+				if section, ok := value.(map[string]any); ok {
+					sections[key] = section
+				}
+			}
+		} else {
+			section := root
+			if hooks, ok := root["hooks"].(map[string]any); ok {
+				section = hooks
+			}
+			if name == "zcode" {
+				section, _ = section["events"].(map[string]any)
+			}
+			sections[""] = section
+		}
+		registrations, err := extraJSONRegistrations(name, sections)
+		if err != nil {
+			return nil, err
+		}
+		for _, registration := range registrations {
+			handlers = append(handlers, registration.handler)
+		}
 	}
-	ambiguous := errors.Is(err, errAgentSetupExecutables)
+	var values []string
+	for _, handler := range handlers {
+		if extraHookKind(name, handler) == "" {
+			continue
+		}
+		command, _ := handler["command"].(string)
+		if runtime.GOOS == "windows" {
+			for _, key := range []string{"commandWindows", "command_windows"} {
+				if alternate, ok := handler[key].(string); ok && alternate != "" {
+					command = alternate
+					break
+				}
+			}
+		}
+		if name == "zcode" {
+			values = append(values, command)
+			continue
+		}
+		value, err := agentHookCommandExecutable(command, runtime.GOOS, false)
+		if err != nil {
+			return nil, errAgentSetupExecutables
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
+
+func agentSetupRecovery(name string) string {
+	exe, _, err := resolveAgentHookExecutable("", defaultAgentHookExecutableEnv())
+	if err != nil {
+		return "Install Kata on PATH, then run kata agent-hook install " + name + " --executable kata"
+	}
+	command, _ := agenthook.BuildCommand("kata", "agent-hook", "install", name, "--executable", exe)
+	return command.Native
+}
+
+func agentSetupItem(name string, warn func(string)) ([]agentsetup.Item, error) {
+	var opts nativeAgentHookOptions
+	var warning string
+	var initErr error
+	initialized := false
+	initialize := func() error {
+		if !initialized {
+			opts, warning, initErr = agentSetupOptions(name)
+			initialized = true
+		}
+		return initErr
+	}
 	return []agentsetup.Item{{Name: "hooks", Install: func(ctx context.Context) error {
-		if ambiguous {
-			return nil
+		if err := initialize(); err != nil {
+			if errors.Is(err, errAgentSetupExecutables) {
+				return nil
+			}
+			return err
 		}
 		plan, err := planAgentSetup(&opts)
 		if err != nil {
@@ -134,6 +209,11 @@ func agentSetupItem(name string, warn func(string)) ([]agentsetup.Item, error) {
 				return err
 			}
 		}
+		if _, err := agenthook.ParseAgent(name); err != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 		changed, err := publishNativeAgentHookPlan(plan)
 		if err == nil && changed && warning != "" && warn != nil {
 			warning = strings.Replace(warning, " (use --executable for a stable path)", ". Install Kata on PATH and rerun kata agent setup "+name, 1)
@@ -141,8 +221,11 @@ func agentSetupItem(name string, warn func(string)) ([]agentsetup.Item, error) {
 		}
 		return err
 	}, Check: func(ctx context.Context) (agentsetup.Status, error) {
-		if ambiguous {
-			return agentsetup.Status{State: agentsetup.StateUnknown, Reason: errAgentSetupExecutables.Error(), NextStep: "kata agent-hook install --executable"}, nil
+		if err := initialize(); err != nil {
+			if errors.Is(err, errAgentSetupExecutables) {
+				return agentsetup.Status{State: agentsetup.StateUnknown, Reason: err.Error(), NextStep: agentSetupRecovery(name)}, nil
+			}
+			return agentsetup.Status{}, err
 		}
 		plan, err := planAgentSetup(&opts)
 		if err != nil {
@@ -154,11 +237,11 @@ func agentSetupItem(name string, warn func(string)) ([]agentsetup.Item, error) {
 		if capability, err := lookupAgentHookCapability(name); err == nil && capability.Note != "" {
 			warn(capability.Note)
 		}
-		return checkAgentSetup(ctx, opts)
+		return checkAgentSetup(ctx, opts, plan)
 	}}}, nil
 }
 
-func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions) (agentsetup.Status, error) {
+func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nativeAgentHookPlan) (agentsetup.Status, error) {
 	status := agentsetup.Status{State: agentsetup.StateOK, ConfigPath: opts.ConfigPath}
 	if opts.Agent == "claude" || opts.Agent == "codex" {
 		if _, err := exec.LookPath(opts.Agent); err != nil {
@@ -170,10 +253,6 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions) (agentset
 				return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: opts.ConfigPath, Reason: "Agent executable is missing", NextStep: "Install " + opts.Agent + " or add it to PATH"}, nil
 			}
 		}
-	}
-	plan, err := planAgentSetup(&opts)
-	if err != nil {
-		return status, err
 	}
 	status.ConfigPath = plan.Path
 	for _, change := range plan.Changes {
@@ -271,6 +350,39 @@ func planAgentSetup(opts *nativeAgentHookOptions) (nativeAgentHookPlan, error) {
 	return plan, err
 }
 
+func agentSetupFallback(ctx context.Context, name string, checkOnly bool, items func(string) ([]agentsetup.Item, error)) (agentsetup.Row, error) {
+	row := agentsetup.Row{Agent: name, AgentName: name, Piece: "hooks"}
+	pieces, err := items(name)
+	if err != nil {
+		return row, err
+	}
+	item := pieces[0]
+	if !checkOnly {
+		if err := ctx.Err(); err != nil {
+			return row, err
+		}
+		if err := item.Install(ctx); err != nil {
+			row.Status = agentsetup.Status{State: agentsetup.StateFailed, Reason: err.Error(), NextStep: "kata agent setup " + name}
+			return row, nil
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return row, err
+	}
+	status, err := item.Check(ctx)
+	if err != nil {
+		row.Status = agentsetup.Status{State: agentsetup.StateFailed, Reason: err.Error(), NextStep: "kata agent setup " + name}
+		return row, nil
+	}
+	if status.State != agentsetup.StateUnknown {
+		status.State = agentsetup.StateUnknown
+		status.Reason = "Hook inspection is unavailable for this agent"
+		status.NextStep = "Inspect hooks in the agent"
+	}
+	row.Status = status
+	return row, ctx.Err()
+}
+
 func newAgentSetupCmd() *cobra.Command {
 	var check bool
 	cmd := &cobra.Command{Use: "setup [<harness>...]", Short: "Install and check agent hooks", RunE: func(cmd *cobra.Command, args []string) error {
@@ -284,13 +396,33 @@ func newAgentSetupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			name = capability.Name
-			if _, err := agenthook.ParseAgent(name); err != nil {
-				return fmt.Errorf("%s is unavailable in agent setup; use kata agent-hook install %s", name, name)
+			if !slices.Contains(names, capability.Name) {
+				names = append(names, capability.Name)
 			}
-			names = append(names, name)
 		}
-		report, err := agentsetup.Run(cmd.Context(), agentsetup.Options{Agents: names, CheckOnly: check, SetupCommand: "kata agent setup", Items: items})
+		var report agentsetup.Report
+		var err error
+		if len(names) == 0 {
+			report, err = agentsetup.Run(cmd.Context(), agentsetup.Options{CheckOnly: check, SetupCommand: "kata agent setup", Items: items})
+		} else {
+			for _, name := range names {
+				if err = cmd.Context().Err(); err != nil {
+					break
+				}
+				if _, parseErr := agenthook.ParseAgent(name); parseErr == nil {
+					var result agentsetup.Report
+					result, err = agentsetup.Run(cmd.Context(), agentsetup.Options{Agents: []string{name}, CheckOnly: check, SetupCommand: "kata agent setup", Items: items})
+					report.Rows = append(report.Rows, result.Rows...)
+				} else {
+					var row agentsetup.Row
+					row, err = agentSetupFallback(cmd.Context(), name, check, items)
+					report.Rows = append(report.Rows, row)
+				}
+				if err != nil {
+					break
+				}
+			}
+		}
 		if err != nil {
 			return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), "or pass --agent", "or name an agent"))
 		}
