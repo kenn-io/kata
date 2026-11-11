@@ -69,7 +69,7 @@ option objects retain exact JSON numbers.
 ### Create with typed flags
 
 For common per-run jobs, `kata cron job create` accepts typed flags instead of
-`--file`. Typed creation is available on main and will ship in a future release. Choose the job's
+`--file`. Choose the job's
 enabled state and policies explicitly. This example stores a disabled native
 job; enabling it activates delivery by the owning daemon:
 
@@ -107,19 +107,14 @@ job. Typed `--cron` uses `--timezone` as its single timezone source; `TZ=` and
 interval rather than the `@every` descriptor. An interval measures elapsed time;
 an omitted interval timezone does not
 choose the machine's local zone. Once requires an explicit offset or `Z`.
-Durations use nanosecond precision; smaller fractions are truncated. Fractional seconds at nanosecond precision, overflow, and negative durations are rejected.
+Durations must be whole seconds. Digits beyond nanosecond precision are ignored.
 
 Prompt, body and message text stay literal. Kata neither parses shell words nor
 launches a process. `options.adapter` selects an adapter by convention; it does
 not confirm that the adapter is installed or ready. Typed creation saves a job;
 it does not preview occurrences or reserve execution.
 
-The [retained UID and retry rules](#definitions) also apply to typed creation.
-Reusing a name creates a separate job; it never updates a job by name. Use
-`--file` for other issue policies, triggers and advanced fields. New typed
-authoring flags cannot be combined with `--file`. The `--uid` flag works with
-either route; `--parent` works with file input or typed native jobs. Update
-continues to require a complete request file or the interactive editor.
+Reusing a name creates a separate job. Update requires a request file or the interactive editor.
 
 ### Edit in place
 

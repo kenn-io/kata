@@ -27,12 +27,14 @@ func cronAuthorBuild(t *testing.T, parent string, args []string) (api.PutCronJob
 func TestCronAuthorPromptDefinition(t *testing.T) {
 	body, err := cronAuthorBuild(t, "", append(cronAuthorFixture(), "--adapter-agent=example-agent", "--checkout-key=example-checkout"))
 	require.NoError(t, err)
+	require.JSONEq(t, `{"adapter":"example-adapter","agent":"example-agent"}`, string(body.Definition.Options))
+	body.Definition.Options = nil
 	require.Equal(t, api.PutCronJobBody{Name: "Inspection", Definition: api.CronJobDefinition{
 		Version: 1, Kind: "job", Enabled: false,
 		Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 3600},
 		Action:  cron.Action{Kind: "execute", Prompt: "Inspect the workspace"},
 		Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Inspect"},
-		Overlap: "forbid", Catchup: "latest", CheckoutKey: "example-checkout", Options: api.JSONRawObject(`{"adapter":"example-adapter","agent":"example-agent"}`),
+		Overlap: "forbid", Catchup: "latest", CheckoutKey: "example-checkout",
 	}}, body)
 }
 
@@ -54,7 +56,8 @@ func TestCronAuthorRejectsInvalidSelections(t *testing.T) {
 		name, flag, value, want string
 	}{
 		{"two schedules", "--cron", "@daily", "choose exactly one of --cron, --every or --once"},
-		{"notify false", "--notify", "false", "--notify must be true when supplied"},
+		{"padded adapter", "--adapter", " example-adapter ", "--adapter must be a non-empty selector without surrounding spaces"},
+		{"padded agent", "--adapter-agent", " example-agent ", "--adapter-agent must be a non-empty selector without surrounding spaces"},
 		{"mixed action", "--notify", "true", "choose exactly one of --notify or --prompt"},
 		{"native recipient on prompt", "--recipient", "worker", "--parent, --recipient and --message require --notify"},
 		{"native message on prompt", "--message", "hello", "--parent, --recipient and --message require --notify"},
@@ -76,7 +79,7 @@ func TestCronAuthorRequiresExplicitChoices(t *testing.T) {
 		{"--overlap", "typed creation requires explicit --overlap"},
 		{"--every", "choose exactly one of --cron, --every or --once"},
 		{"--prompt", "choose exactly one of --notify or --prompt"},
-		{"--adapter", "--prompt requires an explicit --adapter"},
+		{"--adapter", "--adapter must be a non-empty selector without surrounding spaces"},
 	} {
 		t.Run(tc.flag, func(t *testing.T) {
 			args := cronAuthorFixture()
@@ -109,7 +112,7 @@ func TestCronAuthorTrigger(t *testing.T) {
 		{name: "empty timezone", flag: "--every", value: "1h", timezone: "=", want: "--timezone requires an explicit IANA timezone"},
 		{name: "timezone directive", flag: "--cron", value: "CRON_TZ=America/New_York 0 9 * * *", timezone: "UTC", want: "timezone directives remain available through --file"},
 		{name: "trimmed timezone directive", flag: "--cron", value: "  TZ=Local @daily", timezone: "UTC", want: "timezone directives remain available through --file"},
-		{name: "interval descriptor", flag: "--cron", value: "@every 1h", timezone: "UTC", want: "use --every for an interval"},
+		{name: "interval descriptor", flag: "--cron", value: "@every 1h", timezone: "UTC", trigger: cron.Trigger{Kind: "cron", Cron: "@every 1h", Timezone: "UTC"}},
 		{name: "once", flag: "--once", value: "2026-12-01T09:00:00+05:30", trigger: cron.Trigger{Kind: "once", At: "2026-12-01T09:00:00+05:30"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

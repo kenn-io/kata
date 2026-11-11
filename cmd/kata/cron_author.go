@@ -83,9 +83,6 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 		}
 	}
 	out.Name = o.name
-	if cmd.Flags().Changed("notify") && !o.notify {
-		return out, cronCLIValidation("--notify must be true when supplied")
-	}
 	if o.notify == cmd.Flags().Changed("prompt") {
 		return out, cronCLIValidation("choose exactly one of --notify or --prompt")
 	}
@@ -122,13 +119,16 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 	if parent != "" || cmd.Flags().Changed("recipient") || cmd.Flags().Changed("message") {
 		return out, cronCLIValidation("--parent, --recipient and --message require --notify")
 	}
-	if strings.TrimSpace(o.adapter) == "" {
-		return out, cronCLIValidation("--prompt requires an explicit --adapter")
+	if o.adapter == "" || strings.TrimSpace(o.adapter) != o.adapter {
+		return out, cronCLIValidation("--adapter must be a non-empty selector without surrounding spaces")
 	}
 	out.Definition.Action = cron.Action{Kind: "execute", Prompt: o.prompt}
 	out.Definition.CheckoutKey = o.checkoutKey
 	options := map[string]string{"adapter": o.adapter}
 	if cmd.Flags().Changed("adapter-agent") {
+		if o.agent == "" || strings.TrimSpace(o.agent) != o.agent {
+			return out, cronCLIValidation("--adapter-agent must be a non-empty selector without surrounding spaces")
+		}
 		options["agent"] = o.agent
 	}
 	out.Definition.Options, _ = json.Marshal(options)
@@ -154,9 +154,6 @@ func (o *cronAuthorOptions) trigger(cmd *cobra.Command) (cron.Trigger, error) {
 		expression := strings.TrimSpace(o.expression)
 		if strings.HasPrefix(expression, "TZ=") || strings.HasPrefix(expression, "CRON_TZ=") {
 			return trigger, cronCLIValidation("--cron uses --timezone; timezone directives remain available through --file")
-		}
-		if strings.HasPrefix(expression, "@every") {
-			return trigger, cronCLIValidation("use --every for an interval instead of --cron @every")
 		}
 		trigger.Kind, trigger.Cron = "cron", o.expression
 	case cmd.Flags().Changed("every"):
