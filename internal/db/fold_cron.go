@@ -152,7 +152,8 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 		value.Author = p.cronDefinitionAuthor("workflow:"+in.UID, e, value)
 		current, exists := p.CronWorkflows[in.UID]
 		if !exists || compareClock(cronDefinitionClock(value), cronDefinitionClock(current.CronDefinition)) > 0 {
-			workflow := FoldCronWorkflow{ProjectUID: in.ProjectUID}
+			var workflow FoldCronWorkflow
+			workflow.ProjectUID = in.ProjectUID
 			workflow.CronWorkflow = CronWorkflow{CronDefinition: value, Definition: definition}
 			if _, err := cron.DecodeWorkflow(in.Definition); err != nil {
 				workflow.RawDefinition = append(jsontext.Value(nil), in.Definition...)

@@ -15,7 +15,9 @@ func TestOwnerRestoreRetainedWorkflowWinner(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	projectUID, workflowUID, origin := newUID(t), newUID(t), newUID(t)
 	project := &ProjectExport{ID: 1, UID: projectUID}
-	original := &CronWorkflowExport{CronDefinition: CronDefinition{ID: 1, ProjectID: 1, UID: workflowUID, Name: "old", Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now, DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: 1, OriginInstanceUID: origin}}}
+	var originalValue CronWorkflowExport
+	originalValue.CronDefinition = CronDefinition{ID: 1, ProjectID: 1, UID: workflowUID, Name: "old", Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now, DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: 1, OriginInstanceUID: origin}}
+	original := &originalValue
 	for _, tc := range []struct {
 		name, document   string
 		deleted, omitted bool
@@ -61,7 +63,9 @@ func TestOwnerRestoreRepairsSameRevisionHeldOriginal(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	projectUID, workflowUID, origin, eventUID := newUID(t), newUID(t), newUID(t), newUID(t)
 	project := &ProjectExport{ID: 1, UID: projectUID}
-	row := &CronWorkflowExport{CronDefinition: CronDefinition{ID: 1, ProjectID: 1, UID: workflowUID, Name: "Review", Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now, DefinitionEventUID: eventUID, DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: 2, OriginInstanceUID: origin}}}
+	var rowValue CronWorkflowExport
+	rowValue.CronDefinition = CronDefinition{ID: 1, ProjectID: 1, UID: workflowUID, Name: "Review", Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now, DefinitionEventUID: eventUID, DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: 2, OriginInstanceUID: origin}}
+	row := &rowValue
 	body := CronDefinitionEvent{UID: workflowUID, ProjectUID: projectUID, Name: row.Name, Author: row.Author, CreatedAt: now, UpdatedAt: now, Definition: jsontext.Value(`{"version":1,"steps":[null]}`)}
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
