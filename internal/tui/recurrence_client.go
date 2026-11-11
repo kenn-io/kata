@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/v2"
 	"errors"
@@ -56,11 +57,12 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		if marshalErr != nil {
 			return nil, &mutationPreflightError{marshalErr}
 		}
-		if _, err := metadata.SavedScheduleZone(raw); err != nil {
-			return nil, &mutationPreflightError{err}
+		savedZone, savedErr := metadata.SavedScheduleZone(raw)
+		if savedErr != nil {
+			return nil, &mutationPreflightError{savedErr}
 		}
 		issueZone, _ := issue.Metadata["timezone"].(string)
-		zone, zoneErr := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
+		zone, zoneErr := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), cmp.Or(savedZone, issueZone), localZone)
 		switch {
 		case errors.Is(zoneErr, recurrenceclient.ErrLocalZone):
 			return nil, &mutationPreflightError{errors.New(`"Local" is not an IANA zone; enter a name like Europe/Paris`)}

@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	connectorclient "go.kenn.io/kata/internal/connector"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/pkg/connector"
 )
@@ -524,6 +525,9 @@ func externalRootHandlerError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrNotFound), errors.Is(err, rootbridge.ErrConnectorInstanceNotFound):
 		return api.NewError(http.StatusNotFound, "bridge_not_found", "external root bridge not found", "", nil)
+	case errors.Is(err, metadata.ErrInvalidValue):
+		return api.NewError(http.StatusBadRequest, "invalid_metadata_value", err.Error(),
+			"set a named IANA timezone on the issue or recurrence", nil)
 	case errors.Is(err, db.ErrExternalRootValidation), errors.Is(err, db.ErrExternalFieldMappingValidation):
 		return api.NewError(http.StatusBadRequest, "validation", "external root request is invalid", "", nil)
 	case errors.Is(err, rootbridge.ErrExternalFieldAmbiguous):

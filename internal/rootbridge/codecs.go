@@ -3,6 +3,7 @@
 package rootbridge
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
@@ -99,11 +100,7 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 	zone := canonical.Timezone
 	firstInstant := canonical.Kind == fieldKindInstant && saved == nil
 	if saved == nil && (canonical.Kind == fieldKindDate || firstInstant) {
-		fallback := c.defaultTimezone
-		if c.key == "scheduled_on" && recurrenceZone != "" {
-			fallback = recurrenceZone
-		}
-		if zone, err = metadataTimezone(values, fallback); err != nil && !firstInstant {
+		if zone, err = metadataTimezone(values, cmp.Or(recurrenceZone, c.defaultTimezone)); err != nil && !firstInstant {
 			return err
 		}
 	}

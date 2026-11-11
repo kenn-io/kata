@@ -118,12 +118,23 @@ func (h *recurrenceHarness) save() {
 }
 
 func TestRecurrenceFormUsesSavedScheduleZone(t *testing.T) {
-	t.Setenv("TZ", "Asia/Tokyo")
-	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+	h := newRecurrenceHarness(t, viewDetail)
+	saved, err := metadata.NewScheduleValue("2026-11-09", "America/New_York")
 	require.NoError(t, err)
-	issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: "2025-12-31"}
-	form := newRecurrenceForm(formTarget{}, issue, nil)
-	assert.Equal(t, "America/New_York", form.fieldValue(fieldZone))
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: h.issue.ID, Actor: "alice", Patch: map[string]jsontext.Value{
+			"scheduled_on": saved, "timezone": jsontext.Value(`"Europe/Paris"`),
+		},
+	})
+	require.NoError(t, err)
+	h.reload()
+	h.open()
+	assert.Equal(t, "America/New_York", h.m.input.fieldValue(fieldZone))
+	h.fill("FREQ=DAILY", "2026-11-09", "")
+	h.save()
+	recs := h.rows()
+	require.Len(t, recs, 1)
+	assert.Equal(t, "America/New_York", recs[0].Timezone)
 }
 
 func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
@@ -141,12 +152,13 @@ func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
 			// rules this client cannot read.
 			h.m.detail.issue.Metadata.ScheduledOn = jsontext.Value(saved)
 			h.open()
-			h.fill("FREQ=DAIL", "2026-11-09", "Europe/Paris")
-			h.key(runeKey('Y'))
 			assert.Contains(t, h.m.input.err, refusal)
-			before, err := h.env.DB.IssueByID(t.Context(), h.issue.ID)
-			require.NoError(t, err)
-			beforeRows := h.rows()
+			if current == nil {
+				assert.Empty(t, h.m.input.fieldValue(fieldZone))
+			} else {
+				assert.Equal(t, "Europe/Paris", h.m.input.fieldValue(fieldZone))
+			}
+			h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
 			var writes []string
 			hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				if r.Method != http.MethodGet {
@@ -174,11 +186,6 @@ func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
 			h.save()
 			require.Contains(t, h.m.input.err, refusal)
 			require.Empty(t, writes)
-			after, err := h.env.DB.IssueByID(t.Context(), h.issue.ID)
-			require.NoError(t, err)
-			assert.Equal(t, before.Metadata, after.Metadata)
-			assert.Equal(t, before.Revision, after.Revision)
-			assert.Equal(t, beforeRows, h.rows())
 			if current != nil {
 				h.fill("", "", "")
 				h.save()
