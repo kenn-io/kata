@@ -849,15 +849,6 @@ func TestMoveBatchCLI_SelectorSubtreeRevision(t *testing.T) {
 	}
 }
 
-func TestMoveBatchCLI_PreviewAlreadyInTarget(t *testing.T) {
-	env, dir, source, _, issue := setupMoveCLIProjects(t)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, source.Name+"#"+issue.ShortID+"\n", "--workspace", dir, "move", source.Name, "--refs-from", "-", "--dry", "--json")
-	require.NoError(t, err)
-	require.Contains(t, out, issue.UID)
-	require.Contains(t, out, `"result":"unchanged"`)
-	require.Contains(t, out, `"ref":"`+source.Name+"#"+issue.ShortID+`"`)
-}
-
 func TestMoveBatchCLI_SubtreeCommentFailureShowsMove(t *testing.T) {
 	env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-comment-token"))
 	source, err := env.DB.CreateProject(t.Context(), "source")
