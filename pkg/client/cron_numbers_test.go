@@ -23,7 +23,7 @@ func TestCronTypedSDKPreservesNumbers(t *testing.T) {
 	id, err := client.NewCronUID()
 	require.NoError(t, err)
 	jobDefinition := `{"version":1,"kind":"job","enabled":false,"trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspect"},"overlap":"forbid","catchup":"all","options":` + opaque + `}`
-	workflowDefinition := `{"version":1,"options":` + opaque + `,"steps":[{"key":"inspect","kind":"command","command":"git status","argv":["printf","","two words","two words","雪","line\nbreak"],"options":` + opaque + `}]}`
+	workflowDefinition := `{"version":1,"options":` + opaque + `,"steps":[{"key":"inspect","kind":"argv","argv":["printf","","two words","two words","雪","line\nbreak"],"options":` + opaque + `}]}`
 	decode := func(t *testing.T, raw []byte) any {
 		t.Helper()
 		d := json.NewDecoder(bytes.NewReader(raw))
