@@ -110,20 +110,11 @@ downloads, and build-from-source steps.
 Coding agents follow this loop. `kata quickstart` covers subagents, inboxes,
 attention signals, and scheduling.
 
-```mermaid
-flowchart TB
-  arrive{"Does the request change this workspace?"} -->|no: a question or review| answer["Answer without kata"]
-  arrive -->|yes| search["kata search #34;#60;one or two words#62;#34; --agent"]
-  search --> found{"Open issue covers it?"}
-  found -->|yes| claim["kata claim #60;ref#62;"]
-  found -->|no| create["kata create #34;#60;title#62;#34; --idempotency-key #60;key#62; --agent"]
-  create -->|work it| claim
-  create -->|record only| stop["Leave it open"]
-  claim --> work["Do the work; comment findings a later reader needs"]
-  work --> done{"Verified complete?"}
-  done -->|yes| close["kata close #60;ref#62; --done --message #34;#60;what and how verified#62;#34; --test #60;cmd#62;"]
-  done -->|no| review["kata label add #60;ref#62; needs-review --comment #34;#60;what remains#62;#34;"]
-```
+1. For a question or review that doesn't change the workspace, answer without kata.
+2. For a change, search with `kata search "<one or two words>" --agent`.
+3. If an open issue covers the work, claim it with `kata claim <ref>`. Otherwise, create one with `kata create "<title>" --idempotency-key <key> --agent`. Claim it if you'll work on it; leave it open if you're only recording it.
+4. Do the work and comment on findings a later reader needs.
+5. If the work is verified complete, close it with `kata close <ref> --done --message "<what and how verified>" --test <cmd>`. Otherwise, use `kata label add <ref> needs-review --comment "<what remains>"`.
 
 ## Quickstart
 

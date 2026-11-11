@@ -3,6 +3,7 @@ package tui
 import (
 	"cmp"
 	"encoding/json/jsontext"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -418,7 +419,7 @@ func newCronForm(workflows []cronChoice) (*cronForm, error) {
 // cronFormFor is a form on an existing job. It reads the portable definition
 // that was returned by the daemon, so nothing is lost on a round trip.
 func cronFormFor(rec db.CronJob, workflows []cronChoice) (*cronForm, error) {
-	if err := rec.Definition.Validate(); err != nil {
+	if err := rec.Definition.Validate(); err != nil && !errors.Is(err, cron.ErrNeverFires) {
 		return nil, err
 	}
 	f := &cronForm{uid: rec.UID, expected: rec.DefinitionEventUID, opened: rec.Definition, openedName: rec.Name, workflows: workflows}

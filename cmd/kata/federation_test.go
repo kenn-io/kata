@@ -82,6 +82,43 @@ func TestFederationStatusJSONOutput(t *testing.T) {
 	assert.Equal(t, "hub offline", *status.LastError)
 }
 
+func TestFederationStatusProjectFilter(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	other, err := env.DB.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
+		ProjectID: other.ID, Role: db.FederationRoleHub, HubProjectUID: other.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+
+	var all, scoped struct {
+		Statuses []map[string]any `json:"statuses"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(requireCmdOutput(t, env, "federation", "status", "--format", "json")), &all))
+	require.Len(t, all.Statuses, 2)
+	require.NoError(t, json.Unmarshal([]byte(requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")), &scoped))
+	require.Len(t, scoped.Statuses, 1)
+	var expected []map[string]any
+	for _, status := range all.Statuses {
+		if status["project_name"] == project.Name {
+			expected = append(expected, status)
+		}
+	}
+	assert.Equal(t, expected, scoped.Statuses)
+
+	for _, mode := range []string{"human", "agent"} {
+		out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", mode)
+		assert.Contains(t, out, project.Name)
+		assert.NotContains(t, out, other.Name)
+	}
+	for _, mode := range []string{"json", "human", "agent"} {
+		out, err := runCmdOutput(t, env, "federation", "status", "--project", "missing-project", "--format", mode)
+		_ = requireCLIError(t, err, ExitNotFound)
+		assert.Empty(t, out)
+		assert.Contains(t, err.Error(), "missing-project")
+	}
+}
+
 func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 	env, _ := setupFederationStatusCLIState(t)
 

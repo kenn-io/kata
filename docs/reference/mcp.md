@@ -774,8 +774,7 @@ available through MCP.
 Kata delegates protocol negotiation to the official Go MCP SDK. Stateless
 clients can use `server/discover`; session clients can use `initialize` and
 `notifications/initialized`. Stdio accepts both. The standalone and
-daemon-mounted HTTP endpoints on current main
-route MCP 2026-07-28 requests to a stateless JSON server with Events. Legacy
+daemon-mounted HTTP endpoints route MCP 2026-07-28 requests to a stateless JSON server with Events. Legacy
 clients retain sessions and tool-list changes, without Events. JSON-RPC
 batches are rejected. Each compact JSON message is limited to 8 MiB.
 
@@ -788,7 +787,7 @@ a burst of 20, and at most eight concurrent daemon calls. The standalone and
 static daemon mount share limits across protocol paths. Identity mounts retain
 per-session limits for legacy clients; modern requests share limits by exact
 token ID, independently of other tokens. Modern clients using the same token
-also share loaded tool-section selections, which remain until the daemon
+also share loaded tool-section selections until the token expires or the daemon
 restarts.
 
 Host process control stays outside MCP: daemon lifecycle, the TUI and Web UI,
@@ -801,13 +800,11 @@ The daemon owns MCP Events. Turn it on with `[mcp_events] enabled = true` in the
 daemon configuration (see [MCP Events](configuration.md#mcp-events)). Then
 `kata mcp serve` forwards `events/list`, `events/subscribe`, and
 `events/unsubscribe` to the daemon and keeps no Events state of its own. It has
-no Events flag. On current main, the daemon-mounted `/mcp` endpoint offers the
+no Events flag. The daemon-mounted `/mcp` endpoint offers the
 same Events methods with either static or identity tokens after both `[mcp]`
 and `[mcp_events]` are enabled and the daemon starts or restarts. Identity
 requests use the caller's exact token as subscription owner; static mounts use
 the daemon's backend credential. The daemon owns all subscription state.
-In v0.23.0, use the standalone `kata mcp serve --http` sidecar for Events;
-the released mount supports legacy sessions only.
 
 A forwarder advertises Events on stdio and on the MCP
 2026-07-28 HTTP path. It does not advertise or serve Events on legacy-session

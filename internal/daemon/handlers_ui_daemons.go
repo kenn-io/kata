@@ -117,7 +117,12 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	for i := range catalog {
 		go func() {
 			defer wg.Done()
-			resolved[i] = resolveWebDaemon(catalog[i])
+			target, err := resolveWebDaemon(catalog[i])
+			resolved[i] = target
+			if err != nil {
+				states[i] = "auth_required"
+				return
+			}
 			states[i] = g.daemonHealth(r.Context(), resolved[i])
 		}()
 	}
@@ -523,7 +528,10 @@ func (g *webDaemonGateway) selectDaemon(ctx context.Context, requested string) (
 	}
 	for _, d := range catalog {
 		if d.Name == id {
-			resolved := resolveWebDaemon(d)
+			resolved, err := resolveWebDaemon(d)
+			if err != nil {
+				return resolvedWebDaemon{}, errors.New("daemon_auth_required")
+			}
 			if !resolved.local && resolved.baseURL == "" {
 				return resolvedWebDaemon{}, errors.New("invalid_daemon_target")
 			}
@@ -533,38 +541,37 @@ func (g *webDaemonGateway) selectDaemon(ctx context.Context, requested string) (
 	return resolvedWebDaemon{}, errors.New("unknown_daemon")
 }
 
-func resolveWebDaemon(d config.CatalogDaemonConfig) resolvedWebDaemon {
+func resolveWebDaemon(d config.CatalogDaemonConfig) (resolvedWebDaemon, error) {
 	resolved := resolvedWebDaemon{
 		id: d.Name, local: d.Local, credentialConfigured: webDaemonCredentialsConfigured(d),
 		allowInsecure: d.AllowInsecure,
 	}
 	if d.Local {
-		return resolved
+		return resolved, nil
 	}
 	trimmed := strings.TrimSpace(d.URL)
 	parsed, err := url.Parse(trimmed)
 	if err != nil || parsed.Opaque != "" || parsed.User != nil ||
 		(parsed.Path != "" && parsed.Path != "/") || parsed.RawPath != "" ||
 		parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.Contains(trimmed, "#") {
-		return resolved
+		return resolved, nil
 	}
 	canonical, err := httpurl.CanonicalHTTPOrigin(trimmed)
 	if err != nil {
-		return resolved
+		return resolved, nil
 	}
 	parsed, err = url.Parse(canonical)
 	if err != nil {
-		return resolved
+		return resolved, nil
 	}
 	if parsed.Scheme == "http" && !d.AllowInsecure {
 		if err := daemonruntime.ValidateNonPublicAddress(net.JoinHostPort(parsed.Hostname(), "1")); err != nil {
-			return resolved
+			return resolved, nil
 		}
 	}
 	resolved.baseURL = canonical
-	// An unset token_env leaves no credential; the probe then reports auth_required.
-	resolved.token, _ = d.ClientToken()
-	return resolved
+	resolved.token, err = d.ClientToken()
+	return resolved, err
 }
 
 func webDaemonCredentialsConfigured(d config.CatalogDaemonConfig) bool {
