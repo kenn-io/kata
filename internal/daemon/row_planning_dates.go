@@ -25,10 +25,10 @@ func newPlanningDateResolver(store db.Storage, defaultTimezone string) *planning
 
 // resolve omits a field whose stored value is malformed; it fails when the
 // recurrence timezone lookup fails or a saved schedule's tzdata is unsupported.
-func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (scheduledOn, deadlineOn, scheduledToday, deadlineToday string, err error) {
+func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (scheduledOn, deadlineOn, scheduledToday, deadlineToday, scheduledDisplay, deadlineDisplay string, err error) {
 	raw := string(issue.Metadata)
 	if raw == "" {
-		return "", "", "", "", nil
+		return "", "", "", "", "", "", nil
 	}
 	scheduledDefault := r.defaultTimezone
 	if issue.RecurrenceID != nil {
@@ -36,7 +36,7 @@ func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (sch
 		if !ok {
 			recurrence, err := r.store.GetRecurrenceByID(ctx, *issue.RecurrenceID)
 			if err != nil && !errors.Is(err, db.ErrNotFound) {
-				return "", "", "", "", fmt.Errorf("read recurrence timezone for issue %s: %w", issue.UID, err)
+				return "", "", "", "", "", "", fmt.Errorf("read recurrence timezone for issue %s: %w", issue.UID, err)
 			}
 			zone = recurrence.Timezone
 			r.recurrenceTimezone[*issue.RecurrenceID] = zone

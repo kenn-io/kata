@@ -9,10 +9,11 @@ import (
 // planningCalendarDates holds both planning fields' calendar dates. Each field
 // resolves independently, so one unreadable value leaves the other usable.
 type planningCalendarDates struct {
-	scheduledOn, deadlineOn       string
-	scheduledToday, deadlineToday string
-	hasScheduledOn, hasDeadlineOn bool
-	scheduledErr, deadlineErr     error
+	scheduledOn, deadlineOn           string
+	scheduledToday, deadlineToday     string
+	scheduledDisplay, deadlineDisplay string
+	hasScheduledOn, hasDeadlineOn     bool
+	scheduledErr, deadlineErr         error
 }
 
 func (d planningCalendarDates) err() error {
@@ -44,10 +45,10 @@ func resolvePlanningCalendarDates(
 ) planningCalendarDates {
 	var out planningCalendarDates
 	out.scheduledOn, out.scheduledToday, out.hasScheduledOn, out.scheduledErr = metadata.CalendarDateAndToday(
-		raw, "scheduled_on", display, scheduledDefaultTimezone, now, boundary,
+		raw, "scheduled_on", display, scheduledDefaultTimezone, now, boundary, &out.scheduledDisplay,
 	)
 	out.deadlineOn, out.deadlineToday, out.hasDeadlineOn, out.deadlineErr = metadata.CalendarDateAndToday(
-		raw, "deadline_on", display, deadlineDefaultTimezone, now, boundary,
+		raw, "deadline_on", display, deadlineDefaultTimezone, now, boundary, &out.deadlineDisplay,
 	)
 	return out
 }
@@ -65,7 +66,7 @@ func RowPlanningDates(raw, scheduledDefaultTimezone, deadlineDefaultTimezone str
 }
 
 // RowPlanningProjection resolves each field and the current day in its zone.
-func RowPlanningProjection(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string, now time.Time) (scheduledOn, deadlineOn, scheduledToday, deadlineToday string, err error) {
+func RowPlanningProjection(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string, now time.Time) (scheduledOn, deadlineOn, scheduledToday, deadlineToday, scheduledDisplay, deadlineDisplay string, err error) {
 	dates := resolvePlanningCalendarDates(raw, nil, scheduledDefaultTimezone, deadlineDefaultTimezone, now, nil)
-	return dates.scheduledOn, dates.deadlineOn, dates.scheduledToday, dates.deadlineToday, dates.unsupported()
+	return dates.scheduledOn, dates.deadlineOn, dates.scheduledToday, dates.deadlineToday, dates.scheduledDisplay, dates.deadlineDisplay, dates.unsupported()
 }

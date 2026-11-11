@@ -141,13 +141,13 @@ func CalendarDate(
 	displayTimezone *string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	date, _, present, err := CalendarDateAndToday(raw, field, displayTimezone, defaultTimezone, time.Time{})
+	date, _, present, err := CalendarDateAndToday(raw, field, displayTimezone, defaultTimezone, time.Time{}, nil, nil)
 	return date, present, err
 }
 
 // CalendarDateAndToday resolves the date and today's date in the same zone.
 func CalendarDateAndToday(
-	raw, field string, displayTimezone *string, defaultTimezone string, now time.Time, boundary ...*time.Time,
+	raw, field string, displayTimezone *string, defaultTimezone string, now time.Time, boundary *time.Time, wall *string,
 ) (string, string, bool, error) {
 	if field != "scheduled_on" && field != "deadline_on" {
 		return "", "", false, fmt.Errorf("unsupported planning field %q", field)
@@ -167,6 +167,9 @@ func CalendarDateAndToday(
 	kind, layout, instant, err := classifyScheduledOn(scheduleValue)
 	if err != nil {
 		return "", "", false, err
+	}
+	if wall != nil && kind == scheduledOnInstant && savedLocation != nil {
+		*wall = instant.In(savedLocation).Format("2006-01-02T15:04:05.999999999")
 	}
 	if kind == scheduledOnLocalTime {
 		location := savedLocation
@@ -207,10 +210,10 @@ func CalendarDateAndToday(
 	today := ""
 	if !now.IsZero() {
 		today = now.In(displayLocation).Format(time.DateOnly)
-		if len(boundary) > 0 && boundary[0] != nil {
+		if boundary != nil {
 			next := nextCalendarDay(now, displayLocation, today)
-			if boundary[0].IsZero() || next.Before(*boundary[0]) {
-				*boundary[0] = next
+			if boundary.IsZero() || next.Before(*boundary) {
+				*boundary = next
 			}
 		}
 	}

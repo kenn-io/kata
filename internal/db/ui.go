@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"time"
-
-	"go.kenn.io/kata/internal/metadata"
 )
 
 // UIStore is the narrow coherent-read contract used by the browser API.
@@ -130,7 +128,7 @@ func ProjectUIPlanningDates(ctx context.Context, tx *sql.Tx, issue *UIIssue, que
 	issue.ScheduledOnDate = dates.scheduledOn
 	issue.DeadlineOnDate = dates.deadlineOn
 	issue.ScheduledOnToday, issue.DeadlineOnToday = dates.scheduledToday, dates.deadlineToday
-	issue.ScheduledOnDisplay, issue.DeadlineOnDisplay = metadata.SavedScheduleWallTimes(string(issue.Metadata))
+	issue.ScheduledOnDisplay, issue.DeadlineOnDisplay = dates.scheduledDisplay, dates.deadlineDisplay
 	return nil
 }
 

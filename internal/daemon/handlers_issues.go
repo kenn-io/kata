@@ -1081,11 +1081,10 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 		labelNames = append(labelNames, label.Label)
 	}
 	out := &api.ShowIssueResponse{}
-	scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, err := newPlanningDateResolver(cfg.DB, cfg.DefaultTimezone).resolve(ctx, issue)
+	scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, scheduledOnDisplay, deadlineOnDisplay, err := newPlanningDateResolver(cfg.DB, cfg.DefaultTimezone).resolve(ctx, issue)
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
-	scheduledOnDisplay, deadlineOnDisplay := metadata.SavedScheduleWallTimes(string(issue.Metadata))
 	out.Body.Issue = api.ShowIssueOut{
 		Issue: issue, Labels: labelNames,
 		ScheduledOnDate: scheduledOnDate, DeadlineOnDate: deadlineOnDate,
@@ -1409,7 +1408,7 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, defaultTimezone str
 	out := make([]api.IssueOut, len(issues))
 	for i, iss := range issues {
 		rel := relationships[iss.ID]
-		scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, err := dates.resolve(ctx, iss)
+		scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, _, _, err := dates.resolve(ctx, iss)
 		if err != nil {
 			return nil, err
 		}

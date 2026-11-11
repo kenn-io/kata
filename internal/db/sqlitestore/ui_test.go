@@ -534,3 +534,7 @@ func TestReadUISnapshotOrdersLegacyCommentTimestamps(t *testing.T) {
 func TestUISnapshotSavedCalendarContract(t *testing.T) {
 	dbtest.RunUISnapshotSavedCalendarContract(t, func(t *testing.T) db.Storage { return openUIStore(t) })
 }
+
+func TestFederationScheduleReplay(t *testing.T) {
+	dbtest.RunFederationScheduleReplay(t, func(t *testing.T) db.Storage { return openUIStore(t) })
+}
