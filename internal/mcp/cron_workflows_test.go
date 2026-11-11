@@ -1,11 +1,18 @@
 package mcpserver
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 )
 
 func cronWorkflowDefinition() map[string]any {
@@ -54,6 +61,66 @@ func TestCronWorkflowStrictDefinitions(t *testing.T) {
 }
 func TestCronWorkflowOpaqueNumbers(t *testing.T) {
 	f := newCronFixture(t)
+
+	// Send literal JSON-RPC over the SDK transport: ClientSession.CallTool
+	// marshals arguments and would compact json.RawMessage before sending it.
+	scope, err := NewBoundScope(ProjectIdentity{ID: f.project.ID, Name: f.project.Name})
+	require.NoError(t, err)
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "fixture", Version: "1"}, nil)
+	registerCronWorkflowTools(server, toolHandlers{options: Options{Client: f.client, Scope: scope, Actor: "example-agent"}})
+	var received []byte
+	server.AddReceivingMiddleware(func(next sdkmcp.MethodHandler) sdkmcp.MethodHandler {
+		return func(ctx context.Context, method string, req sdkmcp.Request) (sdkmcp.Result, error) {
+			if call, ok := req.(*sdkmcp.CallToolRequest); ok {
+				received = bytes.Clone(call.Params.Arguments)
+			}
+			return next(ctx, method, req)
+		}
+	})
+	transport := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	callRaw := func(id, definition string) sdkmcp.CallToolResult {
+		t.Helper()
+		arguments := fmt.Sprintf(`{"uid":%q,"name":"Raw workflow","definition":%s}`, id, definition)
+		wire := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kata.cron_workflow_create","arguments":` + arguments + `}}`
+		request := httptest.NewRequest(http.MethodPost, "http://localhost/mcp", strings.NewReader(wire)).WithContext(t.Context())
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json, text/event-stream")
+		response := httptest.NewRecorder()
+		transport.ServeHTTP(response, request)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.Equal(t, arguments, string(received), "SDK must deliver the original argument bytes")
+		var envelope struct {
+			Result sdkmcp.CallToolResult `json:"result"`
+			Error  json.RawMessage       `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
+		require.Empty(t, envelope.Error, response.Body.String())
+		return envelope.Result
+	}
+	for _, argv := range []string{"null", "[]"} {
+		invalid := `{"version":1,"steps":[{"key":"inspect","kind":"prompt","prompt":"Inspect","argv":` + argv + `}]}`
+		require.True(t, callRaw(cronNewUID(t, f.session), invalid).IsError)
+	}
+	require.Empty(t, cronOK(t, f.session, "cron_workflows", map[string]any{})["workflows"])
+
+	id := cronNewUID(t, f.session)
+	indented := `{"version":1,` + strings.Repeat(" ", cron.DefinitionLimit) + `"steps":[{"key":"inspect","kind":"command","command":"git status"},{"key":"review","kind":"prompt","prompt":"Review","after":["inspect"],"options":{"integer":9007199254740993,"decimal":1.0000000000000000001}}],"options":{"integer":9007199254740993}}`
+	var compact bytes.Buffer
+	require.NoError(t, json.Compact(&compact, []byte(indented)))
+	require.Greater(t, len(indented), cron.DefinitionLimit)
+	require.LessOrEqual(t, compact.Len(), cron.DefinitionLimit)
+	resultRaw := callRaw(id, indented)
+	require.False(t, resultRaw.IsError, "%s", mustJSON(t, resultRaw))
+	persisted := cronRecord(t, f.session, "cron_workflow", map[string]any{"uid": id}, "workflow")
+	persistedJSON := string(mustJSON(t, persisted))
+	require.Contains(t, persistedJSON, "git status")
+	require.Contains(t, persistedJSON, "Review")
+	// Fetch raw output as well: decoding through map[string]any loses precision.
+	shown := cronCall(t, f.session, "cron_workflow", map[string]any{"uid": id})
+	shownRaw := shown.Content[0].(*sdkmcp.TextContent).Text
+	require.Contains(t, shownRaw, "9007199254740993")
+	require.Contains(t, shownRaw, "1.0000000000000000001")
+
 	definition := cronWorkflowDefinition()
 	opaque := json.RawMessage(`{"integer":9007199254740993,"nested":[-9007199254740993,1.0000000000000000001]}`)
 	definition["options"] = opaque
