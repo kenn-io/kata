@@ -186,7 +186,8 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 			item, expected := items[j], in.Body.Items[j].ExpectedRevision
 			prior := priorMoves[item.issue.ID]
-			if expected != 0 && expected != item.issue.Revision && !(prior.targetID == item.target.ID && prior.revision == item.issue.Revision && expected == prior.revision-1) {
+			if expected != 0 && expected != item.issue.Revision &&
+				(prior.targetID != item.target.ID || prior.revision != item.issue.Revision || expected != prior.revision-1) {
 				moveBatchRefusal(&results[j], &db.RevisionConflictError{CurrentRevision: item.issue.Revision})
 			}
 		}
