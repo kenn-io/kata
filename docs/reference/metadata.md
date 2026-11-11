@@ -71,9 +71,12 @@ New writes store each date with its effective zone and an immutable timezone-dat
 bundle version. For example, `scheduled_on` is stored as
 `{"value":"2026-11-12T09:00","timezone":"Europe/Paris","tzdata_version":"sha256:..."}`.
 The `value` retains the supplied text; UTC instants retain their selected zone
-for calendar dates while keeping their exact instant. Older stored
-strings remain readable using the issue and daemon defaults; they keep their original form until that field is saved. Older published bundles remain available when new rules are added. An unknown bundle
-version makes the date unreadable and the planning-date endpoint returns HTTP
+for calendar dates while keeping their exact instant. Older stored strings remain
+readable using the issue and daemon defaults; they keep their original form
+until that field is saved. Older published bundles remain available when new
+rules are added. A saved date keeps its original rules even if a later timezone
+update changes the local clock. An unknown bundle version makes the date
+unreadable and the planning-date endpoint returns HTTP
 422. Changing or removing an issue timezone rebinds existing dates unless the
 same write supplies a saved date object with its own rules. Echoing an already
 saved date preserves its rules.
@@ -81,9 +84,9 @@ saved date preserves its rules.
 Stop every older daemon sharing a database before starting the new version,
 and keep those older daemons stopped. Older versions skip object-backed dates
 in notification sweeps. Older clients may also show object-backed dates as
-empty; upgrade clients that read schedule metadata. An existing recurrence using `Local` can create an
-occurrence when the host's named zone is bundled and its rules agree for the
-occurrence and inherited deadline. Otherwise, change the recurrence to a named
+empty; upgrade clients that read schedule metadata. An existing recurrence using
+`Local` can create an occurrence when the host's named zone is bundled and its
+rules agree for the occurrence and inherited deadline. Otherwise, change the recurrence to a named
 IANA timezone. On Windows, Kata maps the system timezone setting to an IANA name.
 
 New or changed issue `timezone` values from API, CLI, MCP, TUI and web writes
@@ -93,9 +96,11 @@ must be `UTC`, `Etc/UTC`, or exact case-sensitive bundled names under `Africa/`,
 `Local`, fixed offsets, non-geographic aliases such as `US/Eastern`, and wrong
 case are rejected. Connector ingest retains its existing validation.
 New civil dates, including deadlines, and zone removals exposing them require
-a bundled issue zone or daemon default. A `Local` daemon default works when the host zone can be named and its rules match the bundled rules for that date. Existing aliases such as `US/Eastern`
-remain usable. Recurrence-owned `scheduled_on` keeps
-its behavior when the issue zone is absent or matches the recurrence zone.
+a bundled issue zone or daemon default. A `Local` daemon default works when the
+host zone can be named and its rules match the bundled rules for that date.
+Existing aliases such as `US/Eastern` remain usable. Recurrence-owned
+`scheduled_on` keeps its behavior when the issue zone is absent or matches the
+recurrence zone.
 Set a portable issue `timezone` or change the [daemon default](configuration.md)
 and restart if rejected. Stored values, reads, replay, unchanged echoes,
 unrelated edits, clears, UTC `Z` instants and matching idempotent create retries

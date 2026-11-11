@@ -32,6 +32,7 @@ func TestInstance_ReturnsLocalUID(t *testing.T) {
 	assert.Equal(t, d.db.InstanceUID(), body.InstanceUID)
 	assert.True(t, uid.Valid(body.InstanceUID), "instance_uid %q invalid", body.InstanceUID)
 	assert.Equal(t, api.UISnapshotContractVersion, body.WebUIContractVersion)
+	assert.NotEqual(t, "2", body.WebUIContractVersion, "older browsers cannot read saved schedule objects")
 }
 
 // TestInstance_503WhenUIDUnset covers spec §8.8 second bullet: the handler
