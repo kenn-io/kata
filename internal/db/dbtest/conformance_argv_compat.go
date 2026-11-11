@@ -124,7 +124,7 @@ func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage, back
 	require.NoError(t, err)
 	origin, err := uid.New()
 	require.NoError(t, err)
-	event := argvCompatRemoteWorkflow(t, project, origin, `{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`)
+	event := argvCompatRemoteWorkflow(t, project, origin, `{"version":1,"steps":[{"kind":"argv","argv":null}]}`)
 	fold := db.FoldEvents([]db.FoldEvent{{UID: event.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: event.Type, HLCPhysicalMS: event.HLCPhysicalMS, Payload: event.Payload}})
 	q := store.(interface {
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)

@@ -166,7 +166,10 @@ func TestCronReferenceRequestExamples(t *testing.T) {
 		}
 		resource, identity := "job", cronCLIUID(t)
 		if request.Definition.Kind != "job" {
-			resource, identity = "workflow", "01J00000000000000000000010"
+			resource = "workflow"
+			if request.Name == "literal-arguments" {
+				identity = "01J00000000000000000000010" // Referenced by the adapter job example.
+			}
 		}
 		args := []string{resource, "create", "--uid", identity, "--file", "-"}
 		if request.Definition.Action.Kind == "notify" {
