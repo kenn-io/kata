@@ -740,7 +740,10 @@ func (d *Store) CompleteFederationPullPage(ctx context.Context, projectID, nextC
 		if err != nil {
 			return nil, err
 		}
-		return claimed, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return claimed, nil
 	})
 }
 
