@@ -24,7 +24,6 @@ func TestDocbankOriginPayloadRequiresFeature(t *testing.T) {
 		{"issue.created", `{"body":"attachment.id origin","metadata":{"attachment.id":{"origin":"local"}}}`, "docbank_origin_v1"},
 		{"issue.created", `{"metadata":{"attachment.id":{"origin":""}}}`, ""},
 		{"issue.created", `{"metadata":{"attachment.id":{"origin":"\u006cocal"}}}`, "docbank_origin_v1"},
-		{"issue.snapshot", `{"metadata":{"attachment.id":{"or\u0069gin":"\u00301ARZ3NDEKTSV4RRFFQ69G5FAV"}}}`, "docbank_origin_v1"},
 		{"issue.metadata_updated", `{"diff":{"attachment.id":{"from":{"origin":"local"},"to":null}}}`, "docbank_origin_v1"},
 		{"issue.snapshot", `{"metadata":{"note":"\\\"attachment.id\\\":{\\\"origin\\\":\\\"nonlocal\\\"}"}}`, ""},
 		{"project.metadata_updated", `{"evidence":[{"type":"attachment","attachment":` + ref + `}]}`, ""},

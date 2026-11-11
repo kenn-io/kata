@@ -34,7 +34,11 @@ func TestFederatedDocbankRecoveryForeignOriginNeverUsesLocalVault(t *testing.T) 
 				require.NoError(t, err)
 			}
 			status, body := env.Get(t, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/%s/content", project.ID, issue.UID, attachmentID))
-			require.Contains(t, []int{http.StatusGone, http.StatusServiceUnavailable}, status, string(body))
+			want := http.StatusGone
+			if disabled {
+				want = http.StatusServiceUnavailable
+			}
+			require.Equal(t, want, status, string(body))
 			require.Empty(t, vault.Requests(), "a foreign origin must not consult the local vault")
 		})
 	}

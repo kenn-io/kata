@@ -132,6 +132,14 @@ func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.Fed
 	if strings.ContainsFunc(code, func(r rune) bool { return r != '_' && r != '.' && (r < 'a' || r > 'z') }) {
 		code = "docbank_upstream_failed"
 	}
+	switch code {
+	case "docbank_outside_scope":
+		return nil, api.NewError(resp.StatusCode, code, "file is outside the configured Docbank folder", "move the file into the configured folder", nil)
+	case "attachment_issue_not_synced":
+		return nil, api.NewError(resp.StatusCode, code, "issue is not available at the upstream yet", "sync the project and retry", nil)
+	case "claim_denied":
+		return nil, api.NewError(resp.StatusCode, code, "lease denied for federated issue mutation", "run kata federation lease acquire <ref>", nil)
+	}
 	return nil, attachmentError(resp.StatusCode, code)
 }
 

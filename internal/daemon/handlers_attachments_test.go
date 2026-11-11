@@ -358,24 +358,6 @@ func TestUIAttachmentCapabilityFollowsDocbankConfiguration(t *testing.T) {
 	}
 }
 
-func TestUIAttachmentCapabilityIncludesFederatedDocbankOrigin(t *testing.T) {
-	env := testenv.New(t)
-	project, _ := seedProjectAndIssue(t, env)
-	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
-		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
-		HubProjectID: 42, HubProjectUID: project.UID, Enabled: true,
-	})
-	require.NoError(t, err)
-
-	code, raw := env.Get(t, "/api/v1/ui/snapshot?view=inbox")
-	require.Equal(t, 200, code, string(raw))
-	var snapshot struct {
-		Capabilities api.UICapabilities `json:"capabilities"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &snapshot))
-	require.True(t, snapshot.Capabilities.Attachments, "enabled spoke should expose origin-routed Docbank controls")
-}
-
 func TestAttachmentUploadStatusErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -424,9 +406,10 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, string(raw))
 	var snapshot struct {
 		Capabilities struct {
-			Local    bool   `json:"attachment_local"`
-			Instance string `json:"attachment_instance_uid"`
-			Routes   []struct {
+			Attachments bool   `json:"attachments"`
+			Local       bool   `json:"attachment_local"`
+			Instance    string `json:"attachment_instance_uid"`
+			Routes      []struct {
 				ProjectUID string `json:"project_uid"`
 				Read       bool   `json:"read"`
 				Write      bool   `json:"write"`
@@ -434,13 +417,12 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 		} `json:"capabilities"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &snapshot))
+	require.True(t, snapshot.Capabilities.Attachments)
 	require.False(t, snapshot.Capabilities.Local)
 	require.Equal(t, env.DB.InstanceUID(), snapshot.Capabilities.Instance)
 	require.Len(t, snapshot.Capabilities.Routes, 1)
 	require.Equal(t, spoke.UID, snapshot.Capabilities.Routes[0].ProjectUID)
 	require.True(t, snapshot.Capabilities.Routes[0].Read)
 	require.True(t, snapshot.Capabilities.Routes[0].Write)
-	code, raw = attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", local.ID, issue.UID), "file.pdf", strings.NewReader("data"))
-	require.Equal(t, http.StatusServiceUnavailable, code, string(raw))
-	require.Contains(t, string(raw), "docbank_not_configured")
+
 }

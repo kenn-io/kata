@@ -203,16 +203,8 @@ func TestAttachmentLinkReuseChoosesSmallestExistingID(t *testing.T) {
 func TestAttachmentLinkReuseHandlesConcurrentRequests(t *testing.T) {
 	env, f := attachmentEnv(t)
 	p, iss := seedProjectAndIssue(t, env)
-	version := uuid.MustParse(linkVersion)
-	f.Seed("/kata/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("sample bytes")})
-	legacy := jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":12,"docbank_version":"` + linkVersion + `"}`)
-	_, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.legacy": legacy}})
-	require.NoError(t, err)
-	_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
-	require.NoError(t, err)
+	seedLinkFile(f)
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID)
-	beforeIssue, err := env.DB.IssueByID(t.Context(), iss.ID)
-	require.NoError(t, err)
 	before, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 
@@ -259,13 +251,10 @@ func TestAttachmentLinkReuseHandlesConcurrentRequests(t *testing.T) {
 		require.NoError(t, json.Unmarshal(got.body, &result))
 		ids = append(ids, result.ID)
 	}
-	require.Equal(t, []string{"legacy", "legacy"}, ids)
+	require.Equal(t, ids[0], ids[1], "concurrent retries must reuse one attachment reference")
 	after, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, before, after, "reusing the legacy reference emits no metadata event")
-	afterIssue, err := env.DB.IssueByID(t.Context(), iss.ID)
-	require.NoError(t, err)
-	require.JSONEq(t, string(beforeIssue.Metadata), string(afterIssue.Metadata))
+	require.Equal(t, before+1, after, "concurrent reuse must emit one metadata event total")
 }
 
 func TestAttachmentLinkReuseRefreshesReferenceAfterConcurrentRemoval(t *testing.T) {
@@ -494,10 +483,18 @@ func TestAttachmentLinkReuseLegacyOnHub(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, string(raw))
 	var reused api.AddAttachmentResponseBody
 	require.NoError(t, json.Unmarshal(raw, &reused))
-	require.Equal(t, original, reused)
+	require.NotEqual(t, original.ID, reused.ID)
+	require.Equal(t, env.DB.InstanceUID(), reused.Attachment.Origin)
+	status, raw, err = postAttachmentLink(t, env, endpoint, `{"node_id":42,"reuse_existing":true,"actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var again api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &again))
+	require.Equal(t, reused.ID, again.ID)
 	after, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
-	require.JSONEq(t, string(before.Metadata), string(after.Metadata))
+	require.Contains(t, before.Metadata, original.ID)
+	require.Contains(t, after.Metadata, original.ID)
 }
 
 func TestStandaloneAttachmentAfterAdoption(t *testing.T) {

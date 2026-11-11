@@ -60,10 +60,23 @@ func TestReadFederationQuietPageBudget(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestReadFederationSupportedPeerSkipsAttachmentScan(t *testing.T) {
+	d, path := openTestDBWithPath(t)
+	ctx := t.Context()
+	project := createProject(ctx, t, d, "attachment-project")
+	_, err := d.EnableProjectFederation(ctx, project.ID, "tester")
+	require.NoError(t, err)
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	raw.SetMaxOpenConns(1)
+	store := &sqlitestore.Store{DB: raw}
 	_, err = d.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
  INSERT INTO issues(uid,short_id,project_id,title,author,metadata)
  SELECT printf('%026d',x),printf('%06d',x),?,'Attachment issue','tester',
- '{"attachment.a":{"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV"}}' FROM n`, project.ID)
+ '{"attachment.a":{"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV","name":"file.pdf","media_type":"application/pdf","size":12,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"}}' FROM n`, project.ID)
 	require.NoError(t, err)
 	conn, err := raw.Conn(ctx)
 	require.NoError(t, err)
@@ -76,7 +89,6 @@ func TestReadFederationQuietPageBudget(t *testing.T) {
 	pages := sqlitePageFetches(t, conn, false)
 	require.NoError(t, conn.Close())
 	require.LessOrEqual(t, pages, 256, "supported peers must skip the attachment scan")
-
 }
 
 func TestReadFederationBulkMovePageBudget(t *testing.T) {

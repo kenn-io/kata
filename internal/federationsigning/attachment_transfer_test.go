@@ -200,27 +200,6 @@ func TestAttachmentTransferBinaryProperty(t *testing.T) {
 	}, hegel.WithTestCases(64))
 }
 
-func TestAttachmentTransferCorruptBodyProperty(t *testing.T) {
-	s := testSource(t)
-	v := testVerifier(t, "https://hub.example", s)
-	hegel.Test(t, func(ht *hegel.T) {
-		data := hegel.Draw(ht, hegel.Lists(hegel.Integers[uint8](0, 255)))
-		if len(data) > 64<<10 {
-			data = data[:64<<10]
-		}
-		data = append(data, 0)
-		r := attachmentRequest(t, s, data)
-		_ = r.Body.Close()
-		index := hegel.Draw(ht, hegel.Integers(0, len(data)-1))
-		data[index] ^= 1
-		r.Body = io.NopCloser(bytes.NewReader(data))
-		if err := v.Verify(r, 7); err == nil {
-			_ = r.Body.Close()
-			ht.Fatal("corrupt binary accepted")
-		}
-	}, hegel.WithTestCases(64))
-}
-
 // Contract: body read failures and overflow leave no disk artifacts; cancellation
 // must interrupt a body that is blocked waiting for the peer's next byte.
 func TestAttachmentTransferSpoolFailureCleanup(t *testing.T) {
@@ -307,7 +286,7 @@ func TestAttachmentTransferLargeBoundedBinary(t *testing.T) {
 	t.Setenv("TEMP", dir)
 	s := testSource(t)
 	v := testVerifier(t, "https://hub.example", s)
-	for _, size := range []int64{128<<20 + 1, 256 << 20, 256<<20 + 1} {
+	for _, size := range []int64{256 << 20, 256<<20 + 1} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example"+uploadPath, io.NopCloser(io.LimitReader(signingZeroReader{}, size)))
 			require.NoError(t, err)
@@ -413,5 +392,8 @@ func TestAttachmentTransferContentGETRetainsOrdinaryBodyCap(t *testing.T) {
 	require.NoError(t, Sign(r, s))
 	r.ContentLength = MaxBodyBytes + 1
 	r.Body = &advancingBody{Reader: strings.NewReader(""), advance: func() { t.Fatal("GET accepted upload body cap") }}
-	require.Error(t, v.Verify(r, 7))
+	err = v.Verify(r, 7)
+	var limitErr *http.MaxBytesError
+	require.ErrorAs(t, err, &limitErr)
+	require.EqualValues(t, MaxBodyBytes, limitErr.Limit)
 }

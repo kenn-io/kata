@@ -128,6 +128,7 @@ func TestRelayDocbankPendingIssueAndOfflineNeverUseLocalVault(t *testing.T) {
 	status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=report.pdf", "pending document", "application/octet-stream")
 	require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
 	require.Contains(t, string(raw), "attachment_issue_not_synced")
+	require.Contains(t, string(raw), "sync the project and retry")
 	require.Empty(t, rootVault.Requests())
 	require.Empty(t, localVault.Requests())
 	// Replication makes the issue known; the retry now succeeds at the origin.
@@ -192,37 +193,29 @@ func TestRelayDocbankLinkUsesRootAndRefusesSubtreeEscape(t *testing.T) {
 	for _, body := range []string{`{"path":"/private/report.pdf"}`, `{"node_id":43}`} {
 		status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint, body, "application/json")
 		require.Equal(t, http.StatusForbidden, status, string(raw))
+		require.Contains(t, string(raw), "move the file into the configured folder")
 	}
+	previous := *root.handler.Load()
+	var denied http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/links") {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, `{"error":{"code":"claim_denied","message":"private upstream detail"}}`)
+			return
+		}
+		previous.ServeHTTP(w, r)
+	})
+	root.handler.Store(&denied)
+	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint, `{"node_id":42}`, "application/json")
+	require.Equal(t, http.StatusConflict, status, string(raw))
+	require.Contains(t, string(raw), "run kata federation lease acquire")
+	require.NotContains(t, string(raw), "private upstream detail")
 	_ = relay
-}
-
-// A CLI lease includes its client kind before either relay hashes the tuple.
-func TestRelayDocbankCLILeaseHolderCanUploadAndLink(t *testing.T) {
-	root, _, leaf, issue := newRelayClaimChain(t)
-	vault := docbanktest.New(t)
-	serveRelayDocbank(t, root, vault)
-	status, acquired := relayClaimAction(t, leaf, issue.UID, "acquire", "cli")
-	require.Equal(t, http.StatusOK, status)
-	require.True(t, acquired.Granted)
-	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
-	status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=file.pdf&client_kind=cli", "CLI fixture", "application/octet-stream")
-	require.Equal(t, http.StatusOK, status, string(raw))
-	var uploaded api.AddAttachmentResponseBody
-	require.NoError(t, json.Unmarshal(raw, &uploaded))
-	version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222221")
-	vault.Seed("/kata/existing.pdf", docbank.Node{ID: 99, Name: "existing.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("linked fixture")})
-	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"/links", `{"path":"/kata/existing.pdf","client_kind":"cli"}`, "application/json")
-	require.Equal(t, http.StatusOK, status, string(raw))
-	var linked api.AddAttachmentResponseBody
-	require.NoError(t, json.Unmarshal(raw, &linked))
-	require.Equal(t, root.store.InstanceUID(), linked.Attachment.Origin)
-	require.Equal(t, version, linked.Attachment.DocbankVersion)
 }
 
 // Ordinary local mutation authority belongs to holder+instance across client
 // labels; only the initiating daemon may recover that held lease's exact tuple.
 func TestRelayDocbankLeaseSurvivesClientSwitch(t *testing.T) {
-	for _, pair := range []struct{ lease, request string }{{"cli", ""}, {"", "cli"}} {
+	for _, pair := range []struct{ lease, request string }{{"cli", "cli"}, {"cli", ""}, {"", "cli"}} {
 		t.Run(pair.lease+"-to-"+pair.request, func(t *testing.T) {
 			root, _, leaf, issue := newRelayClaimChain(t)
 			vault := docbanktest.New(t)
@@ -237,6 +230,10 @@ func TestRelayDocbankLeaseSurvivesClientSwitch(t *testing.T) {
 			vault.Seed("/kata/existing.pdf", docbank.Node{ID: 99, Name: "existing.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("linked fixture")})
 			status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"/links", fmt.Sprintf(`{"path":"/kata/existing.pdf","client_kind":%q}`, pair.request), "application/json")
 			require.Equal(t, http.StatusOK, status, string(raw))
+			var linked api.AddAttachmentResponseBody
+			require.NoError(t, json.Unmarshal(raw, &linked))
+			require.Equal(t, root.store.InstanceUID(), linked.Attachment.Origin)
+			require.Equal(t, version, linked.Attachment.DocbankVersion)
 		})
 	}
 }

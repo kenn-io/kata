@@ -83,7 +83,7 @@ func attachmentForVersion(iss db.Issue, version docbank.Version, origin, localOr
 		if !valid || attachment.DocbankVersion != version.ID {
 			continue
 		}
-		sameOrigin := attachment.Origin == origin || (origin == localOrigin && attachment.Origin == "") || (origin == "" && attachment.Origin == localOrigin)
+		sameOrigin := attachment.Origin == origin || (origin == "" && attachment.Origin == localOrigin)
 		if !sameOrigin {
 			continue
 		}
