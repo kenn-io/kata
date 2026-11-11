@@ -1083,8 +1083,9 @@ widths up to 768. Widths below 768 require `request_dimensions = true`. A
 precedence over `local = true`. API key settings are ignored only while the
 built-in server is selected. The setup command refuses while that environment
 variable is set and restores the config if a daemon refuses its restart.
-The daemon reuses
-installed files and asks you to run the setup command if a download is needed.
+The daemon reuses installed files. A recorded shared choice allows it to
+download missing built-in files. If `local = true` was copied without a shared
+choice and files are missing, run the setup command to approve the download.
 Older Kata releases reject the `local` key.
 
 With embeddings disabled, search matches words only. To use an external

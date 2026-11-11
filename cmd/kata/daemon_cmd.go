@@ -1480,9 +1480,6 @@ func runDaemonProcess(
 	if choiceErr == nil && chosen != dcfg.Search.Embeddings {
 		candidate, vectorsPath, err := preflightEmbeddingStartup(chosen, dbPath)
 		choiceErr = err
-		if choiceErr == nil && vectorReady != nil {
-			choiceErr = vectorReady(ctx)
-		}
 		if choiceErr == nil {
 			startup.Embedder, startup.VectorsPath = candidate, vectorsPath
 			dcfg.Search.Embeddings = chosen
