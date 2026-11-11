@@ -425,6 +425,7 @@ func checkFederationLocalReplayStorage(t *testing.T, store db.Storage) error {
 	check(legacy, false, false)
 	require.NoError(t, store.RecordFederationLocalReplayDue(ctx, legacy))
 	require.NoError(t, store.RecordFederationLocalReplayDue(ctx, quiet))
+	check(quiet, false, true)
 	check(legacy, true, true)
 
 	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -445,6 +446,7 @@ func checkFederationLocalReplayStorage(t *testing.T, store db.Storage) error {
 		check(uid, false, true)
 	}
 	require.NoError(t, store.RecordFederationLocalReplayDue(ctx, legacy))
+	check(legacy, false, true)
 	claimed, err = store.CompleteFederationPullPage(ctx, binding.ProjectID, 101, candidates)
 	require.NoError(t, err)
 	require.Empty(t, claimed)
