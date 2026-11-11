@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -233,5 +235,106 @@ func checkArgvJobWorkflowAdmission(t *testing.T, source db.Storage, backend Back
 			require.ErrorIs(t, err, cron.ErrInvalid, "new job-only running evidence must reject %s workflow", state)
 		})
 	}
+	return nil
+}
+
+// A snapshot can be the only retained evidence for a normalized workflow revision.
+func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, _ Backend) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	job, workflow := nativeFederationDefinitions(t, store, project)
+	sibling, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Sibling", Actor: "worker", Definition: workflow.Definition})
+	require.NoError(t, err)
+
+	runUID, err := uid.New()
+	require.NoError(t, err)
+	run := db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}}
+	observed, err := store.ObserveCronRun(ctx, run)
+	require.NoError(t, err)
+
+	events, err := store.EventsByUIDs(ctx, project.ID, []string{workflow.DefinitionEventUID})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	snapshot := portableNativeEvent(events[0])
+	var body db.CronDefinitionEvent
+	require.NoError(t, json.Unmarshal(snapshot.Payload, &body))
+	body.DefinitionEventUID = workflow.DefinitionEventUID
+	body.DefinitionHLC = &workflow.DefinitionHLC
+	body.Definition = []byte(`{"version":1,"steps":[null]}`)
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+	plain := `"definition_event_uid":"` + workflow.DefinitionEventUID + `"`
+	escaped := fmt.Sprintf(`"definition_event_uid":"\u%04x%s"`, workflow.DefinitionEventUID[0], workflow.DefinitionEventUID[1:])
+	require.Contains(t, string(raw), plain)
+	snapshot.Payload = []byte(strings.Replace(string(raw), plain, escaped, 1))
+	snapshot.EventUID, err = uid.New()
+	require.NoError(t, err)
+	snapshot.Type = "cron.workflow.snapshot"
+	resignNativeEvent(t, &snapshot)
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, snapshot.EventUID, snapshot.OriginInstanceUID, project.ID, snapshot.ProjectName, snapshot.Type, snapshot.Actor, string(snapshot.Payload), snapshot.HLCPhysicalMS, snapshot.HLCCounter, snapshot.ContentHash, snapshot.CreatedAt.UTC().Format(db.EventTimestampFormat))
+	require.NoError(t, err)
+	_, err = q.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, workflow.DefinitionEventUID)
+	require.NoError(t, err)
+
+	_, _, err = store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Held workflow job", Actor: "worker", Definition: job.Definition})
+	assert.ErrorIs(t, err, cron.ErrInvalid, "new job must reject held snapshot")
+	fresh := run
+	fresh.UID, err = uid.New()
+	require.NoError(t, err)
+	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = nil, nil
+	_, err = store.ObserveCronRun(ctx, fresh)
+	assert.ErrorIs(t, err, cron.ErrInvalid, "job-only running must reject held snapshot")
+	fresh.UID, err = uid.New()
+	require.NoError(t, err)
+	fresh.Status = "succeeded"
+	_, err = store.ObserveCronRun(ctx, fresh)
+	assert.NoError(t, err, "terminal job-only evidence remains valid")
+	fresh.UID, err = uid.New()
+	require.NoError(t, err)
+	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = &workflow.UID, &workflow.DefinitionEventUID
+	fresh.Status = "running"
+	_, err = store.ObserveCronRun(ctx, fresh)
+	assert.ErrorIs(t, err, cron.ErrInvalid, "workflow-named running must reject held snapshot")
+	run.Status, run.ExpectedRevision = "succeeded", observed.Run.Revision
+	_, err = store.ObserveCronRun(ctx, run)
+	assert.NoError(t, err, "existing run can finish")
+
+	_, err = store.CronWorkflow(ctx, project.ID, workflow.UID)
+	assert.Error(t, err, "held workflow must not be readable")
+	_, err = store.CronWorkflow(ctx, project.ID, sibling.UID)
+	assert.NoError(t, err, "healthy sibling remains readable")
+	for _, includeDeleted := range []bool{false, true} {
+		listed, listErr := store.ListCronWorkflows(ctx, db.CronList{ProjectID: project.ID, IncludeDeleted: includeDeleted})
+		require.NoError(t, listErr)
+		ids := make([]string, 0, len(listed))
+		for _, item := range listed {
+			ids = append(ids, item.UID)
+		}
+		assert.NotContains(t, ids, workflow.UID, "held workflow omitted, include deleted %t", includeDeleted)
+		assert.Contains(t, ids, sibling.UID, "healthy sibling included, include deleted %t", includeDeleted)
+	}
+	siblingJob := job.Definition
+	siblingJob.Action.WorkflowUID = sibling.UID
+	_, _, err = store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Sibling job", Actor: "worker", Definition: siblingJob})
+	assert.NoError(t, err, "healthy sibling admits jobs")
+
+	winner, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: workflow.UID, ExpectedEventUID: workflow.DefinitionEventUID, Name: "Supported winner", Actor: "worker", Definition: workflow.Definition})
+	require.NoError(t, err)
+	got, err := store.CronWorkflow(ctx, project.ID, workflow.UID)
+	require.NoError(t, err)
+	assert.Equal(t, winner.DefinitionEventUID, got.DefinitionEventUID)
+	listed, err := store.ListCronWorkflows(ctx, db.CronList{ProjectID: project.ID})
+	require.NoError(t, err)
+	ids := make([]string, 0, len(listed))
+	for _, item := range listed {
+		ids = append(ids, item.UID)
+	}
+	assert.Contains(t, ids, workflow.UID, "newer supported winner is listed")
+	_, _, err = store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Winner job", Actor: "worker", Definition: job.Definition})
+	assert.NoError(t, err, "newer supported winner admits jobs")
 	return nil
 }
