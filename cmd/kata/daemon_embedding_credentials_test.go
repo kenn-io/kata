@@ -145,32 +145,23 @@ func TestEmbeddingReloadDoesNotMisrouteChangedProviderKey(t *testing.T) {
 }
 
 func TestEmbeddingReloadUsesSharedChoice(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	home := setupKataEnv(t)
-	require.NoError(t, embedlocal.RecordChoice())
-	cfg, err := config.ParseSearchConfig(nil)
-	require.NoError(t, err)
-	effective, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
-	require.NoError(t, err)
-	client, _, err := preflightEmbeddingStartup(effective, filepath.Join(home, "kata.db"))
-	require.NoError(t, err)
-	woke := false
-	require.NoError(t, reloadEmbeddingCredentials(t.Context(), effective, client, func() { woke = true }))
-	require.True(t, woke)
-}
-
-func TestEmbeddingReloadAfterSavingLocalWithoutDimensions(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	home := setupKataEnv(t)
-	require.NoError(t, embedlocal.RecordChoice())
-	cfg, err := config.ParseSearchConfig(nil)
-	require.NoError(t, err)
-	effective, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
-	require.NoError(t, err)
-	client, _, err := preflightEmbeddingStartup(effective, filepath.Join(home, "kata.db"))
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal=true\n"), 0600))
-	woke := false
-	require.NoError(t, reloadEmbeddingCredentials(t.Context(), effective, client, func() { woke = true }))
-	require.True(t, woke)
+	for _, saved := range []bool{false, true} {
+		t.Run(fmt.Sprintf("saved=%t", saved), func(t *testing.T) {
+			clearLocalEmbeddingsEnv(t)
+			home := setupKataEnv(t)
+			require.NoError(t, embedlocal.RecordChoice())
+			cfg, err := config.ParseSearchConfig(nil)
+			require.NoError(t, err)
+			effective, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
+			require.NoError(t, err)
+			client, _, err := preflightEmbeddingStartup(effective, filepath.Join(home, "kata.db"))
+			require.NoError(t, err)
+			if saved {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal=true\n"), 0600))
+			}
+			woke := false
+			require.NoError(t, reloadEmbeddingCredentials(t.Context(), effective, client, func() { woke = true }))
+			require.True(t, woke)
+		})
+	}
 }

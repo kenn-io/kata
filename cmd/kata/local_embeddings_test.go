@@ -36,47 +36,12 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
 }
 
-func TestSharedChoicePreservesPostgresActiveGeneration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires pgvector testcontainer")
-	}
-	setupKataEnv(t)
-	clearLocalEmbeddingsEnv(t)
-	resetFlags(t)
-	t.Setenv("PORT", "")
-	t.Setenv("KATA_SERVER", "")
-	t.Setenv("KATA_AUTH_TOKEN", "")
-	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
-	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, t.Context())
-	t.Cleanup(cleanup)
-	t.Setenv("KATA_DSN", dsn)
-	t.Setenv("KATA_POSTGRES_ALLOW_INSECURE", "1")
-	store, err := pgstore.Open(t.Context(), dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	idx, err := vector.OpenPostgres(t.Context(), store.DB)
-	require.NoError(t, err)
-	generation := kitvec.Generation{Model: "external-model", Dimensions: 768}
-	key := generation.Fingerprint()
-	release, err := idx.AcquireReconcilerLease(t.Context())
-	require.NoError(t, err)
-	require.NoError(t, idx.EnsureBuilding(t.Context(), key, generation))
-	require.NoError(t, idx.CutOver(t.Context(), key))
-	require.NoError(t, release())
-	require.NoError(t, embedlocal.RecordChoice())
-	launchDaemon(t)
-	require.Never(t, func() bool {
-		active, ok, err := idx.ActiveGeneration(t.Context())
-		return err != nil || !ok || active != key
-	}, 2*time.Second, 10*time.Millisecond, "shared choice displaced the configured replica's index")
-}
-
 func TestSharedChoiceStartsPostgresCompatibleIndex(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires pgvector testcontainer")
 	}
-	for _, seeded := range []bool{false, true} {
-		t.Run(fmt.Sprintf("seeded=%t", seeded), func(t *testing.T) {
+	for _, mode := range []string{"fresh", "compatible", "other"} {
+		t.Run(mode, func(t *testing.T) {
 			setupKataEnv(t)
 			clearLocalEmbeddingsEnv(t)
 			resetFlags(t)
@@ -99,8 +64,11 @@ func TestSharedChoiceStartsPostgresCompatibleIndex(t *testing.T) {
 			emb, _, err := preflightEmbeddingStartup(choice, dsn)
 			require.NoError(t, err)
 			generation := emb.Generation()
+			if mode == "other" {
+				generation = kitvec.Generation{Model: "external-model", Dimensions: 768}
+			}
 			key := generation.Fingerprint()
-			if seeded {
+			if mode != "fresh" {
 				release, err := idx.AcquireReconcilerLease(t.Context())
 				require.NoError(t, err)
 				require.NoError(t, idx.EnsureBuilding(t.Context(), key, generation))
@@ -114,40 +82,14 @@ func TestSharedChoiceStartsPostgresCompatibleIndex(t *testing.T) {
 				active, ok, err := idx.ActiveGeneration(t.Context())
 				return err == nil && ok && active == key
 			}, 5*time.Second, 10*time.Millisecond)
+			if mode == "other" {
+				require.Never(t, func() bool {
+					active, ok, err := idx.ActiveGeneration(t.Context())
+					return err != nil || !ok || active != key
+				}, 2*time.Second, 10*time.Millisecond)
+			}
 		})
 	}
-}
-
-func TestLocalEmbeddingsRestartRefusalPreservesChoice(t *testing.T) {
-	home := setupKataEnv(t)
-	clearLocalEmbeddingsEnv(t)
-	stubLocalEmbeddingsInstall(t)
-	oldEndpoint := localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-		if opts.Executable == "" {
-			return "", embedlocal.ErrNotFound
-		}
-		return "http://127.0.0.1:12345/v1", nil
-	}
-	original := []byte("# original\n")
-	path := filepath.Join(home, "config.toml")
-	require.NoError(t, os.WriteFile(path, original, 0600))
-	_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
-		confirm: func(context.Context, int64) (bool, error) { return true, nil },
-		notice:  func(string) error { return nil },
-		restart: func(_ context.Context, apply func() error) error {
-			require.NoError(t, apply())
-			return errors.New("restart refused")
-		},
-	})
-	require.ErrorContains(t, err, "restart refused")
-	data, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
-	require.NoError(t, err)
-	require.Equal(t, original, data)
-	got, err := embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.False(t, got)
 }
 
 func TestLocalEmbeddingsSetup(t *testing.T) {
@@ -378,10 +320,9 @@ func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
 			client, _, err := preflightEmbeddingStartup(cfg.Embeddings, filepath.Join(home, "kata.db"))
 			require.NoError(t, err)
 			_, err = client.Embed(t.Context(), []string{"x"})
-			switch {
-			case tc.chosen:
+			if tc.chosen {
 				require.ErrorContains(t, err, "installation reached")
-			default:
+			} else {
 				require.ErrorContains(t, err, "kata daemon local-embeddings")
 			}
 		})
@@ -477,7 +418,7 @@ func TestLocalEmbeddingsRebuildRefusal(t *testing.T) {
 
 func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
-	for _, scenario := range []string{"existing symlink", "new", "concurrent edit", "unsupported daemon"} {
+	for _, scenario := range []string{"existing symlink", "new", "concurrent edit", "unsupported daemon", "restart refused"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := setupKataEnv(t)
 			stubLocalEmbeddingsInstall(t)
@@ -493,6 +434,27 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 					}
 				}
 				require.NoError(t, os.WriteFile(target, original, 0600))
+			}
+			if scenario == "restart refused" {
+				oldEndpoint := localEmbeddingsEndpoint
+				t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+				localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
+				_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
+					confirm: func(context.Context, int64) (bool, error) { return true, nil },
+					notice:  func(string) error { return nil },
+					restart: func(_ context.Context, apply func() error) error {
+						require.NoError(t, apply())
+						return errors.New("restart refused")
+					},
+				})
+				require.ErrorContains(t, err, "restart refused")
+				got, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
+				require.NoError(t, err)
+				require.Equal(t, original, got)
+				chosen, err := embedlocal.ChoiceRecorded()
+				require.NoError(t, err)
+				require.False(t, chosen)
+				return
 			}
 			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)

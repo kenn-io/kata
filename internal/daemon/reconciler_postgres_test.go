@@ -59,10 +59,11 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 	require.NoError(t, err)
 	embedder := leaseRecoveryEmbedder{}
 	reconciler := daemon.NewReconciler(store, index, embedder, daemon.ReconcilerConfig{
-		BatchSize:  64,
-		SweepEvery: time.Hour,
-		MinBackoff: 50 * time.Millisecond,
-		MaxBackoff: 2 * time.Second,
+		PreserveActiveGeneration: true,
+		BatchSize:                64,
+		SweepEvery:               time.Hour,
+		MinBackoff:               50 * time.Millisecond,
+		MaxBackoff:               2 * time.Second,
 	})
 	done := make(chan error, 1)
 	go func() { done <- reconciler.Run(ctx) }()
@@ -115,4 +116,26 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 			return store.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_mirror`).Scan(&mirrored) == nil && mirrored == cycle+1
 		}, 5*time.Second, 10*time.Millisecond, "cycle %d did not reconcile after reacquiring leadership", cycle)
 	}
+	// Hold the lease after session loss while another replica switches models.
+	var terminated bool
+	require.NoError(t, store.QueryRowContext(ctx, `SELECT pg_terminate_backend($1)`, currentPID).Scan(&terminated))
+	require.True(t, terminated)
+	otherIndex, err := vector.OpenPostgres(ctx, store.DB)
+	require.NoError(t, err)
+	release, err := otherIndex.AcquireReconcilerLease(ctx)
+	require.NoError(t, err)
+	other := kitvec.Generation{Model: "external", Dimensions: 2}
+	otherKey := other.Fingerprint()
+	require.NoError(t, otherIndex.EnsureBuilding(ctx, otherKey, other))
+	require.NoError(t, otherIndex.CutOver(ctx, otherKey))
+	reconciler.Wake()
+	require.NoError(t, release())
+	require.Eventually(t, func() bool {
+		return reconciler.Health().LastError == "shared embedding choice conflicts with the active generation"
+	}, 5*time.Second, 10*time.Millisecond)
+	active, ok, err := otherIndex.ActiveGeneration(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, otherKey, active)
+
 }
