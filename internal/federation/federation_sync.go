@@ -253,7 +253,7 @@ func pushDirectSpoke(
 	if binding.PushEnabled {
 		scanCursor := binding.PushCursorEventID
 		acknowledged := 0
-		var rejectedEvents []db.Event
+		rejectedCount := 0
 		var rejections []db.FederationEventRejection
 		var firstRejected int64
 		retained := db.FederationRejectedCreations{}
@@ -297,18 +297,16 @@ func pushDirectSpoke(
 				}
 				pending = pending[len(batch):]
 				var send []db.Event
-				var deferred []db.Event
 				for _, event := range batch {
 					remote := db.RemoteEventFromStored(event)
 					rejection, dependent, parseErr := retained.Dependent(remote)
 					if parseErr == nil && dependent {
 						retained.Remember(remote, rejection)
-						deferred = append(deferred, event)
+						rejectedCount++
 					} else {
 						send = append(send, event)
 					}
 				}
-				rejectedEvents = append(rejectedEvents, deferred...)
 				if len(send) == 0 {
 					continue
 				}
@@ -343,7 +341,7 @@ func pushDirectSpoke(
 						firstRejected = item.event.ID
 					}
 					retained.Remember(db.RemoteEventFromStored(item.event), item.rejection)
-					rejectedEvents = append(rejectedEvents, item.event)
+					rejectedCount++
 				}
 				var acceptedIDs []int64
 				for _, event := range batch {
@@ -376,7 +374,7 @@ func pushDirectSpoke(
 			}
 		}
 		if len(rejections) > 0 {
-			err := &federationPartialPushError{message: "pending federation events remain: " + federationEventRejectionMessage(rejections, len(rejectedEvents), acknowledged)}
+			err := &federationPartialPushError{message: "pending federation events remain: " + federationEventRejectionMessage(rejections, rejectedCount, acknowledged)}
 			return errors.Join(err, store.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
 		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
