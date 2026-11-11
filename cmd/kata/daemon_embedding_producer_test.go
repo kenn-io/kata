@@ -48,7 +48,7 @@ func TestStartEmbeddingReconcilerPublishesProducerSelection(t *testing.T) {
 	sub := broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	t.Cleanup(sub.Unsub)
 	workers := newDaemonWorkerGroup()
-	_, idx, health, _, err := startEmbeddingReconciler(ctx, workers, nil, ec, client, filepath.Join(home, "vectors.db"), store, broadcaster, log.New(io.Discard, "", 0))
+	_, idx, health, _, err := startEmbeddingReconciler(ctx, workers, nil, ec, client, filepath.Join(home, "vectors.db"), store, broadcaster, log.New(io.Discard, "", 0), false)
 	require.NoError(t, err)
 	// t.Context() is already canceled when cleanup runs.
 	t.Cleanup(func() {

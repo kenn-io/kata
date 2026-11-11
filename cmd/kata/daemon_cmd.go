@@ -1479,7 +1479,7 @@ func runDaemonProcess(
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
 	_, postgres := store.(*pgstore.Store)
-	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconcilerWithPolicy(
+	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconciler(
 		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, postgres && dcfg.Search.Embeddings != originalEmbeddings, publisher,
 	)
 	if err != nil {
@@ -2194,21 +2194,6 @@ func embeddingBatchOptions(ec config.EmbeddingsConfig, batchSize int) []kitvec.B
 // semantic search existed. The caller owns the returned *vector.Index's
 // lifetime and must close it on shutdown.
 func startEmbeddingReconciler(
-	ctx context.Context,
-	workers *daemonWorkerGroup,
-	drainAdmission activity.WaitableAdmission,
-	ec config.EmbeddingsConfig,
-	embedder *embedding.Client,
-	vectorsPath string,
-	store db.Storage,
-	bcast *daemon.EventBroadcaster,
-	daemonLog *log.Logger,
-	publishers ...daemon.EventPublisher,
-) (*embedding.Client, *vector.Index, func() daemon.ReconcilerHealth, func(), error) {
-	return startEmbeddingReconcilerWithPolicy(ctx, workers, drainAdmission, ec, embedder, vectorsPath, store, bcast, daemonLog, false, publishers...)
-}
-
-func startEmbeddingReconcilerWithPolicy(
 	ctx context.Context,
 	workers *daemonWorkerGroup,
 	drainAdmission activity.WaitableAdmission,

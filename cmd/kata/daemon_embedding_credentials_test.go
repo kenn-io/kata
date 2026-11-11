@@ -94,7 +94,7 @@ func TestEmbeddingCredentialReloadRetriesRejectedBacklog(t *testing.T) {
 	admission := func() (*activity.Lease, bool, <-chan struct{}) {
 		return activity.NewLease(func() { cycles <- struct{}{} }, nil), true, nil
 	}
-	_, idx, health, retry, err := startEmbeddingReconciler(ctx, workers, admission, ec, client, filepath.Join(home, "vectors.db"), store, daemon.NewEventBroadcaster(), log.New(io.Discard, "", 0))
+	_, idx, health, retry, err := startEmbeddingReconciler(ctx, workers, admission, ec, client, filepath.Join(home, "vectors.db"), store, daemon.NewEventBroadcaster(), log.New(io.Discard, "", 0), false)
 	require.NoError(t, err)
 	defer func() {
 		cancel()
