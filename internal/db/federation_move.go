@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -20,7 +21,10 @@ type moveQuery interface {
 
 // CheckFederationMoveSourceLifecycle keeps the native replicas joined while
 // pending moves or updates in another stream still need their credentials.
-func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
+func CheckFederationMoveSourceLifecycle(
+	ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string,
+	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
+) error {
 	var sourceUID, hubURL, actor string
 	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.hub_url,b.bound_actor FROM projects p
  JOIN federation_bindings b ON b.project_id=p.id
@@ -66,21 +70,24 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 	if pending {
 		return fmt.Errorf("%w: sync pending events for moved issues before source leave or archive", ErrFederationResetBlockedByPendingPush)
 	}
-	return checkFederationMoveDestinationLifecycle(ctx, tx, projectID, originInstanceUID, hubURL, actor)
+	return checkFederationMoveDestinationLifecycle(ctx, tx, projectID, originInstanceUID, hubURL, actor, referencedIssues)
 }
 
 // A source stream still needs the current owner's enrollment to push its
 // pending updates. Pausing sync does not acknowledge those updates.
-func checkFederationMoveDestinationLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, instanceUID, hubURL, actor string) error {
+func checkFederationMoveDestinationLifecycle(
+	ctx context.Context, tx *sql.Tx, projectID int64, instanceUID, hubURL, actor string,
+	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
+) error {
 	origin, err := httpurl.CanonicalHTTPOrigin(hubURL)
 	if err != nil {
 		return nil
 	}
 	//nolint:gosec // G202: the event types come from a fixed list; runtime values are bound.
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT b.hub_url FROM events e
+	rows, err := tx.QueryContext(ctx, `SELECT b.hub_url,e.type,e.issue_uid,e.related_issue_uid,e.payload
+ FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
  JOIN projects p ON p.id=b.project_id AND p.deleted_at IS NULL
- JOIN issues i ON i.uid=e.issue_uid AND i.project_id=$1
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2 AND b.bound_actor=$3
  AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id
  AND (e.type LIKE 'issue.%' OR e.type IN ('cron.run.observed','cron.run.snapshot'))
@@ -89,16 +96,67 @@ func checkFederationMoveDestinationLifecycle(ctx context.Context, tx *sql.Tx, pr
 		return err
 	}
 	defer func() { _ = rows.Close() }()
+	var candidates []string
+	seen := map[string]bool{}
 	for rows.Next() {
-		var candidate string
-		if err := rows.Scan(&candidate); err != nil {
+		var candidate, payload string
+		var event RemoteEvent
+		if err := rows.Scan(&candidate, &event.Type, &event.IssueUID, &event.RelatedIssueUID, &payload); err != nil {
 			return err
 		}
-		if sourceOrigin, err := httpurl.CanonicalHTTPOrigin(candidate); err == nil && sourceOrigin == origin {
+		sourceOrigin, err := httpurl.CanonicalHTTPOrigin(candidate)
+		if err != nil || sourceOrigin != origin {
+			continue
+		}
+		event.Payload = jsontext.Value(payload)
+		var refs []string
+		if strings.HasPrefix(event.Type, "issue.") {
+			refs, err = referencedIssues(event, PayloadMap(event.Payload))
+			if err != nil {
+				return err
+			}
+			refs = append(refs, FederationEventIssueUID(event.IssueUID, payload))
+		} else {
+			var run CronRunObservation
+			if err := json.Unmarshal(event.Payload, &run); err != nil {
+				return err
+			}
+			if run.IssueUID != nil {
+				refs = append(refs, *run.IssueUID)
+			}
+		}
+		for _, uid := range refs {
+			if uid != "" && !seen[uid] {
+				seen[uid] = true
+				candidates = append(candidates, uid)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for chunk := range slices.Chunk(candidates, 500) {
+		slots := make([]string, len(chunk))
+		args := make([]any, 1, len(chunk)+1)
+		args[0] = projectID
+		for i, uid := range chunk {
+			slots[i] = fmt.Sprintf("$%d", i+2)
+			args = append(args, uid)
+		}
+		var pending bool
+		//nolint:gosec // G202: only generated placeholders enter the SQL; the UIDs are bound.
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE project_id=$1 AND uid IN (`+
+			strings.Join(slots, ",")+`))`, args...).Scan(&pending); err != nil {
+			return err
+		}
+		if pending {
 			return fmt.Errorf("%w: sync pending updates for moved issues from their former projects, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush)
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 // federationMoveSourceHasPendingEvents protects history that remains in a

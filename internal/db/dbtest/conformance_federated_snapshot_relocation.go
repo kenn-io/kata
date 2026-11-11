@@ -15,7 +15,7 @@ import (
 // A late destination baseline must relocate an issue already held in the source,
 // even when the spoke never received the intervening issue.moved event.
 func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, _ db.Storage, backend Backend) error {
-	for _, lifecycle := range []string{"active replicas", "pausing the source retains discussion", "source paused before destination joins", "source leave retains discussion", "destination leave preserves standalone issue"} {
+	for _, lifecycle := range []string{"active replicas", "pausing the source retains discussion", "source paused before destination joins", "source leave retains discussion", "destination leave preserves standalone issue", "destination leave waits for pending link peer"} {
 		t.Run(lifecycle, func(t *testing.T) {
 			hub := backend.Open(t)
 			t.Cleanup(func() { require.NoError(t, hub.Close()) })
@@ -98,6 +98,18 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		_, err = spoke.UpsertFederationBinding(ctx, binding)
 		require.NoError(t, err)
 	}
+	var pendingLink db.Event
+	if lifecycle == "destination leave waits for pending link peer" {
+		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
+		localPeer, err := spoke.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, pendingLink, err = spoke.CreateLinkAndEvent(ctx,
+			db.CreateLinkParams{FromIssueID: localPeer.ID, ToIssueID: before.ID, Type: "blocks", Author: "worker"},
+			db.LinkEventParams{EventType: "issue.linked", EventIssueID: localPeer.ID, FromShortID: localPeer.ShortID, FromUID: localPeer.UID, ToShortID: before.ShortID, ToUID: before.UID, Actor: "worker"})
+		require.NoError(t, err)
+		require.Equal(t, &localPeer.UID, pendingLink.IssueUID)
+		require.Equal(t, &before.UID, pendingLink.RelatedIssueUID)
+	}
 	localTarget := join(target)
 	blocker, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: localTarget.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "local short ID reservation", Author: "worker"})
 	require.NoError(t, err)
@@ -126,7 +138,11 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.Empty(t, labels)
 	links, err := spoke.LinksByIssue(ctx, got.ID)
 	require.NoError(t, err)
-	require.Len(t, links, 1)
+	if pendingLink.ID != 0 {
+		require.Len(t, links, 2)
+	} else {
+		require.Len(t, links, 1)
+	}
 	cursor, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	for range 2 {
@@ -183,6 +199,14 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		retained, err := spoke.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Equal(t, comments, retained)
+	case "destination leave waits for pending link peer":
+		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
+		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
+			"the source's pending link requires the current owner's enrollment")
+		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, pendingLink.ID))
+		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.NoError(t, err, "acknowledging the link releases the destination enrollment")
 	case "destination leave preserves standalone issue":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
 		_, err := spoke.LeaveFederationReplica(ctx, localTarget.ID)

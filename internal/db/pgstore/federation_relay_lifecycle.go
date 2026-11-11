@@ -26,7 +26,7 @@ func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error
 		return db.ApplyTransactionFence(original, tx)
 	})
 	return d.relayTx(ctx, func(tx *sql.Tx) error {
-		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID()); err != nil {
+		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), payloadReferencedIssueUIDs); err != nil {
 			return err
 		}
 		return d.relayReset(tx).FenceDisconnect(ctx, projectID)
@@ -34,7 +34,7 @@ func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error
 }
 
 func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID()); err != nil {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID(), payloadReferencedIssueUIDs); err != nil {
 		return err
 	}
 	return d.relayReset(tx).ValidateLifecycle(ctx, projectID)
