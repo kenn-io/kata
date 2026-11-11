@@ -322,7 +322,7 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 			workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Current", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "command", Command: "true"}}}})
 			require.NoError(t, err)
 			event := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), definition)
-			var payload map[string]jsontext.Value
+			payload := make(map[string]jsontext.Value)
 			require.NoError(t, json.Unmarshal(event.Payload, &payload))
 			payload["uid"], err = json.Marshal(workflow.UID)
 			require.NoError(t, err)
