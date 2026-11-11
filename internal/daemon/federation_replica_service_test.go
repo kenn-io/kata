@@ -72,16 +72,6 @@ func newReplicaCredentialStore() *replicaCredentialStore {
 	return &replicaCredentialStore{credentials: make(map[string]config.FederationCredential)}
 }
 
-func (s *replicaCredentialStore) ListFederationCredentials(_ context.Context) (map[string]config.FederationCredential, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	result := make(map[string]config.FederationCredential, len(s.credentials))
-	for uid, credential := range s.credentials {
-		result[uid] = credential
-	}
-	return result, s.readErr
-}
-
 func (s *replicaCredentialStore) FederationCredential(
 	_ context.Context, projectUID string,
 ) (config.FederationCredential, bool, error) {
@@ -1351,10 +1341,9 @@ func TestEnsureFederationReplicaClassifiesAtomicRekeyConflictWithoutMutation(t *
 	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
 	unchanged, projectErr := store.ProjectByID(ctx, project.ID)
 	require.NoError(t, projectErr)
-	assert.Equal(t, replicaHubProjectUID, unchanged.UID)
-	binding, bindingErr := store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, bindingErr)
-	assert.False(t, binding.PushEnabled)
+	assert.Equal(t, replicaLocalProjectUID, unchanged.UID)
+	_, bindingErr := store.FederationBindingByProject(ctx, project.ID)
+	assert.ErrorIs(t, bindingErr, db.ErrNotFound)
 	stored, found, credentialErr := credentials.FederationCredential(ctx, project.UID)
 	require.NoError(t, credentialErr)
 	require.True(t, found)
@@ -2502,6 +2491,8 @@ func TestAdoptionRefusalAfterSourceResolutionPreservesCredential(t *testing.T) {
 	credentials.put(project.UID, params.Credential)
 	_, err = daemon.EnsureFederationReplica(ctx, argvBeforeAdoptionStore{store}, credentials, nil, params)
 	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	// The preflight saw no argv, so the credential moved and was restored exactly.
+	assert.Equal(t, 2, credentials.rekeyCalls)
 	got, found, err := credentials.FederationCredential(ctx, project.UID)
 	require.NoError(t, err)
 	require.True(t, found)
@@ -2516,7 +2507,7 @@ func TestAdoptionRefusalAfterSourceResolutionPreservesCredential(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestAdoptionRekeyFailureCanRetryWithoutOldUID(t *testing.T) {
+func TestAdoptionRekeyFailureLeavesStandaloneProjectRetryable(t *testing.T) {
 	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
@@ -2532,10 +2523,9 @@ func TestAdoptionRekeyFailureCanRetryWithoutOldUID(t *testing.T) {
 	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
 	current, err := store.ProjectByID(ctx, project.ID)
 	require.NoError(t, err)
-	require.Equal(t, replicaHubProjectUID, current.UID)
-	binding, err := store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	assert.False(t, binding.PushEnabled)
+	require.Equal(t, replicaLocalProjectUID, current.UID)
+	_, err = store.FederationBindingByProject(ctx, project.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
 	old, found, err := credentials.FederationCredential(ctx, project.UID)
 	require.NoError(t, err)
 	require.True(t, found)
@@ -2549,33 +2539,39 @@ func TestAdoptionRekeyFailureCanRetryWithoutOldUID(t *testing.T) {
 	_, found, err = credentials.FederationCredential(ctx, replicaHubProjectUID)
 	require.NoError(t, err)
 	assert.True(t, found)
+	adopted, err := store.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, replicaHubProjectUID, adopted.UID)
 }
 
-func TestAdoptionRetryRejectsAmbiguousOrphanedCredentials(t *testing.T) {
-	ctx := t.Context()
-	store := openReplicaServiceStore(t)
-	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
-	require.NoError(t, err)
-	credentials := newReplicaCredentialStore()
-	params := replicaServiceParams()
-	params.ProjectName, params.AdoptExisting = project.Name, true
-	params.Credential.Capabilities = "pull,push"
-	credentials.put(project.UID, params.Credential)
-	credentials.rekeyErr = errors.New("injected write failure")
-	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
-	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
-	credentials.rekeyErr = nil
-	other := "01HZNQ7VFPK1XGD8R5MABCD4EB"
-	credentials.put(other, params.Credential)
-	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
-	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
-	for _, key := range []string{project.UID, other} {
-		got, found, readErr := credentials.FederationCredential(ctx, key)
-		require.NoError(t, readErr)
+func TestAdoptionPreflightRefusesArgvBeforeCredentialMutation(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		ctx := t.Context()
+		store := openReplicaServiceStore(t)
+		project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
+		require.NoError(t, err)
+		workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "argv", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
+		require.NoError(t, err)
+		if deleted {
+			_, err = store.ExecContext(ctx, `UPDATE cron_workflows SET deleted_at=$1 WHERE uid=$2`, "2026-11-08T12:00:00Z", workflow.UID)
+			require.NoError(t, err)
+		}
+		credentials := newReplicaCredentialStore()
+		params := replicaServiceParams()
+		params.ProjectName, params.AdoptExisting = project.Name, true
+		params.Credential.Capabilities = "pull,push"
+		credentials.put(project.UID, params.Credential)
+		_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		assert.Zero(t, credentials.rekeyCalls, "deleted=%v", deleted)
+		got, found, err := credentials.FederationCredential(ctx, project.UID)
+		require.NoError(t, err)
 		require.True(t, found)
 		assert.Equal(t, params.Credential, got)
+		current, err := store.ProjectByID(ctx, project.ID)
+		require.NoError(t, err)
+		assert.Equal(t, project.UID, current.UID)
+		_, err = store.FederationBindingByProject(ctx, project.ID)
+		assert.ErrorIs(t, err, db.ErrNotFound)
 	}
-	binding, err := store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	assert.False(t, binding.PushEnabled)
 }

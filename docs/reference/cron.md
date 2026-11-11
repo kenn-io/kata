@@ -386,8 +386,8 @@ options). Each step has these fields:
 | Field | Rule |
 | --- | --- |
 | `key` | Required portable name, unique within the workflow. |
-| `kind` | `command` (requires `command`, no `prompt`) or `prompt` (requires `prompt`, no `command`). |
-| `argv` | Reserved string array; any presence, including `null` or an empty array, is refused until argv steps are enabled. |
+| `kind` | `command` (requires `command`, no `prompt`), `prompt` (requires `prompt`, no `command`), or `argv` (requires `argv`, no `command` or `prompt`). |
+| `argv` | String array for `argv` steps only. The first element names a non-empty executable; no element may contain NUL. |
 | `after` | Optional keys of earlier steps this step depends on. |
 | `retries` | Optional; 0–100. |
 | `options` | Optional JSON object for the adapter. |
@@ -590,6 +590,14 @@ definitions, run observations, and native recurring child delivery. Missing,
 unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
+
+### Adopting standalone projects
+
+A standalone project with any retained argv workflow history, including deleted
+workflows, cannot be adopted into a federation yet. The join fails with HTTP 409
+`unsupported_event_features` before anything changes: the project keeps its
+UID, workflows, and federation credential. Join a new empty project instead and
+recreate the workflows there.
 
 ### Held legacy workflows
 
