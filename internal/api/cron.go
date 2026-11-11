@@ -158,6 +158,7 @@ type ReplaceCronJobRequest struct {
 // CreateCronWorkflowRequest creates a workflow in the selected project.
 type CreateCronWorkflowRequest struct {
 	ProjectID int64 `path:"project_id"`
+	RawBody   []byte
 	Body      PutCronWorkflowBody
 }
 
