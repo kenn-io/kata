@@ -935,6 +935,9 @@ archived projects are rejected with a hint to unarchive the project first.
 
 Move between projects:
 
+One positional issue moves with its descendants by default. Multiple issues
+move individually by default.
+
 ```sh
 kata move <issue-ref> <project> [--single] [--dry] [--comment TEXT]
 ```
@@ -1008,6 +1011,9 @@ Each input returns `moved`, `unchanged`, or `refused`; previews return
 contains `dry_run`, `summary`, and `results`, including each input's `index`,
 `ref`, result code, new short ID, collision extension flag, and event ID.
 Human output summarizes the batch and lists every result. Descendants are listed under their selected root.
+
+If the daemon restarts between batch pages, the command stops and reports the
+results already received. Start a new batch for the remaining issues.
 
 | Result code | Meaning |
 | --- | --- |

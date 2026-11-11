@@ -227,6 +227,37 @@ func TestMoveBatchCLI_TargetFailureIsPerItem(t *testing.T) {
 	require.Equal(t, dst.ID, got.ProjectID)
 }
 
+func TestMoveBatchCLI_SubtreeRejectsMultipleIssues(t *testing.T) {
+	for _, mode := range []string{"refs", "single", "file", "selector"} {
+		t.Run(mode, func(t *testing.T) {
+			env, dir, source, target, first := setupMoveCLIProjects(t)
+			second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
+			require.NoError(t, err)
+			args := []string{"--workspace", dir, "move", "--subtree"}
+			input := ""
+			switch mode {
+			case "refs":
+				args = append(args, first.UID, second.UID, target.Name)
+			case "single":
+				args = append(args, "--single", first.UID, target.Name)
+			case "file":
+				args = append(args, "--refs-from", "-", target.Name)
+				input = first.UID + "\n" + second.UID + "\n"
+			case "selector":
+				args = append(args, "--from-project", source.Name, "--status", "all", target.Name)
+			}
+			_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, args...)
+			require.Error(t, err)
+			require.Equal(t, ExitUsage, exitCodeForErr(err, true))
+			for _, issue := range []db.Issue{first, second} {
+				got, err := env.DB.IssueByID(t.Context(), issue.ID)
+				require.NoError(t, err)
+				require.Equal(t, source.ID, got.ProjectID)
+			}
+		})
+	}
+}
+
 func TestMoveBatchCLI_SelectorLabel(t *testing.T) {
 	env, dir, src, dst, first := setupMoveCLIProjects(t)
 	_, err := env.DB.AddLabel(t.Context(), first.ID, "routing", "tester")
