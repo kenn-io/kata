@@ -243,7 +243,7 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 }
 
 func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
-	for _, mode := range []string{"missing", "leave", "enrollment"} {
+	for _, mode := range []string{"missing", "leave", "enrollment", "disabled", "uploads-disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			hub, projects, spoke, issue, local := newPushDeferralFixture(t, true)
@@ -265,9 +265,10 @@ func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
 			move := pending[0]
 			require.Equal(t, "issue.moved", move.Type)
 
-			// The local source binding exists. Without its credential, the hub
-			// receives the move but cannot authorize the source project.
+			// The hub receives the move without proof for its source project.
 			sourceProof := spoke.credentials[projects[0].UID]
+			sourceBinding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+			require.NoError(t, err)
 			switch mode {
 			case "missing":
 				delete(spoke.credentials, projects[0].UID)
@@ -279,6 +280,12 @@ func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
 				credential := sourceProof
 				credential.RelayEnrollmentPending = true
 				spoke.credentials[projects[0].UID] = credential
+			case "disabled", "uploads-disabled":
+				changed := sourceBinding
+				changed.Enabled = mode != "disabled"
+				changed.PushEnabled = mode != "uploads-disabled"
+				_, err = spoke.env.DB.UpsertFederationBinding(ctx, changed)
+				require.NoError(t, err)
 			}
 			push := func() error {
 				return pushDirectSpoke(ctx, pushStore, &binding, projects[1].ID, client, nil, spoke.credentials, clientpkg.Opts{})
@@ -301,6 +308,10 @@ func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
 			require.ErrorIs(t, err, db.ErrNotFound)
 
 			spoke.credentials[projects[0].UID] = sourceProof
+			if mode == "disabled" || mode == "uploads-disabled" {
+				_, err = spoke.env.DB.UpsertFederationBinding(ctx, sourceBinding)
+				require.NoError(t, err)
+			}
 			require.NoError(t, push())
 			require.GreaterOrEqual(t, binding.PushCursorEventID, comment.ID)
 			got, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
