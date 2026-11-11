@@ -229,9 +229,12 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 	})
 }
 
-func TestMoveBatchCLI_DryRunRejectsMultipleItems(t *testing.T) {
-	for _, mode := range []string{"refs", "file", "selector"} {
-		t.Run(mode, func(t *testing.T) {
+func TestMoveBatchCLI_SelectionRestrictions(t *testing.T) {
+	for _, tc := range []struct{ rule, mode string }{
+		{"dry", "refs"}, {"dry", "file"}, {"dry", "selector"},
+		{"subtree", "refs"}, {"subtree", "file"}, {"subtree", "selector"}, {"subtree", "single"},
+	} {
+		t.Run(tc.rule+"/"+tc.mode, func(t *testing.T) {
 			env, dir, source, target, first := setupMoveCLIProjects(t)
 			second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
 			require.NoError(t, err)
@@ -245,37 +248,9 @@ func TestMoveBatchCLI_DryRunRejectsMultipleItems(t *testing.T) {
 				proxy.ServeHTTP(w, r)
 			}))
 			t.Cleanup(server.Close)
-			args := []string{"--workspace", dir, "move", "--dry"}
+			args := []string{"--workspace", dir, "move", "--" + tc.rule}
 			input := ""
-			switch mode {
-			case "refs":
-				args = append(args, first.UID, second.UID, target.Name)
-			case "file":
-				args = append(args, "--refs-from", "-", target.Name)
-				input = first.UID + "\n" + second.UID + "\n"
-			case "selector":
-				args = append(args, "--from-project", source.Name, "--status", "all", target.Name)
-			}
-			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, args...)
-			require.ErrorContains(t, err, "dry run accepts one item")
-			require.Equal(t, ExitUsage, exitCodeForErr(err, true))
-			require.Empty(t, out)
-			if mode != "selector" {
-				require.Zero(t, requests)
-			}
-		})
-	}
-}
-
-func TestMoveBatchCLI_SubtreeRestrictions(t *testing.T) {
-	for _, mode := range []string{"refs", "single", "file", "selector"} {
-		t.Run(mode, func(t *testing.T) {
-			env, dir, source, target, first := setupMoveCLIProjects(t)
-			second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
-			require.NoError(t, err)
-			args := []string{"--workspace", dir, "move", "--subtree"}
-			input := ""
-			switch mode {
+			switch tc.mode {
 			case "refs":
 				args = append(args, first.UID, second.UID, target.Name)
 			case "single":
@@ -286,9 +261,19 @@ func TestMoveBatchCLI_SubtreeRestrictions(t *testing.T) {
 			case "selector":
 				args = append(args, "--from-project", source.Name, "--status", "all", target.Name)
 			}
-			_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, args...)
-			require.Error(t, err)
+			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, args...)
+			message := "--subtree accepts one issue"
+			if tc.rule == "dry" {
+				message = "dry run accepts one item"
+			} else if tc.mode == "single" {
+				message = "--single and --subtree are mutually exclusive"
+			}
+			require.ErrorContains(t, err, message)
 			require.Equal(t, ExitUsage, exitCodeForErr(err, true))
+			require.Empty(t, out)
+			if tc.rule == "dry" && tc.mode != "selector" {
+				require.Zero(t, requests)
+			}
 			for _, issue := range []db.Issue{first, second} {
 				got, err := env.DB.IssueByID(t.Context(), issue.ID)
 				require.NoError(t, err)
@@ -311,8 +296,6 @@ func TestMoveBatchCLI_SelectorLabel(t *testing.T) {
 	require.Equal(t, src.ID, got.ProjectID)
 }
 
-// Contract: line-specific targets, global UIDs and qualified refs work together;
-// preview returns machine-readable rows.
 // Contract: selectors exhaust pages before writing and carry the captured
 // revision, so a concurrent edit refuses only that issue.
 func TestMoveBatchCLI_SelectorPagingRevisionFence(t *testing.T) {
@@ -565,6 +548,7 @@ func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
 	}
 }
 
+// Version skew can produce outcomes the current daemon does not emit.
 func TestMoveBatchCLI_RejectsUnknownResult(t *testing.T) {
 	env, dir, _, target, issue := setupMoveCLIProjects(t)
 	origin, err := url.Parse(env.URL)
@@ -636,6 +620,7 @@ func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 					_, err := io.WriteString(w, "{")
 					require.NoError(t, err)
 				case "continuation":
+					// A version-skewed daemon may return a cursor that does not advance.
 					_, err := io.WriteString(w, `{"results":[],"next_index":1}`)
 					require.NoError(t, err)
 				case "transport":

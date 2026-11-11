@@ -341,7 +341,7 @@ var storageScenarios = []scenario{
 	{name: "issue move merge reservations", methods: []string{"MoveIssueProject", "MergeProjects"}, run: checkMergeMoveReservations},
 	{name: "move batch collision", methods: []string{"MoveIssuesBatch"}, run: checkMoveBatchCollision},
 	{name: "move batch logical membership", methods: []string{"MoveIssuesBatch"}, run: checkMoveBatchLogicalMembership},
-	{name: "issue move source project fence", methods: []string{"MoveIssueProject"}, run: checkMoveTreeSourceProjectFence},
+	{name: "issue move membership fence", methods: []string{"MoveIssueProject"}, run: checkMoveTreeMembershipFence},
 	{name: "move batch selected revisions", methods: []string{"MoveIssuesBatch"}, run: checkMoveBatchSelectedRevisions},
 	{name: "move batch", methods: []string{"MoveIssuesBatch"}, run: checkMoveBatch},
 	{name: "issue move tree", methods: []string{"MoveIssueProject"}, run: checkMoveTree},

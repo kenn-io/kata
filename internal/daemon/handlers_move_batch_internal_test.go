@@ -180,6 +180,12 @@ func TestMoveIssuesBatch_RejectsMultiItemPreview(t *testing.T) {
 	var apiErr *api.APIError
 	require.ErrorAs(t, err, &apiErr)
 	require.Equal(t, "validation", apiErr.Code)
+	req.Body.Items = req.Body.Items[:1]
+	req.Body.StartIndex = 1
+	req.Body.Completed = []api.MoveIssuesCompleted{{Result: "refused"}}
+	_, err = moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "validation", apiErr.Code)
 }
 
 func TestMoveIssuesBatch_ContinuationAtEnd(t *testing.T) {
@@ -697,14 +703,6 @@ func TestMoveBatchWriteContinuationAndRevisions(t *testing.T) {
 	require.Equal(t, 1, out.Body.Summary.Moved)
 	require.Equal(t, 1, out.Body.Summary.Unchanged)
 	require.Equal(t, "revision_conflict", out.Body.Results[3].Code)
-	req.Body.DryRun = true
-	req.Body.Items = req.Body.Items[:1]
-	req.Body.StartIndex = 1
-	req.Body.Completed = []api.MoveIssuesCompleted{{Result: "refused"}}
-	_, err = handler(t.Context(), req)
-	var apiErr *api.APIError
-	require.ErrorAs(t, err, &apiErr)
-	require.Equal(t, "validation", apiErr.Code)
 }
 
 func TestMoveBatchContinuationConflictAfterMoveAndEdit(t *testing.T) {

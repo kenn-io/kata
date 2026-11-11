@@ -201,7 +201,7 @@ func TestMoveIssuesBatch_ContinuationAfterRefusedDuplicate(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, target.ID, got.ProjectID)
 	})
-	t.Run("bare", func(t *testing.T) {
+	t.Run("historical bare ref and forged completion", func(t *testing.T) {
 		store := openClaimGateHelperDB(t)
 		original, issue := createClaimGateHelperIssue(t, store)
 		middle, err := store.CreateProject(t.Context(), "middle-project")
