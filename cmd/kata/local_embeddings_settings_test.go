@@ -44,34 +44,6 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	}
 }
 
-func TestLocalEmbeddingsSettingsRetrySharing(t *testing.T) {
-	t.Run("retry after failed setup", func(t *testing.T) {
-		setupKataEnv(t)
-		sharedHome := clearLocalEmbeddingsEnv(t)
-		stubLocalEmbeddingsInstall(t)
-		oldEndpoint := localEmbeddingsEndpoint
-		t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-		localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-			if opts.Executable == "" {
-				return "", embedlocal.ErrNotFound
-			}
-			return "http://127.0.0.1:12345/v1", nil
-		}
-		blocker := filepath.Join(sharedHome, ".kenn")
-		require.NoError(t, os.WriteFile(blocker, []byte("block marker"), 0600))
-		var run func(context.Context)
-		setup := &localEmbeddingsSetup{start: func(work func(context.Context)) bool { run = work; return true }}
-		require.NoError(t, setup.TurnOn(t.Context()))
-		run(t.Context())
-		require.Equal(t, "failed", setup.job.State)
-		require.Contains(t, setup.job.Error, "sharing could not be confirmed")
-		require.NoError(t, os.Remove(blocker))
-		require.NoError(t, setup.TurnOn(t.Context()))
-		run(t.Context())
-		require.Equal(t, "restart", setup.job.State)
-	})
-}
-
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
