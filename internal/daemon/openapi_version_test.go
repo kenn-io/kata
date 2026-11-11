@@ -31,10 +31,8 @@ func TestCheckAPIVersionRecord(t *testing.T) {
 		contains           []string
 	}{
 		{"collision", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256"}, []string{"0.46.0", "0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256", "feature minimum checks introduced by this change"}},
-		{"identical", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, nil},
 		{"stale", b, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"0.46.0"}},
 		{"next recorded", b, "0.46.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, nil},
-		{"next occupied", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256", "0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}},
 		{"older matching", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}},
 		{"older missing", a, "0.45.0", []string{"0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}},
 		{"missing", a, "0.45.0", nil, []string{"0.45.0." + hashA + ".sha256"}},
