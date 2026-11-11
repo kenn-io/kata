@@ -815,11 +815,11 @@ func shouldDeliverDuplicateLocalEcho(
 	event := events[0]
 	unresolvedIssue := event.IssueID == nil && event.IssueUID != nil
 	due, err := store.FederationLocalReplayDue(ctx, ev.EventUID, event.ID > pushCursor || unresolvedIssue)
-	if err != nil || due || !resumePull || projectID != binding.ProjectID || ev.Type != "issue.created" || !unresolvedIssue {
+	if err != nil || due || !resumePull || !unresolvedIssue {
 		return due, err
 	}
 	// Older data may lack a replay marker on later reset pages. A retained
-	// creation on the unfinished page with no issue projection still needs apply.
+	// event on the unfinished page still needs delivery if its issue is absent.
 	_, err = store.IssueByUID(ctx, *event.IssueUID, db.IncludeDeletedYes)
 	if errors.Is(err, db.ErrNotFound) {
 		return true, nil
