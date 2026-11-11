@@ -906,7 +906,7 @@
       return 'The write result is uncertain. Kata refreshed current authority before retry.'
     }
     if (state.kind === 'blocked')
-      return "You can't make changes right now. Refresh or check your access."
+      return "Can't make changes. Refresh or check access."
     return undefined
   }
 

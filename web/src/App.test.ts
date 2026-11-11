@@ -2739,9 +2739,7 @@ describe('App', () => {
       expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session'),
     )
     await waitFor(() => expect(renewedSnapshotAccepted).toBe(true))
-    expect(
-      screen.getByText("You can't make changes right now. Refresh or check your access."),
-    ).toBeTruthy()
+    expect(screen.getByText("Can't make changes. Refresh or check access.")).toBeTruthy()
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
