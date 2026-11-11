@@ -150,31 +150,45 @@ func (m Model) commitDatesForm() (Model, tea.Cmd) {
 		m.input.err = err.Error()
 		return m, nil
 	}
-	if len(in.Set) == 0 {
+	if m.input.fieldValue(fieldScheduled) == m.input.dates.scheduled && m.input.fieldValue(fieldDeadline) == m.input.dates.deadline {
 		return m.cancelInput()
 	}
 	m.input.saving = true
 	m.input.err = ""
-	return m, withConnGen(dispatchFormSetDates(m.api, m.input.target, in, m.input.formGen), m.connGen)
+	return m, withConnGen(dispatchFormSetDates(m.api, m.input.target, in, m.input, m.toastNow()), m.connGen)
 }
 
-func dispatchFormSetDates(apiClient any, target formTarget, in DatesInput, formGen int64) tea.Cmd {
+func dispatchFormSetDates(apiClient KataAPI, target formTarget, in DatesInput, form inputState, now time.Time) tea.Cmd {
 	return func() tea.Msg {
 		writer, ok := apiClient.(datesAPI)
 		if !ok {
 			return mutationDoneMsg{
-				origin: "form", kind: "dates", formGen: formGen,
+				origin: "form", kind: "dates", formGen: form.formGen,
 				err: errors.New("TUI client does not support editing dates"),
 			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		resp, err := writer.SetDates(ctx, target.projectID, target.issueShortID, in)
+		var resp *MutationResp
+		detail, err := apiClient.readIssue(ctx, target.projectID, target.issueShortID)
+		if err == nil && (detail == nil || detail.Issue == nil) {
+			err = errors.New("could not refresh planning dates")
+		}
+		if err == nil {
+			form.dates.scheduledToday, form.dates.deadlineToday = detail.Issue.ScheduledOnToday, detail.Issue.DeadlineOnToday
+			in, err = datesInputFromForm(form, now, in.Actor)
+		}
+		if err == nil {
+			resp = &MutationResp{}
+			if len(in.Set) > 0 {
+				resp, err = writer.SetDates(ctx, target.projectID, target.issueShortID, in)
+			}
+		}
 		if isRevisionConflict(err) {
 			resp = withCurrentIssue(ctx, apiClient, target, resp)
 		}
 		return mutationDoneMsg{
-			origin: "form", gen: target.detailGen, kind: "dates", formGen: formGen,
+			origin: "form", gen: target.detailGen, kind: "dates", formGen: form.formGen,
 			resp: resp, err: err,
 		}
 	}

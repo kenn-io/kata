@@ -26,21 +26,18 @@ func portableIssueTimezone(zone string) bool {
 // legacyScheduleZoneKnown reports whether a legacy string schedule resolves to a usable zone.
 func legacyScheduleZoneKnown(issueZone jsontext.Value, field, defaultZone, recurrenceZone string) bool {
 	var zone string
-	if json.Unmarshal(issueZone, &zone) == nil {
-		if zone == "Local" {
-			_, err := portableLocalZone()
-			return err == nil
-		}
-		if bundledScheduleZone(zone) {
-			return true
-		}
-	}
-	if len(issueZone) > 0 {
+	if len(issueZone) > 0 && json.Unmarshal(issueZone, &zone) != nil {
 		return false
 	}
-	if field == "scheduled_on" && recurrenceZone != "" {
-		_, err := metadata.ScheduleLocation(recurrenceZone, metadata.ScheduleTZDataVersion)
+	if field == "scheduled_on" && recurrenceZone != "" && (zone == "" || zone == recurrenceZone) {
+		return bundledScheduleZone(recurrenceZone)
+	}
+	if zone == "Local" {
+		_, err := portableLocalZone()
 		return err == nil
+	}
+	if zone != "" {
+		return bundledScheduleZone(zone)
 	}
 	return bundledScheduleZone(cmp.Or(defaultZone, "UTC"))
 }
