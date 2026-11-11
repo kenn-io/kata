@@ -9,6 +9,9 @@ import (
 )
 
 func TestRehomeSnapshotsCachesProjectBinding(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
 	ctx := t.Context()
 	store, _ := openConformanceStore(t)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
