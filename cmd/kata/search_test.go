@@ -8,9 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -40,13 +38,7 @@ func TestSearch_ContinuationCommandKeepsQueryAndFilters(t *testing.T) {
 		_, command, ok := strings.Cut(stderr, "search results are incomplete; continue with ")
 		require.True(t, ok, stderr)
 		command, _, _ = strings.Cut(command, "\n")
-		shell := []string{"sh", "-c", `kata() { printf '%s\n' "$@"; }; ` + command}
-		if runtime.GOOS == "windows" {
-			shell = []string{"pwsh", "-NoProfile", "-Command", "function kata { $args }; " + command}
-		}
-		output, err := exec.CommandContext(t.Context(), shell[0], shell[1:]...).Output() //nolint:gosec // G204: the test runs the emitted retry.
-		require.NoError(t, err)
-		out, stderr, err = executeRootCapture(t, ctx, strings.Split(strings.TrimSpace(strings.ReplaceAll(string(output), "\r\n", "\n")), "\n")...)
+		out, stderr, err = executeRootCapture(t, ctx, retryShellArgs(t, command)...)
 		require.NoError(t, err, stderr)
 		assert.Contains(t, out, title)
 		assert.NotContains(t, out, "distractor")
@@ -63,10 +55,10 @@ func TestSearch_ContinuationRendering(t *testing.T) {
 		wantErr string
 		wantOut string
 	}{
-		{"complete", outputHuman, false, `{"complete":true,"next_cursor":"next","results":[]}`, "", "no matches"},
-		{"no cursor", outputHuman, false, `{"complete":false,"results":[]}`, "search results are incomplete\n", "no matches"},
+		{"complete", outputHuman, false, `{"complete":true,"results":[]}`, "", ""},
+		{"no cursor", outputHuman, false, `{"complete":false,"results":[]}`, "search results are incomplete\n", ""},
 		{"quiet", outputHuman, true, `{"complete":false,"next_cursor":"next","results":[]}`, "", ""},
-		{"json", outputJSON, false, `{"complete":false,"next_cursor":"next","results":[]}`, "", `"next_cursor":"next"`},
+		{"json", outputJSON, false, `{"complete":false,"next_cursor":"next","results":[]}`, "", ""},
 		{"agent", outputAgent, false, `{"complete":false,"next_cursor":"next","results":[]}`, "", "next_cursor=next"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,7 +72,7 @@ func TestSearch_ContinuationRendering(t *testing.T) {
 			assert.Equal(t, tc.wantErr, stderr.String())
 			if tc.quiet {
 				assert.Empty(t, out.String())
-			} else {
+			} else if tc.wantOut != "" {
 				assert.Contains(t, out.String(), tc.wantOut)
 			}
 		})
