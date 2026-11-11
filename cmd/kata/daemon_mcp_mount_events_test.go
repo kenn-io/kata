@@ -114,6 +114,17 @@ func TestDaemonMCPEventsLifecycle(t *testing.T) {
 			} else {
 				require.Equal(t, mcpevents.AuthorityStaticToken, row.PrincipalAuthority)
 			}
+			if identity {
+				_, other := mcpRPCWithBearer(t, endpoint, "same-actor-token", "events/subscribe", eventsSubscribeParams("example-agent/worker", []string{project.UID}))
+				require.NotContains(t, other, "error", "%v", other)
+				otherID := other["result"].(map[string]any)["id"].(string)
+				require.NotEqual(t, id, otherID)
+				_, stopped := mcpRPCWithBearer(t, endpoint, "same-actor-token", "events/unsubscribe", unsubscribeParams("example-agent/worker", []string{project.UID}))
+				require.NotContains(t, stopped, "error", "%v", stopped)
+				row, err = env.DB.GetMCPEventSubscription(t.Context(), id)
+				require.NoError(t, err)
+				require.Equal(t, db.MCPEventStateActive, row.State, "another token must not end this subscription")
+			}
 			_, stopped := mcpRPC(t, endpoint, "events/unsubscribe", unsubscribeParams("example-agent/worker", []string{project.UID}))
 			require.NotContains(t, stopped, "error", "%v", stopped)
 			row, err = env.DB.GetMCPEventSubscription(t.Context(), id)

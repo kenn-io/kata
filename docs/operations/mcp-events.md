@@ -38,17 +38,16 @@ Then start or restart the daemon. The [configuration
 reference](../reference/configuration.md#mcp-events) owns the `[mcp_events]`
 fields, the status reasons, and the key file. Point assistants at the daemon
 through `kata mcp serve` as usual. Enabling the daemon's
-[`[mcp]` mount](../reference/mcp.md#daemon-mount-with-identity-tokens) also
+[`[mcp]` mount](../reference/mcp.md#transport) also
 serves Events directly at `/mcp`, with either its separate static MCP token
 or caller identity tokens. Enable both `[mcp]` and `[mcp_events]`, then start
 or restart the daemon. The mount uses this daemon's Events backend.
 
-Modern HTTP clients use MCP 2026-07-28 discovery and per-request metadata; legacy sessions
-neither advertise Events nor accept `events/*`.
+Modern HTTP clients use MCP 2026-07-28 discovery and per-request metadata;
+legacy sessions neither advertise Events nor accept `events/*`.
 
 Both modern HTTP endpoints advertise Events whether or not the daemon runs it.
-While
-Events is off, `events/list` returns no events, and `events/subscribe` and
+While Events is off, `events/list` returns no events, and `events/subscribe` and
 `events/unsubscribe` fail with `Unavailable` (`-32010`) and the status reason.
 
 `kata mcp serve` has no Events flags, and the forwarder writes nothing under
