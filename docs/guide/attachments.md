@@ -76,6 +76,7 @@ commands stay the same on a leaf or intermediate relay. Only the root needs
 the Docbank key; every connection uses its own project enrollment credential.
 Upgrade the CLI and every daemon on the path before using this feature.
 An unsupported hop returns an explicit upgrade error.
+When a spoke's federation is disabled, uploads and links return `503 federation_offline`, even if that spoke has a local Docbank. Re-enable the spoke to add shared references; unmarked references remain readable from its local vault.
 
 The root exposes its configured `folder` subtree to each enrolled project's
 readers and metadata writers. This includes upload folders for other projects
@@ -96,7 +97,9 @@ Shared-project references carry the root Kata instance UID in `origin`. Every
 replica stores the same value. Standalone references have no origin marker and
 continue to use the serving daemon's local Docbank after sharing or adoption.
 To make those files available on other replicas, copy or link them into the
-root's vault and add new shared references. A marked
+root's vault and add new shared references. On a hub, `reuse_existing` creates
+an origin-marked reference when the only match is an unmarked reference, so
+other replicas can read the new link. A marked
 reference never falls back to a different local vault: an unreachable upstream
 returns `federation_offline`; a missing or changed route is an explicit origin
 error; a missing version at a reachable origin remains

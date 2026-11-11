@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"uuid"
 
@@ -40,6 +41,17 @@ func TestFederatedDocbankRecoveryForeignOriginNeverUsesLocalVault(t *testing.T) 
 			}
 			require.Equal(t, want, status, string(body))
 			require.Empty(t, vault.Requests(), "a foreign origin must not consult the local vault")
+			if disabled {
+				endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.UID)
+				status, body = attachmentUpload(t, env, endpoint, "file.pdf", strings.NewReader("local bytes"))
+				require.Equal(t, http.StatusServiceUnavailable, status, string(body))
+				require.Contains(t, string(body), "federation_offline")
+				status, body, err = postAttachmentLink(t, env, endpoint+"/links", `{"path":"/kata/matching.pdf","actor":"operator"}`)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusServiceUnavailable, status, string(body))
+				require.Contains(t, string(body), "federation_offline")
+				require.Empty(t, vault.Requests(), "a disabled spoke must not write to its local vault")
+			}
 		})
 	}
 }
