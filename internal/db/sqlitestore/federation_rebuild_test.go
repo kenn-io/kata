@@ -44,6 +44,15 @@ func (c *moveQueryConn) QueryContext(ctx context.Context, query string, args []d
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
 }
 
+func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.Project) {
+	t.Helper()
+	ctx := t.Context()
+	_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
+	require.NoError(t, err)
+}
+
 func TestFederationGenerationSurvivesProjectIDReuse(t *testing.T) {
 	ctx := t.Context()
 	d, _, _ := incrementalTestStore(t)
@@ -191,10 +200,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			writer, err := Open(ctx, d.Path())
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, writer.Close()) })
-			_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
-			require.NoError(t, err)
-			_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?, short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
-			require.NoError(t, err)
+			unapplyMove(t, d, issue, source, destination)
 			attempts := 0
 			d.federationIngestPrepared = func() {
 				attempts++
@@ -241,10 +247,7 @@ func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
 	require.NoError(t, err)
 	orphan, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "orphan", Author: "tester"})
 	require.NoError(t, err)
-	_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
-	require.NoError(t, err)
+	unapplyMove(t, d, issue, source, destination)
 	_, err = d.ExecContext(ctx, `DELETE FROM events WHERE issue_id=?`, orphan.ID)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'blocks','tester')`, orphan.ID, issue.ID, orphan.UID, issue.UID)
@@ -358,10 +361,7 @@ func TestMoveRebuildPrunesDetachedDestinationSourceRow(t *testing.T) {
 	require.NoError(t, err)
 	_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
 	require.NoError(t, err)
-	_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
-	require.NoError(t, err)
+	unapplyMove(t, d, issue, source, destination)
 	_, err = d.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE issue_id=?`, issue.ID)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `UPDATE events SET related_issue_id=NULL WHERE related_issue_id=?`, issue.ID)
@@ -415,11 +415,8 @@ func TestMoveRebuildRefreshesChangedDecisions(t *testing.T) {
 	require.NoError(t, err)
 	settled, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "already moved", Author: "tester"})
 	require.NoError(t, err)
-	for _, issue := range []db.Issue{moving, settled} {
-		_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
-		require.NoError(t, err)
-	}
-	_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, moving.ShortID, moving.ID)
+	unapplyMove(t, d, moving, source, destination)
+	_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: settled.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: settled.Revision, Actor: "tester"})
 	require.NoError(t, err)
 	locked := cloneIncrementalStore(t, d)
 	require.NoError(t, locked.materializeFederatedProject(ctx, source.ID))
@@ -474,14 +471,8 @@ func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = prepared.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: second.ID, ToIssueID: other.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: second.ID, FromShortID: second.ShortID, FromUID: second.UID, ToShortID: other.ShortID, ToUID: other.UID, Actor: "tester"})
 	require.NoError(t, err)
-	_, err = prepared.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
-	require.NoError(t, err)
-	_, err = prepared.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: second.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: second.Revision, Actor: "tester"})
-	require.NoError(t, err)
-	_, err = prepared.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
-	require.NoError(t, err)
-	_, err = prepared.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, second.ShortID, second.ID)
-	require.NoError(t, err)
+	unapplyMove(t, prepared, issue, source, destination)
+	unapplyMove(t, prepared, second, source, destination)
 	update := incrementalRemoteEvent(t, destination, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"updated"}`, 9_000_001_000_002)
 	workflow := cronPullWorkflow(t, destination, "workflow", 9_000_001_000_001)
 	_, err = prepared.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{update, workflow})
