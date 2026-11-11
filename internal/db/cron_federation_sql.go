@@ -7,6 +7,8 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
 // CronDefinitionSnapshots captures portable definitions and run history
@@ -88,6 +90,22 @@ func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64
 		}
 		if err == nil && existingProject != projectID {
 			return fmt.Errorf("%w: cron UID belongs to another project", ErrFederationIngestValidation)
+		}
+		if err == nil && !job {
+			var raw, clockJSON, eventUID string
+			if err := tx.QueryRowContext(ctx, `SELECT definition_json,definition_hlc_json,definition_event_uid FROM cron_workflows WHERE uid=$1`, value.UID).Scan(&raw, &clockJSON, &eventUID); err != nil {
+				return err
+			}
+			if _, err := cron.DecodeWorkflow([]byte(raw)); err != nil {
+				var clock CronDefinitionHLC
+				if err := json.Unmarshal([]byte(clockJSON), &clock); err != nil {
+					return err
+				}
+				current := CronDefinition{DefinitionHLC: clock, DefinitionEventUID: eventUID}
+				if compareClock(cronDefinitionClock(value), cronDefinitionClock(current)) <= 0 {
+					return nil
+				}
+			}
 		}
 		document, err := json.Marshal(definition)
 		if err != nil {

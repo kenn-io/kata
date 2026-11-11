@@ -135,7 +135,10 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 	} else {
 		definition, err := cron.DecodeHistoricalWorkflow(in.Definition)
 		if err != nil {
-			reserved, _ := payloadHasArgvWorkflow(e.Type, string(e.Payload))
+			reserved := false
+			if len(in.Definition) <= cron.DefinitionLimit {
+				reserved, _ = payloadHasArgvWorkflow(e.Type, string(e.Payload))
+			}
 			if reserved && cronUID(e.ProjectUID) {
 				if p.cronBlockedProjects == nil {
 					p.cronBlockedProjects = make(map[string]error)
