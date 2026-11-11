@@ -310,7 +310,10 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 	matches := map[string]bool{}
 	cursor = ""
 	for {
-		query := &generated.SearchIssuesQuery{Q: sel.Query, Mode: new(generated.Lexical), Sort: new(generated.SearchIssuesQuerySortOldest), Limit: new(int64(20))}
+		query := &generated.SearchIssuesQuery{Q: sel.Query, Mode: new(generated.Lexical), Sort: new(generated.SearchIssuesQuerySortOldest), Limit: new(int64(200)), Label: sel.Labels, ExcludeLabel: sel.NoLabels}
+		if status != "" {
+			query.Status = new(generated.SearchIssuesQueryStatus(status))
+		}
 		if cursor != "" {
 			query.Cursor = &cursor
 		}

@@ -294,6 +294,59 @@ func TestMoveBatchCLI_SelectorLabel(t *testing.T) {
 	require.Equal(t, src.ID, got.ProjectID)
 }
 
+func TestMoveBatchCLI_SearchSelectorFiltersPages(t *testing.T) {
+	env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-search-token"))
+	source, err := env.DB.CreateProject(t.Context(), "source")
+	require.NoError(t, err)
+	target, err := env.DB.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	var issues []db.Issue
+	for range 42 {
+		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "route", Author: "tester"})
+		require.NoError(t, err)
+		issues = append(issues, issue)
+	}
+	for _, issue := range issues[:3] {
+		_, err := env.DB.AddLabel(t.Context(), issue.ID, "routing", "tester")
+		require.NoError(t, err)
+	}
+	_, err = env.DB.AddLabel(t.Context(), issues[1].ID, "skip", "tester")
+	require.NoError(t, err)
+	for _, issue := range issues[:2] {
+		_, _, _, err := env.DB.CloseIssue(t.Context(), issue.ID, "done", "tester", "Verified fixture completion", []db.Evidence{{Type: "test", Command: "synthetic fixture"}})
+		require.NoError(t, err)
+	}
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	var searches []url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/search") {
+			searches = append(searches, r.URL.Query())
+		}
+		r.Host = origin.Host
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	out, _, err := runCLIAgainst(t, server.URL, dir, "move", "--from-project", source.Name, "--query", "route", "--label", "routing", "--no-label", "skip", "--status", "closed", target.Name, "--json")
+	require.NoError(t, err)
+	require.Contains(t, out, issues[0].UID)
+	require.Len(t, searches, 1)
+	require.Equal(t, "200", searches[0].Get("limit"))
+	require.Equal(t, "closed", searches[0].Get("status"))
+	require.Equal(t, []string{"routing"}, searches[0]["label"])
+	require.Equal(t, []string{"skip"}, searches[0]["exclude_label"])
+	for i, issue := range issues {
+		got, err := env.DB.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		want := source.ID
+		if i == 0 {
+			want = target.ID
+		}
+		require.Equal(t, want, got.ProjectID)
+	}
+}
+
 // Contract: selectors exhaust pages before writing and carry the captured
 // revision, so a concurrent edit refuses only that issue.
 func TestMoveBatchCLI_SelectorPagingRevisionFence(t *testing.T) {
