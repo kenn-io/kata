@@ -193,12 +193,8 @@ func syncFederationOnceWithFence(
 	if hubProjectID == 0 {
 		hubProjectID = binding.HubProjectID
 	}
-	if pushThisTurn {
+	if pushThisTurn && binding.RelayConfig == nil {
 		if err := store.RecordFederationSyncPushStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
-			return false, err
-		}
-	} else if binding.RelayConfig != nil {
-		if err := store.RecordFederationSyncPullStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return false, err
 		}
 	}
