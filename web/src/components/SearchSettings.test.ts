@@ -21,6 +21,7 @@ function renderSettings(
     canAdministerDaemon?: boolean
     postFetch?: typeof fetch
     originStable?: boolean
+    remoteHost?: string
   } = {},
 ) {
   return render(SearchSettings, {
@@ -167,6 +168,11 @@ describe('SearchSettings', () => {
     [false, 'Run kata daemon status, then reopen kata ui.'],
   ])('offers recovery when originStable=%s does not return', async (originStable, message) => {
     vi.useFakeTimers()
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), ms)
+      return controller.signal
+    })
     let available = false
     const read = vi
       .fn<typeof fetch>()
@@ -175,9 +181,18 @@ describe('SearchSettings', () => {
           status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
         ),
       )
-      .mockImplementation(async () => {
+      .mockImplementation(async (_input, init) => {
         if (!available) throw new TypeError('disconnected')
-        return Response.json(status({ provider: 'built_in', can_change: false }))
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(
+            () => resolve(Response.json(status({ provider: 'built_in', can_change: false }))),
+            50,
+          )
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer)
+            reject(new TypeError('disconnected'))
+          })
+        })
       })
     setGeneratedFetch(read)
     vi.stubGlobal(
@@ -198,6 +213,69 @@ describe('SearchSettings', () => {
       expect(screen.getByText('On', { exact: true })).not.toBeNull()
       expect(screen.queryByRole('alert')).toBeNull()
     }
+  })
+
+  test.each([true, false])(
+    'retries a stalled status read during restart, initiated here=%s',
+    async (localRequest) => {
+      vi.useFakeTimers()
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+        const controller = new AbortController()
+        setTimeout(() => controller.abort(), ms)
+        return controller.signal
+      })
+      const initial = status({
+        can_restart: localRequest,
+        job: { state: localRequest ? 'restart' : 'restarting', downloaded: 1, total: 1 },
+      })
+      setGeneratedFetch(
+        vi
+          .fn<typeof fetch>()
+          .mockResolvedValueOnce(Response.json(initial))
+          .mockImplementationOnce(
+            (_input, init) =>
+              new Promise((_resolve, reject) => {
+                init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
+              }),
+          )
+          .mockImplementation(async () =>
+            Response.json(status({ provider: 'built_in', can_change: false })),
+          ),
+      )
+      vi.stubGlobal(
+        'confirm',
+        vi.fn(() => true),
+      )
+      renderSettings({
+        postFetch: vi.fn(async () => new Response(null, { status: 202 })),
+        originStable: true,
+      })
+      await settle()
+      if (localRequest)
+        await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+      await vi.advanceTimersByTimeAsync(16_000)
+      expect(screen.getByText('On', { exact: true })).not.toBeNull()
+    },
+  )
+
+  test('keeps remote restart guidance during another client restart and outage', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          Response.json(
+            status({ can_restart: true, job: { state: 'restarting', downloaded: 1, total: 1 } }),
+          ),
+        )
+        .mockRejectedValue(new TypeError('disconnected')),
+    )
+    renderSettings({ remoteHost: 'daemon.example', originStable: true })
+    await settle()
+    await vi.advanceTimersByTimeAsync(122_000)
+    expect(screen.getByText('Restart the daemon on daemon.example to finish.')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   test('offers recovery when another tab restarts and a read hangs', async () => {
@@ -385,6 +463,7 @@ describe('SearchSettings', () => {
           Response.json(
             status({
               can_change: false,
+              can_restart: !!remoteHost,
               job: { state: 'restart', downloaded: 290_000_000, total: 290_000_000 },
             }),
           ),

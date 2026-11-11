@@ -70,14 +70,13 @@
   let restartLabels = $derived({
     off: restartPending || job?.state === 'restarting' ? 'Restarting...' : 'Turning on',
     turnOn: 'Restart daemon',
-    downloaded:
-      (status?.can_restart || job?.state === 'restarting') && canAdministerDaemon
+    downloaded: remoteHost
+      ? `Restart the daemon on ${remoteHost} to finish.`
+      : (status?.can_restart || job?.state === 'restarting') && canAdministerDaemon
         ? originStable
           ? ''
           : reopenGuidance
-        : remoteHost
-          ? `Restart the daemon on ${remoteHost} to finish.`
-          : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+        : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
   })
   let failure = $derived(
     requestError ?? (job?.state === 'failed' || job?.state === 'restart' ? job.error : undefined),
@@ -88,7 +87,7 @@
   // The borrowed state offers an action only when restart is available.
   let readonly = $derived(
     restarting
-      ? !(status?.can_restart && canAdministerDaemon && !restartPending)
+      ? !(status?.can_restart && canAdministerDaemon && !remoteHost && !restartPending)
       : turning || !(status?.can_change && canAdministerDaemon),
   )
 
@@ -151,10 +150,11 @@
     const post = posts
     let next: LocalEmbeddingsStatus | undefined
     try {
+      const remaining = restartDeadline - Date.now()
       const readSignal = restartPending
         ? AbortSignal.any([
             signal,
-            AbortSignal.timeout(Math.max(pollMs * 5, restartDeadline - Date.now())),
+            AbortSignal.timeout(remaining > 0 ? Math.min(pollMs * 5, remaining) : pollMs * 5),
           ])
         : signal
       const response = await getLocalEmbeddings({ signal: readSignal })
@@ -164,7 +164,7 @@
     }
     if (signal.aborted || post !== posts) return
     if (next) {
-      if (next.job?.state === 'restarting' && !restartPending)
+      if (!remoteHost && next.job?.state === 'restarting' && !restartPending)
         restartDeadline = Date.now() + restartWaitMs
       if (
         next.job?.error ||
@@ -203,7 +203,7 @@
   }
 
   async function restartDaemon(): Promise<void> {
-    if (posting || restartPending || !page) return
+    if (posting || restartPending || remoteHost || !page) return
     const reopen = originStable ? '' : `\n\n${reopenGuidance}`
     if (
       !confirm(
