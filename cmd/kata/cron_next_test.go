@@ -180,9 +180,19 @@ func TestCronNextLeavesProgressUnchanged(t *testing.T) {
 		require.Equal(t, want, batch.Due)
 		out, _, err := executeCronCLI(t, env.URL, nil, "job", "next", job.UID, "--from", start.Format(time.RFC3339Nano))
 		require.NoError(t, err)
-		require.Contains(t, out, `"timezone":"UTC"`)
-		for _, instant := range want {
-			require.Contains(t, out, `"local":"`+instant.Format(time.RFC3339)+`"`)
+		var result struct {
+			Timezone    string `json:"timezone"`
+			Occurrences []struct {
+				At    time.Time `json:"at"`
+				Local string    `json:"local"`
+			} `json:"occurrences"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &result))
+		require.Equal(t, "UTC", result.Timezone)
+		require.Len(t, result.Occurrences, len(want))
+		for i, instant := range want {
+			require.Equal(t, instant, result.Occurrences[i].At)
+			require.Equal(t, instant.Format(time.RFC3339), result.Occurrences[i].Local)
 		}
 	}
 	after, err = env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
@@ -196,6 +206,7 @@ func TestCronNextRootErrorEnvelope(t *testing.T) {
 	require.Empty(t, out)
 	envelope := parseErrorEnvelope(t, []byte(diagnostic))
 	require.Equal(t, "validation", envelope.Error.Kind)
+	require.Equal(t, "cron identity must be a 26-character ULID", envelope.Error.Message)
 }
 
 func TestCronNextModes(t *testing.T) {

@@ -126,6 +126,7 @@ func TestCronJobDetailAdapterTriggerTimes(t *testing.T) {
 		d.Enabled = false
 	}, nil)
 	require.NotContains(t, got, "Triggers:")
+	require.NotContains(t, got, "Next:")
 }
 
 func TestCronJobDetailPausedJobHasNoNextRuns(t *testing.T) {
