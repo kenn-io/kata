@@ -182,3 +182,32 @@ func localInuvikRules(t *testing.T) *time.Location {
 	require.NoError(t, err)
 	return location
 }
+
+func TestLocalDefaultScheduleRules(t *testing.T) {
+	previous := time.Local
+	t.Cleanup(func() { time.Local = previous })
+	loc, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
+	require.NoError(t, err)
+	time.Local = loc
+	for _, tc := range []struct{ current, value string }{
+		{`{}`, `"2026-11-12T09:00"`},
+		{`{"scheduled_on":"2026-11-12T09:00"}`, `"2026-11-12T09:00"`},
+		{`{}`, `"2026-11-12T14:00:00Z"`},
+	} {
+		out, err := PrepareIssueSchedules(jsontext.Value(tc.current), map[string]jsontext.Value{"scheduled_on": jsontext.Value(tc.value)}, "Local", "")
+		require.NoError(t, err)
+		saved, err := metadata.DecodeSavedSchedule(out["scheduled_on"])
+		require.NoError(t, err)
+		require.NotNil(t, saved)
+		require.Equal(t, "America/New_York", saved.Timezone)
+		require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
+	}
+	time.Local = localInuvikRules(t)
+	_, err = PrepareIssueSchedules(jsontext.Value(`{}`), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`)}, "Local", "")
+	require.ErrorContains(t, err, "Local timezone rules differ")
+	time.Local = time.FixedZone("Mars/Olympus_Mons", 0)
+	_, err = PrepareIssueSchedules(jsontext.Value(`{}`), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`)}, "Local", "")
+	require.ErrorContains(t, err, "cannot save Local timezone")
+	_, err = PrepareIssueSchedules(jsontext.Value(`{"scheduled_on":"2026-11-12T09:00"}`), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`)}, "Local", "")
+	require.ErrorContains(t, err, "cannot save Local timezone")
+}

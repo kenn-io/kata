@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -64,6 +65,11 @@ func TestPrepareIssueSchedules(t *testing.T) {
 		{"unusable recurrence zone for instant", "{}", `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "Mars/Olympus_Mons", "UTC", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "civil unusable default" || tc.name == "UTC unusable default" || tc.name == "remove zone" {
+				previous := time.Local
+				time.Local = time.FixedZone("Mars/Olympus_Mons", 0)
+				t.Cleanup(func() { time.Local = previous })
+			}
 			fields := []string{"scheduled_on"}
 			if strings.Contains(tc.patch, `"deadline_on"`) {
 				fields = []string{"deadline_on"}

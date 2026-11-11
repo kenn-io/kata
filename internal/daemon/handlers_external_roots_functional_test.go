@@ -496,6 +496,9 @@ func TestExternalRootHandlersClassifyFieldAndPublishingErrors(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 	t.Run("daemon Local default keeps a rejected field conflict", func(t *testing.T) {
+		previous := time.Local
+		time.Local = time.FixedZone("Mars/Olympus_Mons", 0)
+		t.Cleanup(func() { time.Local = previous })
 		status, body := requestExternalRootJSON(t, ts.URL, http.MethodPut,
 			"/api/v1/connectors/example-connector/fields/scheduled_on", map[string]any{"external_field": "start-date"})
 		require.Equal(t, http.StatusOK, status, string(body))

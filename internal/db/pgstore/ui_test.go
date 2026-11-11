@@ -469,3 +469,7 @@ func TestUISnapshotBoundedCalendar(t *testing.T) {
 func TestRecurrenceAttachmentKeepsDeadlineZone(t *testing.T) {
 	dbtest.RunRecurrenceAttachmentKeepsDeadlineZone(t, func(t *testing.T) db.Storage { return openUIStore(t) })
 }
+
+func TestScheduleMetadataFilter(t *testing.T) {
+	dbtest.RunScheduleMetadataFilter(t, func(t *testing.T) db.Storage { return openUIStore(t) })
+}

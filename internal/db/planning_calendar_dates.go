@@ -89,7 +89,7 @@ func emptyScheduleToday(raw, defaultZone string, now time.Time) string {
 		return ""
 	}
 	zone := cmp.Or(values.Timezone, defaultZone, "UTC")
-	if values.Timezone == "Local" {
+	if zone == "Local" {
 		var err error
 		if zone, err = portableLocalZone(); err != nil {
 			return ""

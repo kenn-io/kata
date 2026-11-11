@@ -136,8 +136,8 @@ type ListIssuesParams struct {
 // metadata key, which MAY contain dots (e.g. "work.branch") — it is always a
 // literal top-level key, never a JSON path. When HasValue is false the filter
 // matches any issue with Key present in its top-level metadata; when true it
-// matches only issues whose Key holds the JSON string Value. Multiple filters
-// AND together.
+// matches issues whose Key holds the JSON string Value, or a saved schedule
+// whose value matches. Multiple filters AND together.
 type MetaFilter struct {
 	Key      string
 	Value    string

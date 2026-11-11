@@ -193,5 +193,9 @@ func TestEmptyScheduleProjectionUsesIssueZoneForRelativeEdits(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "2025-12-31", scheduledToday)
 		assert.Equal(t, "2025-12-31", deadlineToday)
+		_, _, scheduledToday, deadlineToday, _, _, err = RowPlanningProjection(`{}`, "Local", "Local", time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC))
+		require.NoError(t, err)
+		assert.Equal(t, "2025-12-31", scheduledToday)
+		assert.Equal(t, "2025-12-31", deadlineToday)
 	})
 }

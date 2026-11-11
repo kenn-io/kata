@@ -93,7 +93,7 @@ must be `UTC`, `Etc/UTC`, or exact case-sensitive bundled names under `Africa/`,
 `Local`, fixed offsets, non-geographic aliases such as `US/Eastern`, and wrong
 case are rejected. Connector ingest retains its existing validation.
 New civil dates, including deadlines, and zone removals exposing them require
-a bundled issue zone or daemon default. Existing aliases such as `US/Eastern`
+a bundled issue zone or daemon default. A `Local` daemon default works when the host zone can be named and its rules match the bundled rules for that date. Existing aliases such as `US/Eastern`
 remain usable. Recurrence-owned `scheduled_on` keeps
 its behavior when the issue zone is absent or matches the recurrence zone.
 Set a portable issue `timezone` or change the [daemon default](configuration.md)

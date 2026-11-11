@@ -625,7 +625,7 @@ date-time `scheduled_on` and `deadline_on` values without an issue-level
 specify an absolute UTC instant. When Kata saves one without an issue timezone,
 this setting can determine its calendar date for display.
 
-New civil writes using this default require a zone in the bundled timezone data, including existing aliases. New schedules retain the effective zone and its timezone-data version when this default changes.
+New civil writes using this default require a zone in the bundled timezone data, including existing aliases. `Local` works when the host zone can be named and its rules match the bundle for that date. New schedules retain the effective zone and its timezone-data version when this default changes.
 If rejected, set a portable issue `timezone`, or change this setting to `UTC`
 and restart the daemon. Existing configurations keep loading.
 
