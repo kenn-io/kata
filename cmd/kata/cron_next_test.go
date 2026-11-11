@@ -14,7 +14,7 @@ import (
 )
 
 func TestCronNextRejectsInvalidInput(t *testing.T) {
-	for _, args := range [][]string{{"bad"}, {"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--count", "0"}, {"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--from", "tomorrow"}} {
+	for _, args := range [][]string{{"bad"}, {"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--count", "0"}, {"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--count", "101"}, {"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--from", "tomorrow"}} {
 		out, _, err := executeCronCLI(t, "http://daemon.example", nil, append([]string{"job", "next"}, args...)...)
 		require.Error(t, err)
 		require.Empty(t, out)
