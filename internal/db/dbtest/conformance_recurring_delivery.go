@@ -278,18 +278,39 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, older.Metadata, older.ID)
 	})
 	t.Run("candidate order", func(t *testing.T) {
+		second, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Healthy parent", Author: "operator"})
+		require.NoError(t, err)
+		definition := j.Definition
+		definition.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: second.UID, Title: "Healthy work"}
+		healthyJob, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Boundary companion", Actor: "operator", Definition: definition})
+		require.NoError(t, err)
 		for _, tc := range []struct {
 			first, second string
 			winner        int
 			instant       string
 		}{
 			{"2025-01-01T00:59:59.999999999+01:00", "2025-01-01T00:00:00Z", 1, "2025-01-01T00:00:00Z"},
-			{"9999-12-31T23:59:59.5-01:00", "9999-12-31T23:59:59Z", 0, "10000-01-01T00:59:59.5Z"},
+			{"9999-12-31T23:59:59.5-01:00", "9999-12-31T23:59:59Z", 0, "9999-12-31T23:59:59.5-01:00"},
+			{"0000-01-01T00:00:00+02:00", "0000-01-01T00:00:00+01:00", 1, "0000-01-01T00:00:00+01:00"},
 			{"0000-01-01T00:00:00+01:00", "0000-01-01T00:00:00Z", 1, "0000-01-01T00:00:00Z"},
 		} {
 			deliveryStampText(t, s, children[0], tc.first)
 			deliveryStampText(t, s, children[1], tc.second)
-			child := deliveryRead(t, s, p, j, now).LastChild
+			rows, err := s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{ProjectID: p.ID}, now)
+			require.NoError(t, err)
+			_, err = json.Marshal(rows)
+			require.NoError(t, err)
+			var child *db.RecurringChild
+			var healthy bool
+			for _, row := range rows {
+				if row.Job.UID == j.UID {
+					child = row.Delivery.LastChild
+				} else if row.Job.UID == healthyJob.UID && row.Delivery != nil && row.Delivery.Error == "" {
+					healthy = true
+				}
+			}
+			require.True(t, healthy)
+			require.NotNil(t, child)
 			require.Equal(t, children[tc.winner].UID, child.UID)
 			require.Equal(t, tc.instant, child.ScheduledAt.Format(time.RFC3339Nano))
 		}

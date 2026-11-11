@@ -84,7 +84,12 @@ func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, e
 			if err != nil {
 				return nil, err
 			}
-			return &RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}, nil
+			stamp := value.ScheduledAt.UTC()
+			// Keep the original offset when UTC would exceed JSON's year range.
+			if stamp.Year() < 0 || stamp.Year() > 9999 {
+				stamp = value.ScheduledAt
+			}
+			return &RecurringChild{UID: uid, ScheduledAt: stamp}, nil
 		}
 	}
 	return nil, rows.Err()
