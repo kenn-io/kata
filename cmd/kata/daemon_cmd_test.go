@@ -483,7 +483,7 @@ func TestDaemonStatus_ListsUnverifiableRecord(t *testing.T) {
 	assert.Equal(t, child.Process.Pid, got.Daemons[0].PID)
 }
 
-func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
+func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 

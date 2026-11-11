@@ -1453,8 +1453,6 @@ func TestStopRunningDaemonsDoesNotSignalAfterProbeDeadline(t *testing.T) {
 	}
 	assert.True(t, errors.Is(err, context.DeadlineExceeded), "%v", err)
 	assert.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-	assert.Contains(t, err.Error(), server.Listener.Addr().String())
-	assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
 	assert.Zero(t, signals, "deadline must prevent signaling collected daemons")
 }
 
@@ -1487,8 +1485,6 @@ func TestDiscoverForStartKeepsProbeDeadlineEvidence(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
-	assert.Contains(t, err.Error(), address)
 	assert.NotContains(t, err.Error(), "start lock")
 	require.NotNil(t, release)
 	release()

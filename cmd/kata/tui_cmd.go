@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/tui"
 )
@@ -58,7 +60,7 @@ Set [tui] confirm_quit = false in <KATA_HOME>/config.toml to make q quit immedia
 					return err
 				}
 			}
-			return runTUI(ctx, tui.Options{
+			err = runTUI(ctx, tui.Options{
 				Stdout:           cmd.OutOrStdout(),
 				Stderr:           cmd.ErrOrStderr(),
 				DisplayUIDFormat: uidFormat,
@@ -69,6 +71,15 @@ Set [tui] confirm_quit = false in <KATA_HOME>/config.toml to make q quit immedia
 				ProjectName:      strings.TrimSpace(flags.Project),
 				Workspace:        workspace,
 			})
+			if _, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+				selection, inspectErr := client.InspectSelection(ctx, workspace, flags.Daemon)
+				if inspectErr == nil {
+					if profile := resolvedProfileName(selection.Resolved); profile != "" {
+						return cliDaemonTargetError(err, profile)
+					}
+				}
+			}
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&uidFormat, "uid-format", "none", "show issue UIDs in detail (none|short|full)")
