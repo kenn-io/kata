@@ -20,11 +20,14 @@ import (
 
 type batchCountingCredentials struct {
 	config.FederationCredentialStore
-	reads atomic.Int32
+	reads     atomic.Int32
+	failFirst bool
 }
 
 func (c *batchCountingCredentials) FederationCredential(ctx context.Context, uid string) (config.FederationCredential, bool, error) {
-	c.reads.Add(1)
+	if c.reads.Add(1) == 1 && c.failFirst {
+		return config.FederationCredential{}, false, errors.New("credential temporarily unavailable")
+	}
 	return c.FederationCredentialStore.FederationCredential(ctx, uid)
 }
 

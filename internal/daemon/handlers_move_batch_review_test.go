@@ -134,6 +134,27 @@ func TestMoveBatchRefusal_FinalizationFailurePrecedesDenial(t *testing.T) {
 }
 
 func TestClaimClientCache_ReplacementBinding(t *testing.T) {
+	t.Run("transient credential failure", func(t *testing.T) {
+		store := openClaimGateHelperDB(t)
+		project, _ := createClaimGateHelperIssue(t, store)
+		creds := &batchCountingCredentials{FederationCredentialStore: config.DefaultFederationCredentialStore(), failFirst: true}
+		cache := &claimClientCache{}
+		binding := db.FederationBinding{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 1}
+		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: binding.HubURL, HubProjectID: binding.HubProjectID, Token: "synthetic-token"}))
+		cfg := ServerConfig{DB: store, FederationCredentials: creds}
+		failed, _, err := cache.get(t.Context(), cfg, binding)
+		require.Error(t, err)
+		require.Nil(t, failed)
+		client, credential, err := cache.get(t.Context(), cfg, binding)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+		require.Equal(t, "synthetic-token", credential.Token)
+		again, _, err := cache.get(t.Context(), cfg, binding)
+		require.NoError(t, err)
+		require.Same(t, client, again)
+		require.EqualValues(t, 2, creds.reads.Load())
+	})
+
 	cases := []struct {
 		name    string
 		replace func(*db.FederationBinding)
@@ -238,4 +259,74 @@ func TestMoveIssuesBatch_ContinuationAfterRefusedDuplicate(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, source.ID, got.ProjectID)
 	})
+	for _, qualified := range []bool{true, false} {
+		t.Run(map[bool]string{true: "qualified", false: "bare"}[qualified], func(t *testing.T) {
+			store := openClaimGateHelperDB(t)
+			original, issue := createClaimGateHelperIssue(t, store)
+			middle, err := store.CreateProject(t.Context(), "middle-project")
+			require.NoError(t, err)
+			target, err := store.CreateProject(t.Context(), "final-project")
+			require.NoError(t, err)
+			prior, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+				IssueID: issue.ID, FromProjectID: original.ID, ToProjectID: middle.ID,
+				IfMatchRev: issue.Revision, Actor: "agent", Single: true,
+			})
+			require.NoError(t, err)
+			ref := issue.ShortID
+			if qualified {
+				ref = original.Name + "#" + ref
+			}
+			resolved, _, err := resolveMoveBatchIssue(t.Context(), store, original.ID, ref)
+			require.NoError(t, err)
+			require.Equal(t, issue.UID, resolved.UID)
+			require.Equal(t, prior.NewRevision, resolved.Revision)
+
+			req := &api.MoveIssuesRequest{}
+			req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed once", target.UID
+			req.Body.DefaultProjectID = original.ID
+			req.Body.Items = []api.MoveIssuesItem{
+				{Ref: ref, ExpectedRevision: prior.NewRevision},
+				{Ref: issue.UID, ExpectedRevision: prior.NewRevision},
+			}
+			//nolint:kennlint // deadlinetest: Separate the historical-ref move from the selected duplicate.
+			handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
+			first, err := handler(t.Context(), req)
+			require.NoError(t, err)
+			require.Equal(t, 1, first.Body.NextIndex)
+			require.Len(t, first.Body.Results, 1)
+			require.Equal(t, "moved", first.Body.Results[0].Result)
+			require.Equal(t, prior.NewRevision+1, first.Body.Results[0].Revision)
+			require.NotEmpty(t, first.Body.Results[0].Proof)
+			req.Body.StartIndex = first.Body.NextIndex
+			req.Body.Completed = completedMoveResults(first.Body.Results)
+			second, err := handler(t.Context(), req)
+			require.NoError(t, err)
+			require.Equal(t, 2, second.Body.NextIndex)
+			require.Len(t, second.Body.Results, 1)
+			require.Equal(t, "unchanged", second.Body.Results[0].Result)
+			require.Equal(t, "duplicate_item", second.Body.Results[0].Code)
+			require.Equal(t, first.Body.Results[0].Revision, second.Body.Results[0].Revision)
+
+			current, err := store.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, target.ID, current.ProjectID)
+			require.Equal(t, prior.NewRevision+1, current.Revision)
+			comments, err := store.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			require.Equal(t, "routed once", comments[0].Body)
+
+			unrelated, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: original.ID, Title: "unrelated issue", Author: "agent",
+			})
+			require.NoError(t, err)
+			req.Body.Items[0].Ref = unrelated.ShortID
+			if qualified {
+				req.Body.Items[0].Ref = original.Name + "#" + unrelated.ShortID
+			}
+			changed, err := handler(t.Context(), req)
+			require.NoError(t, err)
+			require.Equal(t, "revision_conflict", changed.Body.Results[0].Code)
+		})
+	}
 }

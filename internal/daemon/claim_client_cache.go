@@ -20,7 +20,6 @@ type claimClientBinding struct {
 type claimClientEntry struct {
 	client     *claimHubClient
 	credential config.FederationCredential
-	err        error
 }
 
 // A cache lives only for one batch request and pins each client to its binding.
@@ -36,13 +35,17 @@ func (c *claimClientCache) get(ctx context.Context, cfg ServerConfig, binding db
 		c.entries = map[claimClientBinding]claimClientEntry{}
 	}
 	key := claimClientBinding{binding.ProjectID, binding.HubURL, binding.HubProjectID, binding.AllowInsecure}
-	entry, ok := c.entries[key]
-	if !ok {
-		entry.client, entry.credential, entry.err = claimForwardClient(ctx, cfg, binding)
-		c.entries[key] = entry
+	if entry, ok := c.entries[key]; ok {
+		return entry.client, entry.credential, nil
 	}
-	return entry.client, entry.credential, entry.err
+	client, credential, err := claimForwardClient(ctx, cfg, binding)
+	if err != nil {
+		return client, credential, err
+	}
+	c.entries[key] = claimClientEntry{client: client, credential: credential}
+	return client, credential, nil
 }
+
 func requireFederatedIssueClaimsConcurrently(ctx context.Context, cfg ServerConfig, issues []db.Issue, actor string, cache *claimClientCache, limit int, refresh bool) map[string]error {
 	failures := map[string]error{}
 	seen := map[string]bool{}

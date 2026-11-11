@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -135,7 +136,6 @@ func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectI
 	}
 	var payload struct {
 		FromProjectUID string `json:"from_project_uid"`
-		FromShortID    string `json:"from_short_id"`
 		ToProjectUID   string `json:"to_project_uid"`
 		Revision       int64  `json:"revision"`
 	}
@@ -149,18 +149,22 @@ func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectI
 	if ref.ULID != "" {
 		return strings.EqualFold(ref.ULID, issue.UID), nil
 	}
-	if ref.ShortID != payload.FromShortID {
-		return false, nil
-	}
 	var project db.Project
 	if ref.Project != "" {
 		project, err = store.ProjectByNameIncludingArchived(ctx, ref.Project)
 	} else {
 		project, err = store.ProjectByID(ctx, defaultProjectID)
 	}
-	if err != nil || project.UID != payload.FromProjectUID {
+	if err != nil {
 		return false, nil
 	}
-	_, err = authorizeHostProjectScope(ctx, []int64{project.ID}, nil, false)
-	return err == nil, nil
+	if _, err := authorizeHostProjectScope(ctx, []int64{project.ID}, []string{payload.FromProjectUID}, false); err != nil {
+		return false, nil
+	}
+	// Resolve live or retained aliases to the stable UID, rejecting reassignment.
+	resolved, err := store.IssueByShortID(ctx, project.ID, ref.ShortID, db.IncludeDeletedNo)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return false, err
+	}
+	return err == nil && resolved.UID == issue.UID, nil
 }
