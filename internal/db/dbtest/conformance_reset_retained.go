@@ -13,8 +13,8 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// Owner restore retains unsupported source events, including rowless and held projections.
-// Neither legacy reset nor signed installation may erase that evidence.
+// Owner restore retains unsupported workflow evidence, including rowless,
+// event-only, and projection-only history. Resets must not erase it.
 func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend Backend) error {
 	ctx := t.Context()
 	project, err := source.CreateProject(ctx, "example-project")
@@ -33,16 +33,37 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 	records, err := CollectImportRecords(ctx, source, db.ExportFilter{IncludeDeleted: true})
 	require.NoError(t, err)
 	for _, tc := range []struct {
-		document string
-		rows     int
+		document       string
+		rows           int
+		projectionOnly bool
 	}{
-		{`{"version":2,"steps":[]}`, 0},
-		{`{"version":1,"steps":[{"key":"check","kind":"future-step"}]}`, 1},
+		{`{"version":2,"steps":[]}`, 0, false},
+		{`{"version":1,"steps":[{"key":"check","kind":"future-step"}]}`, 1, false},
+		{`{"version":1,"steps":[{"key":"check","kind":"future-step"}]}`, 1, true},
 	} {
 		for _, operation := range []string{"legacy", "conditional", "signed"} {
-			t.Run(operation+"/"+tc.document, func(t *testing.T) {
+			name := operation + "/" + tc.document
+			if tc.projectionOnly {
+				name += "/projection-only"
+			}
+			t.Run(name, func(t *testing.T) {
 				fixture := append([]db.ImportRecord(nil), records...)
 				var original []byte
+				if tc.projectionOnly {
+					fixture = nil
+					for _, record := range records {
+						if event, ok := record.(*db.EventExport); ok && (event.UID == createdUID || event.UID == bad.DefinitionEventUID) {
+							continue // The owner backup has compacted this workflow's history.
+						}
+						if workflow, ok := record.(*db.CronWorkflowExport); ok && workflow.UID == bad.UID {
+							copyWorkflow := *workflow
+							copyWorkflow.RawDefinition = []byte(tc.document)
+							record = &copyWorkflow
+							original = []byte(tc.document)
+						}
+						fixture = append(fixture, record)
+					}
+				}
 				for i, record := range fixture {
 					if event, ok := record.(*db.EventExport); ok && event.UID == bad.DefinitionEventUID {
 						copyEvent := *event
@@ -67,6 +88,11 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 				var count int
 				require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM cron_workflows WHERE uid=$1`, bad.UID).Scan(&count))
 				require.Equal(t, tc.rows, count)
+				if tc.projectionOnly {
+					var document string
+					require.NoError(t, q.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE uid=$1`, bad.UID).Scan(&document))
+					require.JSONEq(t, tc.document, document)
+				}
 				acknowledged, err := target.MaxEventID(ctx)
 				require.NoError(t, err)
 				_, err = target.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: restored.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true, PushCursorEventID: acknowledged, PullCursorEventID: 17, ReplayHorizonEventID: 13})
@@ -92,9 +118,14 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 				require.NoError(t, err)
 				maxBefore, err := target.MaxEventID(ctx)
 				require.NoError(t, err)
-				eventsBefore, err := target.EventsByUIDs(ctx, restored.ID, []string{createdUID, bad.DefinitionEventUID, healthy.DefinitionEventUID, job.DefinitionEventUID})
+				eventUIDs := []string{createdUID, bad.DefinitionEventUID, healthy.DefinitionEventUID, job.DefinitionEventUID}
+				eventsBefore, err := target.EventsByUIDs(ctx, restored.ID, eventUIDs)
 				require.NoError(t, err)
-				require.Len(t, eventsBefore, 4)
+				if tc.projectionOnly {
+					require.Len(t, eventsBefore, 2)
+				} else {
+					require.Len(t, eventsBefore, 4)
+				}
 				switch operation {
 				case "legacy":
 					err = target.ResetFederatedProject(ctx, restored.ID, 20, 19)
@@ -110,9 +141,14 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 				maxAfter, err := target.MaxEventID(ctx)
 				require.NoError(t, err)
 				require.Equal(t, maxBefore, maxAfter)
-				eventsAfter, err := target.EventsByUIDs(ctx, restored.ID, []string{createdUID, bad.DefinitionEventUID, healthy.DefinitionEventUID, job.DefinitionEventUID})
+				eventsAfter, err := target.EventsByUIDs(ctx, restored.ID, eventUIDs)
 				require.NoError(t, err)
 				require.Equal(t, eventsBefore, eventsAfter)
+				if tc.projectionOnly {
+					var document string
+					require.NoError(t, q.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE uid=$1`, bad.UID).Scan(&document))
+					require.JSONEq(t, tc.document, document)
+				}
 				restoredWorkflow, err := target.CronWorkflow(ctx, restored.ID, healthy.UID)
 				require.NoError(t, err)
 				require.Equal(t, definition, restoredWorkflow.Definition)
