@@ -23,7 +23,7 @@ import (
 
 // Expose the real authenticated daemon and SQLite store through an independent
 // Unix endpoint, without publishing a runtime record for that endpoint.
-func unixConsumerEndpoint(t *testing.T, target string) (string, func()) {
+func unixConsumerEndpoint(t *testing.T, target string, observers ...func(*http.Request)) (string, func()) {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "kata-cli-uds-")
 	require.NoError(t, err)
@@ -33,7 +33,13 @@ func unixConsumerEndpoint(t *testing.T, target string) (string, func()) {
 	require.NoError(t, err)
 	upstream, err := url.Parse(target)
 	require.NoError(t, err)
-	server := &http.Server{Handler: httputil.NewSingleHostReverseProxy(upstream), ReadHeaderTimeout: time.Second}
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, observe := range observers {
+			observe(r)
+		}
+		proxy.ServeHTTP(w, r)
+	}), ReadHeaderTimeout: time.Second}
 	go func() { _ = server.Serve(listener) }()
 	stop := func() { _ = server.Close() }
 	t.Cleanup(stop)
@@ -68,7 +74,9 @@ func TestUnixConsumerTransportErrorPreservesEndpoint(t *testing.T) {
 }
 
 func TestUnixConsumerFederationKeepsSelectedTransportAndCredentialPolicy(t *testing.T) {
-	testUnixConsumerFederationTarget(t, "environment")
+	for _, selection := range []string{"environment", "workspace"} {
+		testUnixConsumerFederationTarget(t, selection)
+	}
 }
 
 func testUnixConsumerFederationTarget(t *testing.T, selection string) {
@@ -81,7 +89,29 @@ func testUnixConsumerFederationTarget(t *testing.T, selection string) {
 		hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 		_, err = hub.DB.CreateProject(t.Context(), "only-hub")
 		require.NoError(t, err)
-		path, stop := unixConsumerEndpoint(t, spoke.URL)
+		authorization := make(chan []string, 4)
+		path, stop := unixConsumerEndpoint(t, spoke.URL, func(r *http.Request) {
+			if r.URL.Path == "/api/v1/projects" {
+				authorization <- r.Header.Values("Authorization")
+			}
+		})
+		anonymous := selection == "environment" || selection == "workspace"
+		requireAuthorization := func() {
+			t.Helper()
+			select {
+			case got := <-authorization:
+				if anonymous {
+					require.Empty(t, got, "URL selection must not send any ambient or catalog Authorization header")
+				} else {
+					require.Equal(t, []string{"Bearer spoke-token"}, got, "catalog selection must send only the selected spoke token")
+				}
+			default:
+				t.Fatal("request did not reach the selected Unix endpoint")
+			}
+		}
+		// Keep workspace discovery inside the test-owned directory even for
+		// environment and catalog selections.
+		flags.Workspace = t.TempDir()
 		t.Setenv("KATA_SERVER", "")
 		t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 		body := fmt.Sprintf("[[daemon]]\nname = \"spoke\"\nurl = %q\ntoken = \"spoke-token\"\n", "unix://"+path)
@@ -92,6 +122,9 @@ func testUnixConsumerFederationTarget(t *testing.T, selection string) {
 			body = "active_daemon = \"spoke\"\n" + body
 		case "environment":
 			t.Setenv("KATA_SERVER", "unix://"+path)
+		case "workspace":
+			require.NoError(t, os.WriteFile(filepath.Join(flags.Workspace, ".kata.toml"), []byte("version = 1\n[project]\nname = \"spoke-project\"\n"), 0600))
+			require.NoError(t, os.WriteFile(filepath.Join(flags.Workspace, ".kata.local.toml"), []byte(fmt.Sprintf("version = 1\n[server]\nurl = %q\n", "unix://"+path)), 0600))
 		}
 		require.NoError(t, os.WriteFile(filepath.Join(hub.Home, "config.toml"), []byte(body), 0600))
 		ctx, base, err := ensureSpokeDaemonContext(t.Context())
@@ -103,7 +136,8 @@ func testUnixConsumerFederationTarget(t *testing.T, selection string) {
 		mutation.Header.Set("Content-Type", "application/json")
 		created, err := hc.Do(mutation)
 		require.NoError(t, err)
-		if selection == "environment" {
+		requireAuthorization()
+		if anonymous {
 			assert.Equal(t, http.StatusUnauthorized, created.StatusCode)
 		} else {
 			assert.Equal(t, http.StatusOK, created.StatusCode)
@@ -123,7 +157,7 @@ func testUnixConsumerFederationTarget(t *testing.T, selection string) {
 		}
 		spokeState := readBack(spoke, "spoke-token")
 		hubState := readBack(hub, "hub-token")
-		if selection == "environment" {
+		if anonymous {
 			assert.NotContains(t, spokeState, "written-spoke")
 		} else {
 			assert.Contains(t, spokeState, "written-spoke")
@@ -136,7 +170,8 @@ func testUnixConsumerFederationTarget(t *testing.T, selection string) {
 		}
 		resp, err := read(ctx)
 		require.NoError(t, err)
-		if selection == "environment" {
+		requireAuthorization()
+		if anonymous {
 			assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "ambient hub credentials must not authorize the spoke")
 		} else {
 			assert.Equal(t, http.StatusOK, resp.StatusCode)
