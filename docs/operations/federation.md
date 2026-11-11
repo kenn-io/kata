@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Federation
@@ -417,6 +417,11 @@ default/spoke daemon only to detect whether the named project already exists
 on the spoke and should print `--adopt-existing`. The generated token printed
 in the `kata federation join ...` command is a separate spoke transport
 credential.
+
+Spoke probes selected by an environment or workspace URL are anonymous; they
+do not use ambient hub credentials or fail because an unselected ambient token
+file is unavailable. Named catalog entries and pinned local profiles use their
+own selected credentials. An unavailable selected credential remains an error.
 
 Without a project argument or `--project`, `enroll` finds the project from the
 client's `.kata.toml` or Git alias and sends only that name or alias to the

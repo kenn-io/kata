@@ -403,25 +403,28 @@ func ensureSpokeDaemonContext(ctx context.Context) (context.Context, string, err
 		return ctx, "", err
 	}
 	if resolved.LocalProfile == nil {
-		resolved.Token = ""
+		auth := clientpkg.TargetAuth{
+			AllowInsecure:       resolved.AllowInsecure,
+			TrustPrivateNetwork: resolved.TrustPrivateNetwork,
+		}
 		if resolved.Name != "" {
 			cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
 			if err != nil {
 				return ctx, "", err
 			}
 			if entry := catalogByName(cfg, resolved.Name); entry != nil {
-				resolved.Token, err = selectedCatalogToken(entry)
+				auth.Token, err = selectedCatalogToken(entry)
 				if err != nil {
 					return ctx, "", err
 				}
 			}
 		} else if resolved.UnixSocket == "" {
-			auth, err := federationImplicitSpokeTargetAuth(ctx, resolved.BaseURL)
+			auth, err = federationImplicitSpokeTargetAuth(ctx, resolved.BaseURL)
 			if err != nil {
 				return ctx, "", err
 			}
-			resolved.Token = auth.Token
 		}
+		resolved = resolved.WithTargetAuth(auth)
 	}
 	ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
 	return ctx, resolved.BaseURL, nil
