@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/stretchr/testify/require"
@@ -101,6 +102,45 @@ func TestRelayDocbankUIOriginAvailability(t *testing.T) {
 			require.False(t, snapshot.Capabilities.AttachmentRoutes[0].Write)
 		})
 	}
+}
+
+func TestRelayDocbankUIConditionalCapabilitiesRefresh(t *testing.T) {
+	root, relay, leaf, _ := newRelayClaimChain(t)
+	serveRelayDocbank(t, root, nil)
+	serveRelayDocbank(t, relay, nil)
+	serveRelayDocbank(t, leaf, nil)
+	request := func(etag string) *http.Response {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, leaf.http.URL+"/api/v1/ui/snapshot?view=inbox", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+leaf.userToken)
+		req.Header.Set("If-None-Match", etag)
+		resp, err := leaf.http.Client().Do(req)
+		require.NoError(t, err)
+		return resp
+	}
+	first := request("")
+	require.Equal(t, http.StatusOK, first.StatusCode)
+	etag := first.Header.Get("ETag")
+	require.NotEmpty(t, etag)
+	require.NoError(t, first.Body.Close())
+	serveRelayDocbank(t, root, docbanktest.New(t))
+	timer := time.NewTimer(5100 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-t.Context().Done():
+		t.Fatal(t.Context().Err())
+	}
+	changed := request(etag)
+	defer func() { _ = changed.Body.Close() }()
+	require.Equal(t, http.StatusOK, changed.StatusCode)
+	require.NotEqual(t, etag, changed.Header.Get("ETag"))
+	var snapshot struct {
+		Capabilities api.UICapabilities `json:"capabilities"`
+	}
+	require.NoError(t, json.UnmarshalRead(changed.Body, &snapshot))
+	require.Len(t, snapshot.Capabilities.AttachmentRoutes, 1)
+	require.True(t, snapshot.Capabilities.AttachmentRoutes[0].Write)
 }
 
 // The initiating replica must get an immediately usable reference while only
