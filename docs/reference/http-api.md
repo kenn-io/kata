@@ -270,6 +270,9 @@ then roll it back. They hold database write locks until the rehearsal ends. A dr
 run returns all results or `move_preview_timeout` after 45 seconds; reduce the
 input and retry on timeout. Dry runs do not accept continuation input.
 
+New `issue.moved` events include `revision`, the issue's revision immediately
+after the move. Older events may omit it. Issue-scoped event payloads omit it.
+
 ### Version history
 
 | Version | Change |

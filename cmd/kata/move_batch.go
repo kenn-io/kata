@@ -248,7 +248,7 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 	matches := map[string]bool{}
 	cursor = ""
 	for {
-		query := &generated.SearchIssuesQuery{Q: sel.Query, Mode: new(generated.Lexical), Sort: new(generated.SearchIssuesQuerySortOldest), Limit: new(int64(200))}
+		query := &generated.SearchIssuesQuery{Q: sel.Query, Mode: new(generated.Lexical), Sort: new(generated.SearchIssuesQuerySortOldest), Limit: new(int64(20))}
 		if cursor != "" {
 			query.Cursor = &cursor
 		}
@@ -259,25 +259,23 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
 		}
-		var page struct {
-			Results []struct {
-				Issue db.Issue `json:"issue"`
-			} `json:"results"`
-			NextCursor string `json:"next_cursor"`
+		if len(response.Body) == 0 {
+			return nil, io.EOF
 		}
-		if err := json.Unmarshal(response.Body, &page); err != nil {
-			return nil, err
+		page := response.JSON200
+		if page == nil {
+			return nil, fmt.Errorf("unexpected search response status %d", response.StatusCode)
 		}
 		for _, row := range page.Results {
 			matches[row.Issue.UID] = true
 		}
-		if page.NextCursor == "" {
+		if page.NextCursor == nil || *page.NextCursor == "" {
 			break
 		}
-		if page.NextCursor == cursor {
+		if *page.NextCursor == cursor {
 			return nil, fmt.Errorf("could not complete search")
 		}
-		cursor = page.NextCursor
+		cursor = *page.NextCursor
 	}
 	out := selected[:0]
 	for _, item := range selected {

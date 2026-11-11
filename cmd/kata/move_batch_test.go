@@ -313,7 +313,7 @@ func TestMoveBatchCLI_SelectorPagingRevisionFence(t *testing.T) {
 	require.NoError(t, err)
 	dst, err := env.DB.CreateProject(t.Context(), "selector-target")
 	require.NoError(t, err)
-	first, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "first", Author: "tester"})
+	first, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "first route", Author: "tester"})
 	require.NoError(t, err)
 	for range 249 {
 		_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "route", Author: "tester"})
@@ -350,7 +350,7 @@ func TestMoveBatchCLI_SelectorPagingRevisionFence(t *testing.T) {
 		proxy.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
-	out, _, err := runCLIAgainst(t, server.URL, dir, "move", "--from-project", src.Name, "--status", "all", dst.Name, "--json")
+	out, _, err := runCLIAgainst(t, server.URL, dir, "move", "--from-project", src.Name, "--status", "all", "--query", "route", dst.Name, "--json")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "some issues were refused")
 	var reply struct {
