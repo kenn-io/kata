@@ -2,11 +2,21 @@ package main
 
 import (
 	"context"
+	"net"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+// configuredActivatedListener leaves ordinary startup without an inherited
+// listener. Platform adapters handle only explicitly configured activation.
+func configuredActivatedListener(ctx context.Context, mode string) (net.Listener, error) {
+	if mode == "" {
+		return nil, nil
+	}
+	return adoptActivatedListener(ctx, mode)
+}
 
 func requireUnmanagedCurrentDaemon(ctx context.Context) error {
 	home, err := config.KataHome()

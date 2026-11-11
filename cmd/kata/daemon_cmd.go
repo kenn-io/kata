@@ -1061,11 +1061,11 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
-	if dcfg.SocketActivation != "" {
-		activated, err = adoptActivatedListener(ctx, dcfg.SocketActivation)
-		if err != nil {
-			return daemonStartupPreflight{}, err
-		}
+	activated, err = configuredActivatedListener(ctx, dcfg.SocketActivation)
+	if err != nil {
+		return daemonStartupPreflight{}, err
+	}
+	if activated != nil {
 		endpoint = kitdaemon.Endpoint{Network: kitdaemon.NetworkUnix, Address: activated.Addr().String()}
 		dcfg.Sources["listen"] = "socket_activation"
 	}
