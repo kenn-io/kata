@@ -197,6 +197,8 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 		features, err = db.ProjectRequiredEventFeatures(ctx, q, project.UID)
 		require.NoError(t, err)
 		require.Equal(t, db.MergeEventFeatures(db.CronEventFeature, db.CronWorkflowArgvEventFeature), features)
+		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
+		require.NoError(t, err)
 		for _, definition := range held {
 			_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, definition, workflow.UID)
 			require.NoError(t, err)
@@ -216,7 +218,7 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 		require.ErrorIs(t, db.RequireEventFeatures(db.CronEventFeature+","+db.CronWorkflowArgvEventFeature+"_extra", features), db.ErrUnsupportedEventFeatures)
 		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: 1 << 60, Limit: 1, Features: db.SupportedEventFeatures})
 		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-		_, err = q.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, `{"definition":{"steps":[{"kind":"argv"}]}}`, event.EventUID)
+		_, err = q.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, `{"definition":null}`, event.EventUID)
 		require.NoError(t, err)
 		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
 		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
