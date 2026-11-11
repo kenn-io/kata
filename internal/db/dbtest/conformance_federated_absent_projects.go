@@ -219,14 +219,19 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		}
 		current, err := hub.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
+		awayOwner := "away-owner"
+		current, awayEdit, _, err := hub.EditIssue(ctx, db.EditIssueParams{IssueID: current.ID, Owner: &awayOwner, Actor: "worker"})
+		require.NoError(t, err)
 		returned, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: current.Revision, Actor: "worker"})
 		require.NoError(t, err)
-		_, err = edited.InsertRemoteEvents(ctx, editedRoute.ID, []db.RemoteEvent{portableNativeEvent(*returned.Event)})
+		_, err = edited.InsertRemoteEvents(ctx, editedRoute.ID, []db.RemoteEvent{portableNativeEvent(*awayEdit), portableNativeEvent(*returned.Event)})
 		require.NoError(t, err)
 		require.NoError(t, edited.MaterializeFederatedProject(ctx, editedRoute.ID))
 		restored, err := edited.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		require.Equal(t, editedRoute.ID, restored.ProjectID)
+		require.NotNil(t, restored.Owner)
+		require.Equal(t, awayOwner, *restored.Owner)
 	})
 
 	return nil
