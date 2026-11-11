@@ -25,7 +25,7 @@ func TestAllSchemaTablesExist(t *testing.T) {
 		"teams", "team_memberships", "project_access_policies", "project_access_teams",
 		"projects", "project_aliases", "issues", "comments",
 		"links", "issue_labels", "events", "purge_log", "project_purge_log",
-		"api_tokens", "federation_bindings", "federation_sync_status", "federation_local_replays",
+		"api_tokens", "federation_bindings", "federation_sync_status", "federation_local_replays", "federation_push_accepted",
 		"federation_quarantine", "federation_enrollments",
 		"issue_sync_bindings", "issue_sync_status",
 		"issue_claims", "pending_claim_requests",

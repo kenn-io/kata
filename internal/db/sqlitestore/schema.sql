@@ -381,6 +381,12 @@ CREATE TABLE federation_bindings (
 CREATE INDEX idx_federation_bindings_role_enabled
   ON federation_bindings(role, enabled);
 
+CREATE TABLE federation_push_accepted (
+  project_id BIGINT NOT NULL REFERENCES federation_bindings(project_id) ON DELETE CASCADE,
+  event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  PRIMARY KEY (project_id, event_id)
+);
+
 CREATE TABLE federation_sync_status (
   project_id              INTEGER PRIMARY KEY REFERENCES projects(id),
   last_pull_started_at    DATETIME,

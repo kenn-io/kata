@@ -175,7 +175,8 @@ migration so the runtime role can use it. The table has no sequences. See the
 [schema 50 migration requirements](../development/postgres-migrations.md#schema-50-mcp-events-subscriptions).
 
 Schema 51 adds `federation_local_replays` to track events restored during
-federation pulls. Re-run the table grants below after migrating. See the
+federation pulls and `federation_push_accepted` for push acknowledgments.
+Re-run the table grants below after migrating. See the
 [schema 51 migration requirements](../development/postgres-migrations.md#schema-51-federation-replay-tracking).
 
 After preparation, grant the runtime role DML access and set default privileges

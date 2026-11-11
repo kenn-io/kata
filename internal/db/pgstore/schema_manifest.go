@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "435931cf7e0f4b0a4dad5cd04176d31241b162b14b86767ed939dbbb491d0bad"
-	canonicalConstraintFingerprint = "2fd6fde103e9b3a634ff19e510e695c5334af81d6c4a95fd48aec5b898377a03"
-	canonicalIndexFingerprint      = "09be4079c19ead46d0941e69df533d9a4345b148ac0781ce9013a948b33295a3"
+	canonicalColumnFingerprint     = "320f307fb7c4af6c15fb0e41464412d564bc8111188293efd57cfc17bb9cb451"
+	canonicalConstraintFingerprint = "5b2db7287a506b868fc175c3b4e3e653f96beba911676abeaa6fa7ccd26ff9e6"
+	canonicalIndexFingerprint      = "c36bcc704abb5bca34a80c5924db57db0ab45d6fcebe4ad4a99461de0e92b09f"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -25,6 +25,7 @@ const (
 //nolint:gosec // This manifest lists canonical schema columns, including credential column names, not secret values.
 var canonicalTableColumns = map[string]string{
 	"federation_local_replays":       "event_uid",
+	"federation_push_accepted":       "project_id,event_id",
 	"mcp_event_subscriptions":        "id,principal_authority,principal_subject,principal_key,actor,event_name,arguments,callback_url,secret_enc,previous_secret_enc,previous_secret_until,verified_at,incarnation,generation,state,end_reason,expires_at,dirty,catalog_version,pending_kind,pending_message_id,pending_body,attempt_count,next_attempt_at,claim_token,claim_until,failed_since,failed_attempts,last_delivery_at,last_error,dead_letter_count,ended_at,created_at,updated_at",
 	"cron_runs":                      "id,uid,project_id,job_uid,definition_event_uid,workflow_uid,workflow_definition_event_uid,occurrence_key,issue_uid,actor,teammate,executor_label,status,summary_json,revision,created_at,started_at,ended_at,updated_at",
 	"cron_workflows":                 "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",

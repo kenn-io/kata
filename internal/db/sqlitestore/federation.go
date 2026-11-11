@@ -378,6 +378,9 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 			q.LastEventID, q.LastEventID, q.ProjectID); err != nil {
 			return db.FederationQuarantine{}, fmt.Errorf("advance quarantine push cursor: %w", err)
 		}
+		if err := pruneFederationPushAccepted(ctx, tx, q.ProjectID); err != nil {
+			return db.FederationQuarantine{}, err
+		}
 	default:
 		return db.FederationQuarantine{}, fmt.Errorf("skip federation quarantine: unsupported direction %q", q.Direction)
 	}
@@ -558,6 +561,9 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		actor, allowInsecure, enabled)
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("upsert federation binding: %w", err)
+	}
+	if err := pruneFederationPushAccepted(ctx, tx, b.ProjectID); err != nil {
+		return db.FederationBinding{}, err
 	}
 	binding, err := federationBindingByProject(ctx, tx, b.ProjectID)
 	if err != nil {

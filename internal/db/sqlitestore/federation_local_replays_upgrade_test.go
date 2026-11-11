@@ -60,6 +60,8 @@ func TestFederationLocalReplaysUpgradeBackfillsInterruptedReset(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.ExecContext(ctx, `DROP TABLE federation_local_replays`)
 	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `DROP TABLE federation_push_accepted`)
+	require.NoError(t, err)
 	_, err = store.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
@@ -67,6 +69,9 @@ func TestFederationLocalReplaysUpgradeBackfillsInterruptedReset(t *testing.T) {
 	upgraded, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
+	accepted, err := upgraded.FederationPushAccepted(ctx, resetProject.ID, acknowledgedID)
+	require.NoError(t, err)
+	require.False(t, accepted)
 	for name, want := range map[string]bool{"unprojected": true, "acknowledged": true, "before": true, "after": false, "pulled": false} {
 		got, replayErr := upgraded.FederationLocalReplay(ctx, events[name])
 		require.NoError(t, replayErr)

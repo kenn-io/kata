@@ -41,7 +41,7 @@ var inPlaceUpgrades = []struct {
 	{47, 48, nil, []string{"idx_events_moved_from_id"}, ""},
 	{48, 49, nil, []string{"idx_events_cron_run_uid"}, ""},
 	{49, 50, []string{"mcp_event_subscriptions"}, []string{"idx_mcp_event_subscriptions_due", "idx_mcp_event_subscriptions_principal_callback", "idx_mcp_event_subscriptions_ended"}, ""},
-	{50, 51, []string{"federation_local_replays"}, nil, federationLocalReplaysBackfill},
+	{50, 51, []string{"federation_local_replays", "federation_push_accepted"}, nil, federationLocalReplaysBackfill},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.

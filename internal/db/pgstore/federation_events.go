@@ -31,10 +31,29 @@ func (s *Store) PendingFederationPushEvents(
 	}
 	output, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
 WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3
+  AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
   AND `+pgFederationPushEventTypeCondition("e.type")+`
 ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
+	}
+	for _, event := range output {
+		if !db.IsFederationSnapshotEvent(event.Type) {
+			continue
+		}
+		var barrier sql.NullInt64
+		err := s.QueryRowContext(ctx, `SELECT MIN(id) FROM events WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushEventTypeCondition("type")+` AND type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)`, projectID, originInstanceUID, event.ID).Scan(&barrier)
+		if err != nil {
+			return nil, mapSQLError(err, nil)
+		}
+		if barrier.Valid {
+			for i, candidate := range output {
+				if candidate.ID >= barrier.Int64 {
+					return output[:i], nil
+				}
+			}
+		}
+		break
 	}
 	if len(output) == limit && len(output) > 0 && db.IsFederationSnapshotEvent(output[len(output)-1].Type) {
 		runStartAfterID := afterID
@@ -45,7 +64,7 @@ ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 			}
 		}
 		extra, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id) AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
   AND e.id <= COALESCE((
     SELECT MIN(barrier.id) FROM events barrier
      WHERE barrier.project_id=$1
@@ -104,8 +123,8 @@ func (s *Store) PendingFederationPushStats(
 
 	var count int64
 	var highWater sql.NullInt64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(id) FROM events
-WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushEventTypeCondition("type"),
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(e.id) FROM events e
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id) AND `+pgFederationPushEventTypeCondition("e.type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &highWater)
 	if err != nil {
 		return 0, 0, mapSQLError(err, nil)

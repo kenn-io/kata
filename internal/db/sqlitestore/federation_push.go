@@ -27,11 +27,30 @@ func (d *Store) PendingFederationPushEvents(
 		WHERE e.project_id = ?
 		  AND e.origin_instance_uid = ?
 		  AND e.id > ?
+		  AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
 		  AND `+federationPushEventTypeCondition("e.type")+`
 		ORDER BY e.id ASC
 		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
+	}
+	for _, event := range out {
+		if !db.IsFederationSnapshotEvent(event.Type) {
+			continue
+		}
+		var barrier sql.NullInt64
+		err := d.QueryRowContext(ctx, `SELECT MIN(id) FROM events WHERE project_id=? AND origin_instance_uid=? AND id>? AND `+federationPushEventTypeCondition("type")+` AND type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)`, projectID, originInstanceUID, event.ID).Scan(&barrier)
+		if err != nil {
+			return nil, err
+		}
+		if barrier.Valid {
+			for i, candidate := range out {
+				if candidate.ID >= barrier.Int64 {
+					return out[:i], nil
+				}
+			}
+		}
+		break
 	}
 	if len(out) == limit && len(out) > 0 && db.IsFederationSnapshotEvent(out[len(out)-1].Type) {
 		runStartAfterID := afterID
@@ -45,6 +64,7 @@ func (d *Store) PendingFederationPushEvents(
 			WHERE e.project_id = ?
 			  AND e.origin_instance_uid = ?
 			  AND e.id > ?
+			  AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
 			  AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  AND e.id <= COALESCE((
 			    SELECT MIN(barrier.id)
@@ -114,12 +134,13 @@ func (d *Store) PendingFederationPushStats(
 	var count int64
 	var maxID sql.NullInt64
 	if err := d.QueryRowContext(ctx, `
-		SELECT COUNT(*), MAX(id)
-		  FROM events
-		 WHERE project_id = ?
-		   AND origin_instance_uid = ?
-		   AND id > ?
-		   AND `+federationPushEventTypeCondition("type"),
+		SELECT COUNT(*), MAX(e.id)
+		  FROM events e
+		 WHERE e.project_id = ?
+		   AND e.origin_instance_uid = ?
+		   AND e.id > ?
+		   AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
+		   AND `+federationPushEventTypeCondition("e.type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
 	}
@@ -133,11 +154,58 @@ func federationPushEventTypeCondition(column string) string {
 	return column + " IN (" + db.FederationPushEventTypesSQL() + ")"
 }
 
+// RecordFederationPushAccepted retains acknowledgements above the binding cursor.
+func (d *Store) RecordFederationPushAccepted(ctx context.Context, projectID int64, eventIDs []int64) error {
+	return d.RetryTransient(ctx, func() error {
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		res, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET push_cursor_event_id=push_cursor_event_id WHERE project_id=?`, projectID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return db.ErrNotFound
+		}
+		for _, id := range eventIDs {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO federation_push_accepted(project_id,event_id)
+				SELECT project_id, ? FROM federation_bindings WHERE project_id=? AND push_cursor_event_id < ?
+				ON CONFLICT(project_id,event_id) DO NOTHING`, id, projectID, id); err != nil {
+				return fmt.Errorf("record accepted federation push: %w", err)
+			}
+		}
+		return tx.Commit()
+	})
+}
+
+// FederationPushAccepted reports whether a binding has acknowledged an event.
+func (d *Store) FederationPushAccepted(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var found bool
+	err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=? AND event_id=?)`, projectID, eventID).Scan(&found)
+	return found, err
+}
+
+func pruneFederationPushAccepted(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM federation_push_accepted WHERE project_id=? AND event_id <= (SELECT push_cursor_event_id FROM federation_bindings WHERE project_id=?)`, projectID, projectID)
+	return err
+}
+
 // AdvanceFederationPushCursor records the highest local events.id accepted by
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		res, err := tx.ExecContext(ctx, `
 			UPDATE federation_bindings
 			   SET push_cursor_event_id = CASE
 			         WHEN push_cursor_event_id < ? THEN ?
@@ -157,7 +225,10 @@ func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, next
 		if n == 0 {
 			return db.ErrNotFound
 		}
-		return nil
+		if err := pruneFederationPushAccepted(ctx, tx, projectID); err != nil {
+			return err
+		}
+		return tx.Commit()
 	})
 }
 
@@ -205,6 +276,9 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 	}
 	if n == 0 {
 		return db.FederationBinding{}, db.ErrNotFound
+	}
+	if err := pruneFederationPushAccepted(ctx, tx, projectID); err != nil {
+		return db.FederationBinding{}, err
 	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))

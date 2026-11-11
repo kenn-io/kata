@@ -14,3 +14,9 @@ SELECT e.uid
    AND s.last_reset_at IS NOT NULL
    AND e.created_at <= s.last_reset_at
    AND (s.last_pull_success_at IS NULL OR s.last_pull_success_at < s.last_reset_at);
+
+CREATE TABLE federation_push_accepted (
+  project_id BIGINT NOT NULL REFERENCES federation_bindings(project_id) ON DELETE CASCADE,
+  event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  PRIMARY KEY (project_id, event_id)
+);
