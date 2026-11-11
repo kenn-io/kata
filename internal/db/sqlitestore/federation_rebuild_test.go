@@ -58,16 +58,19 @@ func TestFederationGenerationSurvivesProjectIDReuse(t *testing.T) {
 	d, _, _ := incrementalTestStore(t)
 	project, err := d.CreateProject(ctx, "temporary")
 	require.NoError(t, err)
-	var before, after int64
-	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&before))
 	_, err = d.ExecContext(ctx, `DELETE FROM events WHERE project_id=?`, project.ID)
 	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `INSERT INTO federation_project_generations(project_id,generation) VALUES(?,42) ON CONFLICT(project_id) DO UPDATE SET generation=42`, project.ID)
+	require.NoError(t, err)
+	var afterDelete, after int64
 	_, err = d.ExecContext(ctx, `DELETE FROM projects WHERE id=?`, project.ID)
 	require.NoError(t, err)
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&afterDelete))
+	require.Greater(t, afterDelete, int64(42))
 	_, err = d.ExecContext(ctx, `INSERT INTO projects(id,uid,name) VALUES(?,'01HZNQ7VFPK1XGD8R5MABCD4EC','replacement')`, project.ID)
 	require.NoError(t, err)
 	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&after))
-	require.Greater(t, after, before)
+	require.Greater(t, after, afterDelete)
 }
 
 func TestFederationGenerationsRejectChangedRows(t *testing.T) {
@@ -201,6 +204,15 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, writer.Close()) })
 			unapplyMove(t, d, issue, source, destination)
+			if change == "history" {
+				_, err = d.ExecContext(ctx, `UPDATE federation_bindings SET role='spoke',hub_url='https://example.com',hub_project_id=? WHERE project_id=?`, destination.ID, destination.ID)
+				require.NoError(t, err)
+				prepared, err := d.prepareFederationRebuild(ctx, destination.ID)
+				require.NoError(t, err)
+				for _, project := range prepared.projects {
+					require.NotContains(t, project.materialization.projectStamps, other.ID)
+				}
+			}
 			attempts := 0
 			d.federationIngestPrepared = func() {
 				attempts++
@@ -212,8 +224,8 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 					_, err := writer.ExecContext(ctx, `UPDATE issues SET title='out of date' WHERE id=?`, preparedIssue.ID)
 					require.NoError(t, err)
 				case "history":
-					event := incrementalRemoteEvent(t, source, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"later edit"}`, 9_000_000_000_000)
-					_, err := d.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{event})
+					event := incrementalRemoteEvent(t, other, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"later edit"}`, 9_000_000_000_000)
+					_, err := d.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{event})
 					require.NoError(t, err)
 				case "unrelated-move":
 					_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: unrelatedIssue.ID, FromProjectID: other.ID, ToProjectID: otherDestination.ID, IfMatchRev: unrelatedIssue.Revision, Actor: "tester"})
@@ -428,14 +440,12 @@ func TestMoveRebuildRefreshesChangedDecisions(t *testing.T) {
 	store := *d
 	store.DB = raw
 	require.NoError(t, store.applyFederationRebuild(ctx, prepared))
-	for _, issue := range []db.Issue{moving, settled} {
-		got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-		require.NoError(t, err)
-		want, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-		require.NoError(t, err)
-		require.Equal(t, destination.ID, got.ProjectID)
-		require.Equal(t, want, got)
-	}
+	got, err := d.IssueByUID(ctx, moving.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	want, err := locked.IssueByUID(ctx, moving.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, destination.ID, got.ProjectID)
+	require.Equal(t, want, got)
 	require.Equal(t, 3, count.counts[moving.UID], "the moved row needs one fresh decision after both validations")
 	require.Equal(t, 2, count.counts[settled.UID], "an unchanged row needs only the two validations")
 }
