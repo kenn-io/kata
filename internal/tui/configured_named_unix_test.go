@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kit/safefileio"
 )
 
 func TestConfiguredUnixTUINamedSwitchPreservesSocketAndCredential(t *testing.T) {
@@ -20,8 +21,13 @@ func TestConfiguredUnixTUINamedSwitchPreservesSocketAndCredential(t *testing.T) 
 	a, _, aCalls := tuiUnixBackend(t, "named-a", "token-a")
 	b, _, _ := tuiUnixBackend(t, "named-b", "token-b")
 	tokenA, tokenB := filepath.Join(home, "a.token"), filepath.Join(home, "b.token")
-	require.NoError(t, os.WriteFile(tokenA, []byte("token-a"), 0600))
-	require.NoError(t, os.WriteFile(tokenB, []byte("token-b"), 0600))
+	for _, token := range []struct{ path, value string }{{tokenA, "token-a"}, {tokenB, "token-b"}} {
+		file, err := safefileio.CreatePrivateFile(token.path)
+		require.NoError(t, err)
+		_, err = file.WriteString(token.value)
+		require.NoError(t, err)
+		require.NoError(t, file.Close())
+	}
 	catalog := fmt.Sprintf("[[daemon]]\nname=\"a\"\nurl=%q\ntoken_file=%q\n[[daemon]]\nname=\"b\"\nurl=%q\ntoken_file=%q\n", a.Address, tokenA, b.Address, tokenB)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(catalog), 0600))
 	// Resolve through the shared named selector, but avoid startup probing:
