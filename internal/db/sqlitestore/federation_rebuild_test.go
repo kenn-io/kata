@@ -9,7 +9,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.Project) {
+func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.Project, joined bool) {
 	t.Helper()
 	ctx := t.Context()
 	hub := cloneIncrementalStore(t, d)
@@ -20,11 +20,18 @@ func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.
 	move, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
 	require.NoError(t, err)
 	for _, project := range []db.Project{source, destination} {
+		if !joined && project.ID == destination.ID {
+			continue
+		}
 		_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
 		require.NoError(t, err)
 	}
 	event := incrementalRemoteEvent(t, destination, issue.UID, "issue.moved", string(move.Event.Payload), 9_000_000_000_000)
-	_, err = d.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{event})
+	route := destination.ID
+	if !joined {
+		route = source.ID
+	}
+	_, err = d.InsertRemoteEvents(ctx, route, []db.RemoteEvent{event})
 	require.NoError(t, err)
 }
 
@@ -130,16 +137,21 @@ func TestFederationMaterializationPreparesLargeIssueScope(t *testing.T) {
 }
 
 func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
-	for _, change := range []string{"history", "unrelated-move", "binding-group", "target-deleted", "local-move", "fallback"} {
+	for _, change := range []string{"history", "unrelated-move", "binding-group", "target-joined", "local-move", "fallback"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, source, issue := incrementalTestStore(t)
 			destination, err := d.CreateProject(ctx, "destination")
 			require.NoError(t, err)
-			_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
-			require.NoError(t, err)
-			preparedIssue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "prepared", Author: "tester"})
-			require.NoError(t, err)
+			if change != "target-joined" {
+				_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
+				require.NoError(t, err)
+			}
+			var preparedIssue db.Issue
+			if change == "fallback" {
+				preparedIssue, _, err = d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "prepared", Author: "tester"})
+				require.NoError(t, err)
+			}
 			other, err := d.CreateProject(ctx, "unrelated")
 			require.NoError(t, err)
 			if change == "local-move" {
@@ -157,7 +169,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			writer, err := Open(ctx, d.Path())
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, writer.Close()) })
-			unapplyMove(t, d, issue, source, destination)
+			unapplyMove(t, d, issue, source, destination, change != "target-joined")
 			if change == "local-move" {
 				_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: other.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: other.ID, HubProjectUID: other.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
 				require.NoError(t, err)
@@ -175,8 +187,8 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				case "binding-group":
 					_, err := writer.LeaveFederationReplica(ctx, destination.ID)
 					require.NoError(t, err)
-				case "target-deleted":
-					_, _, err := writer.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: destination.ID, Actor: "tester", Force: true})
+				case "target-joined":
+					_, err := writer.EnableProjectFederation(ctx, destination.ID, "tester")
 					require.NoError(t, err)
 				case "local-move":
 					current, err := writer.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
@@ -193,15 +205,10 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				}
 			}
 			projectID := destination.ID
-			if change == "binding-group" || change == "target-deleted" {
+			if change == "binding-group" || change == "target-joined" {
 				projectID = source.ID
 			}
 			err = d.MaterializeFederatedProject(ctx, projectID)
-			if change == "target-deleted" {
-				require.ErrorIs(t, err, db.ErrNotFound)
-				require.Equal(t, 2, attempts)
-				return
-			}
 			require.NoError(t, err)
 			if change == "unrelated-move" {
 				require.Equal(t, 1, attempts)
@@ -249,8 +256,8 @@ func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
 	_, err = d.EnableProjectFederation(ctx, third.ID, "tester")
 	require.NoError(t, err)
 	orphan = resetToRemoteIssue(t, d, destination, orphan)
-	unapplyMove(t, d, issue, source, destination)
-	unapplyMove(t, d, orphan, destination, third)
+	unapplyMove(t, d, issue, source, destination, true)
+	unapplyMove(t, d, orphan, destination, third, true)
 	_, err = d.LeaveFederationReplica(ctx, third.ID)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'blocks','tester')`, orphan.ID, issue.ID, orphan.UID, issue.UID)
@@ -314,7 +321,7 @@ func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
 			}
 			for _, entry := range entries {
 				if !missing {
-					unapplyMove(t, d, entry.issue, entry.source, destination)
+					unapplyMove(t, d, entry.issue, entry.source, destination, true)
 					continue
 				}
 				_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: entry.issue.ID, FromProjectID: entry.source.ID, ToProjectID: destination.ID, IfMatchRev: entry.issue.Revision, Actor: "tester"})
@@ -388,7 +395,7 @@ func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 	require.NoError(t, err)
 	_, err = prepared.EnableProjectFederation(ctx, destination.ID, "tester")
 	require.NoError(t, err)
-	unapplyMove(t, prepared, issue, source, destination)
+	unapplyMove(t, prepared, issue, source, destination, true)
 	update := incrementalRemoteEvent(t, destination, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"updated"}`, 9_000_001_000_002)
 	workflow := cronPullWorkflow(t, destination, "workflow", 9_000_001_000_001)
 	_, err = prepared.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{update, workflow})
