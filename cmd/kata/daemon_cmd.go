@@ -223,7 +223,7 @@ func locateDaemon(ctx context.Context) (daemonLocateOutput, error) {
 		if err != nil {
 			return daemonLocateOutput{}, cliDaemonTargetError(err, "")
 		}
-		diagnosis, selection, err := probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection)
+		diagnosis, selection, err := probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection, nil)
 		if err != nil {
 			return daemonLocateOutput{}, err
 		}
@@ -665,7 +665,7 @@ func daemonStatusCmd() *cobra.Command {
 				return err
 			}
 			out := daemonStatusOutput{Daemons: make([]daemonStatusEntry, 0, len(recs))}
-			selected, _, err := diagnoseDaemon(cmd.Context(), "")
+			selected, _, err := diagnoseDaemon(cmd.Context(), "", nil)
 			out.Selected = &selected
 			var statusErr error
 			if err != nil {

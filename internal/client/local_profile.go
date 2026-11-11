@@ -85,7 +85,7 @@ func discoverLocalProfileWithVerifier(
 	selection DaemonSelection,
 	scan liveDaemonScanner,
 	verify func(context.Context, ResolvedDaemon) error,
-) (result ResolvedDaemon, found bool, resultErr error) {
+) (ResolvedDaemon, bool, error) {
 	resolved := selection.Resolved
 	if _, err := os.Stat(resolved.LocalProfile.DataDir); errors.Is(err, os.ErrNotExist) {
 		return resolved, false, nil
@@ -148,7 +148,7 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 	return nil
 }
 
-func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (result ResolvedDaemon, resultErr error) {
+func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, error) {
 	profile := *selection.Profile
 	if !profile.Config.AutostartEnabled() {
 		return waitForSupervisedProfile(ctx, selection.Resolved, profile)

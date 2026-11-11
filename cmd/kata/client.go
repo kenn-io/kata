@@ -63,14 +63,14 @@ func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	if flags.Daemon != "" {
 		resolved, err := client.PrepareResolvedNamed(ctx, flags.Daemon)
 		if err != nil {
-			return resolved, cliDaemonTargetError(err, resolvedProfileName(resolved))
+			return client.ResolvedDaemon{}, cliDaemonTargetError(err, resolvedProfileName(resolved))
 		}
 		return resolved, nil
 	}
 	workspaceStart := workspaceStartForRemote()
 	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStart)
 	if err != nil {
-		return resolved, cliDaemonTargetError(err, resolvedProfileName(resolved))
+		return client.ResolvedDaemon{}, cliDaemonTargetError(err, resolvedProfileName(resolved))
 	}
 	return resolved, nil
 }
@@ -129,30 +129,24 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 	if v, ok := ctx.Value(client.BaseURLKey{}).(string); ok && v != "" {
 		return client.EnsureResolvedInWorkspace(ctx, "")
 	}
-	workspaceStart := workspaceStartForRemote()
-	selection, err := client.InspectSelection(ctx, workspaceStart, flags.Daemon)
-	if err != nil {
-		return client.ResolvedDaemon{}, cliDaemonTargetError(err, "")
-	}
-	resolved, found, err := client.DiscoverSelection(ctx, selection, client.DiscoverRequest{
-		WorkspaceStart: workspaceStart,
+	resolved, found, err := client.DiscoverSelected(ctx, client.DiscoverRequest{
+		WorkspaceStart: workspaceStartForRemote(),
 		Name:           flags.Daemon,
 		ProbeRemote:    flags.Daemon != "",
 	})
-	if selection.Profile != nil {
-		if err != nil || !found {
-			diagnosis, _, diagnoseErr := diagnoseDaemonSelection(ctx, "", selection)
+	if err != nil || !found {
+		if resolved.LocalProfile != nil {
+			var firstFailure *client.LocalDaemonUnreachableError
+			errors.As(err, &firstFailure)
+			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "", firstFailure)
 			if diagnoseErr != nil {
 				return resolved, diagnoseErr
 			}
 			return resolved, diagnosisError(diagnosis)
 		}
-		return resolved, nil
-	}
-	if err != nil {
-		return resolved, cliDaemonTargetError(err, "")
-	}
-	if !found {
+		if err != nil {
+			return resolved, cliDaemonTargetError(err, "")
+		}
 		return resolved, noDaemonRunningError()
 	}
 	return resolved, nil

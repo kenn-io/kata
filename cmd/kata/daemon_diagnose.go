@@ -62,7 +62,7 @@ func daemonDiagnoseCmd() *cobra.Command {
 		if err := validateExpectedProjectUID(expected); err != nil {
 			return err
 		}
-		result, _, _ := diagnoseDaemon(cmd.Context(), expected)
+		result, _, _ := diagnoseDaemon(cmd.Context(), expected, nil)
 		return printDaemonDiagnosis(cmd, result)
 	}}
 	cmd.Flags().StringVar(&expected, "expect-project-uid", "", "assert the existing bound project's UID")
@@ -75,7 +75,7 @@ func daemonRecoverCmd() *cobra.Command {
 		if err := validateExpectedProjectUID(expected); err != nil {
 			return err
 		}
-		result, selection, _ := diagnoseDaemon(cmd.Context(), expected)
+		result, selection, _ := diagnoseDaemon(cmd.Context(), expected, nil)
 		if selection.Profile == nil {
 			return &cliError{Message: "daemon recover requires a registered local profile with home and instance_uid; explicit URLs stay pinned", Kind: kindValidation, ExitCode: ExitValidation}
 		}
@@ -92,7 +92,7 @@ func daemonRecoverCmd() *cobra.Command {
 		if _, err := client.EnsureLocalProfileSelection(cmd.Context(), selection); err != nil {
 			return cliDaemonTargetError(err, selection.Resolved.Name)
 		}
-		result, _, err := diagnoseDaemonSelection(cmd.Context(), expected, selection)
+		result, _, err := diagnoseDaemonSelection(cmd.Context(), expected, selection, nil)
 		if err != nil {
 			return err
 		}
@@ -115,12 +115,12 @@ func validateExpectedProjectUID(value string) error {
 }
 
 // diagnoseDaemon retains selection errors alongside their diagnostic report.
-func diagnoseDaemon(ctx context.Context, expectedProject string) (daemonDiagnosis, client.DaemonSelection, error) {
+func diagnoseDaemon(ctx context.Context, expectedProject string, firstFailure *client.LocalDaemonUnreachableError) (daemonDiagnosis, client.DaemonSelection, error) {
 	selection, err := client.InspectSelection(ctx, workspaceStartForRemote(), flags.Daemon)
 	if err != nil {
 		return selectionErrorDiagnosis(err), selection, err
 	}
-	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection)
+	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection, firstFailure)
 	if err != nil {
 		result.State = "selection_error"
 		result.Message = err.Error()
@@ -173,7 +173,7 @@ func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
 }
 
 func diagnoseDaemonSelection(
-	ctx context.Context, expectedProject string, selection client.DaemonSelection,
+	ctx context.Context, expectedProject string, selection client.DaemonSelection, firstFailure *client.LocalDaemonUnreachableError,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
 	ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 	defer cancel()
@@ -262,7 +262,7 @@ func diagnoseDaemonSelection(
 			return withDiagnosisAction(result), selection, nil
 		}
 	}
-	result, selection, err = probeDaemonSelection(ctx, result, selection)
+	result, selection, err = probeDaemonSelection(ctx, result, selection, firstFailure)
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
 		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)
@@ -313,12 +313,14 @@ func inspectDiagnosisProject(ctx context.Context, store db.Storage, result *daem
 }
 
 func probeDaemonSelection(
-	ctx context.Context, result daemonDiagnosis, selection client.DaemonSelection,
+	ctx context.Context, result daemonDiagnosis, selection client.DaemonSelection, firstFailure *client.LocalDaemonUnreachableError,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
 	var err error
 	var resolved client.ResolvedDaemon
 	var found bool
-	if selection.Profile != nil {
+	if firstFailure != nil {
+		err = firstFailure
+	} else if selection.Profile != nil {
 		resolved, found, err = client.DiscoverLocalProfileSelection(ctx, selection)
 	} else if result.Kind == "remote" {
 		resolved = selection.Resolved
