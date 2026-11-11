@@ -170,7 +170,7 @@ func TestRecurrenceFormOpensPrefilledFromDetail(t *testing.T) {
 		h.open()
 
 		_, _, zone := h.values()
-		assert.Equal(t, "Asia/Tokyo", zone, "never Local")
+		assert.Equal(t, "Asia/Tokyo", zone)
 	})
 	t.Run("existing recurrence shows its rule, start and zone", func(t *testing.T) {
 		h := newRecurrenceHarness(t, viewDetail)

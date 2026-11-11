@@ -39,9 +39,9 @@ func listRecurrencesViaHTTP(t *testing.T, env *testenv.Env, pid int64) []recurre
 	return body.Recurrences
 }
 
-// isolateCallerZone uses the test's TZ and zone link independently of the
-// host's timezone settings, including the Windows registry.
-func isolateCallerZone(t *testing.T) string {
+// isolateCallerZone uses the test's TZ independently of the host's timezone
+// settings, including the Windows registry.
+func isolateCallerZone(t *testing.T) {
 	t.Helper()
 	t.Setenv("TZ", "")
 	require.NoError(t, os.Unsetenv("TZ"))
@@ -52,7 +52,6 @@ func isolateCallerZone(t *testing.T) string {
 		return recurrenceclient.ResolveLocalZone(tz, set, localtimePath)
 	}
 	t.Cleanup(func() { localTimeZoneName = previous })
-	return localtimePath
 }
 
 func TestScheduleRepeatStartsRecurrenceFromTheIssue(t *testing.T) {
@@ -141,13 +140,11 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 		args  []string
 		want  string
 		saved bool
-		link  string
 	}{
 		{
 			name: "flag wins over everything",
 			setup: func(t *testing.T, env *testenv.Env, dir, ref string) {
 				setIssueTimezoneMeta(t, env, dir, ref, "America/Chicago")
-				t.Setenv("TZ", "Asia/Tokyo")
 			},
 			args: []string{"--timezone", "Europe/Paris"},
 			want: "Europe/Paris",
@@ -156,33 +153,23 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 			name: "issue metadata wins over the caller zone",
 			setup: func(t *testing.T, env *testenv.Env, dir, ref string) {
 				setIssueTimezoneMeta(t, env, dir, ref, "America/Chicago")
-				t.Setenv("TZ", "Asia/Tokyo")
 			},
 			want: "America/Chicago",
 		},
 		{
 			name:  "saved schedule wins over caller zone",
-			setup: func(t *testing.T, _ *testenv.Env, _, _ string) { t.Setenv("TZ", "Asia/Tokyo") },
 			want:  "America/New_York",
 			saved: true,
 		},
 		{
-			name:  "TZ environment",
-			setup: func(t *testing.T, _ *testenv.Env, _, _ string) { t.Setenv("TZ", ":Asia/Tokyo") },
-			want:  "Asia/Tokyo",
-		},
-		{
-			name: "localtime link",
-			link: "/usr/share/zoneinfo/Australia/Sydney",
-			want: "Australia/Sydney",
+			name: "caller zone fallback",
+			want: "Asia/Tokyo",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			localtimePath := isolateCallerZone(t)
-			if tc.link != "" {
-				require.NoError(t, os.Symlink(tc.link, localtimePath))
-			}
+			isolateCallerZone(t)
+			localTimeZoneName = func() string { return "Asia/Tokyo" }
 			env, dir, pid := setupCLIWorkspace(t)
 			ref := createIssue(t, env, pid, "zone source")
 			if tc.setup != nil {

@@ -16,6 +16,8 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+const preScheduleEventFeatures = db.CronEventFeature + "," + db.IssueMoveEventFeature
+
 func TestRelaySavedScheduleRequiresPeerSupport(t *testing.T) {
 	for _, push := range []bool{true, false} {
 		name := "pull"
@@ -45,7 +47,7 @@ func TestRelaySavedScheduleRequiresPeerSupport(t *testing.T) {
 				if push && strings.HasSuffix(r.URL.Path, "/federation/metadata") {
 					response := httptest.NewRecorder()
 					handler.ServeHTTP(response, r)
-					response.Header().Del(db.EventFeaturesHeader)
+					response.Header().Set(db.EventFeaturesHeader, preScheduleEventFeatures)
 					for key, values := range response.Header() {
 						w.Header()[key] = values
 					}
@@ -54,7 +56,7 @@ func TestRelaySavedScheduleRequiresPeerSupport(t *testing.T) {
 					return
 				}
 				if !push {
-					r.Header.Del(db.EventFeaturesHeader)
+					r.Header.Set(db.EventFeaturesHeader, preScheduleEventFeatures)
 				}
 				handler.ServeHTTP(w, r)
 			}))
@@ -97,7 +99,7 @@ func TestRelaySavedScheduleCheckpointRequiresPeerSupport(t *testing.T) {
 	require.NoError(t, err)
 	handler := *root.handler.Load()
 	oldPeer := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Header.Del(db.EventFeaturesHeader)
+		r.Header.Set(db.EventFeaturesHeader, preScheduleEventFeatures)
 		handler.ServeHTTP(w, r)
 	}))
 
