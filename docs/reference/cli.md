@@ -2406,7 +2406,7 @@ to inject its value into the consuming process. Revoke the token during teardown
 
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
 Commands return JSON; external adapters schedule and launch their own work.
-See [Cron](cron.md) for bounded documents and retry semantics.
+See [Cron](cron.md) for bounded documents, retry semantics, and [saved job previews](cron.md#preview-saved-jobs).
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json

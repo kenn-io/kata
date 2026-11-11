@@ -33,33 +33,37 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 	if native {
 		label = "Next"
 	}
-	if kind := j.Definition.Trigger.Kind; !native && kind != "cron" && kind != "once" || native && kind != "cron" && kind != "interval" {
-		return "", nil
-	}
 	var def cron.JobDefinition
 	raw, err := json.Marshal(j.Definition)
-	if err != nil || json.Unmarshal(raw, &def) != nil || def.Validate() != nil {
+	if err != nil || json.Unmarshal(raw, &def) != nil {
 		return label, []string{"unavailable"}
 	}
-	if !def.Enabled {
-		return label, []string{"none while paused"}
-	}
-	progress := cron.RecurringProgress{}
+	var parent *cron.PreviewParent
 	if native {
-		// The daemon delivers only while the parent issue is open.
 		open, known := p.parentOpen[cronNativeParent(j)]
-		var ok bool
-		if progress, ok = p.progress[j.UID]; !known || !ok {
-			return label, []string{"unavailable"}
-		}
-		if !open {
-			return label, []string{"none while the parent is closed"}
+		progress, ok := p.progress[j.UID]
+		if known {
+			parent = &cron.PreviewParent{Open: open}
+			if ok {
+				parent.Progress = &progress
+			}
 		}
 	}
-	times, err := cron.RecurringOccurrences(def, progress, now, cronNextCount)
+	preview, err := cron.PreviewJob(def, parent, now, cronNextCount)
 	if err != nil {
 		return label, []string{"unavailable"}
 	}
+	switch preview.Status {
+	case "paused":
+		return label, []string{"none while paused"}
+	case "parent_closed":
+		return label, []string{"none while the parent is closed"}
+	case "unavailable":
+		return label, []string{"unavailable"}
+	case "unsupported", "exhausted":
+		return "", nil
+	}
+	times := preview.Times
 	zone := cron.TriggerLocation(def.Trigger)
 	for _, t := range times {
 		layout := "2006-01-02 15:04 MST"

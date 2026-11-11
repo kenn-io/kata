@@ -293,6 +293,10 @@ func RecurringOccurrences(j JobDefinition, progress RecurringProgress, after tim
 	if err := j.Validate(); err != nil {
 		return nil, err
 	}
+	return recurringOccurrences(j, progress, after, n)
+}
+
+func recurringOccurrences(j JobDefinition, progress RecurringProgress, after time.Time, n int) ([]time.Time, error) {
 	if !j.Enabled || n <= 0 {
 		return nil, nil
 	}
