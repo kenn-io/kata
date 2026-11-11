@@ -133,15 +133,26 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 			p.CronJobs[in.UID] = current
 		}
 	} else {
-		definition, err := cron.DecodeWorkflow(in.Definition)
+		definition, err := cron.DecodeHistoricalWorkflow(in.Definition)
 		if err != nil {
+			reserved, _ := payloadHasArgvWorkflow(e.Type, string(e.Payload))
+			if reserved && cronUID(e.ProjectUID) {
+				if p.cronBlockedProjects == nil {
+					p.cronBlockedProjects = make(map[string]error)
+				}
+				p.cronBlockedProjects[e.ProjectUID] = err
+			}
 			p.Warnings = append(p.Warnings, err.Error())
 			return
 		}
 		value.Author = p.cronDefinitionAuthor("workflow:"+in.UID, e, value)
 		current, exists := p.CronWorkflows[in.UID]
 		if !exists || compareClock(cronDefinitionClock(value), cronDefinitionClock(current.CronDefinition)) > 0 {
-			p.CronWorkflows[in.UID] = FoldCronWorkflow{CronDefinition: value, Definition: definition, ProjectUID: in.ProjectUID}
+			workflow := FoldCronWorkflow{CronWorkflow: CronWorkflow{CronDefinition: value, Definition: definition}, ProjectUID: in.ProjectUID}
+			if _, err := cron.DecodeWorkflow(in.Definition); err != nil {
+				workflow.RawDefinition = append(jsontext.Value(nil), in.Definition...)
+			}
+			p.CronWorkflows[in.UID] = workflow
 		} else {
 			current.Author = value.Author
 			p.CronWorkflows[in.UID] = current
@@ -153,7 +164,7 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 // the envelope, a strict decode, and today's rules for a live definition.
 // Referenced definitions may be historical and are materialized separately.
 func ValidateCronFederationEvent(event RemoteEvent) error {
-	return validateCronEvent(event, true)
+	return validateCronEvent(event, true, false)
 }
 
 // ValidateAcceptedCronEvent checks cron history that a hub or a backup already
@@ -161,10 +172,10 @@ func ValidateCronFederationEvent(event RemoteEvent) error {
 // rules to documents written under older ones. A pull or a restore must not
 // fail because a rule was tightened after the history was written.
 func ValidateAcceptedCronEvent(event RemoteEvent) error {
-	return validateCronEvent(event, false)
+	return validateCronEvent(event, false, false)
 }
 
-func validateCronEvent(event RemoteEvent, applyRules bool) error {
+func validateCronEvent(event RemoteEvent, applyRules, historical bool) error {
 	if !cronUID(event.EventUID) || !cronUID(event.OriginInstanceUID) || !cronUID(event.ProjectUID) || strings.TrimSpace(event.Actor) == "" || event.HLCPhysicalMS <= 0 || event.HLCCounter < 0 {
 		return fmt.Errorf("%w: invalid cron envelope", ErrFederationIngestValidation)
 	}
@@ -180,7 +191,16 @@ func validateCronEvent(event RemoteEvent, applyRules bool) error {
 		return fmt.Errorf("%w: unsupported cron event %s", ErrFederationIngestValidation, event.Type)
 	}
 	in, _, err := parseCronDefinitionEvent(FoldEvent{UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, Payload: event.Payload, Type: event.Type})
-	if err == nil {
+	if err == nil && historical && strings.HasPrefix(event.Type, "cron.workflow.") {
+		_, err = cron.DecodeHistoricalWorkflow(in.Definition)
+		if err != nil && len(in.Definition) <= cron.DefinitionLimit {
+			// Preserve a reserved future document as evidence. Materialization
+			// fences its project instead of reviving an older winner.
+			if reserved, classifyErr := payloadHasArgvWorkflow(event.Type, string(event.Payload)); classifyErr == nil && reserved {
+				err = nil
+			}
+		}
+	} else if err == nil {
 		err = validateCronDefinitionDocument(strings.HasPrefix(event.Type, "cron.job."), in.DeletedAt != nil || !applyRules, in.Definition)
 	}
 	if err != nil {

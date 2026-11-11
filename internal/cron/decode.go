@@ -18,14 +18,22 @@ func DecodeJob(input []byte) (JobDefinition, error) {
 // DecodeWorkflow is DecodeJob for workflow documents, except that the reserved
 // argv kind is explicitly unsupported, including in historical stored rows.
 func DecodeWorkflow(input []byte) (WorkflowDefinition, error) {
-	var workflow WorkflowDefinition
-	if err := decode(input, &workflow, DefinitionLimit); err != nil {
+	workflow, err := DecodeHistoricalWorkflow(input)
+	if err != nil {
 		return workflow, err
 	}
 	if err := checkWorkflowNullShapes(input); err != nil {
 		return workflow, err
 	}
 	return workflow, CheckWorkflowSupported(workflow)
+}
+
+// DecodeHistoricalWorkflow decodes the bounded shape accepted before the
+// argv and null fences. It is only for retaining owner history, not execution.
+func DecodeHistoricalWorkflow(input []byte) (WorkflowDefinition, error) {
+	var workflow WorkflowDefinition
+	err := decode(input, &workflow, DefinitionLimit)
+	return workflow, err
 }
 
 // Nulls decode to zero values, but cannot pass federation feature

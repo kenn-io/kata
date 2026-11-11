@@ -73,6 +73,9 @@ func CronMaterializationNeeded(events []FoldEvent, acceptedEventUIDs []string) b
 // MaterializeCronDefinitions writes the winning shared definitions and
 // independent observations. Reordered references do not start execution.
 func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string, p FoldProjection, validator *CronReplayValidator) error {
+	if err := p.cronBlockedProjects[projectUID]; err != nil {
+		return fmt.Errorf("%w: unsupported retained workflow: %v", ErrFederationIngestValidation, err)
+	}
 	put := func(job bool, value CronDefinition, definition any, owner string) error {
 		if owner != projectUID {
 			return fmt.Errorf("%w: cron project identity mismatch", ErrFederationIngestValidation)
@@ -106,7 +109,11 @@ func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64
 		}
 	}
 	for _, workflow := range p.CronWorkflows {
-		if err := put(false, workflow.CronDefinition, workflow.Definition, workflow.ProjectUID); err != nil {
+		var definition any = workflow.Definition
+		if len(workflow.RawDefinition) != 0 {
+			definition = workflow.RawDefinition
+		}
+		if err := put(false, workflow.CronDefinition, definition, workflow.ProjectUID); err != nil {
 			return err
 		}
 	}

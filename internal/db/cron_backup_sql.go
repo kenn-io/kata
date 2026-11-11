@@ -177,8 +177,15 @@ func ExportCronWorkflowsSQL(ctx context.Context, query CronQuery, filter ExportF
 		if err != nil {
 			return CronWorkflowExport{}, err
 		}
-		value, err := workflowFromRow(row)
-		return CronWorkflowExport(value), err
+		definition, err := cron.DecodeHistoricalWorkflow(row.document)
+		if err != nil {
+			return CronWorkflowExport{}, err
+		}
+		value := CronWorkflowExport{CronDefinition: row.CronDefinition, Definition: definition}
+		if _, err := cron.DecodeWorkflow(row.document); err != nil {
+			value.RawDefinition = append([]byte(nil), row.document...)
+		}
+		return value, nil
 	})
 }
 
@@ -191,6 +198,9 @@ func ReplayCronRecord(ctx context.Context, tx *sql.Tx, record ImportRecord, post
 	case *CronJobExport:
 		return replayCronDefinition(ctx, tx, value.CronDefinition, value.Definition, true, postgres)
 	case *CronWorkflowExport:
+		if len(value.RawDefinition) != 0 {
+			return replayCronDefinition(ctx, tx, value.CronDefinition, value.RawDefinition, false, postgres)
+		}
 		return replayCronDefinition(ctx, tx, value.CronDefinition, value.Definition, false, postgres)
 	default:
 		return fmt.Errorf("unsupported cron record %T", record)

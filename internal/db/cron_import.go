@@ -24,7 +24,11 @@ func ValidateCronRecord(record ImportRecord) error {
 		if value == nil {
 			return fmt.Errorf("nil cron workflow")
 		}
-		if err := cron.CheckWorkflowSupported(value.Definition); err != nil {
+		if len(value.RawDefinition) != 0 {
+			if _, err := cron.DecodeHistoricalWorkflow(value.RawDefinition); err != nil {
+				return err
+			}
+		} else if err := cron.CheckWorkflowSupported(value.Definition); err != nil {
 			return err
 		}
 		return validateCronDefinition(value.CronDefinition)
