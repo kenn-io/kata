@@ -828,7 +828,12 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
 	require.NoError(t, err)
+	// Independent literals per supported OS. Windows prints a PowerShell-labeled
+	// literal, every other supported OS prints plain shell words.
 	logPath, recoverCmd := filepath.Join(ns.DataDir, "daemon.log"), "kata --daemon=work daemon recover"
+	if runtime.GOOS == "windows" {
+		recoverCmd = "in PowerShell & 'kata' '--daemon=work' 'daemon' 'recover'"
+	}
 
 	t.Run("diagnose", func(t *testing.T) {
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
