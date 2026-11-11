@@ -77,3 +77,21 @@ func TestCronWorkflowOpaqueNumbers(t *testing.T) {
 	require.Equal(t, "9007199254740993", string(decoded.Workflow.Definition.Options["integer"]))
 	require.Equal(t, "9007199254740993", string(decoded.Workflow.Definition.Steps[0].Options["integer"]))
 }
+
+func TestCronWorkflowArgvInputPreservesValidation(t *testing.T) {
+	f := newCronFixture(t)
+	for _, step := range []map[string]any{
+		{"key": "run", "kind": "argv", "argv": nil},
+		{"key": "run", "kind": "argv", "argv": []any{"echo", nil}},
+		{"key": "run", "kind": "argv", "argv": []any{"echo", 3}},
+		{"key": "run", "kind": "argv", "argv": []string{"echo"}, "command": ""},
+	} {
+		definition := map[string]any{"version": 1, "steps": []any{step}}
+		require.True(t, cronCall(t, f.session, "cron_workflow_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Invalid", "definition": definition}).IsError)
+	}
+	definition := map[string]any{"version": 1, "steps": []any{map[string]any{"key": "run", "kind": "argv", "argv": []string{"printf", "", "a b"}}}}
+	workflow := cronRecord(t, f.session, "cron_workflow_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Literal", "definition": definition}, "workflow")
+	stored := workflow["definition"].(map[string]any)
+	step := stored["steps"].([]any)[0].(map[string]any)
+	require.Equal(t, []any{"printf", "", "a b"}, step["argv"])
+}
