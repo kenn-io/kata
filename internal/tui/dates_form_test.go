@@ -525,6 +525,35 @@ func TestDatesFormReadsSavedSchedule(t *testing.T) {
 	assert.Equal(t, "2026-06-02", h.m.input.fieldValue(fieldDeadline))
 }
 
+func TestDatesFormShowsSavedInstantInItsZoneAndKeepsUndo(t *testing.T) {
+	h := newDatesHarness(t, nil, viewDetail)
+	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+	require.NoError(t, err)
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved}})
+	require.NoError(t, err)
+	h.reload()
+	h.openForm()
+	require.Equal(t, "2025-12-31T21:00:00", h.m.input.fieldValue(fieldScheduled))
+	before := h.revision()
+	h.save()
+	require.Equal(t, before, h.revision())
+	h.openForm()
+	h.fill("2025-12-31T22:00:00", "")
+	h.save()
+	issue, err := h.env.DB.IssueByID(t.Context(), h.issue.ID)
+	require.NoError(t, err)
+	_, zone, at, _, err := metadata.ScheduleFieldInstant(string(issue.Metadata), "scheduled_on", "")
+	require.NoError(t, err)
+	require.Equal(t, "America/New_York", zone)
+	require.Equal(t, time.Date(2026, 1, 1, 3, 0, 0, 0, time.UTC), at.UTC())
+	h.undo()
+	issue, err = h.env.DB.IssueByID(t.Context(), h.issue.ID)
+	require.NoError(t, err)
+	var fields map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(issue.Metadata), &fields))
+	require.JSONEq(t, string(saved), string(fields["scheduled_on"]))
+}
+
 func TestDetailStripShowsSavedSchedule(t *testing.T) {
 	for _, tc := range []struct {
 		name, value, resolved, want string

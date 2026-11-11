@@ -85,6 +85,12 @@ func (i Issue) deadlineOn() string {
 func (i Issue) datesState() datesFormState {
 	scheduled, serr := metadata.ScheduleValueText(i.Metadata.ScheduledOn)
 	deadline, derr := metadata.ScheduleValueText(i.Metadata.DeadlineOn)
+	if serr == nil {
+		scheduled = metadata.ScheduleClockText(i.Metadata.ScheduledOn)
+	}
+	if derr == nil {
+		deadline = metadata.ScheduleClockText(i.Metadata.DeadlineOn)
+	}
 	d := datesFormState{revision: i.Revision, scheduled: scheduled, deadline: deadline, scheduledToday: i.ScheduledOnToday, deadlineToday: i.DeadlineOnToday}
 	if err := errors.Join(serr, derr); err != nil {
 		d.unreadable = err.Error()
