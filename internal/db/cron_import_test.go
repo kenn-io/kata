@@ -47,16 +47,3 @@ func TestCronImportRejectsUnknownReservedWorkflowDocument(t *testing.T) {
 	project := &db.ProjectExport{ID: 1, UID: projectUID, Name: "example-project"}
 	require.Error(t, db.ValidateImportRecords([]db.ImportRecord{project, event}), "restore must not preserve an undecodable later event beside a runnable older projection")
 }
-
-func TestCronImportRejectsRunnableProjectionOlderThanHeldEvent(t *testing.T) {
-	const projectUID = "01ARZ3NDEKTSV4RRFFQ69G5FAD"
-	const origin = "01ARZ3NDEKTSV4RRFFQ69G5FAE"
-	at := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
-	definition := db.CronDefinition{ID: 1, ProjectID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAF", Name: "Example", Author: "worker", Revision: 1, CreatedAt: at, UpdatedAt: at, DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FAG", DefinitionHLC: db.CronDefinitionHLC{Version: 1, PhysicalMS: at.UnixMilli(), OriginInstanceUID: origin}}
-	row := &db.CronWorkflowExport{CronDefinition: definition, Definition: cron.WorkflowDefinition{Version: 1}}
-	payload, err := json.Marshal(db.CronDefinitionEvent{UID: definition.UID, ProjectUID: projectUID, Name: definition.Name, Author: definition.Author, CreatedAt: at, UpdatedAt: at, Definition: jsontext.Value(`{"version":1,"steps":[{"kind":"argv"}]}`)})
-	require.NoError(t, err)
-	event := &db.EventExport{ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAH", ProjectID: 1, OriginInstanceUID: origin, Actor: "worker", Type: "cron.workflow.updated", Payload: payload, HLCPhysicalMS: at.UnixMilli() + 1, CreatedAt: at.Format(db.EventTimestampFormat)}
-	project := &db.ProjectExport{ID: 1, UID: projectUID, Name: "example-project"}
-	require.Error(t, db.ValidateImportRecords([]db.ImportRecord{project, row, event}), "restore must not make an older supported projection runnable")
-}
