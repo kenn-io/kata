@@ -2655,20 +2655,55 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 			}
 			t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
 
+			readStderr, writeStderr, err := os.Pipe()
+			require.NoError(t, err)
+			originalStderr := os.Stderr
+			os.Stderr = writeStderr
+			t.Cleanup(func() {
+				os.Stderr = originalStderr
+				_ = writeStderr.Close()
+				_ = readStderr.Close()
+			})
+			ready := make(chan struct{})
+			go func() {
+				scanner := bufio.NewScanner(readStderr)
+				for scanner.Scan() {
+					if strings.HasPrefix(scanner.Text(), "kata daemon: listening on ") {
+						close(ready)
+						_, _ = io.Copy(io.Discard, readStderr)
+						return
+					}
+				}
+			}()
+
 			ctx, cancel := context.WithCancel(t.Context())
 			done := make(chan error, 1)
 			go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+			t.Cleanup(func() {
+				cancel()
+				select {
+				case runErr := <-done:
+					if runErr != nil && !errors.Is(runErr, context.Canceled) {
+						t.Errorf("daemon did not stop cleanly: %v", runErr)
+					}
+				case <-time.After(3 * time.Second):
+					t.Error("daemon did not stop after context cancellation")
+				}
+			})
 
+			select {
+			case <-ready:
+			case <-time.After(3 * time.Second):
+				t.Fatal("daemon did not publish its runtime record")
+			}
 			namespace, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
 			runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
 			require.NoError(t, err)
+			body, err := os.ReadFile(runtimePath) //nolint:gosec // test-owned KATA_HOME
+			require.NoError(t, err)
 			var record kitdaemon.RuntimeRecord
-			require.Eventually(t, func() bool {
-				body, readErr := os.ReadFile(runtimePath) //nolint:gosec // test-owned KATA_HOME
-				return readErr == nil && json.Unmarshal(body, &record) == nil &&
-					record.Metadata["web_origin"] != ""
-			}, 3*time.Second, 10*time.Millisecond)
+			require.NoError(t, json.Unmarshal(body, &record))
 
 			assert.NotEmpty(t, record.Metadata["web_origin"])
 			if tc.marker == "1" {
@@ -2684,15 +2719,6 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 				assert.Equal(t, os.FileMode(0o644), runtimeStat.Mode().Perm())
 			}
 
-			cancel()
-			select {
-			case runErr := <-done:
-				if runErr != nil && !errors.Is(runErr, context.Canceled) {
-					t.Fatalf("daemon did not stop cleanly: %v", runErr)
-				}
-			case <-time.After(3 * time.Second):
-				t.Fatal("daemon did not stop after context cancellation")
-			}
 		})
 	}
 }
