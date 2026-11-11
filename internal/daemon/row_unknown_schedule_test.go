@@ -91,3 +91,33 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 		})
 	}
 }
+
+func TestMetadataRejectsReplacingUnsupportedScheduleObject(t *testing.T) {
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		for _, tc := range []struct{ name, stored string }{
+			{"future rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`},
+			{"future member", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`},
+		} {
+			t.Run(field+"/"+tc.name, func(t *testing.T) {
+				f := newRowDatesFixture(t)
+				records, err := dbtest.CollectImportRecords(t.Context(), f.env.DB, db.ExportFilter{ProjectID: &f.project.ID})
+				require.NoError(t, err)
+				for _, record := range records {
+					if issue, ok := record.(*db.IssueExport); ok && issue.UID == f.nodate.UID {
+						issue.Metadata = jsontext.Value(`{"` + field + `":` + tc.stored + `}`)
+					}
+				}
+				require.NoError(t, f.env.DB.ImportReplay(t.Context(), records, db.ImportOptions{}))
+				before, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
+				require.NoError(t, err)
+				path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", f.project.ID, f.nodate.ShortID)
+				replacement := map[string]any{"value": "2026-11-13", "timezone": "UTC", "tzdata_version": metadata.ScheduleTZDataVersion}
+				status, raw := cronHTTP(t, f.env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]any{field: replacement}})
+				require.Equal(t, http.StatusBadRequest, status, string(raw))
+				after, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+			})
+		}
+	}
+}

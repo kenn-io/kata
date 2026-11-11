@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -84,8 +85,8 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		}
 		if supplied := patch[field]; len(supplied) > 0 && supplied[0] == '{' {
 			saved, err := metadata.DecodeSavedSchedule(supplied)
-			if err != nil || saved == nil {
-				return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
+			if _, prior := metadata.DecodeSavedSchedule(before[field]); err != nil || saved == nil || metadata.IsUnsupportedSchedule(prior) {
+				return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, errors.Join(err, prior))
 			}
 			result[field] = supplied
 			continue

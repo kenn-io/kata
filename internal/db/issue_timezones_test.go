@@ -20,6 +20,8 @@ func TestPrepareIssueSchedules(t *testing.T) {
 		{"replace opaque stored date", `{"$field":{"legacy":"opaque"}}`, `{"$field":"2026-11-13"}`, "America/New_York", "", "America/New_York", false, false},
 		{"refuse stored future rules", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true, false},
 		{"refuse stored future members", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true, false},
+		{"clear stored future rules", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`, `{"$field":null}`, "UTC", "", "", false, false},
+		{"clear stored future members", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}}`, `{"$field":null}`, "UTC", "", "", false, false},
 		{"UTC", "{}", `{"timezone":"UTC"}`, "Local", "", "UTC", false, false},
 		{"Etc UTC", "{}", `{"timezone":"Etc/UTC"}`, "Local", "", "Etc/UTC", false, false},
 		{"New York", "{}", `{"timezone":"America/New_York"}`, "Local", "", "America/New_York", false, false},
@@ -90,6 +92,9 @@ func TestPrepareIssueSchedules(t *testing.T) {
 					continue
 				}
 				require.NoError(t, err)
+				if strings.HasPrefix(tc.name, "clear stored future") {
+					require.JSONEq(t, `null`, string(out[field]))
+				}
 				if tc.wantZone != "" && len(out[field]) == 0 {
 					require.JSONEq(t, `"`+tc.wantZone+`"`, string(out["timezone"]))
 				} else if tc.wantZone != "" {
@@ -131,7 +136,7 @@ func TestPrepareIssueSchedulesPreservesAndRebinds(t *testing.T) {
 func TestPrepareIssueSchedulesPreservesSuppliedObject(t *testing.T) {
 	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
 	require.NoError(t, err)
-	for _, current := range []jsontext.Value{jsontext.Value(`{}`), jsontext.Value(`{"scheduled_on":"2026-01-01T02:00:00Z"}`)} {
+	for _, current := range []jsontext.Value{jsontext.Value(`{}`), jsontext.Value(`{"scheduled_on":"2026-01-01T02:00:00Z"}`), jsontext.Value(`{"scheduled_on":{"legacy":"opaque"}}`)} {
 		patch := map[string]jsontext.Value{"scheduled_on": saved, "timezone": jsontext.Value(`"Europe/Paris"`)}
 		out, err := db.PrepareIssueSchedules(current, patch, "UTC", "")
 		require.NoError(t, err)
