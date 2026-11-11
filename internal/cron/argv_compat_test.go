@@ -71,4 +71,11 @@ func TestArgvWorkflowContract(t *testing.T) {
 			require.Error(t, err, string(raw))
 		}
 	}
+	for _, argv := range [][]string{nil, {}, {""}, {"ok", "bad\x00arg"}} {
+		workflow := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "step", Kind: "argv", Argv: argv}}}
+		require.Error(t, workflow.Validate())
+		require.Error(t, cron.CheckWorkflowSupported(workflow))
+	}
+	require.Error(t, cron.CheckWorkflowStepJSON([]byte(`{"kind":"argv","argv":["x"],"prompt":""}`)))
+	require.NoError(t, cron.CheckWorkflowStepJSON([]byte(`{"kind":"argv","argv":["x",""]}`)))
 }

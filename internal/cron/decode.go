@@ -3,6 +3,8 @@ package cron
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
+	"strings"
 )
 
 // DecodeJob strictly decodes a stored job document without applying the
@@ -15,17 +17,77 @@ func DecodeJob(input []byte) (JobDefinition, error) {
 	return job, err
 }
 
-// DecodeWorkflow is DecodeJob for workflow documents, except that the reserved
-// argv kind is explicitly unsupported, including in historical stored rows.
+// DecodeWorkflow reads stored workflows while enforcing argv and null fences.
 func DecodeWorkflow(input []byte) (WorkflowDefinition, error) {
-	workflow, err := DecodeHistoricalWorkflow(input)
+	var workflow WorkflowDefinition
+	err := decode(input, &workflow, DefinitionLimit)
 	if err != nil {
 		return workflow, err
 	}
 	if err := checkWorkflowNullShapes(input); err != nil {
 		return workflow, err
 	}
+	if err := CheckWorkflowRawSteps(input); err != nil {
+		return workflow, err
+	}
 	return workflow, CheckWorkflowSupported(workflow)
+}
+
+// CheckWorkflowRawSteps checks exact JSON member presence and argv element types.
+// Call it before typed decoding can discard nulls or explicitly empty members.
+func CheckWorkflowRawSteps(input []byte) error {
+	var document struct {
+		Steps []jsontext.Value `json:"steps"`
+	}
+	if err := json.Unmarshal(input, &document); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	for _, raw := range document.Steps {
+		if err := CheckWorkflowStepJSON(raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CheckWorkflowStepJSON checks the raw argv shape of one workflow step.
+func CheckWorkflowStepJSON(raw []byte) error {
+	var step map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &step); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	var kind string
+	if rawKind, ok := step["kind"]; ok {
+		if err := json.Unmarshal(rawKind, &kind); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+	}
+	argv, present := step["argv"]
+	if kind != "argv" {
+		if present {
+			return invalid("argv member requires argv kind")
+		}
+		return nil
+	}
+	if _, ok := step["command"]; ok {
+		return invalid("argv step cannot carry command")
+	}
+	if _, ok := step["prompt"]; ok {
+		return invalid("argv step cannot carry prompt")
+	}
+	if !present || argv.Kind() != '[' {
+		return invalid("argv step requires an array")
+	}
+	var items []jsontext.Value
+	if err := json.Unmarshal(argv, &items); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	for _, item := range items {
+		if item.Kind() != '"' {
+			return invalid("argv elements must be strings")
+		}
+	}
+	return nil
 }
 
 // DecodeHistoricalWorkflow decodes the bounded shape accepted before the
@@ -99,12 +161,23 @@ func checkWorkflowNullShapes(input []byte) error {
 	return nil
 }
 
-// CheckWorkflowSupported rejects reserved kinds without revalidating historical
+// CheckWorkflowSupported enforces argv rules without revalidating historical
 // authoring rules. It also applies to already-decoded backup records.
 func CheckWorkflowSupported(workflow WorkflowDefinition) error {
 	for _, step := range workflow.Steps {
-		if step.Kind == "argv" || step.Argv != nil {
-			return invalid("argv workflow steps are not supported")
+		if step.Kind != "argv" {
+			if step.Argv != nil {
+				return invalid("argv member requires argv kind")
+			}
+			continue
+		}
+		if step.Command != "" || step.Prompt != "" || len(step.Argv) == 0 || step.Argv[0] == "" {
+			return invalid("argv step requires a nonempty executable and no command or prompt")
+		}
+		for _, arg := range step.Argv {
+			if strings.ContainsRune(arg, '\x00') {
+				return invalid("argv elements cannot contain NUL")
+			}
 		}
 	}
 	return nil

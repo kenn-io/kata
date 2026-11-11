@@ -46,7 +46,7 @@ func ParseWorkflow(input []byte) (WorkflowDefinition, error) {
 	if err := decode(input, &workflow, DefinitionLimit); err != nil {
 		return workflow, err
 	}
-	if err := rejectWorkflowArgvMember(input); err != nil {
+	if err := CheckWorkflowRawSteps(input); err != nil {
 		return workflow, err
 	}
 	return workflow, workflow.Validate()
@@ -198,6 +198,9 @@ func validRecipient(value string) bool {
 
 // Validate checks step identities, ordering and bounded retry settings.
 func (f WorkflowDefinition) Validate() error {
+	if err := CheckWorkflowSupported(f); err != nil {
+		return err
+	}
 	if f.Version != 1 {
 		return invalid("unsupported workflow version")
 	}
@@ -208,9 +211,6 @@ func (f WorkflowDefinition) Validate() error {
 	for i, step := range f.Steps {
 		stepError := func(message string) error {
 			return invalid(fmt.Sprintf("step %d %q: %s", i+1, step.Key, message))
-		}
-		if step.Argv != nil {
-			return stepError("argv workflow step member is not supported")
 		}
 		if !portableKey(step.Key) || seen[step.Key] {
 			return stepError("step keys must be unique portable names")
@@ -232,6 +232,8 @@ func (f WorkflowDefinition) Validate() error {
 			if strings.TrimSpace(step.Prompt) == "" || step.Command != "" {
 				return stepError("prompt step requires only prompt")
 			}
+		case "argv":
+			// The shared compatibility check above validates the vector.
 		default:
 			return stepError("unknown step kind")
 		}
