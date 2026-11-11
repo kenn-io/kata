@@ -182,7 +182,7 @@ func unreachableRuntime(r kitdaemon.RuntimeRecord, dataDir string, cause error) 
 	return &LocalDaemonUnreachableError{
 		PID: r.PID, Address: r.Endpoint().ConfigAddress(), DataDir: dataDir,
 		WebOrigin:       origin,
-		VerifiedProcess: daemonruntime.RuntimeProcessAlive(r) && kitdaemon.CompareRuntimeProcessIdentity(r) == kitdaemon.ProcessIdentityMatch,
+		VerifiedProcess: daemonruntime.RuntimeProcessAlive(r),
 		cause:           cause,
 	}
 }

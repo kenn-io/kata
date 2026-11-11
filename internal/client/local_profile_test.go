@@ -770,8 +770,7 @@ func testLocalProfileStaleCapableDaemon(t *testing.T, autostart bool) {
 
 func TestPrepareWebUIKeepsProfileNameOnUnreachable(t *testing.T) {
 	profile, root := localProfileFixture(t)
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
-	t.Cleanup(server.Close)
+	server := newHungServer(t)
 	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
