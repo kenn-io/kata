@@ -4801,6 +4801,8 @@ components:
           type: array
         teammate:
           type: string
+        to_project_uid:
+          type: string
       required:
         - items
       type: object

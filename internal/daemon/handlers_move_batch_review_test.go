@@ -75,14 +75,13 @@ func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {
 	}
 }
 
-func TestMoveIssuesBatch_UnsupportedPairLeavesValidMoves(t *testing.T) {
+func TestMoveIssuesBatch_ConflictingDuplicateLeavesValidMove(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	source, issue := createClaimGateHelperIssue(t, store)
 	local, err := store.CreateProject(t.Context(), "local-target")
 	require.NoError(t, err)
 	remote, err := store.CreateProject(t.Context(), "remote-target")
 	require.NoError(t, err)
-	enableClaimGateHelperHub(t, store, remote.ID)
 	independent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "independent", Author: "agent"})
 	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}

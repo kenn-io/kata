@@ -4914,6 +4914,7 @@ type MoveIssuesBody struct {
 	DefaultProjectID *int64           `json:"default_project_id,omitempty"`
 	Items            []MoveIssuesItem `json:"items" validate:"required"`
 	Teammate         *string          `json:"teammate,omitempty"`
+	ToProjectUID     *string          `json:"to_project_uid,omitempty"`
 }
 
 func (m MoveIssuesBody) Validate() error {

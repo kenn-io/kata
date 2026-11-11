@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -178,19 +179,7 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 		return err
 	}
 	if dryRun {
-		sourceProject, err = moveSourceProjectName(ctx, client, baseURL, pid, moved.Issue.ProjectID, sourceProject)
-		if err != nil {
-			return err
-		}
-		names := map[int64]string{}
-		if ref.ProjectName != "" {
-			names[pid] = ref.ProjectName
-		}
-		refs, err := moveIssueRefs(ctx, client, baseURL, names, moved.Issues)
-		if err != nil {
-			return err
-		}
-		return printMovePreview(cmd, sourceProject, moved.Issue.ShortID, target.Name, moved.Issues, refs)
+		return printMoveDryResponse(ctx, cmd, client, baseURL, pid, rawRef, ref.ProjectName, target.Name, target.ID, moved)
 	}
 	if err := printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name); err != nil {
 		return err
@@ -207,6 +196,25 @@ func moveRevisionHeader(dry bool, selected, current int64) *generated.MoveIssueH
 	}
 	etag := fmt.Sprintf(`"rev-%d"`, selected)
 	return &generated.MoveIssueHeaders{IfMatch: &etag}
+}
+
+func printMoveDryResponse(ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, pid int64, rawRef, source, target string, targetID int64, moved moveResponseWire) error {
+	if moved.Issue.ProjectID == targetID {
+		return printMoveBatch(cmd, []api.MoveIssuesResult{{Ref: rawRef, UID: moved.Issue.UID, Result: "unchanged", Code: "already_in_target"}}, 1)
+	}
+	name, err := moveSourceProjectName(ctx, client, baseURL, pid, moved.Issue.ProjectID, source)
+	if err != nil {
+		return err
+	}
+	names := map[int64]string{}
+	if source != "" {
+		names[pid] = source
+	}
+	refs, err := moveIssueRefs(ctx, client, baseURL, names, moved.Issues)
+	if err != nil {
+		return err
+	}
+	return printMovePreview(cmd, name, moved.Issue.ShortID, target, moved.Issues, refs)
 }
 
 func moveSourceProjectName(ctx context.Context, client *http.Client, baseURL string, requestedProjectID, currentProjectID int64, requestedName string) (string, error) {

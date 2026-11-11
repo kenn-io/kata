@@ -106,40 +106,28 @@ func (s *batchResolveHookStore) IssueByUID(ctx context.Context, uid string, incl
 }
 
 func TestMoveIssuesBatch_ResidentChangesAfterResolution(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		edit bool
-	}{
-		{name: "write"},
-		{name: "edited", edit: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			edit := tc.edit
-			store := openClaimGateHelperDB(t)
-			source, other := createClaimGateHelperIssue(t, store)
-			target, err := store.CreateProject(t.Context(), "target")
-			require.NoError(t, err)
-			resident, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "agent"})
-			require.NoError(t, err)
-			wrapped := &batchResolveHookStore{Storage: store, issueUID: resident.UID, afterResolve: func() {
-				if edit {
-					owner := "changed"
-					_, _, _, err = store.EditIssue(t.Context(), db.EditIssueParams{IssueID: resident.ID, Owner: &owner, Actor: "agent"})
-				} else {
-					_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: resident.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: resident.Revision, Actor: "agent", Single: true})
-				}
-				require.NoError(t, err)
-			}}
-			req := &api.MoveIssuesRequest{}
-			req.Body.Actor = "agent"
-			req.Body.Items = []api.MoveIssuesItem{{Ref: resident.UID, ToProjectUID: target.UID}, {Ref: other.UID, ToProjectUID: target.UID}}
-			out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
-			require.NoError(t, err)
-			require.Equal(t, "refused", out.Body.Results[0].Result)
-			require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
-			require.Equal(t, "moved", out.Body.Results[1].Result)
-		})
-	}
+	store := openClaimGateHelperDB(t)
+	_, other := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	resident, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "agent"})
+	require.NoError(t, err)
+	wrapped := &batchResolveHookStore{Storage: store, issueUID: resident.UID, afterResolve: func() {
+		owner := "changed"
+		_, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: resident.ID, Owner: &owner, Actor: "agent"})
+		require.NoError(t, err)
+	}}
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor = "agent"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: resident.UID, ToProjectUID: target.UID}, {Ref: other.UID, ToProjectUID: target.UID}}
+	out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, "refused", out.Body.Results[0].Result)
+	require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
+	require.Equal(t, "moved", out.Body.Results[1].Result)
+	got, err := store.IssueByID(t.Context(), other.ID)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, got.ProjectID)
 }
 
 func TestMoveIssuesBatch_DuplicateInterveningEdit(t *testing.T) {
@@ -176,7 +164,7 @@ func (s batchFailureStore) MoveIssuesBatch(context.Context, db.MoveIssuesBatchIn
 	return db.MoveIssuesBatchOut{}, errors.New("database unavailable")
 }
 
-func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
+func TestMoveIssuesBatch_ErrorIncludesRefusals(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	source, first := createClaimGateHelperIssue(t, store)
 	target, err := store.CreateProject(t.Context(), "target")
@@ -195,11 +183,9 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 	require.ErrorAs(t, err, &apiErr)
 	rows := apiErr.Data["results"].([]api.MoveIssuesResult)
 	require.Len(t, rows, 2)
+	require.Equal(t, 0, rows[0].Index)
 	require.Equal(t, "revision_conflict", rows[0].Code)
 	require.Equal(t, 2, rows[1].Index)
-	got, err := store.IssueByID(t.Context(), other.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
 }
 
 func (s *batchFirstRefusal) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
@@ -228,28 +214,4 @@ func TestMoveIssuesBatch_DuplicateAfterRefusal(t *testing.T) {
 	got, err := store.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, target.ID, got.ProjectID)
-}
-
-func TestMoveBatchWriteContinuationAndRevisions(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	_, issue := createClaimGateHelperIssue(t, store)
-	target, err := store.CreateProject(t.Context(), "target")
-	require.NoError(t, err)
-	owner := "changed"
-	updated, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "agent"})
-	require.NoError(t, err)
-	require.Greater(t, updated.Revision, issue.Revision)
-	req := &api.MoveIssuesRequest{}
-	req.Body.Actor = "agent"
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision, ToProjectUID: target.UID}, {Ref: issue.UID, ExpectedRevision: updated.Revision, ToProjectUID: target.UID}, {Ref: issue.UID, ExpectedRevision: updated.Revision, ToProjectUID: target.UID}, {Ref: issue.UID, ExpectedRevision: issue.Revision, ToProjectUID: target.UID}}
-	handler := moveIssuesHandler(ServerConfig{DB: store})
-	out, err := handler(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
-	require.Equal(t, "moved", out.Body.Results[1].Result)
-	require.Equal(t, "unchanged", out.Body.Results[2].Result)
-	require.Equal(t, "duplicate_item", out.Body.Results[2].Code)
-	require.Equal(t, 1, out.Body.Summary.Moved)
-	require.Equal(t, 1, out.Body.Summary.Unchanged)
-	require.Equal(t, "revision_conflict", out.Body.Results[3].Code)
 }

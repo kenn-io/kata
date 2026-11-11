@@ -254,6 +254,22 @@ func checkMoveTreeMembershipFence(t *testing.T, store db.Storage) error {
 	require.NoError(t, store.DeleteLinkByID(ctx, links[0].ID))
 	_, err = store.MoveIssueProject(ctx, move)
 	require.ErrorIs(t, err, db.ErrIssueMoveTreeChanged)
+
+	rootWithResident, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root with resident", Author: "worker"})
+	require.NoError(t, err)
+	unchanged, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: rootWithResident.ID}}})
+	require.NoError(t, err)
+	// Residents must not become separate OR terms in the mapping check.
+	for range 1000 {
+		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: rootWithResident.ID}}})
+		require.NoError(t, err)
+	}
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: rootWithResident.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: rootWithResident.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	gotResident, err := store.IssueByID(ctx, unchanged.ID)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, gotResident.ProjectID)
+	require.Equal(t, unchanged.Revision, gotResident.Revision)
 	return nil
 }
 

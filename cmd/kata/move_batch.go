@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -39,7 +40,7 @@ type moveSelector struct {
 func moveBatchUsage(message string) error {
 	return &cliError{Message: message, Kind: kindUsage, ExitCode: ExitUsage}
 }
-func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
+func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatchItem, error) {
 	reader := bufio.NewReader(r)
 	var items []moveBatchItem
 	retained := 0
@@ -74,7 +75,7 @@ func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
 				items = append(items, item)
 			}
 		}
-		if err == io.EOF || len(items) > 5000 {
+		if err == io.EOF || len(items) >= maxItems {
 			break
 		}
 	}
@@ -115,6 +116,25 @@ func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string)
 	return uid, nil
 }
 
+func moveBatchReadLimit(items []moveBatchItem, opts moveBatchOptions) int {
+	if opts.DryRun || opts.Subtree {
+		return 2 - len(items)
+	}
+	return 5001
+}
+
+func validateMoveBatchSelection(items []moveBatchItem, opts moveBatchOptions) error {
+	if len(items) > 1 {
+		if opts.DryRun {
+			return moveBatchUsage("dry run accepts one item")
+		}
+		if opts.Subtree {
+			return moveBatchUsage("--subtree accepts one issue")
+		}
+	}
+	return nil
+}
+
 func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel moveSelector, opts moveBatchOptions) error {
 	defaultTarget := ""
 	var items []moveBatchItem
@@ -123,6 +143,9 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 		for _, ref := range args[:len(args)-1] {
 			items = append(items, moveBatchItem{Ref: ref, TargetProject: defaultTarget})
 		}
+	}
+	if err := validateMoveBatchSelection(items, opts); err != nil {
+		return err
 	}
 	if refsFrom != "" {
 		reader := cmd.InOrStdin()
@@ -137,11 +160,14 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 			defer func() { _ = file.Close() }()
 			reader = file
 		}
-		parsed, err := parseRefsFrom(reader, defaultTarget)
+		parsed, err := parseRefsFrom(reader, defaultTarget, moveBatchReadLimit(items, opts))
 		if err != nil {
 			return err
 		}
 		items = append(items, parsed...)
+	}
+	if err := validateMoveBatchSelection(items, opts); err != nil {
+		return err
 	}
 	if sel.Project != "" {
 		if defaultTarget == "" {
@@ -172,17 +198,38 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 	if len(items) > 5000 {
 		return moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
 	}
-	if (opts.DryRun || opts.Subtree) && len(items) > 1 {
-		if opts.DryRun {
-			return moveBatchUsage("dry run accepts one item")
-		}
-		return moveBatchUsage("--subtree accepts one issue")
+	if err := validateMoveBatchSelection(items, opts); err != nil {
+		return err
 	}
 	if (opts.DryRun || opts.Subtree) && len(items) == 1 && items[0].ParseError == "" {
 		previousProject := flags.Project
 		defer func() { flags.Project = previousProject }()
 		if sel.Project != "" && items[0].ExpectedRevision != 0 {
 			flags.Project = sel.Project
+		} else if parsed, err := shortid.Parse(items[0].Ref); err == nil && parsed.ULID != "" {
+			a, err := dialDaemon(cmd.Context())
+			if err != nil {
+				return err
+			}
+			client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			response, callErr := client.ShowIssueByUIDWithResponse(a.ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: parsed.ULID}})
+			if response == nil {
+				return externalCLITransportError(response, callErr)
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			if response.JSON200 == nil {
+				return errors.New("daemon returned an invalid issue response")
+			}
+			project, err := resolveProjectSelector(a, strconv.FormatInt(response.JSON200.Issue.ProjectID, 10))
+			if err != nil {
+				return err
+			}
+			flags.Project = project.Name
 		}
 		return runMove(cmd, items[0].Ref, items[0].TargetProject, opts.DryRun, !opts.Subtree, items[0].ExpectedRevision)
 	}
@@ -357,7 +404,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			return err
 		}
 		if len(results) > 0 {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict}
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
 		}
 		return nil
 	}
@@ -468,7 +515,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	}
 	for _, r := range results {
 		if r.Result == "refused" {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict}
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
 		}
 	}
 	return nil

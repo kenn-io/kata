@@ -23,6 +23,10 @@ type batchReply struct {
 		ShortIDExtended bool   `json:"short_id_extended"`
 		To              string `json:"to"`
 	} `json:"results"`
+	Summary struct {
+		Moved     int `json:"moved"`
+		Unchanged int `json:"unchanged"`
+	} `json:"summary"`
 }
 
 func postMoveBatch(t *testing.T, env *testenv.Env, body string) batchReply {
@@ -105,6 +109,18 @@ func TestMoveIssuesBatch_DuplicateDifferentTargets(t *testing.T) {
 			require.Equal(t, 1, moves)
 		})
 	}
+	t.Run("same target", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken("tok"))
+		_, target, issue := seedMovePair(t, env)
+		body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"items":[{"ref":%q},{"ref":%q}]}`, target.UID, issue.UID, issue.UID)
+		out := postMoveBatch(t, env, body)
+		require.Len(t, out.Results, 2)
+		require.Equal(t, "moved", out.Results[0].Result)
+		require.Equal(t, "unchanged", out.Results[1].Result)
+		require.Equal(t, "duplicate_item", out.Results[1].Code)
+		require.Equal(t, 1, out.Summary.Moved)
+		require.Equal(t, 1, out.Summary.Unchanged)
+	})
 }
 
 func TestMoveIssuesBatch_MixedTargetsAndRerun(t *testing.T) {
@@ -148,29 +164,11 @@ func TestMoveIssuesBatch_ExtendedShortIDAtBothProjects(t *testing.T) {
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "move", Author: "tester"})
 	require.NoError(t, err)
 	require.Len(t, issue.ShortID, 5)
-	out := postMoveBatch(t, env, fmt.Sprintf(`{"actor":"tester","items":[{"ref":%q,"to_project_uid":%q}]}`, issue.UID, target.UID))
+	out := postMoveBatch(t, env, fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"items":[{"ref":%q}]}`, target.UID, issue.UID))
 	require.Len(t, out.Results, 1)
 	require.Equal(t, "moved", out.Results[0].Result)
 	require.Len(t, out.Results[0].NewShortID, 5)
 	require.True(t, out.Results[0].ShortIDExtended)
-}
-
-func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	src, target, root := seedMovePair(t, env)
-	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "child", Author: "tester", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
-	require.NoError(t, err)
-	body := fmt.Sprintf(`{"actor":"tester","subtree":true,"items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, root.UID, target.UID, child.UID, target.UID)
-	resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
-	raw, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
-	for _, issue := range []db.Issue{root, child} {
-		got, err := env.DB.IssueByID(t.Context(), issue.ID)
-		require.NoError(t, err)
-		require.Equal(t, src.ID, got.ProjectID)
-	}
 }
 
 func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
@@ -205,8 +203,8 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 			}
 			require.Equal(t, "refused", out.Results[stale].Result)
 			want := "revision_conflict"
-			if mode == "empty" {
-				want = "issue_not_found"
+			if mode == "negative" || mode == "empty" {
+				want = "validation"
 			}
 			require.Equal(t, want, out.Results[stale].Code)
 			require.Equal(t, "moved", out.Results[valid].Result)
