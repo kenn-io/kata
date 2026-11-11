@@ -661,14 +661,11 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			out := daemonStatusOutput{Daemons: make([]daemonStatusEntry, 0, len(recs))}
 			selected, _, err := diagnoseDaemon(cmd.Context(), "")
-			if err != nil {
-				// Current-home inventory remains useful when workspace routing is
-				// invalid. This partial result never substitutes a selected target.
-				selected = selectionErrorDiagnosis(err)
-			}
 			out.Selected = &selected
 			var statusErr error
-			if selected.State != "ready" {
+			if err != nil {
+				statusErr = cliDaemonTargetError(err)
+			} else if selected.State != "ready" {
 				statusErr = diagnosisError(selected)
 			}
 			for _, r := range recs {
