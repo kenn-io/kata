@@ -102,6 +102,15 @@ func (i Issue) datesState() datesFormState {
 
 func (i Issue) timezone() string { return rawString(i.Metadata.Timezone) }
 
+func (i Issue) hasLegacyDate() bool {
+	for _, raw := range []jsontext.Value{i.Metadata.ScheduledOn, i.Metadata.DeadlineOn} {
+		if len(raw) > 0 && raw[0] == '"' {
+			return true
+		}
+	}
+	return false
+}
+
 func (i *Issue) refreshSavedDays(now time.Time) bool {
 	changed := false
 	for _, field := range []struct {

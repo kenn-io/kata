@@ -2652,28 +2652,10 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		next, cmd := m.handleRefetchTick()
 		return next, cmd, true
 	case dayTickMsg:
-		var cmd tea.Cmd
-		now := renderNow()
-		changed := false
-		for _, issue := range m.list.issues {
-			changed = issue.refreshSavedDays(now) || changed
-		}
-		if m.detail.issue != nil {
-			m.detail.issue.refreshSavedDays(now)
-		}
-		if m.list.filter.Date != "" && (changed || m.list.filter.Day != now.Format(time.DateOnly)) {
-			m, cmd = m.refreshListDay(func(lm listModel) listModel {
-				for i := range lm.issues {
-					lm.issues[i].refreshSavedDays(now)
-				}
-				return lm
-			})
-		} else if changed {
-			for i := range m.list.issues {
-				m.list.issues[i].refreshSavedDays(now)
-			}
-		}
+		m, cmd := m.refreshPlanningDay(renderNow())
 		return m, combineCmds(cmd, dayTick()), true
+	case planningDayFetchedMsg:
+		return m.applyPlanningDay(msg), nil, true
 	case toastExpiredMsg:
 		next, cmd := m.handleToastExpired()
 		return next, cmd, true
@@ -2685,6 +2667,79 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return next, cmd, true
 	}
 	return m, nil, false
+}
+
+func (m Model) refreshPlanningDay(now time.Time) (Model, tea.Cmd) {
+	changed, legacy := false, false
+	for _, issue := range m.list.issues {
+		changed = issue.refreshSavedDays(now) || changed
+		legacy = issue.hasLegacyDate() || legacy
+	}
+	if m.detail.issue != nil {
+		m.detail.issue.refreshSavedDays(now)
+		legacy = m.detail.issue.hasLegacyDate() || legacy
+	}
+	if m.input.kind == inputDatesForm {
+		dates := m.input.dates
+		legacy = legacy || (dates.scheduledZone == nil && (dates.scheduled != "" || dates.scheduledToday != "")) || (dates.deadlineZone == nil && (dates.deadline != "" || dates.deadlineToday != ""))
+	}
+	var cmd tea.Cmd
+	if m.list.filter.Date != "" && (changed || m.list.filter.Day != now.Format(time.DateOnly)) {
+		m, cmd = m.refreshListDay(func(lm listModel) listModel {
+			for i := range lm.issues {
+				lm.issues[i].refreshSavedDays(now)
+			}
+			return lm
+		})
+	} else if changed {
+		for i := range m.list.issues {
+			m.list.issues[i].refreshSavedDays(now)
+		}
+	}
+	if legacy && m.api != nil {
+		cmd = combineCmds(cmd, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))
+		if m.input.kind == inputDatesForm {
+			cmd = combineCmds(cmd, fetchPlanningDay(m.api, m.input.target, m.input.formGen, m.connGen))
+		} else if m.detail.issue != nil && m.detail.issue.hasLegacyDate() && m.detailRefreshEligible() {
+			target := formTarget{projectID: m.detail.scopePID, issueShortID: m.detail.issue.ShortID, issueUID: m.detail.issue.UID}
+			cmd = combineCmds(cmd, fetchPlanningDay(m.api, target, 0, m.connGen))
+		}
+	}
+	return m, cmd
+}
+
+type planningDayFetchedMsg struct {
+	target  formTarget
+	formGen int64
+	connGen uint64
+	issue   *Issue
+}
+
+func fetchPlanningDay(api KataAPI, target formTarget, formGen int64, connGen uint64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		detail, err := api.readIssue(ctx, target.projectID, target.issueShortID)
+		msg := planningDayFetchedMsg{target: target, formGen: formGen, connGen: connGen}
+		if err == nil && detail != nil {
+			msg.issue = detail.Issue
+		}
+		return msg
+	}
+}
+
+func (m Model) applyPlanningDay(msg planningDayFetchedMsg) Model {
+	if m.staleConnMsg(msg.connGen) || msg.issue == nil {
+		return m
+	}
+	if m.detail.issue != nil && m.detail.issue.UID == msg.issue.UID && m.detail.issue.Revision == msg.issue.Revision {
+		m.detail.issue.ScheduledOnToday, m.detail.issue.DeadlineOnToday = msg.issue.ScheduledOnToday, msg.issue.DeadlineOnToday
+	}
+	if m.input.kind != inputDatesForm || m.input.target != msg.target || m.input.formGen != msg.formGen || m.input.dates.revision != msg.issue.Revision {
+		return m
+	}
+	m.input.dates.scheduledToday, m.input.dates.deadlineToday = msg.issue.ScheduledOnToday, msg.issue.DeadlineOnToday
+	return m
 }
 
 // refreshListDay applies edit to the list, re-filters relative dates, and
@@ -2783,6 +2838,22 @@ func (m Model) populateCache(msg tea.Msg) Model {
 	if err == nil && m.cache != nil {
 		issues, _ = trimQueueWorkingSet(issues)
 		m.cache.put(m.currentCacheKey(), issues)
+	}
+	m = m.applyPlanningRefetch(msg)
+	return m
+}
+
+func (m Model) applyPlanningRefetch(msg tea.Msg) Model {
+	_, issues, err := fetchPayload(msg)
+	if err == nil {
+		for _, issue := range issues {
+			if m.detail.issue != nil && m.detail.issue.UID == issue.UID && m.detail.issue.Revision == issue.Revision {
+				m.detail.issue.ScheduledOnToday, m.detail.issue.DeadlineOnToday = issue.ScheduledOnToday, issue.DeadlineOnToday
+			}
+			if m.input.kind == inputDatesForm && m.input.target.projectID == issue.ProjectID && m.input.target.issueShortID == issue.ShortID && m.input.dates.revision == issue.Revision {
+				m.input.dates.scheduledToday, m.input.dates.deadlineToday = issue.ScheduledOnToday, issue.DeadlineOnToday
+			}
+		}
 	}
 	m.list = m.list.applyFetched(msg)
 	return m

@@ -153,7 +153,7 @@ func (m Model) recurrenceStart() (string, string) {
 func recurrenceFormNow(s inputState, now time.Time) time.Time {
 	zone, err := recurrenceclient.ResolveZone(s.fieldValue(fieldZone), s.recurrence.rec.Zone(), s.recurrence.issueZone, localZone)
 	if err == nil {
-		if loc, err := time.LoadLocation(zone); err == nil {
+		if loc, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion); err == nil {
 			return now.In(loc)
 		}
 	}

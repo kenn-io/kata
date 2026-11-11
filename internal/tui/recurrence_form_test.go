@@ -1,12 +1,16 @@
 package tui
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -154,6 +158,57 @@ func TestRecurrenceTodayUsesSelectedZone(t *testing.T) {
 	require.Len(t, recs, 1)
 	assert.Equal(t, "2026-11-10", recs[0].DTStart)
 	assert.Equal(t, "America/New_York", recs[0].Timezone)
+}
+
+func TestRecurrenceTodayUsesBundledRules(t *testing.T) {
+	if os.Getenv("KATA_TEST_INUVIK_RULES") == "1" {
+		h := newRecurrenceHarness(t, viewDetail)
+		now := time.Date(2026, 11, 15, 6, 30, 0, 0, time.UTC)
+		host, err := time.LoadLocation("America/Inuvik")
+		require.NoError(t, err)
+		require.Equal(t, "2026-11-15", now.In(host).Format(time.DateOnly))
+		bundled, err := metadata.ScheduleLocation("America/Inuvik", metadata.ScheduleTZDataVersion)
+		require.NoError(t, err)
+		require.Equal(t, "2026-11-14", now.In(bundled).Format(time.DateOnly))
+		h.m.toastNow = func() time.Time { return now }
+		saved, err := metadata.NewScheduleValue("2026-11-14", "America/Inuvik")
+		require.NoError(t, err)
+		_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved}})
+		require.NoError(t, err)
+		h.reload()
+		h.open()
+		h.fill("FREQ=DAILY", "today", "America/Inuvik")
+		assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, now)), "2026-11-14 Sat")
+		h.save()
+		recs := h.rows()
+		require.Len(t, recs, 1)
+		assert.Equal(t, "2026-11-14", recs[0].DTStart)
+		return
+	}
+	archive, err := zip.OpenReader("../metadata/tzdata/zoneinfo-2026c.zip")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, archive.Close()) }()
+	var hostRules []byte
+	for _, file := range archive.File {
+		if file.Name == "America/Regina" {
+			reader, err := file.Open()
+			require.NoError(t, err)
+			hostRules, err = io.ReadAll(reader)
+			require.NoError(t, err)
+			require.NoError(t, reader.Close())
+			break
+		}
+	}
+	require.NotEmpty(t, hostRules)
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "America"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "America", "Inuvik"), hostRules, 0o600))
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRecurrenceTodayUsesBundledRules$")
+	cmd.Env = append(os.Environ(), "ZONEINFO="+dir, "KATA_TEST_INUVIK_RULES=1")
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
 }
 
 func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
