@@ -124,10 +124,8 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 				emitErrorForMode(&stderr, err, mode, true)
 				if mode == outputHuman {
 					require.Contains(t, out, "1 refused")
-					require.Empty(t, stderr.String())
-				} else {
-					require.Contains(t, stderr.String(), "some issues were refused")
 				}
+				require.Contains(t, stderr.String(), "some issues were refused")
 				if mode == outputJSON && !allInvalid {
 					var reply struct {
 						Results []api.MoveIssuesResult `json:"results"`

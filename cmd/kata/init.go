@@ -64,14 +64,13 @@ type callInitOpts struct {
 // path with command-specific recovery semantics.
 // Message is the human-readable text. ExitCode is what main() exits with.
 type cliError struct {
-	HumanReported bool
-	HTTPStatus    int
-	Hint          string
-	Message       string
-	Kind          errKind
-	Code          string
-	ExitCode      int
-	Data          jsontext.Value
+	HTTPStatus int
+	Hint       string
+	Message    string
+	Kind       errKind
+	Code       string
+	ExitCode   int
+	Data       jsontext.Value
 }
 
 func (e *cliError) Error() string { return e.Message }
