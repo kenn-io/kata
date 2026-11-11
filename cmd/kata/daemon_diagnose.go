@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -350,16 +349,7 @@ func probeDaemonSelection(
 		if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
 			result.PID, result.Endpoint = unreachable.PID, unreachable.Address
 			result.Message = unreachable.Summary()
-			recoverCommand := ""
-			if result.Profile != "" {
-				profileArg := shellQuoteArg(result.Profile)
-				if runtime.GOOS == "windows" {
-					// Use PowerShell literal quoting for names containing shell metacharacters.
-					profileArg = "'" + strings.ReplaceAll(result.Profile, "'", "''") + "'"
-				}
-				recoverCommand = "kata --daemon " + profileArg + " daemon recover"
-			}
-			result.NextAction = fmt.Sprintf("daemon pid %d at %s: %s", unreachable.PID, unreachable.Address, unreachable.RecoveryAdvice(recoverCommand))
+			result.NextAction = fmt.Sprintf("daemon pid %d at %s: %s", unreachable.PID, unreachable.Address, unreachable.RecoveryAdvice())
 		}
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"

@@ -565,7 +565,14 @@ func TestDoctorHookNamesPATHMismatch(t *testing.T) {
 }
 
 func TestDoctorReportsUnreachableRecoveryAdvice(t *testing.T) {
-	err := &client.LocalDaemonUnreachableError{PID: 123, Address: "127.0.0.1:1"}
+	dir := t.TempDir()
+	_, err := (kitdaemon.RuntimeStore{Dir: dir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"})
+	require.NoError(t, err)
+	_, found, err := client.DiscoverResolvedReadOnly(t.Context(), dir)
+	require.False(t, found)
+	require.ErrorIs(t, err, client.ErrLocalDaemonUnreachable)
 	check := doctorDiscoveryCheck(err)
-	require.Contains(t, check.Fix, "daemon.log")
+	require.EqualValues(t, "fail", check.Status)
+	require.Equal(t, "Selected local daemon is unreachable", check.Summary)
+	require.Contains(t, check.Fix, filepath.Join(dir, "daemon.log"))
 }

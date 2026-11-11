@@ -252,14 +252,24 @@ func scopeProfileUnreachable(err error, name string) error {
 		return err
 	}
 	copy := *unreachable
-	arg := name
-	if goruntime.GOOS == "windows" {
-		arg = "'" + strings.ReplaceAll(name, "'", "''") + "'"
-	} else if name == "" || strings.IndexFunc(name, func(r rune) bool {
+	copy.recoverCommand = profileRecoveryCommand(name, goruntime.GOOS)
+	return &copy
+}
+
+func profileRecoveryCommand(name, goos string) string {
+	safe := name != "" && strings.IndexFunc(name, func(r rune) bool {
+		if goos == "windows" {
+			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_.-", r))
+		}
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("@%_+=:,./-", r))
-	}) >= 0 {
+	}) < 0
+	arg := name
+	prefix := ""
+	if !safe && goos == "windows" {
+		arg = "'" + strings.ReplaceAll(name, "'", "''") + "'"
+		prefix = "in PowerShell: "
+	} else if !safe {
 		arg = "'" + strings.ReplaceAll(name, "'", "'\\''") + "'"
 	}
-	copy.recoverCommand = "kata --daemon " + arg + " daemon recover"
-	return &copy
+	return prefix + "kata --daemon " + arg + " daemon recover"
 }

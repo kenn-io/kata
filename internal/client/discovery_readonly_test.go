@@ -129,6 +129,10 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			require.Contains(t, message, filepath.Join(dir, "daemon.log"))
 			require.Contains(t, message, "supervisor stderr")
 			require.Contains(t, message, "kata daemon restart")
+			require.Contains(t, message, "after it exits")
+			require.Contains(t, message, "original foreground launch command")
+			require.Contains(t, message, "supervisor")
+			require.Contains(t, message, "auto-started")
 			require.Contains(t, message, "original KATA_HOME and storage environment")
 			if origin != "" {
 				require.Contains(t, message, origin+"/debug/pprof/goroutine?debug=2")
@@ -142,24 +146,24 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 				require.Contains(t, message, "terminates the daemon")
 			} else {
 				require.NotContains(t, message, "kill -QUIT")
+				require.Contains(t, message, fmt.Sprintf("taskkill /PID %d /F", os.Getpid()))
 			}
 			require.NotNil(t, errors.Unwrap(err), "preserve the probe cause")
 		})
 	}
-}
-
-func TestUnverifiedUnreachableProcessHasNoSignalAdvice(t *testing.T) {
-	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: "future-v1:12345", Network: "tcp", Address: "127.0.0.1:1"}
-	reader := func(string) ([]kitdaemon.RuntimeRecord, error) { return []kitdaemon.RuntimeRecord{record}, nil }
-	probe := func(context.Context, string) (string, PingInfo, error) {
-		return "", PingInfo{}, errors.New("probe failed")
-	}
-	for _, err := range liveDaemonsUsing(t.Context(), t.TempDir(), reader, probe) {
-		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-		advice := err.Error()
-		require.NotContains(t, advice, "kill -QUIT")
-		require.NotContains(t, advice, "taskkill")
-		return
-	}
-	t.Fatal("unverifiable live record was not probed")
+	t.Run("unverified", func(t *testing.T) {
+		record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: "future-v1:12345", Network: "tcp", Address: "127.0.0.1:1"}
+		reader := func(string) ([]kitdaemon.RuntimeRecord, error) { return []kitdaemon.RuntimeRecord{record}, nil }
+		probe := func(context.Context, string) (string, PingInfo, error) {
+			return "", PingInfo{}, errors.New("probe failed")
+		}
+		for _, err := range liveDaemonsUsing(t.Context(), t.TempDir(), reader, probe) {
+			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+			advice := err.Error()
+			require.NotContains(t, advice, "kill -QUIT")
+			require.NotContains(t, advice, "taskkill")
+			return
+		}
+		t.Fatal("unverifiable live record was not probed")
+	})
 }
