@@ -35,7 +35,7 @@ func TestPreviewJobStates(t *testing.T) {
 			}
 			got, err := PreviewJob(job, tc.parent, now, 1)
 			if tc.newer {
-				require.Error(t, err)
+				require.ErrorIs(t, err, ErrInvalid)
 				return
 			}
 			require.NoError(t, err)
