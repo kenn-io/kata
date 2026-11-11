@@ -72,18 +72,12 @@ the owner's bearer credential from the daemon's authentication configuration
 The profiling listener may be the same listener that failed, so capture can also
 time out.
 
-`kata health` keeps the failed probe it observed first. When a storage or project
-problem blocks the selected profile, the same PID, endpoint, and capture advice
-follow that problem's own action. Recheck the daemon's current responsiveness
-before any terminating fallback.
-
-Check the reported `daemon.log`, if present, or retained foreground or supervisor
-stderr. Immediately before using a terminating fallback, verify that the PID
-still identifies this daemon and that the selected endpoint remains unresponsive.
-Unix operators can then choose to stop it with `kill -QUIT <pid>`, but only if
-the daemon's stderr is retained. SIGQUIT writes goroutine stacks to that stderr and
-terminates the daemon. If the stderr is discarded, the dump is lost. On Windows,
-`taskkill /PID <pid> /F` stops the recorded process.
+Check the reported `daemon.log`, if present, or the daemon's retained stderr.
+Stopping the process is optional. If you choose to stop it, immediately recheck
+that the PID still identifies this daemon and the selected endpoint still fails.
+Then on Unix, `kill -QUIT <pid>` stops it and writes goroutine stacks to its
+stderr, which are lost if stderr is discarded. On Windows, `taskkill /PID <pid> /F`
+stops the recorded process.
 
 After the process exits, choose the recovery command for its launch mode:
 

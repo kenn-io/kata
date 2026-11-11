@@ -63,7 +63,7 @@ func daemonDiagnoseCmd() *cobra.Command {
 		if err := validateExpectedProjectUID(expected); err != nil {
 			return err
 		}
-		result, _, err := diagnoseDaemon(cmd.Context(), expected, nil)
+		result, _, err := diagnoseDaemon(cmd.Context(), expected)
 		if err != nil {
 			return err
 		}
@@ -79,7 +79,7 @@ func daemonRecoverCmd() *cobra.Command {
 		if err := validateExpectedProjectUID(expected); err != nil {
 			return err
 		}
-		result, selection, err := diagnoseDaemon(cmd.Context(), expected, nil)
+		result, selection, err := diagnoseDaemon(cmd.Context(), expected)
 		if err != nil {
 			return err
 		}
@@ -95,7 +95,7 @@ func daemonRecoverCmd() *cobra.Command {
 		if _, err := client.EnsureLocalProfileSelection(cmd.Context(), selection); err != nil {
 			return cliDaemonTargetError(err, selection.Resolved.Name)
 		}
-		result, _, err = diagnoseDaemonSelection(cmd.Context(), expected, selection, nil)
+		result, _, err = diagnoseDaemonSelection(cmd.Context(), expected, selection)
 		if err != nil {
 			return err
 		}
@@ -117,30 +117,24 @@ func validateExpectedProjectUID(value string) error {
 	return nil
 }
 
-func diagnoseDaemon(ctx context.Context, expectedProject string, firstFailure *client.LocalDaemonUnreachableError) (daemonDiagnosis, client.DaemonSelection, error) {
+func diagnoseDaemon(ctx context.Context, expectedProject string) (daemonDiagnosis, client.DaemonSelection, error) {
 	selection, err := client.InspectSelection(ctx, workspaceStartForRemote(), flags.Daemon)
 	if err != nil {
 		return selectionErrorDiagnosis(err), selection, nil
 	}
-	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection, firstFailure)
-	return finalizeDiagnosis(result, err, firstFailure), selection, nil
+	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection)
+	return withSelectionError(result, err), selection, nil
 }
 
-// finalizeDiagnosis normalizes a selection failure and keeps any probe failure
-// this invocation already observed. A storage or project blocker keeps its own
-// action first and gains only the evidence to read, never a stop or restart.
-func finalizeDiagnosis(result daemonDiagnosis, err error, firstFailure *client.LocalDaemonUnreachableError) daemonDiagnosis {
-	if err != nil {
-		result.State = "selection_error"
-		result.Message = err.Error()
-		result = withDiagnosisAction(result)
+// withSelectionError reports a failure of the selection step over the
+// diagnosis gathered before it.
+func withSelectionError(result daemonDiagnosis, err error) daemonDiagnosis {
+	if err == nil {
+		return result
 	}
-	if firstFailure != nil && result.State != "local_unreachable" {
-		result.PID = firstFailure.PID
-		result.Endpoint = firstFailure.Address
-		result.NextAction += ". The failed probe reported " + firstFailure.Error() + ". To investigate, " + daemonCaptureAdvice(firstFailure) + "."
-	}
-	return result
+	result.State = "selection_error"
+	result.Message = err.Error()
+	return withDiagnosisAction(result)
 }
 
 func selectionErrorDiagnosis(err error) daemonDiagnosis {
@@ -187,7 +181,7 @@ func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
 }
 
 func diagnoseDaemonSelection(
-	ctx context.Context, expectedProject string, selection client.DaemonSelection, firstFailure *client.LocalDaemonUnreachableError,
+	ctx context.Context, expectedProject string, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
 	ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 	defer cancel()
@@ -276,7 +270,7 @@ func diagnoseDaemonSelection(
 			return withDiagnosisAction(result), selection, nil
 		}
 	}
-	result, selection, err = probeDaemonSelection(ctx, result, selection, firstFailure)
+	result, selection, err = probeDaemonSelection(ctx, result, selection)
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
 		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)
@@ -327,14 +321,12 @@ func inspectDiagnosisProject(ctx context.Context, store db.Storage, result *daem
 }
 
 func probeDaemonSelection(
-	ctx context.Context, result daemonDiagnosis, selection client.DaemonSelection, firstFailure *client.LocalDaemonUnreachableError,
+	ctx context.Context, result daemonDiagnosis, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
 	var err error
 	var resolved client.ResolvedDaemon
 	var found bool
-	if firstFailure != nil {
-		err = firstFailure
-	} else if selection.Profile != nil {
+	if selection.Profile != nil {
 		resolved, found, err = client.DiscoverLocalProfileSelection(ctx, selection)
 	} else if result.Kind == "remote" {
 		resolved = selection.Resolved
