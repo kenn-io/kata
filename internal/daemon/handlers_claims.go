@@ -804,9 +804,6 @@ func claimHubNow(claim *api.IssueClaimOut) time.Time {
 
 func claimForwardError(err error) error {
 	if statusErr, ok := errors.AsType[*claimHubStatusError](err); ok {
-		if statusErr.StatusCode == http.StatusUnauthorized {
-			return federationBridgeHubRejection(statusErr.StatusCode)
-		}
 		if statusErr.StatusCode == http.StatusServiceUnavailable && hubStatusErrorCode(statusErr) == "federation_offline" {
 			return api.NewError(http.StatusServiceUnavailable, "federation_offline", statusErr.Error(), "", nil)
 		}
