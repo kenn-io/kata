@@ -177,7 +177,7 @@ func refuseRunningDaemonWithMessage(ctx context.Context, message string) error {
 	}
 	_, ok, err := client.Discover(ctx, ns.DataDir)
 	if err != nil {
-		return cliDaemonTargetError(err)
+		return cliDaemonTargetError(err, "")
 	}
 	if ok {
 		return &cliError{

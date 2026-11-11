@@ -129,12 +129,17 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 	if v, ok := ctx.Value(client.BaseURLKey{}).(string); ok && v != "" {
 		return client.EnsureResolvedInWorkspace(ctx, "")
 	}
-	selection, err := client.InspectSelection(ctx, workspaceStartForRemote(), flags.Daemon)
+	workspaceStart := workspaceStartForRemote()
+	selection, err := client.InspectSelection(ctx, workspaceStart, flags.Daemon)
 	if err != nil {
-		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
+		return client.ResolvedDaemon{}, cliDaemonTargetError(err, "")
 	}
+	resolved, found, err := client.DiscoverSelection(ctx, selection, client.DiscoverRequest{
+		WorkspaceStart: workspaceStart,
+		Name:           flags.Daemon,
+		ProbeRemote:    flags.Daemon != "",
+	})
 	if selection.Profile != nil {
-		resolved, found, err := client.DiscoverLocalProfileSelection(ctx, selection)
 		if err != nil || !found {
 			diagnosis, _, diagnoseErr := diagnoseDaemonSelection(ctx, "", selection)
 			if diagnoseErr != nil {
@@ -144,13 +149,8 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 		}
 		return resolved, nil
 	}
-	resolved, found, err := client.DiscoverSelected(ctx, client.DiscoverRequest{
-		WorkspaceStart: workspaceStartForRemote(),
-		Name:           flags.Daemon,
-		ProbeRemote:    flags.Daemon != "",
-	})
 	if err != nil {
-		return resolved, cliDaemonTargetError(err)
+		return resolved, cliDaemonTargetError(err, "")
 	}
 	if !found {
 		return resolved, noDaemonRunningError()
@@ -180,12 +180,8 @@ func resolvedProfileName(resolved client.ResolvedDaemon) string {
 	return ""
 }
 
-func cliDaemonTargetError(err error, profiles ...string) error {
+func cliDaemonTargetError(err error, profile string) error {
 	if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-		profile := ""
-		if len(profiles) > 0 {
-			profile = profiles[0]
-		}
 		return &cliError{Message: err.Error(), Hint: localDaemonGuidance(unreachable, profile), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	}
 	code := ""

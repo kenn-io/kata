@@ -203,6 +203,22 @@ func TestLocalProfileSelectionPrecedenceAndRefresh(t *testing.T) {
 	assert.False(t, refreshed.ConfiguredRemote())
 }
 
+// Discovery must use the selected snapshot even if routing changes before it runs.
+func TestDiscoveryRetainsSelectedSnapshot(t *testing.T) {
+	_, root := localProfileFixture(t)
+	server := startResolvableDaemon(t)
+	t.Setenv("KATA_SERVER", server.URL)
+	selection, err := InspectSelection(t.Context(), root, "")
+	require.NoError(t, err)
+	require.Nil(t, selection.Profile)
+	t.Setenv("KATA_SERVER", "") // The workspace now selects the local profile.
+	resolved, found, err := DiscoverSelection(t.Context(), selection, DiscoverRequest{WorkspaceStart: root})
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, server.URL, resolved.BaseURL)
+	assert.Equal(t, DaemonSourceServerEnv, resolved.Source)
+}
+
 func TestLocalProfileLiveIdentityUsesWorkCredential(t *testing.T) {
 	profile, root := localProfileFixture(t)
 	t.Setenv("KATA_AUTH_TOKEN", "personal-token")
