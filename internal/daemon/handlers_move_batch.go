@@ -10,6 +10,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
 )
 
@@ -352,7 +353,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 						continue
 					}
 					r := &results[j]
-					r.Result, r.NewShortID, r.ShortIDExtended = "moved", item.Out.NewShortID, len(item.Out.NewShortID) > len(items[j].issue.ShortID)
+					r.Result, r.NewShortID, r.ShortIDExtended = "moved", item.Out.NewShortID, len(item.Out.NewShortID) > shortid.MinLength
 					r.EventID, r.Revision = item.Out.EventID, item.Out.NewRevision
 					r.To, r.Descendants = items[j].target.Name+"#"+item.Out.NewShortID, item.Out.Issues[1:]
 					succeeded[items[j].issue.ID] = *r

@@ -17,13 +17,14 @@ import (
 
 type batchReply struct {
 	Results []struct {
-		Index      int    `json:"index"`
-		Ref        string `json:"ref"`
-		Result     string `json:"result"`
-		Code       string `json:"code"`
-		EventID    int64  `json:"event_id"`
-		NewShortID string `json:"new_short_id"`
-		To         string `json:"to"`
+		Index           int    `json:"index"`
+		Ref             string `json:"ref"`
+		Result          string `json:"result"`
+		Code            string `json:"code"`
+		EventID         int64  `json:"event_id"`
+		NewShortID      string `json:"new_short_id"`
+		ShortIDExtended bool   `json:"short_id_extended"`
+		To              string `json:"to"`
 	} `json:"results"`
 	NextIndex int `json:"next_index"`
 }
@@ -65,6 +66,29 @@ func TestMoveIssuesBatch_MixedTargetsAndRerun(t *testing.T) {
 		require.Len(t, comments, 1)
 	}
 }
+func TestMoveIssuesBatch_ExtendedShortIDAtBothProjects(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	source, target, _ := seedMovePair(t, env)
+	for _, item := range []struct {
+		projectID int64
+		uid       string
+	}{
+		{source.ID, "01HZNQ7VFPK1XGD8R5MABCD4EX"},
+		{target.ID, "01HZNQ7VFPK1XGD8R5MABYD4EX"},
+	} {
+		_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: item.projectID, UID: item.uid, Title: "collision", Author: "tester"})
+		require.NoError(t, err)
+	}
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "move", Author: "tester"})
+	require.NoError(t, err)
+	require.Len(t, issue.ShortID, 5)
+	out := postMoveBatch(t, env, fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"items":[{"ref":%q}]}`, target.UID, issue.UID))
+	require.Len(t, out.Results, 1)
+	require.Equal(t, "moved", out.Results[0].Result)
+	require.Len(t, out.Results[0].NewShortID, 5)
+	require.True(t, out.Results[0].ShortIDExtended)
+}
+
 func TestMoveIssuesBatch_DuplicateConflictDryRun(t *testing.T) {
 	for _, mode := range []string{"duplicate", "conflict", "dry"} {
 		t.Run(mode, func(t *testing.T) {
