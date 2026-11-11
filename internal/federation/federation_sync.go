@@ -493,8 +493,8 @@ func syncDirectSpoke(
 				}
 				if err == nil {
 					projectID = project.ID
-					projectsByUID[ev.ProjectUID] = projectID
 				}
+				projectsByUID[ev.ProjectUID] = projectID
 			}
 			eventProjects[i] = projectID
 			if projectID != 0 && ev.OriginInstanceUID == localInstanceUID {
@@ -535,11 +535,16 @@ func syncDirectSpoke(
 		}
 		for i, ev := range body.Events {
 			if eventProjects[i] == 0 {
-				project, err := store.ProjectByUID(ctx, ev.ProjectUID)
-				if err != nil {
-					return fmt.Errorf("resolve persisted project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+				projectID := projectsByUID[ev.ProjectUID]
+				if projectID == 0 {
+					project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+					if err != nil {
+						return fmt.Errorf("resolve persisted project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+					}
+					projectID = project.ID
+					projectsByUID[ev.ProjectUID] = projectID
 				}
-				eventProjects[i] = project.ID
+				eventProjects[i] = projectID
 			}
 		}
 		deliverUIDs := map[int64][]string{}

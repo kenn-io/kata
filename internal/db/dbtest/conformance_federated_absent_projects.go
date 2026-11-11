@@ -3,6 +3,7 @@ package dbtest
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -62,6 +63,8 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	require.NoError(t, err)
 	require.NotNil(t, retained.DeletedAt)
 	require.NotEqual(t, collision.Name, retained.Name)
+	_, err = receiver.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: retained.ID, Actor: "worker"})
+	require.ErrorIs(t, err, db.ErrFederationProjectIdentityRequired)
 	unchanged, err := receiver.ProjectByUID(ctx, collision.UID)
 	require.NoError(t, err)
 	require.Equal(t, collision.Name, unchanged.Name)
@@ -84,5 +87,40 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	endpoint, err := other.ProjectByUID(ctx, source.UID)
 	require.NoError(t, err)
 	require.NotNil(t, endpoint.DeletedAt)
+	_, err = other.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: endpoint.ID, Actor: "worker"})
+	require.ErrorIs(t, err, db.ErrFederationProjectIdentityRequired)
+
+	// A cold source route retains the outbound move even without an issue row.
+	cold := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, cold.Close()) })
+	coldRoute, err := cold.CreateProjectWithUID(ctx, "cold-source", source.UID)
+	require.NoError(t, err)
+	existing, err := cold.CreateProjectWithUID(ctx, "existing-target", target.UID)
+	require.NoError(t, err)
+	_, _, err = cold.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: existing.ID, Actor: "worker"})
+	require.NoError(t, err)
+	_, err = cold.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: coldRoute.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, Actor: "worker"})
+	require.NoError(t, err)
+	_, err = cold.InsertRemoteEvents(ctx, coldRoute.ID, []db.RemoteEvent{creation, move})
+	require.NoError(t, err)
+	require.NoError(t, cold.MaterializeFederatedProject(ctx, coldRoute.ID))
+	_, err = cold.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	_, err = cold.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: existing.ID, Actor: "worker"})
+	require.ErrorIs(t, err, db.ErrFederationProjectIdentityRequired)
+
+	// A move that cannot rehome a claimed external root reports its own envelope.
+	from, to, pinned, blocked := federatedRehomeFixture(t, hub, "apply-error")
+	prepareRehomePull(t, hub, from, to, "pull")
+	root, _, err := hub.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: from.ID, IssueID: pinned.ID, ConnectorInstance: "notes", ExternalRootKey: "root", ExternalAccountKey: "account", Actor: "worker", ReceiveCommentsAfter: time.Now().UTC()})
+	require.NoError(t, err)
+	_, _, err = hub.ClaimExternalRootBinding(ctx, root.ID, "bridge-worker", time.Now().UTC(), time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter))
+	require.NoError(t, err)
+	_, err = hub.InsertRemoteEvents(ctx, to.ID, []db.RemoteEvent{blocked})
+	require.NoError(t, err)
+	err = hub.MaterializeFederatedProject(ctx, to.ID)
+	require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
+	require.ErrorContains(t, err, blocked.EventUID)
+	require.ErrorContains(t, err, blocked.ProjectUID)
 	return nil
 }

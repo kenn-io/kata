@@ -284,9 +284,15 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		var relay bool
 		if err := tx.QueryRowContext(ctx, `SELECT role,enabled,relay_config IS NOT NULL
  FROM federation_bindings WHERE project_id=$1`, route).Scan(&role, &enabled, &relay); err != nil {
+			if missing && errors.Is(err, sql.ErrNoRows) {
+				return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
+			}
 			return 0, err
 		}
 		if role != string(FederationRoleSpoke) || enabled != 1 || relay {
+			if missing {
+				return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
+			}
 			return 0, errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)
 		}
 	}
@@ -295,9 +301,25 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
 		}
 	}
+	dependencies := []string{e.ProjectUID}
 	if e.Type == "issue.moved" {
 		if _, _, err := federationMoveProjects(ctx, tx, route, e, true); err != nil {
 			return 0, err
+		}
+		payload := PayloadMap(e.Payload)
+		from, _ := StringValue(payload["from_project_uid"])
+		to, _ := StringValue(payload["to_project_uid"])
+		dependencies = append(dependencies, from, to)
+	}
+	if missing || project != route || e.Type == "issue.moved" {
+		var routeUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, route).Scan(&routeUID); err != nil {
+			return 0, err
+		}
+		for _, uid := range dependencies {
+			if err := recordFederationProjectIdentityDependency(ctx, tx, routeUID, uid); err != nil {
+				return 0, err
+			}
 		}
 	}
 	if missing {
@@ -319,7 +341,7 @@ func retainFederationProject(ctx context.Context, tx *sql.Tx, uid string) (int64
 		}
 		var id int64
 		err := tx.QueryRowContext(ctx, `INSERT INTO projects(uid,name,deleted_at) VALUES($1,$2,$3)
- ON CONFLICT DO NOTHING RETURNING id`, uid, name, time.Now().UTC().Format(time.RFC3339Nano)).Scan(&id)
+ ON CONFLICT DO NOTHING RETURNING id`, uid, name, time.Now().UTC().Format(EventTimestampFormat)).Scan(&id)
 		if err == nil {
 			return id, nil
 		}
