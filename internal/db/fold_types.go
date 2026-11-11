@@ -39,6 +39,7 @@ type FoldProjection struct {
 	ProjectMetadata map[string]jsontext.Value
 	Warnings        []string
 	cronAuthors     map[string]foldCronAuthorCandidate
+	snapshotClocks  map[string]FoldClock
 }
 
 // FoldCronJob retains project identity alongside the winning job document.
