@@ -2128,6 +2128,24 @@ func preflightEmbeddingStartup(
 		return nil, "", nil
 	}
 	cfg := embeddingClientConfig(ec)
+	if ec.UsesLocal() {
+		cfg.Endpoint = func(ctx context.Context) (string, error) {
+			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
+				backend, err := storeopen.BackendForDSN(dbPath)
+				if err != nil {
+					return false, err
+				}
+				chosen := false
+				if backend == storeopen.BackendSQLite {
+					chosen, err = embedlocal.ChoiceRecorded()
+				}
+				if err == nil && !chosen {
+					err = errors.New("run kata daemon local-embeddings to approve the download")
+				}
+				return chosen, err
+			})
+		}
+	}
 	embedder, err := embedding.New(cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
@@ -2167,22 +2185,6 @@ func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
 		}
 		if cfg.Timeout == 0 {
 			cfg.Timeout = embedlocal.RequestTimeout
-		}
-		cfg.Endpoint = func(ctx context.Context) (string, error) {
-			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
-				backend, err := storeopen.BackendForDSN(dbPath)
-				if err != nil {
-					return false, err
-				}
-				chosen := false
-				if backend == storeopen.BackendSQLite {
-					chosen, err = embedlocal.ChoiceRecorded()
-				}
-				if err == nil && !chosen {
-					err = errors.New("run kata daemon local-embeddings to approve the download")
-				}
-				return chosen, err
-			})
 		}
 	}
 	return cfg
