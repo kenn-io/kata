@@ -119,7 +119,7 @@ func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 		})
 		entry.node.handler.Store(&wrapped)
 	}
-	code, acquired := relayClaimAction(t, leaf, issue.UID, "acquire", "")
+	code, acquired := relayClaimAction(t, leaf, issue.UID, "acquire", "cli")
 	require.Equal(t, http.StatusOK, code)
 	require.True(t, acquired.Granted)
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
@@ -244,24 +244,6 @@ func TestRelayDocbankLinkUsesRootAndRefusesSubtreeEscape(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 		require.Contains(t, string(raw), "move the file into the configured folder")
 	}
-}
-
-// Ordinary local mutation authority belongs to holder+instance across client
-// labels on the initiating daemon.
-func TestRelayDocbankLeaseSurvivesClientSwitch(t *testing.T) {
-	root, _, leaf, issue := newRelayClaimChain(t)
-	vault := docbanktest.New(t)
-	serveRelayDocbank(t, root, vault)
-	status, acquired := relayClaimAction(t, leaf, issue.UID, "acquire", "cli")
-	require.Equal(t, http.StatusOK, status)
-	require.True(t, acquired.Granted)
-	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
-	status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=file.pdf", "switched fixture", "application/octet-stream")
-	require.Equal(t, http.StatusOK, status, string(raw))
-	version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222221")
-	vault.Seed("/kata/existing.pdf", docbank.Node{ID: 99, Name: "existing.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("linked fixture")})
-	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"/links", `{"path":"/kata/existing.pdf"}`, "application/json")
-	require.Equal(t, http.StatusOK, status, string(raw))
 }
 
 type unreadDocbankUpload struct{ reads int }

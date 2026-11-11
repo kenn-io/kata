@@ -175,9 +175,10 @@ func TestDocbankForwardRejectsFormerRouteAfterRebind(t *testing.T) {
 type rebindEntryStore struct {
 	db.Storage
 	entered chan struct{}
+	once    sync.Once
 }
 
 func (s *rebindEntryStore) InstanceUID() string {
-	close(s.entered)
+	s.once.Do(func() { close(s.entered) })
 	return s.Storage.InstanceUID()
 }

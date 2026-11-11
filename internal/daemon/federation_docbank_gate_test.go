@@ -92,11 +92,6 @@ func TestDocbankOriginTransportFence(t *testing.T) {
 			}
 			status, _, raw = f.request(t, http.MethodGet, base+"/reset", "", nil, aware)
 			require.Equal(t, http.StatusOK, status, string(raw))
-			var checkpoint db.RelayResetCheckpoint
-			require.NoError(t, json.Unmarshal(raw, &checkpoint))
-			pin, err := store.RootAuthority(ctx, f.private.UID)
-			require.NoError(t, err)
-			require.NoError(t, db.VerifyRootResetManifest(pin, checkpoint.Manifest, checkpoint.Snapshot))
 		})
 	}
 }

@@ -94,6 +94,18 @@ it('ignores an in-flight preview response after the attachment origin changes', 
     expect(screen.getByAltText('screen.png').getAttribute('src')).toBe('blob:new-origin'),
   )
   expect(fetchAttachment).toHaveBeenCalledTimes(2)
+})
+
+it('revokes previews when attachments become unavailable', async () => {
+  vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:new-origin')
+  const { rerender } = render(IssueAttachments, {
+    attachmentsEnabled: true,
+    attachments: { [id]: entry },
+    baseURL: '/attachments',
+    fetchAttachment: vi.fn(async () => new Blob(['image'], { type: 'image/png' })),
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
+  await waitFor(() => expect(screen.getByAltText('screen.png').getAttribute('src')).toBe('blob:new-origin'))
   await rerender({ attachmentsEnabled: false })
   await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:new-origin'))
   expect(screen.queryByAltText('screen.png')).toBeNull()
@@ -300,11 +312,6 @@ it('offers downloads for types outside the inline list', () => {
 })
 
 it('gives each reference a stable history anchor', () => {
-  const { container } = render(IssueAttachments, {
-    attachments: { [id]: entry },
-    baseURL: '/attachments',
-  })
-  expect(container.querySelector(`[id="kata-attachment-${id}"]`)?.textContent).toContain(
-    'screen.png',
-  )
+  const { container } = render(IssueAttachments, { attachments: { [id]: entry }, baseURL: '/attachments' })
+  expect(container.querySelector(`[id="kata-attachment-${id}"]`)?.textContent).toContain('screen.png')
 })
