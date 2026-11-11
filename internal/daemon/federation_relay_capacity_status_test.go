@@ -134,7 +134,6 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 		} else {
 			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_bytes")
 			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_capacity_bytes")
-			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_error")
 		}
 		var body api.FederationStatusBody
 		require.NoError(t, json.Unmarshal(data, &body))

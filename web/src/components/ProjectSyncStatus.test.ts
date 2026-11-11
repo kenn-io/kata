@@ -36,22 +36,31 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('ProjectSyncStatus', () => {
-  it.each(['network', 'body', '503'])(
-    'recovers on the next cycle after %s failure',
+  it.each(['network', 'body', '503', 403, 404, 'mismatch', 'malformed 403', '403 body read error'])(
+    'clears status after %s and retries on the next cycle',
     async (failure) => {
       const fetcher = vi.fn().mockResolvedValueOnce(response())
       if (failure === 'network') fetcher.mockRejectedValueOnce(new TypeError('network failure'))
-      else if (failure === 'body')
+      else if (failure === 'body' || failure === '403 body read error') {
         fetcher.mockResolvedValueOnce(
           new Response(
             new ReadableStream({
               start(controller) {
-                controller.error(new TypeError('connection dropped'))
+                controller.error(new TypeError('body read failed'))
               },
             }),
+            { status: failure === 'body' ? 200 : 403 },
           ),
         )
-      else fetcher.mockResolvedValueOnce(new Response('', { status: 503 }))
+      } else if (failure === 'mismatch') fetcher.mockResolvedValueOnce(response(9))
+      else if (failure === 'malformed 403')
+        fetcher.mockResolvedValueOnce(
+          new Response('{', {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      else fetcher.mockResolvedValueOnce(new Response('', { status: Number(failure) }))
       setGeneratedFetch(fetcher.mockResolvedValueOnce(response()))
       const view = render(ProjectSyncStatus, {
         props: { projectID: 7, projectUID, refreshGeneration: 0 },
@@ -59,8 +68,10 @@ describe('ProjectSyncStatus', () => {
       await screen.findByText('Pending: 2')
       await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
       await screen.findByText('Sync status unavailable. Refresh to retry.')
+      expect(screen.queryByText('Pending: 2')).toBeNull()
       await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
       await screen.findByText('Pending: 2')
+      expect(fetcher).toHaveBeenCalledTimes(3)
     },
   )
 
@@ -216,7 +227,8 @@ describe('ProjectSyncStatus', () => {
     })
     await screen.findByText('Pending: 2')
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    expect(screen.getByText('Reading sync status…')).not.toBeNull()
+    await waitFor(() => expect(screen.getByText('Reading sync status…')).not.toBeNull())
+    expect(screen.queryByText('Pending: 2')).toBeNull()
     expect(
       (screen.getByRole('button', { name: 'Refresh sync' }) as HTMLButtonElement).disabled,
     ).toBe(true)
@@ -299,46 +311,6 @@ describe('ProjectSyncStatus', () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
     hidden.mockRestore()
   })
-
-  it.each([403, 404, 'mismatch', 'malformed 403', '403 body read error'])(
-    'clears status after %s and retries on the next cycle',
-    async (code) => {
-      const fetcher = vi
-        .fn()
-        .mockResolvedValueOnce(response())
-        .mockResolvedValueOnce(
-          code === '403 body read error'
-            ? new Response(
-                new ReadableStream({
-                  start(controller) {
-                    controller.error(new TypeError('body read failed'))
-                  },
-                }),
-                { status: 403 },
-              )
-            : code === 'mismatch'
-              ? response(9)
-              : code === 'malformed 403'
-                ? new Response('{', {
-                    status: 403,
-                    headers: { 'Content-Type': 'application/json' },
-                  })
-                : new Response('', { status: Number(code) }),
-        )
-        .mockResolvedValueOnce(response())
-      setGeneratedFetch(fetcher)
-      const view = render(ProjectSyncStatus, {
-        props: { projectID: 7, projectUID, refreshGeneration: 0 },
-      })
-      await screen.findByText('Pending: 2')
-      await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-      await screen.findByText('Sync status unavailable. Refresh to retry.')
-      expect(screen.queryByText('Pending: 2')).toBeNull()
-      await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
-      await screen.findByText('Pending: 2')
-      expect(fetcher).toHaveBeenCalledTimes(3)
-    },
-  )
 
   it('updates an empty local project when federation appears', async () => {
     const fetcher = vi
