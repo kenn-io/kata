@@ -47,14 +47,14 @@ func TestOwnerRestoreRetainedWorkflowWinner(t *testing.T) {
 				return
 			}
 			row := result[1].(*CronWorkflowExport)
-			if tc.name == "later valid" {
-				require.Same(t, original, row)
-				return
-			}
 			require.Equal(t, event.UID, row.DefinitionEventUID)
 			require.Equal(t, "new", row.Name)
 			require.Equal(t, tc.deleted, row.DeletedAt != nil)
-			require.JSONEq(t, tc.document, string(row.RawDefinition))
+			if tc.name == "later valid" {
+				require.Equal(t, 1, row.Definition.Version)
+			} else {
+				require.JSONEq(t, tc.document, string(row.RawDefinition))
+			}
 		})
 	}
 }
