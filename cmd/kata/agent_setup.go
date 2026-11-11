@@ -172,7 +172,7 @@ func agentSetupRecovery(name string) string {
 	if err != nil {
 		return "Install Kata on PATH, then run kata agent-hook install " + name + " --executable kata"
 	}
-	command, _ := agenthook.BuildCommand("kata", "agent-hook", "install", name, "--executable", exe)
+	command, _ := agenthook.BuildCommand(exe, "agent-hook", "install", name, "--executable", exe)
 	return command.Native
 }
 
@@ -312,9 +312,6 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 		}
 		state := agentsetup.State(result.State)
 		counts[state] += result.HookCount
-		if state == agentsetup.StateMissing {
-			result.Reason = "Kata hooks are not installed"
-		}
 		if state == agentsetup.StateMissing || state == agentsetup.StateOutdated {
 			return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: opts.ConfigPath, Reason: "Hook inspection found conflicting commands", NextStep: "Inspect hooks in the agent"}, nil
 		}
@@ -323,9 +320,6 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 		}
 	}
 	status.HookCount = counts[status.State]
-	if status.State == agentsetup.StateMissing || status.State == agentsetup.StateOutdated {
-		status.NextStep = "kata agent setup " + opts.Agent
-	}
 	return status, nil
 }
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -117,11 +119,15 @@ func TestCodexConditionalHookKeepsForeignGroupIndex(t *testing.T) {
 	require.NoError(t, err)
 	entries, err := inspectAgentHookEntries("codex", path)
 	require.NoError(t, err)
-	var foreignFound, contractFound bool
+	var foreignFound, conditionalFound, contractFound bool
 	for _, entry := range entries {
 		if entry.Kind == contractHook && entry.Event == "SessionStart" {
-			contractFound = true
-			require.Equal(t, 0, entry.GroupIndex)
+			if entry.GroupFields["if"] == "condition" {
+				conditionalFound = true
+				require.Equal(t, 0, entry.GroupIndex)
+			} else {
+				contractFound = true
+			}
 		}
 		if entry.Command == "foreign-hook" {
 			foreignFound = true
@@ -129,11 +135,19 @@ func TestCodexConditionalHookKeepsForeignGroupIndex(t *testing.T) {
 		}
 	}
 	require.True(t, foreignFound)
+	require.True(t, conditionalFound)
 	require.True(t, contractFound)
 	contract, start, end := kitAgentHookConfigured("codex", entries)
 	require.True(t, contract)
 	require.True(t, start)
 	require.True(t, end)
+	before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
+	require.NoError(t, err)
+	_, err = runHookSetup(t, "install", "codex", "--executable", os.Args[0])
+	require.NoError(t, err)
+	after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 }
 
 func TestAgentSetupCodexMissing(t *testing.T) {
@@ -173,8 +187,7 @@ func TestAgentSetupPreservesGroupMetadata(t *testing.T) {
 			var doc map[string]any
 			require.NoError(t, json.Unmarshal(data, &doc))
 			group := doc["hooks"].(map[string]any)["SessionStart"].([]any)[0].(map[string]any)
-			group["enabled"] = false
-			group["if"] = "metadata"
+			group["description"] = "metadata"
 			group["hooks"] = append(group["hooks"].([]any), map[string]any{"type": "command", "command": "foreign-hook", "custom": "preserved"})
 			data, err = json.Marshal(doc)
 			require.NoError(t, err)
@@ -282,12 +295,41 @@ func TestAgentSetupConflictingExecutables(t *testing.T) {
 	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude")
 	require.Error(t, err)
 	require.Contains(t, out, "unknown")
-	require.Contains(t, out, "kata agent-hook install claude --executable ")
+	require.Contains(t, out, "agent-hook install claude --executable ")
 	after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
 	require.NoError(t, err)
 	require.Equal(t, data, string(after))
 	check := doctorAgent(t.Context(), "claude")
-	require.Contains(t, check.Fix, "kata agent-hook install claude --executable ")
+	require.Contains(t, check.Fix, "agent-hook install claude --executable ")
+}
+
+func TestAgentSetupRecoveryWithoutKataOnPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("recovery command is executed by a POSIX shell")
+	}
+	bin := filepath.Join(t.TempDir(), "kata with spaces")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".") //nolint:gosec // Test-owned output path and fixed package.
+	output, err := build.CombinedOutput()
+	require.NoError(t, err, string(output))
+	home := isolateAgentHookHomes(t)
+	t.Setenv("PATH", t.TempDir())
+	path := filepath.Join(home, "claude", "settings.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+	data := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract claude"},{"type":"command","command":"/usr/bin/kata agent-hook attention-native claude start"}]}]}}`
+	require.NoError(t, os.WriteFile(path, []byte(data), 0600))
+	check := exec.CommandContext(t.Context(), bin, "agent", "setup", "claude", "--check", "--json") //nolint:gosec // Test-built executable and fixed arguments.
+	output, err = check.Output()
+	require.Error(t, err)
+	var report struct {
+		Rows []struct {
+			NextStep string `json:"next_step"`
+		} `json:"rows"`
+	}
+	require.NoError(t, json.Unmarshal(output, &report))
+	require.Len(t, report.Rows, 1)
+	repair := exec.CommandContext(t.Context(), "/bin/sh", "-c", report.Rows[0].NextStep) //nolint:gosec // Execute the CLI's suggested command in the isolated home.
+	output, err = repair.CombinedOutput()
+	require.NoError(t, err, string(output))
 }
 
 func TestAgentSetupPreservesPiExecutable(t *testing.T) {

@@ -317,6 +317,9 @@ func effectiveAgentHookDefault(agent agenthook.Agent, entry agentHookEntry) bool
 			return false
 		}
 	}
+	if !sameAgentHookGroupBehavior(entry.GroupFields, nil) {
+		return false
+	}
 	if agent == agenthook.AgentCodex {
 		if timeout, exists := entry.Fields["timeout"]; exists && !sufficientCodexContractTimeout(timeout) {
 			return false
@@ -345,7 +348,7 @@ func ownedAgentHookEntriesMatch(current, desired []agentHookEntry, kind agentHoo
 	owned := func(entries []agentHookEntry) []agentHookEntry {
 		var result []agentHookEntry
 		for _, entry := range entries {
-			if classifyAgentHookHandlerFromEntry(entry) == kind {
+			if classifyAgentHookHandlerFromEntry(entry) == kind && sameAgentHookGroupBehavior(entry.GroupFields, nil) {
 				result = append(result, entry)
 			}
 		}
@@ -357,6 +360,15 @@ func ownedAgentHookEntriesMatch(current, desired []agentHookEntry, kind agentHoo
 	}
 	for i := range before {
 		if before[i].Event != after[i].Event || before[i].Matcher != after[i].Matcher || !reflect.DeepEqual(before[i].Fields, after[i].Fields) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameAgentHookGroupBehavior(before, after map[string]any) bool {
+	for _, key := range []string{"if", "condition", "enabled", "disabled", "async", "once"} {
+		if !reflect.DeepEqual(before[key], after[key]) {
 			return false
 		}
 	}
@@ -568,7 +580,7 @@ func protectAgentHookCommands(agent agenthook.Agent, data []byte, entries, desir
 				}
 			}
 		}
-		if classifyAgentHookHandlerFromEntry(entry) == kind {
+		if classifyAgentHookHandlerFromEntry(entry) == kind && (desired == nil || sameAgentHookGroupBehavior(entry.GroupFields, nil)) {
 			if agent == agenthook.AgentCopilot {
 				handler["bash"] = marker
 			} else {
