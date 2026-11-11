@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
@@ -74,20 +75,22 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	// The existing local workflow was already pushed before relay enrollment.
 	_, err = downstream.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "company-member", Enabled: true, PushEnabled: true, PushCursorEventID: localEvent.ID})
 	require.NoError(t, err)
-	_, err = downstream.SetRelayBindingConfig(ctx, replica.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID, AuthorityUID: root.InstanceUID(), UpstreamInstanceUID: root.InstanceUID(), HubPath: []string{root.InstanceUID(), downstream.InstanceUID()}, LocalActor: "company-member", ResetEpoch: 1})
+	_, err = downstream.SetRelayBindingConfig(ctx, replica.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID, AuthorityUID: root.InstanceUID(), UpstreamInstanceUID: root.InstanceUID(), HubPath: []string{root.InstanceUID(), downstream.InstanceUID()}, LocalActor: "company-member", ServeDownstream: true, ResetEpoch: 1})
 	require.NoError(t, err)
-	{
-		section := "source"
-		{
-			definition := `{"version":1,"steps":null}`
+	for _, section := range []string{"source", "entity"} {
+		for _, definition := range []string{`null`, `{"version":1,"steps":null}`} {
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, project, pin, private, section, definition)
 			_, _, err := db.DecodeRootResetPayload(pin, bad.Snapshot)
 			require.NoError(t, err, "owner backup integrity decoding preserves held content")
 			err = installer.InstallRelayReset(ctx, bindingUID, bad.Manifest, bad.Snapshot, bad.Translation)
 			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "unsupported signed workflow must not be installed")
+			assert.ErrorIs(t, err, db.ErrHeldWorkflowEvidence, "held signed workflow must retain its recovery classification")
 			binding, err := downstream.FederationBindingByProject(ctx, replica.ID)
 			require.NoError(t, err)
 			require.Equal(t, int64(1), binding.RelayConfig.ResetEpoch)
+			require.Equal(t, localEvent.ID, binding.PushCursorEventID)
+			_, err = downstream.CronWorkflow(ctx, replica.ID, localWinner.UID)
+			require.NoError(t, err)
 		}
 	}
 
@@ -141,6 +144,38 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	require.NoError(t, installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation), "lost commit response retries the exact retained checkpoint")
+
+	// An authentic retained checkpoint can come from an owner restore even when
+	// this version cannot use its workflow evidence for a new downstream hop.
+	childParent, _, err := downstream.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "cron-reset-forward-parent-test-token", Actor: "worker", AdminActor: "admin"}) // #nosec G101 -- synthetic fixture token.
+	require.NoError(t, err)
+	child, err := downstream.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: replica.ID, ParentTokenID: childParent.ID, SpokeInstanceUID: "00000000000000000000000008", ProtocolVersion: db.RelayProtocolVersion, Token: "cron-reset-forward-child-test-token"}) // #nosec G101 -- synthetic fixture token.
+	require.NoError(t, err)
+	drainRelayGrant(t, downstream, child.Enrollment.RelayBindingUID, child.Enrollment.RelayResetEpoch)
+	installedKey := db.RelayResetMetadataPrefix + project.UID
+	reader := downstream.(interface {
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	})
+	var installedRaw string
+	require.NoError(t, reader.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, installedKey).Scan(&installedRaw))
+	var installed db.RelayResetCheckpoint
+	require.NoError(t, json.Unmarshal([]byte(installedRaw), &installed))
+	bad := checkpointWithWorkflowDefinition(t, installed, project, pin, private, "source", `null`)
+	raw, err := json.Marshal(bad)
+	require.NoError(t, err)
+	_, err = q.ExecContext(ctx, `UPDATE meta SET value=$1 WHERE key=$2`, string(raw), installedKey)
+	require.NoError(t, err)
+	_, _, err = db.DecodeRootResetPayload(pin, bad.Snapshot)
+	require.NoError(t, err)
+	_, err = installer.CreateRelayReset(ctx, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	assert.ErrorIs(t, err, db.ErrHeldWorkflowEvidence)
+	var retained string
+	require.NoError(t, reader.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, installedKey).Scan(&retained))
+	require.Equal(t, string(raw), retained)
+	var childCaches int
+	require.NoError(t, reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM meta WHERE key=$1`, installedKey+"."+child.Enrollment.RelayBindingUID).Scan(&childCaches))
+	require.Zero(t, childCaches, "refusal must not prepare a downstream checkpoint")
 }
 
 // checkpointWithWorkflowDefinition signs a historical record without changing
@@ -165,7 +200,11 @@ func checkpointWithWorkflowDefinition(t *testing.T, checkpoint db.RelayResetChec
 	require.NotEmpty(t, original.Type)
 	payload := make(map[string]jsontext.Value)
 	require.NoError(t, json.Unmarshal(original.Payload, &payload))
-	payload["definition"] = jsontext.Value(definition)
+	if definition == "" {
+		delete(payload, "definition")
+	} else {
+		payload["definition"] = jsontext.Value(definition)
+	}
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
 	event := newRemoteEvent(t, project, nil, original.Type, original.Actor, pin.AuthorityUID, original.HLCPhysicalMS, jsontext.Value(raw))

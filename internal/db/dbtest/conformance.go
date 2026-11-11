@@ -164,8 +164,8 @@ var storageScenarios = []scenario{
 		RunRelayOffersLegacyIngestedEvents(t, store)
 		return nil
 	}},
-	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, run: func(t *testing.T, store db.Storage) error {
-		RunRelayOutboxAtomicity(t, store)
+	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayOutboxAtomicity(t, store, backend)
 		seen := 0
 		for record, err := range store.ExportRelayState(t.Context()) {
 			require.NoError(t, err)

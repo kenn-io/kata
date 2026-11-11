@@ -264,6 +264,13 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 				if err := checkRunWorkflowDocument(document, features); err != nil {
 					return err
 				}
+				support, err := workflowRevisionSupport(ctx, tx, a.Postgres, project.ID, map[string]string{*ref.event: *ref.id}, features)
+				if err != nil {
+					return err
+				}
+				if err := support[*ref.event]; err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -274,7 +281,7 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 			if err != nil {
 				return fmt.Errorf("%w: job revision is unsupported: %v", cron.ErrInvalid, err)
 			}
-			if job.Action.WorkflowUID != "" {
+			if job.Action.WorkflowUID != "" && (value.WorkflowUID == nil || *value.WorkflowUID != job.Action.WorkflowUID) {
 				if _, err := cronDependency(ctx, tx, a.Postgres, project.ID, "cron_workflows", "workflow", job.Action.WorkflowUID, features); err != nil {
 					return err
 				}

@@ -166,9 +166,10 @@ func requireUsableResetEvents(events []RemoteEvent) error {
 			if err := json.Unmarshal(event.Payload, &body); err != nil {
 				return fmt.Errorf("%w: workflow payload: %v", ErrUnsupportedEventFeatures, err)
 			}
-			// Only classify shapes the historical decoder retained as held evidence.
-			// Future versions, kinds, and other decode failures remain unsupported.
-			if historical, err := cron.DecodeHistoricalWorkflow(body.Definition); err == nil && historical.Version == 1 {
+			// Only classify shapes the historical decoder retained as held evidence,
+			// including an explicit null definition. Future versions, kinds, and
+			// other decode failures remain unsupported.
+			if historical, err := cron.DecodeHistoricalWorkflow(body.Definition); err == nil && (historical.Version == 1 || body.Definition.Kind() == 'n') {
 				known := true
 				for _, step := range historical.Steps {
 					if step.Kind != "" && step.Kind != "command" && step.Kind != "prompt" && step.Kind != "argv" {

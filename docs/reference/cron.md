@@ -662,6 +662,11 @@ downloaded, forwarded, installed, or activated. Taking an owner backup retains
 the evidence; it does not make the checkpoint usable by an older version.
 Use a version that understands the retained format for recovery. A newer
 supported workflow does not clear older retained evidence.
+Legacy replay-horizon resets and signed checkpoint installation also refuse when
+local workflow rows or retained events are unsupported. The reset remains
+blocked on later polls until that evidence can be handled safely. The owner
+backup and replacement workflow above preserve recovery options. They do not
+authorize deleting evidence or bypassing the reset refusal.
 
 ### Upgrade limits
 
@@ -830,13 +835,22 @@ A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
 
 Before recording a running observation or starting any step, an adapter must
-check the entire workflow for step kinds it cannot execute, including steps after
-supported ones. If it finds one, it starts no steps and records a failed
+refuse workflow versions it does not understand and check the entire workflow
+for step kinds it cannot execute, including steps after supported ones. The
+reference example uses `reason: unsupported_version` for an unsupported version
+under the adapter-defined reason convention above. If the adapter finds an
+unsupported step, it starts no steps and records a failed
 observation directly. For a new run UID, use expected revision 0; no preceding
 running observation is needed. Put `reason: unsupported_step` on the first line
 of `summary.message` and identify the unsupported step key and kind in the
-human-readable detail. For example, the detail may include `step: <key>`; its
-format is not a fixed protocol.
+human-readable detail. For example, the detail may include `step: <key>` and
+`kind: <kind>`; its format is not a fixed protocol.
+
+When argv reads are enabled, clients that support the argv representation declare
+`cron_workflow_argv_v1` in the request's `X-Kata-Event-Features` header. This
+declares format support, while the capabilities response describes daemon
+features. Each adapter separately checks which step kinds it can execute before
+starting work.
 
 An adapter that supports an `argv` step passes the vector literally to the
 process: the first element is the executable and the remaining elements are

@@ -72,7 +72,11 @@ func (h toolHandlers) cronPutWorkflow(ctx context.Context, req *sdkmcp.CallToolR
 	if err := json.Unmarshal(req.Params.Arguments, &arguments); err != nil {
 		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
-	if _, err := cron.ParseWorkflow(arguments.Definition); err != nil {
+	definition := arguments.Definition.Clone()
+	if err := definition.Compact(); err != nil {
+		return nil, generated.ReplaceCronWorkflowResponse{}, err
+	}
+	if _, err := cron.ParseWorkflow(definition); err != nil {
 		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)

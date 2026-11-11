@@ -81,6 +81,9 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 			err = rows.Err()
 		}
 		_ = rows.Close()
+		if features, ok := db.RelayPeerFeatures(ctx, bindingUID); err == nil && ok {
+			err = db.CheckRelayBatchFeatures(db.RelayBatch{Stream: stream, Envelopes: output}, features)
+		}
 		if err != nil {
 			return err
 		}

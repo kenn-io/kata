@@ -3,9 +3,11 @@ package dbtest
 import (
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json/v2"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
@@ -89,13 +91,22 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	require.NoError(t, err)
 	checkpoint, err := resets.CreateRelayReset(ctx, binding, signer)
 	require.NoError(t, err)
-	for _, section := range []string{"source"} {
+	metaReader := store.(interface {
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	})
+	key := db.RelayResetMetadataPrefix + selected.UID + "." + binding
+	for _, section := range []string{"source", "entity"} {
 		for _, tc := range []struct {
 			definition string
 			held       bool
 		}{
+			{`null`, true},
 			{`{"version":1,"steps":null}`, true},
 			{`{"version":1,"steps":[{"key":"run","kind":"argv"}]}`, true},
+			{`{"version":2,"steps":[]}`, false},
+			{`{"version":1,"steps":[{"key":"run","kind":"future"}]}`, false},
+			{`"malformed"`, false},
+			{``, false}, // Missing definition, distinct from explicit null.
 		} {
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, selected, pin, signingKey, section, tc.definition)
 			raw, err := json.Marshal(bad)
@@ -106,7 +117,7 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 			_, err = resets.CreateRelayReset(ctx, binding, signer)
 			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "cached content must be checked even when current rows are supported")
 			if tc.held {
-				require.ErrorIs(t, err, db.ErrHeldWorkflowEvidence)
+				assert.ErrorIs(t, err, db.ErrHeldWorkflowEvidence, "definition %q in %s", tc.definition, section)
 			} else {
 				require.NotErrorIs(t, err, db.ErrHeldWorkflowEvidence)
 			}
@@ -120,10 +131,13 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 			require.Equal(t, beforeEpoch, afterEpoch)
 			require.ElementsMatch(t, beforeDeliveries, afterDeliveries)
 			if tc.held {
-				require.ErrorIs(t, err, db.ErrHeldWorkflowEvidence)
+				assert.ErrorIs(t, err, db.ErrHeldWorkflowEvidence, "definition %q in %s", tc.definition, section)
 			} else {
 				require.NotErrorIs(t, err, db.ErrHeldWorkflowEvidence)
 			}
+			var retained string
+			require.NoError(t, metaReader.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, key).Scan(&retained))
+			require.Equal(t, string(raw), retained, "refusal preserves exact signed checkpoint")
 		}
 	}
 	// The stored checkpoint, not current project rows, determines recipient support.
