@@ -75,52 +75,42 @@ describe('ProjectSyncStatus', () => {
     },
   )
 
-  it('refreshes after returning to a project while an older read is in flight', async () => {
-    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    let finish!: (result: Response) => void
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(response())
-      .mockImplementationOnce(
-        () =>
-          new Promise<Response>((resolve) => {
-            finish = resolve
-          }),
-      )
-      .mockResolvedValueOnce(response(7, projectUID, 0))
-    setGeneratedFetch(fetcher)
-    const view = render(ProjectSyncStatus, {
-      props: { projectID: 7, projectUID, refreshGeneration: 0 },
-    })
-    await screen.findByText('Pending: 2')
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    hidden.mockReturnValue(true)
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    hidden.mockReturnValue(false)
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
-    finish(response())
-    await screen.findByText('Pending: 0')
-    expect(fetcher).toHaveBeenCalledTimes(3)
-  })
-
-  it('skips a cycle while a read is in progress', async () => {
-    let finish!: (result: Response) => void
-    const fetcher = vi.fn().mockImplementationOnce(
-      () =>
-        new Promise<Response>((resolve) => {
-          finish = resolve
-        }),
-    )
-    setGeneratedFetch(fetcher)
-    const view = render(ProjectSyncStatus, {
-      props: { projectID: 7, projectUID, refreshGeneration: 0 },
-    })
-    await waitFor(() => expect(finish).toBeDefined())
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    finish(response())
-    await screen.findByText('Pending: 2')
-    expect(fetcher).toHaveBeenCalledTimes(1)
-  })
+  it.each(['initial', 'background', 'manual'])(
+    'refreshes after returning while a %s read is in flight',
+    async (kind) => {
+      const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+      let finish!: (result: Response) => void
+      const fetcher = vi.fn()
+      if (kind !== 'initial') fetcher.mockResolvedValueOnce(response())
+      fetcher
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              finish = resolve
+            }),
+        )
+        .mockResolvedValueOnce(response(7, projectUID, 0))
+      setGeneratedFetch(fetcher)
+      const view = render(ProjectSyncStatus, {
+        props: { projectID: 7, projectUID, refreshGeneration: 0 },
+      })
+      if (kind !== 'initial') {
+        await screen.findByText('Pending: 2')
+        if (kind === 'manual')
+          await fireEvent.click(screen.getByRole('button', { name: 'Refresh sync' }))
+        else await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+      }
+      await waitFor(() => expect(finish).toBeDefined())
+      hidden.mockReturnValue(true)
+      await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+      hidden.mockReturnValue(false)
+      await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })
+      await view.rerender({ projectID: 7, projectUID, refreshGeneration: 4 })
+      finish(response())
+      await screen.findByText('Pending: 0')
+      expect(fetcher).toHaveBeenCalledTimes(kind === 'initial' ? 2 : 3)
+    },
+  )
 
   it('keeps the unavailable message while retrying without a previous result', async () => {
     const fetcher = vi
@@ -272,9 +262,6 @@ describe('ProjectSyncStatus', () => {
     expect(signal?.aborted).toBe(false)
     await vi.advanceTimersByTimeAsync(120_000)
     expect(signal?.aborted).toBe(true)
-    expect(screen.getByText('Sync status unavailable. Refresh to retry.')).not.toBeNull()
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
-    await vi.advanceTimersByTimeAsync(0)
     expect(screen.getByText('Pending: 2')).not.toBeNull()
     vi.useRealTimers()
   })
