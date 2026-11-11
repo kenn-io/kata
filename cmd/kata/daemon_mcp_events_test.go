@@ -187,10 +187,6 @@ func TestMCPEventsTrustedCallbacksStartup(t *testing.T) {
 			}
 			require.NotNil(t, service)
 			require.True(t, service.Availability().Enabled)
-			_, err := service.Subscribe(t.Context(), mcpevents.Principal{Authority: mcpevents.AuthorityDBToken, Subject: "7"}, mcpevents.ForwarderScope{All: true}, mcpevents.SubscribeRequest{Name: mcpevents.EventName, Arguments: mcpevents.Arguments{For: "example-user"}, Delivery: mcpevents.Delivery{Mode: "webhook", URL: tc.origin + "/events", Secret: "whsec_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}})
-			// The literal passes installed policy, then authority refuses before a socket.
-			// Omitting the startup policy instead returns destination_not_allowed.
-			assert.ErrorIs(t, err, mcpevents.ErrForbidden)
 		})
 	}
 }

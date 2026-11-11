@@ -403,9 +403,6 @@ func (s *Service) Subscribe(ctx context.Context, p Principal, scope ForwarderSco
 	if err := checkForwarderScope(scope, ident.args); err != nil {
 		return SubscribeResult{}, err
 	}
-	if err := s.webhook.validateStaticCallback(ctx, ident.parsed); err != nil {
-		return SubscribeResult{}, callbackEndpoint(endpointCategory(err))
-	}
 	// The fingerprint activation stores describes the archive at this head.
 	resolvedAfter, err := s.storeHead(db.WithoutIssueRegistries(db.WithAuthorizedProjects(ctx, nil)))
 	if err != nil {
@@ -429,6 +426,9 @@ func (s *Service) Subscribe(ctx context.Context, p Principal, scope ForwarderSco
 		if err := auth.AuthorizeOccurrence(ctx, Occurrence{IssueUID: ident.args.IssueUID}); err != nil {
 			return SubscribeResult{}, authorityError(err)
 		}
+	}
+	if err := s.webhook.validateStaticCallback(ctx, ident.parsed); err != nil {
+		return SubscribeResult{}, callbackEndpoint(endpointCategory(err))
 	}
 	call := subscribeCall{p: p, ident: ident, req: req, auth: auth, projects: projects, resolvedAfter: resolvedAfter}
 	for range maxActivationAttempts {

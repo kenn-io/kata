@@ -194,6 +194,25 @@ func TestSelectionVisibility(t *testing.T) {
 			_ = requireWire(t, err, mcpevents.CodeForbidden, "scope_removed")
 			assert.Zero(t, h.recv.challenges.Load())
 		})
+		t.Run("withdrawn private trust does not hide removed project access", func(t *testing.T) {
+			h := newHarness(t, open(t))
+			req := h.request("example-user/explicit")
+			req.Arguments.ProjectUIDs = []string{testProjectA}
+			result := h.mustSubscribe(req)
+			row := h.row(result.ID)
+			req.Delivery.URL = "https://100.64.0.1/events"
+			row.CallbackURL = req.Delivery.URL
+			row.ID = mcpevents.SubscriptionID(principalA.Key(), req.Name, mcpevents.CanonicalArguments(req.Arguments), req.Delivery.URL)
+			require.NoError(t, h.store.ImportMCPEventSubscription(t.Context(), row))
+			h.fake.setProjects()
+
+			_, err := h.subscribe(principalA, req)
+			_ = requireWire(t, err, mcpevents.CodeForbidden, "scope_removed")
+			row = h.row(row.ID)
+			assert.Equal(t, db.MCPEventStateEnded, row.State)
+			assert.Equal(t, "scope_removed", row.EndReason)
+			assert.EqualValues(t, 1, h.recv.challenges.Load())
+		})
 	})
 }
 
