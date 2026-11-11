@@ -280,6 +280,7 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 type Server struct {
 	federationIngestAdmission   chan struct{}
 	federationTransferAdmission chan struct{}
+	federationReadAdmission     chan struct{}
 	federationControlAdmission  chan struct{}
 	cfg                         ServerConfig
 	baseHandler                 http.Handler
@@ -392,6 +393,7 @@ func NewServer(cfg ServerConfig) *Server {
 		cfg: cfg, api: humaAPI,
 		federationIngestAdmission:   make(chan struct{}, 2),
 		federationTransferAdmission: make(chan struct{}, 2),
+		federationReadAdmission:     make(chan struct{}, 16),
 		federationControlAdmission:  make(chan struct{}, 16),
 	}
 	registerRoutes(humaAPI, mux, cfg)

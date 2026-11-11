@@ -44,7 +44,7 @@ func TestFederationAttachmentSigningProfile(t *testing.T) {
 			api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
 			path := strings.Replace(tc.path, "/projects/1/", "/projects/{project_id}/", 1)
 			huma.Register(api, huma.Operation{OperationID: tc.operation, Method: tc.method, Path: path}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-			s := &Server{api: api, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1)}
+			s := &Server{api: api, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1)}
 			// Saturate the opposite pool: binary transfers must avoid control
 			// slots, while links/capabilities retain control admission.
 			if tc.bulk {
@@ -52,6 +52,7 @@ func TestFederationAttachmentSigningProfile(t *testing.T) {
 				s.federationIngestAdmission <- struct{}{}
 			} else {
 				s.federationTransferAdmission <- struct{}{}
+				s.federationReadAdmission <- struct{}{}
 			}
 			r := httptest.NewRequestWithContext(t.Context(), tc.method, "https://hub.example"+tc.path, http.NoBody)
 			r.ContentLength = tc.length
@@ -131,7 +132,7 @@ func testFederationAttachmentSigningMode(t *testing.T, mode string) {
 			path = fmt.Sprintf("/api/v1/projects/%d/federation/docbank/capabilities", project.ID)
 		}
 		huma.Register(api, huma.Operation{OperationID: operation, Method: method, Path: route}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1)}
+		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1), federationReadAdmission: make(chan struct{}, 1)}
 		var body io.Reader = strings.NewReader("binary")
 		if mode == "push-only preflight" {
 			body = nil
@@ -187,3 +188,93 @@ func (b *attachmentSigningRevocationBody) Read(p []byte) (int, error) {
 	return b.Reader.Read(p)
 }
 func (*attachmentSigningRevocationBody) Close() error { return nil }
+
+func TestFederationAttachmentReadAndUploadAdmissionAreIndependent(t *testing.T) {
+	t.Setenv("TEST_TRANSFER_POOLS_KEY", strings.Repeat("k", 64))
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_TRANSFER_POOLS_KEY"}
+	store := openClaimGateHelperDB(t)
+	project, err := store.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(t.Context(), project.ID, "tester")
+	require.NoError(t, err)
+	enrollment, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", ProjectID: &project.ID, Capabilities: "pull,push", Actor: "tester"})
+	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		state := filepath.Join(t.TempDir(), "replay.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		verifier, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}}, state)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, verifier.Close()) }()
+		time.Sleep(federationsigning.Quarantine)
+		srv := NewServer(ServerConfig{DB: store, FederationSigning: verifier, FederationSigningRequired: true})
+		defer func() { require.NoError(t, srv.Close()) }()
+		prefix := fmt.Sprintf("/api/v1/projects/%d/federation", project.ID)
+		upload := prefix + "/docbank/issues/example/uploads"
+		content := prefix + "/docbank/versions/6f1c2e8a-2222-4222-8222-222222222222/content"
+		control := prefix + "/metadata"
+		request := func(method, path string, block bool) *http.Request {
+			var body io.Reader
+			if method == http.MethodPost {
+				body = strings.NewReader("file bytes")
+			}
+			r := httptest.NewRequestWithContext(t.Context(), method, "https://hub.example"+path, body)
+			r.Header.Set("Authorization", "Bearer "+enrollment.Token)
+			if method == http.MethodPost {
+				r.Header.Set("Content-Type", "application/octet-stream")
+			}
+			if block {
+				r.Header.Set("X-Fixture-Block", "yes")
+			}
+			require.NoError(t, federationsigning.Sign(r, source))
+			return r
+		}
+		for _, tc := range []struct {
+			name, blockedMethod, blockedPath, otherMethod, otherPath string
+			count                                                    int
+		}{
+			{"uploads do not block reads", http.MethodPost, upload, http.MethodGet, content, 2},
+			{"reads do not block uploads or control", http.MethodGet, content, http.MethodPost, upload, 16},
+		} {
+			func() {
+				entered, release := make(chan struct{}, tc.count), make(chan struct{})
+				var unblock sync.Once
+				done := make(chan *httptest.ResponseRecorder, tc.count)
+				remaining := tc.count
+				defer func() {
+					unblock.Do(func() { close(release) })
+					for range remaining {
+						<-done
+					}
+				}()
+				handler := srv.withFederationSigning(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Header.Get("X-Fixture-Block") == "yes" {
+						entered <- struct{}{}
+						<-release
+					}
+					w.WriteHeader(http.StatusNoContent)
+				}), true)
+				for range tc.count {
+					r := request(tc.blockedMethod, tc.blockedPath, true)
+					go func() { w := httptest.NewRecorder(); handler.ServeHTTP(w, r); done <- w }()
+				}
+				for range tc.count {
+					select {
+					case <-entered:
+					case w := <-done:
+						remaining--
+						t.Fatalf("blocked request returned early: %d %s", w.Code, w.Body.String())
+					}
+				}
+				full := httptest.NewRecorder()
+				handler.ServeHTTP(full, request(tc.blockedMethod, tc.blockedPath, false))
+				require.Equal(t, http.StatusTooManyRequests, full.Code, "%s: %s", tc.name, full.Body.String())
+				require.Equal(t, "1", full.Header().Get("Retry-After"))
+				for _, other := range []struct{ method, path string }{{tc.otherMethod, tc.otherPath}, {http.MethodGet, control}} {
+					w := httptest.NewRecorder()
+					handler.ServeHTTP(w, request(other.method, other.path, false))
+					require.Equal(t, http.StatusNoContent, w.Code, "%s: %s", tc.name, w.Body.String())
+				}
+			}()
+		}
+	})
+}

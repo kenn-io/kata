@@ -115,9 +115,11 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			bodyLimit = federationsigning.MaxBodyBytes
 		}
 		if attachmentTransfer {
-			admission = s.federationTransferAdmission
 			if r.Method == http.MethodPost {
+				admission = s.federationTransferAdmission
 				bodyLimit = federationsigning.AttachmentMaxBodyBytes
+			} else {
+				admission = s.federationReadAdmission
 			}
 		}
 		select {
