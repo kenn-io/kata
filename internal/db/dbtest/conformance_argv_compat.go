@@ -302,6 +302,7 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 			body.DeletedAt = &body.UpdatedAt
 		}
 		if kind == "cron.workflow.snapshot" {
+			body.UID = workflow.UID
 			body.DefinitionEventUID = workflow.DefinitionEventUID
 			body.DefinitionHLC = &workflow.DefinitionHLC
 		}
