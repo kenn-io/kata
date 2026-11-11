@@ -257,8 +257,35 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 				return err
 			}
 			if ref.kind == "workflow" {
-				if err := checkRunnableWorkflowRevision(ctx, tx, a.Postgres, project.ID, *ref.id, *ref.event); err != nil {
+				document, known := validator.idx.documents[cronDefinitionReference{projectID: project.ID, kind: ref.kind, uid: *ref.id, event: *ref.event}]
+				if !known && value.Status == "running" {
+					return fmt.Errorf("%w: workflow revision document is unavailable", cron.ErrInvalid)
+				}
+				if known {
+					if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
+						return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
+					}
+				}
+			}
+		}
+	}
+	if value.Status == "running" && value.WorkflowUID == nil && value.JobUID != nil {
+		ref := cronDefinitionReference{projectID: project.ID, kind: "job", uid: *value.JobUID, event: *value.DefinitionEventUID}
+		if document, known := validator.idx.documents[ref]; known {
+			job, err := cron.DecodeJob([]byte(document))
+			if err != nil {
+				return fmt.Errorf("%w: job revision is unsupported: %v", cron.ErrInvalid, err)
+			}
+			if job.Action.WorkflowUID != "" {
+				var workflowDocument string
+				err := tx.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE project_id=$1 AND uid=$2`, project.ID, job.Action.WorkflowUID).Scan(&workflowDocument)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return err
+				}
+				if err == nil {
+					if _, err := cron.DecodeWorkflow([]byte(workflowDocument)); err != nil {
+						return fmt.Errorf("%w: workflow dependency is unsupported: %v", cron.ErrInvalid, err)
+					}
 				}
 			}
 		}
@@ -272,53 +299,6 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 		return fmt.Errorf("%w: issue reference does not belong to project", cron.ErrInvalid)
 	}
 	return err
-}
-
-// A run may name an older revision, including one retained only by a snapshot.
-// Check that exact document without changing the historical reference rules.
-func checkRunnableWorkflowRevision(ctx context.Context, tx *sql.Tx, postgres bool, projectID int64, workflowUID, eventUID string) error {
-	var document, currentEvent string
-	err := tx.QueryRowContext(ctx, `SELECT definition_json,definition_event_uid FROM cron_workflows WHERE project_id=$1 AND uid=$2`, projectID, workflowUID).Scan(&document, &currentEvent)
-	if err == nil {
-		if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
-			return fmt.Errorf("%w: workflow is unsupported: %v", cron.ErrInvalid, err)
-		}
-		if currentEvent == eventUID {
-			return nil
-		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	{
-		var payload string
-		err = tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, projectID, eventUID).Scan(&payload)
-		if errors.Is(err, sql.ErrNoRows) {
-			predicate := `json_extract(payload,'$.uid')=$2 AND json_extract(payload,'$.definition_event_uid')=$3`
-			if postgres {
-				predicate = `payload::jsonb->>'uid'=$2 AND payload::jsonb->>'definition_event_uid'=$3`
-			}
-			//nolint:gosec // The predicate is selected from two fixed backend expressions.
-			err = tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE project_id=$1 AND type='cron.workflow.snapshot' AND `+predicate+` ORDER BY id DESC LIMIT 1`, projectID, workflowUID, eventUID).Scan(&payload)
-		}
-		if err == nil {
-			var body CronDefinitionEvent
-			if err = json.Unmarshal([]byte(payload), &body); err == nil {
-				document = string(body.Definition)
-			}
-		}
-	}
-	// A compacted revision may be known only through a run observation. The
-	// existing reference validator has already established its identity.
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
-		return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
-	}
-	return nil
 }
 
 func (a CronSQL) insertCronRunEvent(ctx context.Context, tx *sql.Tx, project Project, value CronRun, actor string) (Event, error) {
