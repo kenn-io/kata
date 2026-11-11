@@ -157,8 +157,9 @@ integrations, and idle settings. The client does not apply the parent home's
 `KATA_DSN`, PostgreSQL schema overrides, daemon tokens, proxies, or hosted
 `PORT` to that profile. Child processes receive an OS/toolchain allowlist,
 explicit safe credential references from the selected configuration, and the
-selected home/storage settings. Reserved daemon, PostgreSQL, proxy, and hosted
-variable names cannot be credential references. Other `KATA_` names, including
+selected home/storage settings. When Kata launches the profile, reserved daemon,
+PostgreSQL, proxy, and hosted variable names cannot be credential references.
+Other `KATA_` names, including
 `KATA_TEAM_HUB_TOKEN` and `KATA_SHARED_TOKEN`, are allowed. `SSL_CERT_FILE` and
 `SSL_CERT_DIR` pass through to child daemons so private certificate authorities
 remain available for HTTPS connections. `DOCBANK_HOME` passes through so a
@@ -167,8 +168,13 @@ profile daemon with `[docbank] local = true` finds the same Docbank vault as the
 
 The profile's own auth token is used for its API and identity checks. A catalog
 `token` or `token_env` can select a client credential for identity-token mode;
-it does not replace the selected daemon's configured auth. Use a neutral,
-non-reserved environment name for a referenced credential.
+it does not change the daemon's configured auth. With `autostart = false`, Kata
+never launches the profile, so a catalog credential is used for the client's
+API and identity checks without resolving the daemon's own `auth.token_env`,
+which only the service manager reads and which may be a reserved name. Without a
+catalog credential, the client resolves the profile's own token. For a profile
+Kata launches, use a neutral, non-reserved environment name for a referenced
+credential.
 
 SQLite storage paths must be absolute. PostgreSQL profiles require a complete
 single-host URL with an explicit port, database, and user. Service routing,
