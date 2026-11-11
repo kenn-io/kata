@@ -439,6 +439,11 @@ kata import --merge --link-existing --input backups/second-project.jsonl \
   that Kata relays between hubs. A relay cannot deliver a link between
   projects, so the ordinary link commands refuse it too. Merge that snapshot
   without the flag.
+- The merge also fails, and imports nothing, when a parent link from the
+  snapshot would close a cycle with the parent links already in the target.
+  This can happen when the snapshots were taken at different times. Export the
+  projects again from one point in time, or merge that snapshot without the
+  flag.
 
 To move linked projects to another hub one at a time, merge each project with
 `--link-existing` and then adopt it with

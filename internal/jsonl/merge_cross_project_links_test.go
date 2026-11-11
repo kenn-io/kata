@@ -176,6 +176,56 @@ func TestMergeRefusesLinkAcrossRelayedProjectPostgres(t *testing.T) {
 	checkMergeRefusesLinkAcrossRelayedProject(t, openPostgresImportTarget(t))
 }
 
+// Two snapshots taken at different times can each be valid and still disagree.
+// The first project was exported while A1 was a child of A2. That link was
+// then removed, and A2 became a child of B, and B a child of A1. Merging both
+// with the option would join the two states into a parent cycle.
+func checkMergeRefusesParentCycle(t *testing.T, target db.Storage) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	first, err := source.CreateProject(ctx, "first-project")
+	require.NoError(t, err)
+	second, err := source.CreateProject(ctx, "second-project")
+	require.NoError(t, err)
+	create := func(projectID int64, title string) db.Issue {
+		issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projectID, Title: title, Author: "author"})
+		require.NoError(t, err)
+		return issue
+	}
+	parent := func(child, of db.Issue) db.Link {
+		link, err := source.CreateLink(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: of.ID, Type: "parent", Author: "link-author"})
+		require.NoError(t, err)
+		return link
+	}
+	export := func(projectID int64) []byte {
+		var buffer bytes.Buffer
+		require.NoError(t, jsonl.Export(ctx, source, &buffer, jsonl.ExportOptions{IncludeDeleted: true, ProjectID: projectID}))
+		return buffer.Bytes()
+	}
+	a1, a2, b := create(first.ID, "a1"), create(first.ID, "a2"), create(second.ID, "b")
+	earlier := parent(a1, a2)
+	firstExport := export(first.ID)
+	require.NoError(t, source.DeleteLinkByID(ctx, earlier.ID))
+	parent(a2, b)
+	parent(b, a1)
+	secondExport := export(second.ID)
+
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(firstExport), target, jsonl.ImportOptions{MergeProject: true}))
+	err = jsonl.ImportWithOptions(ctx, bytes.NewReader(secondExport), target,
+		jsonl.ImportOptions{MergeProject: true, LinkExistingIssues: true})
+	require.ErrorIs(t, err, db.ErrParentCycle)
+	_, err = target.ProjectByName(ctx, "second-project")
+	require.ErrorIs(t, err, db.ErrNotFound, "the refused merge changes nothing")
+}
+
+func TestMergeRefusesParentCycleSQLite(t *testing.T) {
+	checkMergeRefusesParentCycle(t, openImportTargetDB(t))
+}
+
+func TestMergeRefusesParentCyclePostgres(t *testing.T) {
+	checkMergeRefusesParentCycle(t, openPostgresImportTarget(t))
+}
+
 // Without the option a merge never touches another project's links.
 func TestMergeWithoutLinkExistingLeavesOtherProjectsUnlinked(t *testing.T) {
 	source := newCrossProjectLinkSource(t)

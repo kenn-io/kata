@@ -775,7 +775,7 @@ func importLabel(ctx context.Context, tx *sql.Tx, l *db.IssueLabelExport) error 
 // the edge and the natural-key check below makes that re-delivery a no-op.
 // Both envelopes of one source DB agree on row ids, so equal natural key
 // implies equal id and the id-preserving INSERT can never collide.
-func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, enforceRelayBoundary bool) (linkSkip, error) {
+func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, mergeProject bool) (linkSkip, error) {
 	var present int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM issues WHERE id IN (?, ?)`,
@@ -800,8 +800,15 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, enforceRelay
 	}
 	// A merge can link the imported project to one already in the target.
 	// Refuse what an ordinary link write refuses: a relay cannot deliver a
-	// link between projects. A full restore keeps the links it exported.
-	if enforceRelayBoundary {
+	// link between projects, and a parent link must not close a cycle with
+	// the links the target already holds. A full restore keeps the links it
+	// exported.
+	if mergeProject {
+		if lk.Type == "parent" {
+			if err := assertNoParentCycleTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); err != nil {
+				return linkSkipNone, fmt.Errorf("project merge parent link from issue %s to %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
+			}
+		}
 		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); err != nil {
 			return linkSkipNone, fmt.Errorf("project merge link between issues %s and %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
 		}

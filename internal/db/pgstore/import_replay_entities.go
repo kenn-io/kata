@@ -214,7 +214,7 @@ func pgReplayLabel(ctx context.Context, tx *sql.Tx, label *db.IssueLabelExport) 
 	return pgReplayError(db.ImportKindIssueLabel, err)
 }
 
-func pgReplayLink(ctx context.Context, tx *sql.Tx, link *db.LinkExport, enforceRelayBoundary bool) (replayLinkSkip, error) {
+func pgReplayLink(ctx context.Context, tx *sql.Tx, link *db.LinkExport, mergeProject bool) (replayLinkSkip, error) {
 	var present int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM issues WHERE id=ANY($1::bigint[])`,
@@ -238,8 +238,15 @@ SELECT 1 FROM links WHERE type=$1 AND (
 	}
 	// A merge can link the imported project to one already in the target.
 	// Refuse what an ordinary link write refuses: a relay cannot deliver a
-	// link between projects. A full restore keeps the links it exported.
-	if enforceRelayBoundary {
+	// link between projects, and a parent link must not close a cycle with
+	// the links the target already holds. A full restore keeps the links it
+	// exported.
+	if mergeProject {
+		if link.Type == "parent" {
+			if err := assertNoParentCycleTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+				return replayLinkInserted, fmt.Errorf("project merge parent link from issue %s to %s: %w", link.FromIssueUID, link.ToIssueUID, err)
+			}
+		}
 		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
 			return replayLinkInserted, fmt.Errorf("project merge link between issues %s and %s: %w", link.FromIssueUID, link.ToIssueUID, err)
 		}
