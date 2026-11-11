@@ -418,6 +418,42 @@ func TestFold_CommentDuplicateKeepsFirstAndWarns(t *testing.T) {
 	require.Len(t, got.Warnings, 1)
 }
 
+func TestFoldSnapshotAppliesNewerCommentEdit(t *testing.T) {
+	const createdAt = "2026-05-23T12:00:01Z"
+	const snapshotEdit = "2026-05-23T12:00:02Z"
+	const localEdit = "2026-05-23T12:00:03Z"
+	for _, tc := range []struct {
+		name, author, originalEdit, incomingEdit, wantBody, wantEdit string
+		local, conflict                                              bool
+	}{
+		{name: "new snapshot edit", author: "agent", incomingEdit: snapshotEdit, wantBody: "snapshot edit", wantEdit: snapshotEdit},
+		{name: "newer local edit", author: "agent", incomingEdit: snapshotEdit, wantBody: "local edit", wantEdit: localEdit, local: true},
+		{name: "same edit time", author: "agent", originalEdit: snapshotEdit, incomingEdit: snapshotEdit, wantBody: "first", wantEdit: snapshotEdit, conflict: true},
+		{name: "different author", author: "other", incomingEdit: snapshotEdit, wantBody: "first", conflict: true},
+		{name: "invalid edit time", author: "agent", incomingEdit: "invalid", wantBody: "first", conflict: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			creation := testEvent("issue.commented", 1, fmt.Sprintf(`{"comment_uid":"comment-1","author":"agent","body":"first","created_at":%q,"edited_at":%q}`, createdAt, tc.originalEdit))
+			snapshot := testEvent("issue.snapshot", 4, fmt.Sprintf(`{"uid":"issue-1","comments":[{"comment_uid":"comment-1","author":%q,"body":"snapshot edit","created_at":%q,"edited_at":%q}]}`, tc.author, createdAt, tc.incomingEdit))
+			uncovered := testEvent("issue.commented", 2, `{"comment_uid":"comment-2","body":"source-only comment"}`)
+			events := []FoldEvent{snapshot, uncovered, creation}
+			if tc.local {
+				events = append(events, testEvent("issue.comment_edited", 3, fmt.Sprintf(`{"comment_uid":"comment-1","body":"local edit","edited_at":%q}`, localEdit)))
+			}
+			got := FoldEvents(events)
+			comment := got.Comments["comment-1"]
+			require.Equal(t, tc.wantBody, comment.Body)
+			require.Equal(t, tc.wantEdit, comment.EditedAt)
+			require.Equal(t, "agent", comment.Author)
+			require.Equal(t, createdAt, comment.CreatedAt)
+			require.Equal(t, "source-only comment", got.Comments["comment-2"].Body)
+			if tc.conflict {
+				require.Equal(t, []string{"conflicting duplicate comment comment-1"}, got.Warnings)
+			}
+		})
+	}
+}
+
 func TestFold_CommentEditOverwritesBodyOnly(t *testing.T) {
 	events := []FoldEvent{
 		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),

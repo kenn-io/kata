@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
@@ -35,7 +36,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.NoError(t, err)
 	issue, _, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Title: "late destination join", Author: "worker", Labels: []string{"retained"}, Links: []db.InitialLink{{Type: "related", ToNumber: peer.ID}}})
 	require.NoError(t, err)
-	_, _, err = hub.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "source discussion"})
+	sourceComment, _, err := hub.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "source discussion"})
 	require.NoError(t, err)
 	for _, project := range []db.Project{source, target} {
 		_, err = hub.EnableProjectFederation(ctx, project.ID, "worker")
@@ -75,6 +76,9 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.Len(t, beforeComments, 1)
 	_, err = spoke.ProjectByUID(ctx, target.UID)
 	require.ErrorIs(t, err, db.ErrNotFound, "the destination is not joined when the hub moves the issue")
+	edited, _, changed, err := hub.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: sourceComment.UID, Actor: "worker", Body: "revised source discussion"})
+	require.NoError(t, err)
+	require.True(t, changed)
 	issue, err = hub.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, err = hub.RemoveLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.unlabeled", Label: "retained", Actor: "worker"})
@@ -114,7 +118,8 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.NoError(t, err)
 	require.Len(t, comments, 2)
 	require.Equal(t, beforeComments[0].ID, comments[0].ID)
-	require.Equal(t, "source discussion", comments[0].Body)
+	assert.Equal(t, edited.Body, comments[0].Body)
+	assert.Equal(t, edited.EditedAt, comments[0].EditedAt)
 	require.Equal(t, "source-only newer discussion", comments[1].Body)
 	labels, err := spoke.LabelsByIssue(ctx, got.ID)
 	require.NoError(t, err)
@@ -181,6 +186,11 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	case "destination leave preserves standalone issue":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
 		_, err := spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
+		_, err = spoke.FederationBindingByProject(ctx, localTarget.ID)
+		require.NoError(t, err, "the destination binding must remain available to authorize source push")
+		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
+		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
 		require.NoError(t, err)
 		body := "standalone destination edit"
 		_, _, _, err = spoke.EditIssue(ctx, db.EditIssueParams{IssueID: got.ID, Body: &body, Actor: "worker"})
