@@ -174,7 +174,15 @@ func compareLocalSchedule(value string, saved jsontext.Value) error {
 	if err != nil {
 		return fmt.Errorf("%w: resolve saved schedule: %v", ErrInvalidRecurrence, err)
 	}
-	if !oldAt.Equal(newAt) {
+	oldDate, _, err := metadata.CalendarDate(string(legacy), "scheduled_on", nil, "")
+	if err != nil {
+		return fmt.Errorf("%w: resolve Local schedule date: %v", ErrInvalidRecurrence, err)
+	}
+	newDate, _, err := metadata.CalendarDate(frozen, "scheduled_on", nil, "")
+	if err != nil {
+		return fmt.Errorf("%w: resolve saved schedule date: %v", ErrInvalidRecurrence, err)
+	}
+	if !oldAt.Equal(newAt) || oldDate != newDate {
 		return fmt.Errorf("%w: Local timezone rules differ from the bundled rules for %q; change the recurrence to a named IANA timezone", ErrInvalidRecurrence, value)
 	}
 	return nil

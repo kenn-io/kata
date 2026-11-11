@@ -67,14 +67,6 @@ func (c scheduleCodec) ReadKata(issue db.Issue) (connector.FieldValue, error) {
 }
 
 func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (map[string]jsontext.Value, error) {
-	return c.kataPatch(issue, value, "")
-}
-
-func (c scheduleCodec) kataPatch(
-	issue db.Issue,
-	value connector.FieldValue,
-	_ string,
-) (map[string]jsontext.Value, error) {
 	canonical, err := canonicalFieldValue(value)
 	if err != nil {
 		return nil, err
@@ -86,7 +78,7 @@ func (c scheduleCodec) kataPatch(
 	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, "")
 }
 
-// pinZone saves the zone a local date-time or first-saved date resolves to, so
+// pinZone saves the zone a local date-time or first saved value resolves to, so
 // an alias zone already on the issue or daemon survives without public
 // admission accepting it.
 func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, patch map[string]jsontext.Value) error {
@@ -99,8 +91,9 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 		return err
 	}
 	zone := canonical.Timezone
-	if canonical.Kind == fieldKindDate && saved == nil {
-		if zone, err = metadataTimezone(values, c.defaultTimezone); err != nil {
+	firstInstant := canonical.Kind == fieldKindInstant && saved == nil
+	if saved == nil && (canonical.Kind == fieldKindDate || firstInstant) {
+		if zone, err = metadataTimezone(values, c.defaultTimezone); err != nil && !firstInstant {
 			return err
 		}
 	}
@@ -111,20 +104,14 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 	if saved != nil && saved.Timezone == zone {
 		version = saved.TZDataVersion
 	}
-	patch[c.key], err = metadata.NewScheduleValueWithVersion(canonical.Value, zone, version)
-	return err
-}
-
-func kataPatchWithCoordinatedTimezone(
-	codec FieldCodec,
-	issue db.Issue,
-	value connector.FieldValue,
-	coordinatedTimezone string,
-) (map[string]jsontext.Value, error) {
-	if schedule, ok := codec.(scheduleCodec); ok {
-		return schedule.kataPatch(issue, value, coordinatedTimezone)
+	pinned, err := metadata.NewScheduleValueWithVersion(canonical.Value, zone, version)
+	if err != nil && firstInstant {
+		return nil // An unbundled zone cannot change the supplied instant.
 	}
-	return codec.KataPatch(issue, value)
+	if err == nil {
+		patch[c.key] = pinned
+	}
+	return err
 }
 
 func (c scheduleCodec) ValidateExternalDescriptor(descriptor connector.FieldDescriptor) error {

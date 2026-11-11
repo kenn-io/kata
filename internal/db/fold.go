@@ -109,12 +109,12 @@ func (p *FoldProjection) apply(e FoldEvent) {
 	case "issue.metadata_updated":
 		uid := issueUID(e, payload)
 		if uid != "" {
-			p.IssueMetadata[uid] = applyMetadataDiff(p.IssueMetadata[uid], payload["diff"])
+			p.IssueMetadata[uid] = applyMetadataDiff(p.IssueMetadata[uid], payload["diff"], true)
 			p.touchIssue(uid, issueUpdatedAt(e, payload))
 		}
 	case "project.metadata_updated":
 		if e.ProjectUID != "" {
-			p.ProjectMetadata[e.ProjectUID] = applyMetadataDiff(p.ProjectMetadata[e.ProjectUID], payload["diff"])
+			p.ProjectMetadata[e.ProjectUID] = applyMetadataDiff(p.ProjectMetadata[e.ProjectUID], payload["diff"], false)
 		}
 	case "project.author_rewritten":
 		p.applyAuthorRewritten(e, payload)
@@ -845,7 +845,7 @@ func StringSlice(raw jsontext.Value) []string {
 // stringSlice is the internal alias for fold.go's existing callers.
 func stringSlice(raw jsontext.Value) []string { return StringSlice(raw) }
 
-func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.Value {
+func applyMetadataDiff(current, diffRaw jsontext.Value, issue bool) jsontext.Value {
 	var currentMap map[string]jsontext.Value
 	if len(current) > 0 && string(current) != "null" {
 		_ = json.Unmarshal(current, &currentMap)
@@ -863,7 +863,7 @@ func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.
 			delete(currentMap, key)
 			continue
 		}
-		if (key == "scheduled_on" || key == "deadline_on") && (isScheduleDescriptor(d.From) || isScheduleDescriptor(d.To) || isScheduleDescriptor(currentMap[key])) {
+		if issue && (key == "scheduled_on" || key == "deadline_on") {
 			currentMap[key] = canonicalJSON(d.To)
 			continue
 		}
@@ -874,14 +874,6 @@ func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.
 		return jsontext.Value(`{}`)
 	}
 	return out
-}
-
-func isScheduleDescriptor(raw jsontext.Value) bool {
-	if !rawJSONObject(raw) {
-		return false
-	}
-	fields := parseRawObject(raw)
-	return fields["value"] != nil && fields["timezone"] != nil && fields["tzdata_version"] != nil
 }
 
 func applyMetadataValueDiff(current, from, to jsontext.Value) jsontext.Value {

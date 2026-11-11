@@ -25,24 +25,26 @@ test('saved schedules use their zone and expose the due date to the editor', asy
   await expect(scheduled).toContainText('Dec 31')
   await expect(page.getByRole('button', { name: 'Edit due date' })).toContainText('Dec 31')
   const writes: string[] = []
+  const metadataPath = `/api/v1/ui/proxy/api/v1/projects/${kata.projectID}/issues/${issue.uid}/metadata`
   page.on('request', (request) => {
-    if (request.method() === 'POST' && request.url().includes('/metadata'))
+    if (request.method() === 'POST' && new URL(request.url()).pathname === metadataPath)
       writes.push(request.url())
   })
   await scheduled.click()
   await page.getByRole('button', { name: /Scheduled: Dec 31/ }).click()
-  const selected = page.getByRole('dialog', { name: 'Scheduled' }).locator('[aria-pressed="true"]')
+  const picker = page.getByRole('dialog', { name: 'Scheduled' })
+  const selected = picker.locator('[aria-pressed="true"]')
   await expect(selected).toHaveText('31')
   await selected.click()
-  await expect(page.getByRole('dialog', { name: 'Scheduled' })).toBeHidden()
-  await expect(scheduled).toBeVisible()
+  await expect(picker).toBeHidden()
+  await expect(scheduled).toBeEnabled()
   expect(writes).toEqual([])
   await page.getByRole('button', { name: 'Edit due date' }).click()
   await expect(page.getByRole('button', { name: /Due: Dec 31/ })).toBeVisible()
   await page.getByRole('button', { name: /Due: Dec 31/ }).click()
   const dueDialog = page.getByRole('dialog', { name: 'Due' })
   const write = page.waitForResponse(
-    (response) => response.request().method() === 'POST' && response.url().includes('/metadata'),
+    (response) => response.request().method() === 'POST' && new URL(response.url()).pathname === metadataPath,
   )
   await dueDialog.getByRole('button', { name: 'Dec 30, 2025', exact: true }).click()
   expect((await write).ok()).toBe(true)

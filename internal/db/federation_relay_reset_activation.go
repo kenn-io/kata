@@ -69,6 +69,9 @@ func (p RelayResetProtocol) ActivateCheckpoint(ctx context.Context, grant Federa
 	if err := VerifyRootResetManifest(pin, checkpoint.Manifest, checkpoint.Snapshot); err != nil {
 		return grant, err
 	}
+	if err := requireRelayCheckpointFeatures(ctx, checkpoint.Snapshot); err != nil {
+		return grant, err
+	}
 	// Writes committed after preparation remain owed. Reoffer them in the new
 	// namespace; leave old emitted records untouched rather than fabricating ACKs.
 	// Event and artifact rows a forwarded root reset superseded are history:

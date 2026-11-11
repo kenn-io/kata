@@ -1238,6 +1238,11 @@ func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Zero(t, result.FieldConflicts)
+		var readFields []string
+		for _, call := range h.client.readFieldCalls {
+			readFields = append(readFields, call.FieldIDs...)
+		}
+		assert.ElementsMatch(t, []string{"start-date", "due-date"}, readFields)
 		issue, readErr := h.store.IssueByID(t.Context(), h.issue.ID)
 		require.NoError(t, readErr)
 		values, readErr := metadataObject(issue.Metadata)

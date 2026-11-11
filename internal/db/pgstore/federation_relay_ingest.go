@@ -154,6 +154,9 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				if err := db.ValidateEmbeddingProducerEvent(source, producerAuthorityUID); err != nil {
 					return err
 				}
+				if err := db.ValidateRelaySchedule(source); err != nil {
+					return err
+				}
 				if err := db.ValidateFederationEntries(source.Type, source.EventUID, source.Payload); err != nil {
 					return err
 				}

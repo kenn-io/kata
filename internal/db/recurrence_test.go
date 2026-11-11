@@ -109,3 +109,13 @@ func TestAttachRecurrencePreservesDeadlineInDaemonDefaultZone(t *testing.T) {
 	assert.Equal(t, "America/New_York", zone)
 	assert.Equal(t, before, after)
 }
+
+func TestRecurrenceLocalRejectsChangedDeadlineCalendarDate(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("America/Inuvik", -6*60*60)
+	t.Cleanup(func() { time.Local = previous })
+
+	const deadline = `{"deadline_on":"2026-11-12T06:30:00Z","timezone":"Local"}`
+	_, err := ComposeRecurrenceIssueMetadata(jsontext.Value(deadline), "2026-07-01", "Local")
+	require.ErrorContains(t, err, "Local timezone rules differ")
+}

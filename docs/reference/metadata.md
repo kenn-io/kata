@@ -105,8 +105,9 @@ keep working.
 `kata list --json`, `kata show --json` and `kata.list` rows carry
 `scheduled_on_date` and `deadline_on_date`: the `scheduled_on` and
 `deadline_on` values as `YYYY-MM-DD` calendar dates. A field is omitted when
-its key is absent or its stored value cannot be read, so one bad value never
-fails the list. These are the names and values the web UI's snapshot
+its key is absent or it contains a malformed legacy value. A saved descriptor
+with an unsupported rules version or object member causes list and show to
+return an error. These are the names and values the web UI's snapshot
 uses, resolved by one shared rule. A date-only value keeps its written date. A
 local date-time resolves with its saved zone and rules. Legacy strings use the
 issue `timezone`, then the daemon's top-level `timezone`, then UTC, as above. For a recurring occurrence without `timezone`
