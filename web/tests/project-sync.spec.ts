@@ -70,10 +70,7 @@ test('local project readers see native sync status with bounded embedding summar
   await expect(region.getByText('Run in a CLI connected to this daemon.')).toBeVisible()
   await expect(region.getByText(`Browser: ${kata.origin}`)).toBeVisible()
   await expect(
-    region.getByText("kata federation status --project 'spoke project'\\''s'"),
-  ).toBeVisible()
-  await expect(
-    region.getByText("kata federation status --project 'spoke project''s'"),
+    region.getByText("kata federation status --project 'spoke project’s'\\'''"),
   ).toBeVisible()
   await expect(region.getByText('example sync failure')).toHaveCount(0)
   await page

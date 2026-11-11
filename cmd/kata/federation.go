@@ -1351,7 +1351,7 @@ func federationStatusCmd() *cobra.Command {
 			var callResp *generated.GetFederationStatusResp
 			var callErr error
 			if flags.Project != "" {
-				project, err := resolveFederationProjectByName(a, flags.Project)
+				project, err := readFederationProjectByName(a, flags.Project)
 				if err != nil {
 					return err
 				}
@@ -1471,6 +1471,14 @@ func resolveFederationProject(
 }
 
 func resolveFederationProjectByName(a daemonAPI, name string) (projectRef, error) {
+	return federationProjectByName(a, name, false)
+}
+
+func readFederationProjectByName(a daemonAPI, name string) (projectRef, error) {
+	return federationProjectByName(a, name, true)
+}
+
+func federationProjectByName(a daemonAPI, name string, readOnly bool) (projectRef, error) {
 	var resp struct {
 		Project struct {
 			ID   int64  `json:"id"`
@@ -1481,14 +1489,27 @@ func resolveFederationProjectByName(a daemonAPI, name string) (projectRef, error
 	if err != nil {
 		return projectRef{}, err
 	}
-	callResp, callErr := apiClient.ReadProjectByNameWithResponse(a.ctx, &generated.ReadProjectByNameRequestOptions{Query: &generated.ReadProjectByNameQuery{Name: name}})
-	if callResp == nil {
-		return projectRef{}, externalCLITransportError(callResp, callErr)
+	var body []byte
+	var status int
+	if readOnly {
+		callResp, callErr := apiClient.ReadProjectByNameWithResponse(a.ctx, &generated.ReadProjectByNameRequestOptions{Query: &generated.ReadProjectByNameQuery{Name: name}})
+		if callResp == nil {
+			return projectRef{}, externalCLITransportError(callResp, callErr)
+		}
+		body, status = callResp.Body, callResp.StatusCode
+		err = externalCLIResponseError(status, body, callErr)
+	} else {
+		callResp, callErr := apiClient.ResolveProjectWithResponse(a.ctx, &generated.ResolveProjectRequestOptions{Body: &generated.ResolveProjectBody{Name: &name}})
+		if callResp == nil {
+			return projectRef{}, externalCLITransportError(callResp, callErr)
+		}
+		body, status = callResp.Body, callResp.StatusCode
+		err = externalCLIResponseError(status, body, callErr)
 	}
-	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+	if err != nil {
 		return projectRef{}, err
 	}
-	if err := json.Unmarshal(callResp.Body, &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return projectRef{}, err
 	}
 	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil

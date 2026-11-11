@@ -137,7 +137,7 @@
     {/if}
     {#if status.last_error}
       {@const bashCommand = `kata federation status --project '${status.project_name.replaceAll("'", "'\\''")}'`}
-      {@const powershellCommand = `kata federation status --project '${status.project_name.replaceAll("'", "''")}'`}
+      {@const powershellCommand = `kata federation status --project '${status.project_name.replace(/['‘’‚‛]/g, '$&$&')}'`}
       <div class="sync-attention">
         <span class="attention">Sync needs attention</span>
         <span>Run in a CLI connected to this daemon.</span>

@@ -194,7 +194,7 @@ listen = "127.0.0.1:${port}"
     projectID: project.id,
     projectUID: project.uid,
     async prepareSyncDiagnostic() {
-      const name = "spoke project's"
+      const name = "spoke project’s'"
       run(binary, ['projects', 'rename', 'example-project', name], workspace, environment)
       run(binary, ['projects', 'create', name], remoteWorkspace, remoteEnvironment)
       run(binary, ['federation', 'enable', name], remoteWorkspace, remoteEnvironment)
@@ -210,7 +210,7 @@ listen = "127.0.0.1:${port}"
             SELECT id, '2026-10-01T12:00:00Z', 'example sync failure' FROM projects WHERE name = ?
             ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,
             )
-            .run("spoke project's")
+            .run("spoke project’s'")
         } finally {
           database.close()
         }

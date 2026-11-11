@@ -11,6 +11,8 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -453,6 +455,32 @@ func TestFederationEnableCLIResolvesExplicitProjectFlag(t *testing.T) {
 	out := requireCmdOutput(t, env, "federation", "enable", "--project", "fedlab")
 
 	assert.Contains(t, out, "enabled federation for fedlab")
+	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, db.FederationRoleHub, binding.Role)
+}
+
+func TestFederationEnableProjectAgainstOlderDaemon(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/resolve" {
+			http.NotFound(w, r)
+			return
+		}
+		r.Host = target.Host
+		r.Header["X-Forwarded-For"] = nil
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	older := *env
+	older.URL = server.URL
+	out := requireCmdOutput(t, &older, "federation", "enable", "--project", project.Name)
+	assert.Contains(t, out, "enabled federation for spoke-project")
 	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, db.FederationRoleHub, binding.Role)
