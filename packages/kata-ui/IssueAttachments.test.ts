@@ -90,8 +90,15 @@ it('ignores an in-flight preview response after the attachment origin changes', 
   const preview = screen.getByRole('button', { name: 'Preview screen.png' })
   expect((preview as HTMLButtonElement).disabled).toBe(false)
   await fireEvent.click(preview)
-  await waitFor(() => expect(screen.getByAltText('screen.png').getAttribute('src')).toBe('blob:new-origin'))
+  await waitFor(() =>
+    expect(screen.getByAltText('screen.png').getAttribute('src')).toBe('blob:new-origin'),
+  )
   expect(fetchAttachment).toHaveBeenCalledTimes(2)
+  await rerender({ attachmentsEnabled: false })
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:new-origin'))
+  expect(screen.queryByAltText('screen.png')).toBeNull()
+  await rerender({ attachmentsEnabled: true })
+  expect(screen.getByRole('button', { name: 'Preview screen.png' })).toBeTruthy()
 })
 
 it.each([
@@ -293,6 +300,11 @@ it('offers downloads for types outside the inline list', () => {
 })
 
 it('gives each reference a stable history anchor', () => {
-  const { container } = render(IssueAttachments, { attachments: { [id]: entry }, baseURL: '/attachments' })
-  expect(container.querySelector(`[id="kata-attachment-${id}"]`)?.textContent).toContain('screen.png')
+  const { container } = render(IssueAttachments, {
+    attachments: { [id]: entry },
+    baseURL: '/attachments',
+  })
+  expect(container.querySelector(`[id="kata-attachment-${id}"]`)?.textContent).toContain(
+    'screen.png',
+  )
 })

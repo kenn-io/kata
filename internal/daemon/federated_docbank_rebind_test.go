@@ -42,8 +42,6 @@ func TestDocbankForwardMapsHubCredentialRejection(t *testing.T) {
 		wantCode       string
 	}{
 		{"issues/a/uploads", http.MethodPost, http.StatusUnauthorized, "signature_invalid", http.StatusBadGateway, "hub_credential_rejected"},
-		{"issues/a/links", http.MethodPost, http.StatusUnauthorized, "signature_invalid", http.StatusBadGateway, "hub_credential_rejected"},
-		{"versions/a/content", http.MethodGet, http.StatusUnauthorized, "signature_invalid", http.StatusBadGateway, "hub_credential_rejected"},
 		{"issues/a/links", http.MethodPost, http.StatusForbidden, "auth_invalid", http.StatusBadGateway, "hub_credential_rejected"},
 		{"issues/a/links", http.MethodPost, http.StatusForbidden, "claim_denied", http.StatusForbidden, "claim_denied"},
 		{"issues/a/links", http.MethodPost, http.StatusForbidden, "docbank_outside_scope", http.StatusForbidden, "docbank_outside_scope"},

@@ -57,6 +57,13 @@ func TestAttachmentTransferBinaryAndLateBody(t *testing.T) {
 func TestAttachmentTransferAdmissionBeforeBody(t *testing.T) {
 	for _, mode := range []string{"digest", "cancel", "retire", "rotate", "success"} {
 		t.Run(mode, func(t *testing.T) {
+			var dir string
+			if mode == "digest" {
+				dir = t.TempDir()
+				t.Setenv("TMPDIR", dir)
+				t.Setenv("TMP", dir)
+				t.Setenv("TEMP", dir)
+			}
 			s := testSource(t)
 			v := testVerifier(t, "https://hub.example", s)
 			r := attachmentRequest(t, s, []byte("binary"))
@@ -72,6 +79,7 @@ func TestAttachmentTransferAdmissionBeforeBody(t *testing.T) {
 			if mode == "digest" {
 				data = "tamper"
 			}
+			require.NoError(t, r.Body.Close())
 			r.Body = &advancingBody{Reader: strings.NewReader(data), advance: func() {
 				require.Len(t, v.seen, 1, "nonce admission must precede body reading")
 				state, err := os.ReadFile(v.statePath)
@@ -91,6 +99,11 @@ func TestAttachmentTransferAdmissionBeforeBody(t *testing.T) {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
+			}
+			if mode == "digest" {
+				files, err := os.ReadDir(dir)
+				require.NoError(t, err)
+				require.Empty(t, files)
 			}
 			require.Len(t, v.seen, 1)
 			if mode == "success" {
@@ -224,7 +237,7 @@ func TestAttachmentTransferBinaryProperty(t *testing.T) {
 // Contract: body read failures and overflow leave no disk artifacts; cancellation
 // must interrupt a body that is blocked waiting for the peer's next byte.
 func TestAttachmentTransferSpoolFailureCleanup(t *testing.T) {
-	for _, mode := range []string{"digest", "cancel", "read error", "overflow", "length mismatch", "transport"} {
+	for _, mode := range []string{"cancel", "read error", "overflow", "length mismatch", "transport"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("TMPDIR", dir)
@@ -238,8 +251,6 @@ func TestAttachmentTransferSpoolFailureCleanup(t *testing.T) {
 			_ = r.Body.Close()
 			r = r.WithContext(ctx)
 			switch mode {
-			case "digest":
-				r.Body = io.NopCloser(strings.NewReader("tamper"))
 			case "cancel":
 				reader, writer := io.Pipe()
 				defer func() { _ = writer.Close() }()
@@ -261,7 +272,8 @@ func TestAttachmentTransferSpoolFailureCleanup(t *testing.T) {
 			case "overflow":
 				r.ContentLength = 256<<20 + 1
 			case "length mismatch":
-				r.Body = io.NopCloser(strings.NewReader("short"))
+				r.Body = io.NopCloser(strings.NewReader("binary"))
+				r.ContentLength = 7
 			case "transport":
 				r.Body = io.NopCloser(strings.NewReader("binary"))
 				client := &http.Client{Transport: signingRoundTripFunc(func(_ *http.Request) (*http.Response, error) { return nil, io.ErrUnexpectedEOF })}

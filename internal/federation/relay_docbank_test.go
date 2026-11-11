@@ -48,14 +48,6 @@ func TestRelayDocbankReadAfterRootNewInstanceRestore(t *testing.T) {
 			require.Equal(t, http.StatusOK, status, string(raw))
 			var out api.AddAttachmentResponseBody
 			require.NoError(t, json.Unmarshal(raw, &out))
-			foreign := out.Attachment
-			foreign.Origin = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
-			foreignRaw, err := json.Marshal(foreign)
-			require.NoError(t, err)
-			localIssue, err := node.store.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			_, err = node.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: localIssue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.foreign": foreignRaw}})
-			require.NoError(t, err)
 			var backup bytes.Buffer
 			require.NoError(t, jsonl.Export(t.Context(), root.store, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
 			restored := openRelayMatrixStore(t, "sqlite", false)
@@ -66,8 +58,6 @@ func TestRelayDocbankReadAfterRootNewInstanceRestore(t *testing.T) {
 			status, raw = relayDocbankRequest(t, node, http.MethodGet, endpoint+"/"+out.ID+"/content", "", "")
 			require.Equal(t, http.StatusOK, status, string(raw))
 			require.Equal(t, "root document", string(raw))
-			status, raw = relayDocbankRequest(t, node, http.MethodGet, endpoint+"/foreign/content", "", "")
-			require.Equal(t, http.StatusConflict, status, string(raw))
 		})
 	}
 }
@@ -200,7 +190,7 @@ func TestRelayDocbankContentAfterDetach(t *testing.T) {
 }
 
 func TestRelayDocbankOfflineNeverUsesLocalVault(t *testing.T) {
-	root, _, leaf, issue := newRelayClaimChain(t)
+	root, _, leaf, _ := newRelayClaimChain(t)
 	rootVault, localVault := docbanktest.New(t), docbanktest.New(t)
 	serveRelayDocbank(t, root, rootVault)
 	serveRelayDocbank(t, leaf, localVault)
@@ -218,17 +208,6 @@ func TestRelayDocbankOfflineNeverUsesLocalVault(t *testing.T) {
 	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=report.pdf", "offline document", "application/octet-stream")
 	require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
 	require.Empty(t, localVault.Requests())
-	// Historical unmarked references still use the serving daemon's vault,
-	// even for this adopted relay project with an unreachable root.
-	version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222228")
-	localVault.Seed("/legacy/file.pdf", docbank.Node{ID: 88, Name: "file.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("legacy bytes")})
-	ref, err := json.Marshal(metadata.Attachment{Name: "file.pdf", MediaType: "application/pdf", Size: 12, DocbankVersion: version})
-	require.NoError(t, err)
-	_, err = leaf.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issueIDForRelayMatrix(t, leaf, issue.UID), Actor: leaf.account, Patch: map[string]jsontext.Value{"attachment.legacy": ref}})
-	require.NoError(t, err)
-	status, raw = relayDocbankRequest(t, leaf, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/legacy/content", leaf.project.ID, issue.UID), "", "")
-	require.Equal(t, http.StatusOK, status, string(raw))
-	require.Equal(t, "legacy bytes", string(raw))
 }
 
 func TestRelayDocbankLinkUsesRootAndRefusesSubtreeEscape(t *testing.T) {

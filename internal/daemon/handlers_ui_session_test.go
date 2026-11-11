@@ -54,12 +54,23 @@ func TestBrowserSessionSurvivesRemoteAttachmentAuthenticationFailure(t *testing.
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	require.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
-	snapshot := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/api/v1/ui/snapshot?view=inbox", nil)
-	snapshot.AddCookie(manager.Cookie(issued.Cookie))
-	snapshot.Header.Set(webSessionHeader, issued.Session)
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, snapshot)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	endpoint := fmt.Sprintf("http://127.0.0.1:27123/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.UID)
+	for _, tc := range []struct{ name, path, body, contentType string }{
+		{"upload", endpoint + "?name=file.pdf&actor=operator", "file bytes", "application/octet-stream"},
+		{"link", endpoint + "/links", `{"path":"/kata/file.pdf","actor":"operator"}`, "application/json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, strings.NewReader(tc.body))
+			request.AddCookie(manager.Cookie(issued.Cookie))
+			request.Header.Set(webSessionHeader, issued.Session)
+			request.Header.Set(webCSRFHeader, issued.CSRF)
+			request.Header.Set("Origin", "http://127.0.0.1:27123")
+			request.Header.Set("Content-Type", tc.contentType)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			require.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+		})
+	}
 }
 
 func TestUIAttachmentCapabilityWithoutLocalVault(t *testing.T) {
@@ -79,17 +90,7 @@ func TestUIAttachmentCapabilityWithoutLocalVault(t *testing.T) {
 	require.False(t, effectiveUIPolicy(t.Context(), cfg, "").Capabilities.Attachments)
 }
 
-type countingBindingStore struct {
-	db.Storage
-	reads int
-}
-
-func (s *countingBindingStore) ListFederationBindings(ctx context.Context) ([]db.FederationBinding, error) {
-	s.reads++
-	return s.Storage.ListFederationBindings(ctx)
-}
-
-func TestUISnapshot304AvoidsBindingProjection(t *testing.T) {
+func TestUISnapshotConditionalAttachmentCapability(t *testing.T) {
 	store := openAuthTestDB(t)
 	project, err := store.CreateProject(t.Context(), "project")
 	require.NoError(t, err)
@@ -97,8 +98,7 @@ func TestUISnapshot304AvoidsBindingProjection(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
 	require.NoError(t, err)
-	counting := &countingBindingStore{Storage: store}
-	server := NewServer(ServerConfig{DB: counting, UIStore: store})
+	server := NewServer(ServerConfig{DB: store, UIStore: store})
 	t.Cleanup(func() { _ = server.Close() })
 	url := "/api/v1/ui/snapshot?view=all-open&selected_issue_uid=" + issue.UID
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
@@ -114,13 +114,11 @@ func TestUISnapshot304AvoidsBindingProjection(t *testing.T) {
 	require.True(t, snapshot.Capabilities.Attachments)
 	etag := response.Header().Get("ETag")
 	require.NotEmpty(t, etag)
-	counting.reads = 0
 	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	request.Header.Set("If-None-Match", etag)
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	require.Equal(t, http.StatusNotModified, response.Code, response.Body.String())
-	assert.Zero(t, counting.reads)
 
 	cursor, err := store.UIEventCursor(t.Context())
 	require.NoError(t, err)

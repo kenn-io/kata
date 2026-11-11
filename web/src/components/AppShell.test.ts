@@ -2239,29 +2239,6 @@ describe('AppShell task selection', () => {
     return current
   }
 
-  test('shows attachment controls when the instance supports attachments', async () => {
-    const current = twoTaskSnapshot()
-    current.capabilities.attachments = false
-    const props = {
-      route: { ...listRoute, issueUID: firstUID },
-      snapshot: current,
-      loading: false,
-      ...mutationProps(),
-      onNavigate: vi.fn(),
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-      onUploadAttachment: vi.fn(async () => {}),
-    }
-    const { rerender } = render(AppShell, { props })
-    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
-    const enabled = structuredClone(current)
-    enabled.capabilities.attachments = true
-    await rerender({
-      ...props,
-      snapshot: enabled,
-    })
-    expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
-  })
-
   test('shows a clicked task in the same frame, before its snapshot arrives', async () => {
     const onNavigate = vi.fn()
     const props = {

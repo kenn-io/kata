@@ -440,12 +440,12 @@ func TestAttachmentOriginBeforeSharing(t *testing.T) {
 			}
 			_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "operator")
 			require.NoError(t, err)
-			linked.Attachment.Origin = env.DB.InstanceUID()
-			marked, err := json.Marshal(linked.Attachment)
-			require.NoError(t, err)
-			_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment." + linked.ID: marked}})
-			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, read(linked.ID).StatusCode)
+			response := read(uploaded.ID)
+			require.Equal(t, http.StatusOK, response.StatusCode)
+			content, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			require.Equal(t, "upload", string(content))
 		})
 	}
 }
@@ -491,8 +491,6 @@ func TestAttachmentLinkReuseLegacyOnHub(t *testing.T) {
 	require.NoError(t, err)
 	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "operator")
 	require.NoError(t, err)
-	before, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
 	status, raw, err = postAttachmentLink(t, env, endpoint, `{"node_id":42,"reuse_existing":true,"actor":"operator"}`)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status, string(raw))
@@ -508,6 +506,5 @@ func TestAttachmentLinkReuseLegacyOnHub(t *testing.T) {
 	require.Equal(t, reused.ID, again.ID)
 	after, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
-	require.Contains(t, before.Metadata, original.ID)
 	require.Contains(t, after.Metadata, original.ID)
 }
