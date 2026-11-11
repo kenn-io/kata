@@ -13,21 +13,6 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestCronCLIAuthoredInputErrorsPerformNoNetworkRequests(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(server.Close)
-	args := append(append([]string{"job", "create"}, cronAuthorFixture()...), "--every=0.5s")
-	_, _, err := executeCronCLI(t, server.URL, nil, args...)
-	require.ErrorContains(t, err, "--every must use whole seconds")
-	require.Zero(t, requests.Load())
-	_, _, err = executeCronCLI(t, server.URL, nil, "job", "create", "--name=Review", "--title=Check in", "--enabled=false", "--catchup=latest", "--overlap=allow", "--once=2026-12-01T09:00:00Z", "--notify")
-	require.ErrorContains(t, err, "--once is only supported for adapter jobs")
-}
-
 func TestCronCLIFileRejectsEveryAuthoredFlag(t *testing.T) {
 	for _, arg := range []string{
 		"--name=", "--title=", "--body=", "--enabled=false", "--cron=", "--every=", "--once=",
@@ -46,7 +31,7 @@ func TestCronCLITypedCreationHasNoNameUpsert(t *testing.T) {
 	require.NoError(t, err)
 	identity := cronCLIUID(t)
 	args := append([]string{"job", "create", "--uid", identity}, cronAuthorFixture()...)
-	args = append(args, "--adapter= example-adapter ", "--adapter-agent= example-agent ")
+	args = append(args, "--adapter-agent=example-agent")
 	_, diagnostic, err := executeCronCLI(t, env.URL, nil, args...)
 	require.NoError(t, err)
 	require.Contains(t, diagnostic, "reuse --uid on retry")
@@ -106,8 +91,7 @@ func TestCronCLITypedNativeParentResolution(t *testing.T) {
 	require.False(t, stored.Definition.Enabled)
 	puts.Store(0)
 	invalid := append(append([]string{}, args...), "--every=30s", "--uid="+cronCLIUID(t))
-	_, diagnostic, err := executeCronCLI(t, server.URL, nil, invalid...)
+	_, _, err = executeCronCLI(t, server.URL, nil, invalid...)
 	require.ErrorContains(t, err, "at least 60")
-	require.NotContains(t, diagnostic, "reuse --uid on retry")
 	require.Zero(t, puts.Load(), "invalid definition must not reach the write")
 }

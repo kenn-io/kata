@@ -127,12 +127,9 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 	}
 	out.Definition.Action = cron.Action{Kind: "execute", Prompt: o.prompt}
 	out.Definition.CheckoutKey = o.checkoutKey
-	options := map[string]string{"adapter": strings.TrimSpace(o.adapter)}
+	options := map[string]string{"adapter": o.adapter}
 	if cmd.Flags().Changed("adapter-agent") {
-		if strings.TrimSpace(o.agent) == "" {
-			return out, cronCLIValidation("--adapter-agent must not be empty")
-		}
-		options["agent"] = strings.TrimSpace(o.agent)
+		options["agent"] = o.agent
 	}
 	out.Definition.Options, _ = json.Marshal(options)
 	return out, nil
@@ -153,8 +150,6 @@ func (o *cronAuthorOptions) trigger(cmd *cobra.Command) (cron.Trigger, error) {
 		return trigger, cronCLIValidation("--timezone requires an explicit IANA timezone; Local is not portable")
 	}
 	switch {
-	case cmd.Flags().Changed("once") && o.notify:
-		return trigger, cronCLIValidation("--once is only supported for adapter jobs")
 	case cmd.Flags().Changed("cron"):
 		expression := strings.TrimSpace(o.expression)
 		if strings.HasPrefix(expression, "TZ=") || strings.HasPrefix(expression, "CRON_TZ=") {

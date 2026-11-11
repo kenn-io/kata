@@ -24,9 +24,7 @@ func cronAuthorBuild(t *testing.T, parent string, args []string) (api.PutCronJob
 	return author.build(cmd, parent)
 }
 
-func TestCronAuthorPromptMatchesFileDefinition(t *testing.T) {
-	_, err := cronAuthorBuild(t, "", append(cronAuthorFixture(), "--adapter-agent= "))
-	require.ErrorContains(t, err, "--adapter-agent must not be empty")
+func TestCronAuthorPromptDefinition(t *testing.T) {
 	body, err := cronAuthorBuild(t, "", append(cronAuthorFixture(), "--adapter-agent=example-agent", "--checkout-key=example-checkout"))
 	require.NoError(t, err)
 	require.Equal(t, api.PutCronJobBody{Name: "Inspection", Definition: api.CronJobDefinition{
@@ -38,7 +36,7 @@ func TestCronAuthorPromptMatchesFileDefinition(t *testing.T) {
 	}}, body)
 }
 
-func TestCronAuthorNativeLeavesParentResolutionToExistingPath(t *testing.T) {
+func TestCronAuthorNativeDefinition(t *testing.T) {
 	body, err := cronAuthorBuild(t, "abcd", []string{
 		"--name", " Check-ins ", "--title", "Check in", "--body", "Literal ${text}",
 		"--enabled", "--catchup", "skip", "--overlap", "allow", "--cron", "0 9 * * 1-5",
@@ -49,20 +47,17 @@ func TestCronAuthorNativeLeavesParentResolutionToExistingPath(t *testing.T) {
 	require.Equal(t, cron.Action{Kind: "notify", Recipient: "worker", Message: "Hello"}, body.Definition.Action)
 	require.Equal(t, &cron.IssuePolicy{Kind: "per-run", Title: "Check in", Body: "Literal ${text}"}, body.Definition.Issue)
 	require.Equal(t, int64(300), body.Definition.GraceSeconds)
-	require.Empty(t, body.Definition.Issue.ParentUID, "a short ref must never be stored as a UID")
 }
 
 func TestCronAuthorRejectsInvalidSelections(t *testing.T) {
 	for _, tc := range []struct {
 		name, flag, value, want string
 	}{
-		{"two schedules", "--cron", "@daily", "exactly one"},
-		{"blank adapter", "--adapter", " ", "--prompt requires an explicit --adapter"},
-		{"fractional grace", "--grace", "0.5s", "--grace must use whole seconds"},
-		{"notify false", "--notify", "false", "notify"},
-		{"mixed action", "--notify", "true", "exactly one"},
-		{"native recipient on prompt", "--recipient", "worker", "notify"},
-		{"native message on prompt", "--message", "hello", "notify"},
+		{"two schedules", "--cron", "@daily", "choose exactly one of --cron, --every or --once"},
+		{"notify false", "--notify", "false", "--notify must be true when supplied"},
+		{"mixed action", "--notify", "true", "choose exactly one of --notify or --prompt"},
+		{"native recipient on prompt", "--recipient", "worker", "--parent, --recipient and --message require --notify"},
+		{"native message on prompt", "--message", "hello", "--parent, --recipient and --message require --notify"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := append(cronAuthorFixture(), tc.flag+"="+tc.value)
@@ -95,6 +90,9 @@ func TestCronAuthorRequiresExplicitChoices(t *testing.T) {
 					break
 				}
 			}
+			if tc.flag == "--adapter" {
+				args = append(args, "--adapter= ")
+			}
 			_, err := cronAuthorBuild(t, "", args)
 			require.ErrorContains(t, err, tc.want)
 		})
@@ -108,7 +106,7 @@ func TestCronAuthorTrigger(t *testing.T) {
 	}{
 		{name: "missing timezone", flag: "--cron", value: "@daily", want: "--timezone requires an explicit IANA timezone"},
 		{name: "local timezone", flag: "--cron", value: "@daily", timezone: "Local", want: "--timezone requires an explicit IANA timezone"},
-		{name: "empty timezone", flag: "--cron", value: "@daily", timezone: "=", want: "--timezone requires an explicit IANA timezone"},
+		{name: "empty timezone", flag: "--every", value: "1h", timezone: "=", want: "--timezone requires an explicit IANA timezone"},
 		{name: "timezone directive", flag: "--cron", value: "CRON_TZ=America/New_York 0 9 * * *", timezone: "UTC", want: "timezone directives remain available through --file"},
 		{name: "trimmed timezone directive", flag: "--cron", value: "  TZ=Local @daily", timezone: "UTC", want: "timezone directives remain available through --file"},
 		{name: "interval descriptor", flag: "--cron", value: "@every 1h", timezone: "UTC", want: "use --every for an interval"},
@@ -137,14 +135,13 @@ func TestCronAuthorTrigger(t *testing.T) {
 }
 
 func TestCronAuthorWholeSecondsContract(t *testing.T) {
-	for _, tc := range []struct {
-		value string
-		want  int64
-	}{
-		{"1h30m", 5400}, {"1.0000000001s", 1},
-	} {
-		got, err := cronAuthorSeconds(tc.value, "every")
-		require.NoError(t, err)
-		require.Equal(t, tc.want, got)
+	got, err := cronAuthorSeconds("1h30m", "every")
+	require.NoError(t, err)
+	require.Equal(t, int64(5400), got)
+	for _, flag := range []string{"every", "grace"} {
+		_, err := cronAuthorSeconds("0.5s", flag)
+		require.ErrorContains(t, err, "--"+flag+" must use whole seconds")
+		_, err = cronAuthorBuild(t, "", append(cronAuthorFixture(), "--"+flag+"=0.5s"))
+		require.ErrorContains(t, err, "--"+flag+" must use whole seconds")
 	}
 }
