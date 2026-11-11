@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/safefileio"
 )
 
 func TestManagedExternallyDoesNotAutostart(t *testing.T) {
@@ -162,7 +163,7 @@ func TestSupervisedProfileCatalogCredentialAuthenticatesLiveDaemon(t *testing.T)
 	require.NoError(t, err)
 	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
+	require.NoError(t, safefileio.EnsurePrivateDir(ns.DataDir)) // the supervised scan is read-only and never repairs the runtime directory
 	serve := func(uid string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer client-token" {
