@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kit/agenthook"
 )
 
 // daemonRecoveryAdvice presents the evidence retained by discovery and the
@@ -33,18 +33,14 @@ func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, goos string) st
 }
 
 // profileRecoveryCommand quotes any catalog name, which is free-form text, for
-// the shell that will run the command.
+// the shell that will run the command; Windows output is labeled PowerShell.
 func profileRecoveryCommand(name, goos string) string {
 	arg := "--daemon=" + name
 	if goos != "windows" {
 		return "kata " + shellQuoteArg(arg) + " daemon recover"
 	}
-	if strings.IndexFunc(name, func(r rune) bool {
-		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune("_.-", r)
-	}) < 0 {
-		return "kata " + arg + " daemon recover"
-	}
-	return "in PowerShell: kata '" + strings.ReplaceAll(arg, "'", "''") + "' daemon recover"
+	commands, _ := agenthook.BuildCommand("kata", arg, "daemon", "recover") // the executable is never blank
+	return "in PowerShell: " + commands.PowerShell
 }
 
 func localDaemonGuidance(e *client.LocalDaemonUnreachableError) string {
