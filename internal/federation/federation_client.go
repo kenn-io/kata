@@ -3,6 +3,7 @@ package federation
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,11 +19,19 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+var errRelayCrossProjectLinks = errors.New("hub relay cross-project links refusal")
+
 // HubStatusError reports a non-2xx response from the configured hub.
 type HubStatusError struct {
-	Path       string
-	StatusCode int
-	Body       string
+	relayCrossProjectLinks bool
+	Path                   string
+	StatusCode             int
+	Body                   string
+}
+
+// Is classifies the canonical refusal even through joined sync errors.
+func (e *HubStatusError) Is(target error) bool {
+	return target == errRelayCrossProjectLinks && e.relayCrossProjectLinks
 }
 
 // HTTPStatus exposes the hub response code to outcome classification.
@@ -303,7 +312,13 @@ func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Respo
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		failure := &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		if resp.StatusCode == http.StatusConflict && federationHubErrorCode(string(body)) == "relay_cross_project_links" {
+			canonical, _ := json.Marshal(api.NewRelayCrossProjectLinksError("hub").Envelope())
+			failure.Body = string(canonical)
+			failure.relayCrossProjectLinks = true
+		}
+		return nil, failure
 	}
 	if err := db.RequireEventFeatures(db.SupportedEventFeatures, resp.Header.Get(db.RequiredEventFeaturesHeader)); err != nil {
 		_ = resp.Body.Close()
