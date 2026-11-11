@@ -7,7 +7,7 @@ import type { LocalEmbeddingsStatusProvider } from './localEmbeddingsStatusProvi
 
 export interface LocalEmbeddingsStatus {
   can_change: boolean
-  can_restart: boolean
+  can_restart?: boolean
   download_bytes: number
   indexing?: LocalEmbeddingsIndexing
   job?: LocalEmbeddingsJob

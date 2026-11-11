@@ -4511,7 +4511,7 @@ func (l LocalEmbeddingsJob) Validate() error {
 
 type LocalEmbeddingsStatus struct {
 	CanChange       bool                          `json:"can_change"`
-	CanRestart      bool                          `json:"can_restart"`
+	CanRestart      *bool                         `json:"can_restart,omitempty"`
 	DownloadBytes   int64                         `json:"download_bytes"`
 	Indexing        *LocalEmbeddingsIndexing      `json:"indexing,omitempty"`
 	Job             *LocalEmbeddingsJob           `json:"job,omitempty"`

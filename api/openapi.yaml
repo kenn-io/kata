@@ -4448,7 +4448,6 @@ components:
         - download_bytes
         - ollama_available
         - can_change
-        - can_restart
       type: object
     MCPEventsArguments:
       additionalProperties: false
