@@ -111,11 +111,9 @@ func issueScheduleRequiredFeature(kind, payload string) (string, error) {
 					values = []jsontext.Value{change.From, change.To}
 				}
 				for _, value := range values {
-					if saved, err := metadata.DecodeSavedSchedule(value); err != nil {
-						if metadata.IsUnsupportedSchedule(err) {
-							return "", fmt.Errorf("%w: %s: %w", ErrUnsupportedEventFeatures, IssueScheduleEventFeature, err)
-						}
-						return "", err
+					// Imports keep opaque objects; only saved rules need the feature.
+					if saved, err := metadata.DecodeSavedSchedule(value); metadata.IsUnsupportedSchedule(err) {
+						return "", fmt.Errorf("%w: %s: %w", ErrUnsupportedEventFeatures, IssueScheduleEventFeature, err)
 					} else if saved != nil {
 						required = IssueScheduleEventFeature
 					}

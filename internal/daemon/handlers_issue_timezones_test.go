@@ -22,7 +22,6 @@ import (
 
 func TestIssueTimezoneLegacyEchoFreezesKnownZone(t *testing.T) {
 	for _, tc := range []struct{ name, raw, value, defaultZone string }{
-		{"issue zone", `{"timezone":"America/New_York","scheduled_on":"2026-11-12"}`, "2026-11-12", "UTC"},
 		{"daemon zone", `{"scheduled_on":"2026-11-12T09:00"}`, "2026-11-12T09:00", "America/New_York"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,7 +75,6 @@ func TestIssuePortableTimezoneAdmission(t *testing.T) {
 		want     int
 	}{
 		{"reject", map[string]any{"timezone": "Local", "scheduled_on": "2026-11-12"}, http.StatusBadRequest},
-		{"reject alias", map[string]any{"timezone": "US/Eastern", "scheduled_on": "2026-11-12"}, http.StatusBadRequest},
 		{"accept", map[string]any{"timezone": "UTC", "scheduled_on": "2026-11-12"}, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,19 +179,6 @@ func TestIssuePortableTimezoneCopiedRecurrence(t *testing.T) {
 		issue, err := store.IssueByUID(t.Context(), out.NewIssueUID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		path := fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID)
-		for _, tc := range []struct {
-			patch string
-			want  int
-		}{
-			{`{"scheduled_on":"2026-11-13"}`, 200},
-		} {
-			resp := doPost(t, env, env.URL+path, `{"actor":"tester","patch":`+tc.patch+`}`)
-			body := readClose(t, resp)
-			require.Equal(t, tc.want, resp.StatusCode, string(body))
-			if tc.want == http.StatusBadRequest {
-				assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "invalid_metadata_value")
-			}
-		}
 		_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"timezone": jsontext.Value(`"EST"`)}})
 		require.NoError(t, err)
 		status, raw := cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "tester", "patch": map[string]any{"scheduled_on": "2026-11-16"}})

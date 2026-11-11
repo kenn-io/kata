@@ -54,19 +54,14 @@ func resolvePlanningCalendarDates(
 	return out
 }
 
-// RowPlanningDates returns the scheduled_on and deadline_on calendar dates
+// RowPlanningProjection returns the scheduled_on and deadline_on calendar dates
 // carried by list and show rows. A value is read in its issue's timezone, then
 // the field's default timezone, then UTC, so a request needs no zone. A field
 // is empty when its key is absent or its stored value cannot be resolved, so
 // one malformed value never fails a whole response; only a saved schedule with
 // an unsupported tzdata version or member returns an error. scheduledDefaultTimezone can
 // include the legacy recurrence fallback; deadlines use the daemon timezone.
-func RowPlanningDates(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string) (scheduledOn, deadlineOn string, err error) {
-	dates := resolvePlanningCalendarDates(raw, nil, scheduledDefaultTimezone, deadlineDefaultTimezone, time.Time{}, nil)
-	return dates.scheduledOn, dates.deadlineOn, dates.unsupported()
-}
-
-// RowPlanningProjection resolves each field and the current day in its zone.
+// Each field also reports the current day in its zone.
 func RowPlanningProjection(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string, now time.Time) (scheduledOn, deadlineOn, scheduledToday, deadlineToday, scheduledDisplay, deadlineDisplay string, err error) {
 	dates := resolvePlanningCalendarDates(raw, nil, scheduledDefaultTimezone, deadlineDefaultTimezone, now, nil)
 	return planningProjectionForEdit(dates, raw, scheduledDefaultTimezone, deadlineDefaultTimezone, now)

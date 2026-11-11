@@ -396,13 +396,22 @@ func TestFold_MetadataDiffsMergeNestedObjectPaths(t *testing.T) {
 }
 
 func TestFold_ConcurrentScheduleEditsReplaceWholeDescriptor(t *testing.T) {
-	events := []FoldEvent{
-		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{"scheduled_on":{"value":"2026-01-01","timezone":"UTC","tzdata_version":"v1"}},"created_at":"2026-05-23T12:00:00.000Z"}`),
-		testEvent("issue.metadata_updated", 2, `{"diff":{"scheduled_on":{"from":{"value":"2026-01-01","timezone":"UTC","tzdata_version":"v1"},"to":{"value":"2026-01-02","timezone":"Europe/Paris","tzdata_version":"v2"}}}}`),
-		testEvent("issue.metadata_updated", 3, `{"diff":{"scheduled_on":{"from":{"value":"2026-01-01","timezone":"UTC","tzdata_version":"v1"},"to":{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":"v1"}}}}`),
+	schedule := func(value, zone string) string {
+		raw, err := metadata.NewScheduleValue(value, zone)
+		require.NoError(t, err)
+		return string(raw)
 	}
+	before := schedule("2026-11-12T09:00", "UTC")
+	edited := schedule("2026-11-12T10:00", "UTC")
+	rebound := schedule("2026-11-12T09:00", "America/New_York")
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","metadata":{"scheduled_on":`+before+`}}`),
+		testEvent("issue.metadata_updated", 2, `{"diff":{"scheduled_on":{"from":`+before+`,"to":`+edited+`}}}`),
+		testEvent("issue.metadata_updated", 3, `{"diff":{"scheduled_on":{"from":`+before+`,"to":`+rebound+`}}}`),
+	}
+	events[2].OriginInstanceUID = "spoke-b"
 	got := FoldEvents(events)
-	require.JSONEq(t, `{"scheduled_on":{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":"v1"}}`, string(got.IssueMetadata["issue-1"]))
+	require.JSONEq(t, `{"scheduled_on":`+rebound+`}`, string(got.IssueMetadata["issue-1"]))
 }
 
 func TestFold_MetadataDiffsProduceDeterministicJSON(t *testing.T) {
@@ -474,22 +483,4 @@ func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestFoldSavedScheduleDoesNotCombineCompetingWrites(t *testing.T) {
-	schedule := func(value, zone string) string {
-		raw, err := metadata.NewScheduleValue(value, zone)
-		require.NoError(t, err)
-		return string(raw)
-	}
-	before := schedule("2026-11-12T09:00", "UTC")
-	edited := schedule("2026-11-12T10:00", "UTC")
-	rebound := schedule("2026-11-12T09:00", "America/New_York")
-	events := []FoldEvent{
-		testEvent("issue.created", 1, `{"uid":"issue-1","metadata":{"scheduled_on":`+before+`}}`),
-		testEvent("issue.metadata_updated", 2, `{"diff":{"scheduled_on":{"from":`+before+`,"to":`+edited+`}}}`),
-		testEvent("issue.metadata_updated", 3, `{"diff":{"scheduled_on":{"from":`+before+`,"to":`+rebound+`}}}`),
-	}
-	events[2].OriginInstanceUID = "spoke-b"
-	assert.JSONEq(t, `{"scheduled_on":`+rebound+`}`, string(FoldEvents(events).IssueMetadata["issue-1"]))
 }

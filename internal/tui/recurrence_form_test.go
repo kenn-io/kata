@@ -183,9 +183,6 @@ func TestRecurrenceFormOpensPrefilledFromDetail(t *testing.T) {
 		assert.Equal(t, "Europe/Paris", zone)
 	})
 	t.Run("zone falls back to the caller's own IANA zone", func(t *testing.T) {
-		previous := localZone
-		localZone = func() string { return "Asia/Tokyo" }
-		t.Cleanup(func() { localZone = previous })
 		h := newRecurrenceHarness(t, viewDetail)
 
 		h.open()

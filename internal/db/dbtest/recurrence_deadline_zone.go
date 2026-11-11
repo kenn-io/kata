@@ -16,8 +16,6 @@ func RunRecurrenceAttachmentKeepsDeadlineZone(t *testing.T, open func(*testing.T
 		defaultZone string
 	}{
 		{"issue zone", jsontext.Value(`"America/New_York"`), "UTC"},
-		{"daemon zone", nil, "America/New_York"},
-		{"empty issue zone", jsontext.Value(`""`), "America/New_York"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := open(t)

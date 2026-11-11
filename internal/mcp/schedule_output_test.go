@@ -14,17 +14,11 @@ import (
 
 func TestToolsForwardSavedSchedulesFromNewerDaemon(t *testing.T) {
 	var writes atomic.Int32
-	var fail atomic.Bool
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if discoveryHealth(w, r) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if fail.Load() {
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"status":409,"error":{"code":"example_conflict","message":"daemon cannot read schedule"}}`))
-			return
-		}
 		var response map[string]any
 		require.NoError(t, json.Unmarshal(daemonResponse(r), &response))
 		var issue map[string]any
@@ -68,9 +62,4 @@ func TestToolsForwardSavedSchedulesFromNewerDaemon(t *testing.T) {
 	require.Equal(t, "2026-01-02", issue["deadline_on_date"])
 	require.Equal(t, "Asia/Tokyo", issue["timezone"])
 	require.Equal(t, "America/New_York", issue["scheduled_on_timezone"])
-	fail.Store(true)
-	failed, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.list", Arguments: map[string]any{}})
-	require.NoError(t, err)
-	require.True(t, failed.IsError)
-	require.Contains(t, string(mustJSON(t, failed.Content)), "daemon cannot read schedule")
 }

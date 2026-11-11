@@ -196,7 +196,7 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 
 func TestRepeatZoneRejectsUnknownScheduleRules(t *testing.T) {
 	_, err := repeatZone("", "", map[string]jsontext.Value{"scheduled_on": jsontext.Value(`{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`)})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }
 
 func setIssueTimezoneMeta(t *testing.T, env *testenv.Env, dir, ref, zone string) {

@@ -138,24 +138,26 @@ func (h *datesHarness) undo() {
 }
 
 func TestDatesFormWritesRelativeAndLocalTimeForms(t *testing.T) {
-	for _, tt := range []struct{ name, typed, want string }{
-		{"local minute", "2026-11-15T09:00", "2026-11-15T09:00"},
-		{"weeks", "+2w", "2026-11-16"},
+	for _, tt := range []struct {
+		name, typed string
+		want        func(string) string
+	}{
+		{"local minute", "2026-11-15T09:00", func(string) string { return "2026-11-15T09:00" }},
+		{"weeks", "+2w", func(today string) string {
+			day, _ := time.Parse(time.DateOnly, today)
+			return day.AddDate(0, 0, 14).Format(time.DateOnly)
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newDatesHarness(t, nil, viewDetail)
 			before := h.revision()
 			h.openForm()
-			if tt.name == "weeks" {
-				day, err := time.Parse(time.DateOnly, h.m.input.dates.scheduledToday)
-				require.NoError(t, err)
-				tt.want = day.AddDate(0, 0, 14).Format(time.DateOnly)
-			}
+			want := tt.want(h.m.input.dates.scheduledToday)
 			h.fill(tt.typed, "")
 			h.save()
 
 			assert.Equal(t, inputNone, h.m.input.kind, "a saved form closes")
-			assert.Equal(t, map[string]string{"scheduled_on": tt.want}, h.stored())
+			assert.Equal(t, map[string]string{"scheduled_on": want}, h.stored())
 			assert.Equal(t, before+1, h.revision())
 		})
 	}

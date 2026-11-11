@@ -221,17 +221,42 @@ describe('IssueProperties', () => {
   })
 
   it('shows an object-backed schedule in its editor', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
     renderProperties({
       issue: makeIssue({
-        scheduled_on_date: '2026-06-01',
         metadata: {
           scheduled_on: { value: '2026-06-01', timezone: 'UTC', tzdata_version: tzdataVersion },
         },
       }),
+      onPatchMetadata,
     })
     expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('Jun 1')
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     expect(screen.getByRole('button', { name: /Scheduled: Jun 1/ })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled: Jun 1/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Jun 1, 2026/ }))
+    expect(onPatchMetadata).not.toHaveBeenCalled()
+  })
+
+  it('keeps a saved instant when its projected date is reselected', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2025-12-31',
+        metadata: {
+          scheduled_on: {
+            value: '2026-01-01T02:00:00Z',
+            timezone: 'America/New_York',
+            tzdata_version: tzdataVersion,
+          },
+        },
+      }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled: Dec 31/ }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Dec 31, 2025', exact: true }))
+    expect(onPatchMetadata).not.toHaveBeenCalled()
   })
 
   it('patches scheduled and due dates and closes editors on accepted replacement', async () => {
