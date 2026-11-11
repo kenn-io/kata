@@ -10,7 +10,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/metadata"
 )
 
@@ -197,11 +196,7 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 	if err := checkDocbankOrigin(cfg, binding, attachment.Origin); err != nil {
 		return nil, err
 	}
-	resp, err := docbankForwardRequest(ctx, cfg, *binding, http.MethodGet, "versions/"+attachment.DocbankVersion.String()+"/content", url.Values{"project_uid": {project.UID}, "origin": {attachment.Origin}}, nil)
-	if err != nil {
-		return nil, err
-	}
-	return docbank.VerifyContentResponse(resp)
+	return docbankForwardRequest(ctx, cfg, *binding, http.MethodGet, "versions/"+attachment.DocbankVersion.String()+"/content", url.Values{"project_uid": {project.UID}, "origin": {attachment.Origin}}, nil)
 }
 
 func checkDocbankOrigin(cfg ServerConfig, binding *db.FederationBinding, origin string) error {

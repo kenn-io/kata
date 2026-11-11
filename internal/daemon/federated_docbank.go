@@ -16,7 +16,6 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
-	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/metadata"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -76,9 +75,7 @@ func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.Fed
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
-	storedURL, storedErr := httpurl.CanonicalHTTPBaseURL(credential.HubURL)
-	boundURL, boundErr := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
-	if !found || storedErr != nil || boundErr != nil || storedURL != boundURL || credential.HubProjectID != binding.HubProjectID || binding.HubProjectUID != project.UID || credential.LeavePending || credential.NativeLeave != nil {
+	if !found || binding.HubProjectUID != project.UID || credential.LeavePending || credential.NativeLeave != nil {
 		return nil, attachmentError(503, "federation_offline")
 	}
 	remote, credential, err := newClaimForwardClient(ctx, binding, credential)
