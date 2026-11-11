@@ -40,6 +40,7 @@ func TestCommentReplyMigrationUpgradesVersion31(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 	dropLaterMigrationIndexes(ctx, t, admin, schema)
+	dropMCPEventSubscriptionsSchema(ctx, t, admin, schema)
 	dropProjectAccessSchema(ctx, t, admin, schema)
 	dropCommentReplySchema(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE reply_upgrade.meta SET value='31' WHERE key='schema_version'`)

@@ -396,6 +396,17 @@ func TestLocalProfileEnvironmentIncludesDocumentedHubCredentials(t *testing.T) {
 	}
 }
 
+// Contract: a local-profile daemon keeps the invoking Docbank vault selection so
+// `docbank daemon start` does not create a second vault under the default home.
+func TestLocalProfileEnvironmentPassesThroughDocbankHome(t *testing.T) {
+	t.Setenv("DOCBANK_HOME", "/srv/docbank-vault")
+
+	env, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir()}, true)
+
+	require.NoError(t, err)
+	assert.Contains(t, env, "DOCBANK_HOME=/srv/docbank-vault")
+}
+
 func TestLocalProfileEnvironmentTrustsConfiguredCertificateAuthority(t *testing.T) {
 	if target := os.Getenv("PROFILE_TLS_PROBE"); target != "" {
 		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, target, nil) //nolint:gosec // Parent supplies only its loopback TLS fixture.

@@ -16,6 +16,9 @@ import (
 // ErrInvalid identifies a malformed or unsupported portable document.
 var ErrInvalid = errors.New("invalid cron document")
 
+// ErrNeverFires means every other job rule passed, but its cron has no occurrence.
+var ErrNeverFires = fmt.Errorf("%w: cron expression never fires", ErrInvalid)
+
 func invalid(message string) error { return fmt.Errorf("%w: %s", ErrInvalid, message) }
 
 func decode(input []byte, out any, limit int) error {
@@ -70,7 +73,8 @@ func (j JobDefinition) Validate() error {
 	if j.Kind != "job" {
 		return invalid("unknown job kind")
 	}
-	if err := j.Trigger.Validate(); err != nil {
+	schedule, err := j.Trigger.validate()
+	if err != nil {
 		return err
 	}
 	if j.CheckoutKey != "" && !portableKey(j.CheckoutKey) {
@@ -159,7 +163,10 @@ func (j JobDefinition) Validate() error {
 	if err := validateOptions(j.Options); err != nil {
 		return err
 	}
-	return checkSize(j, DefinitionLimit)
+	if err := checkSize(j, DefinitionLimit); err != nil {
+		return err
+	}
+	return requireOccurrence(schedule)
 }
 
 func validRecipient(value string) bool {
@@ -195,32 +202,35 @@ func (f WorkflowDefinition) Validate() error {
 		return invalid("workflow requires steps")
 	}
 	seen := map[string]bool{}
-	for _, step := range f.Steps {
+	for i, step := range f.Steps {
+		stepError := func(message string) error {
+			return invalid(fmt.Sprintf("step %d %q: %s", i+1, step.Key, message))
+		}
 		if !portableKey(step.Key) || seen[step.Key] {
-			return invalid("step keys must be unique portable names")
+			return stepError("step keys must be unique portable names")
 		}
 		if step.Retries < 0 || step.Retries > 100 {
-			return invalid("retry count must be between 0 and 100")
+			return stepError("retry count must be between 0 and 100")
 		}
 		for _, previous := range step.After {
 			if !seen[previous] {
-				return invalid("dependencies must name earlier steps")
+				return stepError("dependencies must name earlier steps")
 			}
 		}
 		switch step.Kind {
 		case "command":
 			if strings.TrimSpace(step.Command) == "" || step.Prompt != "" {
-				return invalid("command step requires only command")
+				return stepError("command step requires only command")
 			}
 		case "prompt":
 			if strings.TrimSpace(step.Prompt) == "" || step.Command != "" {
-				return invalid("prompt step requires only prompt")
+				return stepError("prompt step requires only prompt")
 			}
 		default:
-			return invalid("unknown step kind")
+			return stepError("unknown step kind")
 		}
 		if err := validateOptions(step.Options); err != nil {
-			return err
+			return fmt.Errorf("step %d %q: %w", i+1, step.Key, err)
 		}
 		seen[step.Key] = true
 	}

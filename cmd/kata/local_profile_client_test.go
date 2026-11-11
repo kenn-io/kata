@@ -54,6 +54,8 @@ instance_uid = %q
 		case "/api/v1/projects/resolve":
 			_, _ = fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"}}`)
 		case "/api/v1/projects/1/search":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Kata-Embeddings-Configured", "false")
 			_, _ = fmt.Fprint(w, `{"query":"example","mode":"lexical","results":[]}`)
 		default:
 			http.NotFound(w, r)
@@ -69,11 +71,14 @@ instance_uid = %q
 	require.NoError(t, err)
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "1")
 	flags.Workspace = root
-	var out bytes.Buffer
+	var out, stderr bytes.Buffer
 	cmd := newSearchCmd()
 	cmd.SetOut(&out)
+	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"example"})
 	require.NoError(t, cmd.ExecuteContext(t.Context()))
+	require.Contains(t, stderr.String(), "Search by meaning is off. Set KATA_HOME to "+workHome+", then turn it on in Settings (kata ui) or run kata daemon local-embeddings.", "both setup paths must target the searched profile with instructions that work on every platform")
+	require.NotContains(t, stderr.String(), personalHome)
 }
 
 func TestLocalProfileDestructiveCommandsUseSelectedCredential(t *testing.T) {

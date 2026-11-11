@@ -44,9 +44,11 @@ required_files=(
   "docs/website/favicon.svg"
   "docs/website/styles/site.css"
   "docs/website/scripts/site.js"
+  "docs/website/hold-first-paint.js"
   "docs/website/fonts/licenses/Inter-OFL-1.1.txt"
   "docs/website/fonts/licenses/JetBrains-Mono-OFL-1.1.txt"
   "docs/scripts/copy_public_markdown_sources.py"
+  "docs/scripts/embed_first_paint.py"
   "docs/scripts/public_markdown_sources.py"
   "scripts/update-docs.sh"
   "docs/pyproject.toml"
@@ -153,6 +155,9 @@ rm -rf docs/site
 
 missing_assets_docs_root="$(mktemp -d)"
 mkdir -p "$missing_assets_docs_root/docs"
+# Keep the archive in a file instead of a pipe. The receiving tar can stop
+# reading at the archive end marker and make the producer report EPIPE under
+# pipefail, even though extraction completed successfully.
 (
   cd docs
   tar \
@@ -160,8 +165,9 @@ mkdir -p "$missing_assets_docs_root/docs"
     --exclude './site' \
     --exclude './.ruff_cache' \
     --exclude './.mypy_cache' \
-    -cf - .
-) | (cd "$missing_assets_docs_root/docs" && tar -xf -)
+    -cf "$missing_assets_docs_root/docs.tar" .
+)
+tar -xf "$missing_assets_docs_root/docs.tar" -C "$missing_assets_docs_root/docs"
 missing_assets_log="$missing_assets_docs_root/vercel-build.log"
 if (cd "$missing_assets_docs_root/docs" && uv run --frozen bash ./vercel-build.sh >"$missing_assets_log" 2>&1); then
   printf 'docs Vercel build without hydrated screenshots should fail\n' >&2
@@ -183,8 +189,9 @@ mkdir -p "$vercel_docs_root/docs"
     --exclude './site' \
     --exclude './.ruff_cache' \
     --exclude './.mypy_cache' \
-    -cf - .
-) | (cd "$vercel_docs_root/docs" && tar -xf -)
+    -cf "$vercel_docs_root/docs.tar" .
+)
+tar -xf "$vercel_docs_root/docs.tar" -C "$vercel_docs_root/docs"
 (cd "$vercel_docs_root/docs" && uv run --frozen bash ./vercel-build.sh)
 (cd "$vercel_docs_root/docs" && python3 scripts/check_public_markdown_sources.py)
 

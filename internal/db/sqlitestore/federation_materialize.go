@@ -2,33 +2,44 @@ package sqlitestore
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
+	"fmt"
 	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
 )
 
-// A deferred SQLite transaction keeps this history-sized preparation out of
-// the writer interval. A concurrent commit makes the first write fail with
-// BUSY_SNAPSHOT; the caller retries validation and preparation together, and
-// takes the project lock before preparing once optimistic attempts run out.
-// Request fences still run first and may themselves acquire the writer lock.
+// Scoped preparation uses an optimistic transaction. Full-history pulls fold
+// in a read-only snapshot and compare the event stamp under the writer lock.
+// Both paths fall back to preparation under the lock after retry attempts.
 type federationMaterialization struct {
-	fullReplay   bool
-	projection   db.FoldProjection
-	cronAffected bool
-	status       []federatedStatusIntentUpdate
-	binding      db.FederationBinding
-	linkProjects []int64
-	links        db.FoldProjection
-	issueRows    map[string]federatedIssueRow
-	issueIDs     map[string]int64
-	commentRows  map[string]federatedCommentRow
-	labelRows    map[federatedLabelKey]struct{}
-	staleIssues  map[string]int64
-	linkIDs      map[string]int64
-	linkRows     map[db.FoldLinkKey]federatedLinkRow
+	fullReplay       bool
+	fullHistory      bool
+	linksAffected    bool
+	eventStamp       [32]byte
+	rowStamp         [32]byte
+	shortIDChecks    []federatedShortIDCheck
+	linkStamps       map[int64][32]byte
+	linkReadProjects []int64
+	maxEventID       int64
+	moveIssueUIDs    map[string]struct{}
+	relayOrigins     relayOriginClassifier
+	projection       db.FoldProjection
+	cronAffected     bool
+	status           []federatedStatusIntentUpdate
+	binding          db.FederationBinding
+	linkProjects     []int64
+	links            db.FoldProjection
+	issueRows        map[string]federatedIssueRow
+	issueIDs         map[string]int64
+	commentRows      map[string]federatedCommentRow
+	labelRows        map[federatedLabelKey]struct{}
+	staleIssues      map[string]int64
+	linkIDs          map[string]int64
+	linkRows         map[db.FoldLinkKey]federatedLinkRow
 }
 
 // Large issue sets keep the established complete queries. This bounds SQL
@@ -42,10 +53,15 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 			continue
 		}
 		ev := input.Event
+		// Cron rows replay their complete history separately, so cron events do
+		// not widen the issue scope.
+		if db.EventRequiredFeatures(ev.Type) == db.CronEventFeature {
+			continue
+		}
 		uid := db.FederationEventIssueUID(ev.IssueUID, string(ev.Payload))
-		// Project/cron events, moves and unidentified events can affect the entire
+		// Project events, moves and unidentified events can affect the entire
 		// projection. Ordinary issue batches use the same scope as pulled pages.
-		if uid == "" || strings.HasPrefix(ev.Type, "project.") || strings.HasPrefix(ev.Type, "cron.") || ev.Type == "issue.moved" {
+		if uid == "" || strings.HasPrefix(ev.Type, "project.") || ev.Type == "issue.moved" {
 			scope = nil
 			break
 		}
@@ -57,17 +73,17 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 			break
 		}
 	}
-	return prepareFederationMaterialization(ctx, tx, projectID, prepared, false, scope)
+	return foldFederationMaterialization(ctx, tx, projectID, prepared, false, scope, false)
 }
 
 // alreadyStored selects pull preparation: the page is in the log already.
-// Cron-only pages fold cron history; other pages reconcile the supplied issue
-// histories and rows (nil is full).
-func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string) (federationMaterialization, error) {
+// Cron-only pages fold cron history. Other pages reconcile the supplied issue
+// scope (nil is full); a scoped page with cron events adds complete cron history.
+func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string, deferRows bool) (federationMaterialization, error) {
 	var fresh []db.FoldEvent
 	var accepted []string
 	linksAffected := false
-	cronOnly := alreadyStored
+	cronOnly := true
 	for _, in := range prepared {
 		if in.Duplicate {
 			continue
@@ -95,11 +111,29 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		return federationMaterialization{}, err
 	}
 	if cronOnly {
-		return prepareCronPullMaterialization(ctx, tx, projectID, binding, prepared)
+		if alreadyStored {
+			return prepareCronPullMaterialization(ctx, tx, projectID, binding, prepared)
+		}
+		return prepareCronFederationMaterialization(ctx, tx, projectID, binding, fresh, alreadyStored)
 	}
 	events, err := federationFoldEventsForIssues(ctx, tx, projectID, issueScope)
 	if err != nil {
 		return federationMaterialization{}, err
+	}
+	if len(issueScope) > 0 && slices.ContainsFunc(fresh, func(event db.FoldEvent) bool {
+		return db.EventRequiredFeatures(event.Type) == db.CronEventFeature
+	}) {
+		// Scoped history can include observations referencing a touched issue.
+		// Folding them twice is harmless but wasted work, so replace them with
+		// the complete project cron history.
+		events = slices.DeleteFunc(events, func(event db.FoldEvent) bool {
+			return db.EventRequiredFeatures(event.Type) == db.CronEventFeature
+		})
+		cronEvents, err := federationCronFoldEvents(ctx, tx, projectID)
+		if err != nil {
+			return federationMaterialization{}, err
+		}
+		events = append(events, cronEvents...)
 	}
 	if !alreadyStored {
 		events = append(events, fresh...)
@@ -115,6 +149,19 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		}
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
+	if deferRows && len(issueScope) == 0 {
+		m.fullHistory = true
+		m.moveIssueUIDs = map[string]struct{}{}
+		m.recordMoveIssueUIDs(events)
+		m.linksAffected = linksAffected
+		m.eventStamp, err = federationEventStamp(ctx, tx, projectID, nil)
+		if err != nil {
+			return federationMaterialization{}, err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events`).Scan(&m.maxEventID); err != nil {
+			return federationMaterialization{}, err
+		}
+	}
 	if len(issueScope) > 0 {
 		// Historical project events can affect issue authors, but an issue-only
 		// page must not reconcile unrelated project metadata.
@@ -129,35 +176,36 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		}
 	}
 	if linksAffected {
-		m.linkProjects, err = federationBindingGroupProjectIDs(ctx, tx, binding)
-		if err != nil {
+		if err := m.foldLinks(ctx, tx, fresh, alreadyStored); err != nil {
 			return federationMaterialization{}, err
 		}
-		var linkEvents []db.FoldEvent
-		for _, id := range m.linkProjects {
-			history, err := federationFoldEventsOfTypes(ctx, tx, id, db.FederationLinkAffectingEventTypes())
-			if err != nil {
-				return federationMaterialization{}, err
-			}
-			linkEvents = append(linkEvents, history...)
-		}
-		if !alreadyStored {
-			for _, event := range fresh {
-				if db.FederationEventAffectsLinks(event.Type) {
-					linkEvents = append(linkEvents, event)
+	}
+	if m.fullHistory {
+		if linksAffected {
+			m.linkStamps = make(map[int64][32]byte)
+			for _, id := range m.linkReadProjects {
+				if id == projectID {
+					continue
 				}
+				stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+				if err != nil {
+					return federationMaterialization{}, err
+				}
+				m.linkStamps[id] = stamp
 			}
 		}
-		// The incremental fold reads the same group link history as a full
-		// materialization, so it applies the same relay link boundary.
-		linkEvents, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, linkEvents)
+		m.rowStamp, err = federationRowStamp(ctx, tx, projectID, m.linkProjects)
 		if err != nil {
 			return federationMaterialization{}, err
 		}
-		m.links = db.FoldEvents(linkEvents)
 	}
 	if err := m.prepareRows(ctx, tx, projectID, issueScope); err != nil {
 		return federationMaterialization{}, err
+	}
+	if m.fullHistory {
+		for uid := range m.issueRows {
+			m.moveIssueUIDs[uid] = struct{}{}
+		}
 	}
 	if m.linkProjects != nil {
 		if err := m.prepareLinks(ctx, tx, projectID, issueScope); err != nil {
@@ -165,6 +213,149 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		}
 	}
 	return m, nil
+}
+
+func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, fresh []db.FoldEvent, alreadyStored bool) error {
+	var err error
+	m.linkProjects, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
+	if err != nil {
+		return err
+	}
+	var events []db.FoldEvent
+	for _, id := range m.linkProjects {
+		history, err := federationFoldEventsOfTypes(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+		if err != nil {
+			return err
+		}
+		events = append(events, history...)
+	}
+	if m.fullHistory {
+		m.recordMoveIssueUIDs(events)
+		m.linkReadProjects = slices.Clone(m.linkProjects)
+		seen := map[string]bool{}
+		for _, event := range events {
+			if seen[event.ProjectUID] {
+				continue
+			}
+			seen[event.ProjectUID] = true
+			var id int64
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=?`, event.ProjectUID).Scan(&id); err != nil {
+				return err
+			}
+			if !slices.Contains(m.linkReadProjects, id) {
+				m.linkReadProjects = append(m.linkReadProjects, id)
+			}
+		}
+		slices.Sort(m.linkReadProjects)
+	}
+	if !alreadyStored {
+		for _, event := range fresh {
+			if db.FederationEventAffectsLinks(event.Type) {
+				events = append(events, event)
+			}
+		}
+	}
+	events, m.relayOrigins, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
+	if err != nil {
+		return err
+	}
+	m.links = db.FoldEvents(events)
+	return nil
+}
+
+func (m *federationMaterialization) recordMoveIssueUIDs(events []db.FoldEvent) {
+	for _, event := range events {
+		uid := event.IssueUID
+		if uid == "" && strings.HasPrefix(event.Type, "issue.") {
+			uid = db.FederationEventIssueUID(nil, string(event.Payload))
+		}
+		if uid != "" {
+			m.moveIssueUIDs[uid] = struct{}{}
+		}
+	}
+}
+
+// federationRowStamp reads the persisted inputs used by row and link preparation.
+func federationRowStamp(ctx context.Context, tx *sql.Tx, projectID int64, group []int64) ([32]byte, error) {
+	type stampQuery struct {
+		query string
+		args  []any
+	}
+	queries := []stampQuery{
+		{`SELECT json_array(uid,id,short_id,title,body,status,closed_reason,owner,CAST(assignment_expires_on AS TEXT),priority,author,CAST(created_at AS TEXT),CAST(updated_at AS TEXT),CAST(closed_at AS TEXT),CAST(deleted_at AS TEXT),metadata) FROM issues WHERE project_id=? ORDER BY id`, []any{projectID}},
+		{`SELECT json_array(c.uid,c.id,c.issue_id,c.author,CAST(c.created_at AS TEXT),c.body,c.teammate) FROM issues i JOIN comments c ON c.issue_id=i.id WHERE i.project_id=? ORDER BY c.id`, []any{projectID}},
+		{`SELECT json_array(l.issue_id,l.label) FROM issues i JOIN issue_labels l ON l.issue_id=i.id WHERE i.project_id=? ORDER BY l.issue_id,l.label`, []any{projectID}},
+	}
+	if len(group) > 0 {
+		placeholders, args := projectIDPlaceholders(group)
+		//nolint:gosec // The IN clauses contain generated placeholders; IDs are bound.
+		queries = append(queries, stampQuery{`SELECT json_array(uid,id,project_id) FROM issues WHERE project_id IN (` + placeholders + `) ORDER BY project_id,id`, args})
+		//nolint:gosec // The IN clauses contain generated placeholders; IDs are bound.
+		queries = append(queries, stampQuery{`SELECT json_array(l.id,l.from_issue_id,l.to_issue_id,l.from_issue_uid,l.to_issue_uid,l.type,l.author,CAST(l.created_at AS TEXT)) FROM links l JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id WHERE f.project_id IN (` + placeholders + `) AND t.project_id IN (` + placeholders + `) ORDER BY l.id`, append(slices.Clone(args), args...)})
+	}
+	h := sha256.New()
+	for _, q := range queries {
+		rows, err := tx.QueryContext(ctx, q.query, q.args...)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		for rows.Next() {
+			var value string
+			if err := rows.Scan(&value); err != nil {
+				_ = rows.Close()
+				return [32]byte{}, err
+			}
+			var length [8]byte
+			binary.BigEndian.PutUint64(length[:], uint64(len(value))) //nolint:gosec // A string length is nonnegative.
+			_, _ = h.Write(length[:])
+			_, _ = h.Write([]byte(value))
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return [32]byte{}, err
+		}
+		if err := rows.Close(); err != nil {
+			return [32]byte{}, err
+		}
+		_, _ = h.Write([]byte{0})
+	}
+	var stamp [32]byte
+	copy(stamp[:], h.Sum(nil))
+	return stamp, nil
+}
+
+func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes []string) ([32]byte, error) {
+	query := `SELECT id, content_hash FROM events WHERE project_id=?`
+	args := []any{projectID}
+	if len(eventTypes) > 0 {
+		//nolint:gosec // Only generated placeholders enter the query; event types are bound.
+		query += ` AND type IN (?` + strings.Repeat(",?", len(eventTypes)-1) + `)`
+		for _, eventType := range eventTypes {
+			args = append(args, eventType)
+		}
+	}
+	query += ` ORDER BY id`
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("list federation event stamps: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	h := sha256.New()
+	for rows.Next() {
+		var id int64
+		var contentHash string
+		if err := rows.Scan(&id, &contentHash); err != nil {
+			return [32]byte{}, fmt.Errorf("scan federation event stamp: %w", err)
+		}
+		var encoded [8]byte
+		binary.BigEndian.PutUint64(encoded[:], uint64(id)) //nolint:gosec // Preserve every bit of the SQLite row ID.
+		_, _ = h.Write(encoded[:])
+		_, _ = h.Write([]byte(contentHash))
+	}
+	if err := rows.Err(); err != nil {
+		return [32]byte{}, err
+	}
+	return [32]byte(h.Sum(nil)), nil
 }
 
 func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, projectID int64, validator *db.CronReplayValidator) error {
@@ -203,6 +394,11 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 	return updateFederatedProjectMetadataTx(ctx, tx, projectID, m.projection.ProjectMetadata[m.binding.HubProjectUID])
 }
 
+type federatedShortIDCheck struct {
+	uid, preferred, resolved string
+	row                      federatedIssueRow
+}
+
 // prepareRows compares against persisted values, rather than a previous fold:
 // local writes and imports can leave values that a full rebuild would repair.
 func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {
@@ -228,6 +424,9 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 		shortID, err := resolveFederatedIssueShortID(ctx, tx, projectID, issue.UID, issue.ShortID, &row)
 		if err != nil {
 			return err
+		}
+		if m.fullHistory && issue.ShortID != "" && issue.ShortID != row.shortID {
+			m.shortIDChecks = append(m.shortIDChecks, federatedShortIDCheck{issue.UID, issue.ShortID, shortID, row})
 		}
 		values, err := federatedIssueValues(issue, shortID, m.projection.IssueMetadata[issue.UID])
 		if err != nil {

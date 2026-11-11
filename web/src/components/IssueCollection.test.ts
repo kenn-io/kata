@@ -28,7 +28,9 @@ function render(_component: typeof IssueCollection, options: IssueListRenderOpti
   const issueCatalog =
     options.props.issueCatalog ?? options.props.currentView.groups.flatMap((group) => group.issues)
   return renderComponent(IssueCollection, {
-    props: { ...options.props, issueCatalog } as ComponentProps<typeof IssueCollection>,
+    props: { now: Date.now(), ...options.props, issueCatalog } as ComponentProps<
+      typeof IssueCollection
+    >,
   })
 }
 
@@ -340,6 +342,7 @@ describe('IssueCollection', () => {
       // Update snapshot props alone; rerender also invalidates the unchanged selection prop.
       const { container } = renderComponent(IssueCollection, {
         props: {
+          now: Date.now(),
           get currentView() {
             return viewWithIssues(snapshot.current)
           },

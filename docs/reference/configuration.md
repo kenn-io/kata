@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-06
+last_edited: 2026-11-10
 ---
 
 # Configuration
@@ -302,6 +302,8 @@ it does not dial Postgres or stat SQLite paths.
 `.kata.toml` is committed with the project:
 
 ```toml
+# This repository tracks its work in kata.
+# Coding agents: read `kata quickstart --format contract` before changing code here.
 version = 1
 
 [project]
@@ -355,12 +357,30 @@ isolated credentials, PostgreSQL restrictions, and recovery.
 Committed `.kata.toml` files bind the project name only; do not put daemon
 routing or tokens there.
 
-A catalog entry's `token`, or the value of the variable its `token_env` names,
-is the bearer credential clients send to that daemon. A command that connects
-to an entry whose `token_env` variable is unset or empty fails; kata never
-falls back to another credential. `kata daemon locate` reports a remote or
-plain local entry without reading its credential. `KATA_AUTH_TOKEN` replaces a
-remote entry's credential, so its `token_env` is not read then.
+A catalog entry's bearer credential uses `token` > `token_file` > `token_env`.
+Prefer `token_file` on a device to keep the token out of `config.toml`:
+
+```toml
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example"
+token_file = "~/.config/kata/tokens/team-hub"
+```
+
+The file must use an absolute or `~/` path, be a regular file owned by the
+user running Kata, and have no group or world permissions (`chmod 600`). On
+Windows it must be a private current-user file. The file must be at most
+64 KiB; its trimmed contents must be nonempty. Use `token_env` for containers or service
+managers that already inject secrets.
+
+Loading or listing the catalog does not read its credentials. Selection,
+including `kata daemon locate`, may inspect a selected credential. Remote and
+plain local entries defer source errors until connection. A failed selected
+file or an unset or empty selected environment variable stops the connection
+without fallback.
+`KATA_AUTH_TOKEN` replaces a remote entry's credential, so its file or variable
+is not read then. Hub administration uses only the hub's catalog credential;
+the local daemon's global token never replaces it.
 
 For trusted private-network hostnames that cannot be represented as literal
 non-public IP addresses, opt in per target:
@@ -543,12 +563,12 @@ loader-only progressive loading. Loaders remain available in both modes.
 Unknown, duplicate, or unavailable sections disable `/mcp` (503, reason logged);
 REST and the web UI keep serving. Correct the setting and restart. See
 [Startup sections](mcp.md#startup-sections) for IDs and availability rules.
-On unreleased `main`, identity mode (`[auth] require_token_identity = true`)
+In Kata 0.23.0 and later, identity mode (`[auth] require_token_identity = true`)
 uses each caller's identity bearer at `/mcp`. Remove `[mcp] token_file` and
 `token_env`; either setting stops startup in identity mode. The token determines
 the actor, so `[mcp] actor` is ignored. See
-[Daemon mount with identity tokens](mcp.md#daemon-mount-with-identity-tokens-unreleased)
-for authentication and session behavior. Kata 0.21.0 requires
+[Daemon mount with identity tokens](mcp.md#daemon-mount-with-identity-tokens)
+for authentication and session behavior. Kata 0.21.0 and 0.22.0 require
 `kata mcp serve --http` with a user token in this mode.
 Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header. The sidecar must reach the daemon through a REST listener outside `trusted_proxy_listeners` or through the proxy that sets the actor header.
 See [MCP transport](mcp.md#transport) for gateway setup and scope.
@@ -573,9 +593,9 @@ database path still apply.
 Daemon bearer credentials use `[auth].token` > `[auth].token_file` >
 `[auth].token_env` (the name of a variable containing the token). A nonempty
 `KATA_AUTH_TOKEN` overrides the inline token. Token files follow the
-[embedding credential file restrictions](#semantic-search): absolute or `~/`
-paths, regular files owned by the daemon user, no Unix group/world permissions
-or Windows access for other users, and at most 64 KiB. Whitespace and a
+[key file rules](#credentials-and-batching): absolute or `~/` paths, regular
+files owned by the daemon user, no Unix group/world permissions, no inherited
+Windows permissions or access for other users, and at most 64 KiB. Whitespace and a
 trailing newline are trimmed. An unusable
 selected file or named environment variable fails loudly without falling back.
 For example, mount a `0600` secret file owned by the daemon user and set
@@ -778,10 +798,11 @@ actor = "user-a"
 
 `hub` names a remote `[[daemon]]` entry; its URL, authentication, and
 `allow_insecure` policy are reused without falling back to the spoke daemon's
-global bearer token. Prefer `token_env` so the hub administration credential
-does not appear in `config.toml`. An unset or empty selected `token_env` is a
-runtime authentication failure: the spoke stays available and retries without
-sending another credential.
+global bearer token. Prefer `token_file` on a device, or `token_env` when the
+service environment already injects secrets, to keep the hub administration
+credential out of `config.toml`. A failed selected file or an unset or empty
+selected variable is a runtime authentication failure: the spoke stays
+available and retries without sending another credential.
 
 Each mapping ensures the named hub project and a `pull,push,lease` enrollment,
 then creates the local `spoke_project` if it is missing or adopts the existing
@@ -820,8 +841,8 @@ The selected spoke daemon resolves `team-hub` from its own startup config. It
 requires HTTPS, validates the existing enrollment against the same hub project
 ID and UID at the new endpoint, then updates the stored endpoint without
 changing the enrollment token, capabilities, actor, project identity, or sync
-cursors. The catalog entry's administration `token` or `token_env` is not used
-for this validation. Restart first if the edited catalog has not yet been
+cursors. The catalog entry's administration `token`, `token_file` or
+`token_env` is not used for this validation. Restart first if the edited catalog has not yet been
 loaded by the daemon.
 
 Before changing either local endpoint record, rebind drains in-flight
@@ -882,7 +903,7 @@ credential_provider = ["access-helper", "credentials", "--profile", "work"]
 | `intent` | Required: `read_only`, `collaborate`, or `migrate`. |
 | `credential_provider` | Nonempty executable/argument array. Kata executes it directly, without a shell. |
 | `actor` | Must be absent; the provider supplies the approved actor. |
-| Catalog `token`, `token_env` | Must be absent for a provider mapping. |
+| Catalog `token`, `token_file`, `token_env` | Must be absent for a provider mapping. |
 
 Provider mappings require HTTPS even if the catalog sets `allow_insecure`.
 The helper approves a credential for an exact HTTPS destination; the catalog's
@@ -995,6 +1016,50 @@ issue-scoped credential, get a completion form for the substantive message and
 typed evidence required by the normal close contract. The TUI discovers that
 requirement from `/instance`; it does not trust its own `source=tui` marker to
 widen authority. Structural guards still apply to every transport.
+
+## MCP Events
+
+`[mcp_events]` turns on daemon-owned MCP Events. The daemon then stores
+webhook subscriptions and delivers signed inbox events to them while the
+daemon runs. `kata mcp serve` only forwards requests to it.
+
+```toml
+[mcp_events]
+enabled = false
+max_ttl = "720h"
+allow_no_expiry = true
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Starts Events delivery and accepts subscriptions. |
+| `max_ttl` | `"720h"` (30 days) | Longest lifetime of a finite subscription grant. Go duration syntax; at least `"60s"`. |
+| `allow_no_expiry` | `true` | Honors requests for a subscription that never expires. Set `false` to give those requests a `max_ttl` grant instead. |
+
+Subscribers choose their own lifetime. A request without one gets 24 hours
+capped by `max_ttl`, and a finite request is clamped to between 60 seconds and
+`max_ttl`. A request for no expiry is honored unless `allow_no_expiry = false`.
+Subscriptions created before you change the setting keep their lifetime until
+the subscriber next refreshes.
+
+The daemon seals subscription secrets with a 32-byte key in
+`<KATA_HOME>/runtime/<storage-id>/mcp-events.key`. It creates the file, readable
+only by its owner, the first time Events starts against a database that has no
+Events data. Daemons that share one PostgreSQL database must use the same key
+file.
+
+Events failures never stop the daemon. If the key file is missing, unreadable
+or different from the one the database was written under, Events stays
+disabled, the daemon logs why, and every other daemon function keeps working.
+The daemon never replaces a key that is missing or corrupt. The status route,
+`GET /api/v1/mcp-events/subscriptions`, reports `enabled: false` and a
+`reason`: `events_not_configured`, `events_key_unavailable`,
+`events_key_mismatch` or `events_start_failed`.
+
+Programs that embed the Go `Service` set `Config.MCPEvents.Enabled` and
+supply `Config.MCPEvents.Key` instead. `Config.MCPEvents.MaxTTL` and
+`Config.MCPEvents.RefuseNoExpiry` match `max_ttl` and `allow_no_expiry = false`. Without a key provider, Events is
+disabled with `events_not_configured` and the other workers still run.
 
 ## Semantic search
 
@@ -1114,10 +1179,14 @@ daemon user's home directory (not `KATA_HOME`). Other relative paths are
 rejected. Symlinks are accepted, and there is no parent-directory ownership or
 permission policy. Kata validates the opened file: it must be regular and
 owned by the daemon's effective user. On Unix, group/world permissions are
-rejected (`chmod 600`). On Windows, the file ACL must restrict access to the
-current user, SYSTEM, and Administrators. Files larger than 64 KiB are refused,
-and reads are bounded to enforce that limit. File contents are trimmed,
-including a trailing newline.
+rejected (`chmod 600`). On Windows, the file must not inherit permissions from
+its folder, and it may grant access only to the current user, SYSTEM, and
+Administrators. A file created in a user profile inherits its folder's
+permissions and is rejected even when they list only those accounts. To fix
+it, run this in PowerShell as the daemon user:
+`icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R"`. Files larger than
+64 KiB are refused, and reads are bounded to enforce that limit.
+File contents are trimmed, including a trailing newline.
 
 Kata resolves the selected credential once at startup and once per
 `kata daemon reload`. Reload wakes the embedding backlog; changes to provider
@@ -1505,20 +1574,28 @@ for access tokens, field ownership, completion writeback, and recovery limits.
 ## Docbank attachments
 
 Kata 0.21.0 and later: `[docbank]` enables issue file uploads and reads through a
-separately hosted Docbank. See [Issue attachments](../guide/attachments.md) for
-setup and the shared-vault trust boundary.
+Docbank, either separately hosted (`url`) or running on the same machine
+(`local`). `kata docbank setup` writes and checks this section. See
+[Issue attachments](../guide/attachments.md#configure-the-daemon) for setup and
+the shared-vault trust boundary.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `url` | empty (disabled) | Docbank base URL; HTTPS or loopback HTTP, without userinfo, query, or fragment. |
 | `api_key` | empty | Inline key, preferred over file and environment sources. |
-| `api_key_file` | empty | Mode-0600 key file, preferred over the environment source. |
+| `api_key_file` | empty | Key file, preferred over the environment source; it must follow the [key file rules](#credentials-and-batching). |
 | `api_key_env` | empty | Name of the environment variable containing the key. |
 | `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
+| `local` | `false` | Use the Docbank running on this machine, found through its runtime record. |
 
-A configured URL requires a key source. A broken selected credential
-source fails explicitly; Kata does not fall back to another source. Keys are
-resolved on each request.
+A configured URL requires a key source. If the selected source cannot supply a
+key, Kata does not fall back to another source and sends nothing to Docbank;
+attachment requests fail with `docbank_key_unavailable` (see
+[attachment endpoints](http-api.md#attachment-endpoints)). `kata doctor`
+(`daemon.docbank`) shows the failing source. Keys are resolved on each request.
+
+A `url` in the file or `KATA_DOCBANK_URL` wins over `local`. With `local`,
+`api_key`, `api_key_file`, and `api_key_env` are unused. `folder` still applies.
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.

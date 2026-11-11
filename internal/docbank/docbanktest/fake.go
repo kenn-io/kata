@@ -2,6 +2,7 @@
 package docbanktest
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
@@ -16,6 +17,8 @@ import (
 	"testing"
 	"uuid"
 
+	kitdaemon "go.kenn.io/kit/daemon"
+
 	"go.kenn.io/kata/internal/docbank"
 )
 
@@ -24,6 +27,8 @@ type Fake struct {
 	Server       *httptest.Server
 	Fault        string
 	UploadStatus int
+	// Key is the API key the fake accepts, publishes, and proves knowledge of.
+	Key string
 	// BeforeResponse runs after request recording and before the fake handles it.
 	BeforeResponse func(method, path string)
 	mu             sync.Mutex
@@ -38,7 +43,7 @@ type Fake struct {
 
 // New starts an isolated Docbank fake and registers its cleanup.
 func New(t testing.TB) *Fake {
-	f := &Fake{nodes: map[int64]docbank.Node{}, paths: map[string]int64{}, metadata: map[string]docbank.Version{}, dirs: map[string]int64{"/": 1}, versions: map[string]string{}, content: map[string][]byte{}}
+	f := &Fake{Key: "test-key", nodes: map[int64]docbank.Node{}, paths: map[string]int64{}, metadata: map[string]docbank.Version{}, dirs: map[string]int64{"/": 1}, versions: map[string]string{}, content: map[string][]byte{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Server.Close)
 	return f
@@ -63,7 +68,36 @@ func (f *Fake) Requests() []string {
 	defer f.mu.Unlock()
 	return append([]string(nil), f.requests...)
 }
+
+// Publish writes a runtime record for this fake into home, replacing any record
+// this test process already published there.
+func (f *Fake) Publish(t testing.TB, home string) {
+	t.Helper()
+	rec := kitdaemon.NewRuntimeRecord("docbank", "test", kitdaemon.Endpoint{Network: "tcp", Address: f.Server.Listener.Addr().String()})
+	rec.Metadata = map[string]string{"api_key": f.Key}
+	if _, err := (kitdaemon.RuntimeStore{Dir: home}).Write(rec); err != nil {
+		t.Fatalf("publish docbank runtime record: %v", err)
+	}
+}
+
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == kitdaemon.DefaultPingPath {
+		kitdaemon.NewPingHandler(kitdaemon.PingHandlerOptions{Service: "docbank", Version: "test"}).ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/api/daemon/key-challenge" && r.Method == "GET" {
+		nonce, err := hex.DecodeString(r.URL.Query().Get("nonce"))
+		if err != nil {
+			http.Error(w, "bad nonce", http.StatusBadRequest)
+			return
+		}
+		mac := hmac.New(sha256.New, []byte(f.Key))
+		mac.Write([]byte("docbank-api-key-proof-v1\x00"))
+		mac.Write(nonce)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.MarshalWrite(w, map[string]string{"proof": hex.EncodeToString(mac.Sum(nil))})
+		return
+	}
 	f.mu.Lock()
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
 	before := f.BeforeResponse
@@ -73,7 +107,7 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if r.Header.Get("X-Api-Key") != "test-key" {
+	if r.Header.Get("X-Api-Key") != f.Key {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

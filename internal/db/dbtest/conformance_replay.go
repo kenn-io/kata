@@ -387,6 +387,12 @@ func CollectImportRecords(
 			return nil, err
 		}
 	}
+	for value, err := range store.ExportMCPEventSubscriptions(ctx, filter) {
+		v := value
+		if err := appendRecord(&v, err); err != nil {
+			return nil, err
+		}
+	}
 	for value, err := range store.ExportRecurrences(ctx, filter) {
 		v := value
 		if err := appendRecord(&v, err); err != nil {

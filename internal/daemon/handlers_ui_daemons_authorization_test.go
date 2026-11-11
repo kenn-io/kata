@@ -590,35 +590,39 @@ func TestWebDaemonGatewayRejectsNestedProxyRoutesWithoutContactingTarget(t *test
 
 func TestResolveWebDaemonRequiresCanonicalRootOrigin(t *testing.T) {
 	t.Run("canonicalizes origin", func(t *testing.T) {
-		resolved := resolveWebDaemon(config.CatalogDaemonConfig{
+		resolved, err := resolveWebDaemon(config.CatalogDaemonConfig{
 			Name: "example-remote", URL: "https://DAEMON.EXAMPLE:443/",
 		})
+		require.NoError(t, err)
 		assert.Equal(t, "https://daemon.example", resolved.baseURL)
 	})
 
 	t.Run("rejects path prefix", func(t *testing.T) {
-		resolved := resolveWebDaemon(config.CatalogDaemonConfig{
+		resolved, err := resolveWebDaemon(config.CatalogDaemonConfig{
 			Name: "example-remote", URL: "https://daemon.example/gateway",
 		})
+		require.NoError(t, err)
 		assert.Empty(t, resolved.baseURL)
 	})
 }
 
 func TestWebDaemonBearerTransportRequiresExplicitPlaintextTrust(t *testing.T) {
-	resolved := resolveWebDaemon(config.CatalogDaemonConfig{
+	resolved, err := resolveWebDaemon(config.CatalogDaemonConfig{
 		Name: "example-remote", URL: "http://100.64.0.5:7777", Token: "target-token",
 	})
 
-	_, err := webDaemonBearerTransport(resolved, false)
+	require.NoError(t, err)
+	_, err = webDaemonBearerTransport(resolved, false)
 	require.Error(t, err)
 
 	_, err = webDaemonBearerTransport(resolved, true)
 	require.NoError(t, err)
 
-	resolved = resolveWebDaemon(config.CatalogDaemonConfig{
+	resolved, err = resolveWebDaemon(config.CatalogDaemonConfig{
 		Name: "example-remote", URL: "http://daemon.example", Token: "target-token",
 		AllowInsecure: true,
 	})
+	require.NoError(t, err)
 	_, err = webDaemonBearerTransport(resolved, false)
 	require.NoError(t, err)
 }
@@ -903,6 +907,51 @@ func TestWebDaemonGatewayStreamsEventsForTokenSessionOnLocalTarget(t *testing.T)
 			n, err := response.Body.Read(handshake)
 			require.NoError(t, err)
 			require.Contains(t, string(handshake[:n]), ": connected", "the stream flushes its handshake before any event")
+		})
+	}
+}
+
+func TestWebDaemonGatewayRestrictsEmbeddingsByViewer(t *testing.T) {
+	for _, administrator := range []bool{false, true} {
+		t.Run(fmt.Sprintf("viewer administrator=%t", administrator), func(t *testing.T) {
+			targetDaemon := NewServer(ServerConfig{
+				DB: openAuthTestDB(t), StartedAt: time.Now().UTC(),
+				Auth:            config.AuthConfig{Token: "target-token"},
+				LocalEmbeddings: &localEmbeddingsFixture{},
+				ReconcilerHealth: func() ReconcilerHealth {
+					return ReconcilerHealth{Configured: true, Embedded: 40, Backlog: 172, ETASeconds: new(int64(30))}
+				},
+			})
+			t.Cleanup(func() { _ = targetDaemon.Close() })
+			target := httptest.NewServer(targetDaemon.Handler())
+			t.Cleanup(target.Close)
+			handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+				Name: "example-remote", URL: target.URL, Token: "target-token", AllowInsecure: true,
+			})
+			principal := Principal{Kind: PrincipalBootstrap}
+			if !administrator {
+				token, _, err := manager.db.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+					PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor,
+				})
+				require.NoError(t, err)
+				principal = Principal{Kind: PrincipalDBToken, Actor: "member", TokenID: token.ID}
+			}
+			issued, err := manager.IssueSession(principal, "/kata")
+			require.NoError(t, err)
+			response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet, "/api/v1/embeddings/local", nil, "")
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var got api.LocalEmbeddingsStatus
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
+			assert.False(t, got.CanChange)
+			require.NotNil(t, got.Indexing)
+			if administrator {
+				assert.Equal(t, int64(212), got.Indexing.Total)
+				require.NotNil(t, got.Indexing.ETASeconds)
+				assert.Equal(t, int64(30), *got.Indexing.ETASeconds)
+			} else {
+				assert.Zero(t, got.Indexing.Total)
+				assert.Nil(t, got.Indexing.ETASeconds)
+			}
 		})
 	}
 }
