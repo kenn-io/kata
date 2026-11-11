@@ -40,7 +40,7 @@ func RunRelayOutboxAtomicity(t *testing.T, store db.Storage) {
 	})
 	featureEvent := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), `{"steps":[{"kind":"argv","argv":["true"]}]}`)
 	insertFeature := func() {
-		_, err := q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, featureEvent.EventUID, store.InstanceUID(), project.ID, project.Name, featureEvent.Type, "worker", string(featureEvent.Payload), featureEvent.HLCPhysicalMS, featureEvent.HLCCounter, featureEvent.ContentHash)
+		_, err := q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, featureEvent.EventUID, store.InstanceUID(), project.ID, project.Name, featureEvent.Type, "worker", string(featureEvent.Payload), featureEvent.HLCPhysicalMS, featureEvent.HLCCounter, featureEvent.ContentHash, featureEvent.CreatedAt.UTC().Format(db.EventTimestampFormat))
 		require.NoError(t, err)
 	}
 	removeFeature := func() {
