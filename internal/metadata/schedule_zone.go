@@ -91,6 +91,19 @@ func DecodeSavedSchedule(raw jsontext.Value) (*SavedSchedule, error) {
 	return obj, err
 }
 
+// SavedScheduleWallTime projects saved instants using their saved rules.
+func SavedScheduleWallTime(raw jsontext.Value) (string, error) {
+	obj, loc, err := decodeSavedSchedule(raw)
+	if err != nil || obj == nil {
+		return "", err
+	}
+	kind, _, instant, err := classifyScheduledOn(obj.Value)
+	if err != nil || kind != scheduledOnInstant {
+		return "", err
+	}
+	return instant.In(loc).Format("2006-01-02T15:04:05.999999999"), nil
+}
+
 // IsUnsupportedSchedule reports a saved schedule written by a newer build:
 // tzdata rules or object members this build does not know.
 func IsUnsupportedSchedule(err error) bool {

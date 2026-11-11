@@ -805,9 +805,11 @@ type ReachableGraphResponse struct {
 // author and timestamp detail.
 type ShowIssueOut struct {
 	db.Issue
-	Labels          []string `json:"labels"`
-	ScheduledOnDate string   `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
-	DeadlineOnDate  string   `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
+	Labels             []string `json:"labels"`
+	ScheduledOnDate    string   `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
+	DeadlineOnDate     string   `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
+	ScheduledOnDisplay string   `json:"scheduled_on_display,omitempty" doc:"Saved scheduled instant as a local date and time using its saved timezone rules."`
+	DeadlineOnDisplay  string   `json:"deadline_on_display,omitempty" doc:"Saved deadline instant as a local date and time using its saved timezone rules."`
 }
 
 // ShowIssueResponse is the per-issue read payload (Plan 2: + links, + labels).

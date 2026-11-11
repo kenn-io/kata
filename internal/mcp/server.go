@@ -867,6 +867,7 @@ type IssueSummary struct {
 	Revision            int64     `json:"revision"`
 	UpdatedAt           string    `json:"updated_at"`
 	ScheduledOn         *string   `json:"scheduled_on,omitempty"`
+	ScheduledOnTimezone *string   `json:"scheduled_on_timezone,omitempty" jsonschema:"Timezone saved with the scheduled date."`
 	Timezone            *string   `json:"timezone,omitempty"`
 	ScheduledOnDate     *string   `json:"scheduled_on_date,omitempty" jsonschema:"scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable or the daemon predates API 0.36.0"`
 	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`

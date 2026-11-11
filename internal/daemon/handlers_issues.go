@@ -1085,9 +1085,14 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
+	var scheduleFields map[string]jsontext.Value
+	_ = json.Unmarshal([]byte(issue.Metadata), &scheduleFields)
+	scheduledOnDisplay, _ := metadata.SavedScheduleWallTime(scheduleFields["scheduled_on"])
+	deadlineOnDisplay, _ := metadata.SavedScheduleWallTime(scheduleFields["deadline_on"])
 	out.Body.Issue = api.ShowIssueOut{
 		Issue: issue, Labels: labelNames,
 		ScheduledOnDate: scheduledOnDate, DeadlineOnDate: deadlineOnDate,
+		ScheduledOnDisplay: scheduledOnDisplay, DeadlineOnDisplay: deadlineOnDisplay,
 	}
 	var includeDeletedSourceIssueID int64
 	if includeDeleted && issue.DeletedAt != nil {
