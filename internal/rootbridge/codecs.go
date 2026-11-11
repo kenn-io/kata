@@ -230,7 +230,7 @@ func kataScheduleFieldValueFromMetadata(
 		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", key, err)
 	}
 	if saved != nil {
-		return kataScheduleFieldValue(saved.Value, map[string]jsontext.Value{"timezone": mustJSON(saved.Timezone)}, defaultTimezone)
+		return kataScheduleFieldValue(saved.Value, nil, saved.Timezone)
 	}
 	if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
 		return connector.FieldValue{}, fmt.Errorf("validate %s: %w", key, err)
