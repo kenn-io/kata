@@ -2040,7 +2040,7 @@ In agent mode, the `OK daemon` report on stdout indicates that the report was
 produced; a non-ready selection also emits an `ERR status` line on stderr. See
 the [agent output contract](agent-output.md#stability-contract).
 For a live but unreachable selected daemon, the diagnosis includes its recovery action as `selected.next_action` in JSON, `next_action=` in `--agent` output, and a `next:` line in human output.
-`daemon diagnose` inspects selection, home,
+`daemon diagnose` reports its action as top-level `next_action` in JSON and inspects selection, home,
 database/project identity, schema, process, and federation origin without
 starting or changing anything.
 `daemon recover` starts only a registered existing local profile, verifies its

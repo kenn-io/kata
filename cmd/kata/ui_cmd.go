@@ -40,9 +40,9 @@ func newUICmd() *cobra.Command {
 				DaemonName:     flags.Daemon,
 			})
 			if err != nil {
-				if flags.Daemon != "" || errors.Is(err, client.ErrRemoteUnavailable) ||
+				if prepared.DaemonName != "" || flags.Daemon != "" || errors.Is(err, client.ErrRemoteUnavailable) ||
 					errors.Is(err, client.ErrNamedDaemonNotFound) {
-					return cliDaemonTargetError(err)
+					return cliDaemonTargetError(err, prepared.DaemonName)
 				}
 				return err
 			}

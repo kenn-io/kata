@@ -76,7 +76,6 @@ type LocalDaemonUnreachableError struct {
 	DataDir         string
 	WebOrigin       string
 	VerifiedProcess bool
-	Profile         string
 	cause           error
 }
 
@@ -139,6 +138,10 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			}
 			ep := r.Endpoint()
 			address := ep.ConfigAddress()
+			if err := ctx.Err(); err != nil {
+				yield(liveDaemon{}, err)
+				return
+			}
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
 				if err := ctx.Err(); errors.Is(err, context.Canceled) {

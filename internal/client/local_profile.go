@@ -86,7 +86,6 @@ func discoverLocalProfileWithVerifier(
 	scan liveDaemonScanner,
 	verify func(context.Context, ResolvedDaemon) error,
 ) (result ResolvedDaemon, found bool, resultErr error) {
-	defer func() { resultErr = scopeProfileUnreachable(resultErr, selection.Resolved.Name) }()
 	resolved := selection.Resolved
 	if _, err := os.Stat(resolved.LocalProfile.DataDir); errors.Is(err, os.ErrNotExist) {
 		return resolved, false, nil
@@ -150,7 +149,6 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 }
 
 func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (result ResolvedDaemon, resultErr error) {
-	defer func() { resultErr = scopeProfileUnreachable(resultErr, selection.Resolved.Name) }()
 	profile := *selection.Profile
 	if !profile.Config.AutostartEnabled() {
 		return waitForSupervisedProfile(ctx, selection.Resolved, profile)
@@ -277,10 +275,3 @@ func profileCutoverLocked(profile config.LocalProfileConfig) func(context.Contex
 	return func(context.Context) bool { return sqliteCutoverLockedForDSN(profile.DSN) }
 }
 
-// scopeProfileUnreachable attaches the selected profile without dropping wrapping.
-func scopeProfileUnreachable(err error, name string) error {
-	if unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
-		unreachable.Profile = name
-	}
-	return err
-}
