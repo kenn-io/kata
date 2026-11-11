@@ -33,7 +33,7 @@ func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, profile, goos s
 func profileRecoveryCommand(name, goos string) string {
 	arg := "--daemon=" + name
 	if goos != "windows" {
-		return "kata " + shellQuoteGlobSafeArg(arg) + " daemon recover"
+		return "kata " + shellQuoteArg(arg) + " daemon recover"
 	}
 	commands, _ := agenthook.BuildCommand("kata", arg, "daemon", "recover") // the executable is never blank
 	return "in PowerShell " + commands.PowerShell
