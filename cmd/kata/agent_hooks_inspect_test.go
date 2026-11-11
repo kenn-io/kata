@@ -169,14 +169,14 @@ func TestAgentHooksInstallKitManagedProfiles(t *testing.T) {
 			require.NoError(t, err, stderr)
 			handlers = nativeContractHandlers(t, profile.Agent, path)
 			require.Len(t, handlers, 3)
-			var commandsAfter []string
-			for _, handler := range handlers {
-				commandsAfter = append(commandsAfter, nativeHandlerCommandLine(handler))
+			require.Contains(t, nativeHandlerCommandLine(handlers[0]), "example-before")
+			contractIndex, afterIndex := 2, 1
+			if profile.Agent == agenthook.AgentClaude || profile.Agent == agenthook.AgentCodex || profile.Agent == agenthook.AgentGemini || profile.Agent == agenthook.AgentQwen {
+				contractIndex, afterIndex = 1, 2
 			}
-			require.Equal(t, 1, strings.Count(strings.Join(commandsAfter, "\n"), "agent-hook contract"))
-			require.Contains(t, strings.Join(commandsAfter, "\n"), "example-before")
-			require.Contains(t, strings.Join(commandsAfter, "\n"), "example-after")
-			require.Contains(t, strings.Join(commandsAfter, "\n"), replacement)
+			require.Contains(t, nativeHandlerCommandLine(handlers[contractIndex]), "agent-hook contract")
+			require.Contains(t, nativeHandlerCommandLine(handlers[contractIndex]), replacement)
+			require.Contains(t, nativeHandlerCommandLine(handlers[afterIndex]), "example-after")
 		})
 	}
 }

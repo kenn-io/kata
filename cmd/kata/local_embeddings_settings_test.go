@@ -221,8 +221,8 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	require.Equal(t, original, got, "a page loaded while search was off cannot switch a provider saved later")
 }
 
-func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
-	for _, scenario := range []string{"vector path directory", "preflight"} {
+func TestSharedChoiceDaemonStartup(t *testing.T) {
+	for _, scenario := range []string{"vector path directory", "preflight", "enabled"} {
 		t.Run(scenario, func(t *testing.T) {
 			clearLocalEmbeddingsEnv(t)
 			resetFlags(t)
@@ -232,11 +232,12 @@ func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 			t.Setenv("KATA_AUTH_TOKEN", "")
 			t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 			require.NoError(t, embedlocal.RecordChoice())
-			if scenario == "vector path directory" {
+			switch scenario {
+			case "vector path directory":
 				path, err := vectorsPathForDSN(filepath.Join(home, "kata.db"))
 				require.NoError(t, err)
 				require.NoError(t, os.Mkdir(path, 0o700))
-			} else {
+			case "preflight":
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0o600))
 				cfg, err := config.ReadDaemonConfig()
 				require.NoError(t, err)
@@ -245,9 +246,32 @@ func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 				_, _, err = preflightEmbeddingStartup(chosen, filepath.Join(home, "kata.db"))
 				require.ErrorContains(t, err, "embedding batching")
 			}
+			if scenario == "enabled" {
+				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var input struct {
+						Input []string `json:"input"`
+					}
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+					vectors := make([]map[string]any, len(input.Input))
+					for i := range input.Input {
+						v := make([]float64, 768)
+						v[0] = 1
+						vectors[i] = map[string]any{"embedding": v, "index": i}
+					}
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": vectors}))
+				}))
+				t.Cleanup(provider.Close)
+				oldEndpoint := localEmbeddingsEndpoint
+				t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+				localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return provider.URL, nil }
+			}
 			baseURL := launchDaemon(t)
 			status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
-			require.Equal(t, "none", status.Provider)
+			if scenario == "enabled" {
+				require.Equal(t, "built_in", status.Provider)
+			} else {
+				require.Equal(t, "none", status.Provider)
+			}
 			project := postJSON[struct {
 				Project struct {
 					ID int64 `json:"id"`
@@ -259,7 +283,11 @@ func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 				Mode    string          `json:"mode"`
 				Results []api.SearchHit `json:"results"`
 			}](t, projectURL+"/search?q=bicycle")
-			require.Equal(t, "lexical", result.Mode)
+			if scenario == "enabled" {
+				require.Equal(t, "hybrid", result.Mode)
+			} else {
+				require.Equal(t, "lexical", result.Mode)
+			}
 			require.Len(t, result.Results, 1)
 			require.Equal(t, "Repair bicycle", result.Results[0].Issue.Title)
 		})

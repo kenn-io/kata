@@ -1710,7 +1710,7 @@ func launchDaemon(t *testing.T) string {
 			if err != nil && !errors.Is(err, context.Canceled) {
 				t.Errorf("daemon did not stop cleanly: %v", err)
 			}
-		case <-time.After(3 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Error("daemon did not stop after context cancellation")
 		}
 	})

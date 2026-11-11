@@ -29,94 +29,73 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 	got, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, "kata.db")
 	require.NoError(t, err)
 	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
-}
-
-func TestSharedChoiceIgnoresPostgres(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	require.NoError(t, embedlocal.RecordChoice())
-	got, err := applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{}, "postgres://example.invalid/kata")
+	got, err = applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{}, "postgres://example.invalid/kata")
 	require.NoError(t, err)
 	require.Equal(t, config.EmbeddingsConfig{}, got)
 }
 
-func TestDaemonPreflightRejectsInvalidConfiguredProvider(t *testing.T) {
-	home := setupKataEnv(t)
-	clearLocalEmbeddingsEnv(t)
-	resetFlags(t)
-	t.Setenv("PORT", "")
-	t.Setenv("KATA_SERVER", "")
-	t.Setenv("KATA_AUTH_TOKEN", "")
-	require.NoError(t, embedlocal.RecordChoice())
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal=true\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0600))
-	_, err := preflightDaemonStartup(t.Context(), "", false, true)
-	require.ErrorContains(t, err, "embedding batching")
-}
-
 func TestLocalEmbeddingsSetup(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	home := setupKataEnv(t)
-	t.Setenv("KATA_HOME", home)
-	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
-	t.Setenv("KATA_SERVER", "")
-	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	installed := false
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
-		if !installed {
-			return "", embedlocal.ErrNotFound
+	t.Run("recorded", func(t *testing.T) {
+		clearLocalEmbeddingsEnv(t)
+		home := setupKataEnv(t)
+		t.Setenv("KATA_HOME", home)
+		t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
+		t.Setenv("KATA_SERVER", "")
+		oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+		t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+		installed := false
+		localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
+			if !installed {
+				return "", embedlocal.ErrNotFound
+			}
+			return "http://127.0.0.1:12345/v1", nil
 		}
-		return "http://127.0.0.1:12345/v1", nil
-	}
-	localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		expectedDir, err := embedlocal.DefaultDir()
-		require.NoError(t, err)
-		require.Equal(t, expectedDir, opts.DataDir)
-		yes, err := opts.Confirm(ctx, 290_000_000)
-		require.NoError(t, err)
-		require.True(t, yes)
-		installed = true
-		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
-	}
-	out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.NoError(t, err, stderr)
-	require.Contains(t, stderr, "290")
-	require.Contains(t, out, "kata health --json")
-	cfg, err := config.ReadSearchConfig()
-	require.NoError(t, err)
-	require.True(t, cfg.Embeddings.Local)
-	chosen, err := embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.True(t, chosen)
-}
-
-func TestLocalEmbeddingsMarkerWriteFailure(t *testing.T) {
-	setupKataEnv(t)
-	home := clearLocalEmbeddingsEnv(t)
-	stubLocalEmbeddingsInstall(t)
-	oldEndpoint := localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-		if opts.Executable == "" {
-			return "", embedlocal.ErrNotFound
+		localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+			expectedDir, err := embedlocal.DefaultDir()
+			require.NoError(t, err)
+			require.Equal(t, expectedDir, opts.DataDir)
+			yes, err := opts.Confirm(ctx, 290_000_000)
+			require.NoError(t, err)
+			require.True(t, yes)
+			installed = true
+			return embedlocal.Installation{Executable: "/example/kennembed"}, nil
 		}
-		return "http://127.0.0.1:12345/v1", nil
-	}
-	marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
-	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0700))
-	if err := os.Symlink("missing", marker); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
-	run := localEmbeddingsRun{
-		confirm: func(context.Context, int64) (bool, error) { return true, nil },
-		notice:  func(string) error { return nil },
-		restart: func(_ context.Context, apply func() error) error { return apply() },
-	}
-	_, err := enableLocalEmbeddings(t.Context(), run)
-	require.ErrorContains(t, err, "sharing could not be confirmed")
-	require.ErrorContains(t, err, "record search by meaning choice")
-	cfg, err := config.ReadSearchConfig()
-	require.NoError(t, err)
-	require.True(t, cfg.Embeddings.Local)
+		out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+		require.NoError(t, err, stderr)
+		require.Contains(t, stderr, "290")
+		require.Contains(t, out, "kata health --json")
+		cfg, err := config.ReadSearchConfig()
+		require.NoError(t, err)
+		require.True(t, cfg.Embeddings.Local)
+		chosen, err := embedlocal.ChoiceRecorded()
+		require.NoError(t, err)
+		require.True(t, chosen)
+	})
+	t.Run("marker write failure", func(t *testing.T) {
+		setupKataEnv(t)
+		home := clearLocalEmbeddingsEnv(t)
+		stubLocalEmbeddingsInstall(t)
+		oldEndpoint := localEmbeddingsEndpoint
+		t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+		localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+			if opts.Executable == "" {
+				return "", embedlocal.ErrNotFound
+			}
+			return "http://127.0.0.1:12345/v1", nil
+		}
+		marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
+		require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0700))
+		if err := os.Symlink("missing", marker); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		t.Setenv("KATA_SERVER", "")
+		_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+		require.ErrorContains(t, err, "sharing could not be confirmed")
+		require.ErrorContains(t, err, "record search by meaning choice")
+		cfg, err := config.ReadSearchConfig()
+		require.NoError(t, err)
+		require.True(t, cfg.Embeddings.Local)
+	})
 }
 
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
