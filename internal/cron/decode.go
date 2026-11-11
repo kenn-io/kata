@@ -15,8 +15,8 @@ func DecodeJob(input []byte) (JobDefinition, error) {
 	return job, err
 }
 
-// DecodeWorkflow is DecodeJob for workflow documents, except that the reserved
-// argv kind is explicitly unsupported, including in historical stored rows.
+// DecodeWorkflow reads historical documents but refuses unsupported versions
+// and step kinds, including in stored rows.
 func DecodeWorkflow(input []byte) (WorkflowDefinition, error) {
 	workflow, err := DecodeHistoricalWorkflow(input)
 	if err != nil {
@@ -75,12 +75,15 @@ func checkWorkflowNullShapes(input []byte) error {
 	return nil
 }
 
-// CheckWorkflowSupported rejects reserved kinds without revalidating historical
-// authoring rules. It also applies to already-decoded backup records.
+// CheckWorkflowSupported rejects unsupported versions and kinds without
+// revalidating historical authoring rules. It also applies to decoded backups.
 func CheckWorkflowSupported(workflow WorkflowDefinition) error {
+	if workflow.Version != 1 {
+		return invalid("workflow version is not supported")
+	}
 	for _, step := range workflow.Steps {
-		if step.Kind == "argv" {
-			return invalid("argv workflow steps are not supported")
+		if step.Kind != "command" && step.Kind != "prompt" {
+			return invalid("workflow step kind is not supported")
 		}
 	}
 	return nil

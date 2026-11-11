@@ -115,6 +115,9 @@ func parseCronDefinitionEvent(e FoldEvent) (CronDefinitionEvent, CronDefinition,
 func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 	in, value, err := parseCronDefinitionEvent(e)
 	if err != nil {
+		if workflowDefinitionEvent(e.Type) && cronUID(e.ProjectUID) {
+			p.blockCronProject(e.ProjectUID, err)
+		}
 		p.Warnings = append(p.Warnings, fmt.Sprintf("invalid cron event %s: %v", e.UID, err))
 		return
 	}
@@ -135,15 +138,8 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 	} else {
 		definition, err := cron.DecodeHistoricalWorkflow(in.Definition)
 		if err != nil {
-			reserved := false
-			if len(in.Definition) <= cron.DefinitionLimit {
-				reserved, _ = payloadHasArgvWorkflow(e.Type, string(e.Payload))
-			}
-			if reserved && cronUID(e.ProjectUID) {
-				if p.cronBlockedProjects == nil {
-					p.cronBlockedProjects = make(map[string]error)
-				}
-				p.cronBlockedProjects[e.ProjectUID] = err
+			if cronUID(e.ProjectUID) {
+				p.blockCronProject(e.ProjectUID, err)
 			}
 			p.Warnings = append(p.Warnings, err.Error())
 			return
@@ -151,15 +147,13 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 		// Historical decoding accepts null and missing or non-v1 versions,
 		// but neither store can represent them in a workflow row.
 		if definition.Version != 1 && cronUID(e.ProjectUID) {
-			if p.cronBlockedProjects == nil {
-				p.cronBlockedProjects = make(map[string]error)
-			}
-			p.cronBlockedProjects[e.ProjectUID] = fmt.Errorf("workflow definition cannot be represented in storage")
+			p.blockCronProject(e.ProjectUID, fmt.Errorf("workflow definition cannot be represented in storage"))
 		}
 		value.Author = p.cronDefinitionAuthor("workflow:"+in.UID, e, value)
 		current, exists := p.CronWorkflows[in.UID]
 		if !exists || compareClock(cronDefinitionClock(value), cronDefinitionClock(current.CronDefinition)) > 0 {
-			workflow := FoldCronWorkflow{ProjectUID: in.ProjectUID}
+			var workflow FoldCronWorkflow
+			workflow.ProjectUID = in.ProjectUID
 			workflow.CronWorkflow = CronWorkflow{CronDefinition: value, Definition: definition}
 			if _, err := cron.DecodeWorkflow(in.Definition); err != nil {
 				workflow.RawDefinition = append(jsontext.Value(nil), in.Definition...)
@@ -170,6 +164,13 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 			p.CronWorkflows[in.UID] = current
 		}
 	}
+}
+
+func (p *FoldProjection) blockCronProject(projectUID string, err error) {
+	if p.cronBlockedProjects == nil {
+		p.cronBlockedProjects = make(map[string]error)
+	}
+	p.cronBlockedProjects[projectUID] = err
 }
 
 // ValidateCronFederationEvent checks a cron event a spoke pushes to its hub:
