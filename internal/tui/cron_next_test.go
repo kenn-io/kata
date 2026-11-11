@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -308,13 +309,12 @@ func TestCronClientReportsClosedParent(t *testing.T) {
 }
 
 func TestCronProgressSkipsOneCorruptEntry(t *testing.T) {
-	good := map[string]any{"version": 1, "anchor": "2026-06-01T00:00:00Z", "through": "2026-06-01T00:00:00Z"}
-	got := cronProgressFromMetadata(map[string]any{
-		"cron.progress." + nextJobUID: good,
-		"cron.progress.BROKEN":        map[string]any{"version": "one", "anchor": 12},
-		"cron.progress.UNKNOWN":       map[string]any{"version": 1, "anchor": "2026-06-01T00:00:00Z", "through": "2026-06-01T00:00:00Z", "future": true},
-		"cron.progress.NEWER":         map[string]any{"version": 2, "anchor": "2026-06-01T00:00:00Z", "through": "2026-06-01T00:00:00Z"},
-		"cron.occurrence":             "ignored",
+	got := cronProgressFromMetadata(map[string]jsontext.Value{
+		"cron.progress." + nextJobUID: jsontext.Value(`{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T00:00:00Z"}`),
+		"cron.progress.BROKEN":        jsontext.Value(`{"version":"one"}`),
+		"cron.progress.UNKNOWN":       jsontext.Value(`{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T00:00:00Z","future":true}`),
+		"cron.progress.NEWER":         jsontext.Value(`{"version":2,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T00:00:00Z"}`),
+		"cron.occurrence":             jsontext.Value(`"ignored"`),
 	})
 	require.Len(t, got, 1, "a corrupt checkpoint hides only its own job")
 	require.Contains(t, got, nextJobUID)
@@ -442,4 +442,12 @@ func TestCronJobDetailPausedUnsupportedTriggerHidden(t *testing.T) {
 		d.Enabled = false
 	}, nil)
 	require.NotContains(t, got, "Triggers:")
+}
+
+func TestCronJobDetailPausedLegacySchedule(t *testing.T) {
+	got := nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("0 0 30 2 *")}
+		d.Enabled = false
+	}, nil)
+	require.Regexp(t, `Triggers:\s+none while paused`, got)
 }

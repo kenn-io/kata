@@ -24,6 +24,7 @@ func TestCronNextRejectsInvalidInput(t *testing.T) {
 func TestCronNextSavedSchedules(t *testing.T) {
 	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	native := `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":7200,"timezone":"Local"},"action":{"kind":"notify","recipient":"current-owner-or-author"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","title":"Inspection"},"overlap":"allow","catchup":"all"}`
+	legacy := strings.Replace(native, `"kind":"interval","interval_seconds":7200,"timezone":"Local"`, `"kind":"cron","cron":"0 0 30 2 *"`, 1)
 	parent := `{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","project_id":1,"status":"open","revision":7,"metadata":{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T06:00:00Z"}}}`
 	for _, tc := range []struct {
 		name, definition, parent, want string
@@ -33,6 +34,13 @@ func TestCronNextSavedSchedules(t *testing.T) {
 		{"native interval", native, parent, "2026-06-01T08:00:00Z", false},
 		{"archived parent", native, strings.Replace(parent, `"status":"open"`, `"status":"open","deleted_at":"2026-01-01T00:00:00Z"`, 1), `"status":"parent_closed"`, false},
 		{"future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true},
+		{"paused legacy", strings.Replace(legacy, `"enabled":true`, `"enabled":false`, 1), "", `"status":"paused"`, false},
+		{"deleted legacy", legacy, "", `"status":"deleted"`, false},
+		{"enabled legacy", legacy, parent, "", true},
+		{"malformed parent", native, `{}`, "", true},
+		{"paused future definition", strings.Replace(strings.Replace(native, `"version":1`, `"version":2`, 1), `"enabled":true`, `"enabled":false`, 1), "", "", true},
+		{"paused unknown field", strings.Replace(strings.Replace(native, `"enabled":true`, `"enabled":false`, 1), `"version":1`, `"version":1,"future":true`, 1), "", "", true},
+		{"deleted unknown field", strings.Replace(native, `"version":1`, `"version":1,"future":true`, 1), "", "", true},
 		{"deleted future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,11 +55,14 @@ func TestCronNextSavedSchedules(t *testing.T) {
 					fmt.Fprint(w, `{}`)
 				case strings.Contains(r.URL.Path, "/cron/jobs/"):
 					deleted := ""
-					if tc.name == "deleted future definition" {
+					if strings.HasPrefix(tc.name, "deleted ") {
 						deleted = `,"deleted_at":"2026-01-01T00:00:00Z"`
 					}
 					fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":%s%s}}`, id, tc.definition, deleted)
 				case strings.Contains(r.URL.Path, "/issues/"):
+					if tc.parent == "" {
+						t.Error("unexpected parent read")
+					}
 					fmt.Fprintf(w, `{"issue":%s}`, tc.parent)
 				default:
 					t.Errorf("unexpected request: %s", r.URL)
@@ -63,6 +74,9 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			if tc.invalid {
 				require.Error(t, err)
 				require.Empty(t, out)
+				if tc.name == "malformed parent" {
+					require.ErrorContains(t, err, "incomplete cron parent response")
+				}
 				return
 			}
 			require.NoError(t, err)

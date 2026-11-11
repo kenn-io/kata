@@ -258,10 +258,8 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	var project projectRef
 	if o.parent != "" {
 		project, body, err = o.applyParent(cmd, daemon, body)
-	} else if strings.TrimSpace(flags.Project) != "" {
-		project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
 	} else {
-		project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
+		project, err = cronProject(daemon)
 	}
 	if err != nil {
 		return err
@@ -291,6 +289,13 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		return nil
 	}
 	return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
+}
+
+func cronProject(daemon daemonAPI) (projectRef, error) {
+	if strings.TrimSpace(flags.Project) != "" {
+		return resolveProjectSelectorIncludingArchived(daemon, flags.Project)
+	}
+	return resolveProjectArgFlagOrWorkspace(daemon, nil)
 }
 
 // applyParent resolves the CLI ref while leaving the API and stored definition

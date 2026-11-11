@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,7 +13,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	kataclient "go.kenn.io/kata/pkg/client"
-	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type cronNextOptions struct {
@@ -38,15 +36,6 @@ type cronNextResult struct {
 	Status             string               `json:"status"`
 	Occurrences        []cronNextOccurrence `json:"occurrences"`
 	Warnings           []string             `json:"warnings"`
-}
-
-type cronNextParent struct {
-	UID       string                    `json:"uid"`
-	ProjectID int64                     `json:"project_id"`
-	Status    string                    `json:"status"`
-	Revision  int64                     `json:"revision"`
-	DeletedAt *time.Time                `json:"deleted_at,omitempty"`
-	Metadata  map[string]jsontext.Value `json:"metadata"`
 }
 
 func newCronNextCmd() *cobra.Command {
@@ -90,12 +79,7 @@ func (o cronNextOptions) execute(cmd *cobra.Command, id string) error {
 	if err != nil {
 		return err
 	}
-	var project projectRef
-	if strings.TrimSpace(flags.Project) != "" {
-		project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
-	} else {
-		project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
-	}
+	project, err := cronProject(daemon)
 	if err != nil {
 		return err
 	}
@@ -144,6 +128,9 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 	if err != nil {
 		return cronNextResult{}, fmt.Errorf("cannot preview saved job with this kata: %w", err)
 	}
+	if err := def.ValidateVersion(); err != nil {
+		return cronNextResult{}, fmt.Errorf("cannot preview saved job with this kata: %w", err)
+	}
 	zone := cron.TriggerLocation(def.Trigger)
 	result := cronNextResult{JobUID: job.UID, DefinitionEventUID: job.DefinitionEventUID, AsOf: from.UTC(), Delivery: "adapter", Basis: "adapter_trigger", Timezone: zone.String(), Status: "ready", Occurrences: []cronNextOccurrence{}, Warnings: []string{}}
 	native := cron.IsRecurringIssueJob(def)
@@ -153,36 +140,23 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 		result.Warnings = append(result.Warnings, "adapter trigger times do not promise execution")
 	}
 	if job.DeletedAt != nil {
-		if err := def.Validate(); err != nil {
-			return result, fmt.Errorf("cannot preview saved job with this kata: %w", err)
-		}
 		result.Status = "deleted"
 		return result, nil
 	}
 	var parent *cron.PreviewParent
 	if def.Enabled && native {
-		wire, callErr := c.ShowIssueWithResponse(a.ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: projectID, Ref: def.Issue.ParentUID}, Query: &generated.ShowIssueQuery{IncludeDeleted: new(true)}})
-		if wire == nil {
-			return result, externalCLITransportError(wire, callErr)
-		}
-		if err := externalCLIResponseError(wire.StatusCode, wire.Body, callErr); err != nil {
+		p, readErr := recurrenceclient.ReadCronParent(a.ctx, c.Client, projectID, def.Issue.ParentUID)
+		if readErr != nil {
+			mapped := recurrenceCLIError(readErr)
 			var cli *cliError
-			if !errors.As(err, &cli) || cli.Code != "issue_not_found" {
-				return result, err
+			if !errors.As(mapped, &cli) || cli.Code != "issue_not_found" {
+				return result, mapped
 			}
 		} else {
-			var response struct {
-				Issue *cronNextParent `json:"issue"`
-			}
-			if err := json.Unmarshal(wire.Body, &response); err != nil {
-				return result, fmt.Errorf("decode cron parent: %w", err)
-			}
-			if p := response.Issue; p != nil && p.UID == def.Issue.ParentUID && p.ProjectID == projectID && (p.Status == "open" || p.Status == "closed") {
-				result.ParentRevision = p.Revision
-				parent = &cron.PreviewParent{Open: p.Status == "open" && p.DeletedAt == nil}
-				if progress, err := cron.DecodeRecurringProgress(p.Metadata[recurrenceclient.CronProgressPrefix+job.UID]); err == nil {
-					parent.Progress = &progress
-				}
+			result.ParentRevision = p.Revision
+			parent = &cron.PreviewParent{Open: p.Status == "open" && p.DeletedAt == nil}
+			if progress, err := cron.DecodeRecurringProgress(p.Metadata[recurrenceclient.CronProgressPrefix+job.UID]); err == nil {
+				parent.Progress = &progress
 			}
 		}
 	}

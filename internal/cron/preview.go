@@ -16,7 +16,7 @@ type JobPreview struct {
 
 // PreviewJob applies the same availability rules to every saved-job preview.
 func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count int) (JobPreview, error) {
-	if err := def.Validate(); err != nil {
+	if err := def.ValidateVersion(); err != nil {
 		return JobPreview{}, err
 	}
 	if !def.Enabled {
@@ -34,6 +34,9 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 			return JobPreview{Status: "unavailable"}, nil
 		}
 		progress = *parent.Progress
+	}
+	if err := def.Validate(); err != nil {
+		return JobPreview{}, err
 	}
 	occurrences, supported, err := recurringOccurrences(def, progress, after, count)
 	if err != nil {
