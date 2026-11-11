@@ -10,13 +10,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
+- Start search by meaning on the next daemon start after enabling the built-in server in a supported app on the same computer. Kata shares its choice after setup succeeds and reports when sharing cannot be confirmed. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
   build finishes, and an opener waiting for another opener's migration keeps
   waiting. Ordinary queries keep the 30-second limit. See
   [PostgreSQL operations](operations/postgres.md).
-- Start search by meaning on the next daemon start after enabling the built-in server in a supported app on the same computer. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and

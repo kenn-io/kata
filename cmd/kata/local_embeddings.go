@@ -178,13 +178,6 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		if _, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true, Executable: installed.Executable}); err != nil {
 			return "", err
 		}
-		chosen, err := embedlocal.ChoiceRecorded()
-		if err == nil && !chosen {
-			err = embedlocal.RecordChoice()
-		}
-		if err != nil {
-			return "", fmt.Errorf("record built-in embeddings choice: %w", err)
-		}
 	}
 	applied := false
 	err = run.restart(ctx, func() error {
@@ -207,9 +200,6 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		return nil
 	})
 	if err != nil {
-		if next.Embeddings.UsesLocal() {
-			err = fmt.Errorf("built-in choice recorded; %w", err)
-		}
 		if applied && !bytes.Equal(original, proposed) {
 			latest, readErr := os.ReadFile(path) // #nosec G304 -- compare the snapshot before restoring it
 			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
@@ -230,6 +220,15 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		}
 		return "", err
 	}
+	if next.Embeddings.UsesLocal() {
+		chosen, err := embedlocal.ChoiceRecorded()
+		if err == nil && !chosen {
+			err = embedlocal.RecordChoice()
+		}
+		if err != nil {
+			return "", fmt.Errorf("built-in embeddings are configured, but sharing could not be confirmed; retry setup: %w", err)
+		}
+	}
 	return index, nil
 }
 
@@ -248,7 +247,7 @@ func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsCo
 	next := current
 	next.Local = true
 	next.Model = "nomic-embed-text"
-	if !next.LocalRecipeCompatible() {
+	if localEmbeddingRecipeNeedsReset(current, current) {
 		next.Dims = 768
 		next.DocumentPrefix, next.DocumentSuffix = "", ""
 		next.QueryPrefix, next.QuerySuffix = "", ""
@@ -256,6 +255,10 @@ func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsCo
 		next.RequestDimensions = false
 	}
 	return next, nil
+}
+
+func localEmbeddingRecipeNeedsReset(written, current config.EmbeddingsConfig) bool {
+	return !written.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal()
 }
 
 type preparedLocalEmbeddingsConfig struct {
@@ -336,7 +339,7 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 	previous := maps.Clone(fields)
 	delete(fields, "base_url")
 	// Environment overrides don't persist, so the written recipe must suit the built-in server.
-	if !written.Embeddings.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal() {
+	if localEmbeddingRecipeNeedsReset(written.Embeddings, current) {
 		for _, key := range []string{"model", "dims", "document_prefix", "document_suffix", "query_prefix", "query_suffix", "fingerprint_salt", "request_dimensions"} {
 			delete(fields, key)
 		}
@@ -570,19 +573,17 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 					s.mu.Unlock()
 				},
 				restart: func(_ context.Context, apply func() error) error {
-					if err := apply(); err != nil {
-						return err
-					}
-					s.mu.Lock()
-					s.job.State = "restart"
-					s.mu.Unlock()
-					return nil
+					return apply()
 				},
 			})
 		}
 		if err != nil {
 			s.mu.Lock()
 			s.job.State, s.job.Error = "failed", err.Error()
+			s.mu.Unlock()
+		} else {
+			s.mu.Lock()
+			s.job.State = "restart"
 			s.mu.Unlock()
 		}
 	}) {

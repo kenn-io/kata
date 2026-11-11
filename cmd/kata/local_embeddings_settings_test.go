@@ -44,6 +44,44 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	}
 }
 
+func TestLocalEmbeddingsSettingsSharingRetry(t *testing.T) {
+	home := setupKataEnv(t)
+	sharedHome := clearLocalEmbeddingsEnv(t)
+	stubLocalEmbeddingsInstall(t)
+	oldEndpoint := localEmbeddingsEndpoint
+	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+		if opts.Executable == "" {
+			return "", embedlocal.ErrNotFound
+		}
+		return "http://127.0.0.1:12345/v1", nil
+	}
+	marker := filepath.Join(sharedHome, ".kenn", "embeddings", "search-by-meaning")
+	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0700))
+	if err := os.Symlink("missing", marker); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	var run func(context.Context)
+	setup := &localEmbeddingsSetup{start: func(work func(context.Context)) bool { run = work; return true }}
+	require.NoError(t, setup.TurnOn(t.Context()))
+	run(t.Context())
+	require.Equal(t, "failed", setup.job.State)
+	require.Contains(t, setup.job.Error, "sharing could not be confirmed")
+	require.Contains(t, setup.job.Error, "record search by meaning choice")
+	data, err := os.ReadFile(filepath.Join(home, "config.toml")) // #nosec G304 -- test-owned configuration
+	require.NoError(t, err)
+	cfg, err := config.ParseSearchConfig(data)
+	require.NoError(t, err)
+	require.True(t, cfg.Embeddings.Local)
+	require.NoError(t, os.Remove(marker))
+	require.NoError(t, setup.TurnOn(t.Context()))
+	run(t.Context())
+	require.Equal(t, "restart", setup.job.State)
+	chosen, err := embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.True(t, chosen)
+}
+
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -166,6 +204,12 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			if tc.ready {
 				require.Equal(t, "restart", status.Job.State, status.Job.Error)
 				require.False(t, status.CanChange)
+				saved, err := config.ParseSearchConfig(data)
+				require.NoError(t, err)
+				require.True(t, saved.Embeddings.Local)
+				chosen, err := embedlocal.ChoiceRecorded()
+				require.NoError(t, err)
+				require.True(t, chosen)
 			} else {
 				require.Equal(t, "failed", status.Job.State)
 				require.Contains(t, status.Job.Error, "pgvector")

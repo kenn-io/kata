@@ -45,6 +45,8 @@ Open `kata ui`, click the gear in the top bar, and choose **Turn on** under **Se
 
 The built-in server choice is shared with supported apps on this computer. When another supported app enables it, Kata starts indexing on its next daemon start unless Kata already has a configured provider. A saved built-in setting also starts with installed files. If those files are missing, Kata requires a shared choice or an explicit Turn on before downloading them.
 
+Kata records the shared choice after setup succeeds. If sharing cannot be confirmed, Kata keeps the saved setting and reports an error. Retry Turn on or rerun the command to share the choice.
+
 PostgreSQL needs pgvector and Kata’s semantic-search tables before setup. Follow the [PostgreSQL setup guide](../operations/postgres.md) to prepare the database, then try Turn on again.
 
 You can also enable it from the CLI:

@@ -32,6 +32,51 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
+	got, err = applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{Model: "nomic-embed-text", Dims: 768, FingerprintSalt: "old"})
+	require.NoError(t, err)
+	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
+	got, err = applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{Model: "other", Dims: 768, QueryPrefix: "old"})
+	require.NoError(t, err)
+	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
+}
+
+func TestLocalEmbeddingsRestartRefusalPreservesChoice(t *testing.T) {
+	for _, chosen := range []bool{false, true} {
+		t.Run(fmt.Sprintf("chosen=%t", chosen), func(t *testing.T) {
+			home := setupKataEnv(t)
+			clearLocalEmbeddingsEnv(t)
+			if chosen {
+				require.NoError(t, embedlocal.RecordChoice())
+			}
+			stubLocalEmbeddingsInstall(t)
+			oldEndpoint := localEmbeddingsEndpoint
+			t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+				if opts.Executable == "" {
+					return "", embedlocal.ErrNotFound
+				}
+				return "http://127.0.0.1:12345/v1", nil
+			}
+			original := []byte("# original\n")
+			path := filepath.Join(home, "config.toml")
+			require.NoError(t, os.WriteFile(path, original, 0600))
+			_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
+				confirm: func(context.Context, int64) (bool, error) { return true, nil },
+				notice:  func(string) error { return nil },
+				restart: func(_ context.Context, apply func() error) error {
+					require.NoError(t, apply())
+					return errors.New("restart refused")
+				},
+			})
+			require.ErrorContains(t, err, "restart refused")
+			data, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
+			require.NoError(t, err)
+			require.Equal(t, original, data)
+			got, err := embedlocal.ChoiceRecorded()
+			require.NoError(t, err)
+			require.Equal(t, chosen, got)
+		})
+	}
 }
 
 func TestLocalEmbeddingsSetup(t *testing.T) {
@@ -60,21 +105,25 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		installed = true
 		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
 	}
-	blocker := filepath.Join(tmp, ".kenn")
-	require.NoError(t, os.WriteFile(blocker, []byte("blocks marker directory"), 0o600))
+	marker := filepath.Join(tmp, ".kenn", "embeddings", "search-by-meaning")
+	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0700))
+	if err := os.Symlink("missing", marker); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
 	_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.ErrorContains(t, err, "record built-in embeddings choice")
-	_, err = os.Stat(filepath.Join(home, "config.toml"))
-	require.ErrorIs(t, err, os.ErrNotExist)
-	require.NoError(t, os.Remove(blocker))
+	require.ErrorContains(t, err, "sharing could not be confirmed")
+	require.ErrorContains(t, err, "record search by meaning choice")
+	cfg, err := config.ReadSearchConfig()
+	require.NoError(t, err)
+	require.True(t, cfg.Embeddings.Local)
+	require.NoError(t, os.Remove(marker))
 	out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 	require.NoError(t, err, stderr)
 	require.Contains(t, stderr, "290")
 	require.Contains(t, out, "kata health --json")
-	cfg, err := config.ReadSearchConfig()
+	cfg, err = config.ReadSearchConfig()
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
-	marker := filepath.Join(filepath.Dir(home), ".kenn", "embeddings", "search-by-meaning")
 	old := time.Unix(1000000000, 0)
 	require.NoError(t, os.Chtimes(marker, old, old))
 	_, stderr, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
@@ -170,12 +219,17 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 		original string
 		exists   bool
 		edited   string
+		chosen   bool
 	}{
 		{name: "edited", exists: true, original: "[daemon]\nport = 8888\n", edited: "[daemon]\nport = 9999\n"},
 		{name: "created empty"},
+		{name: "edited with existing choice", exists: true, original: "[daemon]\nport = 8888\n", edited: "[daemon]\nport = 9999\n", chosen: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := setupKataEnv(t)
+			if tc.chosen {
+				require.NoError(t, embedlocal.RecordChoice())
+			}
 			t.Setenv("KATA_SERVER", "")
 			path := filepath.Join(home, "config.toml")
 			if tc.exists {
@@ -204,10 +258,9 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 			require.NoError(t, readErr)
 			require.Equal(t, tc.edited, string(got))
 			require.ErrorContains(t, err, "changed")
-			require.ErrorContains(t, err, "built-in choice recorded")
 			chosen, err := embedlocal.ChoiceRecorded()
 			require.NoError(t, err)
-			require.True(t, chosen)
+			require.Equal(t, tc.chosen, chosen)
 		})
 	}
 }
