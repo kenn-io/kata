@@ -533,7 +533,8 @@ func TestDaemonStatus_JSONDegradesOnNonPrivateRuntimeDirectory(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	require.NoError(t, os.Chmod(ns.DataDir, 0o755)) //nolint:gosec // Deliberately non-private regression fixture.
 
-	stdout, _, _ := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	stdout, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, err, ExitDaemonUnavail).Kind)
 	var got struct {
 		Daemons  []json.RawMessage `json:"daemons"`
 		Selected struct {
