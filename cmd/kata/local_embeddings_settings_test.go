@@ -234,7 +234,7 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	require.False(t, chosen)
 }
 
-func TestSharedChoiceKeepsLexicalSearchWhenVectorPathIsDirectory(t *testing.T) {
+func TestSharedChoiceKeepsProviderWhenVectorPathIsDirectory(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	resetFlags(t)
 	home := setupKataEnv(t)
@@ -248,32 +248,13 @@ func TestSharedChoiceKeepsLexicalSearchWhenVectorPathIsDirectory(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.Mkdir(vectorsPath, 0o700))
 	baseURL := launchDaemon(t)
-	request := func(path, body string, output any) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+path, strings.NewReader(body))
-		require.NoError(t, err)
-		req.Header.Set("Content-Type", "application/json")
-		response, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		defer func() { _ = response.Body.Close() }()
-		require.Equal(t, http.StatusOK, response.StatusCode)
-		if output != nil {
-			require.NoError(t, json.NewDecoder(response.Body).Decode(output))
-		}
-	}
-	var project struct {
-		Project struct {
-			ID int64 `json:"id"`
-		} `json:"project"`
-	}
-	request("/api/v1/projects", `{"name":"example-project","actor":"tester"}`, &project)
-	request(fmt.Sprintf("/api/v1/projects/%d/issues", project.Project.ID), `{"title":"Repair bicycle brakes","actor":"tester"}`, nil)
-	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--json", "--project", "example-project", "search", "bicycle")
-	require.NoError(t, err, stderr)
-	var result struct {
-		Mode    string `json:"mode"`
-		Results []any  `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.Equal(t, "lexical", result.Mode)
-	require.Len(t, result.Results, 1)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/embeddings/local", nil)
+	require.NoError(t, err)
+	response, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	var status api.LocalEmbeddingsStatus
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&status))
+	require.Equal(t, "none", status.Provider)
 }

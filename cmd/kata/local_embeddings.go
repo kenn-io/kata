@@ -247,11 +247,8 @@ func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsCo
 	}
 	next := current
 	next.Local = true
-	if next.Model == "" {
-		next.Model = "nomic-embed-text"
-	}
+	next.Model = "nomic-embed-text"
 	if !next.LocalRecipeCompatible() {
-		next.Model = "nomic-embed-text"
 		next.Dims = 768
 		next.DocumentPrefix, next.DocumentSuffix = "", ""
 		next.QueryPrefix, next.QuerySuffix = "", ""
