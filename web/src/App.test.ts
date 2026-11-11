@@ -1262,7 +1262,10 @@ describe('App', () => {
               }),
               { headers: { 'Content-Type': 'application/json' } },
             )
-          return new Response('{', { status: Number(status), headers: { 'Content-Type': 'application/json' } })
+          return new Response('{', {
+            status: Number(status),
+            headers: { 'Content-Type': 'application/json' },
+          })
         }
         return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
       }),

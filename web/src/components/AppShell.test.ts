@@ -866,7 +866,10 @@ describe('AppShell', () => {
             }),
             { headers: { 'Content-Type': 'application/json' } },
           )
-        return new Response('{', { status: Number(status), headers: { 'Content-Type': 'application/json' } })
+        return new Response('{', {
+          status: Number(status),
+          headers: { 'Content-Type': 'application/json' },
+        })
       }
       return Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
     })
