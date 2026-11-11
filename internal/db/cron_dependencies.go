@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 
@@ -20,34 +21,14 @@ func CheckCronDependencies(ctx context.Context, q interface {
 		if id == "" {
 			return nil
 		}
-		var owner int64
-		var deleted sql.NullString
-		err := q.QueryRowContext(ctx, "SELECT project_id,deleted_at FROM "+table+" WHERE uid=$1", id).Scan(&owner, &deleted)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("%w: missing %s dependency %s", cron.ErrInvalid, kind, id)
+		deleted, err := cronDependency(ctx, q, projectID, table, kind, id, SupportedEventFeatures)
+		if err == nil && deleted {
+			err = fmt.Errorf("%w: tombstoned %s dependency %s", cron.ErrInvalid, kind, id)
 		}
-		if err != nil {
-			return fmt.Errorf("read %s dependency: %w", kind, err)
-		}
-		if owner != projectID {
-			return fmt.Errorf("%w: %s dependency belongs to another project", cron.ErrInvalid, kind)
-		}
-		if deleted.Valid {
-			return fmt.Errorf("%w: tombstoned %s dependency %s", cron.ErrInvalid, kind, id)
-		}
-		return nil
+		return err
 	}
 	if err := check("cron_workflows", "workflow", definition.Action.WorkflowUID); err != nil {
 		return err
-	}
-	if definition.Action.WorkflowUID != "" {
-		var document string
-		if err := q.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE project_id=$1 AND uid=$2`, projectID, definition.Action.WorkflowUID).Scan(&document); err != nil {
-			return err
-		}
-		if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
-			return fmt.Errorf("%w: workflow dependency is unsupported: %v", cron.ErrInvalid, err)
-		}
 	}
 	if cron.IsRecurringIssueJob(definition) {
 		return check("issues", "parent issue", definition.Issue.ParentUID)
@@ -63,6 +44,51 @@ func CheckCronDependencies(ctx context.Context, q interface {
 		issueUID = definition.Issue.UID
 	}
 	return check("issues", "issue", issueUID)
+}
+
+// cronDependency requires one dependency to exist in the project and reports
+// whether it is tombstoned. A workflow also needs supported retained evidence:
+// its definition event beats the normalized projection, and a compacted event
+// leaves the projection. Callers decide what a tombstone means.
+func cronDependency(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, projectID int64, table, kind, id, features string) (bool, error) {
+	var owner int64
+	var deleted, row, retained sql.NullString
+	query, dest := "SELECT project_id,deleted_at FROM "+table+" WHERE uid=$1", []any{&owner, &deleted}
+	if table == "cron_workflows" {
+		query = `SELECT w.project_id,w.deleted_at,w.definition_json,e.payload FROM cron_workflows w LEFT JOIN events e ON e.uid=w.definition_event_uid WHERE w.uid=$1`
+		dest = append(dest, &row, &retained)
+	}
+	err := q.QueryRowContext(ctx, query, id).Scan(dest...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("%w: missing %s dependency %s", cron.ErrInvalid, kind, id)
+	}
+	if err != nil {
+		return false, fmt.Errorf("read %s dependency: %w", kind, err)
+	}
+	if owner != projectID {
+		return false, fmt.Errorf("%w: %s dependency belongs to another project", cron.ErrInvalid, kind)
+	}
+	if len(dest) > 2 {
+		if err := retainedWorkflowSupported(row.String, retained, features); err != nil {
+			return false, fmt.Errorf("%w: workflow dependency is unsupported: %w", cron.ErrInvalid, err)
+		}
+	}
+	return deleted.Valid, nil
+}
+
+// retainedWorkflowSupported requires the projection and its retained raw
+// definition event, when still present, to decode under the strict contract.
+func retainedWorkflowSupported(row string, event sql.NullString, features string) error {
+	if err := checkRunWorkflowDocument(row, features); err != nil || !event.Valid {
+		return err
+	}
+	var body CronDefinitionEvent
+	if err := json.Unmarshal([]byte(event.String), &body, json.RejectUnknownMembers(true)); err != nil {
+		return err
+	}
+	return checkRunWorkflowDocument(string(body.Definition), features)
 }
 
 // checkWorkflowUnused refuses to tombstone a workflow that a live job in the

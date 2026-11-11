@@ -274,16 +274,9 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 			if err != nil {
 				return fmt.Errorf("%w: job revision is unsupported: %v", cron.ErrInvalid, err)
 			}
-			if job.Action.WorkflowUID != "" && (value.WorkflowUID == nil || *value.WorkflowUID != job.Action.WorkflowUID) {
-				var workflowDocument string
-				err := tx.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE project_id=$1 AND uid=$2`, project.ID, job.Action.WorkflowUID).Scan(&workflowDocument)
-				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if job.Action.WorkflowUID != "" {
+				if _, err := cronDependency(ctx, tx, project.ID, "cron_workflows", "workflow", job.Action.WorkflowUID, features); err != nil {
 					return err
-				}
-				if err == nil {
-					if err := checkRunWorkflowDocument(workflowDocument, features); err != nil {
-						return err
-					}
 				}
 			}
 		} else {

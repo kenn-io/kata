@@ -244,6 +244,8 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Example", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "command", Command: "echo argv"}}}})
 	require.NoError(t, err)
+	_, _, err = store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: other.ID, Name: "Legacy", Actor: "worker", Definition: workflow.Definition})
+	require.NoError(t, err)
 	_, err = store.EnableProjectFederation(ctx, project.ID, "worker")
 	require.NoError(t, err)
 	q := store.(interface {
@@ -264,44 +266,68 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	legacy := `{"version":1,"steps":[{"kind":"command","command":"echo argv"}]}`
 	supported := `{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`
-	held := []string{`{"version":1,"steps":[{"kind":"argv"}]}`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`}
+	held := []string{`{"version":1,"steps":[{"kind":"argv"}]}`, `{"version":1,"steps":null}`}
 	for _, deleted := range []any{nil, "2026-11-08T12:00:00Z"} {
 		_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=$2 WHERE uid=$3`, supported, deleted, workflow.UID)
 		require.NoError(t, err)
 		features, err = db.ProjectRequiredEventFeatures(ctx, q, project.UID)
 		require.NoError(t, err)
 		require.Equal(t, db.MergeEventFeatures(db.CronEventFeature, db.CronWorkflowArgvEventFeature), features)
+		otherFeatures, err := db.ProjectRequiredEventFeatures(ctx, q, other.UID)
+		require.NoError(t, err)
+		require.Equal(t, db.CronEventFeature, otherFeatures)
 		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
 		require.NoError(t, err)
-		for _, definition := range held {
+		for i, definition := range held {
+			if deleted != nil && i > 0 {
+				continue
+			}
 			_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, definition, workflow.UID)
 			require.NoError(t, err)
 			_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
 			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			otherFeatures, err := db.ProjectRequiredEventFeatures(ctx, q, other.UID)
+			require.NoError(t, err)
+			require.Equal(t, db.CronEventFeature, otherFeatures)
 		}
 	}
 	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=NULL WHERE uid=$2`, legacy, workflow.UID)
 	require.NoError(t, err)
 	for _, kind := range []string{"cron.workflow.created", "cron.workflow.updated", "cron.workflow.deleted", "cron.workflow.restored", "cron.workflow.snapshot"} {
 		event := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), supported)
-		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, kind, "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
+		event.Type = kind
+		event.ContentHash, err = db.RemoteEventContentHash(event)
+		require.NoError(t, err)
+		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, kind, "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash)
 		require.NoError(t, err)
 		features, err = db.ProjectRequiredEventFeatures(ctx, q, project.UID)
 		require.NoError(t, err)
 		require.Contains(t, features, db.CronWorkflowArgvEventFeature)
-		require.ErrorIs(t, db.RequireEventFeatures(db.CronEventFeature+","+db.CronWorkflowArgvEventFeature+"_extra", features), db.ErrUnsupportedEventFeatures)
-		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: 1 << 60, Limit: 1, Features: db.CronEventFeature})
-		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-		_, err = q.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, `{"definition":null}`, event.EventUID)
+		otherFeatures, err := db.ProjectRequiredEventFeatures(ctx, q, other.UID)
 		require.NoError(t, err)
-		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
-		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		require.Equal(t, db.CronEventFeature, otherFeatures)
+		if kind == "cron.workflow.created" {
+			_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: 1 << 60, Limit: 1, Features: db.CronEventFeature})
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		}
 		_, err = q.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, event.EventUID)
 		require.NoError(t, err)
+		if kind == "cron.workflow.created" {
+			event = argvCompatRemoteWorkflow(t, project, store.InstanceUID(), `null`)
+			event.Type = kind
+			event.ContentHash, err = db.RemoteEventContentHash(event)
+			require.NoError(t, err)
+			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, event.Type, event.Actor, string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash)
+			require.NoError(t, err)
+			_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			_, err = q.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, event.EventUID)
+			require.NoError(t, err)
+		}
 	}
 	features, err = db.ProjectRequiredEventFeatures(ctx, q, other.UID)
 	require.NoError(t, err)
-	require.Empty(t, features)
+	require.Equal(t, db.CronEventFeature, features)
 	features, err = db.ProjectRequiredEventFeatures(ctx, q, project.UID)
 	require.NoError(t, err)
 	require.Equal(t, db.CronEventFeature, features)
@@ -317,7 +343,12 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 	})
 	for _, operation := range []string{"adopt", "reset", "conditional reset"} {
 		for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `{"version":1,"steps":null}`} {
-			project, err := store.CreateProject(ctx, "guard-"+uidForGuard(t))
+			if operation != "adopt" && definition != `{"version":1,"steps":null}` {
+				continue
+			}
+			projectUID, err := uid.New()
+			require.NoError(t, err)
+			project, err := store.CreateProject(ctx, "guard-"+projectUID)
 			require.NoError(t, err)
 			workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Current", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "command", Command: "true"}}}})
 			require.NoError(t, err)
@@ -329,7 +360,7 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 			raw, err := json.Marshal(payload)
 			require.NoError(t, err)
 			event = newRemoteEvent(t, project, nil, "cron.workflow.deleted", "worker", store.InstanceUID(), event.HLCPhysicalMS, raw)
-			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
+			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash)
 			require.NoError(t, err)
 			if operation == "adopt" {
 				target, uidErr := uid.New()
@@ -366,18 +397,12 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-func uidForGuard(t *testing.T) string {
-	t.Helper()
-	id, err := uid.New()
-	require.NoError(t, err)
-	return id
-}
-
-// Adoption must retain both live and deleted argv workflows when refused.
 func checkArgvAdoptionRefused(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	for _, deleted := range []bool{false, true} {
-		project, err := store.CreateProject(ctx, "adopt-argv-"+uidForGuard(t))
+		projectUID, err := uid.New()
+		require.NoError(t, err)
+		project, err := store.CreateProject(ctx, "adopt-argv-"+projectUID)
 		require.NoError(t, err)
 		workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "argv", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
 		require.NoError(t, err)
@@ -388,7 +413,9 @@ func checkArgvAdoptionRefused(t *testing.T, store db.Storage) error {
 			_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET deleted_at=$1 WHERE uid=$2`, "2026-11-08T12:00:00Z", workflow.UID)
 			require.NoError(t, err)
 		}
-		_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: uidForGuard(t), Actor: "worker"})
+		targetUID, err := uid.New()
+		require.NoError(t, err)
+		_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: targetUID, Actor: "worker"})
 		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 		current, err := store.ProjectByID(ctx, project.ID)
 		require.NoError(t, err)

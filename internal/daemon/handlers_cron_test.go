@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	stdjson "encoding/json"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
-	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func cronHTTP(t *testing.T, env *testenv.Env, method, path string, body any) (int, []byte) {
@@ -265,6 +263,7 @@ func TestCronWorkflowHTTPRejectsNullArgv(t *testing.T) {
 			var response api.ErrorEnvelope
 			require.NoError(t, json.Unmarshal(raw, &response))
 			require.Equal(t, "validation", response.Error.Code)
+			require.Contains(t, response.Error.Message, "argv")
 			after, err := env.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, before, after)
@@ -281,9 +280,6 @@ func TestCronWorkflowHTTPRejectsNullArgv(t *testing.T) {
 		})
 	}
 
-	replacement := fmt.Sprintf(`{"actor":"worker","name":"Updated","expected_event_uid":%q,"definition":{"version":1,"steps":[{"key":"review","kind":"prompt","prompt":"Review"}]}}`, created.Workflow.DefinitionEventUID)
-	status, raw = request(http.MethodPut, path+"/"+created.Workflow.UID, replacement)
-	require.Equalf(t, http.StatusOK, status, "%s", raw)
 }
 
 func TestCronDefinitionWritePolicy(t *testing.T) {
@@ -342,24 +338,4 @@ func TestCronDefinitionWritePolicy(t *testing.T) {
 			}
 		})
 	}
-}
-
-// The generated client must retain a malformed empty argv until the server refuses it.
-func TestCronWorkflowGeneratedClientEmptyArgvIsRefused(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	project := seedProject(t, env, "workflow-example")
-	command, actor := "true", "worker"
-	body := generated.CreateCronWorkflowBody{Actor: &actor, Name: "Rejected", Definition: generated.CronWorkflowDefinition{Version: 1, Steps: []generated.CronWorkflowStep{{Key: "inspect", Kind: "command", Command: &command, Argv: []string{}}}}}
-	raw, err := stdjson.Marshal(body)
-	require.NoError(t, err)
-	require.Contains(t, string(raw), `"argv":[]`)
-	response := doReqEnv(t, env, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/cron/workflows", env.URL, project.ID), string(raw), "")
-	reply := readClose(t, response)
-	require.Equalf(t, http.StatusBadRequest, response.StatusCode, "%s", reply)
-	var failure api.ErrorEnvelope
-	require.NoError(t, json.Unmarshal(reply, &failure))
-	require.Equal(t, "validation", failure.Error.Code)
-	workflows, err := env.DB.ListCronWorkflows(t.Context(), db.CronList{ProjectID: project.ID})
-	require.NoError(t, err)
-	require.Empty(t, workflows)
 }

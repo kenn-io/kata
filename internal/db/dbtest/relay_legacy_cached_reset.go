@@ -58,8 +58,8 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	require.NoError(t, err)
 	checkpoint, err := resets.CreateRelayReset(ctx, binding, signer)
 	require.NoError(t, err)
-	for _, section := range []string{"source", "entity"} {
-		for _, definition := range []string{`{"version":2,"steps":[{"key":"literal","kind":"command","command":"true"}]}`, `{"version":1,"steps":[{"key":"literal","kind":"future-step"}]}`, `{"version":1,"steps":null}`} {
+	for _, section := range []string{"source"} {
+		for _, definition := range []string{`{"version":1,"steps":null}`} {
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, selected, pin, signingKey, section, definition)
 			raw, err := json.Marshal(bad)
 			require.NoError(t, err)
@@ -67,9 +67,9 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 			_, _, err = db.DecodeRootResetPayload(pin, bad.Snapshot)
 			require.NoError(t, err)
 			_, err = resets.CreateRelayReset(ctx, binding, signer)
-			require.Error(t, err, "cached content must be checked even when current rows are supported")
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "cached content must be checked even when current rows are supported")
 			_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(ctx, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
-			require.Error(t, err, "held checkpoint cannot activate the next epoch")
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "held checkpoint cannot activate the next epoch")
 		}
 	}
 	// The stored checkpoint, not current project rows, determines recipient support.

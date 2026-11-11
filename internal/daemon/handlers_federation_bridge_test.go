@@ -252,6 +252,7 @@ func TestRelayHTTPTransportPrefixAndRevocation(t *testing.T) {
 		require.NoError(t, err)
 		batch := db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}}
 		held := event
+		held.IssueUID, held.RelatedIssueUID = nil, nil
 		held.Type = "cron.workflow.created"
 		held.Payload = jsontext.Value(`{"definition":null}`)
 		held.ContentHash, err = db.RemoteEventContentHash(held)

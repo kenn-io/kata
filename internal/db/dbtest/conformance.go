@@ -51,12 +51,15 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
-	{name: "argv retained feature probe", run: checkArgvRetainedFeatureProbe},
-	{name: "argv destructive guards", run: checkArgvDestructiveGuards},
+	{name: "reset retained workflow owner restore", runWithBackend: checkResetRetainedWorkflowRestore},
+	{name: "argv retained feature probe", methods: []string{"CreateProject", "PutCronWorkflow", "PutCronJob", "CreateIssue", "EnableProjectFederation", "ReadFederation"}, run: checkArgvRetainedFeatureProbe},
+	{name: "argv destructive guards", methods: []string{"CreateProject", "PutCronWorkflow", "AdoptProjectIntoFederation", "UpsertFederationBinding", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush", "ProjectByID", "CronWorkflow", "EventsByUIDs", "FederationBindingByProject"}, run: checkArgvDestructiveGuards},
 	{name: "argv adoption refused", run: checkArgvAdoptionRefused},
 	{name: "argv compatibility stored reads", methods: []string{"CreateProject", "PutCronWorkflow", "CronWorkflow", "ListCronWorkflows", "PutCronJob", "ObserveCronRun"}, runWithBackend: checkArgvCompatStoredReads},
 	{name: "argv retained materialization", methods: []string{"CreateProject"}, runWithBackend: checkArgvCompatRetainedMaterialization},
 	{name: "argv compatibility remote rollback", methods: []string{"CreateProject", "EnableProjectFederation", "UpsertFederationBinding", "FederationBindingByProject", "EventsByUIDs", "MaxEventID", "InsertRemoteEvents", "IngestFederationEvents"}, run: checkArgvCompatRemoteRollback},
+	{name: "argv owner restore supported winner", runWithBackend: checkArgvOwnerRestoreSupportedWinner},
+	{name: "argv job workflow admission", runWithBackend: checkArgvJobWorkflowAdmission},
 	{name: "argv projection repair", methods: []string{"CreateProject"}, runWithBackend: checkArgvProjectionRepair},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},

@@ -33,7 +33,10 @@ func ReconcileOwnerCronWorkflowReplay(records []ImportRecord) []ImportRecord {
 			continue
 		} // Original input has already been validated.
 		k := key{projectUID, in.UID}
-		if current, exists := winners[k]; !exists || compareClock(cronDefinitionClock(value), cronDefinitionClock(current.value)) > 0 {
+		current, exists := winners[k]
+		order := compareClock(cronDefinitionClock(value), cronDefinitionClock(current.value))
+		// Tied evidence names one revision; unsupported originals outrank their normalized snapshot in any order.
+		if !exists || order > 0 || (order == 0 && workflowDocumentHeld(string(in.Definition)) && !workflowDocumentHeld(string(current.document))) {
 			winners[k] = winner{value: value, document: in.Definition}
 		}
 	}
@@ -46,7 +49,7 @@ func ReconcileOwnerCronWorkflowReplay(records []ImportRecord) []ImportRecord {
 		}
 		latest, exists := winners[key{projects[row.ProjectID], row.UID}]
 		order := compareClock(cronDefinitionClock(latest.value), cronDefinitionClock(row.CronDefinition))
-		if !exists || order < 0 || (order == 0 && (latest.value.DefinitionEventUID != row.DefinitionEventUID || latest.value.Author != row.Author)) {
+		if !exists || order < 0 {
 			result = append(result, record)
 			continue
 		}
@@ -54,29 +57,24 @@ func ReconcileOwnerCronWorkflowReplay(records []ImportRecord) []ImportRecord {
 		if err != nil || definition.Version != 1 {
 			continue
 		}
-		_, supportedErr := cron.DecodeWorkflow(latest.document)
-		if supportedErr == nil && order == 0 {
+		held := workflowDocumentHeld(string(latest.document))
+		if order == 0 && (!held || sameRetainedDocument(row.RawDefinition, latest.document)) {
 			result = append(result, record)
 			continue
 		}
-		if order == 0 && len(row.RawDefinition) != 0 {
-			current := append(jsontext.Value(nil), row.RawDefinition...)
-			original := append(jsontext.Value(nil), latest.document...)
-			if current.Canonicalize() == nil && original.Canonicalize() == nil && string(current) == string(original) {
-				result = append(result, record)
-				continue
-			}
-		}
 		replacement := *row
-		replacement.CronDefinition = latest.value
+		replacement.CronDefinition, replacement.Author = latest.value, row.Author
 		replacement.ID, replacement.ProjectID, replacement.Revision = row.ID, row.ProjectID, row.Revision
-		replacement.Author = row.Author
-		replacement.Definition = definition
-		replacement.RawDefinition = nil
-		if supportedErr != nil {
+		replacement.Definition, replacement.RawDefinition = definition, nil
+		if held {
 			replacement.RawDefinition = append(jsontext.Value(nil), latest.document...)
 		}
 		result = append(result, &replacement)
 	}
 	return result
+}
+
+func sameRetainedDocument(a, b jsontext.Value) bool {
+	a, b = append(jsontext.Value(nil), a...), append(jsontext.Value(nil), b...)
+	return len(a) != 0 && a.Canonicalize() == nil && b.Canonicalize() == nil && string(a) == string(b)
 }

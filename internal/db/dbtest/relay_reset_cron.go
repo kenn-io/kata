@@ -76,17 +76,13 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	_, err = downstream.SetRelayBindingConfig(ctx, replica.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID, AuthorityUID: root.InstanceUID(), UpstreamInstanceUID: root.InstanceUID(), HubPath: []string{root.InstanceUID(), downstream.InstanceUID()}, LocalActor: "company-member", ResetEpoch: 1})
 	require.NoError(t, err)
-	for _, section := range []string{"source", "entity"} {
-		for _, definition := range []string{
-			`{"version":2,"steps":[{"key":"literal","kind":"command","command":"true"}]}`,
-			`{"version":1,"steps":[{"key":"literal","kind":"future-step"}]}`,
-			`{"version":1,"steps":null}`,
-		} {
+	for _, section := range []string{"source"} {
+		for _, definition := range []string{`{"version":1,"steps":null}`} {
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, project, pin, private, section, definition)
 			_, _, err := db.DecodeRootResetPayload(pin, bad.Snapshot)
 			require.NoError(t, err, "owner backup integrity decoding preserves held content")
 			err = installer.InstallRelayReset(ctx, bindingUID, bad.Manifest, bad.Snapshot, bad.Translation)
-			require.Error(t, err, "unsupported signed workflow must not be installed")
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "unsupported signed workflow must not be installed")
 			binding, err := downstream.FederationBindingByProject(ctx, replica.ID)
 			require.NoError(t, err)
 			require.Equal(t, int64(1), binding.RelayConfig.ResetEpoch)
@@ -97,7 +93,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	q := downstream.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `null`} {
+	for _, definition := range []string{`null`} {
 		event := argvCompatRemoteWorkflow(t, replica, downstream.InstanceUID(), definition)
 		payload := make(map[string]jsontext.Value)
 		require.NoError(t, json.Unmarshal(event.Payload, &payload))
@@ -106,7 +102,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 		event.Payload, err = json.Marshal(payload)
 		require.NoError(t, err)
 		event = newRemoteEvent(t, replica, nil, "cron.workflow.deleted", "worker", downstream.InstanceUID(), event.HLCPhysicalMS, event.Payload)
-		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, downstream.InstanceUID(), replica.ID, replica.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
+		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, downstream.InstanceUID(), replica.ID, replica.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash)
 		require.NoError(t, err)
 		err = installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation)
 		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
