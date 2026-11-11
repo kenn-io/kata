@@ -260,12 +260,11 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 		if err != nil || found.Outcome == daemonScanNone {
 			return found, err
 		}
-		selected := resolved.WithRunning(runningDaemonForLive(found.Daemon))
-		selected.UnixSocket = found.Daemon.UnixSocket
-		if err := verifyLocalProfileInstance(ctx, selected); err != nil {
+		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
+		resolved.UnixSocket = found.Daemon.UnixSocket
+		if err := verifyLocalProfileInstance(ctx, resolved); err != nil {
 			return ensureDiscovery{}, err
 		}
-		resolved = selected
 		return found, nil
 	}
 	_, err := waitForSupervisedDaemon(ctx, filepath.Join(profile.Home, "config.toml"), scan)

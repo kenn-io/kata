@@ -178,8 +178,7 @@ func supervisedDiscovery(
 	discover func(context.Context, DaemonSelection) (ResolvedDaemon, bool, error),
 ) (resolved ResolvedDaemon, ok bool, err error) {
 	_, err = waitForSupervisedDaemon(ctx, configPath, func(ctx context.Context) (ensureDiscovery, error) {
-		resolved, ok, err = discover(ctx, selection)
-		if ok {
+		if resolved, ok, err = discover(ctx, selection); ok {
 			return ensureDiscovery{Outcome: daemonScanCompatible}, nil
 		}
 		return ensureDiscovery{}, err
