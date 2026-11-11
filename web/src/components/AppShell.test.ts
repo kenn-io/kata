@@ -856,7 +856,8 @@ describe('AppShell', () => {
     let reads = 0
     setGeneratedFetch(async () => {
       reads++
-      if (reads === 1) return new Response('', { status })
+      if (reads === 1)
+        return new Response('{', { status, headers: { 'Content-Type': 'application/json' } })
       return Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
     })
     render(AppShell, { props: accessProps(executeAccessMutation) })
@@ -873,6 +874,24 @@ describe('AppShell', () => {
       expect(screen.getByText('Unable to read teams. Refresh to try again.')).not.toBeNull()
       expect(reads).toBe(1)
     }
+  })
+
+  test('offers a manual teams refresh after retries run out', async () => {
+    vi.useFakeTimers()
+    let reads = 0
+    setGeneratedFetch(async () => {
+      reads++
+      return reads <= 4
+        ? new Response('', { status: 503 })
+        : Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+    })
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await vi.advanceTimersByTimeAsync(7000)
+    expect(screen.getByText('Unable to read teams. Refresh to try again.')).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByRole('option', { name: 'Example team' })).not.toBeNull()
+    expect(reads).toBe(5)
   })
 
   test('manages selected team membership and deletion through owner mutation authority', async () => {

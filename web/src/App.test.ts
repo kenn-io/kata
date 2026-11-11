@@ -1252,7 +1252,8 @@ describe('App', () => {
         const target = new URL(String(input), window.location.origin)
         if (target.pathname !== '/api/v1/ui/snapshot') return Response.json({})
         snapshotReads++
-        if (snapshotReads === 1) return new Response('', { status })
+        if (snapshotReads === 1)
+          return new Response('{', { status, headers: { 'Content-Type': 'application/json' } })
         return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
       }),
     )

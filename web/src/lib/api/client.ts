@@ -1,6 +1,7 @@
 import type { SessionCredentials } from '../auth/session'
 import { loadSessionCredentials } from '../auth/session'
 import { applicationRequest, applicationURL } from '../applicationBase'
+import { retryTransientRead } from './retry'
 
 type CredentialReader = () => SessionCredentials | undefined
 type AuthenticationRequiredHandler = () => boolean
@@ -60,10 +61,15 @@ async function readResponseBody(response: Response): Promise<unknown> {
 
 export async function orvalFetch<T>(
   url: string,
-  options: RequestInit,
+  options: RequestInit & { retry?: boolean },
   fetcher: typeof fetch = generatedFetch,
 ): Promise<T> {
-  const response = await fetcher(applicationURL(url), options)
+  const { retry, ...requestOptions } = options
+  const read = () => fetcher(applicationURL(url), requestOptions)
+  const response =
+    retry && (requestOptions.method ?? 'GET').toUpperCase() === 'GET'
+      ? await retryTransientRead(read, requestOptions.signal ?? new AbortController().signal)
+      : await read()
   const data = await readResponseBody(response)
   return {
     data,

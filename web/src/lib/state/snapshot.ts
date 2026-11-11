@@ -1,4 +1,3 @@
-import { retryTransientRead } from '../api/retry'
 import type { UISnapshotResponseBody } from '../api/generated'
 import { readUISnapshot, type ReadUISnapshotParams } from '../api/generated'
 import { AuthenticationRequiredError, isAuthenticationRequiredError } from '../auth/session'
@@ -298,12 +297,11 @@ export function createUISnapshotRequest(
     if (intent.selectedIssueUID) params.selected_issue_uid = intent.selectedIssueUID
     if (intent.localDate) params.local_date = intent.localDate
     if (intent.timeZone) params.time_zone = intent.timeZone
-    const read = () =>
-      request(params, {
-        signal: options.signal,
-        ...(options.etag ? { headers: { 'If-None-Match': options.etag } } : {}),
-      })
-    const response = await (options.retry ? retryTransientRead(read, options.signal) : read())
+    const response = await request(params, {
+      signal: options.signal,
+      ...(options.retry ? { retry: true } : {}),
+      ...(options.etag ? { headers: { 'If-None-Match': options.etag } } : {}),
+    })
     const status: number = response.status
     if (status === 304) {
       const etag = response.headers.get('ETag')

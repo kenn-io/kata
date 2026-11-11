@@ -7,7 +7,7 @@ import {
   orvalFetch,
   responseTriggeredAuthenticationTransition,
 } from './client'
-import { attachmentContent, getReadUISnapshotUrl } from './generated'
+import { attachmentContent, getReadUISnapshotUrl, listTeams } from './generated'
 
 describe('Kata browser API credentials', () => {
   it('serializes exploded array query parameters as repeated keys', () => {
@@ -144,4 +144,68 @@ it('keeps JSON errors from the generated attachment client', async () => {
   } finally {
     setGeneratedFetch(createCredentialedFetch())
   }
+})
+
+it('honors a server delay before retrying a generated teams read', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '10' } }))
+    .mockResolvedValueOnce(Response.json({ teams: [] }))
+  setGeneratedFetch(fetcher)
+  try {
+    const result = listTeams({ signal: new AbortController().signal, retry: true })
+    await vi.advanceTimersByTimeAsync(9999)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect((await result).status).toBe(200)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
+
+it.each([
+  { status: 403, body: '{', result: 'error', reads: 1 },
+  { status: 503, body: '{', result: 'success', reads: 2 },
+  { status: 200, body: '{', result: 'error', reads: 1 },
+])('classifies HTTP $status before parsing JSON', async ({ status, body, result, reads }) => {
+  vi.useFakeTimers()
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(body, { status, headers: { 'Content-Type': 'application/json' } }),
+    )
+    .mockResolvedValueOnce(Response.json({ teams: [] }))
+  setGeneratedFetch(fetcher)
+  try {
+    const pending = listTeams({ signal: new AbortController().signal, retry: true })
+    if (result === 'error') {
+      const failure = expect(pending).rejects.toThrow()
+      await vi.advanceTimersByTimeAsync(0)
+      await failure
+    } else {
+      await vi.advanceTimersByTimeAsync(1000)
+      expect((await pending).status).toBe(200)
+    }
+    expect(fetcher).toHaveBeenCalledTimes(reads)
+  } finally {
+    vi.useRealTimers()
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
+
+it('does not retry opted-in writes', async () => {
+  const fetcher = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('', { status: 503 }),
+  )
+  const result = await orvalFetch<{ status: number }>(
+    '/example',
+    { method: 'POST', retry: true },
+    fetcher,
+  )
+  expect(result.status).toBe(503)
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(fetcher.mock.calls[0]?.[1]).not.toHaveProperty('retry')
 })

@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Recover automatically when the web UI's first workspace or teams read fails briefly; the Retry and Refresh teams buttons appear only if the retries also fail.
+- Recover automatically when the web UI's first workspace or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
