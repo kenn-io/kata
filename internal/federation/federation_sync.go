@@ -215,7 +215,7 @@ func syncFederationOnceWithFence(
 	}
 	if binding.RelayConfig != nil {
 		turn := &relaySyncTurn{}
-		if err := syncRelayBinding(ctx, store, binding, hubProjectID, client, onPulledEvents, validateLease, turn); err != nil {
+		if err := syncRelayBinding(ctx, store, binding, hubProjectID, client, onPulledEvents, validateLease, turn, pushThisTurn); err != nil {
 			if leaseErr := validateFederationRunnerLease(ctx, validateLease); leaseErr != nil {
 				return false, leaseErr
 			}
