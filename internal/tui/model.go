@@ -2182,7 +2182,7 @@ func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 			m.input.target.forceReply = false
 		}
 		if (m.input.target.replyKind == "confirm" || m.input.target.replyKind == "refute") && utf8.RuneCountInString(strings.Join(strings.Fields(rawBuf), " ")) < 40 {
-			m.input.err = "confirm/refute need at least 40 evidence characters"
+			m.input.err = "Confirm and refute replies need at least 40 characters of evidence"
 			return m, nil
 		}
 		if m.input.target.idempotencyKey == "" || rawBuf != m.input.target.submittedBody || m.input.target.replyKind != m.input.target.submittedKind {

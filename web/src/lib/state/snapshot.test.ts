@@ -90,7 +90,7 @@ describe('SnapshotController', () => {
     expect(controller.state.snapshot?.value).toBe('safe')
     expect(controller.state.stale).toBe(true)
     expect(controller.state.canMutate).toBe(false)
-    expect(controller.state.error).toBe('Snapshot unavailable')
+    expect(controller.state.error).toBe("Couldn't load workspace")
   })
 
   it('distinguishes expired browser authority from a transient snapshot failure', async () => {
