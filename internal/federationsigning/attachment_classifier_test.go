@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -51,6 +53,32 @@ func TestAttachmentTransferClassifierValidProperty(t *testing.T) {
 			if !IsAttachmentTransfer(method, path) {
 				ht.Fatalf("rejected %s %s", method, path)
 			}
+		}
+	})
+}
+
+func TestAttachmentTransferClassifierArbitraryProperty(t *testing.T) {
+	// Independent grammar oracle, including overflow and canonical integer IDs.
+	upload := regexp.MustCompile(`^/api/v1/projects/([1-9][0-9]*)/federation/docbank/issues/([^/%\\?#\x00-\x20\x7f]+)/uploads$`)
+	content := regexp.MustCompile(`^/api/v1/projects/([1-9][0-9]*)/federation/docbank/versions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/content$`)
+	hegel.Test(t, func(ht *hegel.T) {
+		method := hegel.Draw(ht, hegel.SampledFrom([]string{"POST", "GET", "HEAD", "PUT", "DELETE", ""}))
+		part := hegel.Draw(ht, hegel.Text())
+		path := hegel.Draw(ht, hegel.SampledFrom([]string{part, strings.Replace(uploadPath, "abc4", part, 1), uploadPath + part, part + uploadPath}))
+		var matches []string
+		switch method {
+		case "POST":
+			matches = upload.FindStringSubmatch(path)
+		case "GET":
+			matches = content.FindStringSubmatch(path)
+		}
+		want := len(matches) != 0
+		if want {
+			_, err := strconv.ParseInt(matches[1], 10, 64)
+			want = err == nil && (method != "POST" || matches[2] != "." && matches[2] != "..")
+		}
+		if got := IsAttachmentTransfer(method, path); got != want {
+			ht.Fatalf("%s %q: got %v want %v", method, path, got, want)
 		}
 	})
 }

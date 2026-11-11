@@ -200,6 +200,27 @@ func TestAttachmentTransferBinaryProperty(t *testing.T) {
 	}, hegel.WithTestCases(64))
 }
 
+func TestAttachmentTransferCorruptBodyProperty(t *testing.T) {
+	s := testSource(t)
+	v := testVerifier(t, "https://hub.example", s)
+	hegel.Test(t, func(ht *hegel.T) {
+		data := hegel.Draw(ht, hegel.Lists(hegel.Integers[uint8](0, 255)))
+		if len(data) > 64<<10 {
+			data = data[:64<<10]
+		}
+		data = append(data, 0)
+		r := attachmentRequest(t, s, data)
+		_ = r.Body.Close()
+		index := hegel.Draw(ht, hegel.Integers(0, len(data)-1))
+		data[index] ^= 1
+		r.Body = io.NopCloser(bytes.NewReader(data))
+		if err := v.Verify(r, 7); err == nil {
+			_ = r.Body.Close()
+			ht.Fatal("corrupt binary accepted")
+		}
+	}, hegel.WithTestCases(64))
+}
+
 // Contract: body read failures and overflow leave no disk artifacts; cancellation
 // must interrupt a body that is blocked waiting for the peer's next byte.
 func TestAttachmentTransferSpoolFailureCleanup(t *testing.T) {
