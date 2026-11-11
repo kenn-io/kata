@@ -1465,24 +1465,22 @@ func runDaemonProcess(
 	maps.Copy(rec.Metadata, restart.metadata())
 
 	originalEmbeddings := dcfg.Search.Embeddings
-	// PostgreSQL replicas share vector generations, but not this machine's choice.
-	if _, postgres := store.(*pgstore.Store); !postgres {
-		if chosen, err := applySharedEmbeddingChoice(ctx, originalEmbeddings); err != nil {
+	if chosen, err := applySharedEmbeddingChoice(ctx, originalEmbeddings); err != nil {
+		daemonLog.Printf("shared embeddings choice: %v", err)
+	} else if chosen != originalEmbeddings {
+		if candidate, path, err := preflightEmbeddingStartup(chosen, dbPath); err != nil {
 			daemonLog.Printf("shared embeddings choice: %v", err)
-		} else if chosen != originalEmbeddings {
-			if candidate, path, err := preflightEmbeddingStartup(chosen, dbPath); err != nil {
-				daemonLog.Printf("shared embeddings choice: %v", err)
-			} else {
-				startup.Embedder, startup.VectorsPath = candidate, path
-				dcfg.Search.Embeddings = chosen
-			}
+		} else {
+			startup.Embedder, startup.VectorsPath = candidate, path
+			dcfg.Search.Embeddings = chosen
 		}
 	}
 
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
-	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconciler(
-		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, publisher,
+	_, postgres := store.(*pgstore.Store)
+	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconcilerWithPolicy(
+		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, postgres && dcfg.Search.Embeddings != originalEmbeddings, publisher,
 	)
 	if err != nil {
 		if dcfg.Search.Embeddings == originalEmbeddings {
@@ -2207,6 +2205,22 @@ func startEmbeddingReconciler(
 	daemonLog *log.Logger,
 	publishers ...daemon.EventPublisher,
 ) (*embedding.Client, *vector.Index, func() daemon.ReconcilerHealth, func(), error) {
+	return startEmbeddingReconcilerWithPolicy(ctx, workers, drainAdmission, ec, embedder, vectorsPath, store, bcast, daemonLog, false, publishers...)
+}
+
+func startEmbeddingReconcilerWithPolicy(
+	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
+	ec config.EmbeddingsConfig,
+	embedder *embedding.Client,
+	vectorsPath string,
+	store db.Storage,
+	bcast *daemon.EventBroadcaster,
+	daemonLog *log.Logger,
+	preserveActive bool,
+	publishers ...daemon.EventPublisher,
+) (*embedding.Client, *vector.Index, func() daemon.ReconcilerHealth, func(), error) {
 	if embedder == nil {
 		return nil, nil, nil, nil, nil
 	}
@@ -2219,10 +2233,11 @@ func startEmbeddingReconciler(
 		publisher = publishers[0]
 	}
 	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{
-		BatchSize:      ec.BatchSize,
-		BatchOptions:   embeddingBatchOptions(ec, embedder.BatchSize()),
-		DrainAdmission: drainAdmission,
-		OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
+		PreserveActiveGeneration: preserveActive,
+		BatchSize:                ec.BatchSize,
+		BatchOptions:             embeddingBatchOptions(ec, embedder.BatchSize()),
+		DrainAdmission:           drainAdmission,
+		OnProjectEvent:           func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
 		FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
 			if !syncArtifacts {
 				return federation.EmbeddingProducerAuthorized(ctx, store, config.DefaultFederationCredentialStore(), projectUID, recipe)

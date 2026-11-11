@@ -34,6 +34,8 @@ type ReconcilerConfig struct {
 	Now            func() time.Time
 	DrainAdmission activity.WaitableAdmission
 	OnProjectEvent func(db.Event, activity.Admission)
+	// PreserveActiveGeneration prevents an automatic choice from replacing another replica's index.
+	PreserveActiveGeneration bool
 	// The final argument requests artifact synchronization before authorization.
 	// Later documents in the same fill need only fresh authority checks.
 	FederationProducerAllowed func(context.Context, string, embedding.ArtifactIdentity, activity.Admission, bool) (bool, error)
@@ -210,6 +212,15 @@ func (b *leaseRetryBackoff) afterAttempt(leadershipAcquired bool, err error) tim
 }
 
 func (r *Reconciler) runLeader(ctx context.Context) error {
+	if r.cfg.PreserveActiveGeneration {
+		active, ok, err := r.idx.ActiveGeneration(ctx)
+		if err != nil {
+			return err
+		}
+		if ok && active != r.emb.Generation().Fingerprint() {
+			return errors.New("shared embedding choice conflicts with the active generation")
+		}
+	}
 	backoff := r.cfg.MinBackoff
 	rejected := false
 	timer := time.NewTimer(0)

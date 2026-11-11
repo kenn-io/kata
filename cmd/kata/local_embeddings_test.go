@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/pgstore"
@@ -68,6 +69,53 @@ func TestSharedChoicePreservesPostgresActiveGeneration(t *testing.T) {
 		active, ok, err := idx.ActiveGeneration(t.Context())
 		return err != nil || !ok || active != key
 	}, 2*time.Second, 10*time.Millisecond, "shared choice displaced the configured replica's index")
+}
+
+func TestSharedChoiceStartsPostgresCompatibleIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires pgvector testcontainer")
+	}
+	for _, seeded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("seeded=%t", seeded), func(t *testing.T) {
+			setupKataEnv(t)
+			clearLocalEmbeddingsEnv(t)
+			resetFlags(t)
+			t.Setenv("PORT", "")
+			t.Setenv("KATA_SERVER", "")
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+			dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, t.Context())
+			t.Cleanup(cleanup)
+			t.Setenv("KATA_DSN", dsn)
+			t.Setenv("KATA_POSTGRES_ALLOW_INSECURE", "1")
+			store, err := pgstore.Open(t.Context(), dsn)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			idx, err := vector.OpenPostgres(t.Context(), store.DB)
+			require.NoError(t, err)
+			require.NoError(t, embedlocal.RecordChoice())
+			choice, err := applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{})
+			require.NoError(t, err)
+			emb, _, err := preflightEmbeddingStartup(choice, dsn)
+			require.NoError(t, err)
+			generation := emb.Generation()
+			key := generation.Fingerprint()
+			if seeded {
+				release, err := idx.AcquireReconcilerLease(t.Context())
+				require.NoError(t, err)
+				require.NoError(t, idx.EnsureBuilding(t.Context(), key, generation))
+				require.NoError(t, idx.CutOver(t.Context(), key))
+				require.NoError(t, release())
+			}
+			baseURL := launchDaemon(t)
+			status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
+			require.Equal(t, "built_in", status.Provider)
+			require.Eventually(t, func() bool {
+				active, ok, err := idx.ActiveGeneration(t.Context())
+				return err == nil && ok && active == key
+			}, 5*time.Second, 10*time.Millisecond)
+		})
+	}
 }
 
 func TestLocalEmbeddingsRestartRefusalPreservesChoice(t *testing.T) {
