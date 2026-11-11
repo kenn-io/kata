@@ -749,6 +749,10 @@ type PatchProjectMetadataPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type GetProjectNotificationActorPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type ReadyIssuesPath struct {
 	ProjectID int64 `json:"project_id"`
 }

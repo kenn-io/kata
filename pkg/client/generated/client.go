@@ -547,6 +547,9 @@ type ClientInterface interface {
 	PatchProjectMetadata(ctx context.Context, options *PatchProjectMetadataRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PatchProjectMetadataResponse, error)
 	PatchProjectMetadataWithResponse(ctx context.Context, options *PatchProjectMetadataRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PatchProjectMetadataResp, error)
 
+	GetProjectNotificationActor(ctx context.Context, options *GetProjectNotificationActorRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectNotificationActorResponse, error)
+	GetProjectNotificationActorWithResponse(ctx context.Context, options *GetProjectNotificationActorRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectNotificationActorResp, error)
+
 	ReadyIssues(ctx context.Context, options *ReadyIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadyIssuesResponse, error)
 	ReadyIssuesWithResponse(ctx context.Context, options *ReadyIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadyIssuesResp, error)
 
@@ -8786,6 +8789,73 @@ func (c *Client) PatchProjectMetadata(ctx context.Context, options *PatchProject
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/metadata")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) GetProjectNotificationActor(ctx context.Context, options *GetProjectNotificationActorRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectNotificationActorResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"requested_actor": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/notifications/actor",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*GetProjectNotificationActorResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(GetProjectNotificationActorErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "GetProjectNotificationActorErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(GetProjectNotificationActorResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "GetProjectNotificationActorResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/notifications/actor")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

@@ -127,6 +127,8 @@ import type {
   GetProjectFederationParams,
   GetProjectFederationPathParameters,
   GetProjectFederationStatusPathParameters,
+  GetProjectNotificationActorParams,
+  GetProjectNotificationActorPathParameters,
   GetRelayResetPathParameters,
   HealthResponseBody,
   ImportBatchResult,
@@ -212,6 +214,7 @@ import type {
   PriorityRequestBody,
   ProjectAccessResponseBody,
   ProjectFederationBody,
+  ProjectNotificationActorResponseBody,
   ProjectPurgeRequestBody,
   ProjectPurgeResponseBody,
   ProjectResolveBody,
@@ -6144,6 +6147,61 @@ export const patchProjectMetadata = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(patchProjectMetadataRequestBody),
   })
+}
+
+export type getProjectNotificationActorResponse200 = {
+  data: ProjectNotificationActorResponseBody
+  status: 200
+}
+
+export type getProjectNotificationActorResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getProjectNotificationActorResponseSuccess = getProjectNotificationActorResponse200 & {
+  headers: Headers
+}
+export type getProjectNotificationActorResponseError =
+  getProjectNotificationActorResponseDefault & {
+    headers: Headers
+  }
+
+export type getProjectNotificationActorResponse =
+  | getProjectNotificationActorResponseSuccess
+  | getProjectNotificationActorResponseError
+
+export const getGetProjectNotificationActorUrl = (
+  { projectId }: GetProjectNotificationActorPathParameters,
+  params?: GetProjectNotificationActorParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/notifications/actor?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/notifications/actor`
+}
+
+export const getProjectNotificationActor = async (
+  { projectId }: GetProjectNotificationActorPathParameters,
+  params?: GetProjectNotificationActorParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getProjectNotificationActorResponse> => {
+  return orvalFetch<getProjectNotificationActorResponse>(
+    getGetProjectNotificationActorUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
 }
 
 export type readyIssuesResponse200 = {

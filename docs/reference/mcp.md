@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Model Context Protocol server
@@ -361,7 +361,7 @@ require startup flags and fall outside these default catalogs.
 | --- | --- |
 | `kata.load_issue_discovery` | `kata.search`, `kata.list`, `kata.show`, `kata.ready`, `kata.next`, `kata.labels`, `kata.graph` |
 | `kata.load_issue_mutation` | `kata.create`, `kata.edit`, `kata.comment`, `kata.edit_comment`, `kata.claim`, `kata.set_label`, `kata.set_metadata`, `kata.set_schedule`, `kata.set_deadline`, `kata.move` |
-| `kata.load_coordination` | `kata.assign`, `kata.unassign`, `kata.inbox`, `kata.status` |
+| `kata.load_coordination` | `kata.assign`, `kata.unassign`, `kata.notify`, `kata.inbox`, `kata.status` |
 | `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 | `kata.load_issue_lifecycle` | `kata.close`, `kata.reopen`, `kata.delete`, `kata.restore`, `kata.purge`, `kata.wait`, `kata.audit_closes` |
 | `kata.load_leases` | `kata.lease_status`, `kata.lease`, `kata.lease_force_release`, `kata.lease_steal` |
@@ -575,14 +575,54 @@ This is a fixed catalog of agent workflow guidance. It cannot read arbitrary
 files or other skills. For reference documentation, load `kata.load_docs`, then
 use `kata.search_docs` and `kata.read_doc`.
 
-Some workflows have no equivalent MCP call in this version. Notifications require an
-operator with CLI access to send or clear requests. `kata.wait` waits on issue
-status only. For an attention wait, poll `kata.show` for every watched ref with
-your own deadline: a closed issue completes first, then `work.attention` of
-`needs-human` or `stuck`. Report timeout distinctly. `kata.inbox` lists notifications on open
-issues; it does not replace an attention wait. In multi-project scope, use
-`project#ref` for existing-issue calls and pass `project` only where the tool's
-schema includes it.
+In multi-project scope, use `project#ref` for existing-issue calls and pass
+`project` only where the tool's schema includes it.
+
+## Attention requests and waits
+
+Load `kata.load_coordination` to send or clear requests with `kata.notify`.
+Send `{ref, to, message}` to one exact `actor` or `actor/teammate` inbox.
+Messages must be nonblank and at most 1024 UTF-8 bytes. Optional `re` links a
+comment handle or UID that needs an answer. The daemon resolves that reference
+and fixes the sender's actor; `teammate` overrides the startup teammate, with
+an empty string suppressing it. Targeted identical retries make no change.
+
+After handling a request, call `{ref, to, clear: true}` to remove only that
+recipient's slot. Clear cannot include `message`, `re`, `broadcast`, or
+`teammates`. To request attention from the daemon's bounded participant
+audience, use `broadcast: true` instead of `to`; optional `teammates: true`
+includes teammate inboxes. Broadcast retries remain rate limited.
+`kata.inbox` returns linked comment and reply-kind fields without consuming
+requests. Notifications do not change the delegated worker's `work.attention`.
+
+Load `kata.load_issue_lifecycle` to use `kata.wait`. Pass `refs` and either
+`status: "open"|"closed"|"deleted"` or
+`until: "closed"|"attention"|"needs-human"|"stuck"|"reply"`.
+Omitting both waits for closed status. Attention matches any nonempty string
+other than `ok` in `work.attention`; the narrower levels match exactly.
+A closed issue completes every `until` mode with per-state `reason: "closed"`.
+Attention completions include `reason: "attention"`, `attention`, and the
+available `attention_msg`.
+
+`until: "reply"` watches the exact notification slot named by optional `for`.
+It defaults to the daemon's effective actor plus the startup teammate and
+keeps that recipient if the issue moves. The first successful poll establishes
+the baseline; a later change or clear returns
+`reason: "reply"`. Existing requests, JSON property order changes, and absent
+versus null values do not wake it. Waiting never clears a request.
+
+The default timeout is 30 seconds; `timeout_seconds` accepts 1–300 and covers
+setup as well as polling. Top-level `reason` remains `matched` or `timeout`.
+With `any: true`, an `until` wait returns after the first matching issue. A
+status wait reads the current snapshot before returning a match, or returns at
+the deadline if a completed read matched. Otherwise every issue must match;
+observed `until` completions are retained while the others finish. An `until`
+wait with `any: true` omits issues with permanent lookup errors or three
+consecutive transient errors. If no issues remain, it returns a lookup error.
+If the deadline arrives without a match and an issue initially had a permanent
+lookup error, it returns that error.
+Before the deadline, a status wait returns a lookup error even if another issue
+matched.
 
 ## Scheduling and someday
 
@@ -784,7 +824,7 @@ capability described in [Native inbox events](#native-inbox-events). It does
 not advertise prompts, resources, roots,
 logging, sampling, subscriptions, or server-to-client requests. Discovery uses
 a five-minute private cache hint. Tool execution allows 20 starts per second,
-a burst of 20, and at most eight concurrent daemon calls per server process.
+a burst of 20, and at most eight concurrent tool calls per server process.
 
 Host process control stays outside MCP: daemon lifecycle, the TUI and Web UI,
 install/update, database migrations and cutovers, and raw internal replication

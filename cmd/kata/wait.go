@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/textsafe"
+	"go.kenn.io/kata/internal/wait"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -37,17 +37,11 @@ const kindTimeout errKind = "timeout"
 const (
 	// defaultWaitPollInterval keeps the human default gentle; tests pass tiny
 	// values via --poll-interval.
-	defaultWaitPollInterval = 2 * time.Second
-	// maxWaitConsecutiveFails bounds transient GET retries per ref before the
-	// command gives up (daemon restart / network blip tolerance).
-	maxWaitConsecutiveFails = 3
+	defaultWaitPollInterval = wait.DefaultPollInterval
 	// attentionKey / attentionMsgKey are the flat (dotted) metadata keys the
 	// attention convention writes; opaque to the daemon.
 	attentionKey    = "work.attention"
 	attentionMsgKey = "work.attention_msg"
-	// attentionOK is the "nothing to see here" attention level; --until
-	// attention treats any other non-empty value as satisfied.
-	attentionOK = "ok"
 )
 
 // waitMode is the --until target condition.
@@ -70,34 +64,6 @@ type issueState struct {
 	status    string
 	attention string
 	reply     jsontext.Value
-}
-
-// evalWait is the pure condition-evaluation core: given a wait mode and an
-// issue snapshot, it reports whether the wait for that ref is satisfied and the
-// reason ("closed" or "attention"). A closed issue satisfies every mode — you
-// cannot wait forever on a finished issue — and closed always reports "closed"
-// so callers can distinguish it from an attention transition.
-func evalWait(mode waitMode, st issueState) (satisfied bool, reason string) {
-	if st.status == "closed" {
-		return true, "closed"
-	}
-	switch mode {
-	case waitNeedsHuman:
-		if st.attention == string(waitNeedsHuman) {
-			return true, "attention"
-		}
-	case waitStuck:
-		if st.attention == string(waitStuck) {
-			return true, "attention"
-		}
-	case waitAttention:
-		if st.attention != "" && st.attention != attentionOK {
-			return true, "attention"
-		}
-	case waitClosed:
-		// Only a closed issue satisfies --until closed; handled above.
-	}
-	return false, ""
 }
 
 // parseWaitMode validates the --until value.
@@ -163,16 +129,15 @@ const (
 
 // waitTarget is a ref's mutable per-run state.
 type waitTarget struct {
-	arg              string // user-supplied ref, used verbatim for display
-	pid              int64
-	refForAPI        string
-	fails            int
-	state            waitTargetState
-	abandonErr       error // the permanent error that moved this ref to targetAbandoned
-	result           waitResult
-	replyKey         string
-	replyBaseline    jsontext.Value
-	replyBaselineSet bool
+	arg        string // user-supplied ref, used verbatim for display
+	pid        int64
+	refForAPI  string
+	fails      int
+	state      waitTargetState
+	abandonErr error // the permanent error that moved this ref to targetAbandoned
+	result     waitResult
+	replyKey   string
+	evaluator  wait.Evaluator
 }
 
 type waitOptions struct {
@@ -583,7 +548,7 @@ func waitPollLoop(
 					continue
 				}
 				t.fails++
-				if t.fails >= maxWaitConsecutiveFails {
+				if t.fails >= wait.MaxConsecutiveFailures {
 					return &cliError{
 						Message: fmt.Sprintf("wait: %s: %d consecutive failures fetching issue state: %v",
 							t.arg, t.fails, err),
@@ -615,20 +580,7 @@ func evalTarget(run waitRun, t *waitTarget, st issueState, msg string) bool {
 		return false
 	}
 
-	satisfied, reason := evalWait(run.mode, st)
-	if run.mode == waitReply && st.status != "closed" {
-		slot := metadata.NormalizeJSON(st.reply)
-		if len(slot) == 0 || string(slot) == "null" {
-			slot = nil
-		}
-		if !t.replyBaselineSet {
-			t.replyBaseline = append(jsontext.Value(nil), slot...)
-			t.replyBaselineSet = true
-			return false
-		}
-		satisfied = !bytes.Equal(t.replyBaseline, slot)
-		reason = "reply"
-	}
+	satisfied, reason := t.evaluator.Eval(string(run.mode), st.status, st.attention, st.reply)
 
 	if !satisfied {
 		return false

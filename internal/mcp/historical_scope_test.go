@@ -99,10 +99,20 @@ func mcpMoveOutside(t *testing.T, store db.Storage, source, excluded db.Project,
 	require.NoError(t, err)
 }
 func TestFixedMCPScopeRejectsHistoricalReferenceOutsideCurrentProject(t *testing.T) {
-	for _, tool := range []string{"kata.show", "kata.edit", "kata.comment"} {
+	for _, tool := range []string{"kata.show", "kata.edit", "kata.comment", "kata.notify"} {
 		t.Run(tool, func(t *testing.T) {
 			store, _, session, source, _, excluded, issue := mcpFixedScopeFixture(t)
+			if tool == "kata.notify" {
+				callAdministrationTool(t, session, tool, map[string]any{"ref": source.Name + "#" + issue.ShortID, "to": "reviewer", "message": "First request"})
+				var err error
+				issue, err = store.IssueByID(t.Context(), issue.ID)
+				require.NoError(t, err)
+			}
 			mcpMoveOutside(t, store, source, excluded, issue)
+			before, err := store.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			beforeEvent, err := store.MaxEventID(t.Context())
+			require.NoError(t, err)
 			args := map[string]any{"ref": source.Name + "#" + issue.ShortID}
 			if tool == "kata.edit" {
 				args["title"] = "forbidden edit"
@@ -111,6 +121,9 @@ func TestFixedMCPScopeRejectsHistoricalReferenceOutsideCurrentProject(t *testing
 				args["body"] = "forbidden comment"
 				args["idempotency_key"] = "scope-comment"
 			}
+			if tool == "kata.notify" {
+				args["to"], args["message"] = "reviewer", "Out of scope request"
+			}
 			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tool, Arguments: args})
 			require.NoError(t, err)
 			require.True(t, result.IsError, string(mustJSON(t, result)))
@@ -118,6 +131,10 @@ func TestFixedMCPScopeRejectsHistoricalReferenceOutsideCurrentProject(t *testing
 			got, err := store.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Equal(t, issue.Title, got.Title)
+			require.Equal(t, before.Metadata, got.Metadata)
+			afterEvent, err := store.MaxEventID(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, beforeEvent, afterEvent)
 			comments, err := store.CommentsByIssue(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Empty(t, comments)

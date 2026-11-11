@@ -143,11 +143,9 @@ metadata; use real blocking relationships only for prerequisites.
 Load kata.load_coordination and refresh to read pending notify.* requests:
 ` + call("kata.inbox", `{"for":"example-agent/worker-1","project":"spoke-project"}`) + `
 Inbox requests are separate from work.attention. Omitting project aggregates
-within the server's startup scope. This version has no notification send/clear
-tool; an operator must handle those requests. Do not invent a tool name.
-kata.wait currently waits on status only. For attention, use bounded kata.show
-polling with your own deadline: closure completes first, then needs-human or
-stuck. Report timeout distinctly. Read delegated attention; never overwrite it.
+within the server's startup scope. Send or clear requests with kata.notify.
+Use kata.wait with until=attention to wait for closure or attention. Report
+timeout distinctly. Read delegated attention; never overwrite it.
 `, true
 	case "scheduling":
 		return "# Park, schedule and set deadlines\n\n" + scope + `
@@ -161,8 +159,8 @@ Use someday=true when the start date is unknown; remove it with JSON null.
 Clear dates with clear_schedule or clear_deadline, not an invented date string.
 ` + call("kata.set_schedule", `{"ref":"spoke-project#abc4","clear_schedule":true}`) + `
 Reached schedules/deadlines generate notify.* requests for the current owner,
-or author when unowned. Read them through kata.inbox; ask an operator to clear
-them on versions without a notification write tool.
+or author when unowned. Read them through kata.inbox and clear them with
+kata.notify.
 `, true
 	case "events":
 		return "# Follow activity with events\n\n" + scope + `

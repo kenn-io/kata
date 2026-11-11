@@ -19,16 +19,18 @@ import (
 
 func TestNewSectionLoadersRegisterOnlyTheirTools(t *testing.T) {
 	for _, test := range []struct {
-		loader, section string
-		tools           []string
+		name, loader, section string
+		tools                 []string
+		events                bool
 	}{
-		{"kata.load_coordination", "coordination", []string{"kata.assign", "kata.inbox", "kata.status", "kata.unassign"}},
-		{"kata.load_docs", "docs", []string{"kata.read_doc", "kata.search_docs"}},
+		{"coordination", "kata.load_coordination", "coordination", []string{"kata.assign", "kata.inbox", "kata.notify", "kata.status", "kata.unassign"}, false},
+		{"coordination-events", "kata.load_coordination", "coordination", []string{"kata.assign", "kata.event_subscriptions", "kata.inbox", "kata.notify", "kata.status", "kata.unassign"}, true},
+		{"docs", "kata.load_docs", "docs", []string{"kata.read_doc", "kata.search_docs"}, false},
 	} {
-		t.Run(test.section, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			session := connectRawTestServerWithOptions(t, Options{
 				Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
-				Actor: "example-agent", Version: "test-version",
+				Actor: "example-agent", Version: "test-version", Events: test.events,
 			})
 			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: test.loader, Arguments: map[string]any{}})
 			require.NoError(t, err)
@@ -117,15 +119,22 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 	session, _ := newCoordinationSession(t)
 	key := notification.MetadataKey("reviewer-agent")
 	requests := []map[string]any{
-		{"from": "example-agent", "message": "Please review the plan"},
-		{"from": "example-agent", "teammate": "planner", "message": "Second look"},
+		{"from": "example-agent", "message": "Please review the plan", "kind": "reply"},
+		{"from": "example-agent", "teammate": "planner", "message": "Second look", "broadcast": true},
 		{"from": "", "message": "Malformed request"},
 	}
+	var linkedUID string
 	for i, value := range requests {
 		created := callAdministrationTool(t, session, "kata.create", map[string]any{
 			"title": "Attention issue " + string(rune('a'+i)), "idempotency_key": "attention-" + string(rune('a'+i)),
 		})
 		ref := created["issue"].(map[string]any)["ref"].(string)
+		if i == 0 {
+			comment := callAdministrationTool(t, session, "kata.comment", map[string]any{"ref": ref, "body": "Finding", "idempotency_key": "attention-finding"})
+			linkedUID = comment["comment"].(map[string]any)["uid"].(string)
+			value["re"] = linkedUID
+		}
+
 		callAdministrationTool(t, session, "kata.set_metadata", map[string]any{"ref": ref, "patch": map[string]any{key: value}})
 	}
 	callAdministrationTool(t, session, "kata.create", map[string]any{"title": "Quiet issue", "idempotency_key": "quiet"})
@@ -143,6 +152,9 @@ func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
 		require.NotEmpty(t, request["qualified_ref"])
 	}
 	require.Equal(t, "planner", messages["Second look"]["teammate"])
+	require.Equal(t, linkedUID, messages["Please review the plan"]["re"])
+	require.Equal(t, "reply", messages["Please review the plan"]["kind"])
+	require.Equal(t, true, messages["Second look"]["broadcast"])
 	require.NotContains(t, messages["Please review the plan"], "teammate")
 
 	limited := callAdministrationTool(t, session, "kata.inbox", map[string]any{"for": "reviewer-agent", "limit": 1})

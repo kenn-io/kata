@@ -5367,6 +5367,14 @@ func (p ProjectFederationBody) Validate() error {
 	return errors
 }
 
+type ProjectNotificationActorResponseBody struct {
+	EffectiveActor string `json:"effective_actor" validate:"required"`
+}
+
+func (p ProjectNotificationActorResponseBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
 type ProjectOut struct {
 	Active    bool             `json:"active"`
 	CreatedAt time.Time        `json:"created_at" validate:"required"`

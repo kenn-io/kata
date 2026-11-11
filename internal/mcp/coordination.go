@@ -44,6 +44,9 @@ type InboxRequest struct {
 	From         string  `json:"from"`
 	Teammate     string  `json:"teammate,omitempty"`
 	Message      string  `json:"message"`
+	Re           string  `json:"re,omitempty" jsonschema:"Referenced comment UID, when linked"`
+	Kind         string  `json:"kind,omitempty" jsonschema:"Typed reply kind, when this signal reports an answer"`
+	Broadcast    bool    `json:"broadcast,omitzero"`
 }
 
 // InboxOutput lists attention requests without clearing them.
@@ -86,6 +89,7 @@ func registerCoordinationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	mutating := toolHints(false, true, false)
 	addTool(server, "kata.assign", "Assign issue", "Make another actor the owner of an issue.", mutating, handlers.assign)
 	addTool(server, "kata.inbox", "Read inbox", "List open issues that ask an exact recipient for attention. Follow next_cursor until absent, including empty pages. Reading does not clear them. Native Events can signal changes.", read, handlers.inbox)
+	addTool(server, "kata.notify", "Request attention", "Send or clear an exact-recipient inbox signal. Optional re requests a comment answer; broadcasts use the daemon's bounded audience and rate limit. Identical targeted retries are no-ops. This does not change work.attention.", mutating, handlers.notify)
 	addTool(server, "kata.status", "Issue status", "Show who owns or holds an issue and which actor this server writes as.", read, handlers.status)
 	addTool(server, "kata.unassign", "Unassign issue", "Clear an issue's owner, optionally only while an expected owner still holds it.", mutating, handlers.unassign)
 }
@@ -168,6 +172,7 @@ func (h toolHandlers) inbox(ctx context.Context, request *sdkmcp.CallToolRequest
 		output.Requests = append(output.Requests, InboxRequest{
 			IssueUID: issue.UID, ProjectUID: issue.projectUID, Ref: issue.Ref, QualifiedRef: issue.QualifiedRef, WebURL: issue.WebURL, Title: issue.Title,
 			From: value.From, Teammate: value.Teammate, Message: value.Message,
+			Re: value.Re, Kind: value.Kind, Broadcast: value.Broadcast,
 		})
 	}
 	return successResult(), output, nil
