@@ -1019,7 +1019,7 @@ results already received. Start a new batch for the remaining issues.
 | --- | --- |
 | `already_in_target` | The issue is already in its requested target. |
 | `duplicate_item` | An earlier input names the same issue and target. |
-| `conflicting_target` | An issue names different targets. Nothing in that conflict moves. |
+| `conflicting_target` | An issue has different targets that pass validation. Those entries don't move; an entry refused for another reason doesn't block a valid move. |
 | `revision_conflict` | A selected issue changed after selection. Rerun to select its current revision. |
 | `issue_move_tree_changed` | Subtree membership changed after validation. Retry to validate every member. |
 
