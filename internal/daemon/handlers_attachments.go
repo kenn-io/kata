@@ -186,7 +186,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if e.Origin == "" || local {
+		if local {
 			if cfg.Docbank == nil {
 				return nil, attachmentError(503, "docbank_not_configured")
 			}

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,6 +61,27 @@ func TestDocbankForwardMapsHubCredentialRejection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestForwardDocbankDescriptorRejectsReadOnlyBeforeProbe(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	project, issue := createClaimGateHelperIssue(t, store)
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(upstream.Close)
+	binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: upstream.URL, HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, Actor: "operator", AllowInsecure: true}
+	_, err := store.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
+	cfg := ServerConfig{DB: store, FederationCredentials: uiCapabilityCredentials{credential: config.FederationCredential{HubURL: upstream.URL, HubProjectID: 1, Token: "fixture", AllowInsecure: true}}}
+	_, err = forwardDocbankDescriptor(t.Context(), cfg, project, &binding, issue, nil, "", "file.pdf", nil, strings.NewReader("file"))
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, http.StatusConflict, apiErr.Status)
+	require.Equal(t, "federated_read_only", apiErr.Code)
+	require.Zero(t, calls.Load())
 }
 
 func TestForwardDocbankDescriptorRejectsUnexpectedOrigin(t *testing.T) {

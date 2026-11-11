@@ -260,6 +260,9 @@ func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project d
 }
 
 func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, issue db.Issue, result *claimRefreshResult, expectedOrigin, name string, input *api.LinkAttachmentInput, body io.Reader) (metadata.Attachment, error) {
+	if !binding.PushEnabled {
+		return metadata.Attachment{}, federationReadOnlyError(db.ErrFederatedReadOnly)
+	}
 	origin := expectedOrigin
 	if origin == "" {
 		caps, err := docbankOriginCapabilities(ctx, cfg, project, binding, "")
@@ -267,9 +270,6 @@ func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.
 			return metadata.Attachment{}, err
 		}
 		origin = caps.Origin
-	}
-	if !binding.PushEnabled {
-		return metadata.Attachment{}, federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
 	if err := ensureDocbankIssueUpstream(ctx, cfg, project, *binding, issue, result); err != nil {
 		return metadata.Attachment{}, err
