@@ -32,21 +32,15 @@ func moveBatchRefusal(result *api.MoveIssuesResult, err error) {
 	result.Hint = mapped.Hint
 }
 
-func checkMoveBatchClaims(ctx context.Context, cfg ServerConfig, items []moveBatchItem, results []api.MoveIssuesResult, indexes []int, actor string, cache *claimClientCache, refresh bool) {
+func checkMoveBatchClaims(cfg ServerConfig, items []moveBatchItem, results []api.MoveIssuesResult, indexes []int, actor string) {
+	cache := &claimClientCache{}
 	var wg sync.WaitGroup
 	slots := make(chan struct{}, moveBatchClaimConcurrency)
 	for _, j := range indexes {
-		if results[j].Result != "" {
-			continue
-		}
 		slots <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-slots }()
-			itemCtx := items[j].ctx
-			if itemCtx == nil {
-				itemCtx = ctx
-			}
-			if err := requireFederatedIssueClaimWithRefresh(itemCtx, cfg, items[j].issue, actor, refresh, cache); err != nil {
+			if err := requireFederatedIssueClaimWithRefresh(items[j].ctx, cfg, items[j].issue, actor, true, cache); err != nil {
 				moveBatchRefusal(&results[j], err)
 			}
 		})
@@ -124,7 +118,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			items[j].target = target
 			items[j].move = db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: target.ID, IfMatchRev: rev, Actor: actor, Single: true, AuthorizeProjects: authorize, BindContext: func(ctx context.Context) context.Context { return bindBatchItemHostContext(ctx, itemCtx) }}
 		}
-		cache := &claimClientCache{}
 		var indexes []int
 		for j := range items {
 			if results[j].Result != "" {
@@ -139,7 +132,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				indexes = append(indexes, j)
 			}
 		}
-		checkMoveBatchClaims(ctx, cfg, items, results, indexes, actor, cache, true)
+		checkMoveBatchClaims(cfg, items, results, indexes, actor)
 		var moves []db.MoveIssueProjectIn
 		var selected []int
 		for j := range items {
