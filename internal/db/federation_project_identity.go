@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-// FederationProjectIdentityDependencyPrefix stores former project UIDs that a
-// joined replica still needs after a reset removes its move events.
+// FederationProjectIdentityDependencyPrefix stores project UIDs that a
+// joined replica still needs.
 const FederationProjectIdentityDependencyPrefix = "federation_identity_dependency."
 
-// CheckFederationProjectIdentityRetirement protects only former identities
+// CheckFederationProjectIdentityRetirement protects identities
 // still referenced by another joined project's portable issue history. Archive
 // and leave retain the identity; purge and merge must wait for those streams to
 // detach. Local history covered by an adoption baseline creates no dependency.
