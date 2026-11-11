@@ -330,6 +330,45 @@ func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 	require.Len(t, result.Results, 1)
 }
 
+func TestSharedChoiceFallsBackWhenPreflightFails(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0o600))
+	require.NoError(t, embedlocal.RecordChoice())
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	require.False(t, cfg.Search.Embeddings.Enabled())
+	chosen, err := applySharedEmbeddingChoice(t.Context(), cfg.Search.Embeddings)
+	require.NoError(t, err)
+	require.True(t, chosen.UsesLocal())
+	_, _, err = preflightEmbeddingStartup(chosen, filepath.Join(home, "kata.db"))
+	require.ErrorContains(t, err, "embedding batching")
+
+	baseURL := launchDaemon(t)
+	status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
+	require.Equal(t, "none", status.Provider)
+	project := postJSON[struct {
+		Project struct {
+			ID int64 `json:"id"`
+		} `json:"project"`
+	}](t, baseURL+"/api/v1/projects", map[string]string{"name": "example-project", "actor": "tester"})
+	postJSONOK(t, fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, project.Project.ID), map[string]string{"title": "Repair bicycle brakes", "actor": "tester"})
+	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--json", "--project", "example-project", "search", "bicycle")
+	require.NoError(t, err, stderr)
+	var result struct {
+		Mode    string `json:"mode"`
+		Results []any  `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, "lexical", result.Mode)
+	require.Len(t, result.Results, 1)
+}
+
 func TestLocalEmbeddingsSavedSetupMissingModelStatus(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	setup := &localEmbeddingsSetup{embeddings: config.EmbeddingsConfig{Local: true}}
