@@ -510,25 +510,44 @@ func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
 // omitted by the producer. Later label deltas still apply.
 func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 	for _, snapshot := range []string{
-		`{"uid":"issue-1","title":"snapshot","status":"open","labels":["current"]}`,
+		`{"uid":"issue-1","title":"snapshot","status":"open","labels":["current","retained"]}`,
+		`{"uid":"issue-1","title":"snapshot","status":"open","labels":[]}`,
 		`{"uid":"issue-1","title":"snapshot","status":"open"}`,
 	} {
 		t.Run(snapshot, func(t *testing.T) {
 			other := testEvent("issue.snapshot", 1, `{"uid":"issue-2","title":"other","status":"open","labels":["keep"]}`)
 			other.IssueUID = "issue-2"
-			got := FoldEvents([]FoldEvent{
+			events := []FoldEvent{
 				other,
 				testEvent("issue.snapshot", 1, `{"uid":"issue-1","title":"source","status":"open","labels":["old"]}`),
 				testEvent("issue.labeled", 2, `{"label":"before"}`),
+				testEvent("issue.unlabeled", 2, `{"label":"old-tombstone"}`),
 				testEvent("issue.snapshot", 3, snapshot),
 				testEvent("issue.labeled", 4, `{"label":"after"}`),
 				testEvent("issue.unlabeled", 5, `{"label":"current"}`),
-			})
-			require.False(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "old"}].Present)
-			require.False(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "before"}].Present)
-			require.True(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "after"}].Present)
-			require.False(t, got.Labels[FoldLabelKey{IssueUID: "issue-1", Label: "current"}].Present)
-			require.True(t, got.Labels[FoldLabelKey{IssueUID: "issue-2", Label: "keep"}].Present)
+			}
+			want := map[FoldLabelKey]FoldElementState{
+				{IssueUID: "issue-2", Label: "keep"}:    {Present: true, Clock: clockOf(other)},
+				{IssueUID: "issue-1", Label: "after"}:   {Present: true, Clock: clockOf(events[5])},
+				{IssueUID: "issue-1", Label: "current"}: {Present: false, Clock: clockOf(events[6])},
+			}
+			if snapshot == `{"uid":"issue-1","title":"snapshot","status":"open","labels":["current","retained"]}` {
+				want[FoldLabelKey{IssueUID: "issue-1", Label: "retained"}] = FoldElementState{Present: true, Clock: clockOf(events[4])}
+			}
+			require.Equal(t, want, FoldEvents(events).Labels)
+			for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+				events[i], events[j] = events[j], events[i]
+			}
+			require.Equal(t, want, FoldEvents(events).Labels)
 		})
 	}
+	t.Run("seeded move baseline", func(t *testing.T) {
+		move := testEvent("issue.moved", 3, `{"to_project_uid":"destination","snapshot":{"uid":"issue-1","title":"baseline","status":"open","labels":["seed"]}}`)
+		label := testEvent("issue.labeled", 1, `{"label":"later"}`)
+		unlabel := testEvent("issue.unlabeled", 2, `{"label":"seed"}`)
+		require.Equal(t, map[FoldLabelKey]FoldElementState{
+			{IssueUID: "issue-1", Label: "seed"}:  {Present: false, Clock: clockOf(unlabel)},
+			{IssueUID: "issue-1", Label: "later"}: {Present: true, Clock: clockOf(label)},
+		}, FoldEvents([]FoldEvent{move, label, unlabel}).Labels)
+	})
 }
