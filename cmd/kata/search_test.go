@@ -78,7 +78,11 @@ func TestSearch_ContinuationRendering(t *testing.T) {
 			cmd.SetErr(&stderr)
 			require.NoError(t, printSearchResults(cmd, []byte(tc.body)))
 			assert.Equal(t, tc.wantErr, stderr.String())
-			assert.Contains(t, out.String(), tc.wantOut)
+			if tc.quiet {
+				assert.Empty(t, out.String())
+			} else {
+				assert.Contains(t, out.String(), tc.wantOut)
+			}
 		})
 	}
 }
