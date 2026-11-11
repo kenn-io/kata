@@ -20,12 +20,12 @@ import (
 )
 
 func TestManagedExternallyDoesNotAutostart(t *testing.T) {
-	// A zero deadline keeps the default context: the documented limit is 30s.
-	for _, tc := range []struct{ deadline, waited time.Duration }{
-		{100 * time.Millisecond, 100 * time.Millisecond}, {0, 30 * time.Second},
-	} {
-		t.Run(tc.waited.String(), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// A zero deadline keeps the default context: the documented limit is 30s.
+		for _, tc := range []struct{ deadline, waited time.Duration }{
+			{100 * time.Millisecond, 100 * time.Millisecond}, {0, 30 * time.Second},
+		} {
+			t.Run(tc.waited.String(), func(t *testing.T) {
 				home := setupKataEnv(t)
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n[auth]\ntoken_env = 'SUPERVISOR_ONLY_TOKEN'\n"), 0600))
 				state := patchEnsureHooks(t, "v0.2.0", "http://spawned")
@@ -45,8 +45,8 @@ func TestManagedExternallyDoesNotAutostart(t *testing.T) {
 					require.ErrorIs(t, err, context.DeadlineExceeded)
 				}
 			})
-		})
-	}
+		}
+	})
 }
 
 func TestManagedExternallyUnreachableDetail(t *testing.T) {
@@ -155,7 +155,7 @@ func TestSupervisedProfileCatalogCredentialAuthenticatesLiveDaemon(t *testing.T)
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n[auth]\ntoken_env = 'KATA_AUTH_TOKEN'\n"), 0600))
 	configPath := filepath.Join(os.Getenv("KATA_HOME"), "config.toml")
-	require.NoError(t, os.WriteFile(configPath, []byte(fmt.Sprintf("[[daemon]]\nname = 'work'\nlocal = true\nhome = %q\ninstance_uid = %q\ntoken = 'client-token'\n", profile.Home, profile.InstanceUID)), 0600))
+	require.NoError(t, os.WriteFile(configPath, []byte(fmt.Sprintf("[[daemon]]\nname = 'work'\nlocal = true\nhome = %q\ninstance_uid = %q\ntoken = 'client-token'\n", profile.Home, profile.InstanceUID)), 0600)) //nolint:gosec // G703: configPath is the test's own KATA_HOME catalog.
 	selection, err := InspectSelection(t.Context(), root, "")
 	require.NoError(t, err)
 	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
