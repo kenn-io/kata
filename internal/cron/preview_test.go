@@ -32,6 +32,26 @@ func TestPreviewJobStates(t *testing.T) {
 	j.Version = 2
 	_, err = PreviewJob(j, nil, now, 1)
 	require.Error(t, err)
+	job := nativeJob(t)
+	job.Trigger = Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+	for _, tc := range []struct {
+		name   string
+		parent *PreviewParent
+		want   string
+	}{
+		{"missing", nil, "unavailable"},
+		{"closed", &PreviewParent{Open: false}, "parent_closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := PreviewJob(job, tc.parent, now, 3)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got.Status)
+		})
+	}
+	job.Enabled = false
+	got, err = PreviewJob(job, nil, now, 1)
+	require.NoError(t, err)
+	require.Equal(t, "paused", got.Status)
 }
 
 func TestPreviewJobAdapterStates(t *testing.T) {
@@ -49,26 +69,6 @@ func TestPreviewJobAdapterStates(t *testing.T) {
 			got, err := PreviewJob(adapterJob(t, tc.trigger), nil, now, 3)
 			require.NoError(t, err)
 			require.Equal(t, tc.status, got.Status)
-		})
-	}
-}
-
-func TestPreviewJobInactiveLegacyNative(t *testing.T) {
-	job := nativeJob(t)
-	job.Trigger = Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
-	now := at(t, "2026-06-01T00:00:00Z")
-	for _, tc := range []struct {
-		name   string
-		parent *PreviewParent
-		want   string
-	}{
-		{"missing", nil, "unavailable"},
-		{"closed", &PreviewParent{Open: false}, "parent_closed"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := PreviewJob(job, tc.parent, now, 3)
-			require.NoError(t, err)
-			require.Equal(t, tc.want, got.Status)
 		})
 	}
 }

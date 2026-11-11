@@ -14,9 +14,20 @@ import (
 )
 
 func TestCronNextRejectsInvalidInput(t *testing.T) {
-	for _, args := range [][]string{{"bad"}, {"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--count", "0"}, {"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--count", "101"}, {"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--from", "tomorrow"}} {
-		out, _, err := executeCronCLI(t, "http://daemon.example", nil, append([]string{"job", "next"}, args...)...)
-		require.Error(t, err)
+	for _, tc := range []struct {
+		args    []string
+		message string
+	}{
+		{[]string{"bad"}, "cron identity must be a 26-character ULID"},
+		{[]string{"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--count", "0"}, "count must be between 1 and 100"},
+		{[]string{"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--count", "101"}, "count must be between 1 and 100"},
+		{[]string{"01ARZ3NDEKTSV4RRFFQ69G5FAV", "--from", "tomorrow"}, "from must be RFC3339"},
+	} {
+		out, _, err := executeCronCLI(t, "http://daemon.example", nil, append([]string{"job", "next"}, tc.args...)...)
+		var cli *cliError
+		require.ErrorAs(t, err, &cli)
+		require.Equal(t, kindValidation, cli.Kind)
+		require.Equal(t, tc.message, cli.Message)
 		require.Empty(t, out)
 	}
 }
@@ -37,7 +48,9 @@ func TestCronNextSavedSchedules(t *testing.T) {
 		{"paused legacy", strings.Replace(legacy, `"enabled":true`, `"enabled":false`, 1), "", `"status":"paused"`, false},
 		{"deleted legacy", legacy, "", `"status":"deleted"`, false},
 		{"enabled legacy", legacy, parent, "", true},
-		{"malformed parent", native, `{}`, "", true},
+		{"malformed parent UID", native, `{}`, "", true},
+		{"malformed parent project", native, strings.Replace(parent, `"project_id":1`, `"project_id":2`, 1), "", true},
+		{"malformed parent status", native, strings.Replace(parent, `"status":"open"`, `"status":"unknown"`, 1), "", true},
 		{"paused future definition", strings.Replace(strings.Replace(native, `"version":1`, `"version":2`, 1), `"enabled":true`, `"enabled":false`, 1), "", "", true},
 		{"paused unknown field", strings.Replace(strings.Replace(native, `"enabled":true`, `"enabled":false`, 1), `"version":1`, `"version":1,"future":true`, 1), "", "", true},
 		{"deleted unknown field", strings.Replace(native, `"version":1`, `"version":1,"future":true`, 1), "", "", true},
@@ -74,8 +87,10 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			if tc.invalid {
 				require.Error(t, err)
 				require.Empty(t, out)
-				if tc.name == "malformed parent" {
+				if strings.HasPrefix(tc.name, "malformed parent") {
 					require.ErrorContains(t, err, "incomplete cron parent response")
+				} else {
+					require.ErrorContains(t, err, "cannot preview saved job with this kata")
 				}
 				return
 			}
@@ -120,8 +135,14 @@ func TestCronNextParentReadErrors(t *testing.T) {
 				case strings.Contains(r.URL.Path, "/cron/jobs/"):
 					fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":7200},"action":{"kind":"notify","recipient":"current-owner-or-author"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","title":"Review"},"overlap":"allow","catchup":"all"}}}`, id)
 				case strings.Contains(r.URL.Path, "/issues/"):
-					require.Equal(t, "true", r.URL.Query().Get("include_deleted"))
-					w.WriteHeader(http.StatusNotFound)
+					if r.URL.Query().Get("include_deleted") != "true" {
+						t.Error("parent read must include deleted issues")
+					}
+					status := http.StatusNotFound
+					if code == "forbidden" {
+						status = http.StatusForbidden
+					}
+					w.WriteHeader(status)
 					fmt.Fprintf(w, `{"error":{"code":%q,"message":"failed"}}`, code)
 				default:
 					t.Errorf("unexpected request: %s", r.URL)

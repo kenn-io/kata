@@ -119,6 +119,11 @@ func TestCronJobDetailAdapterTriggerTimes(t *testing.T) {
 	}, nil)
 	require.NotContains(t, got, "Triggers:")
 	require.NotContains(t, got, "Next:")
+	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))}
+		d.Enabled = false
+	}, nil)
+	require.NotContains(t, got, "Triggers:")
 }
 
 func TestCronJobDetailPausedJobHasNoNextRuns(t *testing.T) {
@@ -434,14 +439,6 @@ func TestCronReloadsWhenNativeParentChanges(t *testing.T) {
 			require.Len(t, api.parents, tc.want)
 		})
 	}
-}
-
-func TestCronJobDetailPausedUnsupportedTriggerHidden(t *testing.T) {
-	got := nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
-		d.Trigger = generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))}
-		d.Enabled = false
-	}, nil)
-	require.NotContains(t, got, "Triggers:")
 }
 
 func TestCronJobDetailPausedLegacySchedule(t *testing.T) {
