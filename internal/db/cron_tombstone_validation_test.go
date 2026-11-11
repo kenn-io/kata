@@ -114,7 +114,7 @@ func TestOwnerBackupRetainsHistoricalWorkflowEvents(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	projectUID := newUID(t)
 	project := &ProjectExport{ID: 1, UID: projectUID}
-	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`, `{"steps":[{"kind":"argv"}]}`, `{"steps":[{"kind":"argv","argv":["true"]}]}`} {
+	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`, `{"steps":[{"kind":"argv"}]}`} {
 		payload, err := json.Marshal(CronDefinitionEvent{UID: newUID(t), ProjectUID: projectUID, Name: "Review", Definition: jsontext.Value(document), Author: "worker", CreatedAt: now, UpdatedAt: now})
 		require.NoError(t, err)
 		event := &EventExport{ID: 1, UID: newUID(t), OriginInstanceUID: newUID(t), ProjectID: 1, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now.Format(time.RFC3339Nano), Payload: payload}
@@ -125,4 +125,8 @@ func TestOwnerBackupRetainsHistoricalWorkflowEvents(t *testing.T) {
 			return body.Definition
 		}()))
 	}
+	payload, err := json.Marshal(CronDefinitionEvent{UID: newUID(t), ProjectUID: projectUID, Name: "Review", Definition: jsontext.Value(`{"steps":[{"kind":"argv","argv":["true"]}]}`), Author: "worker", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	future := &EventExport{ID: 1, UID: newUID(t), OriginInstanceUID: newUID(t), ProjectID: 1, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now.Format(time.RFC3339Nano), Payload: payload}
+	require.Error(t, validateCronImportEvents([]ImportRecord{project, future}), "unknown future argv members were never accepted")
 }

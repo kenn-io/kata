@@ -20,7 +20,7 @@ func CronDefinitionSnapshots(ctx context.Context, tx *sql.Tx, project Project) (
 	if err != nil {
 		return nil, err
 	}
-	workflows, err := query.Workflows(ctx, CronList{ProjectID: project.ID, IncludeDeleted: true})
+	workflows, err := query.workflows(ctx, CronList{ProjectID: project.ID, IncludeDeleted: true}, true)
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +144,9 @@ func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64
 // PrepareCronAdoption captures portable history before rebinding its
 // project envelope; ordinary federation guards remain with the caller.
 func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targetUID string, emptyOnly bool) ([]CronEvent, error) {
+	if err := RequireLocalProjectWorkflows(ctx, tx, project.UID); err != nil {
+		return nil, err
+	}
 	// Adoption replaces history with new spoke-originated snapshots. Native
 	// delivery state cannot enter through that path; refuse before rebinding or
 	// deleting local history so the current authority can keep delivering.
