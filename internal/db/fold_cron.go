@@ -148,10 +148,18 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 			p.Warnings = append(p.Warnings, err.Error())
 			return
 		}
+		// Historical decoding accepts null and missing or non-v1 versions,
+		// but neither store can represent them in a workflow row.
+		if definition.Version != 1 && cronUID(e.ProjectUID) {
+			if p.cronBlockedProjects == nil {
+				p.cronBlockedProjects = make(map[string]error)
+			}
+			p.cronBlockedProjects[e.ProjectUID] = fmt.Errorf("workflow definition cannot be represented in storage")
+		}
 		value.Author = p.cronDefinitionAuthor("workflow:"+in.UID, e, value)
 		current, exists := p.CronWorkflows[in.UID]
 		if !exists || compareClock(cronDefinitionClock(value), cronDefinitionClock(current.CronDefinition)) > 0 {
-			workflow := FoldCronWorkflow{CronWorkflow: CronWorkflow{CronDefinition: value, Definition: definition}, ProjectUID: in.ProjectUID}
+			workflow := FoldCronWorkflow{CronWorkflow: {CronDefinition: value, Definition: definition}, ProjectUID: in.ProjectUID}
 			if _, err := cron.DecodeWorkflow(in.Definition); err != nil {
 				workflow.RawDefinition = append(jsontext.Value(nil), in.Definition...)
 			}
@@ -196,13 +204,6 @@ func validateCronEvent(event RemoteEvent, applyRules, historical bool) error {
 	in, _, err := parseCronDefinitionEvent(FoldEvent{UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, Payload: event.Payload, Type: event.Type})
 	if err == nil && historical && strings.HasPrefix(event.Type, "cron.workflow.") {
 		_, err = cron.DecodeHistoricalWorkflow(in.Definition)
-		if err != nil && len(in.Definition) <= cron.DefinitionLimit {
-			// Preserve a reserved future document as evidence. Materialization
-			// fences its project instead of reviving an older winner.
-			if reserved, classifyErr := payloadHasArgvWorkflow(event.Type, string(event.Payload)); classifyErr == nil && reserved {
-				err = nil
-			}
-		}
 	} else if err == nil {
 		err = validateCronDefinitionDocument(strings.HasPrefix(event.Type, "cron.job."), in.DeletedAt != nil || !applyRules, in.Definition)
 	}
