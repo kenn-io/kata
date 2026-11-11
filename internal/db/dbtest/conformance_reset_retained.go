@@ -119,6 +119,9 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 				maxBefore, err := target.MaxEventID(ctx)
 				require.NoError(t, err)
 				eventUIDs := []string{createdUID, bad.DefinitionEventUID, healthy.DefinitionEventUID, job.DefinitionEventUID}
+				if tc.projectionOnly {
+					eventUIDs = []string{healthy.DefinitionEventUID, job.DefinitionEventUID}
+				}
 				eventsBefore, err := target.EventsByUIDs(ctx, restored.ID, eventUIDs)
 				require.NoError(t, err)
 				if tc.projectionOnly {
