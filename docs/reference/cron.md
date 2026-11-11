@@ -750,6 +750,19 @@ checkout and secret mappings, process lifecycle, and conversation recovery.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
 
+Before admission or starting any step, an adapter must check the entire workflow
+for step kinds it cannot execute. If it finds one, it starts no steps and records
+a failed run observation with `reason: unsupported_step` as the first line of
+`summary.message`, identifying the unsupported step in the detail. This includes
+a step that appears after a supported step.
+
+An adapter that supports an `argv` step passes the vector literally to the
+process: the first element is the executable and the remaining elements are
+separate arguments. It does not join arguments, interpolate or expand them, or
+retry through a shell if launch fails. A workflow can explicitly request a shell
+by naming it in the vector; then that shell interprets its own arguments. The
+`argv` kind remains reserved until workflow authoring and reads enable it.
+
 A job may name its adapter in `options.adapter`. An adapter neither schedules
 nor manually runs a job whose key names another adapter, and says why in its own
 status. Any adapter may run a job without the key. Kata stores the key and
