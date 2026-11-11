@@ -144,7 +144,7 @@ func checkRunReferenceFederation(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-func checkRunCompactedProvenance(t *testing.T, store db.Storage, backend Backend) error {
+func checkRunCompactedProvenance(t *testing.T, _ db.Storage, backend Backend) error {
 	for _, tombstone := range []bool{false, true} {
 		t.Run(map[bool]string{false: "edited", true: "tombstoned"}[tombstone], func(t *testing.T) {
 			source := backend.Open(t)
