@@ -76,8 +76,10 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	_, err = downstream.SetRelayBindingConfig(ctx, replica.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID, AuthorityUID: root.InstanceUID(), UpstreamInstanceUID: root.InstanceUID(), HubPath: []string{root.InstanceUID(), downstream.InstanceUID()}, LocalActor: "company-member", ResetEpoch: 1})
 	require.NoError(t, err)
-	for _, section := range []string{"source"} {
-		for _, definition := range []string{`{"version":1,"steps":null}`} {
+	{
+		section := "source"
+		{
+			definition := `{"version":1,"steps":null}`
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, project, pin, private, section, definition)
 			_, _, err := db.DecodeRootResetPayload(pin, bad.Snapshot)
 			require.NoError(t, err, "owner backup integrity decoding preserves held content")
@@ -93,7 +95,8 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	q := downstream.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	for _, definition := range []string{`null`} {
+	{
+		definition := `null`
 		event := argvCompatRemoteWorkflow(t, replica, downstream.InstanceUID(), definition)
 		payload := make(map[string]jsontext.Value)
 		require.NoError(t, json.Unmarshal(event.Payload, &payload))

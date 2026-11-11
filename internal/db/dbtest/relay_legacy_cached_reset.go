@@ -58,8 +58,10 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	require.NoError(t, err)
 	checkpoint, err := resets.CreateRelayReset(ctx, binding, signer)
 	require.NoError(t, err)
-	for _, section := range []string{"source"} {
-		for _, definition := range []string{`{"version":1,"steps":null}`} {
+	{
+		section := "source"
+		{
+			definition := `{"version":1,"steps":null}`
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, selected, pin, signingKey, section, definition)
 			raw, err := json.Marshal(bad)
 			require.NoError(t, err)
