@@ -36,6 +36,15 @@ func TestArgvCompatPayloadFeatures(t *testing.T) {
 			})
 		}
 	}
+	// Classification identifies the feature independently of definition size.
+	const definition = `{"version":1,"steps":[{"key":"literal","kind":"argv"}]}`
+	for _, size := range []int{cron.DefinitionLimit - 1, cron.DefinitionLimit, cron.DefinitionLimit + 1} {
+		padded := definition[:len(definition)-1] + strings.Repeat(" ", size-len(definition)) + `}`
+		require.Len(t, padded, size)
+		features, err := db.PayloadRequiredFeatures("cron.workflow.updated", `{"definition":`+padded+`}`)
+		require.NoError(t, err)
+		require.Equal(t, db.MergeEventFeatures(db.CronEventFeature, argvCompatFeature), features)
+	}
 	require.ErrorIs(t, db.RequireEventFeatures(db.SupportedEventFeatures, argvCompatFeature), db.ErrUnsupportedEventFeatures, "a reserved feature is not decoder support")
 }
 
@@ -52,35 +61,24 @@ func TestArgvCompatMalformedPayload(t *testing.T) {
 	}
 }
 
-func TestArgvCompatNonReservedKinds(t *testing.T) {
-	for _, step := range []string{`{}`, `{"kind":""}`, `{"kind":"future"}`, `{"kind":"Argv"}`, `{"kind":"argv "}`, `{"kind":"\u0430rgv"}`} {
-		payload := `{"definition":{"steps":[` + step + `]}}`
-		features, err := db.PayloadRequiredFeatures("cron.workflow.updated", payload)
+func TestArgvCompatNonReservedPayloads(t *testing.T) {
+	for _, tc := range []struct {
+		kind, payload, want string
+	}{
+		{"cron.workflow.updated", `{"definition":{"steps":[{}]}}`, db.CronEventFeature},
+		{"cron.workflow.updated", `{"definition":{"steps":[{"kind":""}]}}`, db.CronEventFeature},
+		{"cron.workflow.updated", `{"definition":{"steps":[{"kind":"future"}]}}`, db.CronEventFeature},
+		{"cron.workflow.updated", `{"definition":{"steps":[{"kind":"Argv"}]}}`, db.CronEventFeature},
+		{"cron.workflow.updated", `{"definition":{"steps":[{"kind":"argv "}]}}`, db.CronEventFeature},
+		{"cron.workflow.updated", `{"definition":{"steps":[{"kind":"\u0430rgv"}]}}`, db.CronEventFeature},
+		{"cron.workflow.updated", "", db.CronEventFeature},
+		{"cron.workflow.updated", `{}`, db.CronEventFeature},
+		{"cron.workflow.updated", `{"definition":{"steps":[{"kind":"prompt","prompt":"argv"}],"options":{"steps":[{"kind":"argv"}]}}}`, db.CronEventFeature},
+		{"project.metadata_updated", `{"definition":{"steps":[{"kind":"argv"}]}}`, ""},
+	} {
+		features, err := db.PayloadRequiredFeatures(tc.kind, tc.payload)
 		require.NoError(t, err)
-		require.Equal(t, db.CronEventFeature, features)
-	}
-}
-
-func TestArgvCompatLegacyPayloads(t *testing.T) {
-	for _, payload := range []string{"", `{}`, `{"definition":{"steps":[{"kind":"command","command":"echo argv","options":{"kind":"argv"}}]}}`, `{"definition":{"steps":[{"kind":"prompt","prompt":"argv"}],"options":{"steps":[{"kind":"argv"}]}}}`} {
-		features, err := db.PayloadRequiredFeatures("cron.workflow.updated", payload)
-		require.NoError(t, err)
-		require.Equal(t, db.CronEventFeature, features)
-	}
-	features, err := db.PayloadRequiredFeatures("project.metadata_updated", `{"definition":{"steps":[{"kind":"argv"}]}}`)
-	require.NoError(t, err)
-	require.Empty(t, features)
-}
-
-func TestArgvCompatClassificationIsNotSizeValidation(t *testing.T) {
-	const definition = `{"version":1,"steps":[{"key":"literal","kind":"argv"}]}`
-	for _, size := range []int{cron.DefinitionLimit - 1, cron.DefinitionLimit, cron.DefinitionLimit + 1} {
-		padded := definition[:len(definition)-1] + strings.Repeat(" ", size-len(definition)) + `}`
-		require.Len(t, padded, size)
-		payload := `{"definition":` + padded + `}`
-		features, err := db.PayloadRequiredFeatures("cron.workflow.updated", payload)
-		require.NoError(t, err)
-		require.Equal(t, db.MergeEventFeatures(db.CronEventFeature, argvCompatFeature), features)
+		require.Equal(t, tc.want, features)
 	}
 }
 

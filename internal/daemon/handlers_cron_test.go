@@ -230,6 +230,61 @@ func TestCronWorkflowAPI(t *testing.T) {
 	require.Nil(t, response.Workflow.DeletedAt)
 }
 
+func TestCronWorkflowHTTPRejectsNullArgv(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "workflow-example")
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/workflows", project.ID)
+	request := func(method, target, body string) (int, []byte) {
+		response := doReqEnv(t, env, method, env.URL+target, body, "")
+		return response.StatusCode, readClose(t, response)
+	}
+	ordinary := `{"actor":"worker","name":"Workflow","definition":{"version":1,"steps":[{"key":"inspect","kind":"command","command":"true"},{"key":"review","kind":"prompt","prompt":"Review"}]}}`
+	status, raw := request(http.MethodPost, path, ordinary)
+	require.Equalf(t, http.StatusCreated, status, "%s", raw)
+	var created struct {
+		Workflow db.CronWorkflow `json:"workflow"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &created))
+	require.NotEmpty(t, created.Workflow.UID)
+	original, err := env.DB.CronWorkflow(t.Context(), project.ID, created.Workflow.UID)
+	require.NoError(t, err)
+
+	for _, operation := range []struct {
+		name, method, target, body string
+	}{
+		{"create", http.MethodPost, path, `{"actor":"worker","name":"Rejected","definition":{"version":1,"steps":[{"key":"inspect","kind":"command","command":"true","argv":null}]}}`},
+		{"replace", http.MethodPut, path + "/" + created.Workflow.UID, fmt.Sprintf(`{"actor":"worker","name":"Rejected","expected_event_uid":%q,"definition":{"version":1,"steps":[{"key":"inspect","kind":"command","command":"true","argv":null}]}}`, created.Workflow.DefinitionEventUID)},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			before, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			status, raw := request(operation.method, operation.target, operation.body)
+			require.Equalf(t, http.StatusBadRequest, status, "%s", raw)
+			var response api.ErrorEnvelope
+			require.NoError(t, json.Unmarshal(raw, &response))
+			require.Equal(t, "validation", response.Error.Code)
+			require.Contains(t, response.Error.Message, "argv workflow step member is not supported")
+			after, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			stored, err := env.DB.CronWorkflow(t.Context(), project.ID, created.Workflow.UID)
+			require.NoError(t, err)
+			require.Equal(t, original, stored)
+			status, raw = request(http.MethodGet, path, "")
+			require.Equalf(t, http.StatusOK, status, "%s", raw)
+			var list struct {
+				Workflows []db.CronWorkflow `json:"workflows"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &list))
+			require.Len(t, list.Workflows, 1)
+		})
+	}
+
+	replacement := fmt.Sprintf(`{"actor":"worker","name":"Updated","expected_event_uid":%q,"definition":{"version":1,"steps":[{"key":"review","kind":"prompt","prompt":"Review"}]}}`, created.Workflow.DefinitionEventUID)
+	status, raw = request(http.MethodPut, path+"/"+created.Workflow.UID, replacement)
+	require.Equalf(t, http.StatusOK, status, "%s", raw)
+}
+
 func TestCronDefinitionWritePolicy(t *testing.T) {
 	for _, kind := range []string{"readonly", "bootstrap", "enrollment", "identity"} {
 		t.Run(kind, func(t *testing.T) {

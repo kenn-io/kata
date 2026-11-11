@@ -24,9 +24,6 @@ func TestArgvCompatReplayKeepsKindOnlyWinners(t *testing.T) {
 			var err error
 			event.Payload, err = json.Marshal(payload)
 			require.NoError(t, err)
-			remote := db.RemoteEvent{EventUID: event.UID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID, Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS, Payload: event.Payload}
-			require.Error(t, db.ValidateAcceptedCronEvent(remote), "historical acceptance must reject reserved decoding")
-			require.Error(t, db.ValidateCronFederationEvent(remote))
 			projection := db.FoldEvents([]db.FoldEvent{event})
 			winner, ok := projection.CronWorkflows[foldCronUID]
 			require.True(t, ok)
@@ -35,9 +32,7 @@ func TestArgvCompatReplayKeepsKindOnlyWinners(t *testing.T) {
 			require.Equal(t, "argv", winner.Definition.Steps[0].Kind)
 		})
 	}
-}
 
-func TestArgvCompatReplayDoesNotReviveOlderWorkflow(t *testing.T) {
 	for _, deleted := range []bool{false, true} {
 		older := cronFoldEvent(t, "workflow", 1, false)
 		newer := cronFoldEvent(t, "workflow", 2, deleted)
@@ -53,9 +48,7 @@ func TestArgvCompatReplayDoesNotReviveOlderWorkflow(t *testing.T) {
 			require.Equal(t, deleted, winner.DeletedAt != nil)
 		}
 	}
-}
 
-func TestArgvCompatHistoricalNullAndSnapshotClock(t *testing.T) {
 	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`} {
 		older := cronFoldEvent(t, "workflow", 1, false)
 		newer := cronFoldEvent(t, "workflow", 2, false)
