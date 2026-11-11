@@ -499,6 +499,11 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
+	assert.Contains(t, string(out), "next_action=")
+	resetFlags(t)
+	human := executeRoot(t, newRootCmd(), "daemon", "status")
+	assert.Contains(t, string(human), "  next:")
+	assert.Contains(t, string(human), "kata running at")
 }
 
 func TestDaemonStatusReportsMCPState(t *testing.T) {

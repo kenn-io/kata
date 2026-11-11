@@ -753,7 +753,7 @@ func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
 
 func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
 	profile, root := localProfileFixture(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(server.Close)
 	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
@@ -784,13 +784,16 @@ func TestScopeProfileUnreachablePreservesInstanceFailure(t *testing.T) {
 	require.NoError(t, err)
 	instanceErr := fmt.Errorf("local profile instance is unavailable: %w", ErrLocalDaemonUnreachable)
 	scan := func(context.Context, string) iter.Seq2[liveDaemon, error] {
-		return func(yield func(liveDaemon, error) bool) { yield(liveDaemon{}, nil) }
+		return func(yield func(liveDaemon, error) bool) {
+			yield(liveDaemon{Record: kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777"}, BaseURL: "http://127.0.0.1:7777"}, nil)
+		}
 	}
 	_, found, err := discoverLocalProfileWithVerifier(t.Context(), selection, scan, func(context.Context, ResolvedDaemon) error {
 		return instanceErr
 	})
 	require.False(t, found)
 	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	// Negative guard: verifier failures must not be rewritten as recovery advice.
 	require.Same(t, instanceErr, err)
 	require.Contains(t, err.Error(), "local profile instance is unavailable")
 }

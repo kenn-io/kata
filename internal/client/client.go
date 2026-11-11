@@ -94,6 +94,7 @@ func (e *LocalDaemonUnreachableError) Unwrap() error {
 	return e.cause
 }
 
+// Is reports whether target is the local daemon unreachable sentinel.
 func (e *LocalDaemonUnreachableError) Is(target error) bool {
 	return target == ErrLocalDaemonUnreachable
 }

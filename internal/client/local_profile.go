@@ -251,17 +251,17 @@ func scopeProfileUnreachable(err error, name string) error {
 	if !ok {
 		return err
 	}
-	copy := *unreachable
-	copy.recoverCommand = profileRecoveryCommand(name, goruntime.GOOS)
-	return &copy
+	scoped := *unreachable
+	scoped.recoverCommand = profileRecoveryCommand(name, goruntime.GOOS)
+	return &scoped
 }
 
 func profileRecoveryCommand(name, goos string) string {
 	safe := name != "" && (goos == "windows" || !strings.HasPrefix(name, "=")) && strings.IndexFunc(name, func(r rune) bool {
 		if goos == "windows" {
-			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_.-", r))
+			return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune("_.-", r)
 		}
-		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("@%_+=:,./-", r))
+		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune("@%_+=:,./-", r)
 	}) < 0
 	arg := name
 	prefix := ""
