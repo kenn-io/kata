@@ -104,13 +104,31 @@ func readMoveBatchLine(reader *bufio.Reader) (string, bool, error) {
 	}
 }
 
-func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string) (string, error) {
+type moveBatchProjectCatalog struct {
+	refs   []projectRef
+	loaded bool
+}
+
+func (c *moveBatchProjectCatalog) load(a daemonAPI) ([]projectRef, error) {
+	if c.loaded {
+		return c.refs, nil
+	}
+	refs, err := loadProjectRefs(a)
+	if err != nil {
+		return nil, err
+	}
+	// Only keep a complete catalog so later rows can retry a failed lookup.
+	c.refs, c.loaded = refs, true
+	return c.refs, nil
+}
+
+func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string, catalog *moveBatchProjectCatalog) (string, error) {
 	if item.ParseError != "" {
 		return "", &cliError{Message: item.ParseError, Code: "validation", Kind: kindUsage, ExitCode: ExitUsage}
 	}
 	uid := targets[item.TargetProject]
 	if uid == "" {
-		project, err := resolveProjectSelector(a, item.TargetProject)
+		project, err := resolveProjectSelectorWithLoader(a, item.TargetProject, catalog.load)
 		if err != nil {
 			return "", err
 		}
@@ -123,6 +141,7 @@ func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string)
 func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel moveSelector, opts moveBatchOptions) error {
 	defaultTarget := ""
 	var items []moveBatchItem
+	var catalog moveBatchProjectCatalog
 	if len(args) > 0 {
 		defaultTarget = args[len(args)-1]
 		for _, ref := range args[:len(args)-1] {
@@ -165,7 +184,7 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 		if err != nil {
 			return err
 		}
-		selected, err := resolveMoveSelector(a.ctx, a, sel)
+		selected, err := resolveMoveSelector(a.ctx, a, sel, &catalog)
 		if err != nil {
 			return err
 		}
@@ -183,11 +202,11 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 	}
 	opts.Comment = comment
 	opts.Teammate = handle
-	return runMoveBatch(cmd, items, opts)
+	return runMoveBatch(cmd, items, opts, &catalog)
 }
 
-func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]moveBatchItem, error) {
-	project, err := resolveProjectSelector(a, sel.Project)
+func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector, catalog *moveBatchProjectCatalog) ([]moveBatchItem, error) {
+	project, err := resolveProjectSelectorWithLoader(a, sel.Project, catalog.load)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +307,7 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 	return out, nil
 }
 
-func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptions) error {
+func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptions, catalog *moveBatchProjectCatalog) error {
 	if len(items) > 5000 {
 		return moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
 	}
@@ -337,7 +356,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	indexes := make([]int, 0, len(items))
 	var results []api.MoveIssuesResult
 	for i, item := range items {
-		uid, err := moveBatchTarget(a, item, targets)
+		uid, err := moveBatchTarget(a, item, targets, catalog)
 		if err != nil {
 			r := api.MoveIssuesResult{Index: i, Ref: item.Ref, Result: "refused", Message: err.Error()}
 			if ce, ok := errors.AsType[*cliError](err); ok {

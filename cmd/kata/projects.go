@@ -527,11 +527,15 @@ func projectsShowCmd() *cobra.Command {
 }
 
 func resolveProjectSelector(a daemonAPI, selector string) (projectRef, error) {
+	return resolveProjectSelectorWithLoader(a, selector, loadProjectRefs)
+}
+
+func resolveProjectSelectorWithLoader(a daemonAPI, selector string, load func(daemonAPI) ([]projectRef, error)) (projectRef, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return projectRef{}, &cliError{Message: "project selector must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
 	}
-	projects, err := loadProjectRefs(a)
+	projects, err := load(a)
 	if err != nil {
 		return projectRef{}, err
 	}
