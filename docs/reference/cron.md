@@ -423,7 +423,7 @@ first require fixing a definition rejected by current write rules.
 linked to this parent with this job's provenance. It considers only readable,
 non-archived child projects. It orders by occurrence time, then UID for ties,
 so moved children, restore and replication do not change the ordering.
-An unsupported occurrence version reports an error for that job and omits `last_child`; upgrade the daemon to read the newer evidence. An occurrence index finds `last_child` without scanning ordinary retained history. The lookup can still skip entries that are no longer linked or visible to the caller.
+An unsupported occurrence version reports an error for that job and omits `last_child`; upgrade the daemon to read the newer evidence. An occurrence index finds `last_child` without scanning ordinary retained history. The lookup can still skip entries that are malformed, no longer linked, or invisible to the caller.
 
 `authority` is `local`, `hub`, `hub_disabled` or `spoke`; `delivers_here` is true
 only for local projects and enabled hubs. On a spoke, status is evaluated locally
@@ -852,8 +852,8 @@ covers setup.
 SQLite and PostgreSQL schema 31 store cron data in `cron_jobs`,
 `cron_workflows`, and `cron_runs`. JSONL export and import retain shared
 definitions, including tombstones, and bounded run evidence. Native recurring
-delivery reuses ordinary issue metadata and parent links; it adds no tables or
-schema version. Keep parent checkpoints and child provenance in the same backup. Runs with
+delivery reuses ordinary issue metadata and parent links. Schema 51 adds an
+index for delivery reads. Keep parent checkpoints and child provenance in the same backup. Runs with
 `running` or `unknown` status do not prevent an explicitly requested restore,
 federation reset, adoption, or project merge; those operations keep their
 ordinary identity, revision and credential guards. See

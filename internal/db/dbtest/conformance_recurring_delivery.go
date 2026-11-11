@@ -23,6 +23,10 @@ func deliveryExec(t *testing.T, s db.Storage, query string, args ...any) {
 }
 
 func deliveryStamp(t *testing.T, s db.Storage, child db.Issue, stamp time.Time) {
+	deliveryStampText(t, s, child, stamp.UTC().Format(time.RFC3339Nano))
+}
+
+func deliveryStampText(t *testing.T, s db.Storage, child db.Issue, stamp string) {
 	t.Helper()
 	var metadata, occurrence map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(child.Metadata), &metadata))
@@ -30,7 +34,7 @@ func deliveryStamp(t *testing.T, s db.Storage, child db.Issue, stamp time.Time) 
 	if metadata == nil || occurrence == nil {
 		t.Fatal("expected metadata and cron.occurrence fixture objects")
 	}
-	raw, err := json.Marshal(stamp.UTC())
+	raw, err := json.Marshal(stamp)
 	require.NoError(t, err)
 	occurrence["scheduled_at"] = raw
 	metadata["cron.occurrence"], err = json.Marshal(occurrence)
@@ -272,6 +276,42 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		require.Equal(t, "error", d.State)
 		require.Nil(t, d.LastChild)
 		deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, older.Metadata, older.ID)
+	})
+	t.Run("candidate order", func(t *testing.T) {
+		for _, tc := range []struct {
+			first, second string
+			winner        int
+			instant       string
+		}{
+			{"2025-01-01T00:59:59.999999999+01:00", "2025-01-01T00:00:00Z", 1, "2025-01-01T00:00:00Z"},
+			{"9999-12-31T23:59:59.5-01:00", "9999-12-31T23:59:59Z", 0, "10000-01-01T00:59:59.5Z"},
+			{"0000-01-01T00:00:00+01:00", "0000-01-01T00:00:00Z", 1, "0000-01-01T00:00:00Z"},
+		} {
+			deliveryStampText(t, s, children[0], tc.first)
+			deliveryStampText(t, s, children[1], tc.second)
+			child := deliveryRead(t, s, p, j, now).LastChild
+			require.Equal(t, children[tc.winner].UID, child.UID)
+			require.Equal(t, tc.instant, child.ScheduledAt.Format(time.RFC3339Nano))
+		}
+		deliveryStampText(t, s, children[0], "2025-01-01T01:00:00.100+01:00")
+		deliveryStampText(t, s, children[1], "2025-01-01T00:00:00.1Z")
+		winner := children[0].UID
+		if children[1].UID > winner {
+			winner = children[1].UID
+		}
+		require.Equal(t, winner, deliveryRead(t, s, p, j, now).LastChild.UID)
+		deliveryStampText(t, s, children[1], "2025-01-01T00:00:00Z")
+		for _, invalid := range []string{"2099-02-30T23:59:59Z", "now"} {
+			deliveryStampText(t, s, children[0], invalid)
+			scoped := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, []string{p.UID}))
+			rows, err := s.RecurringCronDelivery(scoped, db.CronDeliveryQuery{ProjectID: p.ID, JobUID: j.UID}, now)
+			require.NoError(t, err)
+			require.Equal(t, children[1].UID, rows[0].Delivery.LastChild.UID)
+			require.ElementsMatch(t, []int64{parent.ID, children[1].ID}, db.ExposedIssues(scoped))
+		}
+		for _, child := range children {
+			deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, child.Metadata, child.ID)
+		}
 	})
 	t.Run("last child", func(t *testing.T) {
 		// Give the smaller UID the later occurrence, using fractional stamps that do not sort lexically.

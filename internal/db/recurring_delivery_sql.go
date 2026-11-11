@@ -54,44 +54,54 @@ var errRecurringOccurrenceVersion = errors.New("unsupported recurring occurrence
 // RecurringOccurrenceKey orders supported occurrence instants and future versions.
 // Empty keys are not evidence; future versions sort before every supported instant.
 func RecurringOccurrenceKey(occurrence string) string {
-	var header struct {
-		Version jsontext.Value `json:"version"`
-	}
-	if err := json.Unmarshal([]byte(occurrence), &header); err != nil {
-		return ""
-	}
-	version, ok := new(big.Int).SetString(string(header.Version), 10)
-	if ok && version.Cmp(big.NewInt(1)) > 0 {
+	value, err := decodeRecurringOccurrence(occurrence)
+	if errors.Is(err, errRecurringOccurrenceVersion) {
 		return "~"
 	}
-	var value recurringOccurrence
-	if err := json.Unmarshal([]byte(occurrence), &value); err != nil || value.Version != 1 || value.ScheduledAt.IsZero() {
+	if err != nil || value == nil {
 		return ""
 	}
 	// The bias keeps RFC 3339 instants positive, including offsets around year zero.
 	return fmt.Sprintf("%012d.%09d", value.ScheduledAt.Unix()+62167478400, value.ScheduledAt.Nanosecond())
 }
 
-// LastRecurringChild decodes the first authorized row in occurrence-key order.
-func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, error) {
-	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		return nil, rows.Err()
+func decodeRecurringOccurrence(occurrence string) (*recurringOccurrence, error) {
+	var header struct {
+		Version jsontext.Value `json:"version"`
 	}
-	var id int64
-	var uid, occurrence, key string
-	if err := rows.Scan(&id, &uid, &occurrence, &key); err != nil {
-		return nil, err
+	if err := json.Unmarshal([]byte(occurrence), &header); err != nil {
+		return nil, nil
 	}
-	RecordExposedIssue(ctx, id)
-	if key == "~" {
+	version, ok := new(big.Int).SetString(string(header.Version), 10)
+	if ok && version.Cmp(big.NewInt(1)) > 0 {
 		return nil, errRecurringOccurrenceVersion
 	}
 	var value recurringOccurrence
-	if err := json.Unmarshal([]byte(occurrence), &value); err != nil {
-		return nil, err
+	if err := json.Unmarshal([]byte(occurrence), &value); err != nil || value.Version != 1 || value.ScheduledAt.IsZero() {
+		return nil, nil
 	}
-	return &RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}, rows.Err()
+	return &value, nil
+}
+
+// LastRecurringChild finds the first valid authorized row in occurrence-key order.
+func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, error) {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var uid, occurrence, key string
+		if err := rows.Scan(&id, &uid, &occurrence, &key); err != nil {
+			return nil, err
+		}
+		value, err := decodeRecurringOccurrence(occurrence)
+		if err != nil || value != nil {
+			RecordExposedIssue(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			return &RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}, nil
+		}
+	}
+	return nil, rows.Err()
 }
 
 func recurringRecipient(j cron.JobDefinition, parent Issue) (string, error) {

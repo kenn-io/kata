@@ -1,23 +1,11 @@
 package sqlitestore
 
-import (
-	"database/sql/driver"
+import "strings"
 
-	"modernc.org/sqlite"
-
-	"go.kenn.io/kata/internal/db"
-)
-
-func init() {
-	sqlite.MustRegisterDeterministicScalarFunction("kata_occurrence_key", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
-		occurrence, ok := args[0].(string)
-		if !ok {
-			return nil, nil
-		}
-		key := db.RecurringOccurrenceKey(occurrence)
-		if key == "" {
-			return nil, nil
-		}
-		return key, nil
-	})
+// occurrenceOrderSQL uses the canonical index expression so SQLite can stream
+// candidates in the same order without an application-defined SQL function.
+func occurrenceOrderSQL(alias string) string {
+	_, after, _ := strings.Cut(schemaSQL, "/* occurrence-key-begin */")
+	expression, _, _ := strings.Cut(after, "/* occurrence-key-end */")
+	return strings.ReplaceAll(strings.TrimSpace(expression), "metadata", alias+".metadata")
 }
