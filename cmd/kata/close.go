@@ -303,15 +303,18 @@ func runActionWithHeaders(
 		return err
 	}
 	if action == "close" {
+		unconfigured := false
 		if evidence, ok := body["evidence"].([]api.Evidence); ok && len(evidence) > 0 {
-			if ref, selection := prepareCloseTranscript(ctx, cmd, baseURL, pid, issue, headers["Idempotency-Key"] != ""); ref != nil {
+			ref, selection, noEntry := prepareCloseTranscript(ctx, cmd, baseURL, pid, issue, headers["Idempotency-Key"] != "")
+			unconfigured = noEntry
+			if ref != nil {
 				body["transcript"] = ref
 				if selection != nil {
 					body["transcript_selection"] = selection
 				}
 			}
 		}
-		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {
+		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body, unconfigured); err != nil {
 			return err
 		}
 	}

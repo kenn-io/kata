@@ -135,7 +135,7 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 			cmd := &cobra.Command{}
 			var stderr bytes.Buffer
 			cmd.SetErr(&stderr)
-			ref, _ := prepareCloseTranscript(t.Context(), cmd, "", 0, resolvedIssueRef{}, false)
+			ref, _, _ := prepareCloseTranscript(t.Context(), cmd, "", 0, resolvedIssueRef{}, false)
 			if tc.wantID == "" {
 				assert.Nil(t, ref)
 			} else {
@@ -225,6 +225,69 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 	}
 }
 
+func TestCloseTranscript_UnconfiguredProjectOnOlderDaemon(t *testing.T) {
+	for _, tc := range []struct {
+		name, project, version           string
+		lookupFailure, attach, selection bool
+	}{
+		{"unconfigured on 0.44", "other", "0.44.0", false, true, false},
+		{"unconfigured on 0.45", "other", "0.45.0", false, true, true},
+		{"unconfigured before transcript support", "other", "0.25.0", false, false, false},
+		{"configured opt-out", "example-project", "0.44.0", false, false, false},
+		{"lookup failure", "other", "0.44.0", true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", "")
+			if tc.lookupFailure {
+				t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", "true")
+			}
+			t.Setenv("KATA_TRANSCRIPT_AGENT", "codex")
+			t.Setenv("KATA_TRANSCRIPT_SESSION_ID", transcriptSessionOne)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`[close.transcript]
+enabled = true
+agentsview_url = "https://global.example"
+[close.transcript.project.%s]
+enabled = false
+`, tc.project)), 0600))
+			var sent map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/projects/resolve":
+					_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+				case "/api/v1/health":
+					_, _ = fmt.Fprintf(w, `{"ok":true,"api_schema_version":%q}`, tc.version)
+				case "/api/v1/projects/1/issues/abc1":
+					if tc.lookupFailure {
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					_, _ = w.Write([]byte(`{"issue":{"project_id":1,"short_id":"abc1"}}`))
+				case "/api/v1/projects/1/issues/abc1/actions/close":
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&sent))
+					_, _ = w.Write([]byte(`{"changed":true}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--project", "example-project", "close", "abc1", "--done", "--message", "Implemented the example behavior and ran the focused tests.", "--test", "go test ./internal/example")
+			require.NoError(t, err)
+			if tc.attach {
+				assert.Equal(t, map[string]any{"agent": "codex", "session_id": transcriptSessionOne, "url": "https://global.example/sessions/codex/" + transcriptSessionOne}, sent["transcript"])
+			} else {
+				assert.NotContains(t, sent, "transcript")
+			}
+			if tc.selection {
+				assert.Contains(t, sent, "transcript_selection")
+			} else {
+				assert.NotContains(t, sent, "transcript_selection")
+			}
+		})
+	}
+}
+
 func TestCloseTranscript_MalformedConfigurationNamesFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -232,7 +295,7 @@ func TestCloseTranscript_MalformedConfigurationNamesFile(t *testing.T) {
 	cmd := &cobra.Command{}
 	var stderr bytes.Buffer
 	cmd.SetErr(&stderr)
-	ref, _ := prepareCloseTranscript(t.Context(), cmd, "", 0, resolvedIssueRef{}, false)
+	ref, _, _ := prepareCloseTranscript(t.Context(), cmd, "", 0, resolvedIssueRef{}, false)
 	assert.Nil(t, ref)
 	assert.Contains(t, stderr.String(), filepath.Join(home, "config.toml"))
 	assert.Contains(t, stderr.String(), "skipping attachment")
@@ -256,7 +319,7 @@ func TestCloseTranscript_NoProjectReadWithoutCandidate(t *testing.T) {
 			cmd := &cobra.Command{}
 			var stderr bytes.Buffer
 			cmd.SetErr(&stderr)
-			ref, selection := prepareCloseTranscript(t.Context(), cmd, "", 0, resolvedIssueRef{}, false)
+			ref, selection, _ := prepareCloseTranscript(t.Context(), cmd, "", 0, resolvedIssueRef{}, false)
 			assert.Nil(t, ref)
 			assert.Nil(t, selection)
 			assert.NotContains(t, stderr.String(), "project unavailable")

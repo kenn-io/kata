@@ -48,8 +48,12 @@ If the issue moves after selection and before close, the close returns an
 This is off by default and needs no daemon restart. Claude Code and Codex
 transcripts need HTTP API `0.26.0` or newer. Other agents need HTTP API
 `0.34.0` or newer.
-Project targets need HTTP API `0.45.0` or newer. With an older daemon, the
-close proceeds without a transcript when project targets are configured.
+Project targets need HTTP API `0.45.0` or newer. With an older daemon, a
+project without an entry retains the global transcript settings. A configured
+project or failed project lookup closes without a transcript. A move between
+lookup and close on an older daemon can record the former project's global
+transcript in the destination project. A keyed retry after such a move can
+conflict if the destination has an entry.
 Before attaching a transcript, `kata close` checks the daemon's API version. An older daemon
 causes a warning on stderr, and the close proceeds without the transcript.
 With attachment disabled, close requests remain unchanged.

@@ -13,28 +13,31 @@ import (
 	"go.kenn.io/kata/internal/transcript"
 )
 
-func prepareCloseTranscript(ctx context.Context, cmd *cobra.Command, baseURL string, pid int64, issue resolvedIssueRef, includeDeleted bool) (*transcript.Transcript, *api.TranscriptSelection) {
+func prepareCloseTranscript(ctx context.Context, cmd *cobra.Command, baseURL string, pid int64, issue resolvedIssueRef, includeDeleted bool) (*transcript.Transcript, *api.TranscriptSelection, bool) {
 	cfg, err := config.ReadCloseTranscriptConfig()
 	warn := func(message string) { _, _ = fmt.Fprintln(cmd.ErrOrStderr(), "close: transcript: "+message) }
 	if err != nil {
 		warn(fmt.Sprintf("configuration unavailable (%v); skipping attachment", err))
-		return nil, nil
+		return nil, nil, false
 	}
 	if !cfg.AnyEnabled() {
-		return nil, nil
+		return nil, nil, false
 	}
 	ref := closeTranscript(cmd, cfg)
 	if ref == nil {
-		return nil, nil
+		return nil, nil, false
 	}
 	target := cfg.Target(issue.ProjectName)
 	var selection *api.TranscriptSelection
+	unconfigured := false
 	if len(cfg.Project) > 0 {
 		hydrated, err := hydrateRefWithQualified(ctx, baseURL, pid, issue, includeDeleted)
 		if err != nil {
 			warn("project unavailable; using process override for attachment")
-			return ref, &api.TranscriptSelection{Record: cfg.ForceEnabled()}
+			return ref, &api.TranscriptSelection{Record: cfg.ForceEnabled()}, false
 		}
+		_, configured := cfg.Project[hydrated.ProjectName]
+		unconfigured = !configured
 		target = cfg.Target(hydrated.ProjectName)
 		selection = &api.TranscriptSelection{ProjectID: hydrated.CurrentProjectID, Record: *target.Enabled}
 	}
@@ -46,7 +49,7 @@ func prepareCloseTranscript(ctx context.Context, cmd *cobra.Command, baseURL str
 			ref.URL = link
 		}
 	}
-	return ref, selection
+	return ref, selection, unconfigured
 }
 
 func closeTranscript(cmd *cobra.Command, cfg config.CloseTranscriptConfig) *transcript.Transcript {
@@ -92,7 +95,7 @@ func closeTranscript(cmd *cobra.Command, cfg config.CloseTranscriptConfig) *tran
 // dropUnsupportedTranscript keeps provenance optional when a daemon predates
 // the supplied transcript shape.
 func dropUnsupportedTranscript(
-	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, body map[string]any,
+	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, body map[string]any, unconfigured bool,
 ) error {
 	ref, ok := body["transcript"].(*transcript.Transcript)
 	if !ok || ref == nil {
@@ -103,7 +106,21 @@ func dropUnsupportedTranscript(
 		required = apiVersionCloseTranscript
 	}
 	if body["transcript_selection"] != nil {
-		required = apiVersionTranscriptSelection
+		err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionTranscriptSelection, "close transcript")
+		if err == nil {
+			return nil
+		}
+		tooOld, ok := errors.AsType[*cliError](err)
+		if !ok || tooOld.Code != "daemon_api_too_old" {
+			return err
+		}
+		if !unconfigured {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "close: transcript: "+tooOld.Message+"; skipping attachment")
+			delete(body, "transcript")
+			delete(body, "transcript_selection")
+			return nil
+		}
+		delete(body, "transcript_selection")
 	}
 	err := requireDaemonAPIVersion(ctx, client, baseURL, required, "close transcript")
 	if err == nil {
