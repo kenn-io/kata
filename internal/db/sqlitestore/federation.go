@@ -405,6 +405,7 @@ func skipFederationPushBatch(ctx context.Context, tx *sql.Tx, q db.FederationQua
 		ON CONFLICT(project_id, event_id) DO NOTHING`, q.ProjectID, q.ID); err != nil {
 		return err
 	}
+	// #nosec G202 -- Predicates are fixed SQL; project and cursor values are bound.
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
 		   SET push_cursor_event_id = MAX(push_cursor_event_id, MIN(?, COALESCE((

@@ -152,6 +152,7 @@ AND e.uid IN (SELECT jsonb_array_elements_text(event_uids::jsonb) FROM federatio
 ON CONFLICT(project_id,event_id) DO NOTHING`, q.ProjectID, q.ID); err != nil {
 		return err
 	}
+	// #nosec G202 -- Predicates are fixed SQL; project and cursor values are bound.
 	if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET
 push_cursor_event_id=GREATEST(push_cursor_event_id,LEAST($1::bigint,COALESCE((
   SELECT MIN(e.id)-1 FROM events e
