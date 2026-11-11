@@ -112,9 +112,9 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	if !e.verifiedProcess {
 		advice += ". Verify the process identity before stopping it for recovery"
 	}
-	advice += ". After it exits, use its supervisor or the original foreground launch command for those launch modes"
+	advice += ". After it exits, relaunch a supervised or foreground daemon through its supervisor or original foreground launch command"
 	if e.recoverCommand != "" {
-		advice += ". For a named profile, run " + e.recoverCommand
+		advice += ". For a named profile you normally start with Kata, run " + e.recoverCommand
 	} else {
 		advice += ". For an auto-started current home, run kata daemon restart with the original KATA_HOME and storage environment"
 	}
