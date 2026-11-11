@@ -57,7 +57,6 @@ export interface KataFixture {
   restartReadonly(): Promise<void>
   restartIdentity(enabled?: boolean): Promise<void>
   prepareSearch(baseURL: string): Promise<void>
-  searchConfig(): Promise<string>
 }
 
 interface RunningFixture {
@@ -250,10 +249,6 @@ listen = "127.0.0.1:${port}"
     async prepareSearch(baseURL) {
       await writeFile(join(home, 'embedding-fixture'), baseURL, { mode: 0o600 })
       preparedSearch = true
-    },
-    async searchConfig() {
-      await readFile(join(home, 'embedding-fixture.installed'))
-      return readFile(join(home, 'config.toml'), 'utf8')
     },
     async restart() {
       await stopDaemon(daemon)

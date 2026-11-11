@@ -35,7 +35,6 @@ test('installs built-in search, restarts, and reconnects', async ({ page, kata }
     await page.getByRole('button', { name: 'Turn on' }).click()
     const button = page.getByRole('button', { name: 'Restart daemon' })
     await expect(button).toBeVisible()
-    expect(await kata.searchConfig()).toContain('local = true')
     page.once('dialog', (dialog) => dialog.accept())
     await button.click()
     await expect

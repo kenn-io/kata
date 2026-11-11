@@ -46,8 +46,9 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 }
 
 func TestLocalEmbeddingsRestart(t *testing.T) {
-	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nbase_url = \"https://embeddings.example/v1\"\nmodel = \"model\"\ndims = 768\n"))
-	require.NoError(t, err)
+	previous := localEmbeddingsInspect
+	localEmbeddingsInspect = func(context.Context, embedlocal.Options) (embedlocal.Status, error) { return embedlocal.Status{}, nil }
+	t.Cleanup(func() { localEmbeddingsInspect = previous })
 	startErr := errors.New("helper could not start")
 	exitErr := errors.New("replacement refused")
 	for _, tc := range []struct {
@@ -65,7 +66,7 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			setup := &localEmbeddingsSetup{embeddings: cfg.Embeddings, job: &api.LocalEmbeddingsJob{State: tc.initial}}
+			setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: tc.initial}}
 			if tc.callback {
 				setup.restart = func() error { calls++; return tc.startErr }
 			}
@@ -94,10 +95,11 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 }
 
 func TestLocalEmbeddingsStatusDuringRestartStart(t *testing.T) {
-	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nbase_url = \"https://embeddings.example/v1\"\nmodel = \"model\"\ndims = 768\n"))
-	require.NoError(t, err)
+	previous := localEmbeddingsInspect
+	localEmbeddingsInspect = func(context.Context, embedlocal.Options) (embedlocal.Status, error) { return embedlocal.Status{}, nil }
+	t.Cleanup(func() { localEmbeddingsInspect = previous })
 	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-	setup := &localEmbeddingsSetup{embeddings: cfg.Embeddings, job: &api.LocalEmbeddingsJob{State: "restart"}, restart: func() error {
+	setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restart"}, restart: func() error {
 		close(started)
 		<-release
 		return nil

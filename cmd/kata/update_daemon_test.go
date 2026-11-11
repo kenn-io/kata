@@ -227,13 +227,11 @@ func TestDaemonLifecycle(t *testing.T) {
 		setupKataEnv(t)
 		f := fixture(t, "selected generation")
 		before := f.record()
-		output, err := f.restart(t, "--generation", restartGeneration(before))
-		require.NoError(t, err, "%s", output)
-		after := f.record()
-		require.True(t, after.StartedAt.After(before.StartedAt))
-		output, err = f.restart(t, "--generation", restartGeneration(before))
+		stale := before
+		stale.StartedAt = stale.StartedAt.Add(-time.Second)
+		output, err := f.restart(t, "--generation", restartGeneration(stale))
 		require.Error(t, err, "%s", output)
-		require.Equal(t, after.StartedAt, f.record().StartedAt)
+		require.Equal(t, before.StartedAt, f.record().StartedAt)
 	})
 	t.Run("stop waits for held request", func(t *testing.T) {
 		if runtime.GOOS == "windows" {

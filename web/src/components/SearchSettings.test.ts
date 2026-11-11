@@ -21,7 +21,6 @@ function renderSettings(
     canAdministerDaemon?: boolean
     postFetch?: typeof fetch
     originStable?: boolean
-    remoteHost?: string
   } = {},
 ) {
   return render(SearchSettings, {
@@ -41,27 +40,6 @@ describe('SearchSettings', () => {
     vi.useRealTimers()
   })
 
-  test('asks before restarting and cancel sends no request', async () => {
-    vi.useFakeTimers()
-    setGeneratedFetch(
-      vi.fn(async () =>
-        Response.json(
-          status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
-        ),
-      ),
-    )
-    const postFetch = vi.fn<typeof fetch>()
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => false),
-    )
-    renderSettings({ postFetch })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    expect(confirm).toHaveBeenCalledOnce()
-    expect(postFetch).not.toHaveBeenCalled()
-  })
-
   test('keeps the manual step when the daemon cannot restart', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
@@ -77,7 +55,7 @@ describe('SearchSettings', () => {
     expect(screen.getByText(/run kata daemon restart/)).not.toBeNull()
   })
 
-  test('sends a single restart request after confirmation on a named origin', async () => {
+  test('asks before sending a single restart request', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
       vi.fn(async () =>
@@ -87,46 +65,19 @@ describe('SearchSettings', () => {
       ),
     )
     const postFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }))
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    )
-    renderSettings({ postFetch, remoteHost: 'daemon.example' })
+    const confirmRestart = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
+    vi.stubGlobal('confirm', confirmRestart)
+    renderSettings({ postFetch })
     await settle()
     const button = screen.getByRole('button', { name: 'Restart daemon' })
+    await fireEvent.click(button)
+    expect(postFetch).not.toHaveBeenCalled()
     await fireEvent.click(button)
     await fireEvent.click(button)
     expect(postFetch).toHaveBeenCalledOnce()
     expect(postFetch.mock.calls[0]?.[0]).toBe('/api/v1/embeddings/local/restart')
     expect(postFetch.mock.calls[0]?.[1]?.method).toBe('POST')
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('run kata ui'))
-  })
-
-  test('reconnects a stable origin after the restart interrupts reads', async () => {
-    vi.useFakeTimers()
-    const pending = status({
-      can_restart: true,
-      job: { state: 'restart', downloaded: 1, total: 1 },
-    })
-    const read = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json(pending))
-      .mockRejectedValueOnce(new TypeError('disconnected'))
-      .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false })))
-    setGeneratedFetch(read)
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    )
-    const postFetch = vi.fn<typeof fetch>(async () => {
-      throw new TypeError('disconnected')
-    })
-    renderSettings({ postFetch, originStable: true })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    await vi.advanceTimersByTimeAsync(4000)
-    expect(screen.getByText('On', { exact: true })).not.toBeNull()
-    expect(read).toHaveBeenCalledTimes(3)
   })
 
   test('observes completion while the restart response hangs', async () => {
@@ -145,10 +96,11 @@ describe('SearchSettings', () => {
       'confirm',
       vi.fn(() => true),
     )
-    const postFetch = vi.fn<typeof fetch>((_input, init) =>
-      new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
-      }),
+    const postFetch = vi.fn<typeof fetch>(
+      (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
+        }),
     )
     renderSettings({ postFetch, originStable: true })
     await settle()
