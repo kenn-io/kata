@@ -2,12 +2,13 @@ package db
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
-// Six times the input should stay well below quadratic growth. Minimum samples
+// Sixteen times the input should stay well below quadratic growth. Minimum samples
 // reduce scheduler noise; the generous bound allows allocation and cache costs.
 func TestFoldSnapshotLabelsDoNotScaleQuadratically(t *testing.T) {
 	minimum := func(count int) time.Duration {
@@ -26,7 +27,7 @@ func TestFoldSnapshotLabelsDoNotScaleQuadratically(t *testing.T) {
 		}
 		return best
 	}
-	small, large := minimum(2000), minimum(12000)
-	t.Logf("snapshot fold minimum: 2000=%s 12000=%s ratio=%.2f", small, large, float64(large)/float64(small))
-	require.Less(t, large, 14*small, "snapshot label retirement must not scale quadratically")
+	small, large := minimum(1000), minimum(16000)
+	t.Logf("snapshot fold minimum: 1000=%s 16000=%s ratio=%.2f", small, large, float64(large)/float64(small))
+	require.Less(t, large, 64*small, "snapshot label retirement must not scale quadratically")
 }

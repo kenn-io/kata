@@ -509,20 +509,24 @@ func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
 // A full snapshot replaces label membership even when an empty label list is
 // omitted by the producer. Later label deltas still apply.
 func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
-	for _, snapshot := range []string{
-		`{"uid":"issue-1","title":"snapshot","status":"open","labels":["current","retained"]}`,
-		`{"uid":"issue-1","title":"snapshot","status":"open","labels":[]}`,
-		`{"uid":"issue-1","title":"snapshot","status":"open"}`,
+	for _, snapshot := range []struct {
+		name, payload string
+		retained      bool
+	}{
+		{"labeled snapshot", `{"uid":"issue-1","title":"snapshot","status":"open","labels":["current","retained"]}`, true},
+		{"omitted labels", `{"uid":"issue-1","title":"snapshot","status":"open"}`, false},
 	} {
-		t.Run(snapshot, func(t *testing.T) {
+		t.Run(snapshot.name, func(t *testing.T) {
 			other := testEvent("issue.snapshot", 1, `{"uid":"issue-2","title":"other","status":"open","labels":["keep"]}`)
-			other.IssueUID = "issue-2"
+			other.IssueUID, other.UID, other.HLCCounter = "issue-2", "event-other-001", 1
+			tombstone := testEvent("issue.unlabeled", 2, `{"label":"old-tombstone"}`)
+			tombstone.UID, tombstone.HLCCounter = "event-tombstone-002", 1
 			events := []FoldEvent{
 				other,
 				testEvent("issue.snapshot", 1, `{"uid":"issue-1","title":"source","status":"open","labels":["old"]}`),
 				testEvent("issue.labeled", 2, `{"label":"before"}`),
-				testEvent("issue.unlabeled", 2, `{"label":"old-tombstone"}`),
-				testEvent("issue.snapshot", 3, snapshot),
+				tombstone,
+				testEvent("issue.snapshot", 3, snapshot.payload),
 				testEvent("issue.labeled", 4, `{"label":"after"}`),
 				testEvent("issue.unlabeled", 5, `{"label":"current"}`),
 			}
@@ -531,7 +535,7 @@ func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
 				{IssueUID: "issue-1", Label: "after"}:   {Present: true, Clock: clockOf(events[5])},
 				{IssueUID: "issue-1", Label: "current"}: {Present: false, Clock: clockOf(events[6])},
 			}
-			if snapshot == `{"uid":"issue-1","title":"snapshot","status":"open","labels":["current","retained"]}` {
+			if snapshot.retained {
 				want[FoldLabelKey{IssueUID: "issue-1", Label: "retained"}] = FoldElementState{Present: true, Clock: clockOf(events[4])}
 			}
 			require.Equal(t, want, FoldEvents(events).Labels)
