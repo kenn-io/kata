@@ -7,8 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-
-	"go.kenn.io/kata/internal/federationsigning"
 	"os"
 	"path"
 	"time"
@@ -16,6 +14,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/metadata"
 )
 

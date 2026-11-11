@@ -44,13 +44,14 @@ func TestFederationAttachmentSigningProfile(t *testing.T) {
 			api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
 			path := strings.Replace(tc.path, "/projects/1/", "/projects/{project_id}/", 1)
 			huma.Register(api, huma.Operation{OperationID: tc.operation, Method: tc.method, Path: path}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-			s := &Server{api: api, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1)}
+			s := &Server{api: api, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1)}
 			// Saturate the opposite pool: binary transfers must avoid control
 			// slots, while links/capabilities retain control admission.
 			if tc.bulk {
 				s.federationControlAdmission <- struct{}{}
-			} else {
 				s.federationIngestAdmission <- struct{}{}
+			} else {
+				s.federationTransferAdmission <- struct{}{}
 			}
 			r := httptest.NewRequestWithContext(t.Context(), tc.method, "https://hub.example"+tc.path, http.NoBody)
 			r.ContentLength = tc.length
@@ -110,7 +111,7 @@ func TestFederationAttachmentSigningSpoolLifetime(t *testing.T) {
 				api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
 				path := fmt.Sprintf("/api/v1/projects/%d/federation/docbank/issues/abc4/uploads", project.ID)
 				huma.Register(api, huma.Operation{OperationID: "uploadFederatedDocbank", Method: "POST", Path: "/api/v1/projects/{project_id}/federation/docbank/issues/abc4/uploads"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-				s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1)}
+				s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1)}
 				r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example"+path, strings.NewReader("binary"))
 				r.Header.Set("Authorization", "Bearer "+enrollment.Token)
 				r.Header.Set("Content-Type", "application/octet-stream")
@@ -190,7 +191,7 @@ func TestFederationAttachmentSigningPushOnlyPreflight(t *testing.T) {
 		time.Sleep(federationsigning.Quarantine)
 		api := huma.NewAPI(huma.DefaultConfig("fixture", "1"), humago.NewAdapter(http.NewServeMux(), ""))
 		huma.Register(api, huma.Operation{OperationID: "federatedDocbankCapabilities", Method: "GET", Path: "/api/v1/projects/{project_id}/federation/docbank/capabilities"}, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1)}
+		s := &Server{api: api, cfg: ServerConfig{DB: store, FederationSigning: v}, federationControlAdmission: make(chan struct{}, 1), federationIngestAdmission: make(chan struct{}, 1), federationTransferAdmission: make(chan struct{}, 1)}
 		path := fmt.Sprintf("https://hub.example/api/v1/projects/%d/federation/docbank/capabilities", project.ID)
 		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		r.Header.Set("Authorization", "Bearer "+enrollment.Token)

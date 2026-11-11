@@ -219,3 +219,58 @@ func TestSignedUploadHoldsIdleForegroundDuringVerification(t *testing.T) {
 		require.Equal(t, daemon.IdleStateArmed, idle.Snapshot().State)
 	})
 }
+
+// Signed transfers can wait on network or Docbank I/O for much longer than an
+// event ingest. Their admission budget must not block federation sync.
+func TestFederationSigningTransfersDoNotBlockIngest(t *testing.T) {
+	t.Setenv("TEST_TRANSFER_ADMISSION_KEY", strings.Repeat("k", 64))
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_TRANSFER_ADMISSION_KEY"}
+	env := testenv.New(t)
+	project := createFederatedHubProject(t, env, "hub-project")
+	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull,push", Actor: "example-actor"})
+	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		state := filepath.Join(t.TempDir(), "replay.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		verifier, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}}, state)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, verifier.Close()) }()
+		time.Sleep(federationsigning.Quarantine)
+		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: verifier, FederationSigningRequired: true})
+		t.Cleanup(func() { require.NoError(t, srv.Close()) })
+		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
+		require.NoError(t, err)
+		request := func(path string, body []byte, contentType string) *http.Request {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example"+path, bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
+			req.Header.Set("Content-Type", contentType)
+			require.NoError(t, federationsigning.Sign(req, source))
+			return req
+		}
+		entered, release := make(chan struct{}, 2), make(chan struct{})
+		var unblock sync.Once
+		defer unblock.Do(func() { close(release) })
+		done := make(chan struct{}, 2)
+		for range 2 {
+			body := []byte("fixture attachment")
+			path := projectPath(project.ID) + "/federation/docbank/issues/example/uploads?project_uid=" + project.UID + "&origin=" + env.DB.InstanceUID() + "&name=file.pdf"
+			req := request(path, body, "application/octet-stream")
+			original := req.Body
+			req.Body = &pausedFederationUpload{Reader: bytes.NewReader(body), entered: entered, release: release}
+			_ = original.Close()
+			go func() { ingress.ServeHTTP(httptest.NewRecorder(), req); done <- struct{}{} }()
+		}
+		for range 2 {
+			<-entered
+		}
+		raw, err := json.Marshal(federationIngestBody())
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		ingress.ServeHTTP(w, request(projectPath(project.ID)+"/federation/events:ingest", raw, "application/json"))
+		unblock.Do(func() { close(release) })
+		for range 2 {
+			<-done
+		}
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+}
