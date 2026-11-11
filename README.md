@@ -255,19 +255,20 @@ substantive message. [Agent workflows](docs/workflows/agents.md) is the same
 contract in long form.
 
 On `main`, install the contract in every coding-agent session that starts
-inside a kata workspace on this machine:
+inside a kata workspace on this machine.
+
+Not in the latest release yet.
 
 ```sh
-kata agent-hook install
+kata agent setup
 ```
 
-For Codex, open Codex and run `/hooks` to trust the new hook. See
+For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness. Use `kata agent-hook install` for advanced options. See
 [Contract in every session](docs/workflows/agents.md#contract-in-every-session)
 for all 18 targets, runtime requirements, attention capabilities and additional
 Codex homes. Contract and available attention hooks are enabled by default;
-use `--contract-only` to opt out of attention, or
-`kata init --agent-hooks=codex,pi` for project setup. These commands require
-Kata 0.19.0 or later.
+use `kata agent-hook install --contract-only` to opt out of attention, or
+`kata init --agent-hooks=codex,pi` for project setup.
 
 Print the shorter managed briefing without changing the repository:
 

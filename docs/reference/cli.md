@@ -245,9 +245,13 @@ the other output modes.
 [`kata agent-hook contract <harness>`](#contract-injection) injects this text in a harness-native response by default. To load it in every session, see
 [Contract in every session](../workflows/agents.md#contract-in-every-session).
 
+## Agent setup
+
+In unreleased builds, `kata agent setup [<harness>...]` installs user hooks for Claude Code and Codex. With no names it selects installed agents. Add `--check` to inspect readiness without installing. Open Codex and run `/hooks` when its hooks need review. The command exits 1 when a selected agent needs attention.
+
 ## Agent hook
 
-These commands require Kata 0.19.0 or later.
+Availability varies by release; run `kata agent-hook --help` to see the commands your version supports.
 
 The command group has been renamed from `kata agent-hooks` to
 `kata agent-hook`. This is a breaking change: the plural spelling fails as an
@@ -1863,14 +1867,15 @@ set `[tui] confirm_quit = false`; see
 Start with `kata doctor` when commands cannot reach the daemon, a workspace
 points at the wrong project, or hooks and integrations stop working. It reports
 local configuration problems, the selected daemon's health and version, project
-visibility, active hook availability and retained failures, embeddings, and
-declarative federation mapping convergence. Each finding includes a suggested
-fix. See the [doctor troubleshooting guide](../operations/doctor.md).
+visibility, active hook availability and retained failures, embeddings,
+declarative federation mapping convergence, and agent hook readiness. Each
+finding includes a suggested fix. See the [doctor troubleshooting guide](../operations/doctor.md).
 
 Doctor never starts or restarts a daemon, opens storage, runs hooks, repairs
 bindings, or edits configuration. Existing daemon authentication and access
-logging may still record the request. `--json` emits one report with stable
-check IDs, `ok`/`info`/`warn`/`fail` statuses, and summary counts. Failed checks
+logging may still record the request. The agent check preserves hook
+configuration and trust, but can create Codex state. `--json` emits one report
+with stable check IDs, `ok`/`info`/`warn`/`fail` statuses, and summary counts. Failed checks
 exit **1** with error kind `checks_failed`; warnings alone exit **0**. `--quiet`
 hides successful and informational findings in text output; JSON always
 contains the full report.

@@ -304,7 +304,7 @@ func TestAgentHooksCodexDefaultSupplyRequiresUnconditionalBothPlatforms(t *testi
 		{"custom prompt", map[string]any{"command": "kata agent-contract-hook --source prompt.txt", "commandWindows": "kata agent-contract-hook --source prompt.txt"}, nil, false},
 		{"extra args", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook", "args": []any{"custom"}}, nil, false},
 		{"condition", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook", "if": "some condition"}, nil, false},
-		{"group condition", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook"}, map[string]any{"if": "some condition"}, false},
+		{"group metadata", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook"}, map[string]any{"if": "some condition"}, true},
 		{"missing Windows", map[string]any{"command": "kata agent-contract-hook"}, nil, false},
 		{"wrong harness", map[string]any{"command": "kata agent-hook contract claude", "commandWindows": "kata agent-hook contract claude"}, nil, false},
 		{"custom alternate", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook --source windows.txt"}, nil, false},

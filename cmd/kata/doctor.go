@@ -16,7 +16,9 @@ const doctorRequestTimeout = 5 * time.Second
 func newDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "doctor", Short: "diagnose setup problems without starting or changing the daemon",
-		Long:    `Diagnose configuration and connectivity without starting the daemon or changing state. Use kata health for a running daemon.`,
+		Long: `Diagnose configuration and connectivity without starting or changing the daemon. Use kata health for a running daemon.
+
+The agent check preserves hook configuration and trust, but may create Codex state.`,
 		Example: `  kata doctor --json`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -35,6 +37,9 @@ func newDoctorCmd() *cobra.Command {
 func collectDoctor(ctx context.Context) diagnostics.Report {
 	s := &doctorState{}
 	s.localChecks(ctx)
+	for _, name := range []string{"claude", "codex"} {
+		s.add("agent."+name, "agent", func() diagnostics.Check { return doctorAgent(ctx, name) })
+	}
 	s.daemonChecks(ctx)
 	return diagnostics.NewReport(s.checks)
 }

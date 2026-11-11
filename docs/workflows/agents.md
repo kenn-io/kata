@@ -108,15 +108,16 @@ does not enroll an agent, initialize a project, or configure embeddings.
 
 ## Contract in every session
 
-Load Kata's contract in every coding-agent session that starts inside a kata
+In unreleased builds, load Kata's contract in every coding-agent session that starts inside a kata
 workspace on this machine:
 
 ```sh
-kata agent-hook install
+kata agent setup
 ```
 
-These commands require Kata 0.19.0 or later.
-User scope is the default. Bare installation discovers configured agents and
+Open Codex and run `/hooks` to trust its hooks. Run `kata agent setup --check` to check readiness.
+
+Use `kata agent-hook install` for advanced options and other agents. User scope is the default. Bare installation discovers configured agents and
 installs their contract plus every available attention direction. Dedicated agent
 configuration directories count as evidence; `.github/` and `.agents/` alone do
 not. `--all` uses the same discovery. Name agents to select them explicitly, even

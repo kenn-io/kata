@@ -317,11 +317,6 @@ func effectiveAgentHookDefault(agent agenthook.Agent, entry agentHookEntry) bool
 			return false
 		}
 	}
-	for key := range entry.GroupFields {
-		if key != "matcher" && key != "hooks" {
-			return false
-		}
-	}
 	if agent == agenthook.AgentCodex {
 		if timeout, exists := entry.Fields["timeout"]; exists && !sufficientCodexContractTimeout(timeout) {
 			return false
@@ -361,18 +356,7 @@ func ownedAgentHookEntriesMatch(current, desired []agentHookEntry, kind agentHoo
 		return false
 	}
 	for i := range before {
-		if before[i].Event != after[i].Event || !reflect.DeepEqual(before[i].Fields, after[i].Fields) || !sameAgentHookGroupBehavior(before[i].GroupFields, after[i].GroupFields) {
-			return false
-		}
-	}
-	return true
-}
-
-// Non-execution group metadata stays in place when a built-in handler already
-// matches. Conditional behavior still requires repair to the requested default.
-func sameAgentHookGroupBehavior(before, after map[string]any) bool {
-	for _, key := range []string{"if", "condition", "enabled", "disabled", "async", "once"} {
-		if !reflect.DeepEqual(before[key], after[key]) {
+		if before[i].Event != after[i].Event || before[i].Matcher != after[i].Matcher || !reflect.DeepEqual(before[i].Fields, after[i].Fields) {
 			return false
 		}
 	}
