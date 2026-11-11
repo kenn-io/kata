@@ -218,9 +218,13 @@ explicit manager restart. Unload the job with
 unavailable. A normal process exit while the job remains loaded leaves its
 activation socket available to start a new process on demand.
 
+Launchd can throttle rapid reactivation beyond the client's default five-second
+request timeout. Increase `KATA_HTTP_TIMEOUT`, for example to `20s`, when waiting
+for a throttled job. A timed-out request does not start an unmanaged replacement.
+
 Kata does not call its self-reexec restart path for activated services. The
 launchd binding uses Go runtime internals; maintain toolchain compatibility
 checks when upgrading Go. Cold activation, authenticated operations and manager
-reactivation were exercised with `CGO_ENABLED=0`, Go 1.27.3 and Darwin arm64.
+reactivation were exercised with `CGO_ENABLED=0`, Go 1.27.3 and 1.27.4, and Darwin arm64.
 Other architecture/runtime combinations require their own manager checks before
 claiming the same verification.
