@@ -40,6 +40,7 @@ func TestMCPNotifyValidation(t *testing.T) {
 		name, want, without string
 		args                map[string]any
 	}{
+		{"empty message", "message must be nonblank", "", map[string]any{"ref": ref, "to": "reviewer", "message": ""}},
 		{"clear message", "not: validated against", "message", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "message": "x"}},
 		{"clear linked", "not: validated against", "re", map[string]any{"ref": ref, "to": "reviewer", "clear": true, "re": "c:abcdef"}},
 		{"clear broadcast", "clear cannot", "", map[string]any{"ref": ref, "clear": true, "broadcast": true}},

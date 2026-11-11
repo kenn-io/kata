@@ -497,7 +497,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 	case "kata.notify":
 		setStringBounds("ref", 1, 256)
 		setStringBounds("to", 1, notification.RecipientMaxBytes)
-		setStringBounds("message", 1, notification.MessageMaxBytes)
+		setStringBounds("message", 0, notification.MessageMaxBytes)
 		forbidTrueWith("clear", "message")
 		forbidTrueWith("clear", "re")
 	case "kata.search_docs":
