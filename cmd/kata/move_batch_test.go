@@ -812,16 +812,6 @@ func TestMoveBatchCLI_DifferentTargetsAcrossPages(t *testing.T) {
 	require.Equal(t, first.ID, got.ProjectID)
 }
 
-func TestMoveBatchCLI_PreviewUIDFromAnotherProject(t *testing.T) {
-	env, dir, source, target, issue := setupMoveCLIProjects(t)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry", "--json")
-	require.NoError(t, err)
-	require.Contains(t, out, issue.UID)
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
-}
-
 func TestMoveBatchCLI_SelectorSubtreeRevision(t *testing.T) {
 	for _, option := range []string{"--subtree", "--dry"} {
 		t.Run(option, func(t *testing.T) {

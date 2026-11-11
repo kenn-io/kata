@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -206,30 +205,6 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 		defer func() { flags.Project = previousProject }()
 		if sel.Project != "" && items[0].ExpectedRevision != 0 {
 			flags.Project = sel.Project
-		} else if parsed, err := shortid.Parse(items[0].Ref); err == nil && parsed.ULID != "" {
-			a, err := dialDaemon(cmd.Context())
-			if err != nil {
-				return err
-			}
-			client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
-			if err != nil {
-				return err
-			}
-			response, callErr := client.ShowIssueByUIDWithResponse(a.ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: parsed.ULID}})
-			if response == nil {
-				return externalCLITransportError(response, callErr)
-			}
-			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-				return err
-			}
-			if response.JSON200 == nil {
-				return errors.New("daemon returned an invalid issue response")
-			}
-			project, err := resolveProjectSelector(a, strconv.FormatInt(response.JSON200.Issue.ProjectID, 10))
-			if err != nil {
-				return err
-			}
-			flags.Project = project.Name
 		}
 		return runMove(cmd, items[0].Ref, items[0].TargetProject, opts.DryRun, !opts.Subtree, items[0].ExpectedRevision)
 	}
