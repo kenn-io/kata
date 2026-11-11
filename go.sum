@@ -40,6 +40,8 @@ github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPn
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
 github.com/bitfield/gotestdox v0.2.2 h1:x6RcPAbBbErKLnapz1QeAlf3ospg8efBsedU93CDsnE=
 github.com/bitfield/gotestdox v0.2.2/go.mod h1:D+gwtS0urjBrzguAkTM2wodsTQYFHdpx8eqRJ3N+9pY=
+github.com/bored-engineer/go-launchd v0.0.0-20241220214420-b514778f4f80 h1:O7c0CDkfGaIa7eNktOIBoPpuaq0zazOqB3iTghXIySw=
+github.com/bored-engineer/go-launchd v0.0.0-20241220214420-b514778f4f80/go.mod h1:fuBezjGxBjQFkJeCIN1eTo9c27q2WxjHK7tRlfBkyQk=
 github.com/bradleyfalzon/ghinstallation/v2 v2.19.0 h1:KQfD+43pRw9NUJhGycGrFr9vF1MubZacksKol1gomFI=
 github.com/bradleyfalzon/ghinstallation/v2 v2.19.0/go.mod h1:fe5ECIhCdEnxwLiBlNTxx9CP455wt42BELnlDVMvaAA=
 github.com/buger/jsonparser v1.6.1 h1:I0phFv0PlbLHnM7TZAVjZ2MJ2/eWRTDyuO7GLR98IEs=

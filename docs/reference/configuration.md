@@ -603,8 +603,9 @@ startup is confirmed; use `kata daemon start --foreground` for service-manager
 and hosted deployments. Auto-started daemons also read the config-file listener
 value.
 
-Not in the latest release yet: `socket_activation = "systemd"` adopts one
-manager-owned Unix stream listener and requires foreground startup. It conflicts
+Not in the latest release yet: `socket_activation = "systemd"` or
+`socket_activation = "launchd:api"` adopts one manager-owned Unix stream listener
+and requires foreground startup. It conflicts
 with API bind overrides and disables detached startup, stale-version replacement
 and Kata-controlled stop/restart for that home, even while the daemon is stopped.
 The empty or absent value preserves ordinary behavior. Use the service manager

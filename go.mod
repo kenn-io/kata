@@ -10,6 +10,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
+	github.com/bored-engineer/go-launchd v0.0.0-20241220214420-b514778f4f80
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/cenkalti/backoff/v7 v7.0.2

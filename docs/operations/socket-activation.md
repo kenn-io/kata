@@ -8,15 +8,17 @@ last_edited: 2026-11-11
 
 Not in the latest release yet.
 
-A systemd user socket can remain available while Kata is stopped. Connecting to
-that socket starts the foreground daemon, which adopts the manager's listener
-instead of binding or unlinking its path. Explicit Unix client selection is
-independently useful with an already-running native Unix daemon.
+A systemd user socket or launchd LaunchAgent socket can remain available while
+Kata is stopped. Connecting to that socket starts the foreground daemon, which
+adopts the manager's listener instead of binding or unlinking its path. Explicit
+Unix client selection also works with an already-running native Unix daemon.
 
 ## Supported listener and ownership rules
 
-Set `socket_activation = "systemd"` in the service's `<KATA_HOME>/config.toml`.
-The empty or absent setting keeps ordinary daemon behavior. Activation requires
+Set `socket_activation = "systemd"` or `socket_activation = "launchd:api"` in
+the service's `<KATA_HOME>/config.toml`. The launchd suffix names its `Sockets`
+dictionary key. The empty or absent setting keeps ordinary daemon behavior.
+Activation requires
 exactly one pathname Unix stream listening socket, a `0700` immediate parent
 directory owned by the daemon user, and a socket owned by that user. TCP,
 datagrams, accepted connections, abstract sockets and multiple descriptors are
@@ -139,3 +141,82 @@ Authentication policy is unchanged. A preprovisioned token file is sufficient
 for authenticated cold activation; no new bootstrap command or database
 migration is required. Use `kata ui` with the daemon's separate HTTP(S) browser
 origin, not the Unix API selector.
+
+## Configure a macOS LaunchAgent
+
+Use the same private state directory and preprovisioned token-file rules as
+above, with this setting:
+
+```toml
+socket_activation = "launchd:api"
+
+[auth]
+token_file = "~/.local/share/kata-managed/token"
+```
+
+Create `~/.kata-run` with mode `0700` for the socket. Keep this path short:
+Darwin Unix socket path limits are much smaller than ordinary filesystem path
+limits. Replace every `/Users/example` path below with the user's absolute home
+and the executable path with the actual package-managed binary. Launchd does
+not expand `~` or shell variables in property-list values.
+
+`~/Library/LaunchAgents/io.example.kata-managed.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.example.kata-managed</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/example/.local/bin/kata</string>
+    <string>daemon</string><string>start</string><string>--foreground</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>KATA_HOME</key><string>/Users/example/.local/share/kata-managed</string>
+  </dict>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardErrorPath</key><string>/Users/example/.local/share/kata-managed/launchd.log</string>
+  <key>Sockets</key>
+  <dict>
+    <key>api</key>
+    <dict>
+      <key>SockType</key><string>stream</string>
+      <key>SockPassive</key><true/>
+      <key>SockPathName</key><string>/Users/example/.kata-run/api.sock</string>
+      <key>SockPathMode</key><integer>384</integer>
+    </dict>
+  </dict>
+</dict>
+</plist>
+```
+
+`SockPathMode` uses decimal `384` for mode `0600`; `Umask` uses decimal `63`
+for `0077`. Do not enable `inetdCompatibility` or use `SockPassive=false`:
+Kata needs the listening socket, not an accepted or connected socket. The
+no-CGO helper acquires the named socket through `launch_activate_socket`; it
+does not use systemd's environment protocol.
+
+Load the agent in the logged-in user's GUI domain and connect:
+
+```sh
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/io.example.kata-managed.plist"
+export KATA_SERVER="unix://$HOME/.kata-run/api.sock"
+export KATA_AUTH_TOKEN_FILE="$HOME/.local/share/kata-managed/token"
+kata health --json
+```
+
+Use `launchctl kickstart -k "gui/$(id -u)/io.example.kata-managed"` for an
+explicit manager restart. Unload the job with
+`launchctl bootout "gui/$(id -u)/io.example.kata-managed"` when it must remain
+unavailable. A normal process exit while the job remains loaded leaves its
+activation socket available to start a new process on demand.
+
+Kata does not call its self-reexec restart path for activated services. The
+launchd binding uses Go runtime internals; maintain toolchain compatibility
+checks when upgrading Go. Cold activation, authenticated operations and manager
+reactivation were exercised with `CGO_ENABLED=0`, Go 1.27.3 and Darwin arm64.
+Other architecture/runtime combinations require their own manager checks before
+claiming the same verification.
