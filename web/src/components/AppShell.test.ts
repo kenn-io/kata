@@ -2239,6 +2239,58 @@ describe('AppShell task selection', () => {
     return current
   }
 
+  test('keeps upload controls when switching to a pre-origin daemon', async () => {
+    const current = twoTaskSnapshot()
+    current.capabilities.attachments = false
+    current.capabilities.attachment_instance_uid = 'leaf'
+    const props = {
+      route: { ...listRoute, issueUID: firstUID },
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+      onUploadAttachment: vi.fn(async () => {}),
+    }
+    const { rerender } = render(AppShell, { props })
+    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
+    const older = structuredClone(current)
+    older.capabilities.attachments = true
+    delete older.capabilities.attachment_instance_uid
+    await rerender({ ...props, snapshot: older })
+    expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
+  })
+
+  test('keeps content controls when switching to a pre-origin daemon', async () => {
+    const current = twoTaskSnapshot()
+    current.capabilities.attachments = false
+    current.capabilities.attachment_instance_uid = 'leaf'
+    current.selected!.issue!.metadata = {
+      'attachment.file': {
+        name: 'screen.png',
+        media_type: 'image/png',
+        size: 1,
+        docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
+      },
+    }
+    const props = {
+      route: { ...listRoute, issueUID: firstUID },
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const { rerender } = render(AppShell, { props })
+    expect(screen.queryByRole('button', { name: 'Preview screen.png' })).toBeNull()
+    const older = structuredClone(current)
+    older.capabilities.attachments = true
+    delete older.capabilities.attachment_instance_uid
+    await rerender({ ...props, snapshot: older })
+    expect(screen.getByRole('button', { name: 'Preview screen.png' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Download screen.png' })).not.toBeNull()
+  })
+
   test('uses the selected project attachment route', async () => {
     const current = twoTaskSnapshot()
     const spoke = current.collection![0]!
@@ -2256,6 +2308,7 @@ describe('AppShell task selection', () => {
       },
     })
     current.capabilities.attachment_instance_uid = 'leaf'
+    current.capabilities.attachments = false
     current.capabilities.attachment_routes = [
       { project_uid: spoke.project_uid!, read: true, write: true, origin: 'root' },
     ]

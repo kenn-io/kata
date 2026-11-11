@@ -7319,7 +7319,6 @@ type UICapabilities struct {
 	ActorPolicy           string              `json:"actor_policy" validate:"required"`
 	AllowedActions        []string            `json:"allowed_actions,omitempty"`
 	AttachmentInstanceUID *string             `json:"attachment_instance_uid,omitempty"`
-	AttachmentLocal       *bool               `json:"attachment_local,omitempty"`
 	AttachmentRoutes      []UIAttachmentRoute `json:"attachment_routes,omitempty"`
 	Attachments           *bool               `json:"attachments,omitempty"`
 

@@ -104,7 +104,7 @@ func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Is
 	// A relay caches a downstream lease in that incoming hop's identity, just
 	// as its acquire response is remapped. Only local callers need the first
 	// binding transform here; forwarding to the next hop transforms separately.
-	if binding.RelayConfig == nil || principal.HolderInstanceUID == cfg.DB.InstanceUID() {
+	if !service || binding.RelayConfig == nil || principal.HolderInstanceUID == cfg.DB.InstanceUID() {
 		principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
 	}
 

@@ -11,7 +11,6 @@ export interface UICapabilities {
   actor_policy: string
   allowed_actions?: string[]
   attachment_instance_uid?: string
-  attachment_local?: boolean
   attachment_routes?: UIAttachmentRoute[]
   attachments?: boolean
   /** How this request authenticated; matches the instance auth kind. Never contains credentials. */

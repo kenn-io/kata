@@ -38,12 +38,8 @@ func docbankUpstream(ctx context.Context, cfg ServerConfig, projectID int64) (*d
 	return &binding, nil
 }
 
-func isDocbankSpoke(binding *db.FederationBinding) bool {
-	return binding != nil && binding.Role == db.FederationRoleSpoke
-}
-
 func docbankOriginCapabilities(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding) (api.DocbankServiceCapabilities, error) {
-	if !isDocbankSpoke(binding) {
+	if binding == nil || binding.Role != db.FederationRoleSpoke {
 		if cfg.Docbank == nil {
 			return api.DocbankServiceCapabilities{}, attachmentError(503, "docbank_not_configured")
 		}
@@ -222,7 +218,7 @@ func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.
 	if err != nil {
 		return metadata.Attachment{}, err
 	}
-	if !isDocbankSpoke(current) || current.HubURL != binding.HubURL || current.HubProjectUID != binding.HubProjectUID || current.HubProjectID != binding.HubProjectID {
+	if current == nil || current.Role != db.FederationRoleSpoke || current.HubURL != binding.HubURL || current.HubProjectUID != binding.HubProjectUID || current.HubProjectID != binding.HubProjectID {
 		return metadata.Attachment{}, attachmentError(409, "attachment_origin_mismatch")
 	}
 	return descriptor.Attachment, nil

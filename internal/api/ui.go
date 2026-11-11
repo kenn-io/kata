@@ -14,7 +14,6 @@ const UISnapshotContractVersion = "2"
 // UICapabilities describes the browser behavior authorized for this request.
 type UICapabilities struct {
 	Attachments           bool                `json:"attachments,omitempty,omitzero"`
-	AttachmentLocal       bool                `json:"attachment_local,omitempty,omitzero"`
 	AttachmentInstanceUID string              `json:"attachment_instance_uid,omitempty"`
 	AttachmentRoutes      []UIAttachmentRoute `json:"attachment_routes,omitempty"`
 	AccessAdmin           bool                `json:"access_admin,omitempty,omitzero"`

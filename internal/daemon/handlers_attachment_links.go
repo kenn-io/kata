@@ -38,7 +38,7 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 		return nil, err
 	}
 	var attachment metadata.Attachment
-	if isDocbankSpoke(binding) {
+	if binding != nil && binding.Role == db.FederationRoleSpoke {
 		project, err := activeProjectByID(ctx, cfg.DB, iss.ProjectID)
 		if err != nil {
 			return nil, err

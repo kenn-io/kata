@@ -407,7 +407,6 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 	var snapshot struct {
 		Capabilities struct {
 			Attachments bool   `json:"attachments"`
-			Local       bool   `json:"attachment_local"`
 			Instance    string `json:"attachment_instance_uid"`
 			Routes      []struct {
 				ProjectUID string `json:"project_uid"`
@@ -417,8 +416,7 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 		} `json:"capabilities"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &snapshot))
-	require.True(t, snapshot.Capabilities.Attachments)
-	require.False(t, snapshot.Capabilities.Local)
+	require.False(t, snapshot.Capabilities.Attachments)
 	require.Equal(t, env.DB.InstanceUID(), snapshot.Capabilities.Instance)
 	require.Len(t, snapshot.Capabilities.Routes, 1)
 	require.Equal(t, spoke.UID, snapshot.Capabilities.Routes[0].ProjectUID)

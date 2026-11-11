@@ -89,7 +89,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		var descriptor metadata.Attachment
-		if isDocbankSpoke(binding) {
+		if binding != nil && binding.Role == db.FederationRoleSpoke {
 			descriptor, err = forwardDocbankDescriptor(ctx, cfg, project, binding, issue, boundSpokeClaimPrincipal(*binding, principal, cfg.DB.InstanceUID()), in.Origin, in.Name, nil, ctx.Value(attachmentUploadContextKey{}).(io.Reader))
 		} else {
 			descriptor, err = uploadDocbankAttachment(ctx, cfg, issue, in.Name, ctx.Value(attachmentUploadContextKey{}).(io.Reader), recheck)
@@ -121,7 +121,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		var descriptor metadata.Attachment
-		if isDocbankSpoke(binding) {
+		if binding != nil && binding.Role == db.FederationRoleSpoke {
 			descriptor, err = forwardDocbankDescriptor(ctx, cfg, project, binding, issue, boundSpokeClaimPrincipal(*binding, principal, cfg.DB.InstanceUID()), in.Origin, "", &in.Body, nil)
 		} else {
 			descriptor, err = resolveDocbankAttachment(ctx, cfg, in.Body, true)
@@ -155,9 +155,6 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 		}
 		return &huma.StreamResponse{Body: func(hctx huma.Context) {
 			defer func() { _ = resp.Body.Close() }()
-			for _, name := range []string{"X-Docbank-Blob-Hash", "X-Docbank-Blob-Size"} {
-				hctx.SetHeader(name, resp.Header.Get(name))
-			}
 			hctx.SetHeader("Content-Type", "application/octet-stream")
 			hctx.SetHeader("X-Content-Type-Options", "nosniff")
 			if _, err := io.Copy(hctx.BodyWriter(), resp.Body); err != nil {
@@ -168,7 +165,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 }
 
 func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, attachment metadata.Attachment) (*http.Response, error) {
-	if !isDocbankSpoke(binding) {
+	if binding == nil || binding.Role != db.FederationRoleSpoke {
 		// Only projects without an upstream may use this daemon's Docbank origin.
 		if attachment.Origin != cfg.DB.InstanceUID() {
 			return nil, attachmentError(410, "attachment_origin_unavailable")
@@ -200,7 +197,7 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 }
 
 func checkDocbankOrigin(cfg ServerConfig, binding *db.FederationBinding, origin string) error {
-	if !isDocbankSpoke(binding) {
+	if binding == nil || binding.Role != db.FederationRoleSpoke {
 		if origin != cfg.DB.InstanceUID() {
 			return attachmentError(409, "attachment_origin_mismatch")
 		}

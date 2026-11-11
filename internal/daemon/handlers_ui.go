@@ -724,7 +724,8 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	policy := uiPolicy{Capabilities: api.UICapabilities{
 		Writable: !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
 	}}
-	policy.Capabilities.Attachments, policy.Capabilities.AttachmentLocal, policy.Capabilities.AttachmentInstanceUID, policy.Capabilities.AttachmentRoutes = uiAttachmentRoutes(ctx, cfg)
+	policy.Capabilities.Attachments = cfg.Docbank != nil
+	policy.Capabilities.AttachmentInstanceUID, policy.Capabilities.AttachmentRoutes = uiAttachmentRoutes(ctx, cfg)
 	if cfg.WebSessions != nil {
 		principal, _ := PrincipalFromContext(ctx)
 		policy.Capabilities.Writable = cfg.WebSessions.CanWrite(principal)
@@ -758,16 +759,14 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	return policy
 }
 
-func uiAttachmentRoutes(ctx context.Context, cfg ServerConfig) (bool, bool, string, []api.UIAttachmentRoute) {
-	local := cfg.Docbank != nil
+func uiAttachmentRoutes(ctx context.Context, cfg ServerConfig) (string, []api.UIAttachmentRoute) {
 	if cfg.DB == nil {
-		return local, local, "", nil
+		return "", nil
 	}
 	bindings, err := cfg.DB.ListFederationBindings(ctx)
 	if err != nil {
-		return false, false, cfg.DB.InstanceUID(), nil
+		return cfg.DB.InstanceUID(), nil
 	}
-	available := local
 	var routes []api.UIAttachmentRoute
 	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
 	principal, _ := PrincipalFromContext(ctx)
@@ -786,10 +785,9 @@ func uiAttachmentRoutes(ctx context.Context, cfg ServerConfig) (bool, bool, stri
 			route.Origin = binding.RelayConfig.AuthorityUID
 		}
 		routes = append(routes, route)
-		available = available || route.Read
 	}
 	slices.SortFunc(routes, func(a, b api.UIAttachmentRoute) int { return strings.Compare(a.ProjectUID, b.ProjectUID) })
-	return available, local, cfg.DB.InstanceUID(), routes
+	return cfg.DB.InstanceUID(), routes
 }
 
 func makeUIETag(intent any, cursor int64, policy uiPolicy) (string, error) {

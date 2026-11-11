@@ -144,7 +144,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		var e metadata.Attachment
-		if isDocbankSpoke(binding) {
+		if binding != nil && binding.Role == db.FederationRoleSpoke {
 			project, err := activeProjectByID(ctx, cfg.DB, iss.ProjectID)
 			if err != nil {
 				return nil, err
@@ -203,7 +203,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
-			if isDocbankSpoke(binding) {
+			if binding != nil && binding.Role == db.FederationRoleSpoke {
 				caps, err := docbankOriginCapabilities(ctx, cfg, project, binding)
 				if err != nil {
 					return nil, err
@@ -228,8 +228,6 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			if resp.ContentLength >= 0 {
 				hctx.SetHeader("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 			}
-			hctx.SetHeader("X-Docbank-Blob-Hash", resp.Header.Get("X-Docbank-Blob-Hash"))
-			hctx.SetHeader("X-Docbank-Blob-Size", resp.Header.Get("X-Docbank-Blob-Size"))
 			hctx.SetHeader("X-Content-Type-Options", "nosniff")
 			if _, err := io.Copy(hctx.BodyWriter(), resp.Body); err != nil {
 				panic(http.ErrAbortHandler)

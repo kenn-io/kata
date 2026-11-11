@@ -42,6 +42,7 @@ func registerInstanceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.EmbeddingArtifactProtocolVersion = 1
 		out.Body.WebUIContractVersion = api.UISnapshotContractVersion
 		out.Body.WebUICapabilities = effectiveUIPolicy(ctx, cfg).Capabilities
+		out.Body.WebUICapabilities.AttachmentRoutes = nil
 		out.Body.IssueSubtreeTokens = true
 		out.Body.IssueStatusSync = true
 		out.Body.FederationSigningRequired = cfg.FederationSigningRequired

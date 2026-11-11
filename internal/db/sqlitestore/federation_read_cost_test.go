@@ -76,7 +76,7 @@ func TestReadFederationSupportedPeerSkipsAttachmentScan(t *testing.T) {
 	_, err = d.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
  INSERT INTO issues(uid,short_id,project_id,title,author,metadata)
  SELECT printf('%026d',x),printf('%06d',x),?,'Attachment issue','tester',
- '{"attachment.a":{"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV","name":"file.pdf","media_type":"application/pdf","size":12,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"}}' FROM n`, project.ID)
+ '{"attachment.a":{"name":"file.pdf","media_type":"application/pdf","size":12,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"}}' FROM n`, project.ID)
 	require.NoError(t, err)
 	conn, err := raw.Conn(ctx)
 	require.NoError(t, err)

@@ -7176,8 +7176,6 @@ components:
           type: array
         attachment_instance_uid:
           type: string
-        attachment_local:
-          type: boolean
         attachment_routes:
           items:
             $ref: "#/components/schemas/UIAttachmentRoute"

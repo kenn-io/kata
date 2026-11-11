@@ -6,7 +6,7 @@ const capabilities = {
   updates: 'poll' as const,
   writable: true,
   attachment_instance_uid: 'leaf',
-  attachment_local: false,
+  attachments: false,
   attachment_routes: [{ project_uid: 'spoke', read: true, write: true, origin: 'root' }],
 }
 const file = { name: 'file.pdf', media_type: 'application/pdf', size: 1, docbank_version: 'id' }
@@ -18,14 +18,12 @@ describe('attachment availability', () => {
     expect(attachmentAvailable(capabilities, 'spoke', { ...file, origin: 'root' })).toBe(true)
     expect(attachmentAvailable(capabilities, 'spoke', file)).toBe(false)
     expect(attachmentAvailable(capabilities, 'local', { ...file, origin: 'root' })).toBe(false)
-    expect(attachmentAvailable({ ...capabilities, attachment_local: true }, 'spoke', file)).toBe(
-      true,
-    )
+    expect(attachmentAvailable({ ...capabilities, attachments: true }, 'spoke', file)).toBe(true)
     expect(
       attachmentAvailable(
         {
           ...capabilities,
-          attachment_local: true,
+          attachments: true,
           attachment_routes: [{ project_uid: 'spoke', read: false, write: false }],
         },
         'spoke',
@@ -36,7 +34,7 @@ describe('attachment availability', () => {
       attachmentWritable(
         {
           ...capabilities,
-          attachment_local: true,
+          attachments: true,
           attachment_routes: [{ project_uid: 'spoke', read: false, write: false }],
         },
         'spoke',
