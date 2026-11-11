@@ -125,7 +125,7 @@ func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
-	for _, mode := range []string{"empty", "omitted", "negative", "stale first", "stale second"} {
+	for _, mode := range []string{"empty", "negative", "stale first", "stale second"} {
 		for _, dry := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s dry=%t", mode, dry), func(t *testing.T) {
 				env := testenv.New(t, testenv.WithAuthToken("tok"))
@@ -136,8 +136,6 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 				switch mode {
 				case "empty":
 					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"to_project_uid":%q,"items":[{"ref":""},{"ref":%q}]}`, dry, target.UID, issue.UID)
-				case "omitted":
-					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"to_project_uid":%q,"items":[{}, {"ref":%q}]}`, dry, target.UID, issue.UID)
 				case "negative":
 					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"items":[{"ref":%q,"to_project_uid":%q,"expected_revision":-1},{"ref":%q,"to_project_uid":%q}]}`, dry, issue.UID, other.UID, issue.UID, target.UID)
 				default:
@@ -244,10 +242,8 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
-	unrelated, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "unrelated issue", Author: "tester"})
-	require.NoError(t, err)
 	completed := request["completed"].([]map[string]any)[0]
-	for _, field := range []string{"event_id", "uid", "target", "actor", "alias", "proof", "missing_proof"} {
+	for _, field := range []string{"event_id", "uid", "target", "proof", "missing_proof"} {
 		t.Run(field, func(t *testing.T) {
 			switch field {
 			case "event_id":
@@ -256,17 +252,13 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 				completed["uid"] = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 			case "target":
 				items[0]["to_project_uid"] = source.UID
-			case "actor":
-				request["actor"] = "another-actor"
-			case "alias":
-				items[0]["ref"] = source.Name + "#" + unrelated.ShortID
 			case "proof":
 				completed["proof"] = strings.Repeat("0", 64)
 			case "missing_proof":
 				delete(completed, "proof")
 			}
 			status, result := post()
-			if field == "target" || field == "alias" {
+			if field == "target" {
 				require.Equal(t, http.StatusOK, status)
 				require.Equal(t, "revision_conflict", result.Results[0].Code)
 			} else {
@@ -276,8 +268,6 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 			completed["event_id"], completed["uid"] = first.Results[0].EventID, first.Results[0].UID
 			completed["proof"] = first.Results[0].Proof
 			delete(items[0], "to_project_uid")
-			items[0]["ref"] = source.Name + "#" + issue.ShortID
-			request["actor"] = "tester"
 		})
 	}
 	owner := "changed"

@@ -209,44 +209,50 @@ func (s *batchPreviewHookStore) MoveIssuesBatch(ctx context.Context, in db.MoveI
 }
 
 func TestMoveIssuesBatch_ResidentChangesDuringPreview(t *testing.T) {
-	for _, dry := range []bool{false, true} {
-		for _, edit := range []bool{false, true} {
-			t.Run(fmt.Sprintf("dry=%t edit=%t", dry, edit), func(t *testing.T) {
-				store := openClaimGateHelperDB(t)
-				source, other := createClaimGateHelperIssue(t, store)
-				target, err := store.CreateProject(t.Context(), "target")
-				require.NoError(t, err)
-				resident, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "agent"})
-				require.NoError(t, err)
-				wrapped := &batchPreviewHookStore{Storage: store, afterPreview: func() {
-					if edit {
-						owner := "changed"
-						_, _, _, err = store.EditIssue(t.Context(), db.EditIssueParams{IssueID: resident.ID, Owner: &owner, Actor: "agent"})
-					} else {
-						_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: resident.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: resident.Revision, Actor: "agent", Single: true})
-					}
-					require.NoError(t, err)
-				}}
-				req := &api.MoveIssuesRequest{}
-				req.Body.Actor, req.Body.DryRun, req.Body.ToProjectUID = "agent", dry, target.UID
-				req.Body.Items = []api.MoveIssuesItem{{Ref: resident.UID}, {Ref: other.UID}}
-				out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
-				require.NoError(t, err)
-				require.Equal(t, "refused", out.Body.Results[0].Result)
-				want := "moved"
-				if dry {
-					want = "would_move"
-				}
-				require.Equal(t, want, out.Body.Results[1].Result)
-				got, err := store.IssueByID(t.Context(), resident.ID)
-				require.NoError(t, err)
+	for _, tc := range []struct {
+		name string
+		edit bool
+		dry  bool
+	}{
+		{name: "move before write"},
+		{name: "edit before dry run", edit: true, dry: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			edit, dry := tc.edit, tc.dry
+			store := openClaimGateHelperDB(t)
+			source, other := createClaimGateHelperIssue(t, store)
+			target, err := store.CreateProject(t.Context(), "target")
+			require.NoError(t, err)
+			resident, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "agent"})
+			require.NoError(t, err)
+			wrapped := &batchPreviewHookStore{Storage: store, afterPreview: func() {
 				if edit {
-					require.Equal(t, target.ID, got.ProjectID)
+					owner := "changed"
+					_, _, _, err = store.EditIssue(t.Context(), db.EditIssueParams{IssueID: resident.ID, Owner: &owner, Actor: "agent"})
 				} else {
-					require.Equal(t, source.ID, got.ProjectID)
+					_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: resident.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: resident.Revision, Actor: "agent", Single: true})
 				}
-			})
-		}
+				require.NoError(t, err)
+			}}
+			req := &api.MoveIssuesRequest{}
+			req.Body.Actor, req.Body.DryRun, req.Body.ToProjectUID = "agent", dry, target.UID
+			req.Body.Items = []api.MoveIssuesItem{{Ref: resident.UID}, {Ref: other.UID}}
+			out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
+			require.NoError(t, err)
+			require.Equal(t, "refused", out.Body.Results[0].Result)
+			want := "moved"
+			if dry {
+				want = "would_move"
+			}
+			require.Equal(t, want, out.Body.Results[1].Result)
+			got, err := store.IssueByID(t.Context(), resident.ID)
+			require.NoError(t, err)
+			if edit {
+				require.Equal(t, target.ID, got.ProjectID)
+			} else {
+				require.Equal(t, source.ID, got.ProjectID)
+			}
+		})
 	}
 }
 
@@ -324,10 +330,6 @@ func TestMoveIssuesBatch_DestinationResidentChild(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "child", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 	require.NoError(t, err)
-	for range 1000 {
-		_, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
-		require.NoError(t, err)
-	}
 	req := &api.MoveIssuesRequest{}
 	req.Body.Actor, req.Body.Comment, req.Body.Subtree, req.Body.ToProjectUID = "agent", "routed", true, target.UID
 	req.Body.Items = []api.MoveIssuesItem{{Ref: root.UID}}

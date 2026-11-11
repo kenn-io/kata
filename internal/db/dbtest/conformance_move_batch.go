@@ -255,25 +255,35 @@ func checkMoveBatchLogicalMembership(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	root, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "worker"})
 	require.NoError(t, err)
-	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "already at target", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
-	require.NoError(t, err)
+	// Exceed SQLite's expression-depth bound if no-op descendants become
+	// individual OR terms in import-mapping validation.
+	children := make([]db.Issue, 0, 1001)
+	expectedIDs := []int64{root.ID}
+	for range 1001 {
+		child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "already at target", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+		require.NoError(t, err)
+		children = append(children, child)
+		expectedIDs = append(expectedIDs, child.ID)
+	}
 	in := db.MoveIssuesBatchIn{Comment: "routed", DryRun: true, Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Actor: "worker"}}}
 	preview, err := store.MoveIssuesBatch(ctx, in)
 	require.NoError(t, err)
 	require.NoError(t, preview.Results[0].Err)
-	require.ElementsMatch(t, []int64{root.ID, child.ID}, preview.Results[0].Out.TreeIssueIDs)
+	require.ElementsMatch(t, expectedIDs, preview.Results[0].Out.TreeIssueIDs)
 	require.Len(t, preview.Results[0].Out.Issues, 1)
 	db.FenceIssueMove(&in.Items[0], preview.Results[0].Out)
 	in.DryRun = false
 	out, err := store.MoveIssuesBatch(ctx, in)
 	require.NoError(t, err)
 	require.NoError(t, out.Results[0].Err)
-	got, err := store.IssueByID(ctx, child.ID)
-	require.NoError(t, err)
-	require.Equal(t, child, got)
-	comments, err := store.CommentsByIssue(ctx, child.ID)
-	require.NoError(t, err)
-	require.Empty(t, comments)
+	for _, child := range children {
+		got, err := store.IssueByID(ctx, child.ID)
+		require.NoError(t, err)
+		require.Equal(t, child, got)
+		comments, err := store.CommentsByIssue(ctx, child.ID)
+		require.NoError(t, err)
+		require.Empty(t, comments)
+	}
 
 	return nil
 }

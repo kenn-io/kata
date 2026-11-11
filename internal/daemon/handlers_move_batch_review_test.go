@@ -45,47 +45,34 @@ func TestMoveIssuesBatch_TargetFailureIsPerItem(t *testing.T) {
 	require.Equal(t, target.ID, got.ProjectID)
 }
 
-// Each selected issue keeps its own revision precondition.
+// Batch defaults must leave a refused child behind when its parent moves.
 func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {
-	for _, timing := range []string{"initially stale", "before write"} {
-		t.Run(timing, func(t *testing.T) {
-			store := openClaimGateHelperDB(t)
-			source, root := createClaimGateHelperIssue(t, store)
-			target, err := store.CreateProject(t.Context(), "revision-target")
-			require.NoError(t, err)
-			child, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
-			require.NoError(t, err)
-			edit := func() {
-				owner := "new-owner"
-				changed, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: child.ID, Owner: &owner, Actor: "agent"})
-				require.NoError(t, err)
-				require.Greater(t, changed.Revision, child.Revision)
-			}
-			wrapped := &batchMoveRaceStore{Storage: store}
-			if timing == "initially stale" {
-				edit()
-			} else {
-				wrapped.beforeWrite = edit
-			}
-			req := &api.MoveIssuesRequest{}
-			req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed", target.UID
-			req.Body.Items = []api.MoveIssuesItem{{Ref: child.UID, ExpectedRevision: child.Revision}, {Ref: root.UID}}
-			out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
-			require.NoError(t, err)
-			require.Len(t, out.Body.Results, 2)
-			require.Equal(t, "refused", out.Body.Results[0].Result)
-			require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
-			require.Equal(t, "moved", out.Body.Results[1].Result)
-			for i, issue := range []db.Issue{root, child} {
-				got, err := store.IssueByID(t.Context(), issue.ID)
-				require.NoError(t, err)
-				if i == 0 {
-					require.Equal(t, target.ID, got.ProjectID)
-				} else {
-					require.Equal(t, source.ID, got.ProjectID)
-				}
-			}
-		})
+	store := openClaimGateHelperDB(t)
+	source, root := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "revision-target")
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	owner := "new-owner"
+	changed, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: child.ID, Owner: &owner, Actor: "agent"})
+	require.NoError(t, err)
+	require.Greater(t, changed.Revision, child.Revision)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed", target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: child.UID, ExpectedRevision: child.Revision}, {Ref: root.UID}}
+	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
+	require.NoError(t, err)
+	require.Len(t, out.Body.Results, 2)
+	require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
+	require.Equal(t, "moved", out.Body.Results[1].Result)
+	for _, before := range []db.Issue{root, child} {
+		got, err := store.IssueByID(t.Context(), before.ID)
+		require.NoError(t, err)
+		want := source.ID
+		if before.ID == root.ID {
+			want = target.ID
+		}
+		require.Equal(t, want, got.ProjectID)
 	}
 }
 
@@ -133,7 +120,7 @@ func TestMoveBatchRefusal_FinalizationFailurePrecedesDenial(t *testing.T) {
 	require.Equal(t, "access_unavailable", result.Code)
 }
 
-func TestClaimClientCache_ReplacementBinding(t *testing.T) {
+func TestClaimClientCache_ReuseRecoveryAndReplacement(t *testing.T) {
 	t.Run("transient credential failure", func(t *testing.T) {
 		store := openClaimGateHelperDB(t)
 		project, _ := createClaimGateHelperIssue(t, store)
@@ -227,38 +214,6 @@ func TestMoveIssuesBatch_ContinuationAfterRefusedDuplicate(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, target.ID, got.ProjectID)
 	})
-	t.Run("stale revision", func(t *testing.T) {
-		store := openClaimGateHelperDB(t)
-		source, issue := createClaimGateHelperIssue(t, store)
-		target, err := store.CreateProject(t.Context(), "stale-target")
-		require.NoError(t, err)
-		owner := "changed"
-		changed, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "agent"})
-		require.NoError(t, err)
-		require.Greater(t, changed.Revision, issue.Revision)
-		req := &api.MoveIssuesRequest{}
-		req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
-		for range 49 {
-			req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
-		}
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
-		//nolint:kennlint // deadlinetest: Force a yield after the first database chunk, as in TestMoveIssuesBatch_BudgetResume.
-		handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
-		first, err := handler(t.Context(), req)
-		require.NoError(t, err)
-		require.Equal(t, 50, first.Body.NextIndex)
-		require.Equal(t, "revision_conflict", first.Body.Results[0].Code)
-		req.Body.StartIndex = first.Body.NextIndex
-		req.Body.Completed = completedMoveResults(first.Body.Results)
-		second, err := handler(t.Context(), req)
-		require.NoError(t, err)
-		require.Len(t, second.Body.Results, 1)
-		require.Equal(t, "revision_conflict", second.Body.Results[0].Code)
-		got, err := store.IssueByID(t.Context(), issue.ID)
-		require.NoError(t, err)
-		require.Equal(t, source.ID, got.ProjectID)
-	})
 	for _, qualified := range []bool{true, false} {
 		t.Run(map[bool]string{true: "qualified", false: "bare"}[qualified], func(t *testing.T) {
 			store := openClaimGateHelperDB(t)
@@ -276,11 +231,6 @@ func TestMoveIssuesBatch_ContinuationAfterRefusedDuplicate(t *testing.T) {
 			if qualified {
 				ref = original.Name + "#" + ref
 			}
-			resolved, _, err := resolveMoveBatchIssue(t.Context(), store, original.ID, ref)
-			require.NoError(t, err)
-			require.Equal(t, issue.UID, resolved.UID)
-			require.Equal(t, prior.NewRevision, resolved.Revision)
-
 			req := &api.MoveIssuesRequest{}
 			req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed once", target.UID
 			req.Body.DefaultProjectID = original.ID

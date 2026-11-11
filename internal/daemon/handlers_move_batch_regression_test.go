@@ -56,12 +56,8 @@ func TestMoveBatchHostDenialIsolationHTTP(t *testing.T) {
 	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
 	req.Body.ToProjectUID = target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID}}
-	for range 2 {
-		i, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: denied.ID, Title: "also denied", Author: "agent"})
-		require.NoError(t, err)
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: i.UID})
-	}
+	// A repeated denied issue must not poison the allowed neighbor's scope.
+	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID}, {Ref: first.UID}}
 	allowed, err := store.CreateProject(t.Context(), "allowed-source")
 	require.NoError(t, err)
 	permitted, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: allowed.ID, Title: "permitted", Author: "agent"})
@@ -86,10 +82,10 @@ func TestMoveBatchHostDenialIsolationHTTP(t *testing.T) {
 	var reply api.MoveIssuesResponse
 	require.NoError(t, json.NewDecoder(response.Body).Decode(&reply.Body))
 	require.Equal(t, 1, reply.Body.Summary.Moved, "only the independent allowed issue moves: %+v", reply.Body.Results)
-	for _, row := range reply.Body.Results[:3] {
+	for _, row := range reply.Body.Results[:2] {
 		require.Equal(t, "refused", row.Result)
 	}
-	require.Equal(t, "moved", reply.Body.Results[3].Result)
+	require.Equal(t, "moved", reply.Body.Results[2].Result)
 	got, e := store.IssueByID(t.Context(), first.ID)
 	require.NoError(t, e)
 	require.Equal(t, denied.ID, got.ProjectID)
