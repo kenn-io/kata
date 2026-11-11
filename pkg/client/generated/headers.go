@@ -43,7 +43,23 @@ type ListCronWorkflowsHeaders struct {
 	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
 }
 
+type CreateCronWorkflowHeaders struct {
+	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
+}
+
+type ArchiveCronWorkflowHeaders struct {
+	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
+}
+
 type ShowCronWorkflowHeaders struct {
+	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
+}
+
+type ReplaceCronWorkflowHeaders struct {
+	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
+}
+
+type RestoreCronWorkflowHeaders struct {
 	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
 }
 

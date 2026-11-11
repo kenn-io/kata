@@ -9073,6 +9073,10 @@ paths:
     post:
       operationId: createCronWorkflow
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9111,6 +9115,10 @@ paths:
         - in: path
           name: cron_uid
           required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Event-Features
           schema:
             type: string
       requestBody:
@@ -9166,6 +9174,10 @@ paths:
     put:
       operationId: replaceCronWorkflow
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9209,6 +9221,10 @@ paths:
         - in: path
           name: cron_uid
           required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Event-Features
           schema:
             type: string
       requestBody:
