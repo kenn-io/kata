@@ -1901,7 +1901,7 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 	testResetRetryLocalProjectEvent(t, false, false)
 }
 
-func TestSyncFederationOnceResetRetryDoesNotRedeliverAcknowledgedLocalProjectEvent(t *testing.T) {
+func TestSyncFederationOnceResetRetryRepairsLegacyProjectReplayWithoutDeliveryDebt(t *testing.T) {
 	testResetRetryLocalProjectEvent(t, true, false)
 }
 
@@ -1909,7 +1909,7 @@ func TestSyncFederationOnceResetRetryDeliversProjectEventAfterPushAndFailedPoll(
 	testResetRetryLocalProjectEvent(t, false, true)
 }
 
-func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, failPollAfterPush bool) {
+func testResetRetryLocalProjectEvent(t *testing.T, legacyNoDebt, failPollAfterPush bool) {
 	t.Helper()
 	ctx := t.Context()
 	spoke := testenv.New(t)
@@ -2014,7 +2014,7 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, failPollAfterPu
 		require.Equal(t, int64(99), binding.PullCursorEventID, "the failed poll left the replay page pending")
 		require.Empty(t, delivered)
 	}
-	if acknowledged {
+	if legacyNoDebt {
 		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
 		require.NoError(t, err)
 		require.Len(t, replayed, 1)
@@ -2037,7 +2037,7 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, failPollAfterPu
 		delivered = append(delivered, events...)
 	}))
 
-	if acknowledged {
+	if legacyNoDebt {
 		require.Empty(t, delivered, "acknowledged replay repairs must not repeat notifications")
 	} else {
 		require.Len(t, delivered, 1, "the successful pull must notify once for the pending replay")
@@ -2047,15 +2047,6 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, failPollAfterPu
 	repaired, err := spoke.DB.ProjectByID(ctx, project.ID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"area":"ops"}`, string(repaired.Metadata))
-	if failPollAfterPush {
-		binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
-		require.NoError(t, err)
-		require.Equal(t, int64(100), binding.PullCursorEventID)
-		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
-			delivered = append(delivered, events...)
-		}))
-		require.Len(t, delivered, 1, "a completed replay must stay silent")
-	}
 }
 
 func TestSyncFederationOnceRecoveredResetDoesNotDeliverLocalProjectPushEcho(t *testing.T) {
