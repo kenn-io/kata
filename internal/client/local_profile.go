@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	goruntime "runtime"
-	"strings"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/oklog/ulid/v2"
@@ -110,7 +108,7 @@ func discoverLocalProfileWithVerifier(
 		resolved.UnixSocket = candidate.UnixSocket
 		if verify != nil {
 			if err := verify(ctx, resolved); err != nil {
-				return resolved, false, err
+				return resolved, false, withInstanceFailureEvidence(err, candidate, resolved.LocalProfile.DataDir)
 			}
 		}
 		return resolved, true, nil
@@ -130,7 +128,7 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 	}
 	resp, err := apiClient.InstanceWithResponse(ctx)
 	if resp == nil {
-		return fmt.Errorf("local profile instance is unavailable: %w", ErrLocalDaemonUnreachable)
+		return &instanceTransportError{cause: err}
 	}
 	if resp.StatusCode != 200 {
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
@@ -148,6 +146,21 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 		return &LocalProfileIdentityError{Expected: resolved.LocalProfile.InstanceUID, Observed: resp.JSON200.InstanceUID}
 	}
 	return nil
+}
+
+type instanceTransportError struct{ cause error }
+
+func (e *instanceTransportError) Error() string {
+	return fmt.Sprintf("local profile instance is unavailable: %v", e.cause)
+}
+func (e *instanceTransportError) Unwrap() error        { return e.cause }
+func (e *instanceTransportError) Is(target error) bool { return target == ErrLocalDaemonUnreachable }
+
+func withInstanceFailureEvidence(err error, candidate liveDaemon, dataDir string) error {
+	if _, ok := errors.AsType[*instanceTransportError](err); ok {
+		return unreachableRuntime(candidate.Record, dataDir, err)
+	}
+	return err
 }
 
 func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (result ResolvedDaemon, resultErr error) {
@@ -179,7 +192,7 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (result 
 		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
 		resolved.UnixSocket = found.Daemon.UnixSocket
 		if err := verifyLocalProfileInstance(ctx, resolved); err != nil {
-			return resolved, err
+			return resolved, withInstanceFailureEvidence(err, found.Daemon, resolved.LocalProfile.DataDir)
 		}
 		if found.Outcome == daemonScanCompatible {
 			return resolved, nil
@@ -245,31 +258,28 @@ func EnsureSameLocalProfile(ctx context.Context, resolved ResolvedDaemon) (Resol
 	return EnsureLocalProfileSelection(ctx, DaemonSelection{Resolved: resolved, Profile: resolved.profileConfig})
 }
 
-// scopeProfileUnreachable adds recovery for the selected profile without probing again.
+// scopeProfileUnreachable attaches the selected profile without dropping wrapping.
 func scopeProfileUnreachable(err error, name string) error {
 	unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err)
 	if !ok {
 		return err
 	}
 	scoped := *unreachable
-	scoped.recoverCommand = profileRecoveryCommand(name, goruntime.GOOS)
-	return &scoped
+	scoped.Profile = name
+	return &scopedProfileError{err: err, observed: &scoped}
 }
 
-func profileRecoveryCommand(name, goos string) string {
-	safe := name != "" && (goos == "windows" || !strings.HasPrefix(name, "=")) && strings.IndexFunc(name, func(r rune) bool {
-		if goos == "windows" {
-			return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune("_.-", r)
-		}
-		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune("@%_+=:,./-", r)
-	}) < 0
-	arg := name
-	prefix := ""
-	if !safe && goos == "windows" {
-		arg = "'" + strings.ReplaceAll(name, "'", "''") + "'"
-		prefix = "in PowerShell: "
-	} else if !safe {
-		arg = "'" + strings.ReplaceAll(name, "'", "'\\''") + "'"
+type scopedProfileError struct {
+	err      error
+	observed *LocalDaemonUnreachableError
+}
+
+func (e *scopedProfileError) Error() string { return e.err.Error() }
+func (e *scopedProfileError) Unwrap() error { return e.err }
+func (e *scopedProfileError) As(target any) bool {
+	if p, ok := target.(**LocalDaemonUnreachableError); ok {
+		*p = e.observed
+		return true
 	}
-	return prefix + "kata --daemon " + arg + " daemon recover"
+	return false
 }

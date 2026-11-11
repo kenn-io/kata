@@ -54,6 +54,7 @@ type daemonDiagnosis struct {
 	// RootSigning is present when the live daemon cannot sign for a root project.
 	RootSigning *api.RootSigningHealth `json:"root_signing,omitempty"`
 	NextAction  string                 `json:"next_action"`
+	observed    error
 }
 
 func daemonDiagnoseCmd() *cobra.Command {
@@ -94,7 +95,7 @@ func daemonRecoverCmd() *cobra.Command {
 		if _, err := client.EnsureLocalProfileSelection(cmd.Context(), selection); err != nil {
 			return cliDaemonTargetError(err)
 		}
-		result, _, err = diagnoseDaemonSelection(cmd.Context(), expected, selection)
+		result, _, err = diagnoseDaemonSelection(cmd.Context(), expected, selection, nil)
 		if err != nil {
 			return err
 		}
@@ -121,7 +122,7 @@ func diagnoseDaemon(ctx context.Context, expectedProject string) (daemonDiagnosi
 	if err != nil {
 		return selectionErrorDiagnosis(err), selection, nil
 	}
-	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection)
+	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection, nil)
 	if err != nil {
 		result.State = "selection_error"
 		result.Message = err.Error()
@@ -174,18 +175,13 @@ func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
 }
 
 func diagnoseDaemonSelection(
-	ctx context.Context, expectedProject string, selection client.DaemonSelection,
-) (daemonDiagnosis, client.DaemonSelection, error) {
-	return diagnoseDaemonSelectionObserved(ctx, expectedProject, selection, nil)
-}
-
-func diagnoseDaemonSelectionObserved(
-	ctx context.Context, expectedProject string, selection client.DaemonSelection, observed *client.LocalDaemonUnreachableError,
+	ctx context.Context, expectedProject string, selection client.DaemonSelection, observed error,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
 	ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 	defer cancel()
 	var err error
 	result := selectedDaemonDiagnosis(selection, expectedProject)
+	result.observed = observed
 	result.Project = strings.TrimSpace(flags.Project)
 	if result.Project == "" {
 		start, err := resolveStartPath(flags.Workspace)
@@ -266,18 +262,10 @@ func diagnoseDaemonSelectionObserved(
 			return withDiagnosisAction(result), selection, nil
 		}
 		if !inspectDiagnosisProject(ctx, store, &result) {
-			result = withDiagnosisAction(result)
-			if observed != nil {
-				result.PID, result.Endpoint = observed.PID, observed.Address
-				if result.Message != "" {
-					result.NextAction = result.Message + ". " + result.NextAction
-				}
-				result.NextAction += ". " + observed.Summary() + ". " + observed.EvidenceAdvice() + "."
-			}
-			return result, selection, nil
+			return withDiagnosisAction(result), selection, nil
 		}
 	}
-	result, selection, err = probeDaemonSelectionObserved(ctx, result, selection, observed)
+	result, selection, err = probeDaemonSelection(ctx, result, selection)
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
 		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)
@@ -330,17 +318,11 @@ func inspectDiagnosisProject(ctx context.Context, store db.Storage, result *daem
 func probeDaemonSelection(
 	ctx context.Context, result daemonDiagnosis, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
-	return probeDaemonSelectionObserved(ctx, result, selection, nil)
-}
-
-func probeDaemonSelectionObserved(
-	ctx context.Context, result daemonDiagnosis, selection client.DaemonSelection, observed *client.LocalDaemonUnreachableError,
-) (daemonDiagnosis, client.DaemonSelection, error) {
 	var err error
 	var resolved client.ResolvedDaemon
 	var found bool
-	if observed != nil {
-		err = observed
+	if result.observed != nil {
+		err = result.observed
 	} else if selection.Profile != nil {
 		resolved, found, err = client.DiscoverLocalProfileSelection(ctx, selection)
 	} else if result.Kind == "remote" {
@@ -368,10 +350,8 @@ func probeDaemonSelectionObserved(
 	}
 	if err != nil {
 		result.Message = err.Error()
-		if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-			result.PID, result.Endpoint = unreachable.PID, unreachable.Address
-			result.Message = unreachable.Summary()
-			result.NextAction = fmt.Sprintf("daemon pid %d at %s: %s", unreachable.PID, unreachable.Address, unreachable.RecoveryAdvice())
+		if _, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+			result.observed = err
 		}
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"
@@ -504,9 +484,7 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	case "ready":
 		result.NextAction = "selected daemon is ready"
 	case "local_unreachable":
-		if result.NextAction == "" {
-			result.NextAction = "inspect the selected process and its credentials; do not switch databases"
-		}
+		result.NextAction = "inspect the selected process and its credentials; do not switch databases"
 	case "unhealthy":
 		result.NextAction = "inspect the selected daemon's health report and logs"
 	case "stopped_local_profile":
@@ -531,13 +509,24 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 		result.NextAction = "project UID assertion requires readable local storage; restore it or select its pinned local profile"
 	case "version_mismatch":
 		result.NextAction = "use a binary compatible with the storage schema"
-		if result.Kind == "local_profile" {
+		if result.Kind == "local_profile" && result.observed == nil {
 			result.NextAction += "; recover may replace a compatible profile process"
 		}
 	case "selection_error":
 		result.NextAction = "repair the selected routing configuration; current-home processes are listed separately"
 	default:
 		result.NextAction = "inspect the selected process and its credentials; do not switch databases"
+	}
+	if observed, ok := errors.AsType[*client.LocalDaemonUnreachableError](result.observed); ok {
+		result.PID, result.Endpoint = observed.PID, observed.Address
+		if result.State == "local_unreachable" {
+			result.NextAction = localDaemonGuidance(observed, true)
+		} else {
+			if result.Message != "" {
+				result.NextAction = result.Message + ". " + result.NextAction
+			}
+			result.NextAction += ". " + result.observed.Error() + ". " + localDaemonGuidance(observed, false)
+		}
 	}
 	return result
 }

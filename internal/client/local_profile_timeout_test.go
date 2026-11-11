@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -41,6 +42,50 @@ func TestLocalProfileIdentityProbeHonorsTimeout(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("profile identity probe exceeded configured request timeout")
 	}
+}
+
+// A ping can succeed even though instance identity verification stalls. The
+// discovery failure must retain that transport failure and runtime evidence.
+func TestLocalProfileInstanceTimeoutRetainsEvidence(t *testing.T) {
+	profile, _ := localProfileFixture(t)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"test","pid":%d}`, os.Getpid())
+			return
+		}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"),
+	})
+	require.NoError(t, err)
+	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
+	_, _, err = DiscoverSelected(t.Context(), DiscoverRequest{Name: "work"})
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	var observed *LocalDaemonUnreachableError
+	require.ErrorAs(t, err, &observed)
+	require.Equal(t, os.Getpid(), observed.PID)
+	require.Contains(t, observed.Address, server.Listener.Addr().String())
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	state := patchEnsureHooks(t, "test", "http://fixture")
+	originalStart := startDetachedDaemonForEnsure
+	t.Cleanup(func() { startDetachedDaemonForEnsure = originalStart })
+	starts := 0
+	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
+		starts++
+		return errors.New("unexpected fixture daemon start")
+	}
+	_, err = EnsureResolvedNamed(t.Context(), "work")
+	require.ErrorAs(t, err, &observed)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, "work", observed.Profile)
+	require.Zero(t, state.startCalls)
+	require.Zero(t, state.stopCalls)
+	require.Zero(t, starts)
 }
 
 func TestNamedReadOnlyProfileDiscoveryDefersIdentityProbe(t *testing.T) {

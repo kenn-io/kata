@@ -824,7 +824,7 @@ func TestDaemonRunningProfileDoesNotRequireProject(t *testing.T) {
 }
 
 func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
-	for _, mode := range []string{"diagnose", "transient", "unreadable storage"} {
+	for _, mode := range []string{"diagnose", "transient", "ordinary", "unreadable storage", "missing storage", "wrong identity", "schema mismatch"} {
 		t.Run(mode, func(t *testing.T) {
 			home, _, uid, _ := stoppedProfileCLI(t)
 			var calls atomic.Int32
@@ -833,6 +833,25 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			catalog := filepath.Join(os.Getenv("KATA_HOME"), "config.toml")
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				call := calls.Add(1)
+				if call == 1 && mode == "missing storage" {
+					if err := os.Rename(filepath.Join(home, "kata.db"), filepath.Join(home, "saved.db")); err != nil {
+						t.Errorf("move fixture database: %v", err)
+					}
+				}
+				if call == 1 && (mode == "wrong identity" || mode == "schema mismatch") {
+					store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
+					if err == nil {
+						key, value := "instance_uid", "01HZZZZZZZZZZZZZZZZZZZZZ01"
+						if mode == "schema mismatch" {
+							key, value = "schema_version", fmt.Sprint(db.CurrentSchemaVersion()+1)
+						}
+						_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key=?", value, key)
+						_ = store.Close()
+					}
+					if err != nil {
+						t.Errorf("change fixture metadata: %v", err)
+					}
+				}
 				if call == 1 && transient.Load() {
 					err := os.WriteFile(catalog, []byte(fmt.Sprintf("[[daemon]]\nname = \"work\"\nlocal = true\nhome = %q\ninstance_uid = %q\n", changedHome, uid)), 0600) //nolint:gosec // catalog is under the test-owned home
 					if err != nil {
@@ -863,7 +882,7 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 				require.Equal(t, "local_unreachable", result.State)
 				require.Equal(t, os.Getpid(), result.PID)
 				require.Contains(t, result.Endpoint, server.Listener.Addr().String())
-				require.Contains(t, result.NextAction, "kata --daemon work daemon recover")
+				require.Contains(t, result.NextAction, "kata --daemon=work daemon recover")
 			case "transient":
 				calls.Store(0)
 				transient.Store(true)
@@ -881,7 +900,29 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 				require.Equal(t, home, result.Home)
 				require.Equal(t, uid, result.ExpectedInstanceUID)
 				require.Contains(t, result.Message, "context deadline exceeded")
-				require.Contains(t, result.NextAction, "kata --daemon work daemon recover")
+				require.Contains(t, result.NextAction, "kata --daemon=work daemon recover")
+			case "ordinary":
+				_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "list")
+				var cliErr *cliError
+				require.ErrorAs(t, err, &cliErr)
+				require.Contains(t, cliErr.Message, "context deadline exceeded")
+				require.Contains(t, cliErr.Hint, filepath.Join(ns.DataDir, "daemon.log"))
+				require.Contains(t, cliErr.Hint, "kata --daemon=work daemon recover")
+			case "missing storage", "wrong identity", "schema mismatch":
+				_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", "health")
+				var cliErr *cliError
+				require.ErrorAs(t, err, &cliErr)
+				want := map[string]string{"missing storage": "missing_profile_storage", "wrong identity": "wrong_database", "schema mismatch": "version_mismatch"}[mode]
+				require.Equal(t, want, cliErr.Code)
+				var result daemonDiagnosis
+				require.NoError(t, json.Unmarshal(cliErr.Data, &result))
+				require.Equal(t, os.Getpid(), result.PID)
+				require.Contains(t, result.Endpoint, server.Listener.Addr().String())
+				require.Contains(t, result.NextAction, "context deadline exceeded")
+				require.Contains(t, result.NextAction, filepath.Join(ns.DataDir, "daemon.log"))
+				require.NotContains(t, result.NextAction, "kill")
+				require.NotContains(t, result.NextAction, "recover may replace")
+				require.Equal(t, int32(1), calls.Load())
 			default:
 				store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
 				require.NoError(t, err)

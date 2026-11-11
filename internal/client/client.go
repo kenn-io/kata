@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -74,15 +73,15 @@ var ErrLocalDaemonUnreachable = errors.New("local daemon is unreachable")
 type LocalDaemonUnreachableError struct {
 	PID             int
 	Address         string
-	dataDir         string
-	webOrigin       string
-	verifiedProcess bool
-	recoverCommand  string
+	DataDir         string
+	WebOrigin       string
+	VerifiedProcess bool
+	Profile         string
 	cause           error
 }
 
 func (e *LocalDaemonUnreachableError) Error() string {
-	return e.Summary() + ". " + e.RecoveryAdvice()
+	return e.Summary()
 }
 
 // Summary describes the probe failure without assuming a recovery target.
@@ -97,35 +96,6 @@ func (e *LocalDaemonUnreachableError) Unwrap() error {
 // Is reports whether target is the local daemon unreachable sentinel.
 func (e *LocalDaemonUnreachableError) Is(target error) bool {
 	return target == ErrLocalDaemonUnreachable
-}
-
-// EvidenceAdvice describes evidence that can be collected without stopping the daemon.
-func (e *LocalDaemonUnreachableError) EvidenceAdvice() string {
-	advice := fmt.Sprintf("inspect \"%s\" or the supervisor stderr log", filepath.Join(e.dataDir, "daemon.log"))
-	if validWebOrigin(e.webOrigin) {
-		advice += ". If responsive, capture " + e.webOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access. With configured authentication use the owner's credential"
-	}
-	return advice
-}
-
-// RecoveryAdvice describes manual evidence capture and recovery for the selected daemon.
-func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
-	advice := e.EvidenceAdvice()
-	if e.verifiedProcess && goruntime.GOOS != "windows" {
-		advice += fmt.Sprintf(". As a fallback, kill -QUIT %d dumps goroutines to stderr and terminates the daemon", e.PID)
-	} else if e.verifiedProcess && goruntime.GOOS == "windows" {
-		advice += fmt.Sprintf(". Stop the failed process with taskkill /PID %d /F", e.PID)
-	}
-	if !e.verifiedProcess {
-		advice += ". Verify the process identity before stopping it for recovery"
-	}
-	advice += ". After it exits, relaunch a supervised or foreground daemon through its supervisor or original foreground launch command"
-	if e.recoverCommand != "" {
-		advice += ". For a named profile you normally start with Kata, run " + e.recoverCommand
-	} else {
-		advice += ". For an auto-started current home, run kata daemon restart with the original KATA_HOME and storage environment"
-	}
-	return advice + "."
 }
 
 // liveDaemon is one runtime record that answered /api/v1/ping: the record
@@ -180,14 +150,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 					yield(liveDaemon{}, err)
 					return
 				}
-				if !yield(liveDaemon{}, &LocalDaemonUnreachableError{
-					PID:             r.PID,
-					Address:         address,
-					dataDir:         dataDir,
-					webOrigin:       r.Metadata["web_origin"],
-					verifiedProcess: daemonruntime.RuntimeProcessAlive(r) && kitdaemon.CompareRuntimeProcessIdentity(r) == kitdaemon.ProcessIdentityMatch,
-					cause:           probeErr,
-				}) {
+				if !yield(liveDaemon{}, unreachableRuntime(r, dataDir, probeErr)) {
 					return
 				}
 				continue
@@ -209,6 +172,19 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 				return
 			}
 		}
+	}
+}
+
+func unreachableRuntime(r kitdaemon.RuntimeRecord, dataDir string, cause error) *LocalDaemonUnreachableError {
+	origin := r.Metadata["web_origin"]
+	if !validWebOrigin(origin) {
+		origin = ""
+	}
+	return &LocalDaemonUnreachableError{
+		PID: r.PID, Address: r.Endpoint().ConfigAddress(), DataDir: dataDir,
+		WebOrigin:       origin,
+		VerifiedProcess: daemonruntime.RuntimeProcessAlive(r) && kitdaemon.CompareRuntimeProcessIdentity(r) == kitdaemon.ProcessIdentityMatch,
+		cause:           cause,
 	}
 }
 

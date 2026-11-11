@@ -768,9 +768,9 @@ func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := call()
 			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-			command := "kata --daemon work daemon recover"
-			require.Contains(t, err.Error(), command)
-			require.NotContains(t, err.Error(), "kata daemon restart")
+			var observed *LocalDaemonUnreachableError
+			require.ErrorAs(t, err, &observed)
+			require.Equal(t, "work", observed.Profile)
 		})
 	}
 }
@@ -798,16 +798,14 @@ func TestScopeProfileUnreachablePreservesInstanceFailure(t *testing.T) {
 	require.Contains(t, err.Error(), "local profile instance is unavailable")
 }
 
-func TestProfileRecoveryCommandShells(t *testing.T) {
-	for _, tc := range []struct{ os, name, want string }{
-		{"windows", "work", "kata --daemon work daemon recover"},
-		{"windows", "team's work", "in PowerShell: kata --daemon 'team''s work' daemon recover"},
-		{"linux", "work", "kata --daemon work daemon recover"},
-		{"linux", "=work", "kata --daemon '=work' daemon recover"},
-		{"linux", "team's work", "kata --daemon 'team'\\''s work' daemon recover"},
-	} {
-		t.Run(tc.os+"/"+tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, profileRecoveryCommand(tc.name, tc.os))
-		})
-	}
+func TestScopeProfileUnreachablePreservesWrapper(t *testing.T) {
+	cause := errors.New("transport failed")
+	original := fmt.Errorf("starting profile: %w", &LocalDaemonUnreachableError{PID: 42, cause: cause})
+	err := scopeProfileUnreachable(original, "work")
+	require.ErrorIs(t, err, cause)
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	require.Contains(t, err.Error(), "starting profile")
+	var observed *LocalDaemonUnreachableError
+	require.ErrorAs(t, err, &observed)
+	require.Equal(t, "work", observed.Profile)
 }
