@@ -1824,10 +1824,18 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	})
 	require.NoError(t, err)
 	lastID := int64(100)
+	acknowledged := localEvent.ID
+	var laterPage []api.EventEnvelope
 	if legacy {
-		lastID++
+		_, comment, err := spoke.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: issue.ID, Body: "Comment before reset", Author: "tester",
+		})
+		require.NoError(t, err)
+		acknowledged = comment.ID
+		lastID = 102
+		laterPage = []api.EventEnvelope{eventEnvelopeForSyncTest(localEvent, 101), eventEnvelopeForSyncTest(comment, lastID)}
 	}
-	envelope := eventEnvelopeForSyncTest(localEvent, lastID)
+	envelope := eventEnvelopeForSyncTest(localEvent, 100)
 	binding, err := spoke.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            project.ID,
 		Role:                 db.FederationRoleSpoke,
@@ -1838,7 +1846,7 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		PullCursorEventID:    50,
 		PushEnabled:          true,
 		Actor:                "tester",
-		PushCursorEventID:    localEvent.ID,
+		PushCursorEventID:    acknowledged,
 		Enabled:              true,
 	})
 	require.NoError(t, err)
@@ -1867,11 +1875,7 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 				}
 				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: []api.EventEnvelope{first}, NextAfterID: first.EventID}))
 			case "100":
-				page := api.PollEventsBody{NextAfterID: lastID}
-				if legacy {
-					page.Events = []api.EventEnvelope{envelope}
-				}
-				require.NoError(t, json.NewEncoder(w).Encode(page))
+				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: laterPage, NextAfterID: lastID}))
 			default:
 				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{NextAfterID: lastID}))
 			}
@@ -1952,6 +1956,17 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	mirrored, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err, "retry must project the retained issue creation")
 	assert.Equal(t, "acked before reset", mirrored.Title)
+	if legacy {
+		comments, err := spoke.CommentsByIssue(ctx, mirrored.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1, "rebuilding the issue also projects its comment")
+		var deliveredUIDs []string
+		for _, event := range delivered {
+			deliveredUIDs = append(deliveredUIDs, event.UID)
+		}
+		require.ElementsMatch(t, []string{laterPage[0].EventUID, laterPage[1].EventUID}, deliveredUIDs)
+		return
+	}
 	require.NotEmpty(t, delivered)
 	assert.Equal(t, localEvent.UID, delivered[0].UID)
 	assert.Greater(t, delivered[0].ID, localEvent.ID)
