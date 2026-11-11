@@ -55,8 +55,10 @@ type Issue struct {
 	RecurrenceID        *int64        `json:"recurrence_id,omitempty"`
 	Metadata            issueMetadata `json:"metadata,omitzero"`
 	// Resolved YYYY-MM-DD planning dates from the daemon.
-	ScheduledOnDate string `json:"scheduled_on_date,omitempty"`
-	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
+	ScheduledOnDate  string `json:"scheduled_on_date,omitempty"`
+	DeadlineOnDate   string `json:"deadline_on_date,omitempty"`
+	ScheduledOnToday string `json:"scheduled_on_today,omitempty"`
+	DeadlineOnToday  string `json:"deadline_on_today,omitempty"`
 }
 
 // issueMetadata keeps the two planning-date keys and the timezone of an
@@ -83,7 +85,7 @@ func (i Issue) deadlineOn() string {
 func (i Issue) datesState() datesFormState {
 	scheduled, serr := metadata.ScheduleValueText(i.Metadata.ScheduledOn)
 	deadline, derr := metadata.ScheduleValueText(i.Metadata.DeadlineOn)
-	d := datesFormState{revision: i.Revision, scheduled: scheduled, deadline: deadline}
+	d := datesFormState{revision: i.Revision, scheduled: scheduled, deadline: deadline, scheduledToday: i.ScheduledOnToday, deadlineToday: i.DeadlineOnToday}
 	if err := errors.Join(serr, derr); err != nil {
 		d.unreadable = err.Error()
 	}

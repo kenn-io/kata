@@ -184,4 +184,9 @@ func TestSchedulePayloadFeatures(t *testing.T) {
 			}
 		})
 	}
+	t.Run("unknown member", func(t *testing.T) {
+		payload := `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}}}`
+		_, err := db.PayloadRequiredFeatures("issue.created", payload)
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	})
 }

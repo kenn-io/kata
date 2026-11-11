@@ -530,3 +530,19 @@ func TestReadUISnapshotOrdersLegacyCommentTimestamps(t *testing.T) {
 	}
 	assert.Equal(t, []string{"canonical", "legacy"}, bodies)
 }
+
+func TestUISnapshotSavedCalendarContract(t *testing.T) {
+	dbtest.RunUISnapshotSavedCalendarContract(t, func(t *testing.T) db.Storage { return openUIStore(t) })
+}
+
+func TestFederationScheduleReplay(t *testing.T) {
+	dbtest.RunFederationScheduleReplay(t, func(t *testing.T) db.Storage { return openUIStore(t) })
+}
+
+func TestUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T) {
+	dbtest.RunUISnapshotLimitIgnoresUnseenFutureSchedule(t, func(t *testing.T) db.Storage { return openUIStore(t) })
+}
+
+func TestRecurrenceAttachmentKeepsDeadlineZone(t *testing.T) {
+	dbtest.RunRecurrenceAttachmentKeepsDeadlineZone(t, func(t *testing.T) db.Storage { return openUIStore(t) })
+}

@@ -283,6 +283,21 @@ describe('kata task view builder', () => {
     ])
   })
 
+  test('groups saved schedules against their own current day', () => {
+    const tokyo = {
+      ...issue('issue-tokyo', 'Tokyo', 'project-health'),
+      scheduled_on_date: '2026-01-01',
+      scheduled_on_today: '2026-01-01',
+    }
+    for (const view of ['today', 'scheduled', 'inbox'] as const) {
+      const result = buildKataTaskView({ view, issues: [tokyo], projects, today: '2025-12-31' })
+      expect(result.groups.flatMap((group) => group.issues.map((item) => item.title))).toContain(
+        'Tokyo',
+      )
+      if (view === 'scheduled') expect(result.groups[0]?.id).toBe('today')
+    }
+  })
+
   test('uses the server-projected browser date for timed deadlines', () => {
     const previousBrowserDay = {
       ...issue('issue-1', 'Previous browser deadline', 'project-health', {

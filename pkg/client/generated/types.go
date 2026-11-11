@@ -3599,12 +3599,15 @@ type IssueOut struct {
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
 	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
-	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
-	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
-	ID             int64          `json:"id"`
-	Labels         []string       `json:"labels,omitempty"`
-	Metadata       map[string]any `json:"metadata"`
-	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+	DeadlineOnDate *string `json:"deadline_on_date,omitempty"`
+
+	// DeadlineOnToday Today's date in the deadline field's timezone.
+	DeadlineOnToday *string        `json:"deadline_on_today,omitempty"`
+	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
+	ID              int64          `json:"id"`
+	Labels          []string       `json:"labels,omitempty"`
+	Metadata        map[string]any `json:"metadata"`
+	OccurrenceKey   *string        `json:"occurrence_key,omitempty"`
 
 	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
 	Oversized    *bool      `json:"oversized,omitempty"`
@@ -3619,15 +3622,18 @@ type IssueOut struct {
 	Revision     int64      `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
-	ScheduledOnDate *string               `json:"scheduled_on_date,omitempty"`
-	ShortID         string                `json:"short_id" validate:"required"`
-	SourceActor     *string               `json:"source_actor,omitempty"`
-	Status          string                `json:"status" validate:"required"`
-	Teammate        *string               `json:"teammate,omitempty"`
-	Title           string                `json:"title" validate:"required"`
-	UID             string                `json:"uid" validate:"required"`
-	UpdatedAt       time.Time             `json:"updated_at" validate:"required"`
-	Verification    *IssueOutVerification `json:"verification,omitempty"`
+	ScheduledOnDate *string `json:"scheduled_on_date,omitempty"`
+
+	// ScheduledOnToday Today's date in the scheduled field's timezone.
+	ScheduledOnToday *string               `json:"scheduled_on_today,omitempty"`
+	ShortID          string                `json:"short_id" validate:"required"`
+	SourceActor      *string               `json:"source_actor,omitempty"`
+	Status           string                `json:"status" validate:"required"`
+	Teammate         *string               `json:"teammate,omitempty"`
+	Title            string                `json:"title" validate:"required"`
+	UID              string                `json:"uid" validate:"required"`
+	UpdatedAt        time.Time             `json:"updated_at" validate:"required"`
+	Verification     *IssueOutVerification `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -4258,12 +4264,15 @@ type ListGlobalIssueOut struct {
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
 	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
-	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
-	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
-	ID             int64          `json:"id"`
-	Labels         []string       `json:"labels,omitempty"`
-	Metadata       map[string]any `json:"metadata"`
-	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+	DeadlineOnDate *string `json:"deadline_on_date,omitempty"`
+
+	// DeadlineOnToday Today's date in the deadline field's timezone.
+	DeadlineOnToday *string        `json:"deadline_on_today,omitempty"`
+	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
+	ID              int64          `json:"id"`
+	Labels          []string       `json:"labels,omitempty"`
+	Metadata        map[string]any `json:"metadata"`
+	OccurrenceKey   *string        `json:"occurrence_key,omitempty"`
 
 	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
 	Oversized    *bool      `json:"oversized,omitempty"`
@@ -4279,15 +4288,18 @@ type ListGlobalIssueOut struct {
 	Revision     int64      `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
-	ScheduledOnDate *string                         `json:"scheduled_on_date,omitempty"`
-	ShortID         string                          `json:"short_id" validate:"required"`
-	SourceActor     *string                         `json:"source_actor,omitempty"`
-	Status          string                          `json:"status" validate:"required"`
-	Teammate        *string                         `json:"teammate,omitempty"`
-	Title           string                          `json:"title" validate:"required"`
-	UID             string                          `json:"uid" validate:"required"`
-	UpdatedAt       time.Time                       `json:"updated_at" validate:"required"`
-	Verification    *ListGlobalIssueOutVerification `json:"verification,omitempty"`
+	ScheduledOnDate *string `json:"scheduled_on_date,omitempty"`
+
+	// ScheduledOnToday Today's date in the scheduled field's timezone.
+	ScheduledOnToday *string                         `json:"scheduled_on_today,omitempty"`
+	ShortID          string                          `json:"short_id" validate:"required"`
+	SourceActor      *string                         `json:"source_actor,omitempty"`
+	Status           string                          `json:"status" validate:"required"`
+	Teammate         *string                         `json:"teammate,omitempty"`
+	Title            string                          `json:"title" validate:"required"`
+	UID              string                          `json:"uid" validate:"required"`
+	UpdatedAt        time.Time                       `json:"updated_at" validate:"required"`
+	Verification     *ListGlobalIssueOutVerification `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -5788,12 +5800,15 @@ type ReadyGlobalIssueOut struct {
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
 	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
-	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
-	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
-	ID             int64          `json:"id"`
-	Labels         []string       `json:"labels,omitempty"`
-	Metadata       map[string]any `json:"metadata"`
-	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+	DeadlineOnDate *string `json:"deadline_on_date,omitempty"`
+
+	// DeadlineOnToday Today's date in the deadline field's timezone.
+	DeadlineOnToday *string        `json:"deadline_on_today,omitempty"`
+	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
+	ID              int64          `json:"id"`
+	Labels          []string       `json:"labels,omitempty"`
+	Metadata        map[string]any `json:"metadata"`
+	OccurrenceKey   *string        `json:"occurrence_key,omitempty"`
 
 	// Oversized Set on a compact row too large to send whole; the row then carries only the issue's identity and status.
 	Oversized    *bool      `json:"oversized,omitempty"`
@@ -5809,15 +5824,18 @@ type ReadyGlobalIssueOut struct {
 	Revision     int64      `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
-	ScheduledOnDate *string                          `json:"scheduled_on_date,omitempty"`
-	ShortID         string                           `json:"short_id" validate:"required"`
-	SourceActor     *string                          `json:"source_actor,omitempty"`
-	Status          string                           `json:"status" validate:"required"`
-	Teammate        *string                          `json:"teammate,omitempty"`
-	Title           string                           `json:"title" validate:"required"`
-	UID             string                           `json:"uid" validate:"required"`
-	UpdatedAt       time.Time                        `json:"updated_at" validate:"required"`
-	Verification    *ReadyGlobalIssueOutVerification `json:"verification,omitempty"`
+	ScheduledOnDate *string `json:"scheduled_on_date,omitempty"`
+
+	// ScheduledOnToday Today's date in the scheduled field's timezone.
+	ScheduledOnToday *string                          `json:"scheduled_on_today,omitempty"`
+	ShortID          string                           `json:"short_id" validate:"required"`
+	SourceActor      *string                          `json:"source_actor,omitempty"`
+	Status           string                           `json:"status" validate:"required"`
+	Teammate         *string                          `json:"teammate,omitempty"`
+	Title            string                           `json:"title" validate:"required"`
+	UID              string                           `json:"uid" validate:"required"`
+	UpdatedAt        time.Time                        `json:"updated_at" validate:"required"`
+	Verification     *ReadyGlobalIssueOutVerification `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -6800,29 +6818,41 @@ type ShowIssueOut struct {
 	CreatedAt           time.Time  `json:"created_at" validate:"required"`
 
 	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
-	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
-	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
-	ID             int64          `json:"id"`
-	Labels         []string       `json:"labels" validate:"required"`
-	Metadata       map[string]any `json:"metadata"`
-	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
-	Owner          *string        `json:"owner,omitempty"`
-	Priority       *int64         `json:"priority,omitempty"`
-	ProjectID      int64          `json:"project_id"`
-	ProjectUID     *string        `json:"project_uid,omitempty"`
-	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
-	Revision       int64          `json:"revision"`
+	DeadlineOnDate *string `json:"deadline_on_date,omitempty"`
+
+	// DeadlineOnDisplay Saved deadline instant as a local date and time using its saved timezone rules.
+	DeadlineOnDisplay *string `json:"deadline_on_display,omitempty"`
+
+	// DeadlineOnToday Today's date in the deadline field's timezone.
+	DeadlineOnToday *string        `json:"deadline_on_today,omitempty"`
+	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
+	ID              int64          `json:"id"`
+	Labels          []string       `json:"labels" validate:"required"`
+	Metadata        map[string]any `json:"metadata"`
+	OccurrenceKey   *string        `json:"occurrence_key,omitempty"`
+	Owner           *string        `json:"owner,omitempty"`
+	Priority        *int64         `json:"priority,omitempty"`
+	ProjectID       int64          `json:"project_id"`
+	ProjectUID      *string        `json:"project_uid,omitempty"`
+	RecurrenceID    *int64         `json:"recurrence_id,omitempty"`
+	Revision        int64          `json:"revision"`
 
 	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
-	ScheduledOnDate *string                   `json:"scheduled_on_date,omitempty"`
-	ShortID         string                    `json:"short_id" validate:"required"`
-	SourceActor     *string                   `json:"source_actor,omitempty"`
-	Status          string                    `json:"status" validate:"required"`
-	Teammate        *string                   `json:"teammate,omitempty"`
-	Title           string                    `json:"title" validate:"required"`
-	UID             string                    `json:"uid" validate:"required"`
-	UpdatedAt       time.Time                 `json:"updated_at" validate:"required"`
-	Verification    *ShowIssueOutVerification `json:"verification,omitempty"`
+	ScheduledOnDate *string `json:"scheduled_on_date,omitempty"`
+
+	// ScheduledOnDisplay Saved scheduled instant as a local date and time using its saved timezone rules.
+	ScheduledOnDisplay *string `json:"scheduled_on_display,omitempty"`
+
+	// ScheduledOnToday Today's date in the scheduled field's timezone.
+	ScheduledOnToday *string                   `json:"scheduled_on_today,omitempty"`
+	ShortID          string                    `json:"short_id" validate:"required"`
+	SourceActor      *string                   `json:"source_actor,omitempty"`
+	Status           string                    `json:"status" validate:"required"`
+	Teammate         *string                   `json:"teammate,omitempty"`
+	Title            string                    `json:"title" validate:"required"`
+	UID              string                    `json:"uid" validate:"required"`
+	UpdatedAt        time.Time                 `json:"updated_at" validate:"required"`
+	Verification     *ShowIssueOutVerification `json:"verification,omitempty"`
 }
 
 func (s ShowIssueOut) Validate() error {
@@ -7396,6 +7426,8 @@ type UIIssue struct {
 	ClosedReason        *string              `json:"closed_reason,omitempty"`
 	CreatedAt           time.Time            `json:"created_at" validate:"required"`
 	DeadlineOnDate      *string              `json:"deadline_on_date,omitempty"`
+	DeadlineOnDisplay   *string              `json:"deadline_on_display,omitempty"`
+	DeadlineOnToday     *string              `json:"deadline_on_today,omitempty"`
 	DeletedAt           *time.Time           `json:"deleted_at,omitempty"`
 	ID                  int64                `json:"id"`
 	Labels              []string             `json:"labels" validate:"required"`
@@ -7410,6 +7442,8 @@ type UIIssue struct {
 	RecurrenceID        *int64               `json:"recurrence_id,omitempty"`
 	Revision            int64                `json:"revision"`
 	ScheduledOnDate     *string              `json:"scheduled_on_date,omitempty"`
+	ScheduledOnDisplay  *string              `json:"scheduled_on_display,omitempty"`
+	ScheduledOnToday    *string              `json:"scheduled_on_today,omitempty"`
 	ShortID             string               `json:"short_id" validate:"required"`
 	SourceActor         *string              `json:"source_actor,omitempty"`
 	Status              string               `json:"status" validate:"required"`

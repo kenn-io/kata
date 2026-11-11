@@ -56,7 +56,7 @@ func ComposeRecurrenceIssueMetadata(
 	occurrenceKey string,
 	timezone string,
 ) (jsontext.Value, error) {
-	return composeRecurrenceIssueMetadata(templateMetadata, occurrenceKey, timezone, true)
+	return composeRecurrenceIssueMetadata(templateMetadata, occurrenceKey, timezone, "", true)
 }
 
 // ComposeExistingRecurrenceIssueMetadata updates recurrence fields on an
@@ -64,15 +64,15 @@ func ComposeRecurrenceIssueMetadata(
 func ComposeExistingRecurrenceIssueMetadata(
 	issueMetadata jsontext.Value,
 	occurrenceKey string,
-	timezone string,
+	timezone, defaultZone string,
 ) (jsontext.Value, error) {
-	return composeRecurrenceIssueMetadata(issueMetadata, occurrenceKey, timezone, false)
+	return composeRecurrenceIssueMetadata(issueMetadata, occurrenceKey, timezone, defaultZone, false)
 }
 
 func composeRecurrenceIssueMetadata(
 	metadataValue jsontext.Value,
 	occurrenceKey string,
-	timezone string,
+	timezone, defaultZone string,
 	template bool,
 ) (jsontext.Value, error) {
 	issueTimezone := timezone
@@ -106,26 +106,11 @@ func composeRecurrenceIssueMetadata(
 			return nil, err
 		}
 	}
+	if err := freezeRecurrenceDeadline(object, timezone, defaultZone, local, template); err != nil {
+		return nil, err
+	}
 	object["scheduled_on"] = scheduledOn
 	object["timezone"] = timezoneValue
-	if raw := object["deadline_on"]; len(raw) > 0 && string(raw) != "null" {
-		deadline, err := metadata.ScheduleValueText(raw)
-		if err != nil {
-			return nil, fmt.Errorf("%w: deadline_on: %v", ErrInvalidRecurrence, err)
-		}
-		// Preserve an already frozen inherited deadline.
-		if raw[0] == '"' {
-			object["deadline_on"], err = metadata.NewScheduleValue(deadline, timezone)
-			if err != nil {
-				return nil, fmt.Errorf("%w: deadline_on: %v", ErrInvalidRecurrence, err)
-			}
-			if local {
-				if err := compareLocalSchedule(deadline, object["deadline_on"]); err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
 
 	validate := validateRecurrenceIssueMetadataObject
 	if template {
@@ -139,6 +124,40 @@ func composeRecurrenceIssueMetadata(
 		return nil, fmt.Errorf("marshal recurrence issue metadata: %w", err)
 	}
 	return value, nil
+}
+
+func freezeRecurrenceDeadline(object map[string]jsontext.Value, recurrenceZone, defaultZone string, local, template bool) error {
+	raw := object["deadline_on"]
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	deadline, err := metadata.ScheduleValueText(raw)
+	if err != nil {
+		return fmt.Errorf("%w: deadline_on: %v", ErrInvalidRecurrence, err)
+	}
+	if raw[0] != '"' {
+		return nil
+	}
+	zone := recurrenceZone
+	if !template {
+		zone = defaultZone
+		if len(object["timezone"]) > 0 && string(object["timezone"]) != "null" && string(object["timezone"]) != `""` {
+			if err := json.Unmarshal(object["timezone"], &zone); err != nil {
+				return fmt.Errorf("%w: deadline timezone: %v", ErrInvalidRecurrence, err)
+			}
+		}
+		if zone == "" {
+			zone = "UTC"
+		}
+	}
+	object["deadline_on"], err = metadata.NewScheduleValue(deadline, zone)
+	if err != nil {
+		return fmt.Errorf("%w: deadline_on: %v", ErrInvalidRecurrence, err)
+	}
+	if template && local {
+		return compareLocalSchedule(deadline, object["deadline_on"])
+	}
+	return nil
 }
 
 func compareLocalSchedule(value string, saved jsontext.Value) error {

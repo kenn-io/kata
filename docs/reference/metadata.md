@@ -72,7 +72,7 @@ bundle version. For example, `scheduled_on` is stored as
 `{"value":"2026-11-12T09:00","timezone":"Europe/Paris","tzdata_version":"sha256:..."}`.
 The `value` retains the supplied text; UTC instants retain their selected zone
 for calendar dates while keeping their exact instant. Older stored
-strings remain readable using the issue and daemon defaults. Older published bundles remain available when new rules are added. An unknown bundle
+strings remain readable using the issue and daemon defaults; they keep their original form until that field is saved. Older published bundles remain available when new rules are added. An unknown bundle
 version makes the date unreadable and the planning-date endpoint returns HTTP
 422. Changing or removing an issue timezone rebinds existing dates unless the
 same write supplies a saved date object with its own rules. Echoing an already
@@ -113,10 +113,7 @@ local date-time resolves with its saved zone and rules. Legacy strings use the
 issue `timezone`, then the daemon's top-level `timezone`, then UTC, as above. For a recurring occurrence without `timezone`
 metadata, `scheduled_on` resolves in the recurrence's timezone before the
 daemon's; `deadline_on` does not. A saved RFC 3339 `Z` instant uses its saved zone for display.
-The web UI uses each saved value's zone. Legacy timed strings in its snapshot
-use the viewer's zone. For
-an unreadable stored value the snapshot returns an error. A row with a legacy
-metadata key and no date means the value could not be read.
+The web UI uses each saved value's zone to display the date and decide whether it is due today. Legacy timed strings in its snapshot use the viewer's zone. Unreadable legacy values are omitted; unsupported saved rules return an error.
 Requests carry no zone. A daemon older than API `0.36.0` omits both fields, so
 a client should treat a missing field as unsupported rather than as an
 absent date.

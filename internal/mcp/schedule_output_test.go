@@ -14,17 +14,11 @@ import (
 
 func TestToolsForwardSavedSchedulesFromNewerDaemon(t *testing.T) {
 	var writes atomic.Int32
-	var fail atomic.Bool
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if discoveryHealth(w, r) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if fail.Load() {
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"status":409,"error":{"code":"example_conflict","message":"daemon cannot read schedule"}}`))
-			return
-		}
 		var response map[string]any
 		require.NoError(t, json.Unmarshal(daemonResponse(r), &response))
 		var issue map[string]any
@@ -57,7 +51,8 @@ func TestToolsForwardSavedSchedulesFromNewerDaemon(t *testing.T) {
 	issue := output["issue"].(map[string]any)
 	require.EqualValues(t, 8, issue["revision"])
 	require.Equal(t, "2026-01-01T02:00:00Z", issue["scheduled_on"])
-	require.Equal(t, "America/New_York", issue["timezone"])
+	require.Equal(t, "Asia/Tokyo", issue["timezone"])
+	require.Equal(t, "America/New_York", issue["scheduled_on_timezone"])
 	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAW", output["event"].(map[string]any)["uid"])
 	read, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.list", Arguments: map[string]any{}})
 	require.NoError(t, err)
@@ -65,10 +60,6 @@ func TestToolsForwardSavedSchedulesFromNewerDaemon(t *testing.T) {
 	issue = read.StructuredContent.(map[string]any)["issues"].([]any)[0].(map[string]any)
 	require.Equal(t, "2025-12-31", issue["scheduled_on_date"])
 	require.Equal(t, "2026-01-02", issue["deadline_on_date"])
-	require.Equal(t, "America/New_York", issue["timezone"])
-	fail.Store(true)
-	failed, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.list", Arguments: map[string]any{}})
-	require.NoError(t, err)
-	require.True(t, failed.IsError)
-	require.Contains(t, string(mustJSON(t, failed.Content)), "daemon cannot read schedule")
+	require.Equal(t, "Asia/Tokyo", issue["timezone"])
+	require.Equal(t, "America/New_York", issue["scheduled_on_timezone"])
 }

@@ -21,6 +21,15 @@ func TestScheduleBundleDigest(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestOpaqueRestoredDateDoesNotPretendToBeFutureSchedule(t *testing.T) {
+	_, _, err := CalendarDate(`{"scheduled_on":{"note":"opaque"},"deadline_on":"2026-01-01"}`, "scheduled_on", nil, "UTC")
+	require.Error(t, err)
+	require.False(t, IsUnsupportedSchedule(err))
+	_, _, err = CalendarDate(`{"scheduled_on":{"value":"2026-01-01","timezone":"UTC","tzdata_version":"future","new_field":true}}`, "scheduled_on", nil, "UTC")
+	require.Error(t, err)
+	require.True(t, IsUnsupportedSchedule(err))
+}
+
 func TestSavedScheduleIgnoresHostZoneinfo(t *testing.T) {
 	if os.Getenv("KATA_SCHEDULE_ZONE_CHILD") == "1" {
 		raw, err := NewScheduleValue("2026-11-12T09:00", "Europe/Paris")

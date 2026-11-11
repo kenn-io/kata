@@ -219,7 +219,7 @@ func (s *Store) CreateRecurrenceForIssue(
 			return fmt.Errorf("walk after initial occurrence: %w", err)
 		}
 		updatedAt := mutationTimestamp()
-		attached, err := s.attachIssueToRecurrenceTx(ctx, tx, project, issue, recurrenceID, create, *firstOccurrence, updatedAt)
+		attached, err := s.attachIssueToRecurrenceTx(ctx, tx, project, issue, recurrenceID, create, *firstOccurrence, updatedAt, input.DefaultTimezone)
 		if err != nil {
 			return err
 		}
@@ -259,9 +259,9 @@ last_materialized_uid=$2, revision=revision+1, updated_at=$3 WHERE id=$4`,
 // issue.metadata_updated event that carries its saved schedule to replay.
 func (s *Store) attachIssueToRecurrenceTx(
 	ctx context.Context, tx *sql.Tx, project db.Project, issue db.Issue, recurrenceID int64,
-	create db.CreateRecurrenceIn, key, updatedAt string,
+	create db.CreateRecurrenceIn, key, updatedAt, defaultZone string,
 ) ([]db.Event, error) {
-	updated, err := db.ComposeExistingRecurrenceIssueMetadata(jsontext.Value(issue.Metadata), key, create.Timezone)
+	updated, err := db.ComposeExistingRecurrenceIssueMetadata(jsontext.Value(issue.Metadata), key, create.Timezone, defaultZone)
 	if err != nil {
 		return nil, fmt.Errorf("compose initial recurrence issue metadata: %w", err)
 	}

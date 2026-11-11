@@ -14,6 +14,8 @@ export interface UIIssue {
   closed_reason?: string
   created_at: string
   deadline_on_date?: string
+  deadline_on_display?: string
+  deadline_on_today?: string
   deleted_at?: string
   id: number
   labels: string[]
@@ -28,6 +30,8 @@ export interface UIIssue {
   recurrence_id?: number
   revision: number
   scheduled_on_date?: string
+  scheduled_on_display?: string
+  scheduled_on_today?: string
   short_id: string
   source_actor?: string
   status: string

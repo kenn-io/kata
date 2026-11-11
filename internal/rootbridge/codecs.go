@@ -225,15 +225,15 @@ func kataScheduleFieldValueFromMetadata(
 	if !ok || string(raw) == "null" {
 		return nullFieldValue(), nil
 	}
-	if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
-		return connector.FieldValue{}, fmt.Errorf("validate %s: %w", key, err)
-	}
 	saved, err := metadata.DecodeSavedSchedule(raw)
 	if err != nil {
 		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", key, err)
 	}
 	if saved != nil {
 		return kataScheduleFieldValue(saved.Value, map[string]jsontext.Value{"timezone": mustJSON(saved.Timezone)}, defaultTimezone)
+	}
+	if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+		return connector.FieldValue{}, fmt.Errorf("validate %s: %w", key, err)
 	}
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {

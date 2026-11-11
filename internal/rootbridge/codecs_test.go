@@ -90,6 +90,35 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 	}
 }
 
+func TestScheduleCodecRecurrenceZonePrecedence(t *testing.T) {
+	saved, err := metadata.NewScheduleValue("2026-08-20", "Europe/Paris")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, field, raw, want string
+		value                  connector.FieldValue
+	}{
+		{"legacy", "scheduled_on", `{"scheduled_on":"2026-08-20"}`, "America/New_York", date("2026-08-21")},
+		{"saved", "scheduled_on", `{"scheduled_on":` + string(saved) + `}`, "Europe/Paris", date("2026-08-21")},
+		{"issue zone", "scheduled_on", `{"timezone":"Europe/Paris"}`, "Europe/Paris", date("2026-08-21")},
+		{"deadline", "deadline_on", `{}`, "UTC", date("2026-08-21")},
+		{"connector zone", "scheduled_on", `{}`, "Asia/Tokyo", connector.FieldValue{Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "Asia/Tokyo"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			codec := scheduleCodec{key: tc.field, defaultTimezone: "UTC"}
+			recurrenceZone := ""
+			if tc.field == "scheduled_on" {
+				recurrenceZone = "America/New_York"
+			}
+			patch, err := codec.kataPatch(db.Issue{Metadata: db.JSONBlob(tc.raw)}, tc.value, recurrenceZone)
+			require.NoError(t, err)
+			got, err := metadata.DecodeSavedSchedule(patch[tc.field])
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, got.Timezone)
+		})
+	}
+}
+
 func TestScheduleCodecUpdatesAliasBackedSchedule(t *testing.T) {
 	original, err := metadata.NewScheduleValue("2026-08-20T09:30", "US/Eastern")
 	require.NoError(t, err)

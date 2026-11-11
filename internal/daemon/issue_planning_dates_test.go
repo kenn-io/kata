@@ -151,10 +151,16 @@ func TestSavedInstantDatesUseSelectedZoneAcrossViews(t *testing.T) {
 	status, raw = cronHTTP(t, env, http.MethodGet, path, nil)
 	require.Equal(t, 200, status, string(raw))
 	var show struct {
-		Issue rowDates `json:"issue"`
+		Issue struct {
+			rowDates
+			ScheduledOnDisplay string `json:"scheduled_on_display"`
+			DeadlineOnDisplay  string `json:"deadline_on_display"`
+		} `json:"issue"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &show))
-	check(show.Issue)
+	check(show.Issue.rowDates)
+	require.Equal(t, "2025-12-31T21:00:00", show.Issue.ScheduledOnDisplay)
+	require.Equal(t, "2025-12-31T21:00:00", show.Issue.DeadlineOnDisplay)
 	status, raw = cronHTTP(t, env, http.MethodGet, projectPath(project.ID)+"/issues", nil)
 	require.Equal(t, 200, status, string(raw))
 	var list struct {
@@ -182,12 +188,18 @@ func TestSavedInstantDatesUseSelectedZoneAcrossViews(t *testing.T) {
 	require.Equal(t, 200, status, string(raw))
 	var snapshot struct {
 		Selected struct {
-			Issue rowDates `json:"issue"`
+			Issue struct {
+				rowDates
+				ScheduledOnDisplay string `json:"scheduled_on_display"`
+				DeadlineOnDisplay  string `json:"deadline_on_display"`
+			} `json:"issue"`
 		} `json:"selected"`
 		Collection []rowDates `json:"collection"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &snapshot))
-	check(snapshot.Selected.Issue)
+	check(snapshot.Selected.Issue.rowDates)
+	require.Equal(t, "2025-12-31T21:00:00", snapshot.Selected.Issue.ScheduledOnDisplay)
+	require.Equal(t, "2025-12-31T21:00:00", snapshot.Selected.Issue.DeadlineOnDisplay)
 	require.Len(t, snapshot.Collection, 1)
 	check(snapshot.Collection[0])
 }

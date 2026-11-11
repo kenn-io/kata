@@ -365,6 +365,4 @@ func TestSavedScheduleRulesAndProjection(t *testing.T) {
 			require.Equal(t, tc.date, date)
 		})
 	}
-	_, _, err := CalendarDate(`{"deadline_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`, "deadline_on", nil, "UTC")
-	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }

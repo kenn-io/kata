@@ -31,9 +31,11 @@ type datesAPI interface {
 // read and the raw dates it was opened with (a field left alone is never written,
 // so a stored time keeps its time).
 type datesFormState struct {
-	revision  int64
-	scheduled string
-	deadline  string
+	revision       int64
+	scheduled      string
+	deadline       string
+	scheduledToday string
+	deadlineToday  string
 	// unreadable is why a stored date cannot be edited; a save is refused.
 	unreadable string
 }
@@ -93,15 +95,20 @@ func datesInputFromForm(s inputState, now time.Time, actor string) (DatesInput, 
 		label  string
 		key    string
 		opened string
+		today  string
 	}{
-		{fieldScheduled, "Scheduled", api.MetadataKeyScheduledOn, s.dates.scheduled},
-		{fieldDeadline, "Deadline", api.MetadataKeyDeadlineOn, s.dates.deadline},
+		{fieldScheduled, "Scheduled", api.MetadataKeyScheduledOn, s.dates.scheduled, s.dates.scheduledToday},
+		{fieldDeadline, "Deadline", api.MetadataKeyDeadlineOn, s.dates.deadline, s.dates.deadlineToday},
 	} {
 		text := s.fieldValue(f.id)
 		if text == f.opened {
 			continue
 		}
-		value, err := resolveDateInput(text, now)
+		fieldNow := now
+		if day, err := time.Parse(time.DateOnly, f.today); err == nil {
+			fieldNow = day
+		}
+		value, err := resolveDateInput(text, fieldNow)
 		if err != nil {
 			return DatesInput{}, errors.New(f.label + " " + err.Error() + ".")
 		}
@@ -220,6 +227,7 @@ func (issue Issue) withCurrentDates(current Issue) Issue {
 	issue.Metadata, issue.Revision = current.Metadata, current.Revision
 	issue.Status, issue.ClosedAt = current.Status, current.ClosedAt
 	issue.ScheduledOnDate, issue.DeadlineOnDate = current.ScheduledOnDate, current.DeadlineOnDate
+	issue.ScheduledOnToday, issue.DeadlineOnToday = current.ScheduledOnToday, current.DeadlineOnToday
 	return issue
 }
 
@@ -229,7 +237,15 @@ func renderDatesForm(s inputState, innerW int, now time.Time) string {
 	parts := []string{titleStyle.Render(s.title)}
 	for idx := range s.fields {
 		parts = append(parts, renderNewIssueField(s, idx, innerW))
-		parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), now))))
+		fieldNow := now
+		today := s.dates.scheduledToday
+		if s.fields[idx].id == fieldDeadline {
+			today = s.dates.deadlineToday
+		}
+		if day, err := time.Parse(time.DateOnly, today); err == nil {
+			fieldNow = day
+		}
+		parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), fieldNow))))
 	}
 	if status := renderFormStatus(s); status != "" {
 		parts = append(parts, status)

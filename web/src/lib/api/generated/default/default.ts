@@ -7149,7 +7149,7 @@ export const getReadUISnapshotUrl = (params?: ReadUISnapshotParams) => {
 }
 
 /**
- * Returns 304 without projection reads when If-None-Match matches the current durable cursor, normalized intent, and effective capabilities.
+ * Returns 304 when the snapshot and its calendar projections are unchanged.
  * @summary Read a coherent browser snapshot
  */
 export const readUISnapshot = async (

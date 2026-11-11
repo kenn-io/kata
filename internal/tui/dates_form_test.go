@@ -138,19 +138,26 @@ func (h *datesHarness) undo() {
 }
 
 func TestDatesFormWritesRelativeAndLocalTimeForms(t *testing.T) {
-	for _, tt := range []struct{ name, typed, want string }{
-		{"local minute", "2026-11-15T09:00", "2026-11-15T09:00"},
-		{"weeks", "+2w", "2026-11-16"},
+	for _, tt := range []struct {
+		name, typed string
+		want        func(string) string
+	}{
+		{"local minute", "2026-11-15T09:00", func(string) string { return "2026-11-15T09:00" }},
+		{"weeks", "+2w", func(today string) string {
+			day, _ := time.Parse(time.DateOnly, today)
+			return day.AddDate(0, 0, 14).Format(time.DateOnly)
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newDatesHarness(t, nil, viewDetail)
 			before := h.revision()
 			h.openForm()
+			want := tt.want(h.m.input.dates.scheduledToday)
 			h.fill(tt.typed, "")
 			h.save()
 
 			assert.Equal(t, inputNone, h.m.input.kind, "a saved form closes")
-			assert.Equal(t, map[string]string{"scheduled_on": tt.want}, h.stored())
+			assert.Equal(t, map[string]string{"scheduled_on": want}, h.stored())
 			assert.Equal(t, before+1, h.revision())
 		})
 	}
@@ -169,10 +176,13 @@ func TestDatesFormWritesOnlyChangedKeysInOneRequest(t *testing.T) {
 	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": "2026-11-20"}, viewList)
 	before := h.revision()
 	h.openForm()
+	day, err := time.Parse(time.DateOnly, h.m.input.dates.deadlineToday)
+	require.NoError(t, err)
+	deadline := day.AddDate(0, 0, 7).Format(time.DateOnly)
 	h.fill("2026-09-01T09:00", "+1w")
 	h.save()
 
-	assert.Equal(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": "2026-11-09"}, h.stored(),
+	assert.Equal(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": deadline}, h.stored(),
 		"the untouched Scheduled keeps its time")
 	assert.Equal(t, before+1, h.revision(), "both keys travel in one patch")
 }
@@ -377,9 +387,11 @@ func TestDatesFormConflictRemovesRemotelyClosedIssueFromToday(t *testing.T) {
 func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
 	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, viewDetail)
 	h.openForm()
+	day, err := time.Parse(time.DateOnly, h.m.input.dates.scheduledToday)
+	require.NoError(t, err)
 	h.fill("tomorrow", "")
 	h.save()
-	require.Equal(t, map[string]string{"scheduled_on": "2026-11-03"}, h.stored())
+	require.Equal(t, map[string]string{"scheduled_on": day.AddDate(0, 0, 1).Format(time.DateOnly)}, h.stored())
 	changed := h.revision()
 
 	h.undo()
@@ -535,4 +547,15 @@ func TestDetailStripReportsUnknownScheduleRules(t *testing.T) {
 	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-01-01","timezone":"UTC","tzdata_version":"unknown"}`)}}
 	got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
 	assert.Contains(t, got, "unsupported schedule tzdata version")
+}
+
+func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
+	issue := Issue{ScheduledOnToday: "2026-01-01", DeadlineOnToday: "2025-12-31"}
+	form := newDatesForm(formTarget{}, issue)
+	form.field(fieldScheduled).setValue("tomorrow")
+	form.field(fieldDeadline).setValue("tomorrow")
+	input, err := datesInputFromForm(form, time.Date(2025, 12, 31, 23, 0, 0, 0, time.UTC), "alice")
+	require.NoError(t, err)
+	require.Equal(t, "2026-01-02", *input.Set["scheduled_on"])
+	require.Equal(t, "2026-01-01", *input.Set["deadline_on"])
 }

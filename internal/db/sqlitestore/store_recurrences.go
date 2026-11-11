@@ -260,7 +260,7 @@ func (d *Store) attachIssueToRecurrenceTx(
 	ctx context.Context, tx *sql.Tx, in db.CreateRecurrenceForIssueIn, rec db.Recurrence,
 	key, projectName, metadataJSON string, revision int64, updatedAt string,
 ) ([]db.Event, error) {
-	updated, err := db.ComposeExistingRecurrenceIssueMetadata(jsontext.Value(metadataJSON), key, rec.Timezone)
+	updated, err := db.ComposeExistingRecurrenceIssueMetadata(jsontext.Value(metadataJSON), key, rec.Timezone, in.DefaultTimezone)
 	if err != nil {
 		return nil, fmt.Errorf("compose initial recurrence issue metadata: %w", err)
 	}

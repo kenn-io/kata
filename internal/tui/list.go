@@ -1142,11 +1142,16 @@ func matchesDate(iss Issue, f ListFilter) bool {
 		return false
 	}
 	mode, today := f.Date, f.Day
-	for _, d := range [...]string{iss.ScheduledOnDate, iss.DeadlineOnDate} {
+	for _, entry := range [...]struct{ date, today string }{{iss.ScheduledOnDate, iss.ScheduledOnToday}, {iss.DeadlineOnDate, iss.DeadlineOnToday}} {
+		d := entry.date
 		if d == "" {
 			continue
 		}
-		if (mode == dateToday && d <= today) || (mode == dateScheduled && d > today) {
+		day := entry.today
+		if day == "" {
+			day = today
+		}
+		if (mode == dateToday && d <= day) || (mode == dateScheduled && d > day) {
 			return true
 		}
 	}

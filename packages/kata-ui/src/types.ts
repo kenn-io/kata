@@ -56,6 +56,8 @@ export interface KataIssueWire extends KataCreationAttributionWire {
   labels?: string[] | null | undefined
   scheduled_on_date?: string | undefined
   deadline_on_date?: string | undefined
+  scheduled_on_display?: string | undefined
+  deadline_on_display?: string | undefined
   updated_at?: string | undefined
 }
 

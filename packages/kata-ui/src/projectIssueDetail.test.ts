@@ -18,6 +18,39 @@ function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
 }
 
 describe('projectIssueDetail', () => {
+  it.each([
+    ['legacy', '2026-11-12T09:30', '2026-11-12T09:30'],
+    ['saved', { value: '2026-11-12T09:30', timezone: 'America/New_York', tzdata_version: tzdataVersion }, '2026-11-12T09:30'],
+    ['legacy instant', '2026-01-01T02:00:00Z', '2026-01-01T02:00:00Z'],
+    ['saved instant', { value: '2026-01-01T02:00:00Z', timezone: 'America/New_York', tzdata_version: tzdataVersion }, '2026-01-01T02:00:00Z'],
+  ])('retains the time in %s schedules', (_name, value, expected) => {
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Scheduled',
+        status: 'open',
+        scheduled_on_date: '2026-11-12',
+        deadline_on_date: '2026-11-12',
+        metadata: { scheduled_on: value, deadline_on: value },
+      },
+    })
+    expect(detail.issue.scheduledOn).toBe(expected)
+    expect(detail.issue.deadlineOn).toBe(expected)
+  })
+  it('prefers projected dates for schedule formats it cannot interpret', () => {
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Scheduled',
+        status: 'open',
+        scheduled_on_date: '2026-11-12',
+        deadline_on_date: '2026-11-13',
+        metadata: { scheduled_on: 'future-format', deadline_on: { value: 'future-format' } },
+      },
+    } as unknown as KataIssueDetailWire)
+    expect(detail.issue.scheduledOn).toBe('2026-11-12')
+    expect(detail.issue.deadlineOn).toBe('2026-11-13')
+  })
   it('shows saved schedules on their resolved calendar dates', () => {
     const saved = {
       value: '2026-01-01T02:00:00Z',
@@ -31,11 +64,13 @@ describe('projectIssueDetail', () => {
         status: 'open',
         scheduled_on_date: '2025-12-31',
         deadline_on_date: '2025-12-31',
+        scheduled_on_display: '2025-12-31T21:00:00',
+        deadline_on_display: '2025-12-31T21:00:00',
         metadata: { scheduled_on: saved, deadline_on: saved },
       },
     })
-    expect(detail.issue.scheduledOn).toBe('2025-12-31')
-    expect(detail.issue.deadlineOn).toBe('2025-12-31')
+    expect(detail.issue.scheduledOn).toBe('2025-12-31T21:00:00')
+    expect(detail.issue.deadlineOn).toBe('2025-12-31T21:00:00')
   })
   it.each([
     ['non-object entry', 'junk'],

@@ -71,14 +71,21 @@ function validAttachment(value: unknown): value is KataAttachment {
   )
 }
 
+function scheduleDisplay(raw: unknown, projectedDate: string | undefined): string | undefined {
+  const value = typeof raw === 'string' ? raw : (raw as { value?: unknown } | undefined)?.value
+  if (typeof value === 'string' && /^\d{4}-\d\d-\d\dT.*Z$/.test(value)) return value
+  if (typeof value === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/.test(value)) return value
+  return projectedDate ?? (typeof value === 'string' ? value : undefined)
+}
+
 export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailModel {
   const { issue } = wire
   const scheduled =
-    issue.scheduled_on_date ??
-    (typeof issue.metadata?.scheduled_on === 'string' ? issue.metadata.scheduled_on : undefined)
+    issue.scheduled_on_display ??
+    scheduleDisplay(issue.metadata?.scheduled_on, issue.scheduled_on_date)
   const deadline =
-    issue.deadline_on_date ??
-    (typeof issue.metadata?.deadline_on === 'string' ? issue.metadata.deadline_on : undefined)
+    issue.deadline_on_display ??
+    scheduleDisplay(issue.metadata?.deadline_on, issue.deadline_on_date)
   const labels = issue.labels ?? wire.labels?.map((label) => label.label) ?? []
   const parent = wire.parent == null ? undefined : projectReference(wire.parent)
   const children = (wire.children ?? []).map(projectReference)

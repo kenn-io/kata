@@ -694,6 +694,8 @@ type CreateRecurrenceIn struct {
 // issue as its first occurrence in the same transaction.
 type CreateRecurrenceForIssueIn struct {
 	IssueID int64
+	// DefaultTimezone resolves an existing deadline without an issue zone.
+	DefaultTimezone string
 	// IfMatchRev, when set, is the issue revision the caller read; the
 	// attachment fails with RevisionConflictError if the issue moved on.
 	IfMatchRev *int64
