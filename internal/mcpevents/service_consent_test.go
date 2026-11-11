@@ -185,7 +185,9 @@ func TestEndpointConsent(t *testing.T) {
 		t.Run("policy refusals do not exhaust challenge budgets", func(t *testing.T) {
 			h := newHarness(t, open(t))
 			var allowed atomic.Bool
+			var lookups atomic.Int64
 			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				lookups.Add(1)
 				if allowed.Load() {
 					return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
 				}
@@ -199,9 +201,11 @@ func TestEndpointConsent(t *testing.T) {
 			}
 			assert.Zero(t, h.recv.challenges.Load())
 			allowed.Store(true)
+			before := lookups.Load()
 			_, err := h.subscribe(principalA, h.request("example-user"))
 			require.NoError(t, err)
 			assert.EqualValues(t, 1, h.recv.challenges.Load())
+			assert.EqualValues(t, before+1, lookups.Load(), "fresh verification resolves once, after admission")
 		})
 		t.Run("a failed challenge leaves existing rows untouched", func(t *testing.T) {
 			h := newHarness(t, open(t))
@@ -270,7 +274,6 @@ func TestEndpointConsent(t *testing.T) {
 				require.Error(t, err, "iteration %d", i)
 				_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "tls_error")
 			}
-			assert.EqualValues(t, 10, lookups.Load(), "fresh verification resolves once, after admission")
 			req := h.request("example-user")
 			req.Delivery.URL = "https://fresh.example.net/events"
 			_, err := h.subscribe(principalA, req)

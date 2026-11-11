@@ -446,7 +446,7 @@ func TestDeliveryPolicyRefusalRestartsFailureAging(t *testing.T) {
 					h.clock.Advance(10 * time.Minute)
 				}
 				row := h.row(result.ID)
-				since := h.clock.Now()
+				since := h.clock.Now().Add(-8 * 24 * time.Hour)
 				row.FailedSince, row.FailedAttempts = &since, 19
 				require.NoError(t, h.store.ImportMCPEventSubscription(t.Context(), row))
 				blocked.Store(true)

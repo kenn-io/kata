@@ -185,8 +185,7 @@ including in delivery's `lastError`. A syntactically valid private callback
 without a grant returns `CallbackEndpointError` (`-32027`) with
 `destination_not_allowed`. Policy refusals do
 not spend the failed-challenge budget. A delivery refusal clears the prior
-receiver-failure run, so the next receiver failure starts a new run. Deliveries
-still retry and eventually dead-letter the pending ping. Requests carry no
+receiver-failure run, so the next receiver failure starts a new run. Requests carry no
 daemon bearer, browser credentials, or environment proxy. They use TLS 1.2 or newer and time out after
 10 seconds.
 

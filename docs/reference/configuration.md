@@ -1101,8 +1101,9 @@ its private access: subsequent delivery attempts and subscription refreshes
 that resolve to private addresses fail with `destination_not_allowed`.
 Unsubscribe remains available. Cached public consent can still be refreshed
 during a DNS outage; delivery independently checks DNS when it connects.
-Invalid policy disables Events with `events_start_failed` while the daemon keeps
-serving other requests. The diagnostic identifies the zero-based entry index and
+An invalid policy that parses successfully disables Events with `events_start_failed`
+while the daemon keeps serving other requests. Malformed configuration prevents
+the daemon from starting. The diagnostic identifies the zero-based entry index and
 `origin` or `addresses` field, plus the address index when applicable, without
 logging supplied origins or addresses. No environment variable grants callback trust.
 

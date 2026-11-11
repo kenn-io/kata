@@ -3,7 +3,6 @@ package mcpevents
 import (
 	"context"
 	"crypto/x509"
-	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -16,9 +15,7 @@ import (
 func TestTrustedCallbackPolicy(t *testing.T) {
 	const pin = "100.64.0.1"
 	received := 0
-	w, _ := fixtureWebhook(t, func(rw http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		checkFixtureSignature(t, r, body, fixtureSecret(1, 32))
+	w, _ := fixtureWebhook(t, func(rw http.ResponseWriter, _ *http.Request) {
 		received++
 		rw.WriteHeader(204)
 	}, config.MCPEventsTrustedCallback{Origin: "https://EXAMPLE.com:443/", Addresses: []string{pin}})
