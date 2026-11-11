@@ -520,6 +520,8 @@ components:
           type: string
         transcript:
           $ref: "#/components/schemas/Transcript"
+        transcript_selection:
+          $ref: "#/components/schemas/TranscriptSelection"
       type: object
     Comment:
       properties:
@@ -6865,6 +6867,19 @@ components:
         - agent
         - session_id
       type: object
+    TranscriptSelection:
+      additionalProperties: false
+      properties:
+        project_id:
+          format: int64
+          minimum: 0
+          type: integer
+        record:
+          type: boolean
+      required:
+        - project_id
+        - record
+      type: object
     Trigger:
       additionalProperties: false
       properties:
@@ -7325,7 +7340,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.45.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

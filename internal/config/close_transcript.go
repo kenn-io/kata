@@ -14,9 +14,52 @@ import (
 // CloseTranscriptConfig is a client preference, read from the invoking
 // client's Kata home even when it targets a remote daemon.
 type CloseTranscriptConfig struct {
-	Enabled       bool              `toml:"enabled"`
-	AgentsViewURL string            `toml:"agentsview_url"`
-	SessionIDEnv  map[string]string `toml:"session_id_env"`
+	Enabled       bool                             `toml:"enabled"`
+	AgentsViewURL string                           `toml:"agentsview_url"`
+	SessionIDEnv  map[string]string                `toml:"session_id_env"`
+	Project       map[string]CloseTranscriptTarget `toml:"project"`
+	override      *bool
+}
+
+// CloseTranscriptTarget configures attachment and the locator for a project.
+type CloseTranscriptTarget struct {
+	Enabled       *bool  `toml:"enabled"`
+	AgentsViewURL string `toml:"agentsview_url"`
+}
+
+// Target selects the project's settings, applying the process override.
+func (cfg CloseTranscriptConfig) Target(project string) CloseTranscriptTarget {
+	target, ok := cfg.Project[project]
+	if !ok {
+		target.AgentsViewURL = cfg.AgentsViewURL
+	}
+	if cfg.override != nil {
+		target.Enabled = cfg.override
+	} else if target.Enabled == nil {
+		target.Enabled = &cfg.Enabled
+	}
+	return target
+}
+
+// AnyEnabled reports whether any configured target can record a session.
+func (cfg CloseTranscriptConfig) AnyEnabled() bool {
+	if cfg.override != nil {
+		return *cfg.override
+	}
+	if cfg.Enabled {
+		return true
+	}
+	for name := range cfg.Project {
+		if *cfg.Target(name).Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+// ForceEnabled reports whether the process explicitly enabled recording.
+func (cfg CloseTranscriptConfig) ForceEnabled() bool {
+	return cfg.override != nil && *cfg.override
 }
 
 // ReadCloseTranscriptConfig avoids daemon policy and credential resolution.
@@ -39,6 +82,7 @@ func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
 		return CloseTranscriptConfig{}, err
 	}
 	cfg.Enabled = true
+	cfg.override = &enabled
 	return cfg, nil
 }
 

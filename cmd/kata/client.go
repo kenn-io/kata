@@ -627,7 +627,8 @@ type resolvedIssueRef struct {
 	// ProjectName is the project the ref binds to: a qualified ref
 	// ("kata#abc4") overrides; a bare short_id / ULID inherits the
 	// workspace's project name.
-	ProjectName string
+	ProjectName      string
+	CurrentProjectID int64
 	// QualifiedID is "<project_name>#<short_id>" for the resolved issue.
 	// Populated by resolveIssueRefForCommandResolved (and its variants),
 	// empty otherwise.

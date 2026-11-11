@@ -135,7 +135,7 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 			cmd := &cobra.Command{}
 			var stderr bytes.Buffer
 			cmd.SetErr(&stderr)
-			ref := closeTranscript(cmd)
+			ref, _, _ := prepareCloseTranscript(t.Context(), cmd, "", 0, resolvedIssueRef{}, false)
 			if tc.wantID == "" {
 				assert.Nil(t, ref)
 			} else {
@@ -158,18 +158,23 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 	for _, tc := range []struct {
 		name, version, variable, agent, id string
-		attach                             bool
+		attach, project                    bool
 	}{
-		{"Codex on 0.26", "0.26.0", "CODEX_SESSION_ID", "codex", transcriptSessionOne, true},
-		{"Claude on 0.33", "0.33.0", "CLAUDE_CODE_SESSION_ID", "claude", transcriptSessionOne, true},
-		{"Pi on 0.33", "0.33.0", "PI_SESSION_ID", "pi", transcriptSessionOne, false},
-		{"Pi on 0.34", "0.34.0", "PI_SESSION_ID", "pi", transcriptSessionOne, true},
-		{"transcript before 0.26", "0.25.0", "CODEX_THREAD_ID", "codex", transcriptSessionOne, false},
+		{"Codex on 0.26", "0.26.0", "CODEX_SESSION_ID", "codex", transcriptSessionOne, true, false},
+		{"Claude on 0.33", "0.33.0", "CLAUDE_CODE_SESSION_ID", "claude", transcriptSessionOne, true, false},
+		{"Pi on 0.33", "0.33.0", "PI_SESSION_ID", "pi", transcriptSessionOne, false, false},
+		{"Pi on 0.34", "0.34.0", "PI_SESSION_ID", "pi", transcriptSessionOne, true, false},
+		{"transcript before 0.26", "0.25.0", "CODEX_THREAD_ID", "codex", transcriptSessionOne, false, false},
+		{"project on 0.44", "0.44.0", "CODEX_THREAD_ID", "codex", transcriptSessionOne, false, true},
+		{"project on 0.45", "0.45.0", "CODEX_THREAD_ID", "codex", transcriptSessionOne, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("KATA_HOME", home)
 			config := "[close.transcript]\nenabled = true\n"
+			if tc.project {
+				config += "[close.transcript.project.example-project]\nenabled = true\n"
+			}
 			if tc.agent == "pi" {
 				config += "[close.transcript.session_id_env]\npi = \"PI_SESSION_ID\"\n"
 			}
@@ -185,6 +190,8 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 					_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
 				case "/api/v1/health":
 					_, _ = fmt.Fprintf(w, `{"ok":true,"api_schema_version":%q}`, tc.version)
+				case "/api/v1/projects/1/issues/abc1":
+					_, _ = w.Write([]byte(`{"issue":{"project_id":1,"short_id":"abc1"}}`))
 				case "/api/v1/projects/1/issues/abc1/actions/close":
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&sent))
 					_, _ = w.Write([]byte(`{"changed":true}`))
@@ -204,11 +211,91 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 			if tc.attach {
 				expected := map[string]any{"agent": tc.agent, "session_id": tc.id}
 				assert.Equal(t, expected, sent["transcript"])
+				if tc.project {
+					assert.Equal(t, map[string]any{"project_id": float64(1), "record": true}, sent["transcript_selection"])
+				}
 				assert.Empty(t, stderr)
 			} else {
 				assert.NotContains(t, sent, "transcript")
+				assert.NotContains(t, sent, "transcript_selection")
 				assert.Contains(t, stderr, "reports "+tc.version)
 				assert.Contains(t, stderr, "skipping attachment")
+			}
+		})
+	}
+}
+
+func TestCloseTranscript_UnconfiguredProjectOnOlderDaemon(t *testing.T) {
+	for _, tc := range []struct {
+		name, project, version              string
+		lookupFailure, attach, selection    bool
+		globalDisabled, overrideTrue, keyed bool
+	}{
+		{"unconfigured on 0.44", "other", "0.44.0", false, true, false, false, false, false},
+		{"unconfigured on 0.45", "other", "0.45.0", false, true, true, false, false, false},
+		{"unconfigured before transcript support", "other", "0.25.0", false, false, false, false, false, false},
+		{"configured opt-out", "example-project", "0.44.0", false, false, false, false, false, false},
+		{"unkeyed configured opt-out", "example-project", "0.45.0", false, false, true, false, false, false},
+		{"lookup failure", "other", "0.44.0", true, false, false, false, false, false},
+		{"global disabled", "other", "0.44.0", false, false, false, true, false, true},
+		{"keyed global disabled on 0.45", "other", "0.45.0", false, true, true, true, false, true},
+		{"process enables global", "other", "0.44.0", false, true, false, true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", "")
+			if tc.lookupFailure || tc.overrideTrue {
+				t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", "true")
+			}
+			t.Setenv("KATA_TRANSCRIPT_AGENT", "codex")
+			t.Setenv("KATA_TRANSCRIPT_SESSION_ID", transcriptSessionOne)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`[close.transcript]
+enabled = %t
+agentsview_url = "https://global.example"
+[close.transcript.project.%s]
+enabled = %t
+`, !tc.globalDisabled, tc.project, tc.globalDisabled)), 0600))
+			var sent map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/projects/resolve":
+					_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+				case "/api/v1/health":
+					_, _ = fmt.Fprintf(w, `{"ok":true,"api_schema_version":%q}`, tc.version)
+				case "/api/v1/projects/1/issues/abc1":
+					if tc.lookupFailure {
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					_, _ = w.Write([]byte(`{"issue":{"project_id":1,"short_id":"abc1"}}`))
+				case "/api/v1/projects/1/issues/abc1/actions/close":
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&sent))
+					_, _ = w.Write([]byte(`{"changed":true}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			args := []string{"--project", "example-project", "close", "abc1", "--done", "--message", "Implemented the example behavior and ran the focused tests.", "--test", "go test ./internal/example"}
+			if tc.keyed {
+				args = append(args, "--idempotency-key", "example-key")
+			}
+			_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
+			require.NoError(t, err)
+			if tc.attach {
+				expected := map[string]any{"agent": "codex", "session_id": transcriptSessionOne}
+				if !tc.globalDisabled || tc.overrideTrue {
+					expected["url"] = "https://global.example/sessions/codex/" + transcriptSessionOne
+				}
+				assert.Equal(t, expected, sent["transcript"])
+			} else {
+				assert.NotContains(t, sent, "transcript")
+			}
+			if tc.selection {
+				assert.Contains(t, sent, "transcript_selection")
+			} else {
+				assert.NotContains(t, sent, "transcript_selection")
 			}
 		})
 	}
@@ -221,7 +308,34 @@ func TestCloseTranscript_MalformedConfigurationNamesFile(t *testing.T) {
 	cmd := &cobra.Command{}
 	var stderr bytes.Buffer
 	cmd.SetErr(&stderr)
-	assert.Nil(t, closeTranscript(cmd))
+	ref, _, _ := prepareCloseTranscript(t.Context(), cmd, "", 0, resolvedIssueRef{}, false)
+	assert.Nil(t, ref)
 	assert.Contains(t, stderr.String(), filepath.Join(home, "config.toml"))
 	assert.Contains(t, stderr.String(), "skipping attachment")
+}
+
+func TestCloseTranscript_NoProjectReadWithoutCandidate(t *testing.T) {
+	for _, tc := range []struct{ name, config, agent, session string }{
+		{"disabled", "[close.transcript]\nenabled=false\n[close.transcript.project.team]\nenabled=false\n", "codex", transcriptSessionOne},
+		{"missing session", "[close.transcript]\nenabled=true\n[close.transcript.project.team]\nenabled=true\n", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", "")
+			for _, name := range []string{"CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID"} {
+				t.Setenv(name, "")
+			}
+			t.Setenv("KATA_TRANSCRIPT_AGENT", tc.agent)
+			t.Setenv("KATA_TRANSCRIPT_SESSION_ID", tc.session)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0600))
+			cmd := &cobra.Command{}
+			var stderr bytes.Buffer
+			cmd.SetErr(&stderr)
+			ref, selection, _ := prepareCloseTranscript(t.Context(), cmd, "", 0, resolvedIssueRef{}, false)
+			assert.Nil(t, ref)
+			assert.Nil(t, selection)
+			assert.NotContains(t, stderr.String(), "project unavailable")
+		})
+	}
 }

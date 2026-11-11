@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Select a closing transcript target per project, including for moved issues.
+  See [closing-session transcripts](reference/configuration.md#closing-session-transcripts).
+  This partially addresses [#972](https://github.com/kenn-io/kata/issues/972);
+  transcript upload remains outstanding.
+
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
   build finishes, and an opener waiting for another opener's migration keeps
