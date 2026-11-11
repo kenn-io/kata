@@ -113,7 +113,7 @@ AND (e.payload LIKE '%argv%' OR e.payload LIKE '%null%' OR e.payload LIKE '%\u%'
 		}
 		argv, held := retainedWorkflowEvidence(kind, payload)
 		if held {
-			return "", fmt.Errorf("%w: held workflow definition", ErrUnsupportedEventFeatures)
+			return "", ErrHeldWorkflowEvidence
 		}
 		found = found || argv
 	}

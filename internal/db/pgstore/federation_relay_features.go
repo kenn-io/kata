@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+
 	"go.kenn.io/kata/internal/db"
 )
 

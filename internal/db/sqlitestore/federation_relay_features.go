@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+
 	"go.kenn.io/kata/internal/db"
 )
 

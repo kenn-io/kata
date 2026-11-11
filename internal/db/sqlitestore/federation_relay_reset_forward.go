@@ -33,6 +33,13 @@ func (b relayResetBackend) RelayAcceptedInboxPage(ctx context.Context, page db.R
 }
 
 func (b relayResetBackend) RelayOutboxPage(ctx context.Context, page db.RelayRetainedPage) ([]db.RelayRetainedEnvelopeRow, error) {
+	if page.UnemittedOnly {
+		rows, err := b.tx.QueryContext(ctx, `SELECT id,source_uid,source_hash,envelope FROM federation_relay_outbox WHERE binding_uid=? AND stream=? AND reset_epoch=? AND emitted=0 AND id>? ORDER BY id LIMIT ?`, page.BindingUID, page.Stream, page.Epoch, page.After, page.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return scanRetainedEnvelopeRows(rows)
+	}
 	rows, err := b.tx.QueryContext(ctx, `SELECT id,source_uid,source_hash,envelope FROM federation_relay_outbox WHERE project_uid=? AND binding_uid=? AND stream=? AND reset_epoch=? AND id>? ORDER BY id LIMIT ?`, page.ProjectUID, page.BindingUID, page.Stream, page.Epoch, page.After, page.Limit)
 	if err != nil {
 		return nil, err

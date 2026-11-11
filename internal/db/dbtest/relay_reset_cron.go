@@ -77,8 +77,8 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	for _, section := range []string{"source", "entity"} {
 		for _, definition := range []string{
-			`{"version":1,"steps":[{"key":"literal","kind":"argv","argv":["echo","hi"]}]}`,
-			`{"version":1,"steps":[{"key":"literal","kind":"argv"}]}`,
+			`{"version":2,"steps":[{"key":"literal","kind":"command","command":"true"}]}`,
+			`{"version":1,"steps":[{"key":"literal","kind":"future-step"}]}`,
 			`{"version":1,"steps":null}`,
 		} {
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, project, pin, private, section, definition)
@@ -98,7 +98,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	})
 	for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `null`} {
 		event := argvCompatRemoteWorkflow(t, replica, downstream.InstanceUID(), definition)
-		var payload map[string]jsontext.Value
+		payload := make(map[string]jsontext.Value)
 		require.NoError(t, json.Unmarshal(event.Payload, &payload))
 		payload["uid"], err = json.Marshal(localWinner.UID)
 		require.NoError(t, err)
@@ -162,7 +162,7 @@ func checkpointWithWorkflowDefinition(t *testing.T, checkpoint db.RelayResetChec
 		}
 	}
 	require.NotEmpty(t, original.Type)
-	var payload map[string]jsontext.Value
+	payload := make(map[string]jsontext.Value)
 	require.NoError(t, json.Unmarshal(original.Payload, &payload))
 	payload["definition"] = jsontext.Value(definition)
 	raw, err := json.Marshal(payload)
