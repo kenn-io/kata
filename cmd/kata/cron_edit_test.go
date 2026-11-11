@@ -1101,7 +1101,8 @@ func TestCronWorkflowEditRefusesArgvWithoutMutation(t *testing.T) {
 		env, project, id, original := cronEditTestDefinition(t, "workflow")
 		session := cronEditTestEditor(t, func(call int, raw []byte) ([]byte, error) {
 			if call == 1 {
-				return bytes.Replace(raw, []byte(`"kind":"command"`), []byte(`"kind":"command",`+member), 1), nil
+				require.Contains(t, string(raw), `"kind": "command"`)
+				return bytes.Replace(raw, []byte(`"kind": "command"`), []byte(`"kind": "command",`+member), 1), nil
 			}
 			return nil, nil
 		})
