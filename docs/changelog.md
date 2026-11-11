@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Use `kata daemon status` in scripts to check the selected daemon's readiness.
+  A stopped or unavailable selection now exits 7 after printing diagnostics;
+  previously it exited 0.
+
 - Keep search focus and text when keyboard selection opens task detail.
 - See why Docbank attachments fail when the daemon cannot read its own key.
   With daemon API 0.44.0 or newer, uploads, reads, and links return HTTP 503
