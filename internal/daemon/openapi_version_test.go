@@ -29,7 +29,7 @@ func TestCheckAPIVersionRecord(t *testing.T) {
 		markers            []string
 		contains           []string
 	}{
-		{"collision", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256"}, []string{"0.46.0", "0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256", "cmd/kata/api_compat.go", "cmd/kata/close_attachment.go", "cmd/kata/teammate.go", "internal/mcp/", "internal/tui/client.go", "internal/recurrence/recurrenceclient/"}},
+		{"collision", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256"}, []string{"0.46.0", "0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256", "feature minimum checks introduced by this change"}},
 		{"identical", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, nil},
 		{"stale", b, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"0.46.0"}},
 		{"next recorded", b, "0.46.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, nil},
@@ -124,7 +124,7 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 		return err
 	}
 	suggested := fmt.Sprintf("%s.%d.0", strings.TrimPrefix(semver.Major(next), "v"), minor+1)
-	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); take %s in APISchemaVersion, api/openapi.yaml, and the version-history row, and move newly introduced feature minimums in cmd/kata/api_compat.go, cmd/kata/close_attachment.go, cmd/kata/teammate.go, internal/mcp/, internal/tui/client.go, and internal/recurrence/recurrenceclient/; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), suggested)
+	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); take %s in APISchemaVersion, api/openapi.yaml, and the version-history row, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), suggested)
 }
 
 // contractDocument removes documentation fields from Huma objects while leaving
@@ -137,7 +137,7 @@ func contractDocument(doc *huma.OpenAPI) ([]byte, error) {
 		switch v.Kind() {
 		case reflect.Interface:
 			if !v.IsNil() {
-				if _, ok := v.Interface().(*huma.Schema); ok {
+				if _, ok := reflect.TypeAssert[*huma.Schema](v); ok {
 					strip(v.Elem())
 				}
 			}
@@ -191,7 +191,7 @@ func TestAPIVersionBaseRecords(t *testing.T) {
 	if !explicit {
 		ref = "origin/main"
 	}
-	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", ref+"^{commit}")
+	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", ref+"^{commit}") //nolint:gosec // The base ref is supplied by the developer or CI.
 	if err := cmd.Run(); err != nil {
 		if explicit {
 			t.Fatalf("API version base %q unavailable: %v", ref, err)
@@ -205,14 +205,14 @@ func TestAPIVersionBaseRecords(t *testing.T) {
 
 func baseAPIVersionRecords(t *testing.T, ref string) ([]string, error) {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "git", "ls-tree", "-r", "--name-only", ref, "internal/daemon/testdata/api-contracts/")
+	cmd := exec.CommandContext(t.Context(), "git", "ls-tree", "-r", "--name-only", ref, "internal/daemon/testdata/api-contracts/") //nolint:gosec // The base ref is supplied by the developer or CI.
 	cmd.Dir = "../.."
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
 	var names []string
-	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for name := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if name != "" {
 			names = append(names, filepath.Base(name))
 		}
