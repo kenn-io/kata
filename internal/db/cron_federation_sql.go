@@ -63,7 +63,7 @@ func checkRetainedWorkflowSnapshots(ctx context.Context, tx *sql.Tx, project Pro
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var uid, kind, payload string
 		if err := rows.Scan(&uid, &kind, &payload); err != nil {
