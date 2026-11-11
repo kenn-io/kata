@@ -17,6 +17,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	humago "github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/mod/semver"
 )
 
 // artifactPath is the committed OpenAPI schema, relative to this package dir.
@@ -223,6 +224,13 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 	if len(doc.Paths) == 0 {
 		t.Error("no paths registered in document")
 	}
+}
+
+func TestOpenAPIRestartVersion(t *testing.T) {
+	doc := OpenAPIDocument()
+	require.NotNil(t, doc.Paths["/api/v1/embeddings/local/restart"])
+	require.NotNil(t, doc.Paths["/api/v1/embeddings/local/restart"].Post)
+	require.Greater(t, semver.Compare("v"+doc.Info.Version, "v0.44.0"), 0, "clients must distinguish this route from older daemons")
 }
 
 func TestOpenAPISearchDocumentsEveryReachableError(t *testing.T) {
