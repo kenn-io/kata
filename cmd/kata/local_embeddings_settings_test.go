@@ -44,7 +44,7 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	}
 }
 
-func TestLocalEmbeddingsSettingsSharesSavedSetup(t *testing.T) {
+func TestLocalEmbeddingsSettingsRetrySharing(t *testing.T) {
 	t.Run("retry after failed setup", func(t *testing.T) {
 		setupKataEnv(t)
 		sharedHome := clearLocalEmbeddingsEnv(t)
@@ -70,52 +70,6 @@ func TestLocalEmbeddingsSettingsSharesSavedSetup(t *testing.T) {
 		run(t.Context())
 		require.Equal(t, "restart", setup.job.State)
 	})
-
-	home := setupKataEnv(t)
-	sharedHome := clearLocalEmbeddingsEnv(t)
-	original := []byte("[search.embeddings]\nlocal=true\nmodel='nomic-embed-text'\ndims=768\n")
-	path := filepath.Join(home, "config.toml")
-	require.NoError(t, os.WriteFile(path, original, 0600))
-	cfg, err := config.ParseSearchConfig(original)
-	require.NoError(t, err)
-	oldInstall, oldEndpoint := localEmbeddingsInstall, localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsInstall, localEmbeddingsEndpoint = oldInstall, oldEndpoint })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
-		return "http://127.0.0.1:12345/v1", nil
-	}
-	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		t.Fatal("sharing an existing setup must not install")
-		return embedlocal.Installation{}, nil
-	}
-	var run func(context.Context)
-	setup := &localEmbeddingsSetup{embeddings: cfg.Embeddings, start: func(work func(context.Context)) bool { run = work; return true }}
-	status, err := setup.Status(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, "built_in", status.Provider)
-	require.True(t, status.CanChange)
-	blocker := filepath.Join(sharedHome, ".kenn")
-	require.NoError(t, os.WriteFile(blocker, []byte("block marker"), 0600))
-	require.NoError(t, setup.TurnOn(t.Context()))
-	run(t.Context())
-	status, err = setup.Status(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, "failed", status.Job.State)
-	require.True(t, status.CanChange)
-	require.NoError(t, os.Remove(blocker))
-	require.NoError(t, setup.TurnOn(t.Context()))
-	run(t.Context())
-	status, err = setup.Status(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, "built_in", status.Provider)
-	require.False(t, status.CanChange)
-	require.Nil(t, status.Job)
-	chosen, err := embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.True(t, chosen)
-	got, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
-	require.NoError(t, err)
-	require.Equal(t, original, got)
-	require.ErrorIs(t, setup.TurnOn(t.Context()), daemon.ErrLocalEmbeddingsConfigured)
 }
 
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
@@ -367,63 +321,4 @@ func TestSharedChoiceFallsBackWhenPreflightFails(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	require.Equal(t, "lexical", result.Mode)
 	require.Len(t, result.Results, 1)
-}
-
-func TestLocalEmbeddingsSavedSetupMissingModelStatus(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	setup := &localEmbeddingsSetup{embeddings: config.EmbeddingsConfig{Local: true}}
-	status, err := setup.Status(t.Context())
-	require.NoError(t, err)
-	require.True(t, status.CanChange)
-	require.Positive(t, status.DownloadBytes)
-}
-
-func TestLocalEmbeddingsSavedSetupMissingModelTurnOn(t *testing.T) {
-	home := setupKataEnv(t)
-	clearLocalEmbeddingsEnv(t)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal=true\n"), 0600))
-	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	installed := false
-	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-		if !installed || opts.Executable == "" {
-			return "", embedlocal.ErrNotFound
-		}
-		return "http://127.0.0.1:12345/v1", nil
-	}
-	attempts := 0
-	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		attempts++
-		chosen, err := embedlocal.ChoiceRecorded()
-		require.NoError(t, err)
-		require.False(t, chosen, "choice must wait for successful installation")
-		if attempts == 1 {
-			return embedlocal.Installation{}, fmt.Errorf("installation failed")
-		}
-		installed = true
-		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
-	}
-	var run func(context.Context)
-	setup := &localEmbeddingsSetup{embeddings: config.EmbeddingsConfig{Local: true}, start: func(work func(context.Context)) bool { run = work; return true }}
-	status, err := setup.Status(t.Context())
-	require.NoError(t, err)
-	require.Positive(t, status.DownloadBytes)
-	require.NoError(t, setup.TurnOn(t.Context()))
-	accepted, err := setup.Status(t.Context())
-	require.NoError(t, err)
-	require.NotNil(t, accepted.Job)
-	require.Equal(t, "downloading", accepted.Job.State)
-	require.Equal(t, status.DownloadBytes, accepted.Job.Total)
-	run(t.Context())
-	require.Equal(t, 1, attempts)
-	require.Equal(t, "failed", setup.job.State)
-	chosen, err := embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.False(t, chosen)
-	require.NoError(t, setup.TurnOn(t.Context()))
-	run(t.Context())
-	require.Equal(t, 2, attempts)
-	chosen, err = embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.True(t, chosen)
 }

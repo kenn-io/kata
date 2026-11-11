@@ -43,9 +43,9 @@ Kata can run a shared local embeddings server or use an OpenAI-compatible
 
 Open `kata ui`, click the gear in the top bar, and choose **Turn on** under **Search by meaning**. Settings applies to every project on the daemon. Turn on downloads what is missing and saves the setting. Run `kata daemon restart` to finish, then reopen `kata ui` to see indexing progress and any failures while it retries. A local owner session or a daemon access administrator sees the button. Other viewers, including viewers connected through the daemon switcher, see the status.
 
-The built-in server choice is shared with supported apps on this computer. When another supported app enables it, Kata starts indexing on its next daemon start unless Kata already has a configured provider. A saved built-in setting also starts with installed files. If those files are missing, Kata requires a shared choice or an explicit Turn on before downloading them.
+The built-in server choice is shared with supported apps on this computer. When another supported app enables it, Kata starts indexing on its next daemon start unless Kata already has a configured provider. A saved built-in setting also starts with installed files. If those files are missing, Kata requires a shared choice or `kata daemon local-embeddings` before downloading them.
 
-Kata records the shared choice after setup succeeds. If sharing cannot be confirmed, Kata keeps the saved setting and reports an error. Retry Turn on or rerun the command to share the choice. After a daemon restart, use **Share with other apps** in Settings to retry sharing a saved built-in setup.
+Kata records the shared choice after setup succeeds. If sharing cannot be confirmed, Kata keeps the saved setting and reports an error. Retry Turn on before restarting the daemon, or rerun the command to share the choice.
 
 PostgreSQL needs pgvector and Kata’s semantic-search tables before setup. Follow the [PostgreSQL setup guide](../operations/postgres.md) to prepare the database, then try Turn on again.
 

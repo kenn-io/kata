@@ -1,11 +1,6 @@
 <script lang="ts">
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
-  import {
-    Button,
-    PageHeader,
-    SearchByMeaningRow,
-    type SearchByMeaningState,
-  } from '@kenn-io/kit-ui'
+  import { PageHeader, SearchByMeaningRow, type SearchByMeaningState } from '@kenn-io/kit-ui'
   import { untrack } from 'svelte'
 
   import { orvalFetch } from '../lib/api/client'
@@ -106,15 +101,6 @@
             }
       case 'ollama':
         return { kind: 'ollama' }
-      case 'built_in':
-        // A saved setup missing its model files needs the user's click to download them.
-        return current.can_change && current.download_bytes
-          ? {
-              kind: 'off',
-              downloadBytes: current.download_bytes,
-              ...(remoteHost ? { host: remoteHost } : {}),
-            }
-          : { kind: 'on' }
       default:
         return { kind: 'on' }
     }
@@ -207,11 +193,6 @@
             onusebuiltin={() => {}}
           />
         </fieldset>
-        {#if status?.provider === 'built_in' && status.can_change && !status.download_bytes && canAdministerDaemon}
-          <div>
-            <Button size="sm" label="Share with other apps" disabled={posting} onclick={turnOn} />
-          </div>
-        {/if}
         {#if failure}
           <p class="settings-note" role="alert">{failure}</p>
         {/if}

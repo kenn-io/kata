@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-11
+last_edited: 2026-11-09
 ---
 
 # HTTP API schema
@@ -25,7 +25,7 @@ Search responses include `X-Kata-Embeddings-Configured: true` when the answering
 
 `POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It shares the CLI's download and config checks, saves the setting, and reports the `restart` job state until the daemon restarts. Run `kata daemon restart` locally, or restart the daemon on its host. Reopen `kata ui` or sign in again afterward to see indexing progress.
 
-`can_change` is true when no provider is configured or a saved built-in setup has not yet recorded its shared choice, including after a failed job. This lets Settings retry setup. It is false while a job runs or awaits restart, when a saved built-in setup has recorded its choice, or when another provider is configured. Setup requires a local owner browser session, a bootstrap token, or a static daemon token, with a writable browser session manager when present. It returns `403` for other viewers and through the daemon switcher proxy, `404` when setup is unavailable, and `409` while setup is already running. The switcher proxy permits status reads.
+Setup is available only when no embeddings provider is configured and no setup job is active. It requires a local owner browser session, a bootstrap token, or a static daemon token, with a writable browser session manager when present. It returns `403` for other viewers and through the daemon switcher proxy, `404` when setup is unavailable, and `409` while setup is already running. The switcher proxy permits status reads.
 
 ## Getting the schema
 

@@ -113,42 +113,6 @@ describe('SearchSettings', () => {
     expect(screen.queryByText(/Downloads 290 MB/)).toBeNull()
   })
 
-  test('offers to share an existing built-in setup and sends the request', async () => {
-    vi.useFakeTimers()
-    setGeneratedFetch(
-      vi.fn(async () => Response.json(status({ provider: 'built_in', download_bytes: 0 }))),
-    )
-    const postFetch = vi.fn<typeof fetch>(async () =>
-      Response.json(status({ provider: 'built_in', can_change: false }), { status: 202 }),
-    )
-    renderSettings({ postFetch })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Share with other apps' }))
-    await settle()
-    expect(postFetch).toHaveBeenCalledOnce()
-    expect(screen.queryByRole('button', { name: 'Share with other apps' })).toBeNull()
-  })
-
-  test('shows a saved setup with an unknown download size as in progress', async () => {
-    vi.useFakeTimers()
-    setGeneratedFetch(
-      vi.fn(async () =>
-        Response.json(
-          status({
-            provider: 'built_in',
-            can_change: false,
-            download_bytes: 0,
-            job: { state: 'downloading', downloaded: 0, total: 0 },
-          }),
-        ),
-      ),
-    )
-    renderSettings()
-    await settle()
-    expect(screen.getByText('Turning on', { exact: true })).not.toBeNull()
-    expect(screen.getByText(/^Downloading 0 MB of 0 MB/)).not.toBeNull()
-  })
-
   test.each([undefined, 'daemon.example'])(
     'shows the manual restart step for host=%s after download',
     async (remoteHost) => {
@@ -303,18 +267,5 @@ describe('SearchSettings', () => {
     expect(read.mock.calls[1]?.[1]?.signal?.aborted).toBe(true)
     await vi.advanceTimersByTimeAsync(10000)
     expect(read).toHaveBeenCalledTimes(2)
-  })
-
-  test('offers the download for a saved built-in setup missing its model', async () => {
-    vi.useFakeTimers()
-    setGeneratedFetch(vi.fn(async () => Response.json(status({ provider: 'built_in' }))))
-    const postFetch = vi.fn<typeof fetch>(async () =>
-      Response.json(status({ provider: 'built_in', can_change: false }), { status: 202 }),
-    )
-    renderSettings({ postFetch })
-    await settle()
-    expect(screen.getByText('Downloads 290 MB once, shared by all Kenn apps')).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Turn on' }))
-    expect(postFetch).toHaveBeenCalledOnce()
   })
 })
