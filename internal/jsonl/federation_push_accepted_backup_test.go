@@ -64,6 +64,13 @@ func TestBackupPreservesFederationPushAccepted(t *testing.T) {
 			found, err = target.FederationPushAccepted(ctx, project.ID, pending.ID)
 			require.NoError(t, err)
 			require.False(t, found)
+			var scoped bytes.Buffer
+			require.NoError(t, jsonl.Export(ctx, source, &scoped, jsonl.ExportOptions{IncludeDeleted: true, ProjectID: project.ID}))
+			scopedTarget := open()
+			require.NoError(t, jsonl.Import(ctx, &scoped, scopedTarget))
+			found, err = scopedTarget.FederationPushAccepted(ctx, project.ID, accepted.ID)
+			require.NoError(t, err)
+			require.True(t, found)
 			// Backups made before accepted IDs existed leave those events pending.
 			legacyData := regexp.MustCompile(`,"accepted_project_ids":\[[0-9,]+\]`).ReplaceAll(data, nil)
 			legacy := open()

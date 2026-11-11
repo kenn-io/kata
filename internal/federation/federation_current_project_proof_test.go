@@ -63,11 +63,6 @@ func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T)
 			binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[0].ID)
 			require.NoError(t, err)
 			tokens, err := federationMoveSourceTokens(t.Context(), spoke.env.DB, spoke.credentials, binding, hub.URL, []db.Event{event}, clientpkg.Opts{})
-			if kind == "other-credential-origin" {
-				require.Error(t, err, "credentials are never sent to a different configured origin")
-				require.Empty(t, tokens)
-				return
-			}
 			require.NoError(t, err)
 			if kind == "same-origin" {
 				require.Equal(t, spoke.credentials[projects[1].UID].Token, tokens[projects[1].UID])

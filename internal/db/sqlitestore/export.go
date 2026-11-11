@@ -821,9 +821,11 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 	if !f.IncludeDeleted {
 		subjectLiveClause = `((events.issue_id IS NULL AND subject_issue.id IS NULL) OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 	}
-	acceptedProjects := `NULL`
-	if f.ProjectID == nil {
-		acceptedProjects = `(SELECT json_group_array(project_id) FROM federation_push_accepted WHERE event_id=events.id)`
+	acceptedProjects := `accepted.projects`
+	acceptedJoin := `LEFT JOIN (SELECT event_id, json_group_array(project_id) AS projects FROM federation_push_accepted GROUP BY event_id) accepted ON accepted.event_id=events.id`
+	if f.ProjectID != nil {
+		acceptedProjects = `(SELECT json_group_array(project_id) FROM federation_push_accepted WHERE project_id=events.project_id AND event_id=events.id)`
+		acceptedJoin = ``
 	}
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, events.project_name, ` + issueIDExpr + `, events.issue_uid,
 	                 ` + relatedIDExpr + `, ` + relatedUIDExpr + `,
@@ -834,7 +836,8 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
 	               OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
 	          LEFT JOIN issues peer ON peer.id = events.related_issue_id
-	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)`
+	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)
+	          ` + acceptedJoin
 
 	clauses := []string{subjectLiveClause}
 	// SELECT-list args bind in column order — the subject scrub (issue_id

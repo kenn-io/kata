@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 func TestSyncFederationInterruptedLeaveDoesNotBlockUnrelatedPush(t *testing.T) {
@@ -28,6 +29,51 @@ func TestSyncFederationInterruptedLeaveDoesNotBlockUnrelatedPush(t *testing.T) {
 			spoke.move(t, local, 1, 0)
 			err = spoke.sync(t, 0)
 			require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized, "required move-source credentials remain strict")
+		})
+	}
+}
+
+func TestSyncFederationInvalidOptionalSigningCredentialReturnsError(t *testing.T) {
+	hub, projects := newMoveDeliveryHub(t, "active-source", "other-source")
+	spoke := newMoveDeliverySpoke(t, hub, projects)
+	credential := spoke.credentials[projects[1].UID]
+	credential.Signing = &signingpolicy.Source{HubURL: "https://other.example"}
+	spoke.credentials[projects[1].UID] = credential
+	_, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Independent work", Author: "worker"})
+	require.NoError(t, err)
+	require.ErrorIs(t, spoke.sync(t, 0), signingpolicy.ErrInvalid)
+}
+
+func TestSyncFederationUnusableOptionalProofDoesNotBlockPush(t *testing.T) {
+	for _, kind := range []string{"origin", "actor", "project", "binding-project"} {
+		t.Run(kind, func(t *testing.T) {
+			hub, projects := newMoveDeliveryHub(t, "active-source", "other-source")
+			spoke := newMoveDeliverySpoke(t, hub, projects)
+			credential := spoke.credentials[projects[1].UID]
+			switch kind {
+			case "origin":
+				credential.HubURL = "https://other.example"
+			case "actor":
+				credential.Actor = "other-worker"
+			case "project":
+				credential.HubProjectID = projects[1].ID + 100
+			case "binding-project":
+				binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[1].ID)
+				require.NoError(t, err)
+				binding.HubProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EX"
+				_, err = spoke.env.DB.UpsertFederationBinding(t.Context(), binding)
+				require.NoError(t, err)
+			}
+			spoke.credentials[projects[1].UID] = credential
+			issue, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Independent work", Author: "worker"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.sync(t, 0))
+			_, err = hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			local, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Required source", Author: "worker"})
+			require.NoError(t, err)
+			spoke.move(t, local, 1, 0)
+			require.Error(t, spoke.sync(t, 0))
 		})
 	}
 }

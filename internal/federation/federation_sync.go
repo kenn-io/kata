@@ -1855,11 +1855,11 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			if err != nil || origin != destinationOrigin {
 				continue
 			}
-			project, err := store.ProjectByUID(ctx, binding.HubProjectUID)
+			project, err := store.ProjectByID(ctx, binding.ProjectID)
 			if err != nil {
 				return nil, err
 			}
-			if project.DeletedAt == nil {
+			if project.DeletedAt == nil && project.UID == binding.HubProjectUID {
 				projectUIDs = append(projectUIDs, project.UID)
 			}
 		}
@@ -1905,9 +1905,15 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			continue
 		}
 		if credential.HubProjectID != 0 && credential.HubProjectID != source.HubProjectID {
+			if !requiredSources[fromUID] {
+				continue
+			}
 			return nil, errors.New("move source credential project differs from binding")
 		}
 		if credential.Actor != "" && credential.Actor != source.Actor {
+			if !requiredSources[fromUID] {
+				continue
+			}
 			return nil, db.ErrFederationMoveSourceUnauthorized
 		}
 		credentialURL := credential.HubURL
@@ -1916,17 +1922,34 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		}
 		credentialBase, err := httpurl.CanonicalHTTPBaseURL(credentialURL)
 		if err != nil {
+			if !requiredSources[fromUID] {
+				continue
+			}
 			return nil, errors.New("move source credential origin is invalid")
 		}
 		credentialOrigin, err := httpurl.CanonicalHTTPOrigin(credentialBase)
 		if err != nil || credentialOrigin != sourceOrigin {
+			if !requiredSources[fromUID] {
+				continue
+			}
 			return nil, errors.New("move source credential origin differs from binding")
 		}
 		// Validate the source's own plaintext policy before including its token.
 		// The destination credential's opt-in does not authorize source transport.
 		sourceCredential := config.FederationTransportCredential(source.HubURL, source.HubProjectID, source.AllowInsecure, credential)
-		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
+		sourceOpts := clientOptsForCredential(opts, sourceCredential)
+		transportOpts := sourceOpts
+		transportOpts.FederationSigning = nil
+		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, transportOpts); err != nil {
+			if !requiredSources[fromUID] {
+				continue
+			}
 			return nil, err
+		}
+		if sourceOpts.FederationSigning != nil {
+			if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, sourceOpts); err != nil {
+				return nil, err
+			}
 		}
 		if tokens == nil {
 			tokens = map[string]string{}

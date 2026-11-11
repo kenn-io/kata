@@ -828,9 +828,11 @@ func (s *Store) ExportEvents(ctx context.Context, filter db.ExportFilter) iter.S
 		subjectLive = `((events.issue_id IS NULL AND subject_issue.id IS NULL)
 OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 	}
-	acceptedProjects := `NULL`
-	if filter.ProjectID == nil {
-		acceptedProjects = `(SELECT json_agg(project_id) FROM federation_push_accepted WHERE event_id=events.id)`
+	acceptedProjects := `accepted.projects`
+	acceptedJoin := `LEFT JOIN (SELECT event_id, json_agg(project_id) AS projects FROM federation_push_accepted GROUP BY event_id) accepted ON accepted.event_id=events.id`
+	if filter.ProjectID != nil {
+		acceptedProjects = `(SELECT json_agg(project_id) FROM federation_push_accepted WHERE project_id=events.project_id AND event_id=events.id)`
+		acceptedJoin = ``
 	}
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id,
        export_project.uid, events.project_name, ` + issueIDExpression + `, events.issue_uid,
@@ -842,7 +844,8 @@ OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
   LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
     OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
   LEFT JOIN issues peer ON peer.id = events.related_issue_id
-    OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)`
+    OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)
+  ` + acceptedJoin
 	clauses := []string{subjectLive}
 	if filter.ProjectID != nil {
 		clauses = append(clauses, `events.project_id = $1`)

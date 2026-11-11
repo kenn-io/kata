@@ -5120,12 +5120,19 @@ func TestFederationMoveSourceProofPreservesPlaintextPolicy(t *testing.T) {
 					destinationBinding = binding
 				}
 			}
-			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "source policy", Author: "worker"})
+			issue, event, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "source policy", Author: "worker"})
 			require.NoError(t, err)
 			move, err := env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "worker"})
 			require.NoError(t, err)
 			credentials := newMoveCredentialStore()
 			require.NoError(t, credentials.StoreFederationCredential(ctx, source.UID, config.FederationCredential{HubURL: "http://daemon.example", HubProjectID: source.ID, Actor: "worker", Token: "source-plaintext-proof", AllowInsecure: test.credentialAllow}))
+			optional, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, []db.Event{event}, clientpkg.Opts{})
+			require.NoError(t, err)
+			if test.wantError {
+				require.NotContains(t, optional, source.UID)
+			} else {
+				require.Equal(t, "source-plaintext-proof", optional[source.UID])
+			}
 			tokens, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, move.Events, clientpkg.Opts{})
 			if test.wantError {
 				require.Error(t, err)

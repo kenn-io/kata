@@ -60,7 +60,7 @@ func TestBackupRestoredPullSuppressesAcceptedEcho(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, source.RecordFederationPushAccepted(ctx, project.ID, []int64{accepted.ID}))
 			var backup bytes.Buffer
-			require.NoError(t, jsonl.Export(ctx, source, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
+			require.NoError(t, jsonl.Export(ctx, source, &backup, jsonl.ExportOptions{IncludeDeleted: true, ProjectID: project.ID}))
 			restored, reopen := open()
 			require.NoError(t, jsonl.Import(ctx, &backup, restored))
 			require.NoError(t, restored.Close())
