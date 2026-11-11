@@ -418,23 +418,30 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		}
 	}
 	projects := map[int64]bool{}
+	type projectFacts struct {
+		id             int64
+		active, joined bool
+	}
+	projectCache := map[string]projectFacts{}
 	for _, issue := range p.SortedIssues() {
 		winner, known := moved[issue.UID]
 		if !known {
 			continue
 		}
-		var target int64
-		var active bool
-		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&target, &active); err != nil {
-			return nil, err
+		facts, cached := projectCache[issue.ProjectUID]
+		if !cached {
+			if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&facts.id, &facts.active); err != nil {
+				return nil, err
+			}
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, facts.id).Scan(&facts.joined); err != nil {
+				return nil, err
+			}
+			projectCache[issue.ProjectUID] = facts
 		}
+		target, active := facts.id, facts.active
 		// A detached destination retains standalone data. Its former streams
 		// may keep syncing, but cannot reconcile that destination's projection.
-		var joined bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, target).Scan(&joined); err != nil {
-			return nil, err
-		}
-		if !joined {
+		if !facts.joined {
 			delete(p.Issues, issue.UID)
 			continue
 		}
