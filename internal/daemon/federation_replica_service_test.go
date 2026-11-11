@@ -72,6 +72,16 @@ func newReplicaCredentialStore() *replicaCredentialStore {
 	return &replicaCredentialStore{credentials: make(map[string]config.FederationCredential)}
 }
 
+func (s *replicaCredentialStore) ListFederationCredentials(_ context.Context) (map[string]config.FederationCredential, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make(map[string]config.FederationCredential, len(s.credentials))
+	for uid, credential := range s.credentials {
+		result[uid] = credential
+	}
+	return result, s.readErr
+}
+
 func (s *replicaCredentialStore) FederationCredential(
 	_ context.Context, projectUID string,
 ) (config.FederationCredential, bool, error) {
@@ -2488,6 +2498,7 @@ func TestAdoptionRefusalAfterSourceResolutionPreservesCredential(t *testing.T) {
 	credentials := newReplicaCredentialStore()
 	params := replicaServiceParams()
 	params.ProjectName, params.AdoptExisting = project.Name, true
+	params.Credential.Capabilities = "pull,push"
 	credentials.put(project.UID, params.Credential)
 	_, err = daemon.EnsureFederationReplica(ctx, argvBeforeAdoptionStore{store}, credentials, nil, params)
 	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
@@ -2538,4 +2549,33 @@ func TestAdoptionRekeyFailureCanRetryWithoutOldUID(t *testing.T) {
 	_, found, err = credentials.FederationCredential(ctx, replicaHubProjectUID)
 	require.NoError(t, err)
 	assert.True(t, found)
+}
+
+func TestAdoptionRetryRejectsAmbiguousOrphanedCredentials(t *testing.T) {
+	ctx := t.Context()
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	params := replicaServiceParams()
+	params.ProjectName, params.AdoptExisting = project.Name, true
+	params.Credential.Capabilities = "pull,push"
+	credentials.put(project.UID, params.Credential)
+	credentials.rekeyErr = errors.New("injected write failure")
+	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
+	credentials.rekeyErr = nil
+	other := "01HZNQ7VFPK1XGD8R5MABCD4EB"
+	credentials.put(other, params.Credential)
+	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
+	for _, key := range []string{project.UID, other} {
+		got, found, readErr := credentials.FederationCredential(ctx, key)
+		require.NoError(t, readErr)
+		require.True(t, found)
+		assert.Equal(t, params.Credential, got)
+	}
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.False(t, binding.PushEnabled)
 }
