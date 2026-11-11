@@ -17,8 +17,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   and its rules match the bundle. A date saved with timezone data this version
   lacks reports an error. Stop older daemons sharing the database
   before upgrading; their notification sweeps skip saved dates. See
-  [schedule metadata](reference/metadata.md). Upgrade browser-serving and
-  remote daemons together to keep the daemon switcher available.
+  [schedule metadata](reference/metadata.md).
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index

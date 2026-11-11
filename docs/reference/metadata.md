@@ -102,9 +102,9 @@ Existing aliases such as `US/Eastern` remain usable. Recurrence-owned
 `scheduled_on` keeps its behavior when the issue zone is absent or matches the
 recurrence zone.
 Set a portable issue `timezone` or change the [daemon default](configuration.md)
-and restart if rejected. Stored values, reads, replay, unchanged echoes,
-unrelated edits, clears, UTC `Z` instants and matching idempotent create retries
-keep working.
+and restart if rejected. Stored values, reads, replay, unrelated edits, clears,
+UTC `Z` instants and matching idempotent create retries keep working. Echoing
+a legacy civil date with a `Local` zone requires matching portable host rules.
 
 ### Calendar dates on issue rows
 

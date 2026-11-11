@@ -171,7 +171,7 @@ func TestWebDaemonRosterRejectsPreviousSnapshotContract(t *testing.T) {
 	previous := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w,
-			`{"instance_uid":"01J00000000000000000000001","web_ui_contract_version":"2"}`)
+			`{"instance_uid":"01J00000000000000000000001","web_ui_contract_version":"1"}`)
 	}))
 	t.Cleanup(previous.Close)
 

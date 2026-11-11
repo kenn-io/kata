@@ -772,7 +772,7 @@ Counting those links per parent gives the same open and total values as
 `child_counts` on `IssueOut` from `GET /api/v1/issues` for the same principal
 at the same cursor. An absent `child_counts` means zero of zero. Children the
 principal cannot read are excluded from both. This holds for every daemon
-whose snapshot reports `contract_version` `2` or `3`. The daemon-switcher proxy
+whose snapshot reports `contract_version` `2`. The daemon-switcher proxy
 (`/api/v1/ui/proxy`) does not forward `GET /api/v1/issues` or project issue
 lists, so `collection_links` is how to get child counts through it.
 

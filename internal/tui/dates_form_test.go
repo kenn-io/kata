@@ -700,5 +700,50 @@ func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
 			}
 		})
 	}
-
+	t.Run("empty legacy Local uses daemon day", func(t *testing.T) {
+		loc, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
+		require.NoError(t, err)
+		previous := time.Local
+		time.Local = loc
+		t.Cleanup(func() { time.Local = previous })
+		now := time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC)
+		current := Issue{UID: "issue-1", ShortID: "example", ProjectID: 7, Revision: 3, Metadata: issueMetadata{Timezone: jsontext.Value(`"Local"`)}}
+		writes := 0
+		client := NewClient("http://daemon.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method == http.MethodGet {
+				_, _, current.ScheduledOnToday, current.DeadlineOnToday, _, _, err = db.RowPlanningProjection(`{"timezone":"Local"}`, "UTC", "UTC", now)
+				require.NoError(t, err)
+				return jsonResponse(t, map[string]any{"issue": current}), nil
+			}
+			require.Equal(t, http.MethodPost, r.Method)
+			require.True(t, strings.HasSuffix(r.URL.Path, "/metadata"))
+			require.Equal(t, `"rev-3"`, r.Header.Get("If-Match"))
+			var body struct {
+				Patch map[string]jsontext.Value `json:"patch"`
+			}
+			require.NoError(t, json.UnmarshalRead(r.Body, &body))
+			frozen, err := db.PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local"}`), body.Patch, "UTC", "")
+			require.NoError(t, err)
+			for _, field := range []string{"scheduled_on", "deadline_on"} {
+				saved, err := metadata.DecodeSavedSchedule(frozen[field])
+				require.NoError(t, err)
+				require.NotNil(t, saved)
+				assert.Equal(t, "2025-12-31", saved.Value, field+" must use the daemon's Local day, not the UTC client's day")
+				assert.Equal(t, "America/New_York", saved.Timezone)
+			}
+			writes++
+			return jsonResponse(t, map[string]any{"changed": true, "issue": current}), nil
+		})})
+		m := filterFormFixture()
+		m.api = client
+		m.toastNow = func() time.Time { return now }
+		m.input = newDatesForm(formTarget{projectID: 7, issueShortID: "example", origin: "list"}, current)
+		m.input.field(fieldScheduled).setValue("today")
+		m.input.field(fieldDeadline).setValue("today")
+		_, cmd := m.commitDatesForm()
+		require.NotNil(t, cmd)
+		done := cmd().(mutationDoneMsg)
+		require.NoError(t, done.err)
+		require.Equal(t, 1, writes)
+	})
 }
