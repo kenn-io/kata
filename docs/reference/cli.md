@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # CLI reference
@@ -2002,8 +2002,11 @@ resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
 `daemon status` reports current-home processes and a separate selected-daemon
-diagnosis. It identifies processes automatically started by a Kata command when
-that provenance is available. It exits 0 only when the selected daemon is ready;
+diagnosis. For a process automatically started by a Kata command, human output
+shows `started: automatically by a kata command` and JSON includes
+`auto_started: true`. An omitted JSON field means the startup origin is unknown.
+Agent output includes `auto_started=true` when there is exactly one process and
+it was automatically started. It exits 0 only when the selected daemon is ready;
 stopped or unavailable selections exit 7 after printing diagnostics in every output mode.
 In agent mode, the `OK daemon` report on stdout indicates that the report was
 produced; a non-ready selection also emits an `ERR status` line on stderr.
