@@ -94,6 +94,34 @@ func TestDateToggleSavedAndLegacyZoneMidnightKeepsSelection(t *testing.T) {
 	}
 }
 
+func TestDateFilterAfterUnfilteredScheduleMidnight(t *testing.T) {
+	for _, tc := range []struct {
+		filter string
+		want   []string
+	}{
+		{dateToday, []string{"new"}},
+		{dateScheduled, nil},
+	} {
+		t.Run(tc.filter, func(t *testing.T) {
+			now := time.Date(2026, 11, 10, 4, 59, 0, 0, time.UTC)
+			withClock(t, func() time.Time { return now })
+			issue := dated("new", "2026-11-10", "")
+			saved, err := metadata.NewScheduleValue("2026-11-10", "America/New_York")
+			require.NoError(t, err)
+			issue.Metadata.ScheduledOn = saved
+			issue.ScheduledOnToday = "2026-11-09"
+			m := filterFormFixture()
+			m.list = m.list.applyFetched(initialFetchMsg{issues: []Issue{issue}})
+			now = now.Add(2 * time.Minute)
+			m, _ = m.refreshPlanningDay(now)
+			form := newFilterForm(ListFilter{}, m.scope)
+			form.field(fieldDate).radio.set(tc.filter)
+			m, _ = m.commitFilterForm(form)
+			assertQueueShortIDs(t, m.list.visibleRows(), tc.want)
+		})
+	}
+}
+
 type legacyDayAPI struct {
 	KataAPI
 	issues []Issue

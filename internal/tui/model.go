@@ -2685,9 +2685,9 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 func (m Model) refreshPlanningDay(now time.Time) (Model, tea.Cmd) {
 	changed, legacy := false, false
-	for _, issue := range m.list.issues {
-		changed = issue.refreshSavedDays(now) || changed
-		legacy = issue.hasLegacyDate() || legacy
+	for i := range m.list.issues {
+		changed = refreshSavedDay(&m.list.issues[i], now, m.list.filter.Date == "") || changed
+		legacy = m.list.issues[i].hasLegacyDate() || legacy
 	}
 	if m.detail.issue != nil {
 		m.detail.issue.refreshSavedDays(now)
@@ -2718,6 +2718,14 @@ func (m Model) refreshPlanningDay(now time.Time) (Model, tea.Cmd) {
 		}
 	}
 	return m, cmd
+}
+
+func refreshSavedDay(issue *Issue, now time.Time, apply bool) bool {
+	if apply {
+		return issue.refreshSavedDays(now)
+	}
+	copy := *issue
+	return copy.refreshSavedDays(now)
 }
 
 type planningDayFetchedMsg struct {
