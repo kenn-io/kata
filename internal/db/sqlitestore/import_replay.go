@@ -164,6 +164,11 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 				return err
 			}
 		}
+		if opts.RecoverLegacyFederationReplays && !opts.NewInstance {
+			if _, err := tx.ExecContext(ctx, federationLocalReplaysBackfill); err != nil {
+				return fmt.Errorf("recover legacy federation local replays: %w", err)
+			}
+		}
 		if err := replayAPITokenProjection(ctx, tx); err != nil {
 			return err
 		}

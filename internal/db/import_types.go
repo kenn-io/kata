@@ -34,6 +34,10 @@ type ImportOptions struct {
 	// Current streams leave this false so a mismatched supplied hash is refused.
 	RecomputeEventContentHash bool
 
+	// RecoverLegacyFederationReplays applies the schema-51 replay backfill
+	// to a full same-instance snapshot that predates replay markers.
+	RecoverLegacyFederationReplays bool
+
 	// PreserveIssueSyncBindingEnabled keeps imported issue sync bindings in
 	// their source enabled/disabled state. This is only for trusted local
 	// schema cutover; normal JSONL restore leaves restored bindings disabled
