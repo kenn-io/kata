@@ -256,6 +256,38 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 			if err := validator.validateLocalReference(ctx, project, ref.kind, *ref.id, *ref.event); err != nil {
 				return err
 			}
+			if ref.kind == "workflow" {
+				document, known := validator.idx.documents[cronDefinitionReference{projectID: project.ID, kind: ref.kind, uid: *ref.id, event: *ref.event}]
+				if !known && value.Status == "running" {
+					return fmt.Errorf("%w: workflow revision document is unavailable", cron.ErrInvalid)
+				}
+				if known {
+					if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
+						return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
+					}
+				}
+			}
+		}
+	}
+	if value.Status == "running" && value.WorkflowUID == nil && value.JobUID != nil {
+		ref := cronDefinitionReference{projectID: project.ID, kind: "job", uid: *value.JobUID, event: *value.DefinitionEventUID}
+		if document, known := validator.idx.documents[ref]; known {
+			job, err := cron.DecodeJob([]byte(document))
+			if err != nil {
+				return fmt.Errorf("%w: job revision is unsupported: %v", cron.ErrInvalid, err)
+			}
+			if job.Action.WorkflowUID != "" {
+				var workflowDocument string
+				err := tx.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE project_id=$1 AND uid=$2`, project.ID, job.Action.WorkflowUID).Scan(&workflowDocument)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				if err == nil {
+					if _, err := cron.DecodeWorkflow([]byte(workflowDocument)); err != nil {
+						return fmt.Errorf("%w: workflow dependency is unsupported: %v", cron.ErrInvalid, err)
+					}
+				}
+			}
 		}
 	}
 	if value.IssueUID == nil {

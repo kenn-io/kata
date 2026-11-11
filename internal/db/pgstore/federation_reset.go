@@ -85,7 +85,8 @@ WHERE project_id=$3`, replayHorizonEventID, pullCursorEventID, projectID); err !
 
 func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
 	var relayConfig *string
-	if err := tx.QueryRowContext(ctx, `SELECT relay_config FROM federation_bindings WHERE project_id=$1`, projectID).Scan(&relayConfig); err != nil {
+	var projectUID string
+	if err := tx.QueryRowContext(ctx, `SELECT b.relay_config,p.uid FROM federation_bindings b JOIN projects p ON p.id=b.project_id WHERE b.project_id=$1`, projectID).Scan(&relayConfig, &projectUID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return db.ErrNotFound
 		}
@@ -101,7 +102,7 @@ func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID in
 		return db.ErrFederationResetBlockedByExternalRoot
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return db.RequireLocalProjectWorkflows(ctx, tx, projectUID)
 	}
 	return mapSQLError(err, nil)
 }

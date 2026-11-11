@@ -304,6 +304,20 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		if principal.RelayProtocolVersion == db.RelayProtocolVersion {
+			ctx = db.WithRelayPeerFeatures(ctx, principal.RelayBindingUID, in.EventFeatures)
+			project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			if reader, ok := cfg.DB.(db.RelayWorkflowFeatureReader); ok {
+				required, err := reader.RelayWorkflowRequiredFeatures(ctx, project.UID)
+				if err != nil {
+					return nil, relayTransportError(err)
+				}
+				if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {
+					return nil, relayTransportError(err)
+				}
+			}
 			body, err := buildProjectFederationBody(ctx, cfg.DB, in.ProjectID, false)
 			if err != nil {
 				return nil, err
@@ -324,7 +338,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			handshake.PendingArtifactOffers = len(pendingArtifacts) > 0
 			body.Relay = handshake
-			return &api.ProjectFederationResponse{Body: body}, nil
+			return &api.ProjectFederationResponse{Body: body, EventFeatures: db.SupportedEventFeatures}, nil
 		}
 		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, Metadata: true})
 		if err != nil {
@@ -975,6 +989,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		for _, event := range in.Body.Events {
 			required, err := db.PayloadRequiredFeatures(event.Type, string(event.Payload))
 			if err != nil {
+				if strings.HasPrefix(event.Type, "cron.workflow.") {
+					return nil, federationIngestError(fmt.Errorf("%w: invalid workflow event payload: %v", db.ErrFederationIngestValidation, err))
+				}
 				return nil, federationFeatureError(err)
 			}
 			if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {

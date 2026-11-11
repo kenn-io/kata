@@ -102,6 +102,9 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 			if err := checkPushPath(envelope.Path); err != nil {
 				return err
 			}
+			if err := db.CheckRelayBatchFeatures(db.RelayBatch{Stream: batch.Stream, Envelopes: []db.RelayEnvelope{envelope}}, db.SupportedEventFeatures); err != nil {
+				return err
+			}
 			var retained string
 			var accepted int
 			err := tx.QueryRowContext(ctx, `SELECT envelope_digest,accepted FROM federation_relay_inbox WHERE binding_uid=$1 AND stream=$2 AND reset_epoch=$3 AND sequence=$4`, bindingUID, batch.Stream, grant.RelayResetEpoch, envelope.Sequence).Scan(&retained, &accepted)

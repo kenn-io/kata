@@ -1,10 +1,12 @@
 package db
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -150,6 +152,32 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 		refs[identity] = true
 	}
 	return events, provenance, nil
+}
+
+// requireUsableResetEvents fences unsupported history at checkpoint use sites.
+// Integrity decoding remains independent so owner backups can retain evidence.
+func requireUsableResetEvents(events []RemoteEvent) error {
+	for _, event := range events {
+		required, err := PayloadRequiredFeatures(event.Type, string(event.Payload))
+		if err != nil {
+			return fmt.Errorf("%w: workflow payload: %v", ErrUnsupportedEventFeatures, err)
+		}
+		if err := RequireEventFeatures(SupportedEventFeatures, required); err != nil {
+			return err
+		}
+		if workflowDefinitionEvent(event.Type) {
+			var body struct {
+				Definition jsontext.Value `json:"definition"`
+			}
+			if err := json.Unmarshal(event.Payload, &body); err != nil {
+				return fmt.Errorf("%w: workflow payload: %v", ErrUnsupportedEventFeatures, err)
+			}
+			if _, err := cron.DecodeWorkflow(body.Definition); err != nil {
+				return fmt.Errorf("%w: workflow definition: %v", ErrUnsupportedEventFeatures, err)
+			}
+		}
+	}
+	return nil
 }
 
 func remoteResetFoldEvents(events []RemoteEvent) []FoldEvent {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -809,4 +810,38 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	stored, err := env.DB.CronJob(t.Context(), project.ID, jobUID)
 	require.NoError(t, err)
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
+}
+
+func TestCronCLIRefusesArgvWithoutMutation(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	for _, member := range []string{`"argv":null`, `"argv":[]`, `"argv":["printf",""]`} {
+		body := `{"name":"Inspect","definition":{"version":1,"steps":[{"key":"inspect","kind":"command","command":"true",` + member + `}]}}`
+		_, _, err := executeCronCLI(t, env.URL, strings.NewReader(body), "workflow", "create", "--uid", cronCLIUID(t), "--file", "-")
+		require.Error(t, err)
+	}
+	workflows, err := env.DB.ListCronWorkflows(t.Context(), db.CronList{ProjectID: project.ID})
+	require.NoError(t, err)
+	require.Empty(t, workflows)
+}
+
+func TestCronWorkflowHTTPRefusesArgvWithoutMutation(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	for _, member := range []string{`"argv":null`, `"argv":[]`, `"argv":["printf",""]`} {
+		body := `{"actor":"worker","name":"Inspect","definition":{"version":1,"steps":[{"key":"inspect","kind":"command","command":"true",` + member + `}]}}`
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/cron/workflows", env.URL, project.ID), strings.NewReader(body))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := env.HTTP.Do(request)
+		require.NoError(t, err)
+		response.Body.Close()
+		require.GreaterOrEqual(t, response.StatusCode, 400)
+	}
+	workflows, err := env.DB.ListCronWorkflows(t.Context(), db.CronList{ProjectID: project.ID})
+	require.NoError(t, err)
+	require.Empty(t, workflows)
 }

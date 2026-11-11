@@ -43,6 +43,9 @@ func TestCronWorkflowStrictDefinitions(t *testing.T) {
 	f := newCronFixture(t)
 	for _, definition := range []map[string]any{
 		{"version": 2, "steps": []any{}},
+		{"version": 1, "steps": []any{map[string]any{"key": "inspect", "kind": "prompt", "prompt": "Inspect", "argv": []string{}}}},
+		{"version": 1, "steps": []any{map[string]any{"key": "inspect", "kind": "prompt", "prompt": "Inspect", "argv": nil}}},
+		{"version": 1, "steps": []any{map[string]any{"key": "inspect", "kind": "prompt", "prompt": "Inspect", "argv": []string{"echo", ""}}}},
 		{"version": 1, "steps": []any{map[string]any{"key": "inspect", "kind": "command", "command": "true", "after": []string{"missing"}}}},
 		{"version": 1, "steps": []any{map[string]any{"key": "inspect", "kind": "prompt", "prompt": "Inspect"}}, "options": map[string]any{"api_token": "secret-fixture"}},
 		{"version": 1, "steps": []any{map[string]any{"key": "inspect", "kind": "prompt", "prompt": "Inspect", "unexpected": true}}},

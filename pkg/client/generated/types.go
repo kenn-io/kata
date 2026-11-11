@@ -1740,6 +1740,7 @@ func (c CronWorkflowResponseBody) Validate() error {
 
 type CronWorkflowStep struct {
 	After   []string       `json:"after,omitempty"`
+	Argv    []string       `json:"argv,omitempty"`
 	Command *string        `json:"command,omitempty"`
 	Key     string         `json:"key" validate:"required"`
 	Kind    string         `json:"kind" validate:"required"`
@@ -1761,6 +1762,7 @@ func (c CronWorkflowStep) Validate() error {
 
 type CronWorkflowStepResponse struct {
 	After   []string       `json:"after,omitempty"`
+	Argv    []string       `json:"argv,omitempty"`
 	Command *string        `json:"command,omitempty"`
 	Key     string         `json:"key" validate:"required"`
 	Kind    string         `json:"kind" validate:"required"`

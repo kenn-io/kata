@@ -73,6 +73,11 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 				}
 				declaredBytes += manifest.VectorByteSize
 			}
+			if features, ok := db.RelayPeerFeatures(ctx, bindingUID); ok {
+				if err = db.CheckRelayBatchFeatures(db.RelayBatch{Stream: stream, Envelopes: []db.RelayEnvelope{e}}, features); err != nil {
+					break
+				}
+			}
 			total += len(e.Body)
 			output = append(output, e)
 			ids = append(ids, id)
@@ -179,7 +184,14 @@ func (d *Store) relayGrantTx(ctx context.Context, tx *sql.Tx, bindingUID, capabi
 	// exact grant under the binding-first lock order before any data is exposed.
 	grant, err := scanFederationEnrollment(tx.QueryRowContext(ctx, federationEnrollmentSelect+` WHERE relay_binding_uid=?`, bindingUID))
 	if errors.Is(err, db.ErrNotFound) {
-		return d.upstreamRelayGrantTx(ctx, tx, bindingUID)
+		grant, err = d.upstreamRelayGrantTx(ctx, tx, bindingUID)
+		if err != nil {
+			return grant, err
+		}
+		if err = db.CheckRelayProjectFeatures(ctx, tx, bindingUID, *grant.ProjectID); err != nil {
+			return db.FederationEnrollment{}, err
+		}
+		return grant, nil
 	}
 	if err != nil {
 		return grant, err
@@ -188,6 +200,9 @@ func (d *Store) relayGrantTx(ctx context.Context, tx *sql.Tx, bindingUID, capabi
 		return grant, db.ErrNotFound
 	}
 	if err = d.FederationEnrollmentTransactionFence(grant, *grant.ProjectID, capability)(ctx, tx); err != nil {
+		return db.FederationEnrollment{}, err
+	}
+	if err = db.CheckRelayProjectFeatures(ctx, tx, bindingUID, *grant.ProjectID); err != nil {
 		return db.FederationEnrollment{}, err
 	}
 	return d.activateRelayCheckpointTx(ctx, tx, grant)

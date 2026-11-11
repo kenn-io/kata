@@ -7,6 +7,8 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
 // CronDefinitionSnapshots captures portable definitions and run history
@@ -18,7 +20,7 @@ func CronDefinitionSnapshots(ctx context.Context, tx *sql.Tx, project Project) (
 	if err != nil {
 		return nil, err
 	}
-	workflows, err := query.Workflows(ctx, CronList{ProjectID: project.ID, IncludeDeleted: true})
+	workflows, err := query.workflows(ctx, CronList{ProjectID: project.ID, IncludeDeleted: true}, true)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +75,9 @@ func CronMaterializationNeeded(events []FoldEvent, acceptedEventUIDs []string) b
 // MaterializeCronDefinitions writes the winning shared definitions and
 // independent observations. Reordered references do not start execution.
 func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string, p FoldProjection, validator *CronReplayValidator) error {
+	if err := p.cronBlockedProjects[projectUID]; err != nil {
+		return fmt.Errorf("%w: unsupported retained workflow: %v", ErrFederationIngestValidation, err)
+	}
 	put := func(job bool, value CronDefinition, definition any, owner string) error {
 		if owner != projectUID {
 			return fmt.Errorf("%w: cron project identity mismatch", ErrFederationIngestValidation)
@@ -86,7 +91,23 @@ func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64
 		if err == nil && existingProject != projectID {
 			return fmt.Errorf("%w: cron UID belongs to another project", ErrFederationIngestValidation)
 		}
-		document, err := json.Marshal(definition)
+		if err == nil && !job {
+			var raw, clockJSON, eventUID string
+			if err := tx.QueryRowContext(ctx, `SELECT definition_json,definition_hlc_json,definition_event_uid FROM cron_workflows WHERE uid=$1`, value.UID).Scan(&raw, &clockJSON, &eventUID); err != nil {
+				return err
+			}
+			if _, err := cron.DecodeWorkflow([]byte(raw)); err != nil {
+				var clock CronDefinitionHLC
+				if err := json.Unmarshal([]byte(clockJSON), &clock); err != nil {
+					return err
+				}
+				current := CronDefinition{DefinitionHLC: clock, DefinitionEventUID: eventUID}
+				if compareClock(cronDefinitionClock(value), cronDefinitionClock(current)) <= 0 {
+					return nil
+				}
+			}
+		}
+		document, err := cronDefinitionJSON(definition)
 		if err != nil {
 			return err
 		}
@@ -106,7 +127,11 @@ func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64
 		}
 	}
 	for _, workflow := range p.CronWorkflows {
-		if err := put(false, workflow.CronDefinition, workflow.Definition, workflow.ProjectUID); err != nil {
+		var definition any = workflow.Definition
+		if len(workflow.RawDefinition) != 0 {
+			definition = workflow.RawDefinition
+		}
+		if err := put(false, workflow.CronDefinition, definition, workflow.ProjectUID); err != nil {
 			return err
 		}
 	}
@@ -119,6 +144,9 @@ func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64
 // PrepareCronAdoption captures portable history before rebinding its
 // project envelope; ordinary federation guards remain with the caller.
 func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targetUID string, emptyOnly bool) ([]CronEvent, error) {
+	if err := RequireLocalProjectWorkflows(ctx, tx, project.UID); err != nil {
+		return nil, err
+	}
 	// Adoption replaces history with new spoke-originated snapshots. Native
 	// delivery state cannot enter through that path; refuse before rebinding or
 	// deleting local history so the current authority can keep delivering.
