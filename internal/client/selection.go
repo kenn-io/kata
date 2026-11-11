@@ -139,7 +139,7 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 		if token != "" {
 			resolved.Token = token
 		}
-		if _, err := config.LocalProfileEnvironment(profile, false); err != nil {
+		if _, err := config.LocalProfileEnvironment(profile, false); err != nil && profile.Config.AutostartEnabled() {
 			return DaemonSelection{}, err
 		}
 		return DaemonSelection{Resolved: resolved, Profile: &profile}, nil
