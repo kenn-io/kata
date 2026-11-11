@@ -627,8 +627,9 @@ restore preserve historically decodable documents and their event evidence; JSON
 change. These workflows remain unavailable to adapters and cannot be shown or
 used in new jobs or fresh running observations. Terminal run evidence can still
 reference an exact held revision. Ordinary workflow lists omit held workflows and
-show supported siblings. Federation snapshots and adoption fail when a held
-workflow row or retained unsupported workflow event exists.
+show supported siblings. A held workflow row or retained unsupported workflow
+event blocks direct and relay project synchronization as well as federation
+snapshots and adoption.
 
 Retained events whose definitions cannot be represented in storage, or whose
 future fields cannot be decoded, can block cron rematerialization for their
@@ -641,8 +642,8 @@ the definition cannot be represented in a workflow row, find its UID and raw
 definition in the retained `event` record instead. Create a supported workflow
 with a new UID, then update affected jobs to use it. A full replacement using a
 held row's current event UID is also accepted, but retained unsupported events
-continue to block federation snapshots and adoption. Preserve that evidence
-for recovery with a compatible version.
+continue to block direct and relay synchronization, federation snapshots, and
+adoption. Preserve that evidence for recovery with a compatible version.
 
 Signed federation checkpoints with unsupported workflow evidence cannot be
 downloaded, forwarded, installed, or activated. Taking an owner backup retains
@@ -653,9 +654,15 @@ supported workflow does not clear older retained evidence.
 ### Upgrade limits
 
 These limits apply to projects with cron data and the adapters that consume
-it. For ordinary issue synchronization, use the normal
-[hub-first upgrade procedure](../operations/federation.md#compatibility-and-rolling-upgrades);
-spokes can upgrade later.
+it. Use the normal [hub-first upgrade procedure](../operations/federation.md#compatibility-and-rolling-upgrades)
+for ordinary issue synchronization, subject to the following argv requirement.
+
+Before creating a project's first `argv` workflow, upgrade every participating
+peer to support `cron_workflow_argv_v1`. Once argv appears in retained workflow
+history, including edits and tombstones, peers without that capability refuse
+synchronization for the whole project, including issues and comments. Deleting
+or replacing the workflow does not remove the requirement; it lasts while that
+evidence is retained.
 
 Kata 0.19.0 advertised both `cron_v1` and `cron_notify_children_v1`.
 Kata 0.20.0 advertises only `cron_v1` for all cron support, with no alias for
