@@ -79,6 +79,13 @@ func TestSharedChoiceStartsPostgresCompatibleIndex(t *testing.T) {
 			status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
 			require.Equal(t, "built_in", status.Provider)
 			require.Eventually(t, func() bool {
+				status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
+				if mode == "other" {
+					return status.Indexing != nil && status.Indexing.Failed
+				}
+				return status.Indexing == nil
+			}, 5*time.Second, 10*time.Millisecond)
+			require.Eventually(t, func() bool {
 				active, ok, err := idx.ActiveGeneration(t.Context())
 				return err == nil && ok && active == key
 			}, 5*time.Second, 10*time.Millisecond)
