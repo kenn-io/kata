@@ -3,7 +3,6 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -15,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"uuid"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
@@ -325,47 +323,4 @@ func exposedDocbankNode(cfg ServerConfig, node docbank.Node) error {
 		return api.NewError(http.StatusForbidden, "docbank_outside_scope", "file is outside the configured Docbank folder", "move the file into the configured folder", nil)
 	}
 	return nil
-}
-
-// attachmentPatchHook decides the patch under the metadata write transaction.
-// It rejects a write whose Docbank route changed since the handler read it, so
-// a reference never commits with an origin from a stale binding. A reuse
-// request also rechecks there, so concurrent retries cannot each observe an
-// absent reference and create a second one.
-func attachmentPatchHook(patch map[string]jsontext.Value, observed *db.FederationBinding, reuseVersion *uuid.UUID, origin string, localOrigins []string) db.MetadataPatchHook {
-	return func(ctx context.Context, tx *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
-		if !attachmentRouteUnchanged(ctx, tx, current.ProjectID, observed) {
-			return nil, attachmentError(409, "attachment_route_changed")
-		}
-		if reuseVersion == nil {
-			return patch, nil
-		}
-		existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion}, origin, localOrigins)
-		if err != nil || existingID != "" {
-			return map[string]jsontext.Value{}, err
-		}
-		return patch, nil
-	}
-}
-
-// attachmentRouteUnchanged compares the route the handler observed with the
-// committed binding using the same identity check as the forwarding path.
-// Cursors and sync timestamps are not part of the route, so they may advance.
-func attachmentRouteUnchanged(ctx context.Context, tx *sql.Tx, projectID int64, observed *db.FederationBinding) bool {
-	var current db.FederationBinding
-	var enabled, pushEnabled, allowInsecure int
-	var relayConfig *string
-	err := tx.QueryRowContext(ctx, `SELECT role, hub_url, hub_project_id, hub_project_uid, push_enabled, allow_insecure, enabled, relay_config FROM federation_bindings WHERE project_id=$1`, projectID).
-		Scan(&current.Role, &current.HubURL, &current.HubProjectID, &current.HubProjectUID, &pushEnabled, &allowInsecure, &enabled, &relayConfig)
-	if errors.Is(err, sql.ErrNoRows) {
-		return observed == nil
-	}
-	if err != nil || observed == nil {
-		return false
-	}
-	current.PushEnabled, current.AllowInsecure, current.Enabled = pushEnabled == 1, allowInsecure == 1, enabled == 1
-	if current.RelayConfig, err = db.DecodeRelayBindingConfig(relayConfig); err != nil {
-		return false
-	}
-	return sameDocbankForwardRoute(current, *observed)
 }

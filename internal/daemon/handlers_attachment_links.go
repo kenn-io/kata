@@ -60,9 +60,9 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 		}
 	}
 	if input.ReuseExisting {
-		return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, &attachment.DocbankVersion, binding)
+		return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, &attachment.DocbankVersion)
 	}
-	return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, nil, binding)
+	return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, nil)
 }
 
 func attachmentForVersion(iss db.Issue, version docbank.Version, origin string, localOrigins []string) (string, metadata.Attachment, error) {
