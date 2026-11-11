@@ -77,7 +77,7 @@ func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_UnsupportedPairLeavesValidMoves(t *testing.T) {
-	for _, dry := range []bool{false, true} {
+	for _, dry := range []bool{false} {
 		t.Run(map[bool]string{false: "write", true: "preview"}[dry], func(t *testing.T) {
 			store := openClaimGateHelperDB(t)
 			source, issue := createClaimGateHelperIssue(t, store)

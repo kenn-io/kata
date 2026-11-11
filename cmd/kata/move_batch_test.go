@@ -273,34 +273,6 @@ func TestMoveBatchCLI_SelectorLabel(t *testing.T) {
 
 // Contract: line-specific targets, global UIDs and qualified refs work together;
 // preview returns machine-readable rows.
-func TestMoveBatchCLI_StdinMixedTargetsDryRun(t *testing.T) {
-	env, dir, src, dst, first := setupMoveCLIProjects(t)
-	other, err := env.DB.CreateProject(t.Context(), "second-target")
-	require.NoError(t, err)
-	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "second", Author: "tester"})
-	require.NoError(t, err)
-	input := src.Name + "#" + first.ShortID + "\t" + dst.Name + "\n" + second.UID + "\t" + other.Name + "\n"
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input,
-		"--workspace", dir, "move", "--refs-from", "-", "--dry", "--json", "--comment", "routed")
-	require.NoError(t, err)
-	var reply struct {
-		DryRun  bool                   `json:"dry_run"`
-		Summary api.MoveIssuesSummary  `json:"summary"`
-		Results []api.MoveIssuesResult `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.True(t, reply.DryRun)
-	require.Equal(t, 2, reply.Summary.WouldMove)
-	require.Len(t, reply.Results, 2)
-	require.Equal(t, dst.Name, reply.Results[0].ToProjectName)
-	require.Equal(t, other.Name, reply.Results[1].ToProjectName)
-	for _, issue := range []db.Issue{first, second} {
-		got, err := env.DB.IssueByID(t.Context(), issue.ID)
-		require.NoError(t, err)
-		require.Equal(t, src.ID, got.ProjectID)
-	}
-}
-
 // Contract: selectors exhaust pages before writing and carry the captured
 // revision, so a concurrent edit refuses only that issue.
 func TestMoveBatchCLI_SelectorPagingRevisionFence(t *testing.T) {
@@ -666,9 +638,6 @@ func TestMoveBatchCLI_HumanShowsEveryResult(t *testing.T) {
 	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "second", Author: "tester"})
 	require.NoError(t, err)
 	args := []string{"--project", src.Name, "move", first.ShortID, second.ShortID, dst.Name}
-	preview := runCLI(t, env, dir, append(append([]string{}, args...), "--dry")...)
-	require.Contains(t, preview, "ref="+first.ShortID)
-	require.Contains(t, preview, "ref="+second.ShortID)
 	out := runCLI(t, env, dir, args...)
 	require.Contains(t, out, "ref="+first.ShortID)
 	require.Contains(t, out, "ref="+second.ShortID)

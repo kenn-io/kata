@@ -89,8 +89,8 @@ func TestMoveIssuesBatch_ExtendedShortIDAtBothProjects(t *testing.T) {
 	require.True(t, out.Results[0].ShortIDExtended)
 }
 
-func TestMoveIssuesBatch_DuplicateConflictDryRun(t *testing.T) {
-	for _, mode := range []string{"duplicate", "conflict", "dry"} {
+func TestMoveIssuesBatch_DuplicateConflict(t *testing.T) {
+	for _, mode := range []string{"duplicate", "conflict"} {
 		t.Run(mode, func(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("tok"))
 			src, a, i := seedMovePair(t, env)
@@ -102,7 +102,7 @@ func TestMoveIssuesBatch_DuplicateConflictDryRun(t *testing.T) {
 			}
 			before, err := env.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
-			body := fmt.Sprintf(`{"actor":"tester","dry_run":%t,"default_project_id":%d,"items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, mode == "dry", src.ID, i.UID, a.UID, i.UID, target)
+			body := fmt.Sprintf(`{"actor":"tester","default_project_id":%d,"items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, src.ID, i.UID, a.UID, i.UID, target)
 			out := postMoveBatch(t, env, body)
 			require.Len(t, out.Results, 2)
 			if mode == "conflict" {
@@ -113,11 +113,7 @@ func TestMoveIssuesBatch_DuplicateConflictDryRun(t *testing.T) {
 			} else {
 				require.Equal(t, "duplicate_item", out.Results[1].Code)
 				require.Equal(t, "unchanged", out.Results[1].Result)
-				if mode == "dry" {
-					require.Equal(t, "would_move", out.Results[0].Result)
-				} else {
-					require.Equal(t, "moved", out.Results[0].Result)
-				}
+				require.Equal(t, "moved", out.Results[0].Result)
 			}
 			if mode != "duplicate" {
 				after, err := env.DB.MaxEventID(t.Context())
@@ -149,7 +145,7 @@ func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
 
 func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 	for _, mode := range []string{"empty", "negative", "stale first", "stale second"} {
-		for _, dry := range []bool{false, true} {
+		for _, dry := range []bool{false} {
 			t.Run(fmt.Sprintf("%s dry=%t", mode, dry), func(t *testing.T) {
 				env := testenv.New(t, testenv.WithAuthToken("tok"))
 				src, target, issue := seedMovePair(t, env)

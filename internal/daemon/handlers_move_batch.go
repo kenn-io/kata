@@ -143,8 +143,8 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					resultErr = api.NewError(http.StatusRequestTimeout, "move_preview_timeout", "move preview timed out", "Reduce the number of items and retry.", nil)
 				}
 			}()
-			if in.Body.StartIndex != 0 || len(in.Body.Completed) != 0 {
-				return nil, api.NewError(400, "validation", "dry runs do not support continuation", "", nil)
+			if len(in.Body.Items) > 1 || in.Body.StartIndex != 0 || len(in.Body.Completed) != 0 {
+				return nil, api.NewError(400, "validation", "dry run accepts one item and no continuation", "", nil)
 			}
 		}
 		actor, err := attributedActor(ctx, in.Body.Actor)
@@ -286,7 +286,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 		}
 		if in.Body.DryRun {
-			return rehearseMoveBatch(ctx, cfg, in, items, results, actor, cache)
+			return previewSingleMoveBatch(ctx, cfg, in, items, results, actor, cache)
 		}
 		out = &api.MoveIssuesResponse{}
 		out.Body.NextIndex = in.Body.StartIndex
@@ -392,7 +392,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 	}
 }
 
-func rehearseMoveBatch(ctx context.Context, cfg ServerConfig, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult, actor string, cache *claimClientCache) (*api.MoveIssuesResponse, error) {
+func previewSingleMoveBatch(ctx context.Context, cfg ServerConfig, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult, actor string, cache *claimClientCache) (*api.MoveIssuesResponse, error) {
 	var indexes, previews []int
 	for j := range items {
 		if results[j].Result != "" {
@@ -429,7 +429,7 @@ func rehearseMoveBatch(ctx context.Context, cfg ServerConfig, in *api.MoveIssues
 		}
 	}
 	if len(moves) > 0 {
-		rehearsal, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: moves, Rehearse: true, Comment: in.Body.Comment, Teammate: in.Body.Teammate})
+		rehearsal, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: moves, DryRun: true})
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
@@ -439,12 +439,8 @@ func rehearseMoveBatch(ctx context.Context, cfg ServerConfig, in *api.MoveIssues
 				moveBatchRefusal(&results[j], item.Err)
 				continue
 			}
-			if item.Duplicate {
-				results[j].Result, results[j].Code = "unchanged", "duplicate_item"
-			} else {
-				results[j].Result = "would_move"
-				results[j].Descendants = item.Out.Issues[1:]
-			}
+			results[j].Result = "would_move"
+			results[j].Descendants = item.Out.Issues[1:]
 		}
 	}
 	out := &api.MoveIssuesResponse{}

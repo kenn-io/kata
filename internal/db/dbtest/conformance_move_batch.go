@@ -61,17 +61,6 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	access, err := store.ProjectAccessRevision(ctx)
 	require.NoError(t, err)
 	require.Equal(t, revision, access)
-	in.DryRun = false
-	in.Rehearse = true
-	rehearsal, err := store.MoveIssuesBatch(ctx, in)
-	require.NoError(t, err)
-	require.ErrorAs(t, rehearsal.Results[1].Err, new(*db.RecurrencePinnedError))
-	after, err = store.MaxEventID(ctx)
-	require.NoError(t, err)
-	require.Equal(t, cursor, after)
-	access, err = store.ProjectAccessRevision(ctx)
-	require.NoError(t, err)
-	require.Equal(t, revision, access)
 	for _, issue := range issues {
 		got, err := store.IssueByID(ctx, issue.ID)
 		require.NoError(t, err)
@@ -80,7 +69,7 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		require.Empty(t, comments)
 	}
-	in.Rehearse = false
+	in.DryRun = false
 	out, err := store.MoveIssuesBatch(ctx, in)
 	require.NoError(t, err)
 	require.Len(t, out.Results, 4)
