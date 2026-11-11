@@ -298,7 +298,7 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 		event.Type = kind
 		event.ContentHash, err = db.RemoteEventContentHash(event)
 		require.NoError(t, err)
-		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, kind, "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash)
+		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, kind, "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash, event.CreatedAt.UTC().Format(db.EventTimestampFormat))
 		require.NoError(t, err)
 		features, err = db.ProjectRequiredEventFeatures(ctx, q, project.UID)
 		require.NoError(t, err)
@@ -317,7 +317,7 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 			event.Type = kind
 			event.ContentHash, err = db.RemoteEventContentHash(event)
 			require.NoError(t, err)
-			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, event.Type, event.Actor, string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash)
+			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, event.Type, event.Actor, string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash, event.CreatedAt.UTC().Format(db.EventTimestampFormat))
 			require.NoError(t, err)
 			_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures + "," + db.CronWorkflowArgvEventFeature})
 			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
