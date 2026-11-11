@@ -268,24 +268,10 @@ func federationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e Re
 	return from, to, nil
 }
 
-// RemoteIssueProjectResolver keeps portable hashes and receipts tied to their
+// RemoteIssueEventProject keeps portable hashes and receipts tied to their
 // envelope project. A trusted hub may deliver issue history through any later
 // destination, including a page that precedes the move itself.
-type RemoteIssueProjectResolver struct {
-	tx        *sql.Tx
-	route     int64
-	routeUID  string
-	processed map[string]bool
-}
-
-// NewRemoteIssueProjectResolver creates a resolver for one insertion transaction.
-func NewRemoteIssueProjectResolver(tx *sql.Tx, route int64) *RemoteIssueProjectResolver {
-	return &RemoteIssueProjectResolver{tx: tx, route: route, processed: make(map[string]bool)}
-}
-
-// Resolve validates an event and returns its local envelope project ID.
-func (r *RemoteIssueProjectResolver) Resolve(ctx context.Context, e RemoteEvent) (int64, error) {
-	tx, route := r.tx, r.route
+func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e RemoteEvent) (int64, error) {
 	var project int64
 	err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, e.ProjectUID).Scan(&project)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -327,25 +313,20 @@ func (r *RemoteIssueProjectResolver) Resolve(ctx context.Context, e RemoteEvent)
 		dependencies = append(dependencies, from)
 	}
 	if missing || project != route || e.Type == "issue.moved" {
-		if r.routeUID == "" {
-			if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, route).Scan(&r.routeUID); err != nil {
-				return 0, err
-			}
+		var routeUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, route).Scan(&routeUID); err != nil {
+			return 0, err
 		}
 		for _, uid := range dependencies {
-			if r.processed[uid] {
-				continue
-			}
 			var bound bool
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b JOIN projects p ON p.id=b.project_id WHERE p.uid=$1)`, uid).Scan(&bound); err != nil {
 				return 0, err
 			}
 			if !bound {
-				if err := recordFederationProjectIdentityDependency(ctx, tx, r.routeUID, uid); err != nil {
+				if err := recordFederationProjectIdentityDependency(ctx, tx, routeUID, uid); err != nil {
 					return 0, err
 				}
 			}
-			r.processed[uid] = true
 		}
 	}
 	if missing {
