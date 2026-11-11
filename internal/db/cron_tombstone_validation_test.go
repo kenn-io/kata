@@ -81,6 +81,24 @@ func TestCronWorkflowBackupRejectsReservedKind(t *testing.T) {
 	require.NoError(t, ValidateImportReplay(records, ImportOptions{}))
 }
 
+func TestCronWorkflowBackupRetainsLegacyRawDocuments(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	base := CronWorkflowExport{CronDefinition: CronDefinition{ID: 1, ProjectID: 1, UID: newUID(t), Name: "Review", DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: now.UnixMilli(), OriginInstanceUID: newUID(t)}, Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now}}
+	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`, `{"version":1,"steps":[{"kind":"argv"}]}`} {
+		base.RawDefinition = jsontext.Value(document)
+		raw, err := json.Marshal(base)
+		require.NoError(t, err)
+		var restored CronWorkflowExport
+		require.NoError(t, json.Unmarshal(raw, &restored, json.RejectUnknownMembers(true)))
+		require.JSONEq(t, document, string(restored.RawDefinition))
+		require.NoError(t, ValidateCronRecord(&restored))
+		project := &ProjectExport{ID: 1, UID: newUID(t), Name: "example-project", CreatedAt: now.Format(time.RFC3339Nano), Revision: 1}
+		require.NoError(t, ValidateImportReplay([]ImportRecord{project, &restored}, ImportOptions{}))
+		_, err = PrepareProjectMergeRecords([]ImportRecord{project, &restored}, ProjectMergeOffsets{}, nil)
+		require.Error(t, err, "merge must not make held state visible")
+	}
+}
+
 func TestAcceptedWorkflowEventsRejectNullShapes(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	projectUID := newUID(t)
@@ -89,5 +107,22 @@ func TestAcceptedWorkflowEventsRejectNullShapes(t *testing.T) {
 		require.NoError(t, err)
 		event := RemoteEvent{EventUID: newUID(t), OriginInstanceUID: newUID(t), ProjectUID: projectUID, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now, Payload: payload}
 		require.ErrorIs(t, ValidateAcceptedCronEvent(event), ErrFederationIngestValidation, "null shape must not be admitted before feature classification: %s", document)
+	}
+}
+
+func TestOwnerBackupRetainsHistoricalWorkflowEvents(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	projectUID := newUID(t)
+	project := &ProjectExport{ID: 1, UID: projectUID}
+	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`, `{"steps":[{"kind":"argv"}]}`, `{"steps":[{"kind":"argv","argv":["true"]}]}`} {
+		payload, err := json.Marshal(CronDefinitionEvent{UID: newUID(t), ProjectUID: projectUID, Name: "Review", Definition: jsontext.Value(document), Author: "worker", CreatedAt: now, UpdatedAt: now})
+		require.NoError(t, err)
+		event := &EventExport{ID: 1, UID: newUID(t), OriginInstanceUID: newUID(t), ProjectID: 1, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now.Format(time.RFC3339Nano), Payload: payload}
+		require.NoError(t, validateCronImportEvents([]ImportRecord{project, event}), document)
+		require.JSONEq(t, document, string(func() jsontext.Value {
+			var body CronDefinitionEvent
+			require.NoError(t, json.Unmarshal(event.Payload, &body))
+			return body.Definition
+		}()))
 	}
 }

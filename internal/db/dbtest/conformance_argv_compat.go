@@ -39,6 +39,42 @@ func checkArgvCompatStoredReads(t *testing.T, store db.Storage) error {
 		require.NoError(t, tx.Rollback())
 		require.Error(t, snapshotErr)
 	}
+	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET deleted_at=NULL WHERE uid=$1`, workflow.UID)
+	require.NoError(t, err)
+	job, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+	require.NoError(t, err)
+	job.Action.Prompt = ""
+	job.Action.WorkflowUID = workflow.UID
+	_, _, err = store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "worker", Definition: job})
+	require.ErrorIs(t, err, cron.ErrInvalid, "a new job must not use a held workflow")
+	runUID, err := uid.New()
+	require.NoError(t, err)
+	_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}})
+	require.ErrorIs(t, err, cron.ErrInvalid, "a new run must not cite a held revision")
+	return nil
+}
+
+func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	event := argvCompatRemoteWorkflow(t, project, origin, `{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`)
+	fold := db.FoldEvents([]db.FoldEvent{{UID: event.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: event.Type, HLCPhysicalMS: event.HLCPhysicalMS, Payload: event.Payload}})
+	q := store.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	tx, err := q.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.Error(t, db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, fold, nil))
+	require.NoError(t, tx.Rollback())
+	tx, err = q.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, other.ID, other.UID, fold, nil), "another project's history does not block this project")
+	require.NoError(t, tx.Rollback())
 	return nil
 }
 

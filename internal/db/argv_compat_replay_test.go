@@ -54,3 +54,36 @@ func TestArgvCompatReplayDoesNotReviveOlderWorkflow(t *testing.T) {
 		}
 	}
 }
+
+func TestArgvCompatHistoricalNullAndSnapshotClock(t *testing.T) {
+	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`} {
+		older := cronFoldEvent(t, "workflow", 1, false)
+		newer := cronFoldEvent(t, "workflow", 2, false)
+		var payload map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal(newer.Payload, &payload))
+		payload["definition"] = jsontext.Value(document)
+		newer.Payload, _ = json.Marshal(payload)
+		snapshot := older
+		snapshot.Type = "cron.workflow.snapshot"
+		snapshot.HLCPhysicalMS = 3
+		require.NoError(t, json.Unmarshal(older.Payload, &payload))
+		payload["definition_event_uid"], _ = json.Marshal(older.UID)
+		payload["definition_hlc"], _ = json.Marshal(db.CronDefinitionHLC{Version: 1, PhysicalMS: older.HLCPhysicalMS, OriginInstanceUID: older.OriginInstanceUID})
+		snapshot.Payload, _ = json.Marshal(payload)
+		winner := db.FoldEvents([]db.FoldEvent{older, newer, snapshot}).CronWorkflows[foldCronUID]
+		require.Equal(t, newer.UID, winner.DefinitionEventUID)
+		require.JSONEq(t, document, string(winner.RawDefinition))
+	}
+}
+
+func TestCronFoldStillWarnsForOrdinaryUnknownHistory(t *testing.T) {
+	older := cronFoldEvent(t, "workflow", 1, false)
+	newer := cronFoldEvent(t, "workflow", 2, false)
+	var payload map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(newer.Payload, &payload))
+	payload["definition"] = jsontext.Value(`{"steps":[{"kind":"command","unknown":true}]}`)
+	newer.Payload, _ = json.Marshal(payload)
+	projection := db.FoldEvents([]db.FoldEvent{older, newer})
+	require.NotEmpty(t, projection.Warnings)
+	require.Equal(t, older.UID, projection.CronWorkflows[foldCronUID].DefinitionEventUID)
+}
