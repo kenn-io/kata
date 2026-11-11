@@ -32,13 +32,17 @@ func bumpProjectAccess(ctx context.Context, tx db.Transaction) error {
 }
 
 func (s *Store) withProjectAccessTx(ctx context.Context, op func(*sql.Tx) error) error {
-	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+	return s.withProjectAccessTxFinalized(ctx, op, nil)
+}
+
+func (s *Store) withProjectAccessTxFinalized(ctx context.Context, op func(*sql.Tx) error, finish func(error, error) error) error {
+	return s.withTxFinalized(ctx, sql.LevelSerializable, func(tx *sql.Tx) error {
 		var revision string
 		if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='project_access_revision' FOR UPDATE`).Scan(&revision); err != nil {
 			return err
 		}
 		return op(tx)
-	})
+	}, finish)
 }
 
 func (s *Store) projectAccessAudit(ctx context.Context, tx *sql.Tx, kind, actor string, payload any) (db.Event, error) {

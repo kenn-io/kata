@@ -12,10 +12,12 @@ import (
 // errors abort the whole transaction so no results from an attempt escape.
 func (d *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
 	var out db.MoveIssuesBatchOut
+	pending := false
 	run := func(tx *sql.Tx) error {
 		var moved bool
 		var err error
 		out, moved, err = db.RunMoveBatchTx(ctx, tx, in, d.moveTreeTx, d.createCommentTx, IsTransient)
+		pending = true
 		if err != nil {
 			return err
 		}
@@ -29,18 +31,19 @@ func (d *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 		}
 		return nil
 	}
-	err := d.withProjectAccessTx(ctx, run)
-	if errors.Is(err, errBatchMovePreview) {
+	finish := func(err, rollbackErr error) error {
+		if pending {
+			pending = false
+			return db.FinishMoveBatchAttempt(ctx, &out, err, rollbackErr)
+		}
+		return err
+	}
+	err := d.withProjectAccessTxFinalized(ctx, run, finish)
+	if errors.Is(err, errBatchMovePreview) && !errors.Is(err, db.ErrTransactionFinalizationFailed) {
 		err = nil
 	}
 	if err != nil {
 		return db.MoveIssuesBatchOut{}, err
-	}
-	// Rejected items are rolled back and the connection has now been returned.
-	for n := range out.Results {
-		if out.Results[n].Err != nil {
-			out.Results[n].Err = db.FinishTransactionRollback(ctx, out.Results[n].Err, nil)
-		}
 	}
 	return out, nil
 }

@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"context"
 	"encoding/json/v2"
 	"slices"
 	"testing"
@@ -134,7 +135,19 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	retryB, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: deniedSource.ID, Title: "retry b", Author: "worker"})
 	require.NoError(t, err)
 	injected := false
+	finished := 0
+	finishedAtRetry := 0
 	retryAuthorize := func(uids []string) error {
+		if slices.Contains(uids, src.UID) && injected {
+			finishedAtRetry = finished
+		}
+		if slices.Contains(uids, src.UID) && !injected {
+			return db.AfterTransactionRollback(db.ErrNotFound, func(ctx context.Context) error {
+				_, err := store.IssueByID(ctx, retryA.ID)
+				finished++
+				return err
+			})
+		}
 		for _, uid := range uids {
 			if uid == deniedSource.UID && !injected {
 				injected = true
@@ -149,6 +162,8 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	}})
 	require.NoError(t, err)
 	require.True(t, injected)
+	require.Equal(t, 1, finished)
+	require.Equal(t, 1, finishedAtRetry)
 	for n, issue := range []db.Issue{retryA, retryB} {
 		require.NoError(t, retried.Results[n].Err)
 		got, err := store.IssueByID(ctx, issue.ID)

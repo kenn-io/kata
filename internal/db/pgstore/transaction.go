@@ -20,15 +20,24 @@ func (s *Store) withRepeatableReadTx(ctx context.Context, operation transactionF
 // withTx retries the complete transaction, never an individual statement.
 // Each failed attempt is rolled back before RetryTransient can begin another.
 func (s *Store) withTx(ctx context.Context, isolation sql.IsolationLevel, operation transactionFunc) error {
+	return s.withTxFinalized(ctx, isolation, operation, nil)
+}
+
+func (s *Store) withTxFinalized(ctx context.Context, isolation sql.IsolationLevel, operation transactionFunc, finish func(error, error) error) error {
 	if operation == nil {
 		return errors.New("postgres transaction operation is required")
 	}
-	err := s.RetryTransient(ctx, func() error {
+	err := s.RetryTransient(ctx, func() (result error) {
 		tx, err := s.BeginTx(ctx, &sql.TxOptions{Isolation: isolation})
 		if err != nil {
 			return err
 		}
-		defer func() { _ = tx.Rollback() }()
+		defer func() {
+			rollbackErr := tx.Rollback()
+			if finish != nil {
+				result = finish(result, rollbackErr)
+			}
+		}()
 		if err := operation(tx); err != nil {
 			return err
 		}

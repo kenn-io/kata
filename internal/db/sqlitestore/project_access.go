@@ -27,12 +27,21 @@ func bumpProjectAccess(ctx context.Context, tx db.Transaction) error {
 }
 
 func (d *Store) withProjectAccessTx(ctx context.Context, op func(*sql.Tx) error) error {
-	return d.RetryTransient(ctx, func() error {
+	return d.withProjectAccessTxFinalized(ctx, op, nil)
+}
+
+func (d *Store) withProjectAccessTxFinalized(ctx context.Context, op func(*sql.Tx) error, finish func(error, error) error) error {
+	return d.RetryTransient(ctx, func() (result error) {
 		tx, err := d.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = tx.Rollback() }()
+		defer func() {
+			rollbackErr := tx.Rollback()
+			if finish != nil {
+				result = finish(result, rollbackErr)
+			}
+		}()
 		if err := lockProjectAccess(ctx, tx); err != nil {
 			return err
 		}

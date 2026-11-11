@@ -12,7 +12,7 @@ func RunMoveBatchTx(ctx context.Context, tx *sql.Tx, in MoveIssuesBatchIn, move 
 	moved := false
 	for n, item := range in.Items {
 		if _, err := tx.ExecContext(ctx, "SAVEPOINT move_item"); err != nil {
-			return MoveIssuesBatchOut{}, false, err
+			return out, false, err
 		}
 		item.DryRun = in.DryRun
 		item.Savepoint = true
@@ -30,19 +30,36 @@ func RunMoveBatchTx(ctx context.Context, tx *sql.Tx, in MoveIssuesBatchIn, move 
 		}
 		if err != nil {
 			if isTransient(err) || ctx.Err() != nil {
-				return MoveIssuesBatchOut{}, false, err
-			}
-			if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT move_item"); rollbackErr != nil {
-				return MoveIssuesBatchOut{}, false, errors.Join(err, rollbackErr)
+				if _, ok := errors.AsType[*afterRollbackError](err); ok {
+					out.Results[n].Err = err
+				}
+				return out, false, err
 			}
 			out.Results[n].Err = err
+			if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT move_item"); rollbackErr != nil {
+				return out, false, errors.Join(err, rollbackErr)
+			}
 		} else {
 			out.Results[n] = MoveIssueBatchResult{Out: result}
 			moved = moved || !in.DryRun
 		}
 		if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT move_item"); err != nil {
-			return MoveIssuesBatchOut{}, false, err
+			return out, false, err
 		}
 	}
 	return out, moved, nil
+}
+
+// FinishMoveBatchAttempt completes rejected items after the transaction ends.
+func FinishMoveBatchAttempt(ctx context.Context, out *MoveIssuesBatchOut, transactionErr, rollbackErr error) error {
+	for n := range out.Results {
+		if out.Results[n].Err == nil {
+			continue
+		}
+		out.Results[n].Err = FinishTransactionRollback(ctx, out.Results[n].Err, rollbackErr)
+		if transactionErr != nil && errors.Is(out.Results[n].Err, ErrTransactionFinalizationFailed) {
+			transactionErr = errors.Join(transactionErr, out.Results[n].Err)
+		}
+	}
+	return transactionErr
 }
