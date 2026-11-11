@@ -239,7 +239,9 @@ func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
 				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					values := make([]float64, 768)
 					values[0] = 1
-					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"embedding": values, "index": 0}}}))
+					if err := json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"embedding": values, "index": 0}}}); err != nil {
+						t.Errorf("encode embedding response: %v", err)
+					}
 				}))
 				t.Cleanup(provider.Close)
 				endpoint = provider.URL
