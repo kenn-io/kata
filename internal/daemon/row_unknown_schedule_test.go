@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
@@ -111,4 +112,41 @@ func TestMetadataRejectsReplacingUnsupportedScheduleObject(t *testing.T) {
 	after, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
+}
+
+func TestRecurrenceAttachmentRejectsUnsupportedSchedule(t *testing.T) {
+	for _, tc := range []struct{ name, stored string }{
+		{"future rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`},
+		{"future member", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRowDatesFixture(t)
+			records, err := dbtest.CollectImportRecords(t.Context(), f.env.DB, db.ExportFilter{ProjectID: &f.project.ID})
+			require.NoError(t, err)
+			for _, record := range records {
+				if issue, ok := record.(*db.IssueExport); ok && issue.UID == f.nodate.UID {
+					issue.Metadata = jsontext.Value(`{"scheduled_on":` + tc.stored + `}`)
+				}
+			}
+			require.NoError(t, f.env.DB.ImportReplay(t.Context(), records, db.ImportOptions{}))
+			before, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
+			require.NoError(t, err)
+			cursor, err := f.env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			recurrences, err := f.env.DB.ListRecurrencesByProject(t.Context(), f.project.ID)
+			require.NoError(t, err)
+			path := fmt.Sprintf("/api/v1/projects/%d/recurrences", f.project.ID)
+			status, raw := cronHTTP(t, f.env, http.MethodPost, path, map[string]any{"actor": "tester", "initial_issue_ref": f.nodate.ShortID, "rrule": "FREQ=DAILY", "dtstart": "2026-11-12", "timezone": "UTC", "template": map[string]any{"title": "Recurring"}})
+			assert.Equal(t, http.StatusBadRequest, status, string(raw))
+			after, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
+			require.NoError(t, err)
+			assert.Equal(t, before, after)
+			afterCursor, err := f.env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, cursor, afterCursor)
+			afterRecurrences, err := f.env.DB.ListRecurrencesByProject(t.Context(), f.project.ID)
+			require.NoError(t, err)
+			assert.Equal(t, recurrences, afterRecurrences)
+		})
+	}
 }

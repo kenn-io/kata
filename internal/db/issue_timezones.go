@@ -20,8 +20,7 @@ func portableIssueTimezone(zone string) bool {
 	if zone != "UTC" && zone != "Etc/UTC" && !slices.Contains([]string{"Africa", "America", "Antarctica", "Arctic", "Asia", "Atlantic", "Australia", "Europe", "Indian", "Pacific"}, area) {
 		return false
 	}
-	_, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion)
-	return err == nil
+	return bundledScheduleZone(zone)
 }
 
 // legacyScheduleZoneKnown reports whether a legacy string schedule resolves to a usable zone.

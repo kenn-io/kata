@@ -89,6 +89,11 @@ func composeRecurrenceIssueMetadata(
 	if err != nil {
 		return nil, err
 	}
+	if !template {
+		if _, err := metadata.DecodeSavedSchedule(object["scheduled_on"]); metadata.IsUnsupportedSchedule(err) {
+			return nil, fmt.Errorf("%w: scheduled_on: %v", ErrInvalidRecurrence, err)
+		}
+	}
 	scheduledOn, err := metadata.NewScheduleValue(occurrenceKey, timezone)
 	if err != nil {
 		return nil, fmt.Errorf("marshal recurrence scheduled_on: %w", err)
