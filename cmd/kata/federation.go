@@ -418,7 +418,10 @@ func ensureSpokeDaemonContext(ctx context.Context) (context.Context, string, err
 					return ctx, "", err
 				}
 			}
-		} else if resolved.UnixSocket == "" {
+		} else if resolved.UnixSocket == "" || resolved.Source == clientpkg.DaemonSourceLocalRuntime {
+			// Active legacy local entries lose their catalog name during
+			// resolution, but their credential still belongs to this home,
+			// whether its runtime uses TCP or a Unix socket.
 			auth, err = federationImplicitSpokeTargetAuth(ctx, resolved.BaseURL)
 			if err != nil {
 				return ctx, "", err

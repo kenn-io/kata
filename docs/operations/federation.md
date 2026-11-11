@@ -421,7 +421,9 @@ credential.
 Spoke probes selected by an environment or workspace URL are anonymous; they
 do not use ambient hub credentials or fail because an unselected ambient token
 file is unavailable. Named catalog entries and pinned local profiles use their
-own selected credentials. An unavailable selected credential remains an error.
+own selected credentials. An active legacy `local = true` entry without a
+profile home also uses its catalog credential for the current home's daemon,
+over either TCP or Unix. An unavailable selected credential remains an error.
 
 Without a project argument or `--project`, `enroll` finds the project from the
 client's `.kata.toml` or Git alias and sends only that name or alias to the
