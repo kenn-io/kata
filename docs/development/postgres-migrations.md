@@ -463,3 +463,17 @@ place, with an atomic schema-version update.
 Start the matching schema 50 binary after migration. Older binaries cannot open
 schema 50. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 51: recurring delivery evidence index
+
+The 50→51 migration adds an immutable occurrence-key function and a partial
+index on live issues. It orders recurring child evidence by its exact instant
+and keeps unsupported versions visible to delivery reads. Existing issue data
+is unchanged. SQLite installs the equivalent index during its in-place upgrade.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads issues and blocks issue writes; allow an offline window for the
+issue table's size. Existing runtime grants remain sufficient. Start the matching
+schema 51 binary after migration. Older binaries cannot open schema 51; rollback
+requires the pre-upgrade backup and matching older binary.

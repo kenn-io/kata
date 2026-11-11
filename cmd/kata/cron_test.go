@@ -810,3 +810,45 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
 }
+
+func TestCronJobDeliveryDaemonVersion(t *testing.T) {
+	for _, action := range []string{"show", "list"} {
+		for _, version := range []string{"0.44.0", "0.45.0"} {
+			t.Run(action+"/"+version, func(t *testing.T) {
+				var reads atomic.Int32
+				var include atomic.Value
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					switch {
+					case r.URL.Path == "/api/v1/projects":
+						_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
+					case r.URL.Path == "/api/v1/projects/7":
+						_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
+					case r.URL.Path == "/api/v1/health":
+						_, _ = io.WriteString(w, `{"api_schema_version":"`+version+`"}`)
+					case strings.Contains(r.URL.Path, "/cron/jobs"):
+						reads.Add(1)
+						include.Store(r.URL.Query().Get("include"))
+						_, _ = io.WriteString(w, `{"job":{"delivery":{"state":"behind"}},"jobs":[{"delivery":{"state":"behind"}}]}`)
+					default:
+						t.Errorf("unexpected request: %s", r.URL.Path)
+					}
+				}))
+				t.Cleanup(server.Close)
+				args := []string{"job", action}
+				if action == "show" {
+					args = append(args, cronCLIUID(t))
+				}
+				_, _, err := executeCronCLI(t, server.URL, nil, args...)
+				if version == "0.44.0" {
+					require.ErrorContains(t, err, "upgrade the daemon")
+					require.Zero(t, reads.Load())
+				} else {
+					require.NoError(t, err)
+					require.EqualValues(t, 1, reads.Load())
+					require.Equal(t, "delivery", include.Load())
+				}
+			})
+		}
+	}
+}

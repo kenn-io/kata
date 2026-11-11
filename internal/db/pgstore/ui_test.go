@@ -449,3 +449,8 @@ func createUIProject(t *testing.T, store *Store, name string) db.Project {
 	require.NoError(t, err)
 	return project
 }
+
+func TestReadCronDeliveryConsistent(t *testing.T) {
+	store := openUIStore(t)
+	dbtest.CheckCronDeliveryConsistent(t, store, func(stage func(context.Context) error) { store.uiReadStage = stage })
+}

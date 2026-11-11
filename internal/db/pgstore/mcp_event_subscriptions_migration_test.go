@@ -16,7 +16,14 @@ import (
 
 func dropMCPEventSubscriptionsSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	dropRecurringDeliverySchema(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s.mcp_event_subscriptions`, schema)) // #nosec G201 -- schema is a fixed test identifier.
+	require.NoError(t, err)
+}
+
+func dropRecurringDeliverySchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+	t.Helper()
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %[1]s.idx_issues_recurring_delivery; DROP FUNCTION IF EXISTS %[1]s.kata_occurrence_key(json)`, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
 
@@ -57,12 +64,12 @@ func TestMCPEventSubscriptionsMigrationMatchesFreshSchema(t *testing.T) {
 	_, err = admin.ExecContext(ctx, `UPDATE mcp_events_upgrade.meta SET value='49' WHERE key='schema_version'`)
 	require.NoError(t, err)
 
+	// Opening also validates the migrated index and function against the schema manifest.
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 50, version)
 	assert.Equal(t, db.CurrentSchemaVersion(), version)
 
 	fresh, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "mcp_events_fresh", SchemaMode: pgstore.SchemaModeBootstrap})

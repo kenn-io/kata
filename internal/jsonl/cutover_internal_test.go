@@ -245,6 +245,7 @@ func indexOnlySource(t *testing.T, version int) string {
 		{48, []string{"idx_events_moved_from_id"}, nil},
 		{49, []string{"idx_events_cron_run_uid"}, nil},
 		{50, nil, []string{"mcp_event_subscriptions"}},
+		{51, []string{"idx_issues_recurring_delivery"}, nil},
 	} {
 		if step.to > version {
 			for _, name := range step.indexes {

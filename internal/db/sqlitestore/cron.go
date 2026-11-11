@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -72,4 +73,43 @@ func (d *Store) ListRecurringCronJobs(ctx context.Context, after string, limit i
 // DispatchRecurringCron commits a bounded set of children and its progress together.
 func (d *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
 	return d.cronSQL().DispatchRecurring(ctx, in)
+}
+
+// RecurringCronDelivery reads status without changing delivery evidence.
+func (d *Store) RecurringCronDelivery(ctx context.Context, query db.CronDeliveryQuery, now time.Time) ([]db.CronDeliveryJob, error) {
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	a := d.cronSQL()
+	a.Query = tx
+	a.RecurringChild = func(ctx context.Context, parentID int64, jobUID string) (*db.RecurringChild, error) {
+		if d.uiReadStage != nil {
+			if err := d.uiReadStage(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return d.recurringChildTx(ctx, tx, parentID, jobUID)
+	}
+	out, err := a.RecurringDelivery(ctx, query, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (d *Store) recurringChildTx(ctx context.Context, tx *sql.Tx, parentID int64, jobUID string) (*db.RecurringChild, error) {
+	args := []any{jobUID, parentID}
+	key := occurrenceOrderSQL("i")
+	//nolint:gosec // The expressions come from the schema and fixed authorization SQL.
+	query := `SELECT i.id, i.uid, json_extract(i.metadata,'$."cron.occurrence"'), ` + key + ` FROM issues i WHERE json_extract(i.metadata,'$."cron.occurrence".job_uid')=? AND i.deleted_at IS NULL AND (` + key + `) IS NOT NULL AND EXISTS (SELECT 1 FROM links l JOIN projects p ON p.id=i.project_id WHERE l.from_issue_id=i.id AND l.type='parent' AND l.to_issue_id=? AND p.deleted_at IS NULL AND ` + authorizedLinkPredicate(ctx, "l.", &args) + `) ORDER BY (` + key + `) COLLATE BINARY DESC, i.uid COLLATE BINARY DESC`
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return db.LastRecurringChild(ctx, rows)
 }

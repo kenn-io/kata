@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -55,4 +56,47 @@ func (s *Store) ListRecurringCronJobs(ctx context.Context, after string, limit i
 // DispatchRecurringCron commits a bounded set of children and its progress together.
 func (s *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
 	return s.cronSQL().DispatchRecurring(ctx, in)
+}
+
+// RecurringCronDelivery reads status without changing delivery evidence.
+func (s *Store) RecurringCronDelivery(ctx context.Context, query db.CronDeliveryQuery, now time.Time) ([]db.CronDeliveryJob, error) {
+	tx, err := s.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	a := s.cronSQL()
+	a.Query = tx
+	a.RecurringChild = func(ctx context.Context, parentID int64, jobUID string) (*db.RecurringChild, error) {
+		if s.uiReadStage != nil {
+			if err := s.uiReadStage(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return s.recurringChildTx(ctx, tx, parentID, jobUID)
+	}
+	out, err := a.RecurringDelivery(ctx, query, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) recurringChildTx(ctx context.Context, tx *sql.Tx, parentID int64, jobUID string) (*db.RecurringChild, error) {
+	query, args := recurringChildQuery(ctx, parentID, jobUID)
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return db.LastRecurringChild(ctx, rows)
+}
+
+func recurringChildQuery(ctx context.Context, parentID int64, jobUID string) (string, []any) {
+	args := []any{jobUID, parentID}
+	//nolint:gosec // The authorization predicate is generated from fixed SQL and bound parameters.
+	query := `SELECT i.id, i.uid, i.metadata::jsonb -> 'cron.occurrence', kata_occurrence_key(i.metadata::json -> 'cron.occurrence') FROM issues i WHERE (i.metadata::jsonb -> 'cron.occurrence' ->> 'job_uid') COLLATE "C"=$1 AND i.deleted_at IS NULL AND kata_occurrence_key(i.metadata::json -> 'cron.occurrence') IS NOT NULL AND EXISTS (SELECT 1 FROM links l JOIN projects p ON p.id=i.project_id WHERE l.from_issue_id=i.id AND l.type='parent' AND l.to_issue_id=$2 AND p.deleted_at IS NULL AND ` + authorizedLinkPredicate(ctx, "l.", &args) + `) ORDER BY kata_occurrence_key(i.metadata::json -> 'cron.occurrence') COLLATE "C" DESC, i.uid COLLATE "C" DESC LIMIT 1`
+	return query, args
 }

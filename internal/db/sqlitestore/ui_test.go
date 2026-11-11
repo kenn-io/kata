@@ -530,3 +530,8 @@ func TestReadUISnapshotOrdersLegacyCommentTimestamps(t *testing.T) {
 	}
 	assert.Equal(t, []string{"canonical", "legacy"}, bodies)
 }
+
+func TestReadCronDeliveryConsistent(t *testing.T) {
+	store := openUIStore(t)
+	dbtest.CheckCronDeliveryConsistent(t, store, func(stage func(context.Context) error) { store.uiReadStage = stage })
+}

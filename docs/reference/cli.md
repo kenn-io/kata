@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # CLI reference
@@ -2423,6 +2423,9 @@ kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --js
 kata cron run show <run-uid> --json
 kata show <issue-ref> --planning-dates --json
 ```
+
+Native job list/show require daemon API 0.45.0 or newer; upgrade older daemons. They include [delivery status](cron.md#delivery-status), with the
+next due time and latest visible child.
 
 Recurring job create/update also accept `--parent <issue-ref>`; see
 [recurring child issues](cron.md#recurring-child-issues) for the request format.
