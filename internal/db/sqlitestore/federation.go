@@ -3353,6 +3353,13 @@ func (d *Store) quarantineRelayBindingTx(ctx context.Context, tx *sql.Tx, projec
 	return binding.RelayConfig != nil, err
 }
 
+// RecordFederationLocalReplayDue remembers debt for an unprojected legacy replay.
+func (d *Store) RecordFederationLocalReplayDue(ctx context.Context, eventUID string) error {
+	return d.RetryTransient(ctx, func() error {
+		return db.RecordFederationLocalReplayDue(ctx, d, eventUID)
+	})
+}
+
 // FederationLocalReplayStatus reads the recorded notification state.
 func (d *Store) FederationLocalReplayStatus(ctx context.Context, eventUID string) (due, recorded bool, err error) {
 	return db.ReadFederationLocalReplayStatus(ctx, d, eventUID)

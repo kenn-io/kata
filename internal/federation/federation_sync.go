@@ -837,7 +837,7 @@ func shouldDeliverDuplicateLocalEcho(
 	}
 	_, err = store.IssueByUID(ctx, *event.IssueUID, db.IncludeDeletedYes)
 	if errors.Is(err, db.ErrNotFound) {
-		return true, nil
+		return true, store.RecordFederationLocalReplayDue(ctx, ev.EventUID)
 	}
 	if err != nil || event.Type != "issue.commented" {
 		return false, err
@@ -852,7 +852,10 @@ func shouldDeliverDuplicateLocalEcho(
 		return false, nil
 	}
 	comments, err := store.CommentIssueIDsByUIDs(ctx, []string{payload.CommentUID})
-	return len(comments) == 0, err
+	if err != nil || len(comments) > 0 {
+		return false, err
+	}
+	return true, store.RecordFederationLocalReplayDue(ctx, ev.EventUID)
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {

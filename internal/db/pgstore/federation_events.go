@@ -261,6 +261,11 @@ func (s *Store) ReconcileLocalFederationEcho(
 	return found, err
 }
 
+// RecordFederationLocalReplayDue remembers debt for an unprojected legacy replay.
+func (s *Store) RecordFederationLocalReplayDue(ctx context.Context, eventUID string) error {
+	return mapSQLError(db.RecordFederationLocalReplayDue(ctx, s, eventUID), nil)
+}
+
 // FederationLocalReplayStatus reads the recorded notification state.
 func (s *Store) FederationLocalReplayStatus(ctx context.Context, eventUID string) (due, recorded bool, err error) {
 	return db.ReadFederationLocalReplayStatus(ctx, s, eventUID)

@@ -424,6 +424,7 @@ type Storage interface {
 	AdoptProjectIntoFederation(ctx context.Context, p AdoptProjectIntoFederationParams) (AdoptProjectIntoFederationResult, error)
 	AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error
 	CompleteFederationPullPage(ctx context.Context, projectID, nextCursor int64, replayUIDs []string) ([]string, error)
+	RecordFederationLocalReplayDue(ctx context.Context, eventUID string) error
 	FederationLocalReplayStatus(ctx context.Context, eventUID string) (due, recorded bool, err error)
 	ReconcileLocalFederationEcho(ctx context.Context, projectID int64, ev RemoteEvent) (bool, error)
 	InsertRemoteEvent(ctx context.Context, projectID int64, ev RemoteEvent) (bool, error)

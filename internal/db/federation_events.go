@@ -44,6 +44,17 @@ func ReadFederationLocalReplayStatus(ctx context.Context, q interface {
 	return value == 1, err == nil, err
 }
 
+// RecordFederationLocalReplayDue preserves proven legacy delivery debt before
+// projection. A recorded quiet replay stays quiet.
+func RecordFederationLocalReplayDue(ctx context.Context, execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, eventUID string) error {
+	_, err := execer.ExecContext(ctx, `
+		INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1, 1)
+		ON CONFLICT(event_uid) DO NOTHING`, eventUID)
+	return err
+}
+
 // ClaimFederationLocalReplays closes delivery debt in the pull cursor
 // transaction. The caller has already verified missing projection for any
 // candidate that lacks a replay marker.
