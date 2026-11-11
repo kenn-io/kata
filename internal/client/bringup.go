@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 )
 
@@ -165,6 +166,18 @@ func (s executableStart) startIfStopped(
 	resolved, ok, err := discover(ctx, selection)
 	if err != nil || ok {
 		return resolved, ok, err
+	}
+	var home string
+	if selection.Resolved.LocalProfile != nil {
+		home = selection.Resolved.LocalProfile.Home
+	} else {
+		home, err = config.KataHome()
+		if err != nil {
+			return resolved, false, err
+		}
+	}
+	if err := config.RequireUnmanagedDaemonHome(ctx, home); err != nil {
+		return resolved, false, err
 	}
 	output, err := exec.CommandContext(ctx, s.executable, args...).CombinedOutput() //nolint:gosec // G204: the caller names its kata executable; arguments are fixed or caller-selected names.
 	if err != nil {

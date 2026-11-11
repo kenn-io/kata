@@ -23,6 +23,9 @@ const RuntimeRestartReplyKey = "restart_reply"
 // RuntimeRestartFromKey names the daemon generation a replacement replaced.
 const RuntimeRestartFromKey = "restart_from"
 
+// RuntimeSocketActivationKey identifies the manager owning this API listener.
+const RuntimeSocketActivationKey = "socket_activation"
+
 // RuntimeProcessAlive reports whether a runtime record still identifies a local
 // process that created it. For legacy records without an identity, a process
 // created after the record was published proves that the PID has been reused.
@@ -87,5 +90,5 @@ func RuntimeRecordBlocksStart(record kitdaemon.RuntimeRecord) bool {
 // RuntimeRecordRestartable reports whether the record's daemon handles the
 // restart signal sent by SignalDaemonRestart.
 func RuntimeRecordRestartable(record kitdaemon.RuntimeRecord) bool {
-	return record.Metadata[RuntimeRestartMetadataKey] == "1"
+	return record.Metadata[RuntimeSocketActivationKey] == "" && record.Metadata[RuntimeRestartMetadataKey] == "1"
 }

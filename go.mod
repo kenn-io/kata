@@ -16,6 +16,7 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20260705004817-2cc9a8fe1146
+	github.com/coreos/go-systemd/v22 v22.7.1-0.20260720101500-737492515b57
 	github.com/creack/pty v1.1.24
 	github.com/danielgtaylor/huma/v2 v2.40.0
 	github.com/doordash-oss/oapi-codegen-dd/v3 v3.76.5

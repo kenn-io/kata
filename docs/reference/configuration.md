@@ -602,6 +602,15 @@ Plain `kata daemon start` starts the daemon in the background and returns after
 startup is confirmed; use `kata daemon start --foreground` for service-manager
 and hosted deployments. Auto-started daemons also read the config-file listener
 value.
+
+Not in the latest release yet: `socket_activation = "systemd"` adopts one
+manager-owned Unix stream listener and requires foreground startup. It conflicts
+with API bind overrides and disables detached startup, stale-version replacement
+and Kata-controlled stop/restart for that home, even while the daemon is stopped.
+The empty or absent value preserves ordinary behavior. Use the service manager
+for lifecycle changes; see [Unix socket activation](../operations/socket-activation.md)
+for listener permissions, credentials and systemd user units.
+
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
 

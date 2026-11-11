@@ -180,6 +180,12 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 		if found.Outcome == daemonScanCompatible {
 			return resolved, nil
 		}
+		if mode := found.Daemon.Record.Metadata[daemonruntime.RuntimeSocketActivationKey]; mode != "" {
+			return resolved, config.SocketActivationControlError(mode)
+		}
+		if err := config.RequireUnmanagedDaemonHome(ctx, profile.Home); err != nil {
+			return resolved, err
+		}
 		if err := refuseDaemonDowngrade(found.Daemon.Info); err != nil {
 			return resolved, err
 		}
@@ -198,6 +204,9 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 		if err := stopRunningDaemonsForEnsure(ctx, resolved.LocalProfile.DataDir, profile.StorageID); err != nil {
 			return resolved, err
 		}
+	}
+	if err := config.RequireUnmanagedDaemonHome(ctx, profile.Home); err != nil {
+		return resolved, err
 	}
 	env, err := config.LocalProfileEnvironment(profile, true)
 	if err != nil {

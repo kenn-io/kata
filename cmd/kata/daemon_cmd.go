@@ -274,7 +274,10 @@ func daemonStartCmd() *cobra.Command {
 				}
 			}
 			if checkStartup {
-				_, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken)
+				startup, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken)
+				if startup.Listener != nil {
+					_ = startup.Listener.Close()
+				}
 				return err
 			}
 			if foreground {
@@ -282,6 +285,9 @@ func daemonStartCmd() *cobra.Command {
 				defer cancel()
 				daemonProcessEntered = true
 				return runDaemonForeground(ctx, listen, insecureReadonly, noAutoToken)
+			}
+			if err := requireUnmanagedCurrentDaemon(cmd.Context()); err != nil {
+				return err
 			}
 			out, err := startDetachedDaemonLocked(cmd.Context(), listen, insecureReadonly, noAutoToken)
 			if err != nil {
@@ -325,6 +331,9 @@ func daemonStartCmd() *cobra.Command {
 // until its replacement is ready, so an explicit start adopts that replacement
 // instead of launching into the handoff. Restart's own startup already holds it.
 func startDetachedDaemonLocked(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
+	if err := requireUnmanagedCurrentDaemon(ctx); err != nil {
+		return daemonStartOutput{}, err
+	}
 	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return daemonStartOutput{}, err
@@ -338,6 +347,9 @@ func startDetachedDaemonLocked(ctx context.Context, listen string, insecureReado
 }
 
 func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
+	if err := requireUnmanagedCurrentDaemon(ctx); err != nil {
+		return daemonStartOutput{}, err
+	}
 	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return daemonStartOutput{}, err
@@ -355,6 +367,9 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 	}
 	replacedPID := 0
 	if rec, ok := liveDaemonRecord(ns.DataDir, 0); ok {
+		if err := requireUnmanagedRecords([]kitdaemon.RuntimeRecord{rec}); err != nil {
+			return daemonStartOutput{}, err
+		}
 		address := rec.Endpoint().ConfigAddress()
 		if effectiveListen != "" && !daemonEndpointMatches(requestedEndpoint, rec.Endpoint()) {
 			return daemonStartOutput{}, fmt.Errorf("daemon already running at %s; stop it before starting with listener %s", address, effectiveListen)
@@ -383,6 +398,9 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		if !ok || effectiveListen != "" && !daemonEndpointMatches(requestedEndpoint, rec.Endpoint()) {
 			return daemonStartOutput{}, errors.New("daemon disappeared or changed listener while startup was waiting")
 		}
+		if err := requireUnmanagedRecords([]kitdaemon.RuntimeRecord{rec}); err != nil {
+			return daemonStartOutput{}, err
+		}
 		if !daemonRecordAdvertisesIdleShutdown(ctx, rec) {
 			out = daemonStartOutputFromRecord("already_running", rec)
 			break
@@ -403,6 +421,9 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 }
 
 func stopIdleShutdownDaemon(ctx context.Context, ns *daemonruntime.Namespace, rec kitdaemon.RuntimeRecord) error {
+	if err := requireUnmanagedRecords([]kitdaemon.RuntimeRecord{rec}); err != nil {
+		return err
+	}
 	if err := daemonruntime.SignalDaemonStop(rec, ns.DBHash); err != nil {
 		return fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
 	}
@@ -806,6 +827,9 @@ func daemonStopCmd() *cobra.Command {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
+			if err := requireUnmanagedCurrentDaemon(cmd.Context()); err != nil {
+				return err
+			}
 			ns, err := daemonruntime.NewNamespace()
 			if err != nil {
 				return err
@@ -813,6 +837,11 @@ func daemonStopCmd() *cobra.Command {
 			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 			if err != nil {
 				return err
+			}
+			for _, record := range recs {
+				if mode := record.Metadata[daemonruntime.RuntimeSocketActivationKey]; mode != "" && daemonruntime.RuntimeProcessAlive(record) {
+					return config.SocketActivationControlError(mode)
+				}
 			}
 			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			pids := make([]int, 0, len(recs))
@@ -893,6 +922,9 @@ func daemonRestartCmd() *cobra.Command {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
+			if err := requireUnmanagedCurrentDaemon(cmd.Context()); err != nil {
+				return err
+			}
 			ns, err := daemonruntime.NewNamespace()
 			if err != nil {
 				return err
@@ -969,6 +1001,7 @@ func daemonRestartCmd() *cobra.Command {
 }
 
 type daemonStartupPreflight struct {
+	Listener       net.Listener
 	Config         *config.DaemonConfig
 	Web            config.WebConfig
 	MCPToken       string
@@ -984,10 +1017,27 @@ type daemonStartupPreflight struct {
 	VectorsPath    string
 }
 
-func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartupPreflight, error) {
+func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (_ daemonStartupPreflight, returnErr error) {
+	var activated net.Listener
+	defer func() {
+		if returnErr != nil && activated != nil {
+			_ = activated.Close()
+		}
+	}()
 	dcfg, err := config.ReadDaemonConfig()
 	if err != nil {
 		return daemonStartupPreflight{}, err
+	}
+	if dcfg.SocketActivation != "" {
+		if listen != "" || dcfg.Listen != "" {
+			return daemonStartupPreflight{}, fmt.Errorf("socket_activation conflicts with effective listen configuration")
+		}
+		if _, ok := listenFromPortEnv(); ok {
+			return daemonStartupPreflight{}, fmt.Errorf("socket_activation conflicts with eligible PORT listen configuration")
+		}
+		if os.Getenv(daemonruntime.AutoStartMarkerEnv) == "1" {
+			return daemonStartupPreflight{}, config.SocketActivationControlError(dcfg.SocketActivation)
+		}
 	}
 	if err := validateFederationStartupConfig(dcfg); err != nil {
 		return daemonStartupPreflight{}, err
@@ -1010,6 +1060,14 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	endpoint, err := chooseEndpoint(ns, listen)
 	if err != nil {
 		return daemonStartupPreflight{}, err
+	}
+	if dcfg.SocketActivation != "" {
+		activated, err = adoptActivatedListener(ctx, dcfg.SocketActivation)
+		if err != nil {
+			return daemonStartupPreflight{}, err
+		}
+		endpoint = kitdaemon.Endpoint{Network: kitdaemon.NetworkUnix, Address: activated.Addr().String()}
+		dcfg.Sources["listen"] = "socket_activation"
 	}
 	mcpToken, err := resolveDaemonMCPStartup(ctx, dcfg, endpoint)
 	if err != nil {
@@ -1077,6 +1135,7 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		return daemonStartupPreflight{}, err
 	}
 	return daemonStartupPreflight{
+		Listener:       activated,
 		Config:         dcfg,
 		Web:            dcfg.Web,
 		MCPToken:       mcpToken,
@@ -1246,7 +1305,18 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // re-executes itself only after every listener and the runtime record have
 // been released.
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
-	restart := newDaemonRestart(os.Stderr)
+	var restart *daemonRestart
+	home, err := config.KataHome()
+	if err != nil {
+		return err
+	}
+	mode, err := config.ReadSocketActivationForHome(ctx, home)
+	if err != nil {
+		return err
+	}
+	if mode == "" {
+		restart = newDaemonRestart(os.Stderr)
+	}
 	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart); err != nil {
 		return reportRestartFailure(startedForRestartReply, err)
 	}
@@ -1260,6 +1330,10 @@ func runDaemonProcess(
 	if err != nil {
 		return err
 	}
+	if startup.Listener != nil {
+		defer func() { _ = startup.Listener.Close() }()
+		restart = nil
+	}
 	dcfg := startup.Config
 	listen = startup.Listen
 	ns := startup.Namespace
@@ -1270,7 +1344,11 @@ func runDaemonProcess(
 	if msg, ok := daemon.UnauthenticatedPrivateNetworkWritesWarning(listen, dcfg.Auth); ok {
 		fmt.Fprintln(os.Stderr, msg)
 	}
-	if err := ns.EnsureDirs(); err != nil {
+	if dcfg.SocketActivation != "" {
+		if err := os.MkdirAll(ns.DataDir, 0o700); err != nil {
+			return err
+		}
+	} else if err := ns.EnsureDirs(); err != nil {
 		return err
 	}
 
@@ -1286,9 +1364,12 @@ func runDaemonProcess(
 			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon; runtime record: %s; remove that file if no kata daemon owns that PID", record.PID, record.SourcePath)
 		}
 	}
-	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
-	if err != nil {
-		return err
+	listener := startup.Listener
+	if listener == nil {
+		listener, err = kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
+		if err != nil {
+			return err
+		}
 	}
 	defer func() { _ = listener.Close() }()
 
@@ -1462,6 +1543,9 @@ func runDaemonProcess(
 	}
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	maps.Copy(rec.Metadata, restart.metadata())
+	if dcfg.SocketActivation != "" {
+		rec.Metadata[daemonruntime.RuntimeSocketActivationKey] = dcfg.SocketActivation
+	}
 
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)

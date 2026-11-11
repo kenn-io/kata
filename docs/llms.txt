@@ -67,6 +67,8 @@ for machine readers.
   shared job definitions, run evidence, and recurring child issues
 - [Diagnosing setup](https://katatracker.com/docs/operations/doctor.md):
   read-only configuration, daemon, project and hook diagnostics with `kata doctor`
+- [Unix socket activation](https://katatracker.com/docs/operations/socket-activation.md):
+  service-manager-owned Unix sockets and explicit client targeting
 - [Backup and restore](https://katatracker.com/docs/operations/backup-restore.md):
   JSONL export and import
 - [Containers](https://katatracker.com/docs/operations/containers.md):

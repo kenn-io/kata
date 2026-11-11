@@ -80,6 +80,8 @@ github.com/containerd/log v0.1.0 h1:TCJt7ioM2cr/tfR8GPbGf9/VRAX8D2B4PjzCpfX540I=
 github.com/containerd/log v0.1.0/go.mod h1:VRRf09a7mHDIRezVKTRCrOq78v577GXq3bSa3EhrzVo=
 github.com/containerd/platforms v0.2.1 h1:zvwtM3rz2YHPQsF2CHYM8+KtB5dvhISiXh5ZpSBQv6A=
 github.com/containerd/platforms v0.2.1/go.mod h1:XHCb+2/hzowdiut9rkudds9bE5yJ7npe7dG/wG+uFPw=
+github.com/coreos/go-systemd/v22 v22.7.1-0.20260720101500-737492515b57 h1:QBloEe7WJvYM8BMgvLyMOxn03FMi/ZCBKNbYQCS/7QU=
+github.com/coreos/go-systemd/v22 v22.7.1-0.20260720101500-737492515b57/go.mod h1:tqA498xu2/LHDsQ08pn/Q8fKV27O/eO4dnARBmEXF44=
 github.com/cpuguy83/dockercfg v0.3.2 h1:DlJTyZGBDlXqUZ2Dk2Q3xHs/FtnooJJVaad2S9GKorA=
 github.com/cpuguy83/dockercfg v0.3.2/go.mod h1:sugsbF4//dDlL/i+S+rtpIWp+5h0BHJHfjj5/jFyUJc=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
@@ -390,8 +392,6 @@ github.com/yuin/goldmark/v2 v2.1.11 h1:SPy9tHLsgxAZgBh+YDlx9R7LsKsykcM3nZTO8kjeS
 github.com/yuin/goldmark/v2 v2.1.11/go.mod h1:G6M4/qOFtfn01/o14BU1UR2Lo5N3S9Qo7xCuz/sHjGQ=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-go.kenn.io/kit v0.48.2-0.20261105033532-aaab6a3899c6 h1:1+wSx5qr8SZs2J//GaB1t8Y1fvsTwrcQf00ab4xGuM8=
-go.kenn.io/kit v0.48.2-0.20261105033532-aaab6a3899c6/go.mod h1:4g35Ia8V+5uTSUWp6XK/NurYdgPoq/PFZZLubtYly80=
 go.kenn.io/kit v0.48.2 h1:c+JfMBPJbp7kpvWj/o7uYrd/kxUT34bhL5svsDfEQBc=
 go.kenn.io/kit v0.48.2/go.mod h1:4g35Ia8V+5uTSUWp6XK/NurYdgPoq/PFZZLubtYly80=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

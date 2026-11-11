@@ -183,6 +183,11 @@ command fails, Discover returns an error matching `client.ErrDaemonUnavailable`
 that includes the command's output. The child inherits the calling process's
 environment and working directory.
 
+If the selected home has `socket_activation` configured, Discover refuses to
+execute `StartWith`; use its service manager or select the explicit socket
+address for cold activation. A compatible running managed daemon can still be
+discovered normally.
+
 ## Connect to a known endpoint
 
 Pass an endpoint to a constructor when your program already knows which daemon
