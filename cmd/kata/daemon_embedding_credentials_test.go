@@ -148,11 +148,13 @@ func TestEmbeddingReloadUsesSharedChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
 	require.NoError(t, embedlocal.RecordChoice())
-	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
+	cfg, err := config.ParseSearchConfig(nil)
 	require.NoError(t, err)
-	client, _, err := preflightEmbeddingStartup(cfg.Embeddings, filepath.Join(home, "kata.db"))
+	effective, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
+	require.NoError(t, err)
+	client, _, err := preflightEmbeddingStartup(effective, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	woke := false
-	require.NoError(t, reloadEmbeddingCredentials(t.Context(), cfg.Embeddings, client, func() { woke = true }))
+	require.NoError(t, reloadEmbeddingCredentials(t.Context(), effective, client, func() { woke = true }))
 	require.True(t, woke)
 }
