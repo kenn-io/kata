@@ -14,6 +14,9 @@ import (
 // CronDefinitionSnapshots captures portable definitions and run history
 // in the federation boundary transaction without execution coordination.
 func CronDefinitionSnapshots(ctx context.Context, tx *sql.Tx, project Project) ([]CronEvent, error) {
+	if err := checkRetainedWorkflowSnapshots(ctx, tx, project); err != nil {
+		return nil, err
+	}
 	result := []CronEvent{}
 	query := CronSQL{Query: tx}
 	jobs, err := query.Jobs(ctx, CronList{ProjectID: project.ID, IncludeDeleted: true})
@@ -51,6 +54,33 @@ func CronDefinitionSnapshots(ctx context.Context, tx *sql.Tx, project Project) (
 		return nil, err
 	}
 	return append(result, runs...), nil
+}
+
+// A restored event may have no representable projection row. Inspect retained
+// definitions before replacing history with snapshots, including tombstones.
+func checkRetainedWorkflowSnapshots(ctx context.Context, tx *sql.Tx, project Project) error {
+	rows, err := tx.QueryContext(ctx, `SELECT uid,type,payload FROM events WHERE project_id=$1 AND type LIKE 'cron.workflow.%'`, project.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid, kind, payload string
+		if err := rows.Scan(&uid, &kind, &payload); err != nil {
+			return err
+		}
+		if !workflowDefinitionEvent(kind) {
+			continue
+		}
+		var body CronDefinitionEvent
+		if err := json.Unmarshal([]byte(payload), &body, json.RejectUnknownMembers(true)); err != nil {
+			return fmt.Errorf("%w: retained workflow event %s: %v", ErrFederationIngestValidation, uid, err)
+		}
+		if _, err := cron.DecodeWorkflow(body.Definition); err != nil {
+			return fmt.Errorf("%w: retained workflow event %s: %v", ErrFederationIngestValidation, uid, err)
+		}
+	}
+	return rows.Err()
 }
 
 // CronMaterializationNeeded reports whether a federated rebuild must rewrite
