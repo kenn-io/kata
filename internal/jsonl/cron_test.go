@@ -33,7 +33,7 @@ func buildNativeCronJSONLFixture(t *testing.T) nativeJSONLFixture {
 	require.NoError(t, jsonl.Export(ctx, source, &prior, jsonl.ExportOptions{IncludeDeleted: true}))
 	definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip","secret_refs":{"provider":"review-provider"},"checkout_key":"main"}`))
 	require.NoError(t, err)
-	workflow, _, err := source.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Review workflow", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "git status"}}}})
+	workflow, _, err := source.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Review workflow", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "argv", Argv: []string{"printf", "", "a b"}}}}})
 	require.NoError(t, err)
 	job, _, err := source.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Review", Definition: definition, Actor: "worker"})
 	require.NoError(t, err)

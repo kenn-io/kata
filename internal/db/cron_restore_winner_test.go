@@ -27,6 +27,7 @@ func TestOwnerRestoreRetainedWorkflowWinner(t *testing.T) {
 		{"unrepresentable null", `null`, false, true},
 		{"unrepresentable version", `{"version":0,"steps":[]}`, false, true},
 		{"later valid", `{"version":1,"steps":[]}`, false, false},
+		{"later argv", `{"version":1,"steps":[{"kind":"argv","argv":["printf",""]}]}`, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := CronDefinitionEvent{UID: workflowUID, ProjectUID: projectUID, Name: "new", Author: "worker", CreatedAt: now, UpdatedAt: now, Definition: jsontext.Value(tc.document)}
@@ -47,7 +48,7 @@ func TestOwnerRestoreRetainedWorkflowWinner(t *testing.T) {
 				return
 			}
 			row := result[1].(*CronWorkflowExport)
-			if tc.name == "later valid" {
+			if tc.name == "later valid" || tc.name == "later argv" {
 				require.Same(t, original, row)
 				return
 			}

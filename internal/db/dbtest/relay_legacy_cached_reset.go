@@ -72,6 +72,27 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 			require.Error(t, err, "held checkpoint cannot activate the next epoch")
 		}
 	}
+	// The stored checkpoint, not current project rows, determines recipient support.
+	for _, section := range []string{"source", "entity"} {
+		argv := checkpointWithWorkflowDefinition(t, checkpoint, selected, pin, signingKey, section, `{"version":1,"steps":[{"key":"literal","kind":"argv","argv":["printf",""]}]}`)
+		raw, err := json.Marshal(argv)
+		require.NoError(t, err)
+		require.NoError(t, writeMeta(ctx, db.RelayResetMetadataPrefix+selected.UID+"."+binding, string(raw)))
+		for _, features := range []string{"", db.CronWorkflowArgvEventFeature + "_extra"} {
+			peer := db.WithRelayPeerFeatures(ctx, binding, features)
+			_, err = resets.CreateRelayReset(peer, binding, signer)
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(peer, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		}
+		wrongPeer := db.WithRelayPeerFeatures(ctx, "different-binding", db.CronWorkflowArgvEventFeature)
+		_, err = resets.CreateRelayReset(wrongPeer, binding, signer)
+		require.Error(t, err)
+		peer := db.WithRelayPeerFeatures(ctx, binding, db.CronWorkflowArgvEventFeature)
+		served, err := resets.CreateRelayReset(peer, binding, signer)
+		require.NoError(t, err)
+		require.Equal(t, argv.Snapshot, served.Snapshot)
+	}
 	rawCheckpoint, err := json.Marshal(checkpoint)
 	require.NoError(t, err)
 	require.NoError(t, writeMeta(ctx, db.RelayResetMetadataPrefix+selected.UID+"."+binding, string(rawCheckpoint)))

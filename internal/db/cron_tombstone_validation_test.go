@@ -117,5 +117,17 @@ func TestWorkflowEventHistoricalAndAcceptedEntryPoints(t *testing.T) {
 	payload, err := json.Marshal(CronDefinitionEvent{UID: newUID(t), ProjectUID: projectUID, Name: "Review", Definition: jsontext.Value(`{"steps":[{"kind":"argv","argv":["true"]}]}`), Author: "worker", CreatedAt: now, UpdatedAt: now})
 	require.NoError(t, err)
 	future := &EventExport{ID: 1, UID: newUID(t), OriginInstanceUID: newUID(t), ProjectID: 1, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now.Format(time.RFC3339Nano), Payload: payload}
-	require.Error(t, validateCronImportEvents([]ImportRecord{project, future}), "unknown future argv members were never accepted")
+	require.NoError(t, validateCronImportEvents([]ImportRecord{project, future}), "valid argv history must restore")
+}
+
+func TestCronWorkflowBackupRoundTripsArgv(t *testing.T) {
+	var record CronWorkflowExport
+	record.CronDefinition = CronDefinition{ID: 1, ProjectID: 1, UID: newUID(t), Name: "Review", DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: 1, OriginInstanceUID: newUID(t)}, Author: "worker", Revision: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	record.Definition = cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "literal", Kind: "argv", Argv: []string{"printf", "", "a b"}}}}
+	raw, err := json.Marshal(record)
+	require.NoError(t, err)
+	var restored CronWorkflowExport
+	require.NoError(t, json.Unmarshal(raw, &restored))
+	require.Equal(t, record.Definition, restored.Definition)
+	require.NoError(t, ValidateCronRecord(&restored))
 }
