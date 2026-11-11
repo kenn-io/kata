@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
 // This index is derived from ordinary documents inside a read/transaction.
@@ -91,7 +93,7 @@ func (idx *cronReferenceIndex) event(projectID int64, e FoldEvent) ([]cronDefini
 		if err := idx.add(ref); err != nil {
 			return nil, err
 		}
-		if _, exists := idx.documents[ref]; !exists {
+		if old, exists := idx.documents[ref]; !exists || (kind == "workflow" && workflowDocumentHeld(string(body.Definition)) && !workflowDocumentHeld(old)) {
 			idx.documents[ref] = string(body.Definition)
 		}
 		if e.UID == value.DefinitionEventUID {
@@ -117,6 +119,12 @@ func (idx *cronReferenceIndex) event(projectID int64, e FoldEvent) ([]cronDefini
 		return nil, invalidCronReference(err)
 	}
 	return cronRunReferences(projectID, value.CronRun)
+}
+
+// Preserve unsupported evidence regardless of event and projection read order.
+func workflowDocumentHeld(document string) bool {
+	_, err := cron.DecodeWorkflow([]byte(document))
+	return err != nil
 }
 
 func validateCronImportReferences(records []ImportRecord) error {
@@ -193,6 +201,7 @@ type CronReplayValidator struct {
 	historyPrepared map[cronDefinitionReference]bool
 	ownersLoaded    map[cronDefinitionIdentity]bool
 	eventsLoaded    map[string]bool
+	eventsFound     map[string]bool
 	runsLoaded      map[string]bool
 	runs            map[string]CronRun
 }
@@ -202,7 +211,7 @@ type CronReplayValidator struct {
 // NewCronReplayValidator validates cron replay inside one transaction.
 // postgres selects PostgreSQL SQL for the shared history queries.
 func NewCronReplayValidator(tx *sql.Tx, postgres bool) *CronReplayValidator {
-	return &CronReplayValidator{tx: tx, postgres: postgres, idx: newCronReferenceIndex(), loaded: map[cronDefinitionReference]bool{}, historyPrepared: map[cronDefinitionReference]bool{}, ownersLoaded: map[cronDefinitionIdentity]bool{}, eventsLoaded: map[string]bool{}, runsLoaded: map[string]bool{}, runs: map[string]CronRun{}}
+	return &CronReplayValidator{tx: tx, postgres: postgres, idx: newCronReferenceIndex(), loaded: map[cronDefinitionReference]bool{}, historyPrepared: map[cronDefinitionReference]bool{}, ownersLoaded: map[cronDefinitionIdentity]bool{}, eventsLoaded: map[string]bool{}, eventsFound: map[string]bool{}, runsLoaded: map[string]bool{}, runs: map[string]CronRun{}}
 }
 
 func (v *CronReplayValidator) loadKnown(ctx context.Context, ref cronDefinitionReference) error {
@@ -222,7 +231,9 @@ func (v *CronReplayValidator) loadKnown(ctx context.Context, ref cronDefinitionR
 			if err := v.idx.add(current); err != nil {
 				return err
 			}
-			v.idx.documents[current] = document
+			if old, exists := v.idx.documents[current]; !exists || (current.kind == "workflow" && workflowDocumentHeld(document) && !workflowDocumentHeld(old)) {
+				v.idx.documents[current] = document
+			}
 		}
 		v.ownersLoaded[identity] = true
 	}
@@ -235,6 +246,7 @@ func (v *CronReplayValidator) loadKnown(ctx context.Context, ref cronDefinitionR
 			return err
 		}
 		if err == nil {
+			v.eventsFound[ref.event] = true
 			e.Payload = []byte(payload)
 			refs, err := v.idx.event(projectID, e)
 			if err != nil {
@@ -308,7 +320,7 @@ func (v *CronReplayValidator) prepareReferences(ctx context.Context, refs []cron
 		if err := v.loadKnown(ctx, ref); err != nil {
 			return err
 		}
-		if actual, known := v.idx.events[ref.event]; known && actual == ref {
+		if actual, known := v.idx.events[ref.event]; known && actual == ref && (ref.kind != "workflow" || v.eventsFound[ref.event]) {
 			v.historyPrepared[ref] = true
 			continue
 		}

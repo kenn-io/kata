@@ -55,6 +55,7 @@ var storageScenarios = []scenario{
 	{name: "argv compatibility stored reads", methods: []string{"CreateProject", "PutCronWorkflow", "CronWorkflow", "ListCronWorkflows", "PutCronJob", "ObserveCronRun"}, runWithBackend: checkArgvCompatStoredReads},
 	{name: "argv retained materialization", methods: []string{"CreateProject"}, runWithBackend: checkArgvCompatRetainedMaterialization},
 	{name: "argv compatibility remote rollback", methods: []string{"CreateProject", "EnableProjectFederation", "UpsertFederationBinding", "FederationBindingByProject", "EventsByUIDs", "MaxEventID", "InsertRemoteEvents", "IngestFederationEvents"}, run: checkArgvCompatRemoteRollback},
+	{name: "argv projection repair", methods: []string{"CreateProject"}, runWithBackend: checkArgvProjectionRepair},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
