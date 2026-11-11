@@ -62,7 +62,7 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 		PreserveActiveGeneration: true,
 		BatchSize:                64,
 		SweepEvery:               time.Hour,
-		MinBackoff:               500 * time.Millisecond,
+		MinBackoff:               50 * time.Millisecond,
 		MaxBackoff:               2 * time.Second,
 	})
 	done := make(chan error, 1)
@@ -138,5 +138,4 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, otherKey, active)
-
 }
