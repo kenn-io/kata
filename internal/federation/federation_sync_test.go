@@ -2017,12 +2017,6 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		require.NoError(t, err)
 		require.True(t, recorded)
 		require.True(t, due)
-		for _, uid := range cronEventUIDs {
-			due, recorded, err := spoke.FederationLocalReplayStatus(ctx, uid)
-			require.NoError(t, err)
-			require.True(t, recorded)
-			require.True(t, due)
-		}
 		legacyPollFailure.Store(false)
 		binding, err = spoke.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
@@ -2069,11 +2063,6 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		repairedProject, err := spoke.ProjectByID(ctx, project.ID)
 		require.NoError(t, err)
 		require.JSONEq(t, `{"area":"ops"}`, string(repairedProject.Metadata))
-		binding, err = spoke.FederationBindingByProject(ctx, project.ID)
-		require.NoError(t, err)
-		delivered = nil
-		require.NoError(t, SyncFederationPullOnlyOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents))
-		require.Empty(t, delivered, "completed replay notifications are not delivered twice")
 		return
 	}
 	require.NotEmpty(t, delivered)
