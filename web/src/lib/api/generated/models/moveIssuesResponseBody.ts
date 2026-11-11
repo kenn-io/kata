@@ -5,7 +5,6 @@ import type { MoveIssuesResult } from './moveIssuesResult.ts'
 import type { MoveIssuesSummary } from './moveIssuesSummary.ts'
 
 export interface MoveIssuesResponseBody {
-  next_index: number
   results: MoveIssuesResult[]
   summary: MoveIssuesSummary
   [key: string]: unknown

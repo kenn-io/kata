@@ -90,7 +90,7 @@ before any write; split larger input into separate runs. Batch comments travel a
 `issue.moved` event; reruns do not add comments to unchanged issues. No new
 federation event feature is required. See the
 [batch CLI contract](../reference/cli.md#move-many-issues) for input formats,
-selectors, continuation, result codes, and retry behavior.
+selectors, request pages, result codes, and retry behavior.
 
 Spokes must join both projects before applying a move. Sync refuses the batch
 without partial writes when a project is missing; join it and retry sync. Upgrade

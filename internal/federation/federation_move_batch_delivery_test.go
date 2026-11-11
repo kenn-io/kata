@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
@@ -26,7 +25,7 @@ func TestSyncFederationBatchMoveConverges(t *testing.T) {
 		credential.Token = grant.Token
 		spoke.credentials[project.UID] = credential
 	}
-	server := daemon.NewServer(daemon.ServerConfig{DB: spoke.env.DB, FederationCredentials: spoke.credentials, MoveBatchBudget: time.Hour})
+	server := daemon.NewServer(daemon.ServerConfig{DB: spoke.env.DB, FederationCredentials: spoke.credentials})
 	defer func() { _ = server.Close() }()
 	local := httptest.NewServer(server.Handler())
 	defer local.Close()
@@ -48,14 +47,14 @@ func TestSyncFederationBatchMoveConverges(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		var out struct {
-			NextIndex int `json:"next_index"`
-			Summary   struct {
+			Results []struct{} `json:"results"`
+			Summary struct {
 				Refused int `json:"refused"`
 			} `json:"summary"`
 		}
 		require.NoError(t, json.Unmarshal(raw, &out))
 		require.Zero(t, out.Summary.Refused, string(raw[:min(len(raw), 1200)]))
-		require.Equal(t, len(items), out.NextIndex)
+		require.Len(t, out.Results, len(items))
 	}
 	var issues []db.Issue
 	for n := range 210 {
@@ -66,7 +65,9 @@ func TestSyncFederationBatchMoveConverges(t *testing.T) {
 	for i := range projects {
 		require.NoError(t, spoke.sync(t, i))
 	}
-	move(issues[:200])
+	for start := 0; start < 200; start += 50 {
+		move(issues[start : start+50])
+	}
 	for _, i := range []int{1, 2} {
 		require.NoError(t, spoke.sync(t, i))
 	}

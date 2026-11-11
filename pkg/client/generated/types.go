@@ -4908,17 +4908,6 @@ func (m MoveIssueResponseBody) Validate() error {
 	return errors
 }
 
-type MoveIssuesCompleted struct {
-	Code     *string `json:"code,omitempty"`
-	Result   string  `json:"result" validate:"required"`
-	Revision *int64  `json:"revision,omitempty"`
-	UID      *string `json:"uid,omitempty"`
-}
-
-func (m MoveIssuesCompleted) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(m))
-}
-
 type MoveIssuesItem struct {
 	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
 	Ref              *string `json:"ref,omitempty"`
@@ -4926,17 +4915,13 @@ type MoveIssuesItem struct {
 }
 
 type MoveIssuesRequestBody struct {
-	Actor   *string `json:"actor,omitempty"`
-	Comment *string `json:"comment,omitempty"`
+	Actor            *string `json:"actor,omitempty"`
+	Comment          *string `json:"comment,omitempty"`
+	DefaultProjectID *int64  `json:"default_project_id,omitempty"`
 
-	// Completed Outcomes for every item before start_index, copied from earlier results.
-	Completed        []MoveIssuesCompleted `json:"completed,omitempty"`
-	DefaultProjectID *int64                `json:"default_project_id,omitempty"`
-
-	// DryRun Preview one item without a continuation.
-	DryRun     *bool            `json:"dry_run,omitempty"`
-	Items      []MoveIssuesItem `json:"items" validate:"required"`
-	StartIndex *int64           `json:"start_index,omitempty" validate:"omitempty,gte=0"`
+	// DryRun Preview one item.
+	DryRun *bool            `json:"dry_run,omitempty"`
+	Items  []MoveIssuesItem `json:"items" validate:"required"`
 
 	// Subtree Include descendants; requires exactly one item.
 	Subtree      *bool   `json:"subtree,omitempty"`
@@ -4946,35 +4931,20 @@ type MoveIssuesRequestBody struct {
 
 func (m MoveIssuesRequestBody) Validate() error {
 	var errors runtime.ValidationErrors
-	if len(m.Completed) > 5000 {
-		errors = errors.Add("Completed", fmt.Sprintf("must have at most 5000 items, got %d", len(m.Completed)))
-	}
-	for i, item := range m.Completed {
-		if v, ok := any(item).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append(fmt.Sprintf("Completed[%d]", i), err)
-			}
-		}
-	}
 	if err := typesValidator.Var(m.Items, "required"); err != nil {
 		errors = errors.Append("Items", err)
 	}
 	if m.Items != nil && len(m.Items) < 1 {
 		errors = errors.Add("Items", fmt.Sprintf("must have at least 1 items, got %d", len(m.Items)))
 	}
-	if len(m.Items) > 5000 {
-		errors = errors.Add("Items", fmt.Sprintf("must have at most 5000 items, got %d", len(m.Items)))
+	if len(m.Items) > 50 {
+		errors = errors.Add("Items", fmt.Sprintf("must have at most 50 items, got %d", len(m.Items)))
 	}
 	for i, item := range m.Items {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Items[%d]", i), err)
 			}
-		}
-	}
-	if m.StartIndex != nil {
-		if err := typesValidator.Var(m.StartIndex, "omitempty,gte=0"); err != nil {
-			errors = errors.Append("StartIndex", err)
 		}
 	}
 	if len(errors) == 0 {
@@ -4984,9 +4954,8 @@ func (m MoveIssuesRequestBody) Validate() error {
 }
 
 type MoveIssuesResponseBody struct {
-	NextIndex int64              `json:"next_index"`
-	Results   []MoveIssuesResult `json:"results" validate:"required"`
-	Summary   MoveIssuesSummary  `json:"summary"`
+	Results []MoveIssuesResult `json:"results" validate:"required"`
+	Summary MoveIssuesSummary  `json:"summary"`
 }
 
 func (m MoveIssuesResponseBody) Validate() error {

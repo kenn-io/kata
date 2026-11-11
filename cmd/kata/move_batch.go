@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"slices"
 	"strings"
@@ -365,35 +364,34 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		}
 		return nil
 	}
-	// Match the generated transport's JSON escaping and reserve the largest
-	// continuation encoding before the first mutation.
-	request.Body.StartIndex = len(request.Body.Items)
-	raw, err := json.Marshal(request.Body)
-	if err != nil {
-		return err
+	// Encode every page before sending any mutation.
+	var pages []generated.MoveIssuesBody
+	for start := 0; start < len(request.Body.Items); start += 50 {
+		page := request.Body
+		page.Items = request.Body.Items[start:min(start+50, len(request.Body.Items))]
+		raw, err := json.Marshal(page)
+		if err != nil {
+			return err
+		}
+		var body generated.MoveIssuesBody
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return err
+		}
+		raw, err = json.Marshal(body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+		if err != nil {
+			return err
+		}
+		if len(raw) > 1<<20 {
+			return moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
+		}
+		pages = append(pages, body)
 	}
-	var body generated.MoveIssuesBody
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return err
-	}
-	for range body.Items {
-		body.Completed = append(body.Completed, generated.MoveIssuesCompleted{Result: "unchanged", UID: new(strings.Repeat("Z", 26)), Revision: new(int64(math.MaxInt64))})
-	}
-	raw, err = json.Marshal(body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
-	if err != nil {
-		return err
-	}
-	if len(raw) > 1<<20 {
-		return moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
-	}
-	request.Body.StartIndex = 0
-	body.Completed = nil
 	printResults := func() error {
 		slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
 		return printMoveBatch(cmd, results, len(items), opts)
 	}
-	for request.Body.StartIndex < len(request.Body.Items) {
-		body.StartIndex = new(int64(request.Body.StartIndex))
+	for pageIndex, body := range pages {
+		start := pageIndex * 50
 		response, callErr := client.MoveIssuesWithResponse(a.ctx, &generated.MoveIssuesRequestOptions{Body: &body})
 		if response == nil {
 			if err := printResults(); err != nil {
@@ -412,8 +410,8 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 				}
 				if json.Unmarshal(ce.Data, &partial) == nil {
 					for _, r := range partial.Results {
-						if r.Index >= 0 && r.Index < len(indexes) {
-							r.Index = indexes[r.Index]
+						if r.Index >= 0 && r.Index < len(body.Items) {
+							r.Index = indexes[start+r.Index]
 							results = append(results, r)
 						}
 					}
@@ -425,8 +423,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			return err
 		}
 		var reply struct {
-			Results   []api.MoveIssuesResult `json:"results"`
-			NextIndex int                    `json:"next_index"`
+			Results []api.MoveIssuesResult `json:"results"`
 		}
 		if err := json.Unmarshal(response.Body, &reply); err != nil {
 			if printErr := printResults(); printErr != nil {
@@ -434,20 +431,14 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			}
 			return err
 		}
-		if reply.NextIndex <= request.Body.StartIndex || reply.NextIndex > len(request.Body.Items) {
-			if printErr := printResults(); printErr != nil {
-				return printErr
-			}
-			return fmt.Errorf("could not continue batch move")
-		}
-		if len(reply.Results) != reply.NextIndex-request.Body.StartIndex {
+		if len(reply.Results) != len(body.Items) {
 			if printErr := printResults(); printErr != nil {
 				return printErr
 			}
 			return fmt.Errorf("invalid batch move result count")
 		}
 		for j, r := range reply.Results {
-			if r.Index != request.Body.StartIndex+j || r.Index >= len(indexes) || !slices.Contains([]string{"moved", "unchanged", "refused", "would_move"}, r.Result) {
+			if r.Index != j || r.Index >= len(body.Items) || !slices.Contains([]string{"moved", "unchanged", "refused", "would_move"}, r.Result) {
 				if printErr := printResults(); printErr != nil {
 					return printErr
 				}
@@ -455,20 +446,9 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			}
 		}
 		for _, r := range reply.Results {
-			completed := generated.MoveIssuesCompleted{Result: r.Result}
-			switch r.Result {
-			case "moved", "unchanged":
-				completed.UID, completed.Revision = new(r.UID), new(r.Revision)
-			case "refused":
-				if r.Code == "conflicting_target" {
-					completed.Code, completed.UID = new(r.Code), new(r.UID)
-				}
-			}
-			body.Completed = append(body.Completed, completed)
-			r.Index = indexes[r.Index]
+			r.Index = indexes[start+r.Index]
 			results = append(results, r)
 		}
-		request.Body.StartIndex = reply.NextIndex
 	}
 	if err := printResults(); err != nil {
 		return err

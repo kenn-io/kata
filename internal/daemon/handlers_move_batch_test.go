@@ -6,11 +6,8 @@ import (
 	"io"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -26,7 +23,6 @@ type batchReply struct {
 		ShortIDExtended bool   `json:"short_id_extended"`
 		To              string `json:"to"`
 	} `json:"results"`
-	NextIndex int `json:"next_index"`
 }
 
 func postMoveBatch(t *testing.T, env *testenv.Env, body string) batchReply {
@@ -49,7 +45,6 @@ func TestMoveIssuesBatch_MixedTargetsAndRerun(t *testing.T) {
 	require.NoError(t, err)
 	body := fmt.Sprintf(`{"actor":"tester","comment":"routed","default_project_id":%d,"items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, src.ID, src.Name+"#"+first.ShortID, a.UID, second.UID, b.UID)
 	out := postMoveBatch(t, env, body)
-	require.Equal(t, 2, out.NextIndex)
 	require.Len(t, out.Results, 2)
 	for _, r := range out.Results {
 		require.Equal(t, "moved", r.Result)
@@ -87,41 +82,6 @@ func TestMoveIssuesBatch_ExtendedShortIDAtBothProjects(t *testing.T) {
 	require.Equal(t, "moved", out.Results[0].Result)
 	require.Len(t, out.Results[0].NewShortID, 5)
 	require.True(t, out.Results[0].ShortIDExtended)
-}
-
-func TestMoveIssuesBatch_DuplicateConflict(t *testing.T) {
-	for _, mode := range []string{"duplicate", "conflict"} {
-		t.Run(mode, func(t *testing.T) {
-			env := testenv.New(t, testenv.WithAuthToken("tok"))
-			src, a, i := seedMovePair(t, env)
-			b, err := env.DB.CreateProject(t.Context(), "other-target")
-			require.NoError(t, err)
-			target := a.UID
-			if mode == "conflict" {
-				target = b.UID
-			}
-			before, err := env.DB.MaxEventID(t.Context())
-			require.NoError(t, err)
-			body := fmt.Sprintf(`{"actor":"tester","default_project_id":%d,"items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, src.ID, i.UID, a.UID, i.UID, target)
-			out := postMoveBatch(t, env, body)
-			require.Len(t, out.Results, 2)
-			if mode == "conflict" {
-				for _, r := range out.Results {
-					require.Equal(t, "refused", r.Result)
-					require.Equal(t, "conflicting_target", r.Code)
-				}
-			} else {
-				require.Equal(t, "duplicate_item", out.Results[1].Code)
-				require.Equal(t, "unchanged", out.Results[1].Result)
-				require.Equal(t, "moved", out.Results[0].Result)
-			}
-			if mode != "duplicate" {
-				after, err := env.DB.MaxEventID(t.Context())
-				require.NoError(t, err)
-				require.Equal(t, before, after)
-			}
-		})
-	}
 }
 
 func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
@@ -203,148 +163,5 @@ func TestMoveIssuesBatch_RejectsInvalidOptions(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, comments)
 		})
-	}
-}
-
-func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
-	for _, mode := range []string{"duplicate", "edited", "empty"} {
-		t.Run(mode, func(t *testing.T) {
-			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.MoveBatchBudget = time.Nanosecond }) //nolint:kennlint // deadlinetest: Yield after one chunk.
-			source, target, issue := seedMovePair(t, env)
-			items := []map[string]any{{"ref": source.Name + "#" + issue.ShortID, "expected_revision": issue.Revision}, {"ref": issue.UID, "expected_revision": issue.Revision}}
-			request := map[string]any{"actor": "tester", "comment": "routed", "to_project_uid": target.UID, "items": items}
-			post := func() (int, struct {
-				Results   []api.MoveIssuesResult `json:"results"`
-				NextIndex int                    `json:"next_index"`
-			}) {
-				raw, err := json.Marshal(request)
-				require.NoError(t, err)
-				resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(raw), "")
-				defer func() { _ = resp.Body.Close() }()
-				var result struct {
-					Results   []api.MoveIssuesResult `json:"results"`
-					NextIndex int                    `json:"next_index"`
-				}
-				require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
-				return resp.StatusCode, result
-			}
-			status, first := post()
-			require.Equal(t, http.StatusOK, status)
-			require.Equal(t, 1, first.NextIndex)
-			require.Equal(t, "moved", first.Results[0].Result)
-			request["start_index"] = first.NextIndex
-			request["completed"] = []api.MoveIssuesCompleted{{Result: first.Results[0].Result, UID: first.Results[0].UID, Revision: first.Results[0].Revision}}
-			if mode == "edited" {
-				owner := "changed"
-				updated, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
-				require.NoError(t, err)
-				require.Greater(t, updated.Revision, first.Results[0].Revision)
-			}
-			if mode == "empty" {
-				request["completed"] = []api.MoveIssuesCompleted{}
-			}
-			status, second := post()
-			if mode == "empty" {
-				require.Equal(t, http.StatusBadRequest, status)
-				return
-			}
-			require.Equal(t, http.StatusOK, status)
-			if mode == "edited" {
-				require.Equal(t, "revision_conflict", second.Results[0].Code)
-			} else {
-				require.Equal(t, "unchanged", second.Results[0].Result)
-				require.Equal(t, "duplicate_item", second.Results[0].Code)
-			}
-			got, err := env.DB.IssueByID(t.Context(), issue.ID)
-			require.NoError(t, err)
-			require.Equal(t, target.ID, got.ProjectID)
-			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
-			require.NoError(t, err)
-			require.Len(t, comments, 1)
-		})
-	}
-}
-
-func TestMoveIssuesBatch_ThreePageDuplicateKeepsOriginalRevision(t *testing.T) {
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.MoveBatchBudget = time.Nanosecond }) //nolint:kennlint // deadlinetest: Yield after each duplicate.
-	_, target, issue := seedMovePair(t, env)
-	request := api.MoveIssuesRequest{}
-	request.Body.Actor, request.Body.ToProjectUID, request.Body.Comment = "tester", target.UID, "routed"
-	for page := range 3 {
-		if page > 0 {
-			for range 49 {
-				request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{})
-			}
-		}
-		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
-	}
-	for page := range 3 {
-		raw, err := json.Marshal(request.Body)
-		require.NoError(t, err)
-		resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(raw), "")
-		require.Equal(t, http.StatusOK, resp.StatusCode)
-		var out api.MoveIssuesResponse
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(&out.Body))
-		require.NoError(t, resp.Body.Close())
-		require.Equal(t, min((page+1)*50, len(request.Body.Items)), out.Body.NextIndex)
-		require.NotEmpty(t, out.Body.Results)
-		result := out.Body.Results[0]
-		if page == 0 {
-			require.Equal(t, "moved", result.Result)
-		} else {
-			require.Equal(t, "duplicate_item", result.Code, "page %d result %q", page+1, result.Result)
-			require.Equal(t, "unchanged", result.Result)
-		}
-		request.Body.StartIndex = out.Body.NextIndex
-		for _, completed := range out.Body.Results {
-			request.Body.Completed = append(request.Body.Completed, api.MoveIssuesCompleted{Result: completed.Result, Code: completed.Code, UID: completed.UID, Revision: completed.Revision})
-		}
-	}
-	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-}
-
-func TestMoveIssuesBatch_ThreePageDuplicateAfterEdit(t *testing.T) {
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.MoveBatchBudget = time.Nanosecond }) //nolint:kennlint // deadlinetest: Yield after each chunk.
-	_, target, issue := seedMovePair(t, env)
-	request := api.MoveIssuesRequest{}
-	request.Body.Actor, request.Body.ToProjectUID = "tester", target.UID
-	for page := range 3 {
-		if page > 0 {
-			for range 49 {
-				request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{})
-			}
-		}
-		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
-	}
-	request.Body.Items[0].ExpectedRevision = issue.Revision
-	for page := range 3 {
-		raw, err := json.Marshal(request.Body)
-		require.NoError(t, err)
-		resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(raw), "")
-		require.Equal(t, http.StatusOK, resp.StatusCode)
-		var out api.MoveIssuesResponse
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(&out.Body))
-		require.NoError(t, resp.Body.Close())
-		require.Equal(t, min((page+1)*50, len(request.Body.Items)), out.Body.NextIndex)
-		result := out.Body.Results[0]
-		switch page {
-		case 0:
-			require.Equal(t, "moved", result.Result)
-			request.Body.Items[100].ExpectedRevision = result.Revision
-			owner := "changed"
-			updated, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
-			require.NoError(t, err)
-			require.Greater(t, updated.Revision, result.Revision)
-		case 1:
-			require.Equal(t, "already_in_target", result.Code)
-		case 2:
-			require.Equal(t, "revision_conflict", result.Code)
-		}
-		request.Body.StartIndex = out.Body.NextIndex
-		for _, completed := range out.Body.Results {
-			request.Body.Completed = append(request.Body.Completed, api.MoveIssuesCompleted{Result: completed.Result, Code: completed.Code, UID: completed.UID, Revision: completed.Revision})
-		}
 	}
 }

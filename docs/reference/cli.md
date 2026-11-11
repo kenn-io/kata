@@ -1017,7 +1017,6 @@ Batch previews accept one item.
 | --- | --- |
 | `already_in_target` | The issue is already in its requested target. |
 | `duplicate_item` | An earlier input names the same issue and target. |
-| `conflicting_target` | An issue has different targets that pass validation. Those entries don't move; an entry refused for another reason doesn't block a valid move. |
 | `revision_conflict` | A selected issue changed after selection. Rerun to select its current revision. |
 | `issue_move_tree_changed` | Subtree membership changed after validation. Retry to validate every member. |
 
@@ -1032,8 +1031,8 @@ Inputs over 5,000 items or a 1 MiB request body are refused before any write.
 The combined text of noncomment refs-file rows is also
 limited to 1 MiB; an oversized line receives its own refusal. Split larger input
 into separate runs.
-The daemon commits chunks and returns a continuation after its soft four-second
-budget; the CLI continues automatically. Exit 0 means every item succeeded
+The CLI sends up to 50 items per request; each request commits independently.
+A later item with a stale expected revision is refused. Exit 0 means every item succeeded
 or was unchanged; exit 5 means at least one refusal; exit 2 means invalid input
 before a move request. An interrupted request prints confirmed results, including committed chunks returned in an error response. A transport failure exits 7.
 Rerun the same input to finish any remaining items. Batch commands fail closed
