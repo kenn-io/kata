@@ -152,22 +152,28 @@
     {#if status.last_error}
       {@const bashCommand = `kata federation status --project '${status.project_name.replaceAll("'", "'\\''")}'`}
       {@const powershellCommand = `kata federation status --project '${status.project_name.replaceAll("'", "''")}'`}
-      <span class="sync-attention">
-        Sync needs attention
+      <div class="sync-attention">
+        <span class="attention">Sync needs attention</span>
         <span>Use a CLI configured for {window.location.origin}.</span>
-        <span>Bash/Zsh: <code>{bashCommand}</code></span>
-        <CopyButton
-          text={bashCommand}
-          ariaLabel="Copy Bash/Zsh sync status command"
-          copiedAriaLabel="Copied Bash/Zsh sync status command"
-        />
-        <span>PowerShell: <code>{powershellCommand}</code></span>
-        <CopyButton
-          text={powershellCommand}
-          ariaLabel="Copy PowerShell sync status command"
-          copiedAriaLabel="Copied PowerShell sync status command"
-        />
-      </span>
+        <div class="command">
+          <span class="shell">Bash/Zsh</span>
+          <code>{bashCommand}</code>
+          <CopyButton
+            text={bashCommand}
+            ariaLabel="Copy Bash/Zsh sync status command"
+            copiedAriaLabel="Copied Bash/Zsh sync status command"
+          />
+        </div>
+        <div class="command">
+          <span class="shell">PowerShell</span>
+          <code>{powershellCommand}</code>
+          <CopyButton
+            text={powershellCommand}
+            ariaLabel="Copy PowerShell sync status command"
+            copiedAriaLabel="Copied PowerShell sync status command"
+          />
+        </div>
+      </div>
     {/if}
     {#if status.credential_status}<span>Credential: {status.credential_status}</span>{/if}
     {#if status.embedding}
@@ -211,15 +217,30 @@
     min-width: 0;
   }
   .sync-attention {
-    display: inline-flex;
+    display: flex;
     flex-wrap: wrap;
+    flex-basis: 100%;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    min-width: 0;
+  }
+  .command {
+    display: flex;
+    flex-basis: 100%;
     align-items: center;
     gap: var(--space-2);
+    min-width: 0;
+  }
+  .shell {
+    flex: 0 0 5.5rem;
+    color: var(--text-primary);
   }
   code {
     font-size: var(--font-size-sm);
     overflow-wrap: anywhere;
+    min-width: 0;
   }
+  .attention,
   .stale {
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
