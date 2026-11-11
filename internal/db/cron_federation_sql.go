@@ -159,6 +159,15 @@ func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targe
 	if err := RequireLocalProjectWorkflows(ctx, tx, project.UID); err != nil {
 		return nil, err
 	}
+	// Until adoption carries the target handshake into this transaction, do not
+	// replace argv history that the target may be unable to accept.
+	required, err := ProjectWorkflowRequiredFeatures(ctx, tx, project.UID)
+	if err != nil {
+		return nil, err
+	}
+	if err := RequireEventFeatures("", required); err != nil {
+		return nil, err
+	}
 	// Adoption replaces history with new spoke-originated snapshots. Native
 	// delivery state cannot enter through that path; refuse before rebinding or
 	// deleting local history so the current authority can keep delivering.

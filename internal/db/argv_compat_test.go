@@ -45,7 +45,7 @@ func TestArgvCompatPayloadFeatures(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, db.MergeEventFeatures(db.CronEventFeature, argvCompatFeature), features)
 	}
-	require.ErrorIs(t, db.RequireEventFeatures(db.SupportedEventFeatures, argvCompatFeature), db.ErrUnsupportedEventFeatures, "a reserved feature is not decoder support")
+	require.NoError(t, db.RequireEventFeatures(db.SupportedEventFeatures, argvCompatFeature), "the activated decoder advertises argv support")
 }
 
 func TestArgvCompatMalformedPayload(t *testing.T) {
