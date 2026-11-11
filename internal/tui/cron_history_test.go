@@ -178,7 +178,7 @@ func TestCronHistoryFullLoadedWindowNarrowLayout(t *testing.T) {
 			text, links := historyDocument(p, ref, width)
 			// Strip wrapping to check provenance and exact sample text at any width.
 			compact := strings.Join(strings.Fields(text), "")
-			require.Contains(t, compact, "Loadedprojectobservations(incomplete)")
+			require.Contains(t, compact, "Runhistoryfromthelatest100projectruns")
 			require.Contains(t, compact, "Sample:100observations")
 			require.Equal(t, wantLinks, links)
 			for line := range strings.SplitSeq(text, "\n") {
