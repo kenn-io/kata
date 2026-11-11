@@ -176,11 +176,41 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	var childCaches int
 	require.NoError(t, reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM meta WHERE key=$1`, installedKey+"."+child.Enrollment.RelayBindingUID).Scan(&childCaches))
 	require.Zero(t, childCaches, "refusal must not prepare a downstream checkpoint")
+
+	// Restore an authentic installed checkpoint through the ordinary owner path.
+	bad = checkpointWithWorkflowDefinition(t, installed, project, pin, private, "source", `{"version":1,"steps":[{"key":"inspect","kind":"command","command":"git status"}]}`, true)
+	require.NoError(t, db.VerifyRootResetManifest(pin, bad.Manifest, bad.Snapshot))
+	require.NoError(t, db.ValidateRelayResetTranslation(bad.Translation.Authority, bad.Manifest, bad.Translation))
+	_, _, err = db.DecodeRootResetPayload(pin, bad.Snapshot)
+	require.NoError(t, err)
+	raw, err = json.Marshal(bad)
+	require.NoError(t, err)
+	filter := db.ExportFilter{IncludeDeleted: true}
+	records := replaceRelayOwnerMeta(t, relayOwnerRecords(t, downstream, filter), installedKey, string(raw))
+	require.NoError(t, db.ValidateImportReplay(records, db.ImportOptions{}))
+	require.NoError(t, downstream.ImportReplay(ctx, records, db.ImportOptions{}))
+	live, err := downstream.CronWorkflow(ctx, replica.ID, workflow.UID)
+	require.NoError(t, err)
+	require.Equal(t, workflowDefinition, live.Definition)
+	before := relayOwnerRecords(t, downstream, filter)
+	maximum, err := downstream.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.NoError(t, reader.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, installedKey).Scan(&retained))
+	require.Equal(t, string(raw), retained)
+	_, err = installer.CreateRelayReset(ctx, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
+	assert.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	assert.NotErrorIs(t, err, db.ErrHeldWorkflowEvidence)
+	afterMaximum, err := downstream.MaxEventID(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, maximum, afterMaximum)
+	assert.Equal(t, before, relayOwnerRecords(t, downstream, filter), "forward refusal preserves the installed checkpoint and child state")
+	require.NoError(t, reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM meta WHERE key=$1`, installedKey+"."+child.Enrollment.RelayBindingUID).Scan(&childCaches))
+	assert.Zero(t, childCaches, "refusal must not prepare a downstream checkpoint")
 }
 
 // checkpointWithWorkflowDefinition signs a historical record without changing
 // the existing records or their creation receipts.
-func checkpointWithWorkflowDefinition(t *testing.T, checkpoint db.RelayResetCheckpoint, project db.Project, pin db.RootKeyPin, private ed25519.PrivateKey, section, definition string) db.RelayResetCheckpoint {
+func checkpointWithWorkflowDefinition(t *testing.T, checkpoint db.RelayResetCheckpoint, project db.Project, pin db.RootKeyPin, private ed25519.PrivateKey, section, definition string, unknownMember ...bool) db.RelayResetCheckpoint {
 	t.Helper()
 	var bodies [][]byte
 	selected := &checkpoint.Snapshot.Events
@@ -204,6 +234,9 @@ func checkpointWithWorkflowDefinition(t *testing.T, checkpoint db.RelayResetChec
 		delete(payload, "definition")
 	} else {
 		payload["definition"] = jsontext.Value(definition)
+	}
+	if len(unknownMember) > 0 && unknownMember[0] {
+		payload["future_event_field"] = jsontext.Value(`true`)
 	}
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)

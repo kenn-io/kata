@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -160,10 +159,8 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 func requireUsableResetEvents(events []RemoteEvent) error {
 	for _, event := range events {
 		if workflowDefinitionEvent(event.Type) {
-			var body struct {
-				Definition jsontext.Value `json:"definition"`
-			}
-			if err := json.Unmarshal(event.Payload, &body); err != nil {
+			body, _, err := parseCronDefinitionEvent(FoldEvent{UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, Payload: event.Payload, Type: event.Type})
+			if err != nil {
 				return fmt.Errorf("%w: workflow payload: %v", ErrUnsupportedEventFeatures, err)
 			}
 			// Only classify shapes the historical decoder retained as held evidence,
