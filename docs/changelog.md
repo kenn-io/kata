@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Send MCP event webhooks to private receivers using configured exact origins and pinned addresses. An untrusted private callback now returns `-32027` with `destination_not_allowed`.
 - Keep search focus and text when keyboard selection opens task detail.
 - Keep local writes responsive while a federation pull updates projects with long histories.
 - See why Docbank attachments fail when the daemon cannot read its own key.

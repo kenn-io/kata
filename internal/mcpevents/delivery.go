@@ -336,13 +336,14 @@ func (s *Service) exhaust(ctx context.Context, c *claim, row db.MCPEventSubscrip
 // failed records a failed attempt (§9.1, §9.2): it ages the endpoint, ends a
 // dead one, and either schedules the next attempt or exhausts the budget.
 func (s *Service) failed(ctx context.Context, c *claim, row db.MCPEventSubscription, number int, category string, retryAfter time.Duration) stepResult {
+	receiverFailure := category != "destination_not_allowed"
 	for {
 		now := s.now().UTC()
 		since := now
 		if row.FailedSince != nil {
 			since = *row.FailedSince
 		}
-		if row.State == db.MCPEventStateActive && row.FailedAttempts+1 >= deadEndpointAttempts && now.Sub(since) > deadEndpointAge {
+		if receiverFailure && row.State == db.MCPEventStateActive && row.FailedAttempts+1 >= deadEndpointAttempts && now.Sub(since) > deadEndpointAge {
 			body, id, err := terminatedBody("endpoint_dead")
 			if err != nil {
 				return stepError
@@ -381,7 +382,7 @@ func (s *Service) failed(ctx context.Context, c *claim, row db.MCPEventSubscript
 		if number >= maxAttempts {
 			zero := 0
 			in := db.MCPEventDeliveryUpdate{
-				PendingMessageID: row.PendingMessageID, RecordFailure: true, LastError: &category,
+				PendingMessageID: row.PendingMessageID, RecordFailure: receiverFailure, LastError: &category,
 				ClearPending: true, AttemptCount: &zero, ClearNextAttempt: true,
 				IncrementDeadLetter: row.PendingKind == db.MCPEventPendingEvent,
 			}
@@ -396,7 +397,7 @@ func (s *Service) failed(ctx context.Context, c *claim, row db.MCPEventSubscript
 		delay = max(delay, retryAfter)
 		next := now.Add(delay)
 		ok, err := s.write(ctx, c, db.MCPEventDeliveryUpdate{
-			PendingMessageID: row.PendingMessageID, RecordFailure: true, LastError: &category,
+			PendingMessageID: row.PendingMessageID, RecordFailure: receiverFailure, LastError: &category,
 			NextAttemptAt: &next, ReleaseClaim: true,
 		})
 		if err != nil || !ok {

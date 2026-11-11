@@ -25,6 +25,15 @@ import (
 
 const fixtureCallback = "https://receiver.example/events?route=inbox"
 
+func fixtureURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := parseWebhookCallback(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
 func fixtureSecret(b byte, size int) string {
 	return "whsec_" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{b}, size))
 }
@@ -126,7 +135,7 @@ func TestWebhookVerificationChallenge(t *testing.T) {
 		_ = json.NewEncoder(rw).Encode(map[string]string{"challenge": challenge.Challenge})
 	})
 	for range 2 {
-		if err := w.Verify(t.Context(), fixtureTLSCallback, "sub_fixture", key); err != nil {
+		if err := w.verify(t.Context(), fixtureURL(t, fixtureTLSCallback), "sub_fixture", key); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -240,7 +249,7 @@ func TestWebhookValidationBeforeNetwork(t *testing.T) {
 		}
 	}
 	for _, secret := range []string{"", "secret", fixtureSecret(1, 23), fixtureSecret(1, 65), key + "\n", "whsec_!!!!"} {
-		if err := w.Verify(t.Context(), fixtureCallback, "sub", secret); err == nil {
+		if err := w.verify(t.Context(), fixtureURL(t, fixtureCallback), "sub", secret); err == nil {
 			t.Error("accepted invalid signing secret")
 		}
 	}
@@ -277,7 +286,7 @@ func TestWebhookVerificationFailureIsBoundedAndSanitized(t *testing.T) {
 					rw.WriteHeader(500)
 				}
 			})
-			err := w.Verify(t.Context(), fixtureTLSCallback, "sub", key)
+			err := w.verify(t.Context(), fixtureURL(t, fixtureTLSCallback), "sub", key)
 			if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "example.com") || strings.Contains(err.Error(), key) {
 				t.Fatalf("unsafe or absent error: %v", err)
 			}
@@ -290,7 +299,7 @@ func TestWebhookVerificationFailureIsBoundedAndSanitized(t *testing.T) {
 	w := NewWebhookClient(WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
 		return nil, errors.New("secret DNS callback body")
 	}})
-	if err := w.Verify(t.Context(), fixtureCallback, "sub", key); err == nil || strings.Contains(err.Error(), "secret") {
+	if err := w.verify(t.Context(), fixtureURL(t, fixtureCallback), "sub", key); err == nil || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("resolver error leaked: %v", err)
 	}
 }
@@ -420,7 +429,7 @@ func TestWebhookDialSharesTheDeadlineAcrossAddresses(t *testing.T) {
 		},
 		RootCAs: roots,
 	})
-	if err := w.Verify(t.Context(), fixtureTLSCallback, "sub_fixture", fixtureSecret(7, 32)); err != nil {
+	if err := w.verify(t.Context(), fixtureURL(t, fixtureTLSCallback), "sub_fixture", fixtureSecret(7, 32)); err != nil {
 		t.Fatal(err)
 	}
 	if len(budgets) != 2 {

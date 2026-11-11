@@ -182,6 +182,27 @@ func TestEndpointConsent(t *testing.T) {
 			require.NoError(t, listErr)
 			assert.Empty(t, rows)
 		})
+		t.Run("policy refusals do not exhaust challenge budgets", func(t *testing.T) {
+			h := newHarness(t, open(t))
+			var allowed atomic.Bool
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				if allowed.Load() {
+					return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+				}
+				return []netip.Addr{netip.MustParseAddr("10.0.0.1")}, nil
+			})
+			for i := range 10 {
+				req := h.request("example-user")
+				req.Delivery.URL = fmt.Sprintf("https://example.com/events?route=%d", i)
+				_, err := h.subscribe(principalA, req)
+				_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
+			}
+			assert.Zero(t, h.recv.challenges.Load())
+			allowed.Store(true)
+			_, err := h.subscribe(principalA, h.request("example-user"))
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, h.recv.challenges.Load())
+		})
 		t.Run("a failed challenge leaves existing rows untouched", func(t *testing.T) {
 			h := newHarness(t, open(t))
 			req := h.request("example-user")

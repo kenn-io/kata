@@ -42,7 +42,7 @@ func CompileTrustedCallbacks(entries []TrustedCallback) (*TrustedCallbackPolicy,
 				return nil, fmt.Errorf("invalid mcp_events.trusted_callbacks[%d].addresses[%d]", i, j)
 			}
 			ip = ip.Unmap()
-			if ip == netip.MustParseAddr("100.100.100.200") || ip == netip.MustParseAddr("fd00:ec2::254") ||
+			if ip == netip.MustParseAddr("100.100.100.200") || ip == netip.MustParseAddr("fd00:ec2::254") || ip == netip.MustParseAddr("fd20:ce::254") ||
 				(!ip.IsPrivate() && !netip.MustParsePrefix("100.64.0.0/10").Contains(ip)) || seen[ip] {
 				return nil, fmt.Errorf("invalid mcp_events.trusted_callbacks[%d].addresses[%d]", i, j)
 			}

@@ -1056,9 +1056,9 @@ addresses = ["100.64.0.1", "fd00::1"]
 Each entry needs at least one numeric address from RFC1918 IPv4
 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), CGNAT
 (`100.64.0.0/10`), or IPv6 ULA (`fc00::/7`). Loopback, link-local,
-metadata, unspecified, multicast, public and other reserved addresses are
-not permitted. This includes metadata endpoints `100.100.100.200` and
-`fd00:ec2::254`, even though they fall within the ranges above. Do not use
+unspecified, multicast, public, and other reserved addresses are
+not permitted. The metadata addresses `100.100.100.200`, `fd00:ec2::254`,
+and `fd20:ce::254` are also excluded. Do not use
 CIDRs, zones or hostnames in `addresses`.
 
 An origin includes the scheme, hostname and optional port. The default

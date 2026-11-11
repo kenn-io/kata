@@ -132,29 +132,21 @@ func parseWebhookCallback(raw string) (*url.URL, error) {
 
 // validateStaticCallback refuses prohibited literals and private namespaces
 // without DNS or spending failed-challenge tokens. The same selector honors exact operator pins.
-func (w *WebhookClient) validateStaticCallback(ctx context.Context, raw string) error {
-	u, err := parseWebhookCallback(raw)
-	if err != nil {
-		return err
-	}
+func (w *WebhookClient) validateStaticCallback(ctx context.Context, u *url.URL) error {
 	if _, err := netip.ParseAddr(u.Hostname()); err == nil || privateWebhookHostname(u.Hostname()) {
-		_, err = w.destinationAddresses(ctx, u)
+		_, err := w.destinationAddresses(ctx, u)
 		return err
 	}
 	return nil
 }
 
-// ValidateCallback authorizes a subscription destination before any write.
+// validateCallback authorizes a subscription destination before any write.
 // Lookup failures remain reachability errors; cached consent can be refreshed
 // during a DNS outage. Dialing independently validates every actual DNS answer.
-func (w *WebhookClient) ValidateCallback(ctx context.Context, raw string) error {
-	u, err := parseWebhookCallback(raw)
-	if err != nil {
-		return err
-	}
+func (w *WebhookClient) validateCallback(ctx context.Context, u *url.URL) error {
 	ctx, cancel := context.WithTimeout(ctx, webhookTimeout)
 	defer cancel()
-	_, err = w.destinationAddresses(ctx, u)
+	_, err := w.destinationAddresses(ctx, u)
 	if err != nil && safeWebhookError(err).Reason == "destination_not_allowed" {
 		return err
 	}
@@ -288,10 +280,7 @@ func (w *WebhookClient) dialPublic(ctx context.Context, network, address string)
 	if err != nil {
 		return nil, &WebhookError{Reason: "invalid_callback"}
 	}
-	u, err := parseWebhookCallback("https://" + net.JoinHostPort(host, port))
-	if err != nil {
-		return nil, err
-	}
+	u := &url.URL{Scheme: "https", Host: net.JoinHostPort(host, port)}
 	addresses, err := w.destinationAddresses(ctx, u)
 	if err != nil {
 		return nil, err
@@ -370,10 +359,7 @@ func validWebhookHeader(value string) bool {
 	return true
 }
 
-func (w *WebhookClient) request(ctx context.Context, callback, eventID, subscriptionID string, body []byte, keys []string) (*http.Response, error) {
-	if _, err := parseWebhookCallback(callback); err != nil {
-		return nil, err
-	}
+func (w *WebhookClient) request(ctx context.Context, callback *url.URL, eventID, subscriptionID string, body []byte, keys []string) (*http.Response, error) {
 	if len(body) > webhookEnvelopeLimit {
 		return nil, &WebhookError{Reason: "payload_too_large"}
 	}
@@ -391,10 +377,11 @@ func (w *WebhookClient) request(ctx context.Context, callback, eventID, subscrip
 		}
 		decoded = append(decoded, value)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callback, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", bytes.NewReader(body))
 	if err != nil {
 		return nil, &WebhookError{Reason: "invalid_callback"}
 	}
+	req.URL = callback
 	timestamp := strconv.FormatInt(w.now().Unix(), 10)
 	signatures := make([]string, 0, len(decoded))
 	for _, key := range decoded {
@@ -415,12 +402,9 @@ func (w *WebhookClient) request(ctx context.Context, callback, eventID, subscrip
 	return resp, nil
 }
 
-// Verify authenticates the receiver using one fresh signed challenge. Activation,
+// verify authenticates the receiver using one fresh signed challenge. Activation,
 // verification caching and durable key rotation are the caller's responsibility.
-func (w *WebhookClient) Verify(ctx context.Context, callback, subscriptionID, secret string) error {
-	if _, err := parseWebhookCallback(callback); err != nil {
-		return err
-	}
+func (w *WebhookClient) verify(ctx context.Context, callback *url.URL, subscriptionID, secret string) error {
 	if err := ValidateWebhookSecret(secret); err != nil {
 		return err
 	}
@@ -460,7 +444,11 @@ func (w *WebhookClient) Verify(ctx context.Context, callback, subscriptionID, se
 // Send signs the exact persisted body. Retries retain body and eventID, while
 // each call creates a fresh signing timestamp and signatures for supplied keys.
 func (w *WebhookClient) Send(ctx context.Context, callback, eventID, subscriptionID string, body []byte, keys []string) (WebhookReceipt, error) {
-	resp, err := w.request(ctx, callback, eventID, subscriptionID, body, keys)
+	u, err := parseWebhookCallback(callback)
+	if err != nil {
+		return WebhookReceipt{}, err
+	}
+	resp, err := w.request(ctx, u, eventID, subscriptionID, body, keys)
 	if err != nil {
 		return WebhookReceipt{}, err
 	}

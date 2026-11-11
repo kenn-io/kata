@@ -430,19 +430,33 @@ func TestSubscribeRechecksDestinationWithCachedConsent(t *testing.T) {
 }
 
 func TestSubscribeTrustedPrivateCallbackAndWithdrawal(t *testing.T) {
-	recv := newReceiver(t, mcpevents.TrustedCallback{Origin: "https://example.com", Addresses: []string{"100.64.0.1"}})
-	h := newHarnessWith(t, openSQLite(t), func(cfg *mcpevents.ServiceConfig) { cfg.Webhook = recv.client })
-	req := h.request("example-user")
-	req.TTLMS = mcpevents.TTLNull()
-	result := h.mustSubscribe(req)
-	// Restart without the grant, keeping durable consent and pending delivery.
-	withdrawn := mcpevents.NewWebhookClient(mcpevents.WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
-		return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
-	}})
-	svc, err := mcpevents.NewService(t.Context(), mcpevents.ServiceConfig{Store: h.store, Keys: h.keys, Authority: h.auth, Webhook: withdrawn, Now: h.clock.Now})
-	require.NoError(t, err)
-	h.touch(result.ID)
-	require.NoError(t, svc.Drain(t.Context()))
-	assert.Equal(t, "destination_not_allowed", h.row(result.ID).LastError)
-	require.NoError(t, svc.Unsubscribe(t.Context(), principalA, mcpevents.UnsubscribeRequest{Name: req.Name, Arguments: req.Arguments, Delivery: req.Delivery}))
+	forEachBackend(t, func(t *testing.T, store db.Storage) {
+		recv := newReceiver(t, mcpevents.TrustedCallback{Origin: "https://example.com", Addresses: []string{"100.64.0.1"}})
+		h := newHarnessWith(t, store, func(cfg *mcpevents.ServiceConfig) { cfg.Webhook = recv.client })
+		req := h.request("example-user")
+		req.TTLMS = mcpevents.TTLNull()
+		result := h.mustSubscribe(req)
+		row := h.row(result.ID)
+		since := h.clock.Now().Add(-8 * 24 * time.Hour)
+		row.FailedSince, row.FailedAttempts = &since, 19
+		require.NoError(t, h.store.ImportMCPEventSubscription(t.Context(), row))
+		// Restart without the grant, keeping durable consent and pending delivery.
+		withdrawn := mcpevents.NewWebhookClient(mcpevents.WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
+		}})
+		svc, err := mcpevents.NewService(t.Context(), mcpevents.ServiceConfig{Store: h.store, Keys: h.keys, Authority: h.auth, Webhook: withdrawn, Now: h.clock.Now})
+		require.NoError(t, err)
+		h.touch(result.ID)
+		for range 5 {
+			require.NoError(t, svc.Drain(t.Context()))
+			row = h.row(result.ID)
+			assert.Equal(t, "destination_not_allowed", row.LastError)
+			assert.Equal(t, db.MCPEventStateActive, row.State)
+			assert.Equal(t, 19, row.FailedAttempts)
+			assert.Equal(t, since, *row.FailedSince)
+			h.clock.Advance(10 * time.Minute)
+		}
+		assert.Equal(t, 1, row.DeadLetterCount)
+		require.NoError(t, svc.Unsubscribe(t.Context(), principalA, mcpevents.UnsubscribeRequest{Name: req.Name, Arguments: req.Arguments, Delivery: req.Delivery}))
+	})
 }
