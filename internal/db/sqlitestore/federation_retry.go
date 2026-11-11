@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -18,7 +19,7 @@ const federationSlowOptimisticPreparation = time.Second
 func (d *Store) retryFederationPreparation(ctx context.Context, op func(locked bool) error) error {
 	for range federationIngestOptimisticAttempts {
 		started := time.Now()
-		if err := op(false); err == nil || !IsTransient(err) {
+		if err := op(false); err == nil || (!IsTransient(err) && !errors.Is(err, errStaleFederationPreparation)) {
 			return err
 		}
 		if time.Since(started) >= federationSlowOptimisticPreparation {

@@ -345,24 +345,14 @@ func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow b
 	d.text(label, cronRef{kind, uid})
 }
 func cronHistory(d *cronDoc, p cronData, ref cronRef) {
+	d.section("Loaded project observations (incomplete)")
 	if p.runsErr != nil {
 		d.section("Loaded runs · unavailable")
 		return
 	}
-	runs := []generated.CronRun{}
-	for _, r := range p.runs {
-		uid := r.JobUID
-		if ref.kind == cronWorkflows {
-			uid = r.WorkflowUID
-		}
-		if deref(uid) == ref.uid {
-			runs = append(runs, r)
-		}
-	}
-	d.section(fmt.Sprintf("Loaded runs (%d) · newest 100", len(runs)))
-	if len(runs) == 0 {
-		d.text("no loaded runs", cronRef{})
-	}
+	runs := cronProjectObservations(p.runs, ref)
+	d.text(cronObservationSummary(runs), cronRef{})
+	d.section("Loaded run links · newest 100")
 	for _, r := range runs {
 		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
 	}

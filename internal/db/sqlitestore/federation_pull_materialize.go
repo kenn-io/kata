@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
+	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -33,12 +35,34 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 				return err
 			}
 		}
-		materialization, err := preparePulledFederationMaterializationTx(ctx, tx, projectID, eventUIDs)
+		mode := pullPrepareComplete
+		if !locked {
+			mode = pullPrepareDetectFull
+		}
+		materialization, err := preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, mode)
 		if err != nil {
 			return err
 		}
-		if materialization.fullReplay {
+		if materialization.fullHistory {
 			if err := tx.Rollback(); err != nil {
+				return err
+			}
+			materialization, err = d.prepareFullPull(ctx, projectID, eventUIDs)
+			if err != nil {
+				return err
+			}
+			if !materialization.fullReplay && !materialization.fullHistory {
+				return errStaleFederationPreparation
+			}
+			if materialization.fullHistory {
+				if d.federationIngestPrepared != nil {
+					d.federationIngestPrepared()
+				}
+				return d.applyFullPull(ctx, projectID, eventUIDs, materialization)
+			}
+		}
+		if materialization.fullReplay {
+			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
 				return err
 			}
 			return d.MaterializeFederatedProject(ctx, projectID)
@@ -51,17 +75,19 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 				return err
 			}
 		}
-		if err := materialization.apply(ctx, tx, projectID, db.NewCronReplayValidator(tx, false)); err != nil {
-			return err
-		}
-		if err := db.RecordMCPEventsRematch(ctx, tx, eventUIDs); err != nil {
-			return err
-		}
-		return tx.Commit()
+		return applyPulledFederationMaterialization(ctx, tx, projectID, eventUIDs, materialization)
 	})
 }
 
-func preparePulledFederationMaterializationTx(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string) (federationMaterialization, error) {
+type pullPrepareMode int
+
+const (
+	pullPrepareComplete pullPrepareMode = iota
+	pullPrepareDetectFull
+	pullPrepareFullSnapshot
+)
+
+func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, mode pullPrepareMode) (federationMaterialization, error) {
 	events, err := eventsByUIDs(ctx, tx, projectID, eventUIDs)
 	if err != nil {
 		return federationMaterialization{}, err
@@ -90,7 +116,126 @@ func preparePulledFederationMaterializationTx(ctx context.Context, tx *sql.Tx, p
 	if full {
 		scope = nil
 	}
-	return prepareFederationMaterialization(ctx, tx, projectID, prepared, true, scope)
+	if mode == pullPrepareFullSnapshot && !full {
+		return federationMaterialization{}, nil
+	}
+	if mode == pullPrepareDetectFull && full {
+		return federationMaterialization{fullHistory: true}, nil
+	}
+	return foldFederationMaterialization(ctx, tx, projectID, prepared, true, scope, mode == pullPrepareFullSnapshot)
+}
+
+var errStaleFederationPreparation = errors.New("stale federation preparation")
+
+func (d *Store) prepareFullPull(ctx context.Context, projectID int64, eventUIDs []string) (federationMaterialization, error) {
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return federationMaterialization{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	return preparePulledFederationMaterialization(ctx, tx, projectID, eventUIDs, pullPrepareFullSnapshot)
+}
+
+func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []string, m federationMaterialization) error {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+		return err
+	}
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id = ?`, projectID))
+	if err != nil {
+		return err
+	}
+	stamp, err := federationEventStamp(ctx, tx, projectID, nil)
+	if err != nil {
+		return err
+	}
+	if stamp != m.eventStamp || binding.ProjectID != m.binding.ProjectID || binding.Role != m.binding.Role ||
+		binding.HubURL != m.binding.HubURL || binding.HubProjectUID != m.binding.HubProjectUID ||
+		binding.Enabled != m.binding.Enabled || !reflect.DeepEqual(binding.RelayConfig, m.binding.RelayConfig) {
+		return errStaleFederationPreparation
+	}
+	// A move can add history for an issue included in the prepared fold.
+	//nolint:gosec // The UID expression is fixed SQL; the event ID is bound.
+	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(`+db.FederationReadIssueUIDExpr(false)+`, '') FROM events e WHERE e.id>? AND e.type='issue.moved'`, m.maxEventID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if _, ok := m.moveIssueUIDs[uid]; ok {
+			_ = rows.Close()
+			return errStaleFederationPreparation
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if m.linksAffected {
+		projects, err := federationBindingGroupProjectIDs(ctx, tx, binding)
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(projects, m.linkProjects) {
+			return errStaleFederationPreparation
+		}
+		if len(projects) > 0 {
+			origins, err := loadRelayOriginClassifier(ctx, tx, projects)
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(origins, m.relayOrigins) {
+				return errStaleFederationPreparation
+			}
+		}
+		for id, expected := range m.linkStamps {
+			stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+			if err != nil {
+				return err
+			}
+			if stamp != expected {
+				return errStaleFederationPreparation
+			}
+		}
+	}
+	rowStamp, err := federationRowStamp(ctx, tx, projectID, m.linkProjects)
+	if err != nil {
+		return err
+	}
+	if rowStamp != m.rowStamp {
+		return errStaleFederationPreparation
+	}
+	for _, check := range m.shortIDChecks {
+		shortID, err := resolveFederatedIssueShortID(ctx, tx, projectID, check.uid, check.preferred, &check.row)
+		if err != nil {
+			return err
+		}
+		if shortID != check.resolved {
+			return errStaleFederationPreparation
+		}
+	}
+	return applyPulledFederationMaterialization(ctx, tx, projectID, eventUIDs, m)
+}
+
+func applyPulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, m federationMaterialization) error {
+	if err := m.apply(ctx, tx, projectID, db.NewCronReplayValidator(tx, false)); err != nil {
+		return err
+	}
+	if err := db.RecordMCPEventsRematch(ctx, tx, eventUIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // column is an internal SQL identifier; all issue identities are bound values.
