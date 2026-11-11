@@ -7,7 +7,6 @@ import (
 	"path"
 	"slices"
 	"strings"
-	"uuid"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -139,9 +138,5 @@ func resolveDocbankAttachment(ctx context.Context, cfg ServerConfig, input api.L
 	if !metadata.ValidAttachmentName(node.Name) {
 		return metadata.Attachment{}, attachmentError(400, "attachment_invalid")
 	}
-	attachment := metadata.Attachment{Name: node.Name, MediaType: attachmentMediaType(node.Name), Size: version.Size, DocbankVersion: version.ID}
-	if attachment.DocbankVersion == uuid.Nil() || attachment.Size < 0 {
-		return metadata.Attachment{}, attachmentError(400, "attachment_invalid")
-	}
-	return attachment, nil
+	return metadata.Attachment{Name: node.Name, MediaType: attachmentMediaType(node.Name), Size: version.Size, DocbankVersion: version.ID}, nil
 }

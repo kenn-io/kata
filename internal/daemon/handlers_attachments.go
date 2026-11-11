@@ -204,12 +204,8 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 			if binding != nil && binding.Role == db.FederationRoleSpoke {
-				caps, err := docbankOriginCapabilities(ctx, cfg, project, binding, e.Origin)
-				if err != nil {
+				if _, err := docbankOriginCapabilities(ctx, cfg, project, binding, e.Origin); err != nil {
 					return nil, err
-				}
-				if caps.Origin != e.Origin {
-					return nil, attachmentError(409, "attachment_origin_mismatch")
 				}
 			}
 			resp, err = originDocbankContent(ctx, cfg, project, binding, e)
