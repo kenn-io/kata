@@ -17,7 +17,8 @@ func DecodeJob(input []byte) (JobDefinition, error) {
 	return job, err
 }
 
-// DecodeWorkflow reads stored workflows while enforcing argv and null fences.
+// DecodeWorkflow reads stored workflows and rejects unsupported shapes and kinds.
+
 func DecodeWorkflow(input []byte) (WorkflowDefinition, error) {
 	var workflow WorkflowDefinition
 	err := decode(input, &workflow, DefinitionLimit)
@@ -161,13 +162,20 @@ func checkWorkflowNullShapes(input []byte) error {
 	return nil
 }
 
-// CheckWorkflowSupported enforces argv rules without revalidating historical
-// authoring rules. It also applies to already-decoded backup records.
+// CheckWorkflowSupported checks supported versions and steps without applying
+// modern authoring rules to historical documents.
+
 func CheckWorkflowSupported(workflow WorkflowDefinition) error {
+	if workflow.Version != 1 {
+		return invalid("workflow version is not supported")
+	}
 	for _, step := range workflow.Steps {
 		if step.Kind != "argv" {
 			if step.Argv != nil {
 				return invalid("argv member requires argv kind")
+			}
+			if step.Kind != "command" && step.Kind != "prompt" {
+				return invalid("workflow step kind is not supported")
 			}
 			continue
 		}

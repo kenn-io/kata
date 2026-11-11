@@ -63,7 +63,7 @@ type WorkflowStep struct {
 	Key     string         `json:"key"`
 	Kind    string         `json:"kind"`
 	Command string         `json:"command,omitempty"`
-	Argv    []string       `json:"argv,omitempty"`
+	Argv    []string       `json:"argv,omitzero"`
 	Prompt  string         `json:"prompt,omitempty"`
 	After   []string       `json:"after,omitempty"`
 	Retries int            `json:"retries,omitzero"`

@@ -617,9 +617,10 @@ Older databases can contain unsupported workflows, including malformed `argv`
 steps or a null definition, steps array, step, or step kind. Owner backup and
 restore preserve historically decodable documents and their event evidence; JSON formatting may
 change. These workflows remain unavailable to adapters and cannot be shown or
-used in new jobs or runs. Ordinary workflow lists omit held workflows and show
-supported siblings. Federation snapshots for the affected project fail while a
-held workflow remains; they do not omit held data.
+used in new jobs or fresh running observations. Terminal run evidence can still
+reference an exact held revision. Ordinary workflow lists omit held workflows and
+show supported siblings. Federation snapshots and adoption fail when a held
+workflow row or retained unsupported workflow event exists.
 
 Retained events whose definitions cannot be represented in storage, or whose
 future fields cannot be decoded, can block cron rematerialization for their
@@ -627,9 +628,19 @@ project even when a later supported event exists. Preserve the backup for
 recovery with a compatible version.
 
 To recover, take an [owner backup](../operations/backup-restore.md#full-backup)
-and find the `cron_workflow` record and its UID and definition in the JSONL.
-Create a supported workflow with a new UID, then update affected jobs to use it.
-The original UID and its evidence remain held; do not reuse that UID.
+and find the `cron_workflow` record and its UID and definition in the JSONL. If
+the definition cannot be represented in a workflow row, find its UID and raw
+definition in the retained `event` record instead. Create a supported workflow
+with a new UID, then update affected jobs to use it. A full replacement using a
+held row's current event UID is also accepted, but retained unsupported events
+continue to block federation snapshots and adoption. Preserve that evidence
+for recovery with a compatible version.
+
+Signed federation checkpoints with unsupported workflow evidence cannot be
+downloaded, forwarded, installed, or activated. Taking an owner backup retains
+the evidence; it does not make the checkpoint usable by an older version.
+Use a version that understands the retained format for recovery. A newer
+supported workflow does not clear older retained evidence.
 
 ### Upgrade limits
 

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -158,13 +159,6 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 // Integrity decoding remains independent so owner backups can retain evidence.
 func requireUsableResetEvents(events []RemoteEvent) error {
 	for _, event := range events {
-		required, err := PayloadRequiredFeatures(event.Type, string(event.Payload))
-		if err != nil {
-			return fmt.Errorf("%w: workflow payload: %v", ErrUnsupportedEventFeatures, err)
-		}
-		if err := RequireEventFeatures(SupportedEventFeatures, required); err != nil {
-			return err
-		}
 		if workflowDefinitionEvent(event.Type) {
 			var body struct {
 				Definition jsontext.Value `json:"definition"`
@@ -174,6 +168,38 @@ func requireUsableResetEvents(events []RemoteEvent) error {
 			}
 			if _, err := cron.DecodeWorkflow(body.Definition); err != nil {
 				return fmt.Errorf("%w: workflow definition: %v", ErrUnsupportedEventFeatures, err)
+			}
+			continue
+		}
+		required, err := PayloadRequiredFeatures(event.Type, string(event.Payload))
+		if err != nil {
+			return fmt.Errorf("%w: event payload: %v", ErrUnsupportedEventFeatures, err)
+		}
+		if err := RequireEventFeatures(SupportedEventFeatures, required); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireResetPeerFeatures checks the exact signed records for the requesting
+// hop. Protocol 1 predates cron negotiation, so only argv needs a new token.
+func requireResetPeerFeatures(ctx context.Context, bindingUID string, events []RemoteEvent) error {
+	features, ok := RelayPeerFeatures(ctx, bindingUID)
+	if !ok {
+		if HasRelayPeerFeatures(ctx) {
+			return ErrNotFound
+		}
+		return nil
+	}
+	for _, event := range events {
+		argv, err := payloadHasArgvWorkflow(event.Type, string(event.Payload))
+		if err != nil {
+			return err
+		}
+		if argv {
+			if err := RequireEventFeatures(features, CronWorkflowArgvEventFeature); err != nil {
+				return err
 			}
 		}
 	}

@@ -155,6 +155,9 @@ func (p RelayResetProtocol) retainedCheckpoint(ctx context.Context, create relay
 	if err := requireUsableResetEvents(events); err != nil {
 		return RelayResetCheckpoint{}, false, err
 	}
+	if err := requireResetPeerFeatures(ctx, create.bindingUID, events); err != nil {
+		return RelayResetCheckpoint{}, false, err
+	}
 	refresh, err := p.Backend.RelayCheckpointNeedsRefresh(ctx, create.project.UID, result)
 	if err != nil {
 		return RelayResetCheckpoint{}, false, err
@@ -209,6 +212,9 @@ func (p RelayResetProtocol) captureRootCheckpoint(ctx context.Context, create re
 		return RelayResetCheckpoint{}, err
 	}
 	if err := requireUsableResetEvents(events); err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	if err := requireResetPeerFeatures(ctx, create.bindingUID, events); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
 	retained, err := p.Backend.MetaValuesWithPrefix(ctx, RelayResetMetadataPrefix+project.UID+".")

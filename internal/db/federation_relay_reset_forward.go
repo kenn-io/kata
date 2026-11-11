@@ -32,6 +32,9 @@ type RelayRetainedPage struct {
 	Epoch      int64
 	After      int64
 	Limit      int
+	// UnemittedOnly selects the exact binding/epoch seeds a reset may delete;
+	// unlike ordinary forwarding, it does not filter by project UID.
+	UnemittedOnly bool
 }
 
 // RelayRetainedDeliveryCheck validates retained delivery rows from one hop
@@ -136,6 +139,13 @@ func (p RelayResetProtocol) PrepareForwardedCheckpoint(ctx context.Context, gran
 	}
 	if err := requireUsableResetEvents(events); err != nil {
 		return RelayResetCheckpoint{}, err
+	}
+	// A forward prepared during installation carries the upstream request's
+	// context, not an advertisement from this downstream grant.
+	if _, ok := RelayPeerFeatures(ctx, grant.RelayBindingUID); ok {
+		if err := requireResetPeerFeatures(ctx, grant.RelayBindingUID, events); err != nil {
+			return RelayResetCheckpoint{}, err
+		}
 	}
 	source := relayForwardSource{BindingUID: binding.RelayConfig.BindingUID, Grant: upstream, Baselines: checkpoint.Translation.HopBaselines}
 	checkpoint = RelayResetForwardTranslation(checkpoint, grant, pin, p.InstanceUID)
