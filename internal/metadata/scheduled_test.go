@@ -355,13 +355,13 @@ func TestScheduleDueCutoffCoversEveryZone(t *testing.T) {
 
 func TestSavedScheduleRulesAndProjection(t *testing.T) {
 	for _, tc := range []struct {
-		name, value, zone, instant, date string
+		name, value, zone, instant, date, viewer string
 	}{
-		{"viewer date", "2026-11-12T00:30", "Europe/Paris", "2026-11-11T23:30:00Z", "2026-11-12"},
-		{"gap", "2026-03-08T02:30", "America/New_York", "2026-03-08T07:00:00Z", "2026-03-08"},
-		{"overlap", "2026-11-01T01:30", "America/New_York", "2026-11-01T05:30:00Z", "2026-11-01"},
-		{"instant", "2026-01-01T02:00:00Z", "America/New_York", "2026-01-01T02:00:00Z", "2025-12-31"},
-		{"date only", "2026-11-12", "Europe/Paris", "2026-11-11T23:00:00Z", "2026-11-12"},
+		{"paris midnight", "2026-11-12T00:30", "Europe/Paris", "2026-11-11T23:30:00Z", "2026-11-12", "America/Los_Angeles"},
+		{"gap", "2026-03-08T02:30", "America/New_York", "2026-03-08T07:00:00Z", "2026-03-08", "America/Los_Angeles"},
+		{"overlap", "2026-11-01T01:30", "America/New_York", "2026-11-01T05:30:00Z", "2026-11-01", "America/Los_Angeles"},
+		{"instant", "2026-01-01T02:00:00Z", "America/New_York", "2026-01-01T02:00:00Z", "2025-12-31", "Asia/Tokyo"},
+		{"date only", "2026-11-12", "Europe/Paris", "2026-11-11T23:00:00Z", "2026-11-12", "America/Los_Angeles"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := NewScheduleValue(tc.value, tc.zone)
@@ -373,8 +373,7 @@ func TestSavedScheduleRulesAndProjection(t *testing.T) {
 			require.Equal(t, tc.value, value)
 			require.Equal(t, tc.zone, zone)
 			require.Equal(t, tc.instant, at.Format(time.RFC3339))
-			viewer := "Asia/Tokyo"
-			date, present, err := CalendarDate(doc, "scheduled_on", &viewer, "UTC")
+			date, present, err := CalendarDate(doc, "scheduled_on", &tc.viewer, "UTC")
 			require.NoError(t, err)
 			require.True(t, present)
 			require.Equal(t, tc.date, date)

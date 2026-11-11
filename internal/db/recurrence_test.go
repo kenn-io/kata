@@ -206,8 +206,6 @@ func TestLocalDefaultScheduleRules(t *testing.T) {
 	_, err = PrepareIssueSchedules(jsontext.Value(`{}`), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`)}, "Local", "")
 	require.ErrorContains(t, err, "Local timezone rules differ")
 	time.Local = time.FixedZone("Mars/Olympus_Mons", 0)
-	_, err = PrepareIssueSchedules(jsontext.Value(`{}`), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`)}, "Local", "")
-	require.ErrorContains(t, err, "cannot save Local timezone")
 	_, err = PrepareIssueSchedules(jsontext.Value(`{"scheduled_on":"2026-11-12T09:00"}`), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`)}, "Local", "")
 	require.ErrorContains(t, err, "cannot save Local timezone")
 }
