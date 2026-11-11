@@ -258,7 +258,8 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, fmt.Errorf("%w: non-snapshot event %s follows snapshot baseline in same batch",
 				db.ErrFederationIngestValidation, ev.EventUID)
 		}
-		if err := rejectFreshCreateSnapshotForKnownIssue(ev, knownIssueUIDs); err != nil {
+		if err := rejectFreshCreateSnapshotForKnownIssue(ctx, tx, p.ProjectID, ev, knownIssueUIDs,
+			adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if db.IsFederationSnapshotEvent(ev.Type) {
@@ -1064,7 +1065,9 @@ func validateFederationProjectEvent(
 	return nil
 }
 
-func rejectFreshCreateSnapshotForKnownIssue(ev db.RemoteEvent, knownIssueUIDs map[string]struct{}) error {
+// rejectFreshCreateSnapshotForKnownIssue keeps creation create-only, except
+// for an adoption baseline snapshot of an issue this project already holds.
+func rejectFreshCreateSnapshotForKnownIssue(ctx context.Context, tx *sql.Tx, projectID int64, ev db.RemoteEvent, knownIssueUIDs map[string]struct{}, adoptionBaseline bool) error {
 	switch ev.Type {
 	case "issue.created", "issue.snapshot":
 	default:
@@ -1073,6 +1076,12 @@ func rejectFreshCreateSnapshotForKnownIssue(ev db.RemoteEvent, knownIssueUIDs ma
 	issueUID, err := payloadIssueUID(ev, db.PayloadMap(ev.Payload))
 	if err != nil {
 		return err
+	}
+	if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
+		return err
+	}
+	if db.AllowsRepeatedIssueSnapshot(ev.Type, adoptionBaseline) {
+		return nil
 	}
 	if _, ok := knownIssueUIDs[issueUID]; ok {
 		return fmt.Errorf("%w: fresh %s targets existing issue %s",

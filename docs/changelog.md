@@ -21,6 +21,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
 
+- Repeat or resume an adoption push into a hub project that already holds
+  some of the issues, or bring it up to date from a newer copy of the project.
+  A newer snapshot updates the issue, an older or identical one changes
+  nothing, and comments merge by UID with their original author and time.
+  Links are added and never removed. A push for an issue that another project
+  on the hub holds, including an archived one, now returns `400 validation`
+  naming the issue and is quarantined on the spoke; before, it returned 404 and
+  the spoke retried without showing an error. The hub and every spoke must run
+  this version to replay a repeated snapshot the same way. See
+  [repeating an adoption](operations/federation.md#repeating-an-adoption).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 

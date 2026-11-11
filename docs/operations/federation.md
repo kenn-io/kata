@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Federation
@@ -1733,6 +1733,46 @@ writes by rewriting the same rows.
 Adopted issues become ordinary federated spoke issues. You can keep editing
 them locally; acquire a hub lease only when you want exclusive coordination.
 
+### Repeating an adoption
+
+A hub accepts an adoption push for issues its project already holds. Use this
+to repeat an adoption, to resume one that copied only some issues, or to bring
+a hub project up to date from a newer copy of the same project. The newer copy
+must keep the same issue UIDs, and it joins with its own adoption-enabled
+enrollment token.
+
+For each issue the hub already holds, the snapshot's `updated_at` decides the
+result:
+
+| Incoming snapshot | Result on the hub |
+| --- | --- |
+| Newer than the hub issue | Title, body, status, owner, priority, closed and deleted state, labels, and metadata become the snapshot's. |
+| Same `updated_at` | The snapshot restates the issue. An identical copy changes nothing. |
+| Older than the hub issue | No field, label, or metadata changes. |
+
+These rules hold in every case:
+
+- Comments merge by comment UID. A comment the hub lacks is added with its
+  original author and created time. A comment the hub has keeps its author and
+  created time, and takes a later edit only from a newer snapshot.
+- Links are added and never removed. Remove an unwanted link on the hub after
+  the push.
+- Issues the hub does not hold are created as usual.
+- Pushing the same snapshots twice from one Kata home is acknowledged as
+  duplicates and changes nothing.
+
+Every replica applies the same rules when it replays the events, so the hub
+and its spokes reach the same state.
+
+The create-only rule still applies outside an adoption push. A fresh
+`issue.created`, or an `issue.snapshot` in an ordinary push, for an issue the
+project holds returns `400 validation` with `targets existing issue`.
+
+Issue UIDs are unique across a hub. A snapshot or creation for an issue that
+another project on the hub holds returns `400 validation` and names the issue,
+and the spoke [quarantines](#issue-held-by-another-project) the push. An
+archived project still holds its issues.
+
 ## Leaving a federation
 
 `kata federation leave` is the inverse of `join`: it revokes the spoke's hub
@@ -2278,6 +2318,28 @@ quarantine whose retained error has the exact former cross-project peer
 validation shape. Current hubs accept a missing link peer as deferred state,
 so the original batch can advance and the edge materializes after both endpoint
 projects reach the same hub federation group.
+
+### Issue held by another project
+
+A push that creates an issue whose UID another project on the hub holds returns
+`400 validation`:
+
+```text
+fresh issue.snapshot targets issue <uid>, which another project on this hub
+already holds
+```
+
+The spoke quarantines the batch, and `kata federation status` shows the error.
+This happens when a hub project was archived and replaced, and the same issues
+are pushed into the replacement: an archived project keeps its issues, so their
+UIDs stay taken. The error does not name the other project, because the spoke
+may not be allowed to see it.
+
+A retry cannot succeed while the other project holds the issue. The hub
+operator must free the UIDs first, by purging the archived project or moving
+the issues, and then the spoke operator retries the quarantine.
+
+### Other validation quarantines
 
 A fresh cross-project addition involving a relayed project also returns
 `400 validation` and quarantines the whole push batch, including earlier valid

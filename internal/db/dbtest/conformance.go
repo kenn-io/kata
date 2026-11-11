@@ -231,6 +231,8 @@ var storageScenarios = []scenario{
 	{name: "issue planning dates", methods: []string{"IssuePlanningDates"}, run: checkIssuePlanningDates},
 	{name: "native cron remote validation", methods: []string{}, runWithBackend: checkNativeCronValidation},
 	{name: "native cron adoption author", methods: []string{}, runWithBackend: checkNativeCronAdoptionAuthor},
+	{name: "federation repeated import", methods: []string{"IngestFederationEvents", "AdoptProjectIntoFederation", "CommentsByIssue", "LabelsByIssue"}, runWithBackend: checkFederationRepeatedImport},
+	{name: "federation import issue held elsewhere", methods: []string{"IngestFederationEvents", "RemoveProject"}, runWithBackend: checkFederationImportIssueHeldElsewhere},
 	{name: "native cron federation", methods: []string{"ReadFederation"}, runWithBackend: checkNativeCronFederation},
 	{name: "native cron push", methods: []string{}, runWithBackend: checkNativeCronPush},
 	{name: "native cron definitions", methods: []string{"PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow", "ListCronJobs", "ListCronWorkflows"}, run: checkNativeCronDefinitions},

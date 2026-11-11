@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"sort"
+	"time"
 )
 
 // FoldEvents applies events in deterministic HLC order and returns the resulting
@@ -137,28 +138,22 @@ func (p *FoldProjection) apply(e FoldEvent) {
 
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	var in struct {
-		UID                 string         `json:"uid"`
-		ShortID             string         `json:"short_id"`
-		Title               string         `json:"title"`
-		Body                string         `json:"body"`
-		Author              string         `json:"author"`
-		Owner               *string        `json:"owner"`
-		AssignmentExpiresOn *string        `json:"assignment_expires_on"`
-		Priority            *int64         `json:"priority"`
-		Status              string         `json:"status"`
-		ClosedReason        *string        `json:"closed_reason"`
-		ClosedAt            *string        `json:"closed_at"`
-		DeletedAt           *string        `json:"deleted_at"`
-		Metadata            jsontext.Value `json:"metadata"`
-		Labels              []string       `json:"labels"`
-		Links               []struct {
-			Type       string `json:"type"`
-			ToIssueUID string `json:"to_issue_uid"`
-			Incoming   bool   `json:"incoming"`
-			Author     string `json:"author"`
-			CreatedAt  string `json:"created_at"`
-		} `json:"links"`
-		Comments []struct {
+		UID                 string             `json:"uid"`
+		ShortID             string             `json:"short_id"`
+		Title               string             `json:"title"`
+		Body                string             `json:"body"`
+		Author              string             `json:"author"`
+		Owner               *string            `json:"owner"`
+		AssignmentExpiresOn *string            `json:"assignment_expires_on"`
+		Priority            *int64             `json:"priority"`
+		Status              string             `json:"status"`
+		ClosedReason        *string            `json:"closed_reason"`
+		ClosedAt            *string            `json:"closed_at"`
+		DeletedAt           *string            `json:"deleted_at"`
+		Metadata            jsontext.Value     `json:"metadata"`
+		Labels              []string           `json:"labels"`
+		Links               []foldSnapshotLink `json:"links"`
+		Comments            []struct {
 			ReplyToUID string `json:"reply_to_uid"`
 			ReplyKind  string `json:"reply_kind"`
 			EditedAt   string `json:"edited_at"`
@@ -180,6 +175,36 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		return
 	}
 	issue := p.ensureIssue(uid)
+	// A snapshot for an issue that already has a baseline is a repeated import
+	// of the same issue, such as a second adoption push from a newer copy. Its
+	// updated_at decides what it may change:
+	//   - older than the folded state: it changes no field, label or metadata,
+	//     so a stale copy cannot overwrite newer edits;
+	//   - newer: it replaces the fields, labels and metadata;
+	//   - equal, or no updated_at at all: it restates the issue additively, as
+	//     a baseline refresh always has.
+	// Comments merge by UID in every case. Links stay additive in every case:
+	// the link fold must give the same result from link-affecting events alone
+	// (see FederationLinkAffectingEventTypes), and updated_at depends on events
+	// outside that set.
+	repeated := e.Type == "issue.snapshot" && p.baselined[uid] && in.UpdatedAt != ""
+	if p.baselined == nil {
+		p.baselined = map[string]bool{}
+	}
+	p.baselined[uid] = true
+	older := repeated && foldTimeBefore(in.UpdatedAt, issue.UpdatedAt)
+	newer := repeated && foldTimeBefore(issue.UpdatedAt, in.UpdatedAt)
+	for _, comment := range in.Comments {
+		if repeated {
+			p.mergeSnapshotComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e), newer)
+			continue
+		}
+		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
+	}
+	if older {
+		p.addSnapshotLinks(uid, e, in.Links)
+		return
+	}
 	if issue.UID == "" {
 		issue.UID = uid
 	}
@@ -213,11 +238,30 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	p.Issues[uid] = issue
 	if len(in.Metadata) > 0 && string(in.Metadata) != "null" {
 		p.IssueMetadata[uid] = canonicalJSON(in.Metadata)
+	} else if newer {
+		delete(p.IssueMetadata, uid)
+	}
+	if newer {
+		p.retireSnapshotLabels(uid, clockOf(e))
 	}
 	for _, label := range in.Labels {
 		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
 	}
-	for _, link := range in.Links {
+	p.addSnapshotLinks(uid, e, in.Links)
+}
+
+// foldSnapshotLink is one link entry of an issue.created or issue.snapshot
+// payload.
+type foldSnapshotLink struct {
+	Type       string `json:"type"`
+	ToIssueUID string `json:"to_issue_uid"`
+	Incoming   bool   `json:"incoming"`
+	Author     string `json:"author"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func (p *FoldProjection) addSnapshotLinks(uid string, e FoldEvent, links []foldSnapshotLink) {
+	for _, link := range links {
 		if link.ToIssueUID == "" {
 			continue
 		}
@@ -231,9 +275,50 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		}
 		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt)
 	}
-	for _, comment := range in.Comments {
-		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
+}
+
+// retireSnapshotLabels removes the labels a newer repeated snapshot is about
+// to restate. The snapshot then adds back the ones it carries, so the issue
+// ends up with exactly the snapshot's labels.
+func (p *FoldProjection) retireSnapshotLabels(issueUID string, clock FoldClock) {
+	for key, state := range p.Labels {
+		if key.IssueUID == issueUID && state.Present && compareClock(state.Clock, clock) < 0 {
+			p.Labels[key] = FoldElementState{Present: false, Clock: clock}
+		}
 	}
+}
+
+// mergeSnapshotComment merges one comment of a repeated snapshot by UID. A
+// comment the fold has not seen is added. A known comment keeps its author and
+// created time; it takes the incoming body only when the snapshot is newer
+// than the issue and carries a later edit.
+func (p *FoldProjection) mergeSnapshotComment(commentUID, issueUID, author, teammate, body, createdAt, replyTo, replyKind, editedAt string, clock FoldClock, newer bool) {
+	existing, exists := p.Comments[commentUID]
+	if !exists || existing.CreatedAt == "" {
+		p.setComment(commentUID, issueUID, author, teammate, body, createdAt, replyTo, replyKind, editedAt, clock)
+		return
+	}
+	if newer && editedAt != "" && existing.Body != body && foldTimeBefore(existing.EditedAt, editedAt) {
+		p.editCommentBody(commentUID, issueUID, body, editedAt, clock)
+	}
+}
+
+// foldTimeBefore reports whether timestamp a is earlier than b. An empty or
+// unparseable a is earlier than any parseable b, and nothing is earlier than
+// an empty b.
+func foldTimeBefore(a, b string) bool {
+	if b == "" {
+		return false
+	}
+	if a == "" {
+		return true
+	}
+	left, leftErr := time.Parse(time.RFC3339Nano, a)
+	right, rightErr := time.Parse(time.RFC3339Nano, b)
+	if leftErr != nil || rightErr != nil {
+		return a < b
+	}
+	return left.Before(right)
 }
 
 func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsontext.Value) {

@@ -39,6 +39,9 @@ type FoldProjection struct {
 	ProjectMetadata map[string]jsontext.Value
 	Warnings        []string
 	cronAuthors     map[string]foldCronAuthorCandidate
+	// baselined records the issues whose creation or first snapshot has
+	// been applied, so a later snapshot is recognized as a repeated import.
+	baselined map[string]bool
 }
 
 // FoldCronJob retains project identity alongside the winning job document.
