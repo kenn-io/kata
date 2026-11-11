@@ -34,10 +34,9 @@ export async function readProjectSync(
   } catch (error) {
     if (
       previous &&
-      error instanceof TypeError &&
       !signal.aborted &&
-      (responseStatus === undefined ||
-        responseStatus >= 500 ||
+      ((responseStatus === undefined && error instanceof TypeError) ||
+        (responseStatus !== undefined && responseStatus >= 500) ||
         responseStatus === 408 ||
         responseStatus === 429)
     )

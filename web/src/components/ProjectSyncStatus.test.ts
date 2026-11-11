@@ -138,6 +138,46 @@ describe('ProjectSyncStatus', () => {
     },
   )
 
+  it('keeps the last summary after a malformed 503 response', async () => {
+    setGeneratedFetch(
+      vi
+        .fn()
+        .mockResolvedValueOnce(response())
+        .mockResolvedValueOnce(
+          new Response('{', { status: 503, headers: { 'Content-Type': 'application/json' } }),
+        ),
+    )
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await screen.findByText('Sync status may be out of date.')
+    expect(screen.getByText('Pending: 2')).not.toBeNull()
+  })
+
+  it('keeps the last summary when a background read times out', async () => {
+    setGeneratedFetch(
+      vi
+        .fn()
+        .mockResolvedValueOnce(response())
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce(response()),
+    )
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    vi.useFakeTimers()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(screen.getByText('Pending: 2')).not.toBeNull()
+    expect(screen.getByText('Sync status may be out of date.')).not.toBeNull()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.queryByText('Sync status may be out of date.')).toBeNull()
+  })
+
   it('disables refresh while a denied response body is stalled, then retries', async () => {
     let closeBody!: () => void
     const body = new ReadableStream({

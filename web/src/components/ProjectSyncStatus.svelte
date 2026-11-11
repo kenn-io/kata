@@ -71,9 +71,8 @@
         runQueued()
       }
       const timeout = setTimeout(() => {
-        status = undefined
-        hasResult = false
-        error = true
+        if (status) stale = true
+        else error = true
         abort.abort()
         finish()
       }, 120_000)
