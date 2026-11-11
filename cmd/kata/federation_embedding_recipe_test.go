@@ -67,7 +67,7 @@ func TestFederationEmbeddingRecipeExport(t *testing.T) {
 	require.Equal(t, recipe, producer.Recipe)
 }
 
-func TestFederationEmbeddingRecipeUnconfigured(t *testing.T) {
+func TestFederationEmbeddingRecipeUnconfiguredAndSharedChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	var output bytes.Buffer

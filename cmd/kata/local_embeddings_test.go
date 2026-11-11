@@ -44,6 +44,13 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		installed = true
 		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
 	}
+	blocker := filepath.Join(os.Getenv("HOME"), ".kenn")
+	require.NoError(t, os.WriteFile(blocker, []byte("blocks marker directory"), 0o600))
+	_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+	require.ErrorContains(t, err, "record built-in embeddings choice")
+	_, err = os.Stat(filepath.Join(home, "config.toml"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.NoError(t, os.Remove(blocker))
 	out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 	require.NoError(t, err, stderr)
 	require.Contains(t, stderr, "290")
@@ -51,6 +58,16 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
+	dir, err := embedlocal.DefaultDir()
+	require.NoError(t, err)
+	marker := filepath.Join(dir, "search-by-meaning")
+	old := time.Unix(1000000000, 0)
+	require.NoError(t, os.Chtimes(marker, old, old))
+	_, stderr, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+	require.NoError(t, err, stderr)
+	info, err := os.Stat(marker)
+	require.NoError(t, err)
+	require.Equal(t, old, info.ModTime())
 }
 
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {

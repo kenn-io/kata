@@ -168,9 +168,6 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			require.NoError(t, err)
 			if tc.ready {
 				require.Equal(t, "restart", status.Job.State, status.Job.Error)
-				chosen, err := embedlocal.ChoiceRecorded()
-				require.NoError(t, err)
-				require.True(t, chosen)
 				require.False(t, status.CanChange)
 			} else {
 				require.Equal(t, "failed", status.Job.State)
@@ -203,12 +200,10 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			saved, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
 			require.NoError(t, err)
 			require.Equal(t, original, saved)
+			wantMode := "lexical"
 			if tc.ready {
 				request("GET", "/api/v1/embeddings/local", "", 200, &status)
 				require.Equal(t, "built_in", status.Provider)
-			}
-			wantMode := "lexical"
-			if tc.ready {
 				wantMode = "hybrid"
 			}
 			require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: waits for the real reconciler after explicit restart
@@ -237,52 +232,6 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	chosen, err := embedlocal.ChoiceRecorded()
 	require.NoError(t, err)
 	require.False(t, chosen)
-}
-
-func TestTurnOnSharedChoice(t *testing.T) {
-	for _, existing := range []bool{false, true} {
-		t.Run(fmt.Sprint(existing), func(t *testing.T) {
-			clearLocalEmbeddingsEnv(t)
-			home := setupKataEnv(t)
-			var marker string
-			old := time.Unix(1000000000, 0)
-			if existing {
-				require.NoError(t, embedlocal.RecordChoice())
-				dir, err := embedlocal.DefaultDir()
-				require.NoError(t, err)
-				marker = filepath.Join(dir, "search-by-meaning")
-				require.NoError(t, os.Chtimes(marker, old, old))
-			} else {
-				require.NoError(t, os.WriteFile(filepath.Join(home, ".kenn"), []byte("blocks marker directory"), 0o600))
-			}
-			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-				if opts.Executable == "" {
-					return "", embedlocal.ErrNotFound
-				}
-				return "http://127.0.0.1:12345/v1", nil
-			}
-			localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
-				return embedlocal.Installation{Executable: "/example/kennembed"}, nil
-			}
-			_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
-				confirm: func(context.Context, int64) (bool, error) { return true, nil },
-				notice:  func(string) error { return nil },
-				restart: func(_ context.Context, apply func() error) error { return apply() },
-			})
-			if existing {
-				require.NoError(t, err)
-				info, err := os.Stat(marker)
-				require.NoError(t, err)
-				require.Equal(t, old, info.ModTime())
-			} else {
-				require.ErrorContains(t, err, "record built-in embeddings choice")
-				_, err := os.Stat(filepath.Join(home, "config.toml"))
-				require.ErrorIs(t, err, os.ErrNotExist)
-			}
-		})
-	}
 }
 
 func TestSharedChoiceKeepsLexicalSearchWhenVectorPathIsDirectory(t *testing.T) {
