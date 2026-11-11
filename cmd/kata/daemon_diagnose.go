@@ -155,7 +155,7 @@ func selectedDaemonDiagnosis(selection client.DaemonSelection, expectedProject s
 		result.ExpectedInstanceUID = profile.InstanceUID
 	} else if selection.Resolved.ConfiguredRemote() {
 		result.Kind = "remote"
-		result.Endpoint = safeDaemonOrigin(selection.Resolved.BaseURL)
+		result.Endpoint = safeResolvedDaemonEndpoint(selection.Resolved)
 	}
 	return result
 }
@@ -364,7 +364,7 @@ func probeDaemonSelection(
 	}
 	result.Endpoint = resolved.Address
 	if resolved.ConfiguredRemote() {
-		result.Endpoint = safeDaemonOrigin(resolved.BaseURL)
+		result.Endpoint = safeResolvedDaemonEndpoint(resolved)
 	}
 	probeTarget := resolved
 	if result.Kind == "remote" {
@@ -462,6 +462,15 @@ func unavailableRemoteState(endpoint string) string {
 		}
 	}
 	return "unavailable_remote"
+}
+
+// safeResolvedDaemonEndpoint retains socket identity without exposing HTTP URL
+// credentials, paths, or queries in diagnostic output.
+func safeResolvedDaemonEndpoint(resolved client.ResolvedDaemon) string {
+	if resolved.UnixSocket != "" {
+		return "unix://" + resolved.UnixSocket
+	}
+	return safeDaemonOrigin(resolved.BaseURL)
 }
 
 func safeDaemonOrigin(value string) string {

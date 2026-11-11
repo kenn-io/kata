@@ -394,16 +394,36 @@ func federationSpokeProbePreflight(ctx context.Context, spokeInstance string) er
 	return err
 }
 
-// Legacy enrollment can use a hub token in the caller environment. Only a
-// profile supplies a fully independent selected-home credential snapshot.
+// Spoke requests retain the selected transport, but ambient credentials may
+// belong to the hub. Only selected profiles and catalog credentials belong to
+// the spoke; environment/workspace URL selections deliberately remain anonymous.
 func ensureSpokeDaemonContext(ctx context.Context) (context.Context, string, error) {
 	resolved, err := ensureDaemonResolved(ctx)
 	if err != nil {
 		return ctx, "", err
 	}
-	if resolved.LocalProfile != nil {
-		ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
+	if resolved.LocalProfile == nil {
+		resolved.Token = ""
+		if resolved.Name != "" {
+			cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
+			if err != nil {
+				return ctx, "", err
+			}
+			if entry := catalogByName(cfg, resolved.Name); entry != nil {
+				resolved.Token, err = selectedCatalogToken(entry)
+				if err != nil {
+					return ctx, "", err
+				}
+			}
+		} else if resolved.UnixSocket == "" {
+			auth, err := federationImplicitSpokeTargetAuth(ctx, resolved.BaseURL)
+			if err != nil {
+				return ctx, "", err
+			}
+			resolved.Token = auth.Token
+		}
 	}
+	ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
 	return ctx, resolved.BaseURL, nil
 }
 

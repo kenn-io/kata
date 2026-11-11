@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Go client
@@ -61,6 +61,12 @@ Discover does not probe configured remotes, including one selected by name.
 The first request reports whether a remote is reachable; call
 `api.PingWithResponse(ctx)` to check sooner.
 
+Not in the latest release yet: `KATA_SERVER` and workspace `server.url`
+accept explicit `unix:///absolute/path/daemon.sock` endpoints. Discover does not
+require a runtime record or probe that socket. The first request reports
+reachability. `StartWith` is never used for an explicit endpoint, even when the
+socket is missing.
+
 Discover finds a PostgreSQL-backed default local daemon from its storage DSN.
 Client-only programs do not include the PostgreSQL driver, so they cannot
 resolve DSN routing options: the `host`, `port`, `dbname`, `service`, or
@@ -87,9 +93,10 @@ if target, ok := api.Discovered(); ok && target.Remote {
 ```
 
 `Discovered` returns a `client.DiscoveredDaemon`. Its `Remote` field is true
-for a configured remote daemon. Kata clients treat such a daemon as unable to
-read the caller's files, even at a loopback address, and resolve projects
-without sending local paths. It matches `kind=remote` in
+for a configured endpoint, including an explicit Unix socket. This means the
+client must not assume the target can read the caller's files or belongs to the
+current Kata home; it does not necessarily mean another machine. Projects are
+resolved without sending local paths. It matches `kind=remote` in
 [`kata daemon locate`](daemon-discovery.md#output-contract). A pinned local
 profile selected by `[server].daemon` or `active_daemon` is local.
 

@@ -79,7 +79,7 @@ func bringUpSelection(
 	case selection.Profile != nil:
 		return up.profile(ctx, selection)
 	case selection.Resolved.ConfiguredRemote():
-		if probe && !probeRemote(ctx, selection.Resolved.BaseURL) {
+		if probe && !probeConfigured(ctx, selection.Resolved) {
 			return ResolvedDaemon{}, false, remoteUnavailableError(ctx, selection.Resolved, workspaceStart)
 		}
 		return selection.Resolved, true, nil
@@ -106,7 +106,7 @@ func remoteUnavailableError(ctx context.Context, d ResolvedDaemon, workspaceStar
 	case DaemonSourceNamedCatalog:
 		source = fmt.Sprintf("%s daemon %q", daemonConfigSource(), d.Name)
 	}
-	return fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, d.BaseURL, source)
+	return fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, d.Address, source)
 }
 
 // liveDiscovery finds a running daemon and never starts one.

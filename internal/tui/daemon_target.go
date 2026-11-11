@@ -160,6 +160,10 @@ func connectImplicitDaemonTarget(
 	}
 	target := implicitDaemonTarget(resolved.BaseURL)
 	target.resolved = resolved
+	if resolved.ConfiguredRemote() {
+		target.Local = false
+		target.URL = resolvedDaemonTargetURL(resolved)
+	}
 	if resolved.Name != "" {
 		target.Name = resolved.Name
 		target.Implicit = false
@@ -192,7 +196,7 @@ func connectDaemonTarget(ctx context.Context, target daemonTarget) (daemonConnec
 	if target.Local {
 		target.URL = ""
 	} else {
-		target.URL = resolved.BaseURL
+		target.URL = resolvedDaemonTargetURL(resolved)
 	}
 	return connectResolvedDaemonTarget(ctx, target, resolved.BaseURL)
 }
@@ -210,7 +214,11 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 	if key := client.TelemetryTargetKey(target.resolved); key != "" {
 		c.telemetryTarget = key
 	}
-	if target.resolved.LocalProfile != nil {
+	if target.resolved.ConfiguredRemote() {
+		// A configured socket shares UnixBase with local discovery, but never
+		// authorizes recovery against the current home's daemon.
+		c.setLocalHTTPClientRefresh(nil)
+	} else if target.resolved.LocalProfile != nil {
 		transports := shareLocalProfileTransports(target, hc, sseHC)
 		c.setLocalHTTPClientRefresh(transports.refreshAPI)
 	} else if endpoint == client.UnixBase {
@@ -241,11 +249,11 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 }
 
 func daemonTargetUsesRemoteFilesystem(target daemonTarget, endpoint string) bool {
-	if target.Local || endpoint == client.UnixBase {
-		return false
-	}
 	if target.resolved.ConfiguredRemote() {
 		return true
+	}
+	if target.Local || endpoint == client.UnixBase {
+		return false
 	}
 	if !target.Implicit {
 		return true
@@ -269,7 +277,7 @@ func localHTTPClientRefreshForTarget(
 				return nil, err
 			}
 			refreshedTarget.resolved = resolved
-		} else if target.Local || endpoint == client.UnixBase {
+		} else if !target.resolved.ConfiguredRemote() && (target.Local || endpoint == client.UnixBase) {
 			running, err := ensureLocalRunningTargetForTUI(ctx)
 			if err != nil {
 				return nil, err
@@ -278,6 +286,15 @@ func localHTTPClientRefreshForTarget(
 		}
 		return newHTTPClientForTUI(ctx, refreshedTarget.resolved.BaseURL, refreshedTarget, clientOptsNormal)
 	}
+}
+
+// resolvedDaemonTargetURL is display/switch identity, not an HTTP request base.
+// All Unix transports share the latter, so it cannot identify a socket.
+func resolvedDaemonTargetURL(resolved client.ResolvedDaemon) string {
+	if resolved.UnixSocket != "" {
+		return "unix://" + resolved.UnixSocket
+	}
+	return resolved.BaseURL
 }
 
 func implicitDaemonTarget(endpoint string) daemonTarget {

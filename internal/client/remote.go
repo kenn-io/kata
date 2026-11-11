@@ -152,19 +152,15 @@ func resolveRemoteSelection(
 ) (ResolvedDaemon, bool, error) {
 	if value := os.Getenv(remoteServerEnvVar); value != "" {
 		allowInsecure := envAllowInsecure()
-		baseURL, err := normalizeRemoteURL(value, allowInsecure)
+		resolved, err := configuredEndpoint(DaemonSourceServerEnv, "", value, allowInsecure)
 		if err != nil {
 			return ResolvedDaemon{}, false,
 				fmt.Errorf("KATA_SERVER %q: %w", remoteURLForError(value), err)
 		}
-		if mode != remoteRequestTarget && !probeRemote(ctx, baseURL) {
+		if mode != remoteRequestTarget && !probeConfigured(ctx, resolved) {
 			return ResolvedDaemon{}, false,
-				fmt.Errorf("%w: %s (KATA_SERVER)", ErrRemoteUnavailable, baseURL)
+				fmt.Errorf("%w: %s (KATA_SERVER)", ErrRemoteUnavailable, resolved.Address)
 		}
-		resolved := resolvedForRunning(
-			DaemonSourceServerEnv, "", remoteRunningDaemon(baseURL, true),
-		)
-		resolved.AllowInsecure = allowInsecure
 		if mode != remoteEndpointOnly {
 			resolved = resolved.withGlobalAuth()
 		}
@@ -192,19 +188,16 @@ func resolveRemoteSelection(
 	if cfg.Server.URL == "" {
 		return resolveActiveRemoteSelection(ctx, mode)
 	}
-	baseURL, err := normalizeRemoteURL(cfg.Server.URL, cfg.Server.AllowInsecure)
+	resolved, err := configuredEndpoint(DaemonSourceLocalConfig, "", cfg.Server.URL, cfg.Server.AllowInsecure)
 	if err != nil {
 		return ResolvedDaemon{}, false,
 			fmt.Errorf("%s server.url %q: %w", path, remoteURLForError(cfg.Server.URL), err)
 	}
-	if mode != remoteRequestTarget && !probeRemote(ctx, baseURL) {
+	resolved.SourcePath = path
+	if mode != remoteRequestTarget && !probeConfigured(ctx, resolved) {
 		return ResolvedDaemon{}, false,
-			fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, baseURL, path)
+			fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, resolved.Address, path)
 	}
-	resolved := resolvedForRunning(
-		DaemonSourceLocalConfig, "", remoteRunningDaemon(baseURL, true),
-	)
-	resolved.AllowInsecure = cfg.Server.AllowInsecure
 	if mode != remoteEndpointOnly {
 		resolved = resolved.withGlobalAuth()
 	}
@@ -696,6 +689,9 @@ func requireSecureOrPrivate(u *url.URL, allowInsecure bool) error {
 }
 
 func remoteURLForError(raw string) string {
+	if _, unix, err := UnixSocketPath(raw); unix && err == nil {
+		return raw
+	}
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "<invalid-url>"

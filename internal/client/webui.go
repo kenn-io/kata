@@ -114,12 +114,15 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 func resolveWebUIHostTarget(
 	ctx context.Context, opts PrepareWebUIOptions,
 ) (ResolvedDaemon, error) {
-	if opts.DaemonName != "" {
-		return EnsureResolvedNamed(ctx, opts.DaemonName)
-	}
-	selection, err := InspectSelection(ctx, opts.WorkspaceStart, "")
+	selection, err := InspectSelection(ctx, opts.WorkspaceStart, opts.DaemonName)
 	if err != nil {
 		return ResolvedDaemon{}, err
+	}
+	if selection.Resolved.ConfiguredRemote() && selection.Resolved.UnixSocket != "" {
+		return ResolvedDaemon{}, errors.New("browser access to a configured Unix API socket is not supported; select the daemon's separate HTTP(S) browser listener instead")
+	}
+	if opts.DaemonName != "" {
+		return EnsureResolvedNamed(ctx, opts.DaemonName)
 	}
 	if selection.Profile != nil {
 		return EnsureLocalProfileSelection(ctx, selection)

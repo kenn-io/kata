@@ -63,6 +63,36 @@ func TestResolveWebUIHostTargetUsesLocalGatewayDespiteRemoteOverride(t *testing.
 	assert.False(t, resolved.AllowInsecure)
 }
 
+func TestUnixConsumerWebUIRejectsSelectedSocketBeforeLocalGateway(t *testing.T) {
+	testUnixConsumerWebUIRejectsSelectedSocket(t, "environment")
+}
+
+func testUnixConsumerWebUIRejectsSelectedSocket(t *testing.T, selection string) {
+	t.Helper()
+	for _, selection := range []string{selection} {
+		t.Run(selection, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_SERVER", "")
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			body := "[[daemon]]\nname = \"socket\"\nurl = \"unix:///tmp/example-browser.sock\"\n"
+			opts := PrepareWebUIOptions{}
+			switch selection {
+			case "environment":
+				t.Setenv("KATA_SERVER", "unix:///tmp/example-browser.sock")
+			case "named":
+				opts.DaemonName = "socket"
+			case "active":
+				body = "active_daemon = \"socket\"\n" + body
+			}
+			require.NoError(t, writeRawConfig(home, body))
+			ctx := context.WithValue(t.Context(), BaseURLKey{}, "http://127.0.0.1:27123")
+			_, err := resolveWebUIHostTarget(ctx, opts)
+			require.Error(t, err)
+		})
+	}
+}
+
 // TestPrepareWebUIBuildsAnonymousClientWithResolvedPolicy covers the actual
 // configured-remote construction path. The anonymous client carries no token,
 // but D2 still requires the target policy that made the selected daemon legal.
