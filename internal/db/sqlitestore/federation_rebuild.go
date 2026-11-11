@@ -12,6 +12,7 @@ import (
 type preparedFederationRebuildProject struct {
 	id              int64
 	events          []db.FoldEvent
+	moveEvents      map[string]db.FoldEvent
 	projection      db.FoldProjection
 	moveProjection  db.FoldProjection
 	moved           db.FoldProjection
@@ -44,7 +45,8 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			}
 		}
 		projection := db.FoldEvents(events)
-		decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, events, projection)
+		moveEvents := db.IndexFederatedMoveEvents(events)
+		decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moveEvents, projection)
 		if err != nil {
 			return nil, err
 		}
@@ -53,7 +55,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			result.moved[decision.IssueUID] = decision
 			moveProjection.Issues[decision.IssueUID] = projection.Issues[decision.IssueUID]
 		}
-		result.projects = append(result.projects, preparedFederationRebuildProject{id: id, events: events, projection: projection, moveProjection: moveProjection, decisions: decisions})
+		result.projects = append(result.projects, preparedFederationRebuildProject{id: id, events: events, moveEvents: moveEvents, projection: projection, moveProjection: moveProjection, decisions: decisions})
 		return destinations, nil
 	}
 	destinations, err := prepare(projectID)
@@ -199,7 +201,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		// Earlier rehomes can change the source of a later decision.
 		changed := map[string]bool{}
 		for _, p := range prepared.projects {
-			decisions, _, err := db.PlanFederatedMovedIssues(ctx, tx, p.events, p.moveProjection)
+			decisions, _, err := db.PlanFederatedMovedIssues(ctx, tx, p.moveEvents, p.moveProjection)
 			if err != nil {
 				return err
 			}
@@ -211,7 +213,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 					return errStaleFederationPreparation
 				}
 			}
-			if err := d.rehomeFederatedMovedIssues(ctx, tx, p.events, p.moveProjection, decisions, nil); err != nil {
+			if err := d.rehomeFederatedMovedIssues(ctx, tx, p.moveEvents, p.moveProjection, decisions, nil); err != nil {
 				return err
 			}
 			for _, decision := range decisions {

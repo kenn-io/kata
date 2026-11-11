@@ -319,18 +319,25 @@ type FederatedMoveDecision struct {
 	Active, Joined, Exists                         bool
 }
 
-// PlanFederatedMovedIssues reads move decisions without changing any rows.
-func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection) ([]FederatedMoveDecision, []int64, error) {
-	moved := map[string]bool{}
-	for _, event := range events {
-		if event.Type == "issue.moved" {
-			moved[event.IssueUID] = true
+// IndexFederatedMoveEvents selects the latest move for each issue.
+func IndexFederatedMoveEvents(events []FoldEvent) map[string]FoldEvent {
+	moved := map[string]FoldEvent{}
+	for _, e := range events {
+		if e.Type == "issue.moved" {
+			if previous, known := moved[e.IssueUID]; !known || compareClock(clockOf(e), clockOf(previous)) > 0 {
+				moved[e.IssueUID] = e
+			}
 		}
 	}
+	return moved
+}
+
+// PlanFederatedMovedIssues reads move decisions without changing any rows.
+func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection) ([]FederatedMoveDecision, []int64, error) {
 	var decisions []FederatedMoveDecision
 	projects := map[int64]bool{}
 	for _, issue := range p.SortedIssues() {
-		if !moved[issue.UID] {
+		if _, ok := moved[issue.UID]; !ok {
 			continue
 		}
 		decision := FederatedMoveDecision{IssueUID: issue.UID}
@@ -357,15 +364,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEven
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
-	moved := map[string]FoldEvent{}
-	for _, e := range events {
-		if e.Type == "issue.moved" {
-			if previous, known := moved[e.IssueUID]; !known || compareClock(clockOf(e), clockOf(previous)) > 0 {
-				moved[e.IssueUID] = e
-			}
-		}
-	}
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
 	for _, decision := range decisions {
 		issue := p.Issues[decision.IssueUID]
 		winner := moved[issue.UID]
