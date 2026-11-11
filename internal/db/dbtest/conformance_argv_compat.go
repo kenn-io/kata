@@ -137,6 +137,16 @@ func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage, back
 	require.NoError(t, err)
 	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, other.ID, other.UID, fold, db.NewCronReplayValidator(tx, backend.Name == "postgres")), "another project's history does not block this project")
 	require.NoError(t, tx.Rollback())
+	// A future field on an update or deletion cannot make the earlier
+	// runnable definition eligible for materialization.
+	for _, kind := range []string{"cron.workflow.updated", "cron.workflow.deleted"} {
+		bad := argvCompatRemoteWorkflow(t, project, origin, `{"version":1,"steps":[{"kind":"command","future":true}]}`)
+		fold := db.FoldEvents([]db.FoldEvent{{UID: bad.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: kind, HLCPhysicalMS: bad.HLCPhysicalMS, Payload: bad.Payload}})
+		tx, err = q.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		require.ErrorIs(t, db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, fold, db.NewCronReplayValidator(tx, backend.Name == "postgres")), db.ErrFederationIngestValidation)
+		require.NoError(t, tx.Rollback())
+	}
 	for _, document := range []string{`null`, `{"steps":[]}`, `{"version":1,"steps":[{"kind":"command","future":true}]}`} {
 		bad := argvCompatRemoteWorkflow(t, project, origin, document)
 		projection := db.FoldEvents([]db.FoldEvent{{UID: bad.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: bad.Type, HLCPhysicalMS: bad.HLCPhysicalMS, Payload: bad.Payload}})
