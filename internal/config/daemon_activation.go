@@ -42,16 +42,23 @@ func ReadSocketActivationForHome(ctx context.Context, home string) (string, erro
 	}
 	if _, err := toml.Decode(string(data), &policy); err != nil {
 		// Process-control fast paths historically ignore malformed unrelated
-		// settings. A possible activation declaration must still fail closed,
-		// including when its TOML key is quoted or escaped.
+		// settings. Parse isolated declarations with the same TOML decoder so
+		// activation assignments and tables still fail closed.
 		for line := range bytes.Lines(data) {
-			key, _, assignment := bytes.Cut(line, []byte("="))
-			if !assignment {
-				continue
+			declaration := string(bytes.TrimSpace(line))
+			if !strings.HasPrefix(declaration, "[") {
+				key, _, assignment := strings.Cut(declaration, "=")
+				if !assignment {
+					continue
+				}
+				declaration = key + " = true"
 			}
 			var keys map[string]any
-			if _, keyErr := toml.Decode(string(key)+" = true", &keys); keyErr == nil {
-				if _, declared := keys["socket_activation"]; declared {
+			if _, keyErr := toml.Decode(declaration, &keys); keyErr != nil {
+				continue
+			}
+			for key := range keys {
+				if strings.EqualFold(key, "socket_activation") {
 					return "", fmt.Errorf("read socket_activation: %w", err)
 				}
 			}

@@ -120,6 +120,10 @@ profile recovery cannot take over that home. A stale binary is not permission
 to stop and replace its managed daemon. Runtime metadata also protects an
 already-running managed process if the configuration is subsequently edited.
 
+Malformed activation declarations also refuse process control, including a
+table or a non-string value where `socket_activation` requires a string.
+Malformed unrelated settings do not claim service-manager ownership.
+
 Use the manager for lifecycle changes:
 
 ```sh
