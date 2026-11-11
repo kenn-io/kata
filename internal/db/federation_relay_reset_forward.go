@@ -130,7 +130,11 @@ func (p RelayResetProtocol) PrepareForwardedCheckpoint(ctx context.Context, gran
 	if err := ValidateRelayResetTranslation(authority, checkpoint.Manifest, checkpoint.Translation); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	if _, _, err := DecodeRootResetPayload(historical, checkpoint.Snapshot); err != nil {
+	events, _, err := DecodeRootResetPayload(historical, checkpoint.Snapshot)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	if err := requireUsableResetEvents(events); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
 	source := relayForwardSource{BindingUID: binding.RelayConfig.BindingUID, Grant: upstream, Baselines: checkpoint.Translation.HopBaselines}
