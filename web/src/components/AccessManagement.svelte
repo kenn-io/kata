@@ -159,7 +159,7 @@
 
   async function changeMember(actor: string, add: boolean): Promise<void> {
     const uid = teamUID
-    if (!uid || !actor || teamLoading) return
+    if (!uid || !actor || teamLoading || loading) return
     if (
       await mutate({ teamUID: uid, actor, add }, (context) =>
         (add ? addTeamMember : removeTeamMember)(
@@ -177,12 +177,14 @@
   async function removeTeam(): Promise<void> {
     const uid = teamUID
     const selectedProjectID = projectID
-    if (!uid || !confirm('Delete this team and revoke its project access?')) return
+    if (!uid || loading || !confirm('Delete this team and revoke its project access?')) return
     if (
       await mutate({ teamUID: uid }, (context) =>
         deleteTeam({ teamUid: uid }, { headers: context.headers, signal: lifetime.signal }),
       )
     ) {
+      teams = teams.filter((team) => team.uid !== uid)
+      if (teamUID === uid) teamUID = ''
       await refresh()
       if (selectedProjectID && projectID === selectedProjectID) await loadPolicy(selectedProjectID)
     }
@@ -235,7 +237,7 @@
           <button
             type="button"
             aria-label={`Remove ${account}`}
-            disabled={disabled || teamLoading}
+            disabled={disabled || teamLoading || loading}
             onclick={() => void changeMember(account, false)}>Remove</button
           >
         </li>{/each}
@@ -250,13 +252,17 @@
         >Member account <input
           bind:value={member}
           required
-          disabled={disabled || teamLoading}
+          disabled={disabled || teamLoading || loading}
         /></label
       >
-      <button type="submit" disabled={disabled || teamLoading || !member.trim()}>Add member</button>
+      <button type="submit" disabled={disabled || teamLoading || loading || !member.trim()}
+        >Add member</button
+      >
     </form>
-    <button type="button" disabled={disabled || teamLoading} onclick={() => void removeTeam()}
-      >Delete team</button
+    <button
+      type="button"
+      disabled={disabled || teamLoading || loading}
+      onclick={() => void removeTeam()}>Delete team</button
     >
   {/if}
   <label for={`${controlID}-project`}>Project visibility</label>
