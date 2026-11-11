@@ -158,11 +158,7 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 	}
 	result.Status = preview.Status
 	if preview.Status == "unavailable" || preview.Status == "unsupported" {
-		reason := "schedule, native parent or stored progress is unavailable"
-		if preview.Status == "unsupported" {
-			reason = "this adapter trigger cannot be previewed"
-		}
-		return result, &cliError{Kind: kindValidation, Code: "cron_preview_unavailable", ExitCode: ExitValidation, Message: "cron preview unavailable: " + reason}
+		return result, &cliError{Kind: kindValidation, Code: "cron_preview_unavailable", ExitCode: ExitValidation, Message: "cron preview unavailable"}
 	}
 	for _, at := range preview.Times {
 		result.Occurrences = append(result.Occurrences, cronNextOccurrence{At: at.UTC(), Local: at.In(zone).Format(time.RFC3339Nano)})

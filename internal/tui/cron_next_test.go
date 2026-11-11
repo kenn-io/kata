@@ -40,7 +40,9 @@ func nextRunsDetailParent(t *testing.T, now string, edit func(*generated.CronJob
 	if progress != nil {
 		m.cron.data.progress = map[string]cron.RecurringProgress{nextJobUID: *progress}
 	}
-	m.cron.data.parentOpen = map[string]bool{nextParentUID: parentOpen}
+	if progress != nil || !parentOpen {
+		m.cron.data.parentOpen = map[string]bool{nextParentUID: parentOpen}
+	}
 	m = sendKey(m, tea.KeyEnter)
 	return ansi.Strip(m.viewBody())
 }

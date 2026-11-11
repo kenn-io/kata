@@ -51,6 +51,9 @@ func TestCronNextSavedSchedules(t *testing.T) {
 		{"closed parent without progress", native, strings.Replace(parent, `"status":"open","revision":7,"metadata":{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T06:00:00Z"}}`, `"status":"closed","metadata":{}`, 1), "cron_preview_unavailable", true, false},
 		{"closed parent with newer progress", native, strings.Replace(strings.Replace(parent, `"status":"open"`, `"status":"closed"`, 1), `"version":1`, `"version":2`, 1), "cron_preview_unavailable", true, false},
 		{"closed parent with corrupt progress", native, strings.Replace(strings.Replace(parent, `"status":"open"`, `"status":"closed"`, 1), `"version":1`, `"version":"bad"`, 1), "cron_preview_unavailable", true, false},
+		{"missing parent", native, "error:issue_not_found", "cron_preview_unavailable", true, false},
+		{"missing project", native, "error:project_not_found", "project_not_found", true, false},
+		{"forbidden parent", native, "error:forbidden", "forbidden", true, false},
 		{"future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true, false},
 		{"paused legacy", strings.Replace(legacy, `"enabled":true`, `"enabled":false`, 1), "", `"status":"paused"`, false, false},
 		{"deleted legacy", legacy, "", `"status":"deleted"`, false, true},
@@ -77,6 +80,18 @@ func TestCronNextSavedSchedules(t *testing.T) {
 					}
 					_, _ = fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":%s%s}}`, id, tc.definition, deleted)
 				case strings.Contains(r.URL.Path, "/issues/"):
+					if r.URL.Query().Get("include_deleted") != "true" {
+						t.Error("parent read must include deleted issues")
+					}
+					if code, ok := strings.CutPrefix(tc.parent, "error:"); ok {
+						status := http.StatusNotFound
+						if code == "forbidden" {
+							status = http.StatusForbidden
+						}
+						w.WriteHeader(status)
+						_, _ = fmt.Fprintf(w, `{"error":{"code":%q,"message":"failed"}}`, code)
+						return
+					}
 					if tc.parent == "" {
 						t.Error("unexpected parent read")
 					}
@@ -91,10 +106,13 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			if tc.invalid {
 				require.Error(t, err)
 				require.Empty(t, out)
-				if tc.want == "cron_preview_unavailable" {
+				if tc.want != "" {
 					var cli *cliError
 					require.ErrorAs(t, err, &cli)
 					require.Equal(t, tc.want, cli.Code)
+					if tc.want == "cron_preview_unavailable" {
+						require.Equal(t, "cron preview unavailable", cli.Message)
+					}
 					return
 				}
 				require.ErrorContains(t, err, "cannot preview saved job with this kata")
@@ -123,51 +141,6 @@ func TestCronNextLeavesProgressUnchanged(t *testing.T) {
 	after, err := env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, before.Metadata, after.Metadata)
-}
-
-func TestCronNextParentReadErrors(t *testing.T) {
-	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-	for _, code := range []string{"issue_not_found", "project_not_found", "forbidden"} {
-		t.Run(code, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch {
-				case r.URL.Path == "/api/v1/projects":
-					_, _ = fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
-				case r.URL.Path == "/api/v1/projects/1":
-					_, _ = fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
-				case strings.HasSuffix(r.URL.Path, "/cron/capabilities"):
-					w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
-					_, _ = fmt.Fprint(w, `{}`)
-				case strings.Contains(r.URL.Path, "/cron/jobs/"):
-					_, _ = fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":7200},"action":{"kind":"notify","recipient":"current-owner-or-author"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","title":"Review"},"overlap":"allow","catchup":"all"}}}`, id)
-				case strings.Contains(r.URL.Path, "/issues/"):
-					if r.URL.Query().Get("include_deleted") != "true" {
-						t.Error("parent read must include deleted issues")
-					}
-					status := http.StatusNotFound
-					if code == "forbidden" {
-						status = http.StatusForbidden
-					}
-					w.WriteHeader(status)
-					_, _ = fmt.Fprintf(w, `{"error":{"code":%q,"message":"failed"}}`, code)
-				default:
-					t.Errorf("unexpected request: %s", r.URL)
-					w.WriteHeader(404)
-				}
-			}))
-			t.Cleanup(server.Close)
-			out, _, err := executeCronCLI(t, server.URL, nil, "job", "next", id)
-			require.Empty(t, out)
-			var got *cliError
-			require.ErrorAs(t, err, &got)
-			if code == "issue_not_found" {
-				require.Equal(t, "cron_preview_unavailable", got.Code)
-				require.Contains(t, got.Message, "native parent or stored progress is unavailable")
-			} else {
-				require.Equal(t, code, got.Code)
-			}
-		})
-	}
 }
 
 func TestCronNextRootErrorEnvelope(t *testing.T) {
