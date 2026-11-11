@@ -96,7 +96,7 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		}
 		if patched && !changedZone && len(before[field]) > 0 {
 			previous, err := metadata.ScheduleValueText(before[field])
-			if err == nil && previous == value {
+			if err == nil && (previous == value || before[field][0] == '{' && metadata.ScheduleClockText(before[field]) == value) {
 				if before[field][0] != '"' || !legacyScheduleZoneKnown(before["timezone"], field, defaultZone, recurrenceZone) {
 					result[field] = before[field]
 					continue

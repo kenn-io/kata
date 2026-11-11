@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
-	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Storage) error {
@@ -580,16 +579,12 @@ func checkScheduleReplay(t *testing.T, target db.Storage, backend Backend) error
 
 func checkLocalRecurrenceReplay(t *testing.T, target db.Storage, backend Backend) error {
 	ctx := t.Context()
-	zone := time.Local.String()
-	if zone == "Local" {
-		zone = recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath)
-	}
-	if zone == "" || zone == "Local" {
-		t.Skip("host local timezone has no bundled name")
-	}
-	if _, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion); err != nil {
-		t.Skip("host local timezone is absent from the bundle")
-	}
+	const zone = "America/New_York"
+	local, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion)
+	require.NoError(t, err)
+	previous := time.Local
+	time.Local = local
+	t.Cleanup(func() { time.Local = previous })
 	source := backend.Open(t)
 	t.Cleanup(func() { _ = source.Close() })
 	project, err := source.CreateProject(ctx, "local-recurrence")

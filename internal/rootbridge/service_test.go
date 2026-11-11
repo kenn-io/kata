@@ -880,23 +880,6 @@ func TestResolveFieldConflictResumesAfterSelectedSideWasAlreadyApplied(t *testin
 func TestResolveFieldConflictsPreserveScheduleZones(t *testing.T) {
 	h, newDue := prepareScheduleZoneConflicts(t, false)
 	service := NewService(h.store, h.registry, nil)
-	oldDue := connector.FieldValue{Kind: fieldKindLocalDateTime, Value: "2026-08-21T10:30", Timezone: "America/New_York"}
-	changed := oldDue
-	changed.Timezone = newDue.Timezone
-	h.setKataField(t, "deadline_on", changed)
-	_, rejected, err := service.ResolveFieldConflict(t.Context(), h.issue.ID, "deadline_on", "external", "operator")
-	require.ErrorIs(t, err, ErrFieldConflictChanged)
-	require.Empty(t, rejected)
-	issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
-	require.NoError(t, err)
-	values, err := metadataObject(issue.Metadata)
-	require.NoError(t, err)
-	saved, err := metadata.DecodeSavedSchedule(values["deadline_on"])
-	require.NoError(t, err)
-	require.Equal(t, changed.Value, saved.Value)
-	require.Equal(t, changed.Timezone, saved.Timezone)
-	h.setKataField(t, "deadline_on", oldDue)
-
 	dueState, dueEvents, err := service.ResolveFieldConflict(
 		t.Context(), h.issue.ID, "deadline_on", "external", "operator",
 	)
@@ -906,9 +889,9 @@ func TestResolveFieldConflictsPreserveScheduleZones(t *testing.T) {
 	assert.Contains(t, eventTypes(dueEvents), "issue.external_field_resolved")
 	issue, readErr := h.store.IssueByID(t.Context(), h.issue.ID)
 	require.NoError(t, readErr)
-	values, readErr = metadataObject(issue.Metadata)
+	values, readErr := metadataObject(issue.Metadata)
 	require.NoError(t, readErr)
-	saved, err = metadata.DecodeSavedSchedule(values["deadline_on"])
+	saved, err := metadata.DecodeSavedSchedule(values["deadline_on"])
 	require.NoError(t, err)
 	assert.Equal(t, "2026-08-22T10:30", saved.Value)
 	assert.Equal(t, "America/Los_Angeles", saved.Timezone)

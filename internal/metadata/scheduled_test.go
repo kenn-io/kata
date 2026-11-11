@@ -367,7 +367,7 @@ func TestSavedScheduleRulesAndProjection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := NewScheduleValue(tc.value, tc.zone)
 			require.NoError(t, err)
-			doc := `{"scheduled_on":` + string(raw) + `,"deadline_on":false}`
+			doc := `{"scheduled_on":` + string(raw) + `}`
 			value, zone, at, present, err := ScheduleFieldInstant(doc, "scheduled_on", "UTC")
 			require.NoError(t, err)
 			require.True(t, present)

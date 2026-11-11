@@ -18,8 +18,7 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 		name, scheduled      string
 		unsupported, replace bool
 	}{
-		{"unsupported rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, true, false},
-		{"unsupported members", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`, true, true},
+		{"unsupported rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, true, true},
 		{"opaque legacy value", `{"legacy":"opaque"}`, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

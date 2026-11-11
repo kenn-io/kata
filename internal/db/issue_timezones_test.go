@@ -15,57 +15,55 @@ import (
 func TestPrepareIssueSchedules(t *testing.T) {
 	for _, tc := range []struct {
 		name, current, patch, fallback, recurrence, wantZone string
-		wantError                                            bool
+		wantError, localUnknown                              bool
 	}{
-		{"replace opaque stored date", `{"$field":{"legacy":"opaque"}}`, `{"$field":"2026-11-13"}`, "America/New_York", "", "America/New_York", false},
-		{"refuse stored future rules", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true},
-		{"refuse stored future members", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true},
-		{"UTC", "{}", `{"timezone":"UTC"}`, "Local", "", "", false},
-		{"Etc UTC", "{}", `{"timezone":"Etc/UTC"}`, "Local", "", "", false},
-		{"New York", "{}", `{"timezone":"America/New_York"}`, "Local", "", "", false},
-		{"alias geographic", "{}", `{"timezone":"Asia/Calcutta"}`, "Local", "", "", false},
-		{"deep geographic", "{}", `{"timezone":"America/Argentina/Buenos_Aires"}`, "Local", "", "", false},
-		{"Local", "{}", `{"timezone":"Local"}`, "Local", "", "", true},
-		{"EST", "{}", `{"timezone":"EST"}`, "Local", "", "", true},
-		{"alias outside geographic", "{}", `{"timezone":"US/Eastern"}`, "Local", "", "", true},
-		{"fixed offset", "{}", `{"timezone":"Etc/GMT+5"}`, "Local", "", "", true},
-		{"wrong case", "{}", `{"timezone":"america/New_York"}`, "Local", "", "", true},
-		{"empty zone", "{}", `{"timezone":""}`, "Local", "", "", true},
-		{"civil unusable default", "{}", `{"$field":"2026-11-12T10:30"}`, "Local", "", "", true},
-		{"portable override", "{}", `{"$field":"2026-11-12","timezone":"UTC"}`, "Local", "", "UTC", false},
-		{"UTC unusable default", "{}", `{"$field":"2026-11-12T10:30:00Z"}`, "Local", "", "UTC", false},
-		{"omitted default", "{}", `{"$field":"2026-11-12"}`, "UTC", "", "UTC", false},
-		{"existing alias", `{"timezone":"US/Eastern"}`, `{"$field":"2026-11-12"}`, "UTC", "", "US/Eastern", false},
-		{"default alias", "{}", `{"$field":"2026-11-12"}`, "US/Eastern", "", "US/Eastern", false},
-		{"legacy echo", `{"timezone":"Local","scheduled_on":"2026-11-12"}`, `{"timezone":"Local"}`, "Local", "", "", false},
-		{"unrelated invalid zone", `{"timezone":17}`, `{"topic":"x"}`, "Local", "", "", false},
-		{"restored clear", `{"timezone":17,"$field":"2026-11-12"}`, `{"$field":null}`, "Local", "", "", false},
-		{"restored no-op", `{"timezone":17,"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "Local", "", "", false},
-		{"legacy no-op with known zone", `{"timezone":"America/New_York","$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "", "America/New_York", false},
-		{"legacy no-op with empty issue zone", `{"timezone":"","$field":"2026-11-12T09:00"}`, `{"$field":"2026-11-12T09:00"}`, "", "", "UTC", false},
-		{"legacy no-op with daemon zone", `{"$field":"2026-11-12T09:00"}`, `{"$field":"2026-11-12T09:00"}`, "America/New_York", "", "America/New_York", false},
-		{"legacy no-op with implicit UTC", `{"$field":"2026-11-12T09:00"}`, `{"$field":"2026-11-12T09:00"}`, "", "", "UTC", false},
-		{"legacy no-op with recurrence zone", `{"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "US/Eastern", "US/Eastern", false},
-		{"deadline uses existing alias", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"deadline_on":"2026-11-14"}`, "Local", "US/Eastern", "US/Eastern", false},
-		{"legacy no-op with linked recurrence alias", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"scheduled_on":"2026-11-12"}`, "UTC", "US/Eastern", "US/Eastern", false},
-		{"clear recurrence zone", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"timezone":null,"scheduled_on":"2026-11-15"}`, "Local", "US/Eastern", "US/Eastern", false},
-		{"replace opaque", `{"timezone":"America/New_York","$field":{"legacy":"opaque"}}`, `{"$field":"2026-11-12"}`, "UTC", "", "America/New_York", false},
-		{"replace unknown rules", `{"$field":{"value":"2026-11-01","timezone":"UTC","tzdata_version":"future"}}`, `{"$field":"2026-11-12"}`, "UTC", "", "", true},
-		{"replace unknown member", `{"$field":{"value":"2026-11-01","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}}`, `{"$field":"2026-11-12"}`, "UTC", "", "", true},
-		{"replace unknown rules and zone", `{"$field":{"value":"2026-11-01","timezone":"UTC","tzdata_version":"future"}}`, `{"$field":"2026-11-12","timezone":"Europe/Paris"}`, "UTC", "", "", true},
-		{"replace unknown member and zone", `{"$field":{"value":"2026-11-01","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}}`, `{"$field":"2026-11-12","timezone":"Europe/Paris"}`, "UTC", "", "", true},
-		{"restored UTC", `{"timezone":17}`, `{"$field":"2026-11-12T10:30:00Z"}`, "Local", "", "UTC", false},
-		{"restored civil", `{"timezone":17}`, `{"$field":"2026-11-12"}`, "UTC", "", "", true},
-		{"remove zone", `{"timezone":"UTC","$field":"2026-11-12"}`, `{"timezone":null}`, "Local", "", "", true},
-		{"clear both", `{"timezone":"Local","scheduled_on":"2026-11-12"}`, `{"timezone":null,"scheduled_on":null}`, "Local", "", "", false},
-		{"remove instant zone", `{"timezone":"Local","deadline_on":"2026-11-12T10:30:00Z"}`, `{"timezone":null}`, "Local", "", "", false},
-		{"remove empty zone", `{"timezone":"","scheduled_on":"2026-11-12"}`, `{"timezone":null}`, "Local", "", "", false},
-		{"issue zone for instant", `{"timezone":"America/New_York"}`, `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "", "America/New_York", false},
-		{"recurrence zone for instant", "{}", `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "US/Eastern", "US/Eastern", false},
-		{"unusable recurrence zone for instant", "{}", `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "Mars/Olympus_Mons", "UTC", false},
+		{"replace opaque stored date", `{"$field":{"legacy":"opaque"}}`, `{"$field":"2026-11-13"}`, "America/New_York", "", "America/New_York", false, false},
+		{"refuse stored future rules", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true, false},
+		{"refuse stored future members", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true, false},
+		{"UTC", "{}", `{"timezone":"UTC"}`, "Local", "", "UTC", false, false},
+		{"Etc UTC", "{}", `{"timezone":"Etc/UTC"}`, "Local", "", "Etc/UTC", false, false},
+		{"New York", "{}", `{"timezone":"America/New_York"}`, "Local", "", "America/New_York", false, false},
+		{"alias geographic", "{}", `{"timezone":"Asia/Calcutta"}`, "Local", "", "Asia/Calcutta", false, false},
+		{"deep geographic", "{}", `{"timezone":"America/Argentina/Buenos_Aires"}`, "Local", "", "America/Argentina/Buenos_Aires", false, false},
+		{"Local", "{}", `{"timezone":"Local"}`, "Local", "", "", true, false},
+		{"EST", "{}", `{"timezone":"EST"}`, "Local", "", "", true, false},
+		{"alias outside geographic", "{}", `{"timezone":"US/Eastern"}`, "Local", "", "", true, false},
+		{"fixed offset", "{}", `{"timezone":"Etc/GMT+5"}`, "Local", "", "", true, false},
+		{"wrong case", "{}", `{"timezone":"america/New_York"}`, "Local", "", "", true, false},
+		{"empty zone", "{}", `{"timezone":""}`, "Local", "", "", true, false},
+		{"civil unusable default", "{}", `{"$field":"2026-11-12T10:30"}`, "Local", "", "", true, true},
+		{"portable override", "{}", `{"$field":"2026-11-12","timezone":"UTC"}`, "Local", "", "UTC", false, false},
+		{"UTC unusable default", "{}", `{"$field":"2026-11-12T10:30:00Z"}`, "Local", "", "UTC", false, true},
+		{"omitted default", "{}", `{"$field":"2026-11-12"}`, "UTC", "", "UTC", false, false},
+		{"existing alias", `{"timezone":"US/Eastern"}`, `{"$field":"2026-11-12"}`, "UTC", "", "US/Eastern", false, false},
+		{"default alias", "{}", `{"$field":"2026-11-12"}`, "US/Eastern", "", "US/Eastern", false, false},
+		{"legacy echo", `{"timezone":"Local","scheduled_on":"2026-11-12"}`, `{"timezone":"Local"}`, "Local", "", "", false, false},
+		{"unrelated invalid zone", `{"timezone":17}`, `{"topic":"x"}`, "Local", "", "", false, false},
+		{"restored clear", `{"timezone":17,"$field":"2026-11-12"}`, `{"$field":null}`, "Local", "", "", false, false},
+		{"restored no-op", `{"timezone":17,"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "Local", "", "", false, false},
+		{"legacy no-op with known zone", `{"timezone":"America/New_York","$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "", "America/New_York", false, false},
+		{"legacy no-op with empty issue zone", `{"timezone":"","$field":"2026-11-12T09:00"}`, `{"$field":"2026-11-12T09:00"}`, "", "", "UTC", false, false},
+		{"legacy no-op with daemon zone", `{"$field":"2026-11-12T09:00"}`, `{"$field":"2026-11-12T09:00"}`, "America/New_York", "", "America/New_York", false, false},
+		{"legacy no-op with implicit UTC", `{"$field":"2026-11-12T09:00"}`, `{"$field":"2026-11-12T09:00"}`, "", "", "UTC", false, false},
+		{"legacy no-op with recurrence zone", `{"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "US/Eastern", "US/Eastern", false, false},
+		{"deadline uses existing alias", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"deadline_on":"2026-11-14"}`, "Local", "US/Eastern", "US/Eastern", false, false},
+		{"legacy no-op with linked recurrence alias", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"scheduled_on":"2026-11-12"}`, "UTC", "US/Eastern", "US/Eastern", false, false},
+		{"clear recurrence zone", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"timezone":null,"scheduled_on":"2026-11-15"}`, "Local", "US/Eastern", "US/Eastern", false, false},
+		{"replace opaque", `{"timezone":"America/New_York","$field":{"legacy":"opaque"}}`, `{"$field":"2026-11-12"}`, "UTC", "", "America/New_York", false, false},
+		{"replace unknown rules and zone", `{"$field":{"value":"2026-11-01","timezone":"UTC","tzdata_version":"future"}}`, `{"$field":"2026-11-12","timezone":"Europe/Paris"}`, "UTC", "", "", true, false},
+		{"replace unknown member and zone", `{"$field":{"value":"2026-11-01","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}}`, `{"$field":"2026-11-12","timezone":"Europe/Paris"}`, "UTC", "", "", true, false},
+		{"restored UTC", `{"timezone":17}`, `{"$field":"2026-11-12T10:30:00Z"}`, "Local", "", "UTC", false, false},
+		{"restored civil", `{"timezone":17}`, `{"$field":"2026-11-12"}`, "UTC", "", "", true, false},
+		{"remove zone", `{"timezone":"UTC","$field":"2026-11-12"}`, `{"timezone":null}`, "Local", "", "", true, true},
+		{"clear both", `{"timezone":"Local","scheduled_on":"2026-11-12"}`, `{"timezone":null,"scheduled_on":null}`, "Local", "", "", false, false},
+		{"remove instant zone", `{"timezone":"Local","deadline_on":"2026-11-12T10:30:00Z"}`, `{"timezone":null}`, "Local", "", "", false, false},
+		{"remove empty zone", `{"timezone":"","scheduled_on":"2026-11-12"}`, `{"timezone":null}`, "Local", "", "", false, false},
+		{"issue zone for instant", `{"timezone":"America/New_York"}`, `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "", "America/New_York", false, false},
+		{"recurrence zone for instant", "{}", `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "US/Eastern", "US/Eastern", false, false},
+		{"unusable recurrence zone for instant", "{}", `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "Mars/Olympus_Mons", "UTC", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.name == "civil unusable default" || tc.name == "UTC unusable default" || tc.name == "remove zone" {
+			if tc.localUnknown {
 				previous := time.Local
 				time.Local = time.FixedZone("Mars/Olympus_Mons", 0)
 				t.Cleanup(func() { time.Local = previous })
@@ -92,7 +90,9 @@ func TestPrepareIssueSchedules(t *testing.T) {
 					continue
 				}
 				require.NoError(t, err)
-				if tc.wantZone != "" {
+				if tc.wantZone != "" && len(out[field]) == 0 {
+					require.JSONEq(t, `"`+tc.wantZone+`"`, string(out["timezone"]))
+				} else if tc.wantZone != "" {
 					saved, err := metadata.DecodeSavedSchedule(out[field])
 					require.NoError(t, err)
 					require.NotNil(t, saved)

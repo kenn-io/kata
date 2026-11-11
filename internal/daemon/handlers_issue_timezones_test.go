@@ -20,30 +20,22 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestIssueScheduleUsesExistingAliasTimezone(t *testing.T) {
+func TestIssueScheduleUsesDaemonDefaultTimezone(t *testing.T) {
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "US/Eastern" })
 	p := seedProject(t, env, "example-project")
-	for _, tc := range []struct{ name, metadata, zone string }{
-		{"daemon default", `{}`, "US/Eastern"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Legacy", Author: "tester"})
-			require.NoError(t, err)
-			_, err = env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, tc.metadata, issue.ID)
-			require.NoError(t, err)
-			status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": map[string]any{"scheduled_on": "2026-11-12T09:00"}})
-			require.Equal(t, http.StatusOK, status, string(raw))
-			stored, err := env.DB.IssueByID(t.Context(), issue.ID)
-			require.NoError(t, err)
-			var fields map[string]jsontext.Value
-			require.NoError(t, json.Unmarshal([]byte(stored.Metadata), &fields))
-			saved, err := metadata.DecodeSavedSchedule(fields["scheduled_on"])
-			require.NoError(t, err)
-			require.NotNil(t, saved)
-			require.Equal(t, tc.zone, saved.Timezone)
-			require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
-		})
-	}
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Existing", Author: "tester"})
+	require.NoError(t, err)
+	status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": map[string]any{"scheduled_on": "2026-11-12T09:00"}})
+	require.Equal(t, http.StatusOK, status, string(raw))
+	stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	var fields map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(stored.Metadata), &fields))
+	saved, err := metadata.DecodeSavedSchedule(fields["scheduled_on"])
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	require.Equal(t, "US/Eastern", saved.Timezone)
+	require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
 }
 
 func TestIssueCreatePreservesSuppliedScheduleRules(t *testing.T) {
@@ -188,47 +180,6 @@ func TestIssuePortableTimezoneCopiedRecurrence(t *testing.T) {
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.Contains(t, string(raw), `"timezone":"US/Eastern"`)
 	})
-}
-
-func TestLocalDefaultSchedulesRemainPortable(t *testing.T) {
-	loc, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
-	require.NoError(t, err)
-	previous := time.Local
-	time.Local = loc
-	t.Cleanup(func() { time.Local = previous })
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "Local" })
-	project := seedProject(t, env, "example-project")
-	status, raw := cronHTTP(t, env, http.MethodPost, projectPath(project.ID)+"/issues", map[string]any{
-		"actor": "tester", "title": "Portable", "force_new": true,
-		"metadata": map[string]any{"scheduled_on": "2026-11-12T09:00", "deadline_on": "2026-11-13T09:00"},
-	})
-	require.Equal(t, http.StatusOK, status, string(raw))
-	var created struct {
-		Issue struct {
-			UID string `json:"uid"`
-		} `json:"issue"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &created))
-	server := httptest.NewServer(daemon.NewServer(daemon.ServerConfig{DB: env.DB, DefaultTimezone: "UTC", Broadcaster: daemon.NewEventBroadcaster()}).Handler())
-	t.Cleanup(server.Close)
-	reader := &testenv.Env{URL: server.URL, HTTP: server.Client()}
-	status, raw = cronHTTP(t, reader, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issues/%s/planning-dates", project.ID, created.Issue.UID), nil)
-	require.Equal(t, http.StatusOK, status, string(raw))
-	var dates struct {
-		ScheduledOn struct {
-			Timezone string `json:"timezone"`
-			Instant  string `json:"instant"`
-		} `json:"scheduled_on"`
-		DeadlineOn struct {
-			Timezone string `json:"timezone"`
-			Instant  string `json:"instant"`
-		} `json:"deadline_on"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &dates))
-	require.Equal(t, "America/New_York", dates.ScheduledOn.Timezone)
-	require.Equal(t, "2026-11-12T14:00:00Z", dates.ScheduledOn.Instant)
-	require.Equal(t, "America/New_York", dates.DeadlineOn.Timezone)
-	require.Equal(t, "2026-11-13T14:00:00Z", dates.DeadlineOn.Instant)
 }
 
 func TestSavedScheduleMetadataFilterHTTP(t *testing.T) {

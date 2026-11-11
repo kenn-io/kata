@@ -121,17 +121,28 @@ func TestScheduleCodecRecurrenceZonePrecedence(t *testing.T) {
 	}
 }
 
-func TestScheduleCodecUpdatesAliasBackedSchedule(t *testing.T) {
+func TestScheduleCodecPreservesAliasZone(t *testing.T) {
 	original, err := metadata.NewScheduleValue("2026-08-20T09:30", "US/Eastern")
 	require.NoError(t, err)
-	issue := db.Issue{Metadata: db.JSONBlob(`{"scheduled_on":` + string(original) + `}`)}
-	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T10:30", Timezone: "US/Eastern"})
-	require.NoError(t, err)
-	saved, err := metadata.DecodeSavedSchedule(patch["scheduled_on"])
-	require.NoError(t, err)
-	require.Equal(t, "US/Eastern", saved.Timezone)
-	require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
-	require.Equal(t, "2026-08-20T10:30", saved.Value)
+	for _, tc := range []struct {
+		name, metadata, value, kind string
+	}{
+		{"existing date", `{"scheduled_on":` + string(original) + `}`, "2026-08-20T10:30", "local_datetime"},
+		{"first instant", `{"timezone":"US/Eastern","deadline_on":"2026-11-30"}`, "2026-11-12T02:30:00Z", "instant"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value := connector.FieldValue{Kind: tc.kind, Value: tc.value}
+			if tc.kind == "local_datetime" {
+				value.Timezone = "US/Eastern"
+			}
+			patch, err := fieldCodecs["scheduled_on"].KataPatch(db.Issue{Metadata: db.JSONBlob(tc.metadata)}, value)
+			require.NoError(t, err)
+			require.Len(t, patch, 1)
+			saved, err := metadata.DecodeSavedSchedule(patch["scheduled_on"])
+			require.NoError(t, err)
+			require.Equal(t, &metadata.SavedSchedule{Value: tc.value, Timezone: "US/Eastern", TZDataVersion: metadata.ScheduleTZDataVersion}, saved)
+		})
+	}
 }
 
 func TestScheduleCodecKataPatchKeepsOtherSchedule(t *testing.T) {
@@ -163,16 +174,17 @@ func TestScheduleCodecKataPatchCanonicalizesAndClears(t *testing.T) {
 		name  string
 		value connector.FieldValue
 		want  string
+		clear bool
 	}{
-		{"date", date("2026-08-20"), "2026-08-20"},
-		{"instant", connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.120000000Z"}, "2026-08-20T09:30:45.12Z"},
-		{"clear", nullValue(), ""},
+		{"date", date("2026-08-20"), "2026-08-20", false},
+		{"instant", connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.120000000Z"}, "2026-08-20T09:30:45.12Z", false},
+		{"clear", nullValue(), "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			patch, err := codec.KataPatch(db.Issue{}, tc.value)
 			require.NoError(t, err)
-			if tc.want == "" {
+			if tc.clear {
 				assert.JSONEq(t, `null`, string(patch["deadline_on"]))
 			} else {
 				saved, err := metadata.DecodeSavedSchedule(patch["deadline_on"])
@@ -184,16 +196,6 @@ func TestScheduleCodecKataPatchCanonicalizesAndClears(t *testing.T) {
 	}
 }
 
-func TestScheduleCodecPinsFirstInstantInBundledAlias(t *testing.T) {
-	issue := db.Issue{Metadata: db.JSONBlob(`{"timezone":"US/Eastern","deadline_on":"2026-11-30"}`)}
-	value := connector.FieldValue{Kind: "instant", Value: "2026-11-12T02:30:00Z"}
-	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, value)
-	require.NoError(t, err)
-	require.Len(t, patch, 1)
-	saved, err := metadata.DecodeSavedSchedule(patch["scheduled_on"])
-	require.NoError(t, err)
-	require.Equal(t, &metadata.SavedSchedule{Value: value.Value, Timezone: "US/Eastern", TZDataVersion: metadata.ScheduleTZDataVersion}, saved)
-}
 func TestScheduleCodecValidatesExternalDescriptor(t *testing.T) {
 	codec := fieldCodecs["scheduled_on"]
 	valid := connector.FieldDescriptor{ID: "field-id", DisplayName: "Plan date", AcceptedKinds: []string{"date", "local_datetime", "instant"}, Nullable: true, Writable: true, SchemaRevision: "v1"}

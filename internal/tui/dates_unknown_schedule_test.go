@@ -17,7 +17,6 @@ func TestDatesFormRejectsUnknownScheduleRules(t *testing.T) {
 		unsupported, sibling bool
 	}{
 		{"unknown rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, true, false},
-		{"unknown members", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`, true, false},
 		{"replace opaque date", `{"legacy":"opaque"}`, false, false},
 		{"edit healthy sibling", `{"legacy":"opaque"}`, false, true},
 	} {

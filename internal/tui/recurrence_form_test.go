@@ -624,14 +624,17 @@ func TestSaveRecurrenceRequiresGuardedStartAPI(t *testing.T) {
 func TestSaveRecurrenceRejectsUnknownRulesOnReadback(t *testing.T) {
 	const saved = `{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`
 	const refusal = "unsupported schedule tzdata version"
-	for _, test := range []struct{ name, field string }{
-		{"start scheduled", "scheduled_on"}, {"change scheduled", "scheduled_on"},
-		{"start deadline", "deadline_on"}, {"change deadline", "deadline_on"},
+	for _, test := range []struct {
+		name, field string
+		change      bool
+	}{
+		{"start scheduled", "scheduled_on", false}, {"change scheduled", "scheduled_on", true},
+		{"start deadline", "deadline_on", false}, {"change deadline", "deadline_on", true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewDetail)
 			var current *recurrenceclient.View
-			if strings.HasPrefix(test.name, "change") {
+			if test.change {
 				rec := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
 				current = &rec
 			}

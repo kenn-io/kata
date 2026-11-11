@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -872,7 +874,12 @@ func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normal
 		}
 		out.Body.Catalog = append(out.Body.Catalog, api.UIProject{Project: project, Stats: stats})
 	}
-	out.Body.Collection = nonNil(data.Issues)
+	out.Body.Collection = nonNil(slices.Clone(data.Issues))
+	for i := range out.Body.Collection {
+		if err := projectBrowserIssueDates(&out.Body.Collection[i]); err != nil {
+			return nil, err
+		}
+	}
 	out.Body.CollectionLinks = nonNil(data.CollectionLinks)
 	if intent.SelectedIssueUID != "" {
 		state := data.SelectedState
@@ -884,6 +891,13 @@ func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normal
 			Comments: []api.CommentOut{}, Labels: nonNil(data.SelectedLabels),
 			Links: nonNil(data.SelectedLinks), Recurrences: nonNil(data.Recurrences),
 			History: nonNil(data.History),
+		}
+		if data.SelectedIssue != nil {
+			selected := *data.SelectedIssue
+			if err := projectBrowserIssueDates(&selected); err != nil {
+				return nil, err
+			}
+			out.Body.Selected.Issue = &selected
 		}
 	}
 	if out.Body.Selected != nil && data.SelectedIssue != nil {
@@ -900,11 +914,49 @@ func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normal
 	}
 	if intent.IncludeGraph {
 		out.Body.Graph = &api.UIGraph{
-			Issues: nonNil(data.GraphIssues), Links: nonNil(data.GraphLinks),
+			Issues: nonNil(slices.Clone(data.GraphIssues)), Links: nonNil(data.GraphLinks),
 			Edges: nonNil(data.GraphEdges), UnresolvedRefs: nonNil(data.GraphUnresolvedRefs),
+		}
+		for i := range out.Body.Graph.Issues {
+			if err := projectBrowserIssueDates(&out.Body.Graph.Issues[i]); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return out, nil
+}
+
+func projectBrowserIssueDates(issue *db.UIIssue) error {
+	if issue.Metadata == "" {
+		return nil
+	}
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(issue.Metadata), &fields); err != nil {
+		return err
+	}
+	changed := false
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		saved, err := metadata.DecodeSavedSchedule(fields[field])
+		if metadata.IsUnsupportedSchedule(err) {
+			return err
+		}
+		if saved == nil || err != nil {
+			continue
+		}
+		fields[field], err = json.Marshal(metadata.ScheduleClockText(fields[field]))
+		if err != nil {
+			return err
+		}
+		changed = true
+	}
+	if changed {
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			return err
+		}
+		issue.Metadata = db.JSONBlob(raw)
+	}
+	return nil
 }
 
 func referencesResponse(data db.UIReferencesData, policy uiPolicy, validator string) *api.UIReferencesResponse {

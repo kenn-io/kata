@@ -127,7 +127,7 @@ func TestOpenDatesFormRefreshesDaemonDay(t *testing.T) {
 				updated := issue
 				updated.ScheduledOnToday = "2026-11-10"
 				m := filterFormFixture()
-				m.api = &legacyDayAPI{issues: []Issue{updated}, detail: &updated}
+				m.api = &legacyDayAPI{detail: &updated}
 				target := formTarget{issueShortID: issue.ShortID, projectID: issue.ProjectID}
 				m.input = newDatesForm(target, issue)
 				m.input.field(fieldScheduled).setValue(tc.input)
