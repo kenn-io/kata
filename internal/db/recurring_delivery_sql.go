@@ -51,20 +51,6 @@ type RecurringChild struct {
 
 var errRecurringOccurrenceVersion = errors.New("unsupported recurring occurrence version")
 
-// RecurringOccurrenceKey orders supported occurrence instants and future versions.
-// Empty keys are not evidence; future versions sort before every supported instant.
-func RecurringOccurrenceKey(occurrence string) string {
-	value, err := decodeRecurringOccurrence(occurrence)
-	if errors.Is(err, errRecurringOccurrenceVersion) {
-		return "~"
-	}
-	if err != nil || value == nil {
-		return ""
-	}
-	// The bias keeps RFC 3339 instants positive, including offsets around year zero.
-	return fmt.Sprintf("%012d.%09d", value.ScheduledAt.Unix()+62167478400, value.ScheduledAt.Nanosecond())
-}
-
 func decodeRecurringOccurrence(occurrence string) (*recurringOccurrence, error) {
 	var header struct {
 		Version jsontext.Value `json:"version"`
