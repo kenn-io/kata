@@ -2006,10 +2006,11 @@ diagnosis. For a process automatically started by a Kata command, human output
 shows `started: automatically by a kata command` and JSON includes
 `auto_started: true`. An omitted JSON field means the startup origin is unknown.
 Agent output includes `auto_started=true` when there is exactly one process and
-it was automatically started. The command exits 0 only when the selected daemon
-is ready. Stopped or unavailable selections and the `version_mismatch` state
-exit 7; an unknown named daemon exits 3. Diagnostics are printed in every
-output mode.
+it was automatically started; it omits the field when multiple processes are
+listed. An existing process's startup marker survives an in-place restart or
+re-exec. The command exits 0 only when the selected daemon is ready. Stopped or
+unavailable selections and the `version_mismatch` state exit 7; an unknown
+named daemon exits 3. Diagnostics are printed in every output mode.
 In agent mode, the `OK daemon` report on stdout indicates that the report was
 produced; a non-ready selection also emits an `ERR status` line on stderr.
 `daemon diagnose` inspects selection, home,

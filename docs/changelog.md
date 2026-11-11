@@ -1,13 +1,16 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- See in `kata daemon status` when a process was automatically started by a
+  Kata command. See the [CLI reference](reference/cli.md) for output details.
 
 - Use `kata daemon status` in scripts to check the selected daemon's readiness.
   Stopped or unavailable selections and the `version_mismatch` state now exit 7;

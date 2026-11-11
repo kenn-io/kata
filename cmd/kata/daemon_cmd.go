@@ -770,7 +770,6 @@ type daemonStatusOutput struct {
 }
 
 type daemonStatusEntry struct {
-	AutoStarted   bool              `json:"auto_started,omitzero"`
 	PID           int               `json:"pid"`
 	Version       string            `json:"version"`
 	Address       string            `json:"address"`
@@ -779,6 +778,7 @@ type daemonStatusEntry struct {
 	StartedAt     time.Time         `json:"started_at"`
 	MCP           string            `json:"mcp,omitempty"` // "serving" or "unavailable" when [mcp] is enabled
 	ConfigSources map[string]string `json:"config_sources,omitempty"`
+	AutoStarted   bool              `json:"auto_started,omitzero"`
 }
 
 func runtimeConfigSources(metadata map[string]string) map[string]string {
