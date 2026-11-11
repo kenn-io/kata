@@ -90,6 +90,14 @@ func TestParseRefsFrom(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, items[0].ParseError, "line 2")
 	}
+	reader := strings.NewReader(strings.Repeat("abcd\n", 5001) + strings.Repeat("x", 2<<20))
+	_, err = parseRefsFrom(reader, "dst")
+	require.ErrorContains(t, err, "5,000")
+	require.Greater(t, reader.Len(), 1<<20)
+	reader = strings.NewReader(strings.Repeat(strings.Repeat("a", 600000)+"\n", 4))
+	_, err = parseRefsFrom(reader, "dst")
+	require.ErrorContains(t, err, "1 MiB")
+	require.Greater(t, reader.Len(), 1<<20)
 }
 
 func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {

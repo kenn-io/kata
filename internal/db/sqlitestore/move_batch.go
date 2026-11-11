@@ -6,15 +6,11 @@ import (
 	"errors"
 
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/teammate"
 )
 
 // MoveIssuesBatch isolates product refusals with savepoints. Retryable database
 // errors abort the whole transaction so no results from an attempt escape.
 func (d *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
-	if err := teammate.Validate(in.Teammate); err != nil {
-		return db.MoveIssuesBatchOut{}, err
-	}
 	var out db.MoveIssuesBatchOut
 	run := func(tx *sql.Tx) error {
 		var moved bool

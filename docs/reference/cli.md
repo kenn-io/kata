@@ -1025,7 +1025,9 @@ Unchanged issues receive no comment, so rerunning an old ref file is safe
 while its move-history aliases remain available.
 
 Inputs over 5,000 items or a 1 MiB request body are refused before any write,
-including with `--dry`. Split larger input into separate runs.
+including with `--dry`. The combined text of noncomment refs-file rows is also
+limited to 1 MiB; an oversized line receives its own refusal. Split larger input
+into separate runs.
 The daemon commits chunks and returns a continuation after its soft four-second
 budget; the CLI continues automatically. Exit 0 means every item succeeded
 or was unchanged; exit 5 means at least one refusal; exit 2 means invalid input

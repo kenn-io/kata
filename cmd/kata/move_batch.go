@@ -44,6 +44,7 @@ func moveBatchUsage(message string) error {
 func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
 	reader := bufio.NewReader(r)
 	var items []moveBatchItem
+	retained := 0
 	for line := 1; ; line++ {
 		value, oversized, err := readMoveBatchLine(reader)
 		if err != nil && err != io.EOF {
@@ -60,6 +61,10 @@ func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
 			}
 			trimmed := strings.TrimSpace(value)
 			if (trimmed != "" || strings.Contains(value, "\t")) && trimmed != "#" && !strings.HasPrefix(trimmed, "# ") {
+				retained += len(value)
+				if retained > 1<<20 {
+					return nil, moveBatchUsage("refs-file input exceeds 1 MiB; split the input into separate runs")
+				}
 				fields := strings.Split(value, "\t")
 				item := moveBatchItem{Ref: strings.TrimSpace(fields[0]), TargetProject: defaultTarget}
 				if len(fields) >= 2 {
@@ -70,6 +75,9 @@ func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
 				}
 				items = append(items, item)
 			}
+		}
+		if len(items) > 5000 {
+			return nil, moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
 		}
 		if err == io.EOF {
 			break

@@ -183,19 +183,23 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 	}
 }
 
-func TestMoveIssuesBatch_RejectsBlankComment(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	source, target, issue := seedMovePair(t, env)
-	body := fmt.Sprintf(`{"actor":"tester","comment":"  \t ","to_project_uid":%q,"items":[{"ref":%q}]}`, target.UID, issue.UID)
-	resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	require.NoError(t, resp.Body.Close())
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
-	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Empty(t, comments)
+func TestMoveIssuesBatch_RejectsInvalidOptions(t *testing.T) {
+	for _, option := range []string{`"comment":"  \t "`, `"comment":"routed","teammate":"@invalid"`} {
+		t.Run(option, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			source, target, issue := seedMovePair(t, env)
+			body := fmt.Sprintf(`{"actor":"tester",%s,"to_project_uid":%q,"items":[{"ref":%q}]}`, option, target.UID, issue.UID)
+			resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			require.NoError(t, resp.Body.Close())
+			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, source.ID, got.ProjectID)
+			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Empty(t, comments)
+		})
+	}
 }
 
 func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
