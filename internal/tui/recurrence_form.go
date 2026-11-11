@@ -45,18 +45,8 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 		s.fields = append(s.fields, inputField{id: f.id, kind: fieldSingleLine, input: input, label: f.label})
 	}
 	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec, unreadable: issue.datesState().unreadable}
-	s.err = state.unreadable
-	var rule, start, zone string
-	if rec != nil {
-		rule, start, zone = rec.RRule, rec.DTStart, rec.Timezone
-	} else {
-		start = cmp.Or(issue.ScheduledOnDate, issue.scheduledOn())
-		var zoneErr string
-		zone, zoneErr = savedFormZone(issue)
-		if s.err == "" {
-			s.err = zoneErr
-		}
-	}
+	rule, start, zone, errText := recurrenceFormSeed(issue, rec, state.unreadable)
+	s.err = errText
 	s.recurrence, s.target.projectID = state, issue.ProjectID
 	for i := range s.fields {
 		switch s.fields[i].id {
@@ -70,6 +60,16 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 	}
 	_ = s.fields[0].focus()
 	return s
+}
+
+// recurrenceFormSeed is the rule, start, zone, and error text a Repeat form
+// opens with; unreadable saved dates take precedence over a zone error.
+func recurrenceFormSeed(issue Issue, rec *recurrenceclient.View, unreadable string) (rule, start, zone, errText string) {
+	if rec != nil {
+		return rec.RRule, rec.DTStart, rec.Timezone, unreadable
+	}
+	zone, zoneErr := savedFormZone(issue)
+	return "", cmp.Or(issue.ScheduledOnDate, issue.scheduledOn()), zone, cmp.Or(unreadable, zoneErr)
 }
 
 // savedFormZone is the zone a new Repeat form starts in: the one the saved
@@ -126,19 +126,27 @@ func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 		m.input.err = state.unreadable
 		return m, nil
 	}
-	start, err := resolveDateInput(m.input.fieldValue(fieldStart), m.toastNow())
-	if err == nil && start == "" {
-		m.input.err = "Start is required."
-		return m, nil
-	}
-	if _, dateErr := time.Parse(time.DateOnly, start); err != nil || dateErr != nil {
-		m.input.err = "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."
+	start, errText := m.recurrenceStart()
+	if errText != "" {
+		m.input.err = errText
 		return m, nil
 	}
 	return m.saveRecurrence(RecurrenceInput{
 		Rule: rule, Start: start, Zone: zone, Actor: m.list.actor,
 		IssueRevision: state.issueRevision, Recurrence: state.rec,
 	})
+}
+
+// recurrenceStart is the Start field as a date, or the error text for it.
+func (m Model) recurrenceStart() (string, string) {
+	start, err := resolveDateInput(m.input.fieldValue(fieldStart), m.toastNow())
+	if err == nil && start == "" {
+		return "", "Start is required."
+	}
+	if _, dateErr := time.Parse(time.DateOnly, start); err != nil || dateErr != nil {
+		return "", "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."
+	}
+	return start, ""
 }
 
 func (m Model) saveRecurrence(in RecurrenceInput) (Model, tea.Cmd) {

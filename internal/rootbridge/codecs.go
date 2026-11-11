@@ -64,6 +64,15 @@ func prepareFieldPatch(ctx context.Context, store db.Storage, codec FieldCodec, 
 	return codec.KataPatch(issue, value)
 }
 
+// defaultZone is the zone a date with no saved zone takes: the repeat's for a
+// scheduled date, else the configured default.
+func (c scheduleCodec) defaultZone() string {
+	if c.key == "scheduled_on" && c.recurrenceZone != "" {
+		return c.recurrenceZone
+	}
+	return c.defaultTimezone
+}
+
 func (c scheduleCodec) KataField() string {
 	return c.key
 }
@@ -107,11 +116,7 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 	zone := canonical.Timezone
 	firstInstant := canonical.Kind == fieldKindInstant && saved == nil
 	if saved == nil && (canonical.Kind == fieldKindDate || firstInstant) {
-		defaultZone := c.defaultTimezone
-		if c.key == "scheduled_on" && c.recurrenceZone != "" {
-			defaultZone = c.recurrenceZone
-		}
-		if zone, err = metadataTimezone(values, defaultZone); err != nil && !firstInstant {
+		if zone, err = metadataTimezone(values, c.defaultZone()); err != nil && !firstInstant {
 			return err
 		}
 	}

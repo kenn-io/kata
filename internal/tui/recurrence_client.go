@@ -52,22 +52,9 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 	if in.Stop {
 		err = recurrenceclient.Stop(ctx, apiClient, issue.ProjectID, *in.Recurrence, in.Actor)
 	} else {
-		for _, field := range []string{"scheduled_on", "deadline_on"} {
-			raw, marshalErr := json.Marshal(issue.Metadata[field])
-			if marshalErr != nil {
-				return nil, &mutationPreflightError{marshalErr}
-			}
-			if _, decodeErr := metadata.ScheduleValueText(raw); decodeErr != nil {
-				return nil, &mutationPreflightError{decodeErr}
-			}
-		}
-		issueZone, _ := issue.Metadata["timezone"].(string)
-		zone, zoneErr := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
-		switch {
-		case errors.Is(zoneErr, recurrenceclient.ErrLocalZone):
-			return nil, &mutationPreflightError{errors.New(`"Local" is not an IANA zone; enter a name like Europe/Paris`)}
-		case zoneErr != nil:
-			return nil, &mutationPreflightError{errors.New("no timezone known for this recurrence; enter an IANA zone like Europe/Paris")}
+		zone, zoneErr := preflightRecurrenceZone(in, issue.Metadata)
+		if zoneErr != nil {
+			return nil, &mutationPreflightError{zoneErr}
 		}
 		terms := in.Terms
 		terms.Zone = zone
@@ -85,6 +72,29 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		return nil, err
 	}
 	return &MutationResp{Changed: changed, Issue: &Issue{UID: issue.UID, ShortID: issue.ShortID, ProjectID: issue.ProjectID}}, nil
+}
+
+// preflightRecurrenceZone refuses a save while the issue's saved dates are
+// unreadable here, else resolves the zone the recurrence will use.
+func preflightRecurrenceZone(in RecurrenceInput, meta map[string]any) (string, error) {
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		raw, err := json.Marshal(meta[field])
+		if err != nil {
+			return "", err
+		}
+		if _, err := metadata.ScheduleValueText(raw); err != nil {
+			return "", err
+		}
+	}
+	issueZone, _ := meta["timezone"].(string)
+	zone, err := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
+	switch {
+	case errors.Is(err, recurrenceclient.ErrLocalZone):
+		return "", errors.New(`"Local" is not an IANA zone; enter a name like Europe/Paris`)
+	case err != nil:
+		return "", errors.New("no timezone known for this recurrence; enter an IANA zone like Europe/Paris")
+	}
+	return zone, nil
 }
 
 // errCronParent is the refusal for an issue that parents a native cron job.
