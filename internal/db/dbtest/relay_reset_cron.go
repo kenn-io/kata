@@ -150,6 +150,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	child, err := downstream.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: replica.ID, ParentTokenID: childParent.ID, SpokeInstanceUID: "00000000000000000000000008", ProtocolVersion: db.RelayProtocolVersion, Token: "cron-reset-forward-child-test-token"}) // #nosec G101 -- synthetic fixture token.
 	require.NoError(t, err)
+	drainRelayGrant(t, downstream, child.Enrollment.RelayBindingUID, child.Enrollment.RelayResetEpoch)
 	installedKey := db.RelayResetMetadataPrefix + project.UID
 	reader := downstream.(interface {
 		QueryRowContext(context.Context, string, ...any) *sql.Row

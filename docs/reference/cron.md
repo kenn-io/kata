@@ -629,7 +629,7 @@ supported workflow does not clear older retained evidence.
 Legacy replay-horizon resets and signed checkpoint installation also refuse when
 local workflow rows or retained events are unsupported. The reset remains
 blocked on later polls until that evidence can be handled safely. The owner
-backup and replacement workflow above preserve recovery options; they do not
+backup and replacement workflow above preserve recovery options. They do not
 authorize deleting evidence or bypassing the reset refusal.
 
 ### Upgrade limits
