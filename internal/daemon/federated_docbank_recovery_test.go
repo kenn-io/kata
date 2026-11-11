@@ -51,6 +51,12 @@ func TestFederatedDocbankRecoveryForeignOriginNeverUsesLocalVault(t *testing.T) 
 				require.Equal(t, http.StatusServiceUnavailable, status, string(body))
 				require.Contains(t, string(body), "federation_offline")
 				require.Empty(t, vault.Requests(), "a disabled spoke must not write to its local vault")
+				legacy := jsontext.Value(fmt.Sprintf(`{"name":"matching.pdf","media_type":"application/pdf","size":11,"docbank_version":%q}`, version.String()))
+				_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.legacy": legacy}})
+				require.NoError(t, err)
+				status, body = env.Get(t, endpoint+"/legacy/content")
+				require.Equal(t, http.StatusOK, status, string(body))
+				require.Equal(t, "local bytes", string(body))
 			}
 		})
 	}
