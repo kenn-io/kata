@@ -71,6 +71,27 @@ func previewMoveBatch(ctx context.Context, store db.Storage, items []moveBatchIt
 	return nil
 }
 
+func checkMoveBatchClaims(ctx context.Context, cfg ServerConfig, items []moveBatchItem, results []api.MoveIssuesResult, indexes []int, actor string, cache *claimClientCache, refresh bool) {
+	var claimed []db.Issue
+	for _, j := range indexes {
+		if results[j].Result == "" {
+			claimed = append(claimed, items[j].tree...)
+		}
+	}
+	refusals := requireFederatedIssueClaimsConcurrently(ctx, cfg, claimed, actor, cache, moveBatchClaimConcurrency, refresh)
+	for _, j := range indexes {
+		if results[j].Result != "" {
+			continue
+		}
+		for _, issue := range items[j].tree {
+			if err := refusals[issue.UID]; err != nil {
+				moveBatchRefusal(&results[j], err)
+				break
+			}
+		}
+	}
+}
+
 func finishUnchangedMove(ctx context.Context, store db.Storage, item moveBatchItem, result *api.MoveIssuesResult, prior api.MoveIssuesResult) error {
 	issue, _, err := resolveMoveBatchIssue(ctx, store, 0, item.issue.UID)
 	if err != nil {
@@ -222,6 +243,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		if err := previewMoveBatch(ctx, cfg.DB, items, results, conflictPreviews); err != nil {
 			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
 		}
+		checkMoveBatchClaims(ctx, cfg, items, results, conflictPreviews, actor, cache, !in.Body.DryRun)
 		for _, indexes := range seen {
 			var target int64
 			conflict := false
@@ -252,6 +274,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		if err := previewMoveBatch(ctx, cfg.DB, items, results, conflictedPreviews); err != nil {
 			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
 		}
+		checkMoveBatchClaims(ctx, cfg, items, results, conflictedPreviews, actor, cache, !in.Body.DryRun)
 		for j := in.Body.StartIndex; j < n; j++ {
 			if results[j].Result == "" && conflicts[items[j].issue.ID] {
 				results[j].Result, results[j].Code, results[j].Message = "refused", "conflicting_target", "issue requested for different targets"
@@ -266,7 +289,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			end := min(start+moveBatchChunkIssues, n)
 			pending := map[int64]bool{}
 			var indexes, chunkPreviews, noops []int
-			var claimed []db.Issue
 			for j := start; j < end; j++ {
 				if results[j].Result != "" {
 					continue
@@ -302,24 +324,10 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			if err := previewMoveBatch(ctx, cfg.DB, items, results, chunkPreviews); err != nil {
 				return nil, moveBatchError(err, results[in.Body.StartIndex:], start)
 			}
-			for _, j := range indexes {
-				if results[j].Result == "" {
-					claimed = append(claimed, items[j].tree...)
-				}
-			}
-			refusals := requireFederatedIssueClaimsConcurrently(ctx, cfg, claimed, actor, cache, moveBatchClaimConcurrency, !in.Body.DryRun)
+			checkMoveBatchClaims(ctx, cfg, items, results, indexes, actor, cache, !in.Body.DryRun)
 			var write []db.MoveIssueProjectIn
 			var written []int
 			for _, j := range indexes {
-				if results[j].Result != "" {
-					continue
-				}
-				for _, issue := range items[j].tree {
-					if err := refusals[issue.UID]; err != nil {
-						moveBatchRefusal(&results[j], err)
-						break
-					}
-				}
 				if results[j].Result != "" {
 					continue
 				}

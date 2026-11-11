@@ -116,6 +116,34 @@ func TestMoveIssuesBatch_SubtreeClaimDenialAndDryRun(t *testing.T) {
 		require.Equal(t, source.ID, got.ProjectID)
 	}
 }
+
+func TestMoveIssuesBatch_ClaimDenialBeforeTargetConflict(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	source, issue := createClaimGateHelperIssue(t, store)
+	first, err := store.CreateProject(t.Context(), "claim-target-one")
+	require.NoError(t, err)
+	second, err := store.CreateProject(t.Context(), "claim-target-two")
+	require.NoError(t, err)
+	enableClaimGateHelperHub(t, store, source.ID)
+	enableClaimGateHelperHub(t, store, first.ID)
+	enableClaimGateHelperHub(t, store, second.ID)
+	_, err = store.AcquireClaim(t.Context(), db.AcquireClaimParams{ProjectID: source.ID, IssueRef: issue.UID, Principal: db.ClaimPrincipal{HolderInstanceUID: store.InstanceUID(), Holder: "other"}, ClaimKind: "hard", Now: time.Now().UTC()})
+	require.NoError(t, err)
+	for _, dry := range []bool{true, false} {
+		req := &api.MoveIssuesRequest{}
+		req.Body.Actor, req.Body.DryRun = "agent", dry
+		req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ToProjectUID: first.UID}, {Ref: issue.UID, ToProjectUID: second.UID}}
+		out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
+		require.NoError(t, err)
+		for _, result := range out.Body.Results {
+			require.Equal(t, "claim_denied", result.Code)
+		}
+		got, err := store.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, source.ID, got.ProjectID)
+	}
+}
+
 func TestMoveIssuesBatch_BudgetResume(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	source, first := createClaimGateHelperIssue(t, store)
