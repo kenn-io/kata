@@ -40,21 +40,6 @@ describe('SearchSettings', () => {
     vi.useRealTimers()
   })
 
-  test('keeps the manual step when the daemon cannot restart', async () => {
-    vi.useFakeTimers()
-    setGeneratedFetch(
-      vi.fn(async () =>
-        Response.json(
-          status({ can_restart: false, job: { state: 'restart', downloaded: 1, total: 1 } }),
-        ),
-      ),
-    )
-    renderSettings()
-    await settle()
-    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
-    expect(screen.getByText(/run kata daemon restart/)).not.toBeNull()
-  })
-
   test('asks before sending a single restart request', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
@@ -81,35 +66,6 @@ describe('SearchSettings', () => {
     expect(postFetch.mock.calls[0]?.[0]).toBe('/api/v1/embeddings/local/restart')
     expect(postFetch.mock.calls[0]?.[1]?.method).toBe('POST')
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('run kata ui'))
-  })
-
-  test('observes completion while the restart response hangs', async () => {
-    vi.useFakeTimers()
-    const pending = status({
-      can_restart: true,
-      job: { state: 'restart', downloaded: 1, total: 1 },
-    })
-    setGeneratedFetch(
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(Response.json(pending))
-        .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false }))),
-    )
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    )
-    const postFetch = vi.fn<typeof fetch>(
-      (_input, init) =>
-        new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
-        }),
-    )
-    renderSettings({ postFetch, originStable: true })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    await vi.advanceTimersByTimeAsync(8000)
-    expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 
   test('allows retry when a status read reports failure while the restart response hangs', async () => {
@@ -185,40 +141,6 @@ describe('SearchSettings', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  test('reconnects when a stable daemon returns after a long outage', async () => {
-    vi.useFakeTimers()
-    let available = false
-    const pending = status({
-      can_restart: true,
-      job: { state: 'restart', downloaded: 1, total: 1 },
-    })
-    setGeneratedFetch(
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(Response.json(pending))
-        .mockImplementation(async () => {
-          if (!available) throw new TypeError('disconnected')
-          return Response.json(status({ provider: 'built_in', can_change: false }))
-        }),
-    )
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    )
-    renderSettings({
-      postFetch: vi.fn(async () => new Response(null, { status: 202 })),
-      originStable: true,
-    })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    await vi.advanceTimersByTimeAsync(120_000)
-    expect(screen.getByRole('alert').textContent).toContain('kata daemon status')
-    available = true
-    await vi.advanceTimersByTimeAsync(4000)
-    expect(screen.getByText('On', { exact: true })).not.toBeNull()
-    expect(screen.queryByRole('alert')).toBeNull()
-  })
-
   test('allows retry after a restart request is lost while the daemon stays up', async () => {
     vi.useFakeTimers()
     const pending = status({
@@ -245,6 +167,7 @@ describe('SearchSettings', () => {
     [false, 'Run kata daemon status, then reopen kata ui.'],
   ])('offers recovery when originStable=%s does not return', async (originStable, message) => {
     vi.useFakeTimers()
+    let available = false
     const read = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -252,7 +175,10 @@ describe('SearchSettings', () => {
           status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
         ),
       )
-      .mockRejectedValue(new TypeError('disconnected'))
+      .mockImplementation(async () => {
+        if (!available) throw new TypeError('disconnected')
+        return Response.json(status({ provider: 'built_in', can_change: false }))
+      })
     setGeneratedFetch(read)
     vi.stubGlobal(
       'confirm',
@@ -265,7 +191,13 @@ describe('SearchSettings', () => {
     await settle()
     await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
     await vi.advanceTimersByTimeAsync(120_000)
-    expect(screen.getByRole('alert').textContent).toContain(message)
+    expect(screen.getByRole('alert').textContent).toBe(message)
+    if (originStable) {
+      available = true
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(screen.getByText('On', { exact: true })).not.toBeNull()
+      expect(screen.queryByRole('alert')).toBeNull()
+    }
   })
 
   test('offers recovery when another tab restarts and a read hangs', async () => {
@@ -481,7 +413,7 @@ describe('SearchSettings', () => {
             : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
         ),
       ).not.toBeNull()
-      expect(screen.queryByRole('button', { name: 'Turn on' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
     },
   )
 

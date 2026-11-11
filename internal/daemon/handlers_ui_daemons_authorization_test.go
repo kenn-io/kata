@@ -943,6 +943,7 @@ func TestWebDaemonGatewayRestrictsEmbeddingsByViewer(t *testing.T) {
 			var got api.LocalEmbeddingsStatus
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
 			assert.False(t, got.CanChange)
+			assert.False(t, got.CanRestart)
 			require.NotNil(t, got.Indexing)
 			if administrator {
 				assert.Equal(t, int64(212), got.Indexing.Total)
