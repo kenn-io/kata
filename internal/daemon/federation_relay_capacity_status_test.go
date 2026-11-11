@@ -49,10 +49,9 @@ func (m *countingCheckpointMeasurer) count(projectID int64) int {
 	return m.measured[projectID]
 }
 
-// Status measures the relay checkpoint only for projects this daemon roots
-// that have a live relay enrollment, and a failed measurement degrades to a
-// reported reason instead of failing the whole status response.
-func TestFederationStatusMeasuresOnlyRootedRelayProjects(t *testing.T) {
+// Status measures rooted relay projects, reports measurement failures, and
+// skips checkpoint measurement for compact project reads.
+func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)

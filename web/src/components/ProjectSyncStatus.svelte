@@ -61,7 +61,7 @@
         current = undefined
         queued = false
       }
-      loading = manual || !hasResult
+      loading = manual || (!hasResult && !error)
       reading = true
       const abort = new AbortController()
       current = abort

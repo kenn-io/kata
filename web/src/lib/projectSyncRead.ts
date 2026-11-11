@@ -5,6 +5,8 @@ export interface ProjectSyncRead {
   stale: boolean
 }
 
+const isTransientStatus = (status: number) => status >= 500 || status === 408 || status === 429
+
 // A temporary server failure keeps the last summary of this same project,
 // marked stale. Every other failure throws so the caller drops it.
 export async function readProjectSync(
@@ -24,7 +26,7 @@ export async function readProjectSync(
         signal,
         onResponse: (raw) => {
           responseStatus = raw.status
-          if (raw.status >= 400 && raw.status < 500 && raw.status !== 408 && raw.status !== 429) {
+          if (raw.status >= 400 && raw.status < 500 && !isTransientStatus(raw.status)) {
             previous = undefined
             clearPrevious()
           }
@@ -36,14 +38,12 @@ export async function readProjectSync(
       previous &&
       !signal.aborted &&
       ((responseStatus === undefined && error instanceof TypeError) ||
-        (responseStatus !== undefined && responseStatus >= 500) ||
-        responseStatus === 408 ||
-        responseStatus === 429)
+        (responseStatus !== undefined && isTransientStatus(responseStatus)))
     )
       return { status: previous.status, stale: true }
     throw error
   }
-  if (previous && (response.status >= 500 || response.status === 408 || response.status === 429))
+  if (previous && isTransientStatus(response.status))
     return { status: previous.status, stale: true }
   if (response.status !== 200) throw new Error()
   const found = response.data.statuses.find(
