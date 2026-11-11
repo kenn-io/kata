@@ -52,6 +52,11 @@ func trackerAttemptPrefix(f TrackerExecutionFence) string {
 	return key + ".attempt." + f.WriteUID + "."
 }
 
+func trackerAttemptKeyBounds(f TrackerExecutionFence) (string, string) {
+	prefix := trackerAttemptPrefix(f)
+	return prefix + "00000000000000000001", prefix + "09223372036854775808"
+}
+
 func trackerAttemptKey(f TrackerExecutionFence) string {
 	return fmt.Sprintf("%s%020d", trackerAttemptPrefix(f), f.Sequence)
 }
@@ -180,9 +185,9 @@ func (a TrackerFenceSQL) Store(ctx context.Context, previous *TrackerExecutionFe
 			if count != 0 {
 				return ErrTrackerOutcomeUnknown
 			}
-			prefix := trackerAttemptPrefix(next)
+			lower, upper := trackerAttemptKeyBounds(next)
 			var hasAttempt bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE substr(key,1,$1)=$2)`, len(prefix), prefix).Scan(&hasAttempt); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key >= $1 AND key < $2)`, lower, upper).Scan(&hasAttempt); err != nil {
 				return err
 			}
 			if hasAttempt {
@@ -266,6 +271,9 @@ func (a TrackerFenceSQL) Store(ctx context.Context, previous *TrackerExecutionFe
 func TrackerMetadataForImport(record MetaKV, opts ImportOptions) (MetaKV, bool, error) {
 	if !strings.HasPrefix(record.Key, TrackerMetadataPrefix) {
 		return record, true, nil
+	}
+	if strings.HasPrefix(record.Key, TrackerMetadataPrefix+"control_capacity.") {
+		return MetaKV{}, false, nil
 	}
 	if opts.MergeProject || opts.NewInstance {
 		return MetaKV{}, false, nil

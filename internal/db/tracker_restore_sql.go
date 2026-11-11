@@ -22,17 +22,23 @@ func RetainTrackerMetadataSQL(ctx context.Context, tx *sql.Tx) ([]MetaKV, error)
 		if err := rows.Scan(&rec.Key, &rec.Value); err != nil {
 			return nil, err
 		}
-		normalized, _, err := TrackerMetadataForImport(rec, ImportOptions{})
+		normalized, keep, err := TrackerMetadataForImport(rec, ImportOptions{})
 		if err != nil {
 			return nil, err
 		}
-		retained = append(retained, normalized)
+		if keep {
+			retained = append(retained, normalized)
+		}
 	}
 	return retained, rows.Err()
 }
 
 // RestoreRetainedTrackerMetadataSQL preserves target evidence during replacement.
 func RestoreRetainedTrackerMetadataSQL(ctx context.Context, tx *sql.Tx, records []MetaKV) error {
+	// Imported and retained pending receipts are made inactive; rebuild local counts.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, trackerControlCapacityKey); err != nil {
+		return err
+	}
 	for _, rec := range records {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, rec.Key, rec.Value); err != nil {
 			return err

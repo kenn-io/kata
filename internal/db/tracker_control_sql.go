@@ -66,15 +66,21 @@ func (a TrackerFenceSQL) BeginControl(ctx context.Context, p tracker.ControlRece
 	}
 	var result tracker.ControlReceipt
 	fresh := false
+	var admissionErr error
 	err := a.Transact(ctx, func(tx *sql.Tx) error {
 		result = tracker.ControlReceipt{}
 		fresh = false
+		admissionErr = nil
 		if err := a.authorize(ctx, tx, p.ProjectUID); err != nil {
+			return err
+		}
+		capacity, err := loadTrackerControlCapacity(ctx, tx)
+		if err != nil {
 			return err
 		}
 		key := TrackerControlKey(a.InstanceUID, p.ProjectUID, p.UID)
 		var raw string
-		err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, key).Scan(&raw)
+		err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, key).Scan(&raw)
 		if err == nil {
 			existing, err := decodeTrackerControl(key, raw)
 			if err != nil {
@@ -89,8 +95,10 @@ func (a TrackerFenceSQL) BeginControl(ctx context.Context, p tracker.ControlRece
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if err := trackerControlCapacity(ctx, tx, p); err != nil {
-			return err
+		if capacity.full(p) {
+			// Commit a newly rebuilt counter even when admission is full.
+			admissionErr = tracker.ErrControlCapacity
+			return nil
 		}
 		encoded, err := json.Marshal(p)
 		if err != nil {
@@ -105,6 +113,10 @@ func (a TrackerFenceSQL) BeginControl(ctx context.Context, p tracker.ControlRece
 			return err
 		}
 		if count == 1 {
+			capacity.change(p, 1)
+			if err := saveTrackerControlCapacity(ctx, tx, capacity); err != nil {
+				return err
+			}
 			result = p
 			fresh = true
 			return nil
@@ -122,43 +134,99 @@ func (a TrackerFenceSQL) BeginControl(ctx context.Context, p tracker.ControlRece
 		result = existing
 		return nil
 	})
-	return result, fresh, err
+	if err != nil {
+		return result, fresh, err
+	}
+	return result, fresh, admissionErr
 }
-func trackerControlCapacity(ctx context.Context, tx *sql.Tx, p tracker.ControlReceipt) error {
+
+const trackerControlCapacityKey = TrackerMetadataPrefix + "control_capacity.global"
+
+type trackerControlCounts struct {
+	Pending     int            `json:"pending"`
+	Projects    map[string]int `json:"projects"`
+	Connections map[string]int `json:"connections"`
+}
+
+func (c *trackerControlCounts) change(p tracker.ControlReceipt, delta int) {
+	c.Pending += delta
+	c.Projects[p.ProjectUID] += delta
+	connection := p.Selection.OwnerInstanceUID + "." + p.Selection.ConnectionUID
+	c.Connections[connection] += delta
+	if c.Projects[p.ProjectUID] == 0 {
+		delete(c.Projects, p.ProjectUID)
+	}
+	if c.Connections[connection] == 0 {
+		delete(c.Connections, connection)
+	}
+}
+func (c trackerControlCounts) full(p tracker.ControlReceipt) bool {
+	return c.Pending >= 256 || c.Projects[p.ProjectUID] >= 64 || c.Connections[p.Selection.OwnerInstanceUID+"."+p.Selection.ConnectionUID] >= 64
+}
+
+// The row is a transaction-wide serialization point on both backends. A missing
+// row means an older database or a restore: rebuild once from retained receipts.
+func loadTrackerControlCapacity(ctx context.Context, tx *sql.Tx) (trackerControlCounts, error) {
+	c := trackerControlCounts{Projects: map[string]int{}, Connections: map[string]int{}}
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING`, trackerControlCapacityKey, "")
+	if err != nil {
+		return c, err
+	}
+	n, err := inserted.RowsAffected()
+	if err != nil {
+		return c, err
+	}
+	if n == 0 {
+		// UPDATE obtains the row lock before reading, including on PostgreSQL.
+		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value=value WHERE key=$1`, trackerControlCapacityKey); err != nil {
+			return c, err
+		}
+		var raw string
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, trackerControlCapacityKey).Scan(&raw); err != nil {
+			return c, err
+		}
+		if json.Unmarshal([]byte(raw), &c, json.RejectUnknownMembers(true)) != nil || c.Projects == nil || c.Connections == nil || c.Pending < 0 {
+			return c, tracker.ErrInvalid
+		}
+		return c, nil
+	}
 	prefix := TrackerMetadataPrefix + "control."
 	rows, err := tx.QueryContext(ctx, `SELECT key,value FROM meta WHERE substr(key,1,$1)=$2`, len(prefix), prefix)
 	if err != nil {
-		return err
+		return c, err
 	}
 	defer func() { _ = rows.Close() }()
-	pending, project, connection := 0, 0, 0
 	for rows.Next() {
 		var key, raw string
 		if err := rows.Scan(&key, &raw); err != nil {
-			return err
+			return c, err
 		}
-		c, err := decodeTrackerControl(key, raw)
+		receipt, err := decodeTrackerControl(key, raw)
 		if err != nil {
-			return err
+			return c, err
 		}
-		if c.State != tracker.ControlPending {
-			continue
-		}
-		pending++
-		if c.ProjectUID == p.ProjectUID {
-			project++
-		}
-		if c.Selection.OwnerInstanceUID == p.Selection.OwnerInstanceUID && c.Selection.ConnectionUID == p.Selection.ConnectionUID {
-			connection++
+		if receipt.State == tracker.ControlPending {
+			c.change(receipt, 1)
 		}
 	}
 	if err := rows.Err(); err != nil {
+		return c, err
+	}
+	if err := rows.Close(); err != nil {
+		return c, err
+	}
+	if err := saveTrackerControlCapacity(ctx, tx, c); err != nil {
+		return c, err
+	}
+	return c, nil
+}
+func saveTrackerControlCapacity(ctx context.Context, tx *sql.Tx, c trackerControlCounts) error {
+	raw, err := json.Marshal(c)
+	if err != nil {
 		return err
 	}
-	if pending >= 256 || project >= 64 || connection >= 64 {
-		return tracker.ErrControlCapacity
-	}
-	return nil
+	_, err = tx.ExecContext(ctx, `UPDATE meta SET value=$1 WHERE key=$2`, string(raw), trackerControlCapacityKey)
+	return err
 }
 
 // CompleteControl atomically replaces a matching pending receipt.
@@ -178,6 +246,10 @@ func (a TrackerFenceSQL) CompleteControl(ctx context.Context, previous, next tra
 		if err := a.authorize(ctx, tx, next.ProjectUID); err != nil {
 			return err
 		}
+		capacity, err := loadTrackerControlCapacity(ctx, tx)
+		if err != nil {
+			return err
+		}
 		updated, err := tx.ExecContext(ctx, `UPDATE meta SET value=$1 WHERE key=$2 AND value=$3`, string(after), TrackerControlKey(next.RootInstanceUID, next.ProjectUID, next.UID), string(before))
 		if err != nil {
 			return err
@@ -189,7 +261,11 @@ func (a TrackerFenceSQL) CompleteControl(ctx context.Context, previous, next tra
 		if count != 1 {
 			return tracker.ErrControlConflict
 		}
-		return nil
+		if capacity.Pending <= 0 || capacity.Projects[previous.ProjectUID] <= 0 || capacity.Connections[previous.Selection.OwnerInstanceUID+"."+previous.Selection.ConnectionUID] <= 0 {
+			return tracker.ErrInvalid
+		}
+		capacity.change(previous, -1)
+		return saveTrackerControlCapacity(ctx, tx, capacity)
 	})
 }
 func isTrackerControlKey(key string) bool {

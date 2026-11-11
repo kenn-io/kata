@@ -28,3 +28,15 @@ func TestRestoredControlCannotResumePendingSideEffects(t *testing.T) {
 	}
 	require.NoError(t, db.CheckTrackerMetadataRestoreConflict(record.Value, restored))
 }
+
+func TestTrackerControlCapacityBookkeepingIsLocal(t *testing.T) {
+	for _, key := range []string{
+		db.TrackerMetadataPrefix + "control_capacity.version",
+		db.TrackerMetadataPrefix + "control_capacity.global",
+		db.TrackerMetadataPrefix + "control_capacity.project.01ARZ3NDEKTSV4RRFFQ69G5FAW",
+	} {
+		_, keep, err := db.TrackerMetadataForImport(db.MetaKV{Key: key, Value: "1"}, db.ImportOptions{})
+		require.NoError(t, err)
+		require.False(t, keep, "local capacity state must be rebuilt from restored receipts")
+	}
+}
