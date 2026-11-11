@@ -62,6 +62,58 @@ func TestBrowserSessionSurvivesRemoteAttachmentAuthenticationFailure(t *testing.
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 }
 
+func TestBrowserSessionSurvivesUpstreamLeaseAuthenticationFailure(t *testing.T) {
+	store := openAuthTestDB(t)
+	project, err := store.CreateProject(t.Context(), "attachments")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "example", Author: "operator"})
+	require.NoError(t, err)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/lease") {
+			http.Error(w, "unexpected upstream request", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"code":"auth_invalid","message":"private remote detail"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: upstream.URL, HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator", AllowInsecure: true})
+	require.NoError(t, err)
+	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
+	server := NewServer(ServerConfig{DB: store, WebSessions: manager, FederationCredentials: uiCapabilityCredentials{credential: config.FederationCredential{HubURL: upstream.URL, HubProjectID: 1, Token: "fixture", AllowInsecure: true}}})
+	t.Cleanup(func() { _ = server.Close() })
+	handler, err := server.HandlerFor(ListenerPolicy{Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true, AllowLocalSession: true})
+	require.NoError(t, err)
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	endpoint := fmt.Sprintf("http://127.0.0.1:27123/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.UID)
+	for _, tc := range []struct{ name, path, body, contentType string }{
+		{"upload", endpoint + "?name=file.pdf&actor=operator", "file bytes", "application/octet-stream"},
+		{"link", endpoint + "/links", `{"path":"/kata/file.pdf","actor":"operator"}`, "application/json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, strings.NewReader(tc.body))
+			request.AddCookie(manager.Cookie(issued.Cookie))
+			request.Header.Set(webSessionHeader, issued.Session)
+			request.Header.Set(webCSRFHeader, issued.CSRF)
+			request.Header.Set("Origin", "http://127.0.0.1:27123")
+			request.Header.Set("Content-Type", tc.contentType)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			require.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), "hub_credential_rejected")
+			require.NotContains(t, response.Body.String(), "private remote detail")
+		})
+	}
+	snapshot := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/api/v1/ui/snapshot?view=inbox", nil)
+	snapshot.AddCookie(manager.Cookie(issued.Cookie))
+	snapshot.Header.Set(webSessionHeader, issued.Session)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, snapshot)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+}
+
 func TestUIAttachmentCapabilityWithoutLocalVault(t *testing.T) {
 	store := openAuthTestDB(t)
 	project, err := store.CreateProject(t.Context(), "project")
