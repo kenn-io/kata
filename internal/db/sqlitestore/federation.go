@@ -806,7 +806,7 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 	resolver := db.NewRemoteIssueProjectResolver(tx, projectID)
 	inserted := make([]bool, len(events))
 	for i, ev := range events {
-		inserted[i], err = d.insertRemoteEventTx(ctx, tx, projectID, ev, payloads[i], createdAts[i], validator, resolver)
+		inserted[i], err = d.insertRemoteEventTx(ctx, tx, ev, payloads[i], createdAts[i], validator, resolver)
 		if err != nil {
 			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 		}
@@ -820,15 +820,13 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 func (d *Store) insertRemoteEventTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	projectID int64,
 	ev db.RemoteEvent,
 	payload jsontext.Value,
 	createdAt string,
 	validator *db.CronReplayValidator,
 	resolver *db.RemoteIssueProjectResolver,
 ) (bool, error) {
-	var err error
-	projectID, err = resolver.Resolve(ctx, ev)
+	projectID, err := resolver.Resolve(ctx, ev)
 	if err != nil {
 		return false, err
 	}

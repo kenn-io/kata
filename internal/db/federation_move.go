@@ -278,10 +278,12 @@ type RemoteIssueProjectResolver struct {
 	processed map[string]bool
 }
 
+// NewRemoteIssueProjectResolver creates a resolver for one insertion transaction.
 func NewRemoteIssueProjectResolver(tx *sql.Tx, route int64) *RemoteIssueProjectResolver {
 	return &RemoteIssueProjectResolver{tx: tx, route: route, processed: make(map[string]bool)}
 }
 
+// Resolve validates an event and returns its local envelope project ID.
 func (r *RemoteIssueProjectResolver) Resolve(ctx context.Context, e RemoteEvent) (int64, error) {
 	tx, route := r.tx, r.route
 	var project int64
