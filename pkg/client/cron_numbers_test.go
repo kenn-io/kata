@@ -162,3 +162,31 @@ func copyCronSDKDefinition(t *testing.T, source, target any) {
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, target))
 }
+
+// A present empty vector is different from an omitted reserved member.
+func TestCronWorkflowArgvFieldPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"request absent", generated.CronWorkflowStep{}, ""},
+		{"request empty", generated.CronWorkflowStep{Argv: []string{}}, `[]`},
+		{"request populated", generated.CronWorkflowStep{Argv: []string{"printf", ""}}, `["printf",""]`},
+		{"response absent", generated.CronWorkflowStepResponse{}, ""},
+		{"response empty", generated.CronWorkflowStepResponse{Argv: []string{}}, `[]`},
+		{"response populated", generated.CronWorkflowStepResponse{Argv: []string{"printf", ""}}, `["printf",""]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.value)
+			require.NoError(t, err)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(raw, &fields))
+			if tc.want == "" {
+				require.NotContains(t, fields, "argv")
+			} else {
+				require.Equal(t, tc.want, string(fields["argv"]))
+			}
+		})
+	}
+}
