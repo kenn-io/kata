@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -397,5 +398,52 @@ func TestCronDeliveryResponseRelease(t *testing.T) {
 		require.True(t, moved)
 		require.Equal(t, http.StatusNotFound, status, string(raw))
 		require.NotContains(t, string(raw), selected)
+	})
+}
+
+func TestCronDeliveryUnsupportedVersionResponseRelease(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		now := time.Now().UTC().Add(5 * time.Hour)
+		clock := func() time.Time { return now }
+		f = projectAccessFixtureWithStorage(t, f, store, clock)
+		hidden := projectAccessHiddenProject(t, store, "hidden-project")
+		j, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.private.ID, Name: "Recurring work", Actor: "member", Definition: cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: f.issue.UID, Title: "Recurring work"}, Overlap: "allow", Catchup: "latest"}})
+		require.NoError(t, err)
+		_, err = store.DispatchRecurringCron(t.Context(), db.DispatchRecurringCronIn{ProjectID: f.private.ID, JobUID: j.UID, ExpectedEventUID: j.DefinitionEventUID, Now: now})
+		require.NoError(t, err)
+		children, err := store.ChildrenOfIssue(t.Context(), f.issue.ID)
+		require.NoError(t, err)
+		require.Len(t, children, 1)
+		child := children[0]
+		var metadata map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal([]byte(child.Metadata), &metadata))
+		var occurrence map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal(metadata["cron.occurrence"], &occurrence))
+		occurrence["version"] = jsontext.Value("2")
+		metadata["cron.occurrence"], err = json.Marshal(occurrence)
+		require.NoError(t, err)
+		rawMetadata, err := json.Marshal(metadata)
+		require.NoError(t, err)
+		sqlStore := store.(interface {
+			ExecContext(context.Context, string, ...any) (sql.Result, error)
+		})
+		_, err = sqlStore.ExecContext(t.Context(), `UPDATE issues SET metadata=$1 WHERE id=$2`, string(rawMetadata), child.ID)
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s?include=delivery", f.private.ID, j.UID)
+		status, _, raw := f.request(t, http.MethodGet, path, "member", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Contains(t, string(raw), "unsupported recurring occurrence version")
+		moved := false
+		wrapped := &deliveryAfterReadStore{Storage: store, afterRead: func() error {
+			_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: child.ID, FromProjectID: f.private.ID, ToProjectID: hidden.ID, IfMatchRev: child.Revision, Actor: "member"})
+			moved = err == nil
+			return err
+		}}
+		f = projectAccessFixtureWithStorage(t, f, wrapped, clock)
+		status, _, raw = f.request(t, http.MethodGet, path, "member", nil, nil)
+		require.True(t, moved)
+		require.Equal(t, http.StatusNotFound, status, string(raw))
+		require.NotContains(t, string(raw), "unsupported recurring occurrence version")
 	})
 }

@@ -83,6 +83,7 @@ func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, e
 	if err := rows.Scan(&id, &uid, &occurrence, &key); err != nil {
 		return nil, err
 	}
+	RecordExposedIssue(ctx, id)
 	if key == "~" {
 		return nil, errRecurringOccurrenceVersion
 	}
@@ -90,7 +91,6 @@ func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, e
 	if err := json.Unmarshal([]byte(occurrence), &value); err != nil {
 		return nil, err
 	}
-	RecordExposedIssue(ctx, id)
 	return &RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}, rows.Err()
 }
 
