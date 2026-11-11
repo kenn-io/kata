@@ -144,22 +144,10 @@ func TestCronNextLeavesProgressUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Review", Author: "tester"})
 	require.NoError(t, err)
-	def := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "all"}
-	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "tester", Definition: def})
+	def := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "Local"}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "all"}
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Local cron", Actor: "tester", Definition: def})
 	require.NoError(t, err)
 	before, err := env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	out, _, err := executeCronCLI(t, env.URL, nil, "job", "next", job.UID)
-	require.NoError(t, err)
-	require.Contains(t, out, `"status":"ready"`)
-	after, err := env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, before.Metadata, after.Metadata)
-
-	def.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "Local"}
-	job, _, err = env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Local cron", Actor: "tester", Definition: def})
-	require.NoError(t, err)
-	before, err = env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	var metadata map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(before.Metadata), &metadata))
@@ -195,7 +183,7 @@ func TestCronNextLeavesProgressUnchanged(t *testing.T) {
 			require.Equal(t, instant.Format(time.RFC3339), result.Occurrences[i].Local)
 		}
 	}
-	after, err = env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
+	after, err := env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, before.Metadata, after.Metadata)
 }

@@ -37,11 +37,8 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 		return "", nil
 	}
 	raw, err := json.Marshal(j.Definition)
-	if err != nil {
-		return label, []string{"unavailable"}
-	}
-	def, err := cron.DecodeJob(raw)
-	if err != nil {
+	def, decodeErr := cron.DecodeJob(raw)
+	if err != nil || decodeErr != nil {
 		return label, []string{"unavailable"}
 	}
 	var parent *cron.PreviewParent

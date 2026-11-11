@@ -16,11 +16,6 @@ import (
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
-type cronNextOptions struct {
-	count int
-	from  string
-}
-
 type cronNextOccurrence struct {
 	At    time.Time `json:"at"`
 	Local string    `json:"local"`
@@ -34,59 +29,6 @@ type cronNextResult struct {
 	Timezone           string               `json:"timezone"`
 	Status             string               `json:"status"`
 	Occurrences        []cronNextOccurrence `json:"occurrences"`
-}
-
-func newCronNextCmd() *cobra.Command {
-	options := cronNextOptions{count: 3}
-	cmd := &cobra.Command{
-		Use:   "next <uid>",
-		Short: "preview future occurrences of a saved job without changing it",
-		Long: `Preview future times from a saved job and its delivery progress.
---from cannot rewind delivered progress. Adapter times are triggers and do not promise execution.`,
-		Example: "  kata cron job next <job-uid> --count 3 --json\n  kata cron job next <job-uid> --from 2026-11-08T12:00:00Z",
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return options.execute(cmd, args[0])
-		},
-	}
-	cmd.Flags().IntVar(&options.count, "count", 3, "number of future occurrences (1–100)")
-	cmd.Flags().StringVar(&options.from, "from", "", "RFC3339 lower bound (defaults to now)")
-	return cmd
-}
-
-func (o cronNextOptions) execute(cmd *cobra.Command, id string) error {
-	id, err := normalizedCronCLIUID(id)
-	if err != nil {
-		return err
-	}
-	if o.count < 1 || o.count > 100 {
-		return cronCLIValidation("count must be between 1 and 100")
-	}
-	from := time.Now().UTC()
-	if cmd.Flags().Changed("from") {
-		from, err = time.Parse(time.RFC3339, o.from)
-		if err != nil {
-			return cronCLIValidation("from must be RFC3339")
-		}
-		from = from.UTC()
-	}
-	daemon, err := dialDaemon(cmd.Context())
-	if err != nil {
-		return err
-	}
-	project, err := cronProject(daemon)
-	if err != nil {
-		return err
-	}
-	client, err := kataclient.NewWithHTTPClient(daemon.baseURL, daemon.client)
-	if err != nil {
-		return err
-	}
-	result, err := readCronNext(daemon, client, project.ID, id, from, o.count)
-	if err != nil {
-		return err
-	}
-	return emitCronNext(cmd, result)
 }
 
 func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string, from time.Time, count int) (cronNextResult, error) {
