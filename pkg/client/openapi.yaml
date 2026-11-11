@@ -9620,6 +9620,10 @@ paths:
     get:
       operationId: offerRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9680,6 +9684,10 @@ paths:
     get:
       operationId: getRelayReset
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9707,6 +9715,10 @@ paths:
     post:
       operationId: acceptRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9740,6 +9752,10 @@ paths:
     post:
       operationId: ackRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
