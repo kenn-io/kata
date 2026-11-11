@@ -106,3 +106,42 @@ test('Settings keeps status colors, spacing, and title alignment consistent', as
   expect(Math.max(...positions) - Math.min(...positions)).toBeLessThanOrEqual(1)
   for (const gap of gaps) expect.soft(gap).toBeCloseTo(8, 0)
 })
+
+test.describe('light theme', () => {
+  test.use({ colorScheme: 'light' })
+
+  test('Settings keeps the unfilled indexing track visible', async ({ page, kata }) => {
+    await page.route('**/api/v1/embeddings/local', (route) =>
+      route.fulfill({
+        json: {
+          ...off,
+          provider: 'built_in',
+          download_bytes: 0,
+          can_change: false,
+          indexing: { done: 1, total: 2, failed: false },
+        },
+      }),
+    )
+    await kata.launch(page)
+    await page.goto(`${kata.origin}/kata?view=settings`)
+    const contrast = await page.getByRole('progressbar').evaluate((track) => {
+      const probe = document.createElement('canvas').getContext('2d')!
+      const luminance = (color: string) => {
+        probe.fillStyle = color
+        probe.fillRect(0, 0, 1, 1)
+        const channels = [...probe.getImageData(0, 0, 1, 1).data.slice(0, 3)].map((value) => {
+          const channel = value / 255
+          return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+        })
+        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+      }
+      let page = track.parentElement
+      while (page && getComputedStyle(page).backgroundColor === 'rgba(0, 0, 0, 0)')
+        page = page.parentElement
+      const edge = luminance(getComputedStyle(track).borderTopColor)
+      const behind = luminance(getComputedStyle(page ?? document.body).backgroundColor)
+      return (Math.max(edge, behind) + 0.05) / (Math.min(edge, behind) + 0.05)
+    })
+    expect(contrast).toBeGreaterThanOrEqual(1.2)
+  })
+})
