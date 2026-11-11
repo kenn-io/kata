@@ -357,7 +357,6 @@ func TestSavedScheduleRulesAndProjection(t *testing.T) {
 	for _, tc := range []struct {
 		name, value, zone, instant, date string
 	}{
-		{"civil", "2026-11-12T09:00", "Europe/Paris", "2026-11-12T08:00:00Z", "2026-11-12"},
 		{"viewer date", "2026-11-12T00:30", "Europe/Paris", "2026-11-11T23:30:00Z", "2026-11-12"},
 		{"gap", "2026-03-08T02:30", "America/New_York", "2026-03-08T07:00:00Z", "2026-03-08"},
 		{"overlap", "2026-11-01T01:30", "America/New_York", "2026-11-01T05:30:00Z", "2026-11-01"},

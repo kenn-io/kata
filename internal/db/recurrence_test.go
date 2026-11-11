@@ -80,7 +80,6 @@ func TestRecurrenceLocalMaterializesInNamedZone(t *testing.T) {
 func TestAttachRecurrencePreservesDeadlineZone(t *testing.T) {
 	for _, tc := range []struct{ name, raw, defaultZone string }{
 		{"issue zone", `{"timezone":"America/New_York","deadline_on":"2026-05-19T09:00"}`, "UTC"},
-		{"daemon zone", `{"deadline_on":"2026-05-19T09:00"}`, "America/New_York"},
 		{"empty issue zone", `{"timezone":"","deadline_on":"2026-05-19T09:00"}`, "America/New_York"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -108,13 +108,7 @@ func datesInputFromForm(s inputState, now time.Time, actor string) (DatesInput, 
 		if text == f.opened {
 			continue
 		}
-		fieldNow := now
-		if f.zone != nil {
-			fieldNow = now.In(f.zone)
-		} else if day, err := time.Parse(time.DateOnly, f.today); err == nil {
-			fieldNow = day
-		}
-		value, err := resolveDateInput(text, fieldNow)
+		value, err := resolveDateInput(text, dateFieldNow(now, f.today, f.zone))
 		if err != nil {
 			return DatesInput{}, errors.New(f.label + " " + err.Error() + ".")
 		}
@@ -257,25 +251,29 @@ func renderDatesForm(s inputState, innerW int, now time.Time) string {
 	parts := []string{titleStyle.Render(s.title)}
 	for idx := range s.fields {
 		parts = append(parts, renderNewIssueField(s, idx, innerW))
-		fieldNow := now
 		today := s.dates.scheduledToday
 		zone := s.dates.scheduledZone
 		if s.fields[idx].id == fieldDeadline {
 			today = s.dates.deadlineToday
 			zone = s.dates.deadlineZone
 		}
-		if zone != nil {
-			fieldNow = now.In(zone)
-		} else if day, err := time.Parse(time.DateOnly, today); err == nil {
-			fieldNow = day
-		}
-		parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), fieldNow))))
+		parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), dateFieldNow(now, today, zone)))))
 	}
 	if status := renderFormStatus(s); status != "" {
 		parts = append(parts, status)
 	}
 	parts = append(parts, renderDatesFooter(s, innerW))
 	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
+}
+
+func dateFieldNow(now time.Time, today string, zone *time.Location) time.Time {
+	if zone != nil {
+		return now.In(zone)
+	}
+	if day, err := time.Parse(time.DateOnly, today); err == nil {
+		return day
+	}
+	return now
 }
 
 func savedDateLocation(raw jsontext.Value) *time.Location {

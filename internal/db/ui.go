@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 )
 
@@ -111,9 +110,8 @@ func MatchUICalendarView(
 func ProjectUIPlanningDates(ctx context.Context, tx *sql.Tx, issue *UIIssue, query UISnapshotQuery) error {
 	scheduledDefault := query.DefaultTimezone
 	if issue.RecurrenceID != nil {
-		var zone string
-		err := tx.QueryRowContext(ctx, `SELECT timezone FROM recurrences WHERE id=$1 AND project_id=$2`, *issue.RecurrenceID, issue.ProjectID).Scan(&zone)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		zone, err := IssueRecurrenceTimezone(ctx, tx, issue.Issue)
+		if err != nil {
 			return err
 		}
 		if zone != "" {
