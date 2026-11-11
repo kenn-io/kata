@@ -30,6 +30,12 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	_, later, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later accepted", Author: "tester"})
 	require.NoError(t, err)
 	require.NoError(t, reopened.RecordFederationPushAccepted(ctx, project.ID, []int64{later.ID}))
+	through, err := reopened.FederationPushAcceptedThrough(ctx, project.ID, reopened.InstanceUID(), 0)
+	require.NoError(t, err)
+	require.Equal(t, event.ID, through)
+	through, err = reopened.FederationPushAcceptedThrough(ctx, project.ID, reopened.InstanceUID(), pending.ID)
+	require.NoError(t, err)
+	require.Equal(t, later.ID, through)
 	t.Run("pending stats", func(t *testing.T) {
 		count, high, err := reopened.PendingFederationPushStats(ctx, project.ID, reopened.InstanceUID(), 0)
 		require.NoError(t, err)
