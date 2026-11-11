@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
@@ -452,6 +453,58 @@ func TestDoctorFailsWhenLiveLocalRuntimeIsUnreachable(t *testing.T) {
 
 	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(t.Context()), "daemon.connection").Status,
 		"a live runtime record whose endpoint does not answer is a real failure, not a stopped daemon")
+}
+
+func TestDoctorUnreachableRecoveryGuidance(t *testing.T) {
+	for _, selection := range []string{"current home", "explicit profile", "workspace profile", "active profile"} {
+		t.Run(selection, func(t *testing.T) {
+			home, workspace := doctorTestEnv(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
+			}))
+			t.Cleanup(server.Close)
+			flags = globalFlags{Workspace: workspace}
+			var ns *daemonruntime.Namespace
+			var err error
+			if selection == "current home" {
+				ns, err = daemonruntime.NewNamespace()
+			} else {
+				profileHome := t.TempDir()
+				const uid = "01HZZZZZZZZZZZZZZZZZZZZZ01"
+				profile, profileErr := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: profileHome, InstanceUID: uid})
+				require.NoError(t, profileErr)
+				cfg := fmt.Sprintf("[[daemon]]\nname='work'\nlocal=true\nhome=%q\ninstance_uid=%q\n", profileHome, uid)
+				if selection == "active profile" {
+					cfg = "active_daemon='work'\n" + cfg
+				}
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0600))
+				if selection == "workspace profile" {
+					require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"), []byte("version=1\n[project]\nname='example-project'\n"), 0600))
+					require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte("version=1\n[server]\ndaemon='work'\n"), 0600))
+				} else if selection == "explicit profile" {
+					flags.Daemon = "work"
+				}
+				ns, err = daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+			}
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+				PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"),
+			})
+			require.NoError(t, err)
+			check := doctorFinding(t, collectDoctor(t.Context()), "daemon.connection")
+			assert.EqualValues(t, "fail", check.Status)
+			assert.Contains(t, check.Summary, "503")
+			assert.Contains(t, check.Fix, filepath.Join(ns.DataDir, "daemon.log"))
+			if selection == "current home" {
+				assert.Contains(t, check.Fix, "kata daemon restart")
+			} else {
+				assert.Contains(t, check.Fix, "--daemon=work")
+				assert.Contains(t, check.Fix, "daemon recover")
+				assert.NotContains(t, check.Fix, "kata daemon restart")
+			}
+		})
+	}
 }
 
 func TestDoctorDiscoveryRejectsRedirects(t *testing.T) {

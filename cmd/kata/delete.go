@@ -250,6 +250,19 @@ func shellQuoteArg(s string) string {
 	if isShellSafeArg(s) {
 		return s
 	}
+	return singleQuoteShellArg(s)
+}
+
+// shellQuoteGlobSafeArg also quotes '#', which zsh with EXTENDED_GLOB treats as
+// a glob operator anywhere in an unquoted word.
+func shellQuoteGlobSafeArg(s string) string {
+	if strings.Contains(s, "#") {
+		return singleQuoteShellArg(s)
+	}
+	return shellQuoteArg(s)
+}
+
+func singleQuoteShellArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 

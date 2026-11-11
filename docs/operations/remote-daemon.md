@@ -1,7 +1,7 @@
 ---
 title: Remote daemon
 description: Serve Kata to trusted private-network clients with explicit authentication and transport settings.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Remote daemon
@@ -64,11 +64,12 @@ thread-creation, command-line, symbol, and execution-trace endpoints. Capture
 ## Recover an unresponsive local daemon
 
 If a local process is alive but this CLI probe failed, errors report its PID,
-endpoint, log path, and recovery steps. If the advertised web origin responds,
-capture `/debug/pprof/goroutine?debug=2` there before stopping the process. These
-handlers require daemon-owner authority. When authentication is configured, use
-the owner's bearer credential from the daemon's authentication configuration
-(for example, `[auth].token` or `KATA_AUTH_TOKEN`).
+endpoint, log path, and recovery steps. After independently confirming the
+advertised web origin is this daemon's browser origin, capture
+`/debug/pprof/goroutine?debug=2` there with daemon-owner access before stopping
+the process. These handlers require daemon-owner authority. When authentication
+is configured, use the owner's bearer credential from the daemon's authentication
+configuration (for example, `[auth].token` or `KATA_AUTH_TOKEN`).
 The profiling listener may be the same listener that failed, so capture can also
 time out.
 
