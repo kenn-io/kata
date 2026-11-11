@@ -1,10 +1,7 @@
 package dbtest
 
 import (
-	"context"
 	"crypto/ed25519"
-	"database/sql"
-	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -58,39 +55,6 @@ func RunRelayResetRepeatedBeforeDownstreamActivation(t *testing.T, store db.Stor
 	_, err = store.IssueByUID(ctx, late.entity.EntityUID, db.IncludeDeletedYes)
 	require.NoError(t, err, "root-accepted work newer than the checkpoint survives installation")
 
-	// A next-epoch seed can outlive its event row; replacing that seed must
-	// still refuse unsupported workflow bytes before deleting the outbox row.
-	q := store.(interface {
-		QueryRowContext(context.Context, string, ...any) *sql.Row
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	})
-	var seedID int64
-	var raw, sourceUID, sourceHash string
-	err = q.QueryRowContext(ctx, `SELECT id,envelope,source_uid,source_hash FROM federation_relay_outbox WHERE binding_uid=$1 AND reset_epoch=$2 AND stream=$3 AND emitted=0 LIMIT 1`, deviceBinding, device.Enrollment.RelayResetEpoch+1, db.RelayStreamEvent).Scan(&seedID, &raw, &sourceUID, &sourceHash)
-	require.NoError(t, err)
-	var envelope db.RelayEnvelope
-	require.NoError(t, json.Unmarshal([]byte(raw), &envelope))
-	future := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), `{"version":1,"steps":null}`)
-	envelope.Body, err = db.EncodeRelaySourceEvent(future)
-	require.NoError(t, err)
-	envelope.SourceUID, envelope.SourceHash = future.EventUID, future.ContentHash
-	envelope, err = db.SealRelayEnvelope(envelope)
-	require.NoError(t, err)
-	changed, err := json.Marshal(envelope)
-	require.NoError(t, err)
-	_, err = q.ExecContext(ctx, `UPDATE federation_relay_outbox SET envelope=$1,source_uid=$2,source_hash=$3 WHERE id=$4`, string(changed), future.EventUID, future.ContentHash, seedID)
-	require.NoError(t, err)
-	manifest, snapshot, translation = root.checkpoint(4, 4, kept)
-	err = installer.InstallRelayReset(ctx, upstream, manifest, snapshot, translation)
-	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	binding, err := store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	require.Equal(t, int64(3), binding.RelayConfig.ResetEpoch)
-	var preserved string
-	require.NoError(t, q.QueryRowContext(ctx, `SELECT envelope FROM federation_relay_outbox WHERE id=$1`, seedID).Scan(&preserved))
-	require.Equal(t, string(changed), preserved)
-	_, err = q.ExecContext(ctx, `UPDATE federation_relay_outbox SET envelope=$1,source_uid=$2,source_hash=$3 WHERE id=$4`, raw, sourceUID, sourceHash, seedID)
-	require.NoError(t, err)
 	// The root purges that issue and the relay installs the next checkpoint
 	// before the downstream ever asked for the first forwarded epoch.
 

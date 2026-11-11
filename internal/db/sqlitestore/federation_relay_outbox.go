@@ -73,11 +73,6 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 				}
 				declaredBytes += manifest.VectorByteSize
 			}
-			if features, ok := db.RelayPeerFeatures(ctx, bindingUID); ok {
-				if err = db.CheckRelayBatchFeatures(db.RelayBatch{Stream: stream, Envelopes: []db.RelayEnvelope{e}}, features); err != nil {
-					break
-				}
-			}
 			total += len(e.Body)
 			output = append(output, e)
 			ids = append(ids, id)

@@ -127,67 +127,32 @@ AND (e.payload LIKE '%argv%' OR e.payload LIKE '%null%' OR e.payload LIKE '%\u%'
 // Keep historical decode-only warnings unchanged. Only the reserved kind and
 // the explicit null shapes held by the old decoder affect negotiation.
 func retainedWorkflowEvidence(kind, payload string) (bool, bool) {
+	argv, err := payloadHasArgvWorkflow(kind, payload)
+	if err != nil {
+		return false, true
+	}
 	var envelope struct {
 		Definition jsontext.Value `json:"definition"`
 	}
-	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
-		return false, false
-	}
-	definition := envelope.Definition
-	if definition.Kind() == 'n' {
-		return false, true
-	}
-	if definition.Kind() != '{' {
-		return false, false
-	}
-	var body struct {
-		Steps jsontext.Value `json:"steps"`
-	}
-	if err := json.Unmarshal(definition, &body); err != nil {
-		return false, false
-	}
-	if body.Steps.Kind() == 'n' {
-		return false, true
-	}
-	if body.Steps.Kind() != '[' {
-		return false, false
-	}
-	var steps []jsontext.Value
-	if err := json.Unmarshal(body.Steps, &steps); err != nil {
-		return false, false
-	}
-	reserved := false
-	for _, raw := range steps {
-		if raw.Kind() == 'n' {
-			return false, true
-		}
-		var step struct {
-			Kind jsontext.Value `json:"kind"`
+	var definition struct {
+		Steps []struct {
+			Kind string         `json:"kind"`
 			Argv jsontext.Value `json:"argv"`
-		}
-		if err := json.Unmarshal(raw, &step); err != nil {
-			continue
-		}
-		if step.Kind.Kind() == 'n' {
-			return false, true
-		}
-		var stepKind string
-		if err := json.Unmarshal(step.Kind, &stepKind); err == nil && stepKind != "argv" && len(step.Argv) != 0 {
-			return false, true
-		}
-		if stepKind == "argv" {
-			reserved = true
-			if len(step.Argv) == 0 || step.Argv.Kind() == 'n' {
-				return false, true
-			}
-		}
+		} `json:"steps"`
 	}
-	argv, err := payloadHasArgvWorkflow(kind, payload)
-	if err != nil {
-		return false, reserved
+	if json.Unmarshal([]byte(payload), &envelope) != nil || len(envelope.Definition) == 0 {
+		return false, false
+	}
+	if json.Unmarshal(envelope.Definition, &definition) != nil {
+		return false, true
+	}
+	for _, step := range definition.Steps {
+		if step.Kind == "argv" && (len(step.Argv) == 0 || step.Argv.Kind() == 'n') || step.Kind != "argv" && len(step.Argv) != 0 {
+			return false, true
+		}
 	}
 	if argv {
-		if _, err := cron.DecodeWorkflow(definition); err != nil {
+		if _, err := cron.DecodeWorkflow(envelope.Definition); err != nil {
 			return false, true
 		}
 	}
