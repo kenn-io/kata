@@ -417,6 +417,46 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			}
 		}
 	}
+	// Snapshot winners include ordinary unchanged issues. Fetch their locations
+	// together; real move winners retain their existing per-issue lookup.
+	type issueLocation struct {
+		id, source    int64
+		recurrence    *int64
+		sourceProject Project
+		sourceShort   string
+	}
+	snapshotRows := map[string]issueLocation{}
+	var snapshotUIDs []string
+	for uid := range p.Issues {
+		if moved[uid].Type == "issue.snapshot" {
+			snapshotUIDs = append(snapshotUIDs, uid)
+		}
+	}
+	for chunk := range slices.Chunk(snapshotUIDs, 500) {
+		slots, args := make([]string, len(chunk)), make([]any, len(chunk))
+		for i, uid := range chunk {
+			slots[i], args[i] = fmt.Sprintf("$%d", i+1), uid
+		}
+		//nolint:gosec // G202: only generated placeholders enter SQL; all UIDs are bound.
+		rows, err := tx.QueryContext(ctx, `SELECT i.uid,i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid IN (`+strings.Join(slots, ",")+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var uid string
+			var location issueLocation
+			if err := rows.Scan(&uid, &location.id, &location.source, &location.recurrence, &location.sourceProject.UID, &location.sourceProject.Name, &location.sourceShort); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			snapshotRows[uid] = location
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
 	projects := map[int64]bool{}
 	type projectFacts struct {
 		id             int64
@@ -449,7 +489,15 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		var sourceProject Project
 		var recurrence *int64
 		var sourceShort string
-		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&id, &source, &recurrence, &sourceProject.UID, &sourceProject.Name, &sourceShort)
+		err := sql.ErrNoRows
+		if winner.Type == "issue.snapshot" {
+			if row, ok := snapshotRows[issue.UID]; ok {
+				id, source, recurrence, sourceProject, sourceShort = row.id, row.source, row.recurrence, row.sourceProject, row.sourceShort
+				err = nil
+			}
+		} else {
+			err = tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&id, &source, &recurrence, &sourceProject.UID, &sourceProject.Name, &sourceShort)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			if active {
 				projects[target] = true
