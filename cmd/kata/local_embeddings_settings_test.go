@@ -240,7 +240,7 @@ func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0o600))
 				cfg, err := config.ReadDaemonConfig()
 				require.NoError(t, err)
-				chosen, err := applySharedEmbeddingChoice(t.Context(), cfg.Search.Embeddings)
+				chosen, err := applySharedEmbeddingChoice(t.Context(), cfg.Search.Embeddings, filepath.Join(home, "kata.db"))
 				require.NoError(t, err)
 				_, _, err = preflightEmbeddingStartup(chosen, filepath.Join(home, "kata.db"))
 				require.ErrorContains(t, err, "embedding batching")

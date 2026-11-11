@@ -20,9 +20,16 @@ func federationEmbeddingRecipeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			effective, err := applySharedEmbeddingChoice(cmd.Context(), cfg.Embeddings)
-			if err != nil {
-				return err
+			effective := cfg.Embeddings
+			if !effective.Enabled() {
+				dsn, err := config.KataDSN(cmd.Context())
+				if err != nil {
+					return err
+				}
+				effective, err = applySharedEmbeddingChoice(cmd.Context(), effective, dsn)
+				if err != nil {
+					return err
+				}
 			}
 			encoder, _, err := preflightEmbeddingStartup(effective, "")
 			if err != nil {

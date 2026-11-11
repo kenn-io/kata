@@ -10,15 +10,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
-	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/testenv"
-	"go.kenn.io/kata/internal/vector"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/embedlocal"
-	kitvec "go.kenn.io/kit/vector"
 )
 
 func TestApplySharedEmbeddingChoice(t *testing.T) {
@@ -26,14 +21,29 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 	require.NoError(t, embedlocal.RecordChoice())
 	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nbase_url='https://embeddings.example/v1'\nmodel='example-model'\ndims=1024\n"))
 	require.NoError(t, err)
-	got, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
+	got, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, "kata.db")
 	require.NoError(t, err)
 	require.Equal(t, cfg.Embeddings, got)
 	cfg, err = config.ParseSearchConfig([]byte("[search.embeddings]\ndims=1024\ndocument_prefix='document prefix'\ndocument_suffix='document suffix'\nquery_prefix='query prefix'\nquery_suffix='query suffix'\nfingerprint_salt='salt'\nrequest_dimensions=true\n"))
 	require.NoError(t, err)
-	got, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
+	got, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, "kata.db")
 	require.NoError(t, err)
 	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
+}
+
+func TestSharedChoiceIgnoresPostgres(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	t.Setenv("KATA_DSN", "postgres://example.invalid/kata")
+	require.NoError(t, embedlocal.RecordChoice())
+	dsn, err := config.KataDSN(t.Context())
+	require.NoError(t, err)
+	got, err := applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{}, dsn)
+	require.NoError(t, err)
+	require.Equal(t, config.EmbeddingsConfig{}, got)
+	configured := config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text"}
+	got, err = applySharedEmbeddingChoice(t.Context(), configured, dsn)
+	require.NoError(t, err)
+	require.Equal(t, configured, got)
 }
 
 func TestDaemonPreflightFallsBackFromInvalidSharedChoice(t *testing.T) {
@@ -54,72 +64,6 @@ func TestDaemonPreflightFallsBackFromInvalidSharedChoice(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal=true\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0600))
 	_, err = preflightDaemonStartup(t.Context(), "", false, true)
 	require.ErrorContains(t, err, "embedding batching")
-}
-
-func TestSharedChoiceStartsPostgresCompatibleIndex(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires pgvector testcontainer")
-	}
-	for _, mode := range []string{"fresh", "compatible", "other"} {
-		t.Run(mode, func(t *testing.T) {
-			setupKataEnv(t)
-			clearLocalEmbeddingsEnv(t)
-			resetFlags(t)
-			t.Setenv("PORT", "")
-			t.Setenv("KATA_SERVER", "")
-			t.Setenv("KATA_AUTH_TOKEN", "")
-			t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
-			dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, t.Context())
-			t.Cleanup(cleanup)
-			t.Setenv("KATA_DSN", dsn)
-			t.Setenv("KATA_POSTGRES_ALLOW_INSECURE", "1")
-			store, err := pgstore.Open(t.Context(), dsn)
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = store.Close() })
-			idx, err := vector.OpenPostgres(t.Context(), store.DB)
-			require.NoError(t, err)
-			require.NoError(t, embedlocal.RecordChoice())
-			choice, err := applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{})
-			require.NoError(t, err)
-			emb, _, err := preflightEmbeddingStartup(choice, dsn)
-			require.NoError(t, err)
-			generation := emb.Generation()
-			if mode == "other" {
-				generation = kitvec.Generation{Model: "external-model", Dimensions: 768}
-			}
-			key := generation.Fingerprint()
-			if mode != "fresh" {
-				release, err := idx.AcquireReconcilerLease(t.Context())
-				require.NoError(t, err)
-				require.NoError(t, idx.EnsureBuilding(t.Context(), key, generation))
-				require.NoError(t, idx.CutOver(t.Context(), key))
-				require.NoError(t, release())
-			}
-			baseURL := launchDaemon(t)
-			status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
-			require.Equal(t, "built_in", status.Provider)
-			//nolint:kennlint // sleeptest: The daemon publishes indexing progress through HTTP.
-			require.Eventually(t, func() bool {
-				status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
-				if mode == "other" {
-					return status.Indexing != nil && status.Indexing.Failed
-				}
-				return status.Indexing == nil
-			}, 5*time.Second, 10*time.Millisecond)
-			//nolint:kennlint // sleeptest: PostgreSQL exposes the reconciler's active generation through database reads.
-			require.Eventually(t, func() bool {
-				active, ok, err := idx.ActiveGeneration(t.Context())
-				return err == nil && ok && active == key
-			}, 5*time.Second, 10*time.Millisecond)
-			if mode == "other" {
-				//nolint:kennlint // sleeptest: Observe the active generation over time while the daemon runs.
-				require.Never(t, func() bool {
-					active, ok, err := idx.ActiveGeneration(t.Context())
-					return err != nil || !ok || active != key
-				}, 2*time.Second, 10*time.Millisecond)
-			}
-		})
-	}
 }
 
 func TestLocalEmbeddingsSetup(t *testing.T) {
@@ -321,10 +265,11 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 
 func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		chosen bool
+		name     string
+		chosen   bool
+		postgres bool
 	}{
-		{name: "no choice"}, {name: "recorded choice", chosen: true},
+		{name: "no choice"}, {name: "recorded choice", chosen: true}, {name: "postgres recorded choice", chosen: true, postgres: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearLocalEmbeddingsEnv(t)
@@ -339,7 +284,7 @@ func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
 			}
 			localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
 				approved, err := opts.Confirm(ctx, 290_000_000)
-				require.Equal(t, tc.chosen, approved)
+				require.Equal(t, tc.chosen && !tc.postgres, approved)
 				if err != nil {
 					return embedlocal.Installation{}, err
 				}
@@ -347,10 +292,14 @@ func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
 			}
 			cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
 			require.NoError(t, err)
-			client, _, err := preflightEmbeddingStartup(cfg.Embeddings, filepath.Join(home, "kata.db"))
+			dsn := filepath.Join(home, "kata.db")
+			if tc.postgres {
+				dsn = "postgres://example.invalid/kata"
+			}
+			client, _, err := preflightEmbeddingStartup(cfg.Embeddings, dsn)
 			require.NoError(t, err)
 			_, err = client.Embed(t.Context(), []string{"x"})
-			if tc.chosen {
+			if tc.chosen && !tc.postgres {
 				require.ErrorContains(t, err, "installation reached")
 			} else {
 				require.ErrorContains(t, err, "kata daemon local-embeddings")

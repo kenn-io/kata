@@ -1,7 +1,7 @@
 package vector
 
 // The semantic-search reconciler is elected with a PostgreSQL advisory lock.
-// The key has to be spelled twice: pg_advisory_lock takes two int4
+// The key has to be spelled twice: pg_try_advisory_lock takes two int4
 // arguments, while pg_catalog.pg_locks reports the same pair as classid/objid
 // bigints holding the unsigned 32-bit truncation of those values. Both
 // spellings are built from reconcilerLockName here, so a change to the key
@@ -12,7 +12,7 @@ package vector
 const reconcilerLockName = "kata:vector:reconciler:"
 
 // reconcilerLockArgs is the (classid, objid) argument pair passed to
-// pg_advisory_lock and pg_advisory_unlock.
+// pg_try_advisory_lock and pg_advisory_unlock.
 const reconcilerLockArgs = `hashtext(current_database()), ` +
 	`hashtext('` + reconcilerLockName + `' || current_schema())`
 
@@ -25,7 +25,7 @@ const ReconcilerLockPredicateSQL = `locktype = 'advisory'
 	  AND classid = (hashtext(current_database())::bigint & 4294967295)
 	  AND objid = (hashtext('` + reconcilerLockName + `' || current_schema())::bigint & 4294967295)`
 
-const reconcilerLockSQL = `SELECT pg_advisory_lock(` + reconcilerLockArgs + `)`
+const reconcilerLockSQL = `SELECT pg_try_advisory_lock(` + reconcilerLockArgs + `)`
 
 const reconcilerUnlockSQL = `SELECT pg_advisory_unlock(` + reconcilerLockArgs + `)`
 

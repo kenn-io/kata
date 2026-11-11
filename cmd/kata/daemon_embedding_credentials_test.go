@@ -52,7 +52,7 @@ func TestEmbeddingCredentialStartupAndReload(t *testing.T) {
 	}
 	writePrivateCredentialFixture(t, path, "file-secret\n")
 	woke := false
-	if err := reloadEmbeddingCredentials(t.Context(), ec, c, func() { woke = true }); err != nil {
+	if err := reloadEmbeddingCredentials(t.Context(), ec, filepath.Join(home, "kata.db"), c, func() { woke = true }); err != nil {
 		t.Fatal(err)
 	}
 	if !woke {
@@ -94,7 +94,7 @@ func TestEmbeddingCredentialReloadRetriesRejectedBacklog(t *testing.T) {
 	admission := func() (*activity.Lease, bool, <-chan struct{}) {
 		return activity.NewLease(func() { cycles <- struct{}{} }, nil), true, nil
 	}
-	_, idx, health, retry, err := startEmbeddingReconciler(ctx, workers, admission, ec, client, filepath.Join(home, "vectors.db"), store, daemon.NewEventBroadcaster(), log.New(io.Discard, "", 0), false)
+	_, idx, health, retry, err := startEmbeddingReconciler(ctx, workers, admission, ec, client, filepath.Join(home, "vectors.db"), store, daemon.NewEventBroadcaster(), log.New(io.Discard, "", 0))
 	require.NoError(t, err)
 	defer func() {
 		cancel()
@@ -112,7 +112,7 @@ func TestEmbeddingCredentialReloadRetriesRejectedBacklog(t *testing.T) {
 
 	body := fmt.Sprintf("[search.embeddings]\nbase_url=%q\nmodel=\"m\"\ndims=2\napi_key=\"reloaded-key\"\n", srv.URL)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
-	require.NoError(t, reloadEmbeddingCredentials(t.Context(), ec, client, retry))
+	require.NoError(t, reloadEmbeddingCredentials(t.Context(), ec, filepath.Join(home, "kata.db"), client, retry))
 	select {
 	case <-cycles:
 	case <-time.After(time.Second):
@@ -135,7 +135,7 @@ func TestEmbeddingReloadDoesNotMisrouteChangedProviderKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	woke := false
-	err = reloadEmbeddingCredentials(t.Context(), ec, c, func() { woke = true })
+	err = reloadEmbeddingCredentials(t.Context(), ec, filepath.Join(home, "kata.db"), c, func() { woke = true })
 	if err == nil || !strings.Contains(err.Error(), "restart") || woke {
 		t.Fatalf("unexpected reload: %v woke=%t", err, woke)
 	}
@@ -152,7 +152,7 @@ func TestEmbeddingReloadUsesSharedChoice(t *testing.T) {
 			require.NoError(t, embedlocal.RecordChoice())
 			cfg, err := config.ParseSearchConfig(nil)
 			require.NoError(t, err)
-			effective, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
+			effective, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, filepath.Join(home, "kata.db"))
 			require.NoError(t, err)
 			client, _, err := preflightEmbeddingStartup(effective, filepath.Join(home, "kata.db"))
 			require.NoError(t, err)
@@ -160,7 +160,7 @@ func TestEmbeddingReloadUsesSharedChoice(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal=true\n"), 0600))
 			}
 			woke := false
-			require.NoError(t, reloadEmbeddingCredentials(t.Context(), effective, client, func() { woke = true }))
+			require.NoError(t, reloadEmbeddingCredentials(t.Context(), effective, filepath.Join(home, "kata.db"), client, func() { woke = true }))
 			require.True(t, woke)
 		})
 	}

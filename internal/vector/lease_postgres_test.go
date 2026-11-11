@@ -1,7 +1,6 @@
 package vector_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -12,37 +11,6 @@ import (
 	"go.kenn.io/kata/internal/vector"
 	kitvec "go.kenn.io/kit/vector"
 )
-
-func TestPostgresReconcilerLeaseQueuedCancellation(t *testing.T) {
-	ctx := t.Context()
-	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
-	t.Cleanup(cleanup)
-	store, err := pgstore.Open(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	first, err := vector.OpenPostgres(ctx, store.DB)
-	require.NoError(t, err)
-	second, err := vector.OpenPostgres(ctx, store.DB)
-	require.NoError(t, err)
-	release, err := first.AcquireReconcilerLease(ctx)
-	require.NoError(t, err)
-	queued, cancel := context.WithCancel(ctx)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { _, err := second.AcquireReconcilerLease(queued); done <- err }()
-	//nolint:kennlint // sleeptest: PostgreSQL exposes queued leases asynchronously.
-	require.Eventually(t, func() bool {
-		var count int
-		err := store.QueryRowContext(ctx, `SELECT count(*) FROM pg_catalog.pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&count)
-		return err == nil && count == 1
-	}, 5*time.Second, 10*time.Millisecond)
-	cancel()
-	require.Error(t, <-done)
-	require.NoError(t, release())
-	release, err = second.AcquireReconcilerLease(ctx)
-	require.NoError(t, err)
-	require.NoError(t, release())
-}
 
 func TestPostgresReconcilerLeaseFencesWorkAfterSessionLoss(t *testing.T) {
 	if testing.Short() {

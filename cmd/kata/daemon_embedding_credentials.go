@@ -10,7 +10,7 @@ import (
 
 // reloadEmbeddingCredentials changes only credentials on the running provider.
 // Applying a new provider's key to the existing origin would misroute secrets.
-func reloadEmbeddingCredentials(ctx context.Context, initial config.EmbeddingsConfig, client *embedding.Client, wake func()) error {
+func reloadEmbeddingCredentials(ctx context.Context, initial config.EmbeddingsConfig, dsn string, client *embedding.Client, wake func()) error {
 	if client == nil {
 		return nil
 	}
@@ -18,7 +18,7 @@ func reloadEmbeddingCredentials(ctx context.Context, initial config.EmbeddingsCo
 	if err != nil {
 		return err
 	}
-	current, err := applySharedEmbeddingChoice(ctx, cfg.Search.Embeddings)
+	current, err := applySharedEmbeddingChoice(ctx, cfg.Search.Embeddings, dsn)
 	if err != nil {
 		return err
 	}

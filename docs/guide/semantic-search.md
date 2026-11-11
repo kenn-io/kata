@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Semantic search
@@ -43,7 +43,7 @@ Kata can run a shared local embeddings server or use an OpenAI-compatible
 
 Open `kata ui`, click the gear in the top bar, and choose **Turn on** under **Search by meaning**. Settings applies to every project on the daemon. Turn on downloads what is missing and saves the setting. Run `kata daemon restart` to finish, then reopen `kata ui` to see indexing progress and any failures while it retries. A local owner session or a daemon access administrator sees the button. Other viewers, including viewers connected through the daemon switcher, see the status.
 
-The built-in server choice is shared with supported apps on this computer. When another supported app enables it, Kata starts indexing on its next daemon start unless Kata already has a configured provider. A saved built-in setting also starts with installed files. If those files are missing, Kata requires a shared choice or `kata daemon local-embeddings` before downloading them.
+The built-in server choice is shared with supported apps on this computer. When another supported app enables it, a SQLite daemon starts indexing on its next start unless Kata already has a configured provider. PostgreSQL requires explicit setup in Kata. A saved built-in setting also starts with installed files. If those files are missing, SQLite accepts a shared choice to download them. Otherwise, run `kata daemon local-embeddings` to approve the download.
 
 Kata records the shared choice after setup succeeds. If sharing cannot be confirmed, Kata keeps the saved setting and reports an error. Retry Turn on before restarting the daemon, or rerun the command to share the choice.
 
@@ -262,9 +262,6 @@ Embeddings are local derived state and **do not federate**: each daemon embeds
 only what it stores, and no vectors are sent to or pulled from federated hubs.
 SQLite keeps them in a sidecar database; PostgreSQL keeps them in pgvector
 tables in its selected Kata schema when that optional extension is installed.
-Automatic PostgreSQL indexing releases its lease between cycles, so a daemon
-with a configured provider can take over and build its index before switching
-away from the active one.
 They are not included in JSONL
 [backup/export](../operations/backup-restore.md); a restore or a storage-format
 upgrade re-embeds from scratch rather than carrying vectors forward. Archives

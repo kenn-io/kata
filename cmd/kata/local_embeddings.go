@@ -22,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kit/atomicfile"
 	"go.kenn.io/kit/embedlocal"
 )
@@ -240,8 +241,15 @@ func recordLocalEmbeddingsChoice() error {
 }
 
 // applySharedEmbeddingChoice derives the active provider without changing the config file.
-func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsConfig) (config.EmbeddingsConfig, error) {
+func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsConfig, dsn string) (config.EmbeddingsConfig, error) {
 	if current.Enabled() {
+		return current, nil
+	}
+	backend, err := storeopen.BackendForDSN(dsn)
+	if err != nil {
+		return current, err
+	}
+	if backend != storeopen.BackendSQLite {
 		return current, nil
 	}
 	if err := ctx.Err(); err != nil {

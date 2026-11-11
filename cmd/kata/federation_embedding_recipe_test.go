@@ -29,6 +29,7 @@ func TestFederationEmbeddingRecipeExport(t *testing.T) {
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 	t.Setenv("KATA_SERVER", "https://unreachable.example")
+	t.Setenv("KATA_DSN", "invalid://database")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nbase_url = \""+provider.URL+"\"\nmodel = \"example-model\"\ndims = 2\napi_key = \"recipe-test-secret-never-export\"\n"+untrustedWebConfig), 0600))
 	var output bytes.Buffer
 	cmd := newFederationCmd()
@@ -81,4 +82,8 @@ func TestFederationEmbeddingRecipeUnconfiguredAndSharedChoice(t *testing.T) {
 	require.NoError(t, embedlocal.RecordChoice())
 	require.NoError(t, cmd.Execute())
 	require.NotEmpty(t, output.String())
+	output.Reset()
+	t.Setenv("KATA_DSN", "postgres://example.invalid/kata")
+	require.ErrorContains(t, cmd.Execute(), "embeddings are not configured")
+	require.Empty(t, output.String())
 }

@@ -1076,7 +1076,7 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		return daemonStartupPreflight{}, fmt.Errorf("hooks: %w", err)
 	}
 	savedEmbeddings := dcfg.Search.Embeddings
-	chosen, choiceErr := applySharedEmbeddingChoice(ctx, savedEmbeddings)
+	chosen, choiceErr := applySharedEmbeddingChoice(ctx, savedEmbeddings, dbPath)
 	if choiceErr == nil {
 		dcfg.Search.Embeddings = chosen
 	}
@@ -1485,9 +1485,8 @@ func runDaemonProcess(
 
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
-	_, postgres := store.(*pgstore.Store)
 	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconciler(
-		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, postgres && dcfg.Search.Embeddings != originalEmbeddings, publisher,
+		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, publisher,
 	)
 	if err != nil {
 		if dcfg.Search.Embeddings == originalEmbeddings {
@@ -1512,7 +1511,7 @@ func runDaemonProcess(
 	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
 	workers.Go(func() {
 		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog, func() {
-			if err := reloadEmbeddingCredentials(ctx, dcfg.Search.Embeddings, embedder, embeddingWake); err != nil {
+			if err := reloadEmbeddingCredentials(ctx, dcfg.Search.Embeddings, startup.DBPath, embedder, embeddingWake); err != nil {
 				daemonLog.Printf("embedding credential reload failed: %v", err)
 			}
 		})
@@ -2172,7 +2171,14 @@ func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
 		}
 		cfg.Endpoint = func(ctx context.Context) (string, error) {
 			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
-				chosen, err := embedlocal.ChoiceRecorded()
+				backend, err := storeopen.BackendForDSN(dbPath)
+				if err != nil {
+					return false, err
+				}
+				chosen := false
+				if backend == storeopen.BackendSQLite {
+					chosen, err = embedlocal.ChoiceRecorded()
+				}
 				if err == nil && !chosen {
 					err = errors.New("run kata daemon local-embeddings to approve the download")
 				}
@@ -2210,7 +2216,6 @@ func startEmbeddingReconciler(
 	store db.Storage,
 	bcast *daemon.EventBroadcaster,
 	daemonLog *log.Logger,
-	preserveActive bool,
 	publishers ...daemon.EventPublisher,
 ) (*embedding.Client, *vector.Index, func() daemon.ReconcilerHealth, func(), error) {
 	if embedder == nil {
@@ -2225,11 +2230,10 @@ func startEmbeddingReconciler(
 		publisher = publishers[0]
 	}
 	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{
-		PreserveActiveGeneration: preserveActive,
-		BatchSize:                ec.BatchSize,
-		BatchOptions:             embeddingBatchOptions(ec, embedder.BatchSize()),
-		DrainAdmission:           drainAdmission,
-		OnProjectEvent:           func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
+		BatchSize:      ec.BatchSize,
+		BatchOptions:   embeddingBatchOptions(ec, embedder.BatchSize()),
+		DrainAdmission: drainAdmission,
+		OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
 		FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
 			if !syncArtifacts {
 				return federation.EmbeddingProducerAuthorized(ctx, store, config.DefaultFederationCredentialStore(), projectUID, recipe)

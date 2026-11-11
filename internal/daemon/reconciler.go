@@ -34,8 +34,6 @@ type ReconcilerConfig struct {
 	Now            func() time.Time
 	DrainAdmission activity.WaitableAdmission
 	OnProjectEvent func(db.Event, activity.Admission)
-	// PreserveActiveGeneration prevents an automatic choice from replacing another replica's index.
-	PreserveActiveGeneration bool
 	// The final argument requests artifact synchronization before authorization.
 	// Later documents in the same fill need only fresh authority checks.
 	FederationProducerAllowed func(context.Context, string, embedding.ArtifactIdentity, activity.Admission, bool) (bool, error)
@@ -179,48 +177,13 @@ func (r *Reconciler) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		delay := r.cfg.SweepEvery
-		if err != nil {
-			r.markError(err)
-			if leadershipAcquired && r.cfg.PreserveActiveGeneration {
-				retry.current = r.nextBackoff(retry.current, err)
-				delay = retry.current
-			} else {
-				delay = retry.afterAttempt(leadershipAcquired, err)
-			}
-		} else {
-			retry.current = r.cfg.MinBackoff
-		}
-		timer := time.NewTimer(delay)
-		if !r.cfg.PreserveActiveGeneration {
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
-			continue
-		}
-		apiErr, rejected := errors.AsType[*embedclient.APIError](err)
-		rejected = rejected && requestRejected(apiErr)
-	wait:
-		for {
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-r.wake:
-				if rejected {
-					continue
-				}
-				timer.Stop()
-				break wait
-			case <-r.retry:
-				timer.Stop()
-				break wait
-			case <-timer.C:
-				break wait
-			}
+		r.markError(err)
+		timer := time.NewTimer(retry.afterAttempt(leadershipAcquired, err))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
 		}
 	}
 }
@@ -247,15 +210,6 @@ func (b *leaseRetryBackoff) afterAttempt(leadershipAcquired bool, err error) tim
 }
 
 func (r *Reconciler) runLeader(ctx context.Context) error {
-	if r.cfg.PreserveActiveGeneration {
-		active, ok, err := r.idx.ActiveGeneration(ctx)
-		if err != nil {
-			return err
-		}
-		if ok && active != r.emb.Generation().Fingerprint() {
-			return errors.New("shared embedding choice conflicts with the active generation")
-		}
-	}
 	backoff := r.cfg.MinBackoff
 	rejected := false
 	timer := time.NewTimer(0)
@@ -280,9 +234,6 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 			continue
 		}
 		if err == nil {
-			if r.cfg.PreserveActiveGeneration {
-				return nil
-			}
 			rejected = false
 			backoff = r.cfg.MinBackoff
 			timer.Reset(r.cfg.SweepEvery)
@@ -292,9 +243,6 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 			}
 			if leaseErr := r.idx.ValidateReconcilerLease(ctx); leaseErr != nil {
 				return errors.Join(err, leaseErr)
-			}
-			if r.cfg.PreserveActiveGeneration {
-				return err
 			}
 			backoff = r.nextBackoff(backoff, err)
 			apiErr, ok := errors.AsType[*embedclient.APIError](err)
