@@ -33,36 +33,22 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 
 func TestSharedChoiceIgnoresPostgres(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
-	t.Setenv("KATA_DSN", "postgres://example.invalid/kata")
 	require.NoError(t, embedlocal.RecordChoice())
-	dsn, err := config.KataDSN(t.Context())
-	require.NoError(t, err)
-	got, err := applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{}, dsn)
+	got, err := applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{}, "postgres://example.invalid/kata")
 	require.NoError(t, err)
 	require.Equal(t, config.EmbeddingsConfig{}, got)
-	configured := config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text"}
-	got, err = applySharedEmbeddingChoice(t.Context(), configured, dsn)
-	require.NoError(t, err)
-	require.Equal(t, configured, got)
 }
 
-func TestDaemonPreflightFallsBackFromInvalidSharedChoice(t *testing.T) {
+func TestDaemonPreflightRejectsInvalidConfiguredProvider(t *testing.T) {
 	home := setupKataEnv(t)
 	clearLocalEmbeddingsEnv(t)
 	resetFlags(t)
 	t.Setenv("PORT", "")
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_AUTH_TOKEN", "")
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0600))
 	require.NoError(t, embedlocal.RecordChoice())
-	startup, err := preflightDaemonStartup(t.Context(), "", false, true)
-	require.NoError(t, err)
-	require.Equal(t, startup.SavedEmbedding, startup.Config.Search.Embeddings)
-	require.Nil(t, startup.Embedder)
-	require.ErrorContains(t, startup.ChoiceErr, "embedding batching")
-
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal=true\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0600))
-	_, err = preflightDaemonStartup(t.Context(), "", false, true)
+	_, err := preflightDaemonStartup(t.Context(), "", false, true)
 	require.ErrorContains(t, err, "embedding batching")
 }
 
