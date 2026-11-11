@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-08
+last_edited: 2026-11-10
 ---
 
 # Semantic search technical notes
@@ -112,7 +112,7 @@ Components:
 [search.embeddings]
 base_url = "http://localhost:11434/v1"  # any OpenAI-compatible /embeddings
 model    = "nomic-embed-text"
-# api_key      = "..."          # or api_key_env = "SOME_VAR"; mutually exclusive
+# api_key      = "..."          # or api_key_file / api_key_env
 # fingerprint_salt = ""         # bump to force re-embed when weights change
 # trust_private_network = false # plaintext HTTP to literal non-public IPs
 # timeout_seconds, batch_size, dims  # defaulted; override rarely
@@ -121,11 +121,9 @@ model    = "nomic-embed-text"
 - `local = true` enables the shared built-in Nomic server. A configured
   `base_url` takes precedence, and requires `model`; partial external provider
   configuration is a startup error.
-- `api_key` / `api_key_env` are mutually exclusive, mirroring the daemon
-  catalog's `token` / `token_env` pair
-  (`internal/config/daemon_config.go`). There is no additional hardcoded
-  environment variable; `api_key_env = "KATA_EMBED_API_KEY"` is the
-  conventional spelling if an env var is wanted.
+- Credentials use `ResolveSecret` precedence: `api_key` > `api_key_file` >
+  `api_key_env`. See [Credentials and batching](../reference/configuration.md#credentials-and-batching)
+  for the current source and file requirements.
 - The client POSTs `{model, input: [...]}` to `{base_url}/embeddings` and
   L2-normalizes returned vectors at the boundary, so similarity is a dot
   product everywhere downstream.

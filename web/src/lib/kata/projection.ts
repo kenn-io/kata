@@ -35,6 +35,9 @@ export interface KataUISnapshotProjection {
   readonly selected_recurrences: readonly KataRecurrence[]
   readonly selected_history: readonly KataTaskEvent[]
   readonly selected_graph?: KataReachableGraphResponse
+  // True while selected_detail is the loaded list's copy of the task, before the
+  // snapshot carrying its comments, links, and history arrives.
+  readonly selected_pending?: boolean
 }
 
 export function normalizeKataUISnapshot(
@@ -86,6 +89,37 @@ export function normalizeKataUISnapshot(
           selected_graph: immutableCopy(selectedGraph) as KataReachableGraphResponse,
         }
       : {}),
+  })
+}
+
+// Shows a task picked from the loaded list at once: the list already holds its
+// title, body, properties, parent, and children. Comments, links, history, and
+// recurrences stay empty and selected_pending stays true until the snapshot
+// for that task arrives. Returns undefined when the list does not hold the task.
+export function withPendingSelection(
+  projection: KataUISnapshotProjection,
+  issueUID: string,
+): KataUISnapshotProjection | undefined {
+  if (projection.selected_detail?.issue.uid === issueUID) return projection
+  const issue = projection.issues.find((candidate) => candidate.uid === issueUID)
+  if (!issue) return undefined
+  const detail = normalizeSelectedDetail(
+    issue,
+    { state: 'available', comments: [], history: [], labels: [], links: [], recurrences: [] },
+    projection.issues,
+  )
+  return Object.freeze({
+    fetched_at: projection.fetched_at,
+    projects: projection.projects,
+    issues: projection.issues,
+    member_issue_uids: projection.member_issue_uids,
+    member_issue_uid_set: projection.member_issue_uid_set,
+    selected_state: 'available',
+    selected_revision: `"rev-${issue.revision}"`,
+    selected_detail: immutableCopy(detail) as KataTaskDetail,
+    selected_recurrences: Object.freeze([]),
+    selected_history: Object.freeze([]),
+    selected_pending: true,
   })
 }
 

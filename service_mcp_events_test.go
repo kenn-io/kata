@@ -216,9 +216,8 @@ func TestServiceMCPEventsDeliversUnderTheWorkerTransactionFence(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(raw))
 
-	runDone := make(chan error, 1)
-	go func() { runDone <- service.Run(ctx) }()
-
+	// Seed both events before starting the worker so a project-catalog ping
+	// cannot arrive before the scan marks the issue notification.
 	project, err := service.store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	notify, err := json.Marshal(notification.Value{From: "coordinator", Message: "please review"})
@@ -228,6 +227,8 @@ func TestServiceMCPEventsDeliversUnderTheWorkerTransactionFence(t *testing.T) {
 		Metadata: map[string]json.RawMessage{notification.MetadataKey("example-user"): notify},
 	})
 	require.NoError(t, err)
+	runDone := make(chan error, 1)
+	go func() { runDone <- service.Run(ctx) }()
 	service.publishWorkerEvents(project.ID, []db.Event{event})
 
 	var delivered eventsDelivery
