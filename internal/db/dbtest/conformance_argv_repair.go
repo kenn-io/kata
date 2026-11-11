@@ -56,6 +56,20 @@ func checkArgvProjectionRepair(t *testing.T, store db.Storage, backend Backend) 
 	var repeatRevision int64
 	require.NoError(t, q.QueryRowContext(ctx, `SELECT revision FROM cron_workflows WHERE uid=$1`, workflow.UID).Scan(&repeatRevision))
 	require.Equal(t, revision, repeatRevision)
+	// An equal-revision null kind must also repair a normalized row.
+	body.Definition = []byte(`{"version":1,"steps":[{"kind":null}]}`)
+	held, err = json.Marshal(body)
+	require.NoError(t, err)
+	_, err = q.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, string(held), workflow.DefinitionEventUID)
+	require.NoError(t, err)
+	healthyOriginal, err := json.Marshal(workflow.Definition)
+	require.NoError(t, err)
+	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, string(healthyOriginal), workflow.UID)
+	require.NoError(t, err)
+	projection = db.FoldEvents([]db.FoldEvent{{UID: workflow.DefinitionEventUID, ProjectUID: project.UID, OriginInstanceUID: origin, HLCPhysicalMS: physical, HLCCounter: counter, Type: "cron.workflow.created", Payload: held}})
+	materialize()
+	require.NoError(t, q.QueryRowContext(ctx, `SELECT definition_json,revision FROM cron_workflows WHERE uid=$1`, workflow.UID).Scan(&raw, &revision))
+	require.JSONEq(t, string(body.Definition), raw)
 	// A retained older held event must not replace a newer healthy row.
 	newerClock := workflow.DefinitionHLC
 	newerClock.PhysicalMS++
