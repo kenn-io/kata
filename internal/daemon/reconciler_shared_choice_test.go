@@ -13,21 +13,6 @@ import (
 	kitvec "go.kenn.io/kit/vector"
 )
 
-type sharedChoiceEmbedder struct{}
-
-func (sharedChoiceEmbedder) Generation() kitvec.Generation {
-	return kitvec.Generation{Model: "built-in", Dimensions: 2}
-}
-func (sharedChoiceEmbedder) EncodeFunc() kitvec.EncodeFunc {
-	return func(_ context.Context, texts []string) ([][]float32, error) {
-		vectors := make([][]float32, len(texts))
-		for i := range vectors {
-			vectors[i] = []float32{1, 0}
-		}
-		return vectors, nil
-	}
-}
-
 func TestReconcilerPreservesActiveGenerationAfterReacquiringLease(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires pgvector testcontainer")
@@ -39,7 +24,7 @@ func TestReconcilerPreservesActiveGenerationAfterReacquiringLease(t *testing.T) 
 	t.Cleanup(func() { _ = store.Close() })
 	idx, err := vector.OpenPostgres(t.Context(), store.DB)
 	require.NoError(t, err)
-	emb := sharedChoiceEmbedder{}
+	emb := leaseRecoveryEmbedder{}
 	r := daemon.NewReconciler(store, idx, emb, daemon.ReconcilerConfig{PreserveActiveGeneration: true, MinBackoff: 20 * time.Millisecond})
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
