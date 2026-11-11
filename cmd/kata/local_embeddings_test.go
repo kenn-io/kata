@@ -200,7 +200,7 @@ func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
 	ec := cfg.Embeddings
-	saved, err := applySharedEmbeddingChoice(t.Context(), ec, nil, filepath.Join(home, "kata.db"))
+	saved, err := applySharedEmbeddingChoice(t.Context(), ec)
 	require.NoError(t, err)
 	require.Equal(t, ec, saved)
 	chosen, err := embedlocal.ChoiceRecorded()

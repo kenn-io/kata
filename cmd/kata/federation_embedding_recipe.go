@@ -20,7 +20,7 @@ func federationEmbeddingRecipeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			effective, err := applySharedEmbeddingChoice(cmd.Context(), cfg.Embeddings, nil, "")
+			effective, err := applySharedEmbeddingChoice(cmd.Context(), cfg.Embeddings)
 			if err != nil {
 				return err
 			}

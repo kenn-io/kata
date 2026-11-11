@@ -1474,10 +1474,15 @@ func runDaemonProcess(
 			return idx.Close()
 		}
 	}
-	chosen, choiceErr := applySharedEmbeddingChoice(ctx, dcfg.Search.Embeddings, vectorReady, dbPath)
+	chosen, choiceErr := applySharedEmbeddingChoice(ctx, dcfg.Search.Embeddings)
 	if choiceErr == nil && chosen != dcfg.Search.Embeddings {
-		startup.Embedder, startup.VectorsPath, choiceErr = preflightEmbeddingStartup(chosen, dbPath)
+		candidate, vectorsPath, err := preflightEmbeddingStartup(chosen, dbPath)
+		choiceErr = err
+		if choiceErr == nil && vectorReady != nil {
+			choiceErr = vectorReady(ctx)
+		}
 		if choiceErr == nil {
+			startup.Embedder, startup.VectorsPath = candidate, vectorsPath
 			dcfg.Search.Embeddings = chosen
 		}
 	}

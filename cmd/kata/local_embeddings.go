@@ -238,9 +238,12 @@ func recordLocalEmbeddingChoice() error {
 }
 
 // applySharedEmbeddingChoice derives the active provider without changing the config file.
-func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsConfig, vectorReady func(context.Context) error, dbPath string) (config.EmbeddingsConfig, error) {
+func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsConfig) (config.EmbeddingsConfig, error) {
 	if current.Enabled() {
 		return current, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return current, err
 	}
 	chosen, err := embedlocal.ChoiceRecorded()
 	if err != nil || !chosen {
@@ -252,15 +255,12 @@ func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsCo
 		next.Model = "nomic-embed-text"
 	}
 	if !next.LocalRecipeCompatible() {
-		return current, errors.New("search.embeddings: local requires a nomic-embed-text model and dims 768, or request_dimensions for a smaller width")
-	}
-	if _, _, err := preflightEmbeddingStartup(next, dbPath); err != nil {
-		return current, err
-	}
-	if vectorReady != nil {
-		if err := vectorReady(ctx); err != nil {
-			return current, err
-		}
+		next.Model = "nomic-embed-text"
+		next.Dims = 768
+		next.DocumentPrefix, next.DocumentSuffix = "", ""
+		next.QueryPrefix, next.QuerySuffix = "", ""
+		next.FingerprintSalt = ""
+		next.RequestDimensions = false
 	}
 	return next, nil
 }

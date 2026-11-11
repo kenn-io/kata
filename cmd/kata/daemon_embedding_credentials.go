@@ -18,7 +18,7 @@ func reloadEmbeddingCredentials(ctx context.Context, initial config.EmbeddingsCo
 	if err != nil {
 		return err
 	}
-	current, err := applySharedEmbeddingChoice(ctx, cfg.Search.Embeddings, nil, "")
+	current, err := applySharedEmbeddingChoice(ctx, cfg.Search.Embeddings)
 	if err != nil {
 		return err
 	}
