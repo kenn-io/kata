@@ -73,10 +73,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			r := &results[j]
 			r.Index = j
 			r.Ref = input.Ref
-			if input.Ref == "" || input.ExpectedRevision < 0 {
-				moveBatchRefusal(r, api.NewError(400, "validation", "ref must be nonempty and expected_revision must be nonnegative", "", nil))
-				continue
-			}
 			uid := input.ToProjectUID
 			if uid == "" {
 				uid = in.Body.ToProjectUID
