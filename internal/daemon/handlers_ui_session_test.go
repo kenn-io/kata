@@ -118,14 +118,55 @@ func TestUIAttachmentCapabilityWithoutLocalVault(t *testing.T) {
 	store := openAuthTestDB(t)
 	project, err := store.CreateProject(t.Context(), "project")
 	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "issue", Author: "operator"})
+	require.NoError(t, err)
 	cfg := ServerConfig{DB: store}
-	require.False(t, effectiveUIPolicy(t.Context(), cfg).Capabilities.Attachments)
+	require.False(t, effectiveUIPolicy(t.Context(), cfg, issue.UID).Capabilities.Attachments)
 	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
 	require.NoError(t, err)
-	require.False(t, effectiveUIPolicy(t.Context(), cfg).Capabilities.Attachments)
+	require.False(t, effectiveUIPolicy(t.Context(), cfg, issue.UID).Capabilities.Attachments)
 	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
 	require.NoError(t, err)
-	require.True(t, effectiveUIPolicy(t.Context(), cfg).Capabilities.Attachments)
+	require.True(t, effectiveUIPolicy(t.Context(), cfg, issue.UID).Capabilities.Attachments)
+	require.False(t, effectiveUIPolicy(t.Context(), cfg, "").Capabilities.Attachments)
+}
+
+func TestUISnapshotAttachmentCapabilityFollowsSelectedIssueProject(t *testing.T) {
+	store := openAuthTestDB(t)
+	standalone, err := store.CreateProject(t.Context(), "standalone")
+	require.NoError(t, err)
+	spoke, err := store.CreateProject(t.Context(), "spoke")
+	require.NoError(t, err)
+	standaloneIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: standalone.ID, Title: "standalone issue", Author: "operator"})
+	require.NoError(t, err)
+	spokeIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.ID, Title: "shared issue", Author: "operator"})
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: spoke.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: spoke.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	server := NewServer(ServerConfig{DB: store, UIStore: store})
+	t.Cleanup(func() { _ = server.Close() })
+	for _, tc := range []struct {
+		name     string
+		issueUID string
+		want     bool
+	}{
+		{"standalone", standaloneIssue.UID, false},
+		{"spoke", spokeIssue.UID, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/ui/snapshot?view=all-open&selected_issue_uid="+tc.issueUID, nil)
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var snapshot struct {
+				Capabilities struct {
+					Attachments bool `json:"attachments"`
+				} `json:"capabilities"`
+			}
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &snapshot))
+			assert.Equal(t, tc.want, snapshot.Capabilities.Attachments)
+		})
+	}
 }
 
 func TestIssueLocalUISession(t *testing.T) {

@@ -171,7 +171,7 @@ func TestCapabilityCloseRequirementDoesNotDependOnPrincipal(t *testing.T) {
 	ownerLocal := context.WithValue(remote, ownerLocalTransportContextKey{}, true)
 
 	require.True(t, instanceAuthInfo(remote, ServerConfig{}).CloseRequiresEvidence)
-	require.True(t, effectiveUIPolicy(remote, ServerConfig{}).Capabilities.CloseRequiresEvidence)
+	require.True(t, effectiveUIPolicy(remote, ServerConfig{}, "").Capabilities.CloseRequiresEvidence)
 	require.False(t, instanceAuthInfo(ownerLocal, ServerConfig{}).CloseRequiresEvidence)
-	require.False(t, effectiveUIPolicy(ownerLocal, ServerConfig{}).Capabilities.CloseRequiresEvidence)
+	require.False(t, effectiveUIPolicy(ownerLocal, ServerConfig{}, "").Capabilities.CloseRequiresEvidence)
 }

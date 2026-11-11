@@ -401,12 +401,12 @@ func TestEffectiveUIPolicyUsesBrowserSessionPrincipal(t *testing.T) {
 
 	bootstrap := effectiveUIPolicy(WithPrincipal(t.Context(), Principal{
 		Kind: PrincipalBootstrap,
-	}), cfg)
+	}), cfg, "")
 	assert.False(t, bootstrap.Capabilities.Writable)
 
 	local := effectiveUIPolicy(WithPrincipal(t.Context(), Principal{
 		Kind: PrincipalWebLocal,
-	}), cfg)
+	}), cfg, "")
 	assert.True(t, local.Capabilities.Writable)
 }
 
