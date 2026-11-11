@@ -797,9 +797,10 @@ func TestFieldReconcileSavedSchedules(t *testing.T) {
 		assert.Zero(t, result.FieldConflicts)
 		issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
 		require.NoError(t, err)
-		_, zone, _, _, err := metadata.ScheduleFieldInstant(string(issue.Metadata), "scheduled_on", "Europe/Paris")
+		_, zone, instant, _, err := metadata.ScheduleFieldInstant(string(issue.Metadata), "scheduled_on", "Europe/Paris")
 		require.NoError(t, err)
 		assert.Equal(t, "America/New_York", zone)
+		assert.Equal(t, "2026-08-20T04:00:00Z", instant.UTC().Format(time.RFC3339))
 	})
 }
 
@@ -1092,6 +1093,7 @@ func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
 	for _, tc := range []struct {
 		name, issueTimezone, daemonTimezone string
 	}{
+		{"issue timezone", `"US/Eastern"`, "UTC"},
 		{"daemon timezone", ``, "US/Eastern"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

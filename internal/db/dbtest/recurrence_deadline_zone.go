@@ -1,7 +1,9 @@
 package dbtest
 
 import (
+	"archive/zip"
 	"encoding/json/jsontext"
+	"io/fs"
 	"testing"
 	"time"
 
@@ -13,25 +15,31 @@ import (
 // RunRecurrenceAttachmentKeepsDeadlineZone checks that attaching a recurrence preserves the deadline zone.
 func RunRecurrenceAttachmentKeepsDeadlineZone(t *testing.T, open func(*testing.T) db.Storage) {
 	for _, tc := range []struct {
-		name          string
-		issueZone     jsontext.Value
-		defaultZone   string
-		deadline      string
-		wantZone      string
-		localMismatch bool
+		name                 string
+		issueZone            jsontext.Value
+		defaultZone          string
+		deadline             string
+		wantZone             string
+		local, localMismatch bool
 	}{
-		{"issue zone", jsontext.Value(`"America/New_York"`), "UTC", `"2026-05-19T09:00"`, "America/New_York", false},
-		{"legacy Local instant", jsontext.Value(`"Local"`), "UTC", `"2026-05-19T09:00:00Z"`, "America/New_York", false},
-		{"legacy Local civil mismatched rules", jsontext.Value(`"Local"`), "Local", `"2026-05-19T09:00"`, "", true},
+		{"issue zone", jsontext.Value(`"America/New_York"`), "UTC", `"2026-05-19T09:00"`, "America/New_York", false, false},
+		{"legacy Local instant", jsontext.Value(`"Local"`), "UTC", `"2026-05-19T09:00:00Z"`, "America/New_York", true, false},
+		{"legacy Local civil mismatched rules", jsontext.Value(`"Local"`), "Local", `"2026-11-12T09:00"`, "", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.localMismatch || tc.name == "legacy Local instant" {
+			if tc.local {
 				previous := time.Local
 				location, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
 				require.NoError(t, err)
 				time.Local = location
 				if tc.localMismatch {
-					time.Local = time.FixedZone("America/New_York", -8*60*60)
+					archive, err := zip.OpenReader("../../metadata/testdata/zoneinfo-2026e-inuvik.zip")
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, archive.Close()) })
+					data, err := fs.ReadFile(archive, "America/Inuvik")
+					require.NoError(t, err)
+					time.Local, err = time.LoadLocationFromTZData("America/Inuvik", data)
+					require.NoError(t, err)
 				}
 				t.Cleanup(func() { time.Local = previous })
 			}

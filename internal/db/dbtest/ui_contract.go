@@ -1216,7 +1216,6 @@ func RunUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T, open func(*test
 	require.Equal(t, []string{visible.UID}, uiIssueUIDs(ready.Issues))
 	_, err = store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Limit: 2, CalendarAt: "2026-01-01T00:00:00Z"})
 	require.ErrorContains(t, err, "unsupported schedule tzdata version")
-
 }
 
 // RunUISnapshotBoundedCalendar checks that lower-ranked dates cannot expire a full result.

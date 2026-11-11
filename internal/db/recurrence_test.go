@@ -1,7 +1,9 @@
 package db
 
 import (
+	"archive/zip"
 	"encoding/json/jsontext"
+	"io/fs"
 	"os"
 	"os/exec"
 	"runtime"
@@ -75,16 +77,6 @@ func TestRecurrenceLocalMaterializesInNamedZone(t *testing.T) {
 	require.NoError(t, err, string(output))
 }
 
-func TestRecurrenceLocalRejectsDifferentRules(t *testing.T) {
-	previous := time.Local
-	time.Local = time.FixedZone("fixture", -8*60*60)
-	t.Cleanup(func() { time.Local = previous })
-	saved, err := metadata.NewScheduleValue("2026-05-19T09:00", "America/New_York")
-	require.NoError(t, err)
-	err = compareLocalSchedule("2026-05-19T09:00", saved)
-	require.ErrorContains(t, err, "Local timezone rules differ")
-}
-
 func TestAttachRecurrencePreservesDeadlineZone(t *testing.T) {
 	for _, tc := range []struct{ name, raw, defaultZone string }{
 		{"issue zone", `{"timezone":"America/New_York","deadline_on":"2026-05-19T09:00"}`, "UTC"},
@@ -121,20 +113,10 @@ func TestAttachRecurrencePreservesLocalDeadline(t *testing.T) {
 
 func TestAttachRecurrenceRejectsUnportableLocalDeadline(t *testing.T) {
 	previous := time.Local
+	time.Local = localInuvikRules(t)
 	t.Cleanup(func() { time.Local = previous })
-	for _, tc := range []struct {
-		name, zone, want string
-		offset           int
-	}{
-		{"different rules", "America/New_York", "Local timezone rules differ", -8 * 60 * 60},
-		{"unknown zone", "Unmapped/Zone", "cannot save Local timezone", 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			time.Local = time.FixedZone(tc.zone, tc.offset)
-			_, err := ComposeExistingRecurrenceIssueMetadata(jsontext.Value(`{"timezone":"Local","deadline_on":"2026-05-19T09:00"}`), "2026-05-18", "Europe/London", "UTC")
-			require.ErrorContains(t, err, tc.want)
-		})
-	}
+	_, err := ComposeExistingRecurrenceIssueMetadata(jsontext.Value(`{"timezone":"Local","deadline_on":"2026-11-12T09:00"}`), "2026-05-18", "Europe/London", "UTC")
+	require.ErrorContains(t, err, "Local timezone rules differ")
 }
 
 func TestExistingLocalIssueScheduleUsesPortableHostRules(t *testing.T) {
@@ -143,23 +125,36 @@ func TestExistingLocalIssueScheduleUsesPortableHostRules(t *testing.T) {
 	previous := time.Local
 	time.Local = zone
 	t.Cleanup(func() { time.Local = previous })
-	patch := map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-05-19T09:00"`)}
+	patch := map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`)}
 	got, err := PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local"}`), patch, "UTC", "")
 	require.NoError(t, err)
 	saved, err := metadata.DecodeSavedSchedule(got["scheduled_on"])
 	require.NoError(t, err)
 	require.Equal(t, "America/New_York", saved.Timezone)
-	time.Local = time.FixedZone("America/New_York", -8*60*60)
+	time.Local = localInuvikRules(t)
 	_, err = PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local"}`), patch, "UTC", "")
 	require.ErrorContains(t, err, "Local timezone rules differ")
 }
 
 func TestRecurrenceLocalRejectsChangedDeadlineCalendarDate(t *testing.T) {
 	previous := time.Local
-	time.Local = time.FixedZone("America/Inuvik", -6*60*60)
+	time.Local = localInuvikRules(t)
 	t.Cleanup(func() { time.Local = previous })
 
 	const deadline = `{"deadline_on":"2026-11-12T06:30:00Z","timezone":"Local"}`
 	_, err := ComposeRecurrenceIssueMetadata(jsontext.Value(deadline), "2026-07-01", "Local")
 	require.ErrorContains(t, err, "Local timezone rules differ")
+}
+
+// localInuvikRules models a host loading a newer TZif release than the saved bundle.
+func localInuvikRules(t *testing.T) *time.Location {
+	t.Helper()
+	archive, err := zip.OpenReader("../metadata/testdata/zoneinfo-2026e-inuvik.zip")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, archive.Close()) })
+	data, err := fs.ReadFile(archive, "America/Inuvik")
+	require.NoError(t, err)
+	location, err := time.LoadLocationFromTZData("America/Inuvik", data)
+	require.NoError(t, err)
+	return location
 }

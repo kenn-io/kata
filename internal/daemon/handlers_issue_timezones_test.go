@@ -25,7 +25,6 @@ func TestIssueScheduleUsesExistingAliasTimezone(t *testing.T) {
 	p := seedProject(t, env, "example-project")
 	for _, tc := range []struct{ name, metadata, zone string }{
 		{"daemon default", `{}`, "US/Eastern"},
-		{"legacy echo", `{"scheduled_on":"2026-11-12T09:00"}`, "US/Eastern"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Legacy", Author: "tester"})

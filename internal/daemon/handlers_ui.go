@@ -807,10 +807,7 @@ func snapshotIntervalETag(intent normalizedUISnapshotIntent, cursor int64, polic
 func matchingSnapshotETag(header string, intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, now time.Time) string {
 	for value := range strings.SplitSeq(header, ",") {
 		candidate := strings.TrimSpace(value)
-		if len(candidate) < 2 || candidate[0] != '"' || candidate[len(candidate)-1] != '"' {
-			continue
-		}
-		parts := strings.Split(candidate[1:len(candidate)-1], ".")
+		parts := strings.Split(strings.Trim(candidate, `"`), ".")
 		if len(parts) != 3 {
 			continue
 		}

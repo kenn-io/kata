@@ -138,20 +138,16 @@ func TestRowPlanningDatesKeepsAValidDateBesideANonStringOne(t *testing.T) {
 }
 
 func TestRowPlanningDatesReportsUnsupportedSchedule(t *testing.T) {
-	for _, tc := range []struct {
-		name, raw string
-		want      error
-		wantText  string
-	}{
-		{"unknown member", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}`, json.ErrUnknownName, ""},
-		{"unknown version", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, nil, "unsupported schedule tzdata version"},
+	for _, tc := range []struct{ name, raw string }{
+		{"unknown member", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}`},
+		{"unknown version", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, _, _, _, _, err := RowPlanningProjection(`{"scheduled_on":`+tc.raw+`}`, "", "", time.Time{})
-			if tc.want != nil {
-				require.ErrorIs(t, err, tc.want)
+			if tc.name == "unknown member" {
+				require.ErrorIs(t, err, json.ErrUnknownName)
 			} else {
-				require.ErrorContains(t, err, tc.wantText)
+				require.ErrorContains(t, err, "unsupported schedule tzdata version")
 			}
 		})
 	}
@@ -187,4 +183,15 @@ func TestEmptyScheduleProjectionUsesIssueZoneForRelativeEdits(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "2026-11-03", scheduledToday)
 	assert.Equal(t, "2026-11-03", deadlineToday)
+	t.Run("legacy Local", func(t *testing.T) {
+		loc, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
+		require.NoError(t, err)
+		previous := time.Local
+		time.Local = loc
+		t.Cleanup(func() { time.Local = previous })
+		_, _, scheduledToday, deadlineToday, _, _, err := RowPlanningProjection(`{"timezone":"Local"}`, "UTC", "UTC", time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC))
+		require.NoError(t, err)
+		assert.Equal(t, "2025-12-31", scheduledToday)
+		assert.Equal(t, "2025-12-31", deadlineToday)
+	})
 }

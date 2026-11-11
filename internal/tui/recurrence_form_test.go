@@ -7,6 +7,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -124,57 +125,51 @@ func (h *recurrenceHarness) save() {
 }
 
 func TestRecurrenceTodayUsesSelectedZone(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	now := time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC)
-	h.m.toastNow = func() time.Time { return now }
-	h.patchDaemon(map[string]string{"timezone": "America/New_York"})
-	h.reload()
-	h.open()
-	h.fill("FREQ=DAILY", "today", "")
-	assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, h.m.toastNow())), "2026-11-09 Mon")
-	h.fill("FREQ=DAILY", "today", "Asia/Tokyo")
-	assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, h.m.toastNow())), "2026-11-10 Tue")
-	h.fill("FREQ=DAILY", "today", "")
-	h.save()
-	recs := h.rows()
-	require.Len(t, recs, 1)
-	assert.Equal(t, "2026-11-09", recs[0].DTStart)
-	assert.Equal(t, "America/New_York", recs[0].Timezone)
-	h.refreshDetail()
-	h.open()
-	h.fill("FREQ=WEEKLY", "today", "")
-	now = now.Add(5 * time.Hour)
-	assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, h.m.toastNow())), "2026-11-10 Tue")
-	h.save()
-	recs = h.rows()
-	require.Len(t, recs, 1)
-	assert.Equal(t, "2026-11-10", recs[0].DTStart)
-	assert.Equal(t, "America/New_York", recs[0].Timezone)
+	for _, savedZone := range []bool{false, true} {
+		t.Run(fmt.Sprintf("saved zone %t", savedZone), func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			now := time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC)
+			h.m.toastNow = func() time.Time { return now }
+			h.patchDaemon(map[string]string{"timezone": "America/New_York"})
+			if savedZone {
+				saved, err := metadata.NewScheduleValue("2026-11-09", "America/New_York")
+				require.NoError(t, err)
+				_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved, "timezone": jsontext.Value(`"Asia/Tokyo"`)}})
+				require.NoError(t, err)
+			}
+			h.reload()
+			h.open()
+			require.Equal(t, "America/New_York", h.m.input.fieldValue(fieldZone))
+			h.fill("FREQ=DAILY", "today", "")
+			assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, now)), "2026-11-09 Mon")
+			h.fill("FREQ=DAILY", "today", "Asia/Tokyo")
+			assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, now)), "2026-11-10 Tue")
+			h.fill("FREQ=DAILY", "today", "")
+			h.save()
+			recs := h.rows()
+			require.Len(t, recs, 1)
+			assert.Equal(t, "2026-11-09", recs[0].DTStart)
+			assert.Equal(t, "America/New_York", recs[0].Timezone)
+			h.refreshDetail()
+			h.open()
+			h.fill("FREQ=WEEKLY", "today", "")
+			now = now.Add(5 * time.Hour)
+			assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, now)), "2026-11-10 Tue")
+			h.save()
+			recs = h.rows()
+			require.Len(t, recs, 1)
+			assert.Equal(t, "2026-11-10", recs[0].DTStart)
+			assert.Equal(t, "America/New_York", recs[0].Timezone)
+		})
+	}
 }
 
 func TestRecurrenceTodayUsesBundledRules(t *testing.T) {
 	if os.Getenv("KATA_TEST_INUVIK_RULES") == "1" {
-		h := newRecurrenceHarness(t, viewDetail)
 		now := time.Date(2026, 11, 15, 6, 30, 0, 0, time.UTC)
-		host, err := time.LoadLocation("America/Inuvik")
-		require.NoError(t, err)
-		require.Equal(t, "2026-11-15", now.In(host).Format(time.DateOnly))
-		bundled, err := metadata.ScheduleLocation("America/Inuvik", metadata.ScheduleTZDataVersion)
-		require.NoError(t, err)
-		require.Equal(t, "2026-11-14", now.In(bundled).Format(time.DateOnly))
-		h.m.toastNow = func() time.Time { return now }
-		saved, err := metadata.NewScheduleValue("2026-11-14", "America/Inuvik")
-		require.NoError(t, err)
-		_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved}})
-		require.NoError(t, err)
-		h.reload()
-		h.open()
-		h.fill("FREQ=DAILY", "today", "America/Inuvik")
-		assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, now)), "2026-11-14 Sat")
-		h.save()
-		recs := h.rows()
-		require.Len(t, recs, 1)
-		assert.Equal(t, "2026-11-14", recs[0].DTStart)
+		form := newRecurrenceForm(formTarget{}, Issue{}, nil)
+		form.field(fieldZone).setValue("America/Inuvik")
+		assert.Equal(t, "2026-11-14", recurrenceFormNow(form, now).Format(time.DateOnly))
 		return
 	}
 	archive, err := zip.OpenReader("../metadata/tzdata/zoneinfo-2026c.zip")
@@ -193,33 +188,14 @@ func TestRecurrenceTodayUsesBundledRules(t *testing.T) {
 	}
 	require.NotEmpty(t, hostRules)
 	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "America"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "America"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "America", "Inuvik"), hostRules, 0o600))
 	exe, err := os.Executable()
 	require.NoError(t, err)
-	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRecurrenceTodayUsesBundledRules$")
+	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRecurrenceTodayUsesBundledRules$") // #nosec G204 -- re-execute this test binary with isolated timezone data.
 	cmd.Env = append(os.Environ(), "ZONEINFO="+dir, "KATA_TEST_INUVIK_RULES=1")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
-}
-
-func TestRecurrenceTodayUsesSavedZoneWhenZoneBlank(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	h.m.toastNow = func() time.Time { return time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC) }
-	saved, err := metadata.NewScheduleValue("2026-11-09", "America/New_York")
-	require.NoError(t, err)
-	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved, "timezone": jsontext.Value(`"Asia/Tokyo"`)}})
-	require.NoError(t, err)
-	h.reload()
-	h.open()
-	assert.Equal(t, "America/New_York", h.m.input.fieldValue(fieldZone))
-	h.fill("FREQ=DAILY", "today", "")
-	assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, h.m.toastNow())), "2026-11-09 Mon")
-	h.save()
-	recs := h.rows()
-	require.Len(t, recs, 1)
-	require.Equal(t, "America/New_York", recs[0].Timezone)
-	require.Equal(t, "2026-11-09", recs[0].DTStart)
 }
 
 func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {

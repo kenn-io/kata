@@ -93,7 +93,7 @@ func (c *uiSnapshotCache) put(key string, data db.UISnapshotData, dependencies [
 	c.entries[key] = uiSnapshotAuthorityCacheEntry{
 		data:         c.clone(data),
 		dependencies: slices.Clone(dependencies),
-		createdAt:    now,
+		createdAt:    now.Round(0),
 		expiresAt:    expiresAt,
 		sequence:     c.sequence,
 	}

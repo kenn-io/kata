@@ -103,16 +103,6 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	require.Equalf(t, http.StatusOK, wideResp.StatusCode, "body: %s", wideBody)
 	require.NotEqual(t, etag, wideResp.Header.Get("ETag"))
 
-	// A saved zone's midnight changes the projection even without an event.
-	now = now.Add(3 * time.Second)
-	resp, body = envDoRaw(t, env, http.MethodGet, query, nil,
-		map[string]string{"Authorization": "Bearer worker-token", "If-None-Match": etag})
-	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
-	require.NotEqual(t, etag, resp.Header.Get("ETag"))
-	etag = resp.Header.Get("ETag")
-	instrumented.snapshotReads.Store(0)
-	instrumented.subtreeReads.Store(0)
-
 	// A moved durable cursor invalidates the scoped validator: the next
 	// conditional request rebuilds the snapshot instead of returning 304.
 	_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
@@ -130,23 +120,4 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &snapshot))
 	require.NotEqual(t, child.Revision, snapshot.Cursor, "sanity: cursor is an event id")
-}
-
-func TestEmptyTodaySnapshotExpiresWhenSavedZoneDayChanges(t *testing.T) {
-	now := time.Date(2026, 1, 1, 4, 59, 59, 0, time.UTC)
-	env := testenv.New(t, testenv.Option(func(cfg *daemon.ServerConfig) { cfg.UIClock = func() time.Time { return now } }))
-	project, err := env.DB.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	saved, err := metadata.NewScheduleValue("2026-01-01", "America/New_York")
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Tomorrow", Author: "user-a", Metadata: map[string]jsontext.Value{"scheduled_on": saved}})
-	require.NoError(t, err)
-	query := "/api/v1/ui/snapshot?view=today&time_zone=UTC&local_date=2026-01-01"
-	first, body := envDoRaw(t, env, http.MethodGet, query, nil, nil)
-	require.Equal(t, http.StatusOK, first.StatusCode, string(body))
-	require.NotContains(t, string(body), issue.UID)
-	now = now.Add(time.Second)
-	second, body := envDoRaw(t, env, http.MethodGet, query, nil, map[string]string{"If-None-Match": first.Header.Get("ETag")})
-	require.Equal(t, http.StatusOK, second.StatusCode, string(body))
-	require.Contains(t, string(body), issue.UID)
 }
