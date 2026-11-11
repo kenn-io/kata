@@ -61,6 +61,17 @@ func TestLocalEmbeddingsRestartOnce(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
+func TestLocalEmbeddingsRestartWithoutCallback(t *testing.T) {
+	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nbase_url = \"https://embeddings.example/v1\"\nmodel = \"model\"\ndims = 768\n"))
+	require.NoError(t, err)
+	setup := &localEmbeddingsSetup{embeddings: cfg.Embeddings, job: &api.LocalEmbeddingsJob{State: "restart"}}
+	status, err := setup.Status(t.Context())
+	require.NoError(t, err)
+	require.False(t, status.CanRestart)
+	require.ErrorIs(t, setup.Restart(t.Context()), daemon.ErrLocalEmbeddingsBusy)
+	require.Equal(t, "restart", setup.job.State)
+}
+
 func TestLocalEmbeddingsRestartFailureCanRetry(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	t.Setenv("HOME", t.TempDir())

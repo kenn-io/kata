@@ -17,7 +17,12 @@ function status(patch: Partial<LocalEmbeddingsStatus> = {}): LocalEmbeddingsStat
 }
 
 function renderSettings(
-  props: { canAdministerDaemon?: boolean; postFetch?: typeof fetch; originStable?: boolean } = {},
+  props: {
+    canAdministerDaemon?: boolean
+    postFetch?: typeof fetch
+    originStable?: boolean
+    remoteHost?: string
+  } = {},
 ) {
   return render(SearchSettings, {
     props: { canAdministerDaemon: true, onback: vi.fn(), postFetch: fetch, ...props },
@@ -72,7 +77,7 @@ describe('SearchSettings', () => {
     expect(screen.getByText(/run kata daemon restart/)).not.toBeNull()
   })
 
-  test('sends a single restart request after confirmation', async () => {
+  test('sends a single restart request after confirmation on a named origin', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
       vi.fn(async () =>
@@ -86,7 +91,7 @@ describe('SearchSettings', () => {
       'confirm',
       vi.fn(() => true),
     )
-    renderSettings({ postFetch })
+    renderSettings({ postFetch, remoteHost: 'daemon.example' })
     await settle()
     const button = screen.getByRole('button', { name: 'Restart daemon' })
     await fireEvent.click(button)

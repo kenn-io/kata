@@ -1680,7 +1680,7 @@ func runDaemonProcess(
 		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
 		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
 	}
-	if restart != nil && requireRestartable([]kitdaemon.RuntimeRecord{rec}) == nil {
+	if restart != nil {
 		localSetup.restart = func() error {
 			var output bytes.Buffer
 			// The caller must hold the start lock after this daemon shuts down.

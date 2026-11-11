@@ -67,7 +67,7 @@
     off: restartPending || job?.state === 'restarting' ? 'Restarting...' : 'Turning on',
     turnOn: 'Restart daemon',
     downloaded:
-      (status?.can_restart || job?.state === 'restarting') && canAdministerDaemon && !remoteHost
+      (status?.can_restart || job?.state === 'restarting') && canAdministerDaemon
         ? originStable
           ? ''
           : 'After restart, run kata ui to reopen. If this daemon uses a custom home, set KATA_HOME to it first.'
@@ -84,7 +84,7 @@
   // The borrowed state offers an action only when restart is available.
   let readonly = $derived(
     restarting
-      ? !(status?.can_restart && canAdministerDaemon && !remoteHost && !restartPending)
+      ? !(status?.can_restart && canAdministerDaemon && !restartPending)
       : turning || !(status?.can_change && canAdministerDaemon),
   )
 
