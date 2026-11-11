@@ -11,7 +11,7 @@ import (
 // daemonRecoveryAdvice presents the evidence retained by discovery and the
 // recovery commands that fit the launch mode.
 func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, profile, goos string) string {
-	advice := fmt.Sprintf("This probe failed, so read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log"))
+	advice := fmt.Sprintf("Read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log"))
 	if e.WebOrigin != "" {
 		advice += fmt.Sprintf(". If %[1]s responds, capture %[1]s/debug/pprof/goroutine?debug=2 with daemon-owner access, using the owner's credential when authentication is configured", e.WebOrigin)
 	}
