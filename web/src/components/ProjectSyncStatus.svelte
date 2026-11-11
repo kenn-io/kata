@@ -56,7 +56,6 @@
         queued = true
         return
       }
-      error = false
       loading = manual || !hasResult
       reading = true
       const abort = new AbortController()
@@ -87,6 +86,7 @@
         })
         if (abort.signal.aborted || disposed) return
         ;({ status, stale } = result)
+        error = false
         hasResult = true
       } catch {
         if (!abort.signal.aborted && !disposed) {

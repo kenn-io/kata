@@ -178,6 +178,34 @@ describe('ProjectSyncStatus', () => {
     expect(screen.queryByText('Sync status may be out of date.')).toBeNull()
   })
 
+  it('warns after a local project refresh times out while another cycle is queued', async () => {
+    let resolveRetry!: (value: Response) => void
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ statuses: [] }))
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveRetry = resolve
+          }),
+      )
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Local project')
+    vi.useFakeTimers()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(screen.getByText('Sync status unavailable. Refresh to retry.')).not.toBeNull()
+    expect(screen.queryByText('Local project')).toBeNull()
+    resolveRetry(Response.json({ statuses: [] }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByText('Local project')).not.toBeNull()
+  })
+
   it('disables refresh while a denied response body is stalled, then retries', async () => {
     let closeBody!: () => void
     const body = new ReadableStream({
