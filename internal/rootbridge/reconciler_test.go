@@ -1142,7 +1142,7 @@ func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
 }
 
 func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
-	t.Run("first dates use the recurrence zone for scheduled only", func(t *testing.T) {
+	t.Run("first dates retain their effective schedule zones", func(t *testing.T) {
 		previous := time.Local
 		loc, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
 		require.NoError(t, err)
@@ -1150,8 +1150,13 @@ func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 		t.Cleanup(func() { time.Local = previous })
 		for _, tc := range []struct {
 			legacy, clearZone bool
-			zone              string
-		}{{false, true, "America/New_York"}, {true, true, "America/New_York"}, {false, false, "Local"}, {false, true, "Local"}} {
+			zone, deadline    string
+		}{
+			{false, true, "America/New_York", "2026-08-21T00:00:00Z"},
+			{true, true, "America/New_York", "2026-08-21T00:00:00Z"},
+			{false, false, "Local", "2026-08-21T04:00:00Z"},
+			{false, true, "Local", "2026-08-21T00:00:00Z"},
+		} {
 			t.Run(fmt.Sprintf("%s/legacy_%t/clear_%t", tc.zone, tc.legacy, tc.clearZone), func(t *testing.T) {
 				h := newReconcileHarness(t)
 				h.mapField(t, "scheduled_on", "start-date")
@@ -1186,18 +1191,14 @@ func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 				require.Zero(t, result.FieldConflicts)
 				issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
 				require.NoError(t, err)
-				deadlineAt := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
-				if !tc.clearZone {
-					deadlineAt = deadlineAt.Add(4 * time.Hour)
-				}
-				for key, want := range map[string]time.Time{
-					"scheduled_on": time.Date(2026, 8, 21, 4, 0, 0, 0, time.UTC),
-					"deadline_on":  deadlineAt,
+				for key, want := range map[string]string{
+					"scheduled_on": "2026-08-21T04:00:00Z",
+					"deadline_on":  tc.deadline,
 				} {
 					_, _, at, present, err := metadata.ScheduleFieldInstant(string(issue.Metadata), key, "UTC")
 					require.NoError(t, err)
 					require.True(t, present)
-					assert.Equal(t, want, at.UTC(), key)
+					assert.Equal(t, want, at.UTC().Format(time.RFC3339), key)
 				}
 			})
 		}

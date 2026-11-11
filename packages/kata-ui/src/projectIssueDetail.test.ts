@@ -19,17 +19,17 @@ function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
 
 describe('projectIssueDetail', () => {
   it.each([
-    ['legacy', '2026-11-12T09:30', '2026-11-12T09:30'],
-    ['saved', { value: '2026-11-12T09:30', timezone: 'America/New_York', tzdata_version: tzdataVersion }, '2026-11-12T09:30'],
-    ['legacy instant', '2026-01-01T02:00:00Z', '2026-01-01T02:00:00Z'],
-  ])('retains the time in %s schedules', (_name, value, expected) => {
+    ['legacy', '2026-11-12T09:30', '2026-11-12', '2026-11-12T09:30'],
+    ['saved', { value: '2026-11-12T09:30', timezone: 'America/New_York', tzdata_version: tzdataVersion }, '2026-11-12', '2026-11-12T09:30'],
+    ['legacy instant', '2026-01-01T02:00:00Z', '2026-01-01', '2026-01-01T02:00:00Z'],
+  ])('retains the time in %s schedules', (_name, value, date, expected) => {
     const detail = projectIssueDetail({
       issue: {
         uid: '01TASK',
         title: 'Scheduled',
         status: 'open',
-        scheduled_on_date: '2026-11-12',
-        deadline_on_date: '2026-11-12',
+        scheduled_on_date: date,
+        deadline_on_date: date,
         metadata: { scheduled_on: value, deadline_on: value },
       },
     })

@@ -154,21 +154,24 @@ func FuzzRecurringMetadataFeatures(f *testing.F) {
 
 func TestSchedulePayloadFeatures(t *testing.T) {
 	for _, tc := range []struct {
-		name, kind, payload    string
-		wantFeature, wantError bool
+		name, kind, payload string
+		wantFeature         bool
+		wantErr             error
 	}{
-		{"created", "issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, false},
-		{"snapshot", "issue.snapshot", `{"metadata":{"deadline_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, false},
-		{"updated", "issue.metadata_updated", `{"diff":{"deadline_on":{"from":null,"to":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}}`, true, false},
-		{"projection", "projection.issue", `{"metadata":{"deadline_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, false},
-		{"moved", "issue.moved", `{"snapshot":{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}}`, true, false},
-		{"unknown rules", "issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"unknown"}}}`, false, true},
-		{"opaque legacy", "issue.created", `{"metadata":{"scheduled_on":{"value":"opaque"}}}`, false, false},
+		{"created", "issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, nil},
+		{"snapshot", "issue.snapshot", `{"metadata":{"deadline_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, nil},
+		{"updated", "issue.metadata_updated", `{"diff":{"deadline_on":{"from":null,"to":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}}`, true, nil},
+		{"projection", "projection.issue", `{"metadata":{"deadline_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, nil},
+		{"moved", "issue.moved", `{"snapshot":{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}}`, true, nil},
+		{"unknown rules", "issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"unknown"}}}`, false, metadata.ErrUnsupportedScheduleTZData},
+		{"unknown member", "issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}}}`, false, db.ErrUnsupportedEventFeatures},
+		{"opaque legacy", "issue.created", `{"metadata":{"scheduled_on":{"value":"opaque"}}}`, false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := db.PayloadRequiredFeatures(tc.kind, tc.payload)
-			if tc.wantError {
-				require.ErrorContains(t, err, "unsupported schedule tzdata version")
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+				require.ErrorIs(t, err, tc.wantErr)
 				return
 			}
 			require.NoError(t, err)
@@ -184,9 +187,4 @@ func TestSchedulePayloadFeatures(t *testing.T) {
 			}
 		})
 	}
-	t.Run("unknown member", func(t *testing.T) {
-		payload := `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}}}`
-		_, err := db.PayloadRequiredFeatures("issue.created", payload)
-		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	})
 }

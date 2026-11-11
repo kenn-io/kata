@@ -22,7 +22,7 @@ func RunRecurrenceAttachmentKeepsDeadlineZone(t *testing.T, open func(*testing.T
 		wantZone             string
 		local, localMismatch bool
 	}{
-		{"issue zone", jsontext.Value(`"America/New_York"`), "UTC", `"2026-05-19T09:00"`, "America/New_York", false, false},
+		{"daemon zone", nil, "America/New_York", `"2026-05-19T09:00"`, "America/New_York", false, false},
 		{"legacy Local instant", jsontext.Value(`"Local"`), "UTC", `"2026-05-19T09:00:00Z"`, "America/New_York", true, false},
 		{"legacy Local civil mismatched rules", jsontext.Value(`"Local"`), "Local", `"2026-11-12T09:00"`, "", true, true},
 	} {

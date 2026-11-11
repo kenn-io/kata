@@ -2,7 +2,6 @@ package daemon_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -103,15 +102,12 @@ func TestIssuePortableTimezoneTransactionCurrent(t *testing.T) {
 		server := httptest.NewServer(d.Handler())
 		t.Cleanup(server.Close)
 		env := &testenv.Env{URL: server.URL, HTTP: server.Client()}
-		exec := store.(interface {
-			ExecContext(context.Context, string, ...any) (sql.Result, error)
-		}).ExecContext
 		p, err := store.CreateProject(t.Context(), "example-project")
 		require.NoError(t, err)
 		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Example", Author: "tester", Metadata: map[string]jsontext.Value{"timezone": jsontext.Value(`"UTC"`)}})
 		require.NoError(t, err)
-		storage.before = func(ctx context.Context, _ int64) error {
-			_, err := exec(ctx, `UPDATE issues SET metadata = '{"timezone":"Europe/Paris"}' WHERE id = $1`, issue.ID)
+		storage.before = func(_ context.Context, _ int64) error {
+			_, err := store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"timezone": jsontext.Value(`"Europe/Paris"`)}})
 			return err
 		}
 		path := fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID)
@@ -123,7 +119,7 @@ func TestIssuePortableTimezoneTransactionCurrent(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, present)
 		require.Equal(t, "Europe/Paris", zone)
-		require.Equal(t, issue.Revision+1, after.Revision)
+		require.Equal(t, issue.Revision+2, after.Revision)
 
 	})
 }

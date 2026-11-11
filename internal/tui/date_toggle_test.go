@@ -42,19 +42,6 @@ func shortIDs(issues []Issue) []string {
 	return out
 }
 
-func TestDateToggleUsesScheduleDay(t *testing.T) {
-	for _, field := range []string{"scheduled_on", "deadline_on"} {
-		issue := dated("tokyo", "", "")
-		if field == "scheduled_on" {
-			issue.ScheduledOnDate, issue.ScheduledOnToday = "2026-01-01", "2026-01-01"
-		} else {
-			issue.DeadlineOnDate, issue.DeadlineOnToday = "2026-01-01", "2026-01-01"
-		}
-		require.True(t, matchesDate(issue, ListFilter{Date: dateToday, Day: "2025-12-31"}), field)
-		require.False(t, matchesDate(issue, ListFilter{Date: dateScheduled, Day: "2025-12-31"}), field)
-	}
-}
-
 func TestDateToggleSavedAndLegacyZoneMidnightKeepsSelection(t *testing.T) {
 	for _, legacy := range []bool{false, true} {
 		t.Run(fmt.Sprintf("legacy %t", legacy), func(t *testing.T) {
@@ -202,12 +189,21 @@ func TestDateToggle_TodayAndScheduledSplitOnLocalDay(t *testing.T) {
 	instant := time.Date(2026, 11, 10, 23, 30, 0, 0, time.UTC)
 	closed := dated("done", "2026-11-01", "2026-11-01")
 	closed.Status = "closed"
+	scheduledTokyo := dated("scheduled-tokyo", "2026-01-01", "")
+	scheduledTokyo.ScheduledOnToday = "2026-01-01"
+	deadlineTokyo := dated("deadline-tokyo", "", "2026-01-01")
+	deadlineTokyo.DeadlineOnToday = "2026-01-01"
 	for _, tc := range []struct {
 		name             string
 		now              time.Time
 		issues           []Issue
 		today, scheduled []string
 	}{
+		{
+			name: "saved schedule days differ from local day", now: time.Date(2025, 12, 31, 12, 0, 0, 0, time.UTC),
+			issues: []Issue{scheduledTokyo, deadlineTokyo},
+			today:  []string{"scheduled-tokyo", "deadline-tokyo"}, scheduled: []string{},
+		},
 		{
 			name: "scheduled and deadline dates", now: instant,
 			issues: []Issue{
@@ -607,7 +603,7 @@ func TestLegacyDateDoesNotRefetchIdleList(t *testing.T) {
 	m.list.issues = []Issue{issue}
 	api := &legacyCountingAPI{}
 	m.api = api
-	for minute := 0; minute < 3; minute++ {
+	for minute := range 3 {
 		_, cmd := m.refreshPlanningDay(time.Date(2026, 11, 11, 12, minute, 0, 0, time.UTC))
 		runCmdTree(cmd)
 	}
@@ -622,7 +618,7 @@ func TestEnablingDateFilterRefreshesLegacyRows(t *testing.T) {
 	updated := issue
 	updated.ScheduledOnToday = "2026-11-12"
 	m.list.issues = []Issue{issue}
-	api := &legacyCountingAPI{legacyDayAPI: legacyDayAPI{issues: []Issue{updated}}}
+	api := &legacyCountingAPI{issues: []Issue{updated}}
 	m.api = api
 	form := newFilterForm(ListFilter{}, m.scope)
 	form.field(fieldDate).radio.set(dateToday)

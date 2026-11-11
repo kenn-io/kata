@@ -234,27 +234,38 @@ func TestCronClientDoesNotAssumeFutureEventsAreLegacy(t *testing.T) {
 	require.Zero(t, requests, "future events require an explicit wire mapping before publication")
 }
 
-func TestCronClientRefusesPublicationToOldHub(t *testing.T) {
-	var posts int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodPost {
-			posts++
-			_, _ = w.Write([]byte(`{"accepted":1,"push_cursor_event_id":10}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"project_id":1,"project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","replay_horizon_event_id":1,"baseline_through_event_id":1}`))
-	}))
-	defer server.Close()
-	client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
-	require.NoError(t, err)
-	_, err = client.IngestProjectEvents(t.Context(), 1, []api.FederationIngestEventEnvelope{{EventID: 10, Type: "cron.job.created"}})
-	require.Error(t, err)
-	require.Zero(t, posts, "publication requires positive hub support before POST")
+func TestClientRefusesPublicationToOldHub(t *testing.T) {
 	saved := `{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}`
-	_, err = client.IngestProjectEvents(t.Context(), 1, []api.FederationIngestEventEnvelope{{Type: "issue.snapshot", Payload: jsontext.Value(`{"metadata":{"deadline_on":` + saved + `}}`)}})
-	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	require.Zero(t, posts)
+	for _, tc := range []struct {
+		name              string
+		event             api.FederationIngestEventEnvelope
+		wantScheduleError bool
+	}{
+		{"cron", api.FederationIngestEventEnvelope{EventID: 10, Type: "cron.job.created"}, false},
+		{"schedule", api.FederationIngestEventEnvelope{Type: "issue.snapshot", Payload: jsontext.Value(`{"metadata":{"deadline_on":` + saved + `}}`)}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var posts int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodPost {
+					posts++
+					_, _ = w.Write([]byte(`{"accepted":1,"push_cursor_event_id":10}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"project_id":1,"project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","replay_horizon_event_id":1,"baseline_through_event_id":1}`))
+			}))
+			t.Cleanup(server.Close)
+			client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
+			require.NoError(t, err)
+			_, err = client.IngestProjectEvents(t.Context(), 1, []api.FederationIngestEventEnvelope{tc.event})
+			require.Error(t, err)
+			if tc.wantScheduleError {
+				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			}
+			require.Zero(t, posts, "publication requires positive hub support before POST")
+		})
+	}
 }
 
 func TestPushOnlyEnrollmentCanPublishCronEvents(t *testing.T) {

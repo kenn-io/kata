@@ -150,18 +150,24 @@ func TestRecurrenceTodayUsesSelectedZone(t *testing.T) {
 			require.Len(t, recs, 1)
 			assert.Equal(t, "2026-11-09", recs[0].DTStart)
 			assert.Equal(t, "America/New_York", recs[0].Timezone)
-			h.refreshDetail()
-			h.open()
-			h.fill("FREQ=WEEKLY", "today", "")
-			now = now.Add(5 * time.Hour)
-			assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, now)), "2026-11-10 Tue")
-			h.save()
-			recs = h.rows()
-			require.Len(t, recs, 1)
-			assert.Equal(t, "2026-11-10", recs[0].DTStart)
-			assert.Equal(t, "America/New_York", recs[0].Timezone)
 		})
 	}
+}
+
+func TestRecurrenceTodayAdvancesAtSavedZoneMidnight(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	now := time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC)
+	h.m.toastNow = func() time.Time { return now }
+	h.startBehindTheTUI("FREQ=DAILY", "2026-11-09", "America/New_York")
+	h.open()
+	h.fill("FREQ=WEEKLY", "today", "")
+	now = now.Add(5 * time.Hour)
+	assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, now)), "2026-11-10 Tue")
+	h.save()
+	recs := h.rows()
+	require.Len(t, recs, 1)
+	assert.Equal(t, "2026-11-10", recs[0].DTStart)
+	assert.Equal(t, "America/New_York", recs[0].Timezone)
 }
 
 func TestRecurrenceTodayUsesBundledRules(t *testing.T) {
