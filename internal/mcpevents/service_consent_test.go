@@ -2,6 +2,7 @@ package mcpevents_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"strconv"
@@ -146,6 +147,31 @@ func TestEndpointConsent(t *testing.T) {
 			_, err := h.subscribe(principalA, h.request("example-user/other"))
 			_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
 			assert.EqualValues(t, 1, h.recv.challenges.Load())
+		})
+
+		t.Run("refresh rechecks current destinations", func(t *testing.T) {
+			h := newHarness(t, open(t))
+			req := h.request("example-user")
+			req.TTLMS = mcpevents.TTLNull()
+			result := h.mustSubscribe(req)
+			before := h.row(result.ID)
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
+			})
+			_, err := h.subscribe(principalA, req)
+			_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
+			assert.Equal(t, before, h.row(result.ID))
+		})
+		t.Run("refresh permits a DNS outage", func(t *testing.T) {
+			h := newHarness(t, open(t))
+			req := h.request("example-user")
+			req.TTLMS = mcpevents.TTLNull()
+			h.mustSubscribe(req)
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				return nil, errors.New("private resolver details")
+			})
+			_, err := h.subscribe(principalA, req)
+			require.NoError(t, err)
 		})
 
 		t.Run("recent consent after a failed commit rechecks destinations", func(t *testing.T) {
