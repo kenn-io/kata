@@ -19,7 +19,7 @@ func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.
 }
 
 func TestFederationRebuildRetriesChangedRows(t *testing.T) {
-	for _, change := range []string{"issue", "comment", "label", "link"} {
+	for _, change := range []string{"priority", "comment", "label", "link"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, project, issue := incrementalTestStore(t)
@@ -42,8 +42,8 @@ func TestFederationRebuildRetriesChangedRows(t *testing.T) {
 					return
 				}
 				switch change {
-				case "issue":
-					_, err = writer.ExecContext(ctx, `UPDATE issues SET title='changed', priority=1.5 WHERE id=?`, issue.ID)
+				case "priority":
+					_, err = writer.ExecContext(ctx, `UPDATE issues SET priority=1.5 WHERE id=?`, issue.ID)
 				case "comment":
 					_, err = writer.ExecContext(ctx, `UPDATE comments SET body='changed' WHERE id=?`, comment.ID)
 				case "label":
