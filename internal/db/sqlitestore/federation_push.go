@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -53,13 +52,6 @@ func (d *Store) PendingFederationPushEvents(
 		break
 	}
 	if len(out) == limit && len(out) > 0 && db.IsFederationSnapshotEvent(out[len(out)-1].Type) {
-		runStartAfterID := afterID
-		for _, o := range slices.Backward(out) {
-			if !db.IsFederationSnapshotEvent(o.Type) {
-				runStartAfterID = o.ID
-				break
-			}
-		}
 		extra, err := d.queryPendingFederationPushEvents(ctx, `
 			WHERE e.project_id = ?
 			  AND e.origin_instance_uid = ?
@@ -75,7 +67,7 @@ func (d *Store) PendingFederationPushEvents(
 			       AND `+federationPushEventTypeCondition("barrier.type")+`
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  ), 9223372036854775807)
-			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
+			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, out[len(out)-1].ID)
 		if err != nil {
 			return nil, err
 		}

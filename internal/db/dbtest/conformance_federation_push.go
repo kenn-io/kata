@@ -181,6 +181,27 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.Len(t, pending, 4)
 	require.Equal(t, []string{uids[0], uids[1], uids[3], uids[4]}, []string{pending[0].UID, pending[1].UID, pending[2].UID, pending[3].UID})
+	retryProject, err := store.CreateProject(ctx, "snapshot-retry")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: retryProject.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 2, HubProjectUID: retryProject.UID, PushEnabled: true, Actor: "tester", Enabled: true})
+	require.NoError(t, err)
+	metadata, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: retryProject.ID, IfMatchRev: new(retryProject.Revision), Actor: "tester", Patch: map[string]jsontext.Value{"area": jsontext.Value(`"ops"`)}})
+	require.NoError(t, err)
+	require.NoError(t, store.RecordFederationPushAccepted(ctx, retryProject.ID, []int64{metadata.Event.ID}))
+	var snapshots []string
+	for i := range 1001 {
+		event := newRemoteEvent(t, retryProject, &issue.UID, "issue.snapshot", "tester", store.InstanceUID(), int64(200+i), jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"work","author":"tester","status":"open"}`, issue.UID)))
+		_, err := store.InsertRemoteEvent(ctx, retryProject.ID, event)
+		require.NoError(t, err)
+		snapshots = append(snapshots, event.EventUID)
+	}
+	pending, err = store.PendingFederationPushEvents(ctx, retryProject.ID, store.InstanceUID(), 0, 1000)
+	require.NoError(t, err)
+	var retryUIDs []string
+	for _, event := range pending {
+		retryUIDs = append(retryUIDs, event.UID)
+	}
+	require.Equal(t, snapshots, retryUIDs, "accepted metadata must not truncate the remaining snapshot run")
 	return nil
 }
 

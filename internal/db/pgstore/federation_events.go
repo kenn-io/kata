@@ -6,7 +6,6 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -68,13 +67,6 @@ ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 		break
 	}
 	if len(output) == limit && len(output) > 0 && db.IsFederationSnapshotEvent(output[len(output)-1].Type) {
-		runStartAfterID := afterID
-		for _, o := range slices.Backward(output) {
-			if !db.IsFederationSnapshotEvent(o.Type) {
-				runStartAfterID = o.ID
-				break
-			}
-		}
 		extra, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
 WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id) AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
   AND e.id <= COALESCE((
@@ -85,7 +77,7 @@ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND NOT EXISTS (S
        AND `+pgFederationPushEventTypeCondition("barrier.type")+`
        AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
   ), 9223372036854775807)
-ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, runStartAfterID)
+ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, output[len(output)-1].ID)
 		if err != nil {
 			return nil, err
 		}

@@ -437,7 +437,7 @@ func interruptedFederationReset(ctx context.Context, store db.Storage, projectID
 	return nil, nil
 }
 
-// pendingFederationPushEvents loads the next push events, first marking project events that predate an
+// pendingFederationPushEvents loads the next push events, first marking events that predate an
 // interrupted reset as due for local replay so advancing the push cursor cannot hide them.
 func pendingFederationPushEvents(
 	ctx context.Context,
@@ -452,7 +452,7 @@ func pendingFederationPushEvents(
 		return nil, recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	for _, event := range pending {
-		if resetAt == nil || !strings.HasPrefix(event.Type, "project.") || event.CreatedAt.After(*resetAt) {
+		if resetAt == nil || event.CreatedAt.After(*resetAt) {
 			continue
 		}
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
@@ -907,7 +907,7 @@ func shouldDeliverDuplicateLocalEcho(
 	}
 	event := events[0]
 	if event.IssueUID == nil {
-		if projectID == binding.ProjectID && strings.HasPrefix(event.Type, "project.") && event.ID > binding.PushCursorEventID {
+		if projectID == binding.ProjectID && event.ID > binding.PushCursorEventID {
 			status, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
 			if err != nil {
 				return false, err

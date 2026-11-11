@@ -25,6 +25,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federationcoord"
@@ -1830,6 +1831,7 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	var laterPage []api.EventEnvelope
 	var earlierIssueCommentUID string
 	var projectEventUID string
+	var cronEventUIDs []string
 	if legacy {
 		_, comment, err := spoke.CreateComment(ctx, db.CreateCommentParams{
 			IssueID: issue.ID, Body: "Comment before reset", Author: "tester",
@@ -1846,15 +1848,29 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		updated, err := spoke.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: project.ID, IfMatchRev: new(project.Revision), Actor: "tester", Patch: map[string]jsontext.Value{"area": jsontext.Value(`"ops"`)}})
 		require.NoError(t, err)
 		projectEventUID = updated.Event.UID
+		definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+		require.NoError(t, err)
+		job, jobEvents, err := spoke.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "tester", Definition: definition})
+		require.NoError(t, err)
+		require.Len(t, jobEvents, 1)
+		jobEvent := jobEvents[0]
+		runUID, err := katauid.New()
+		require.NoError(t, err)
+		run, err := spoke.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "tester", Status: "running", Summary: cron.Summary{Version: 1}})
+		require.NoError(t, err)
+		require.Len(t, run.Events, 1)
+		cronEventUIDs = []string{jobEvent.UID, run.Events[0].UID}
 		earlierIssueCommentUID = commentOnEarlierIssue.UID
-		acknowledged = updated.Event.ID
-		lastID = 105
+		acknowledged = run.Events[0].ID
+		lastID = 107
 		laterPage = []api.EventEnvelope{
 			eventEnvelopeForSyncTest(localEvent, 101),
 			eventEnvelopeForSyncTest(comment, 102),
 			eventEnvelopeForSyncTest(earlierIssueComment, 103),
 			eventEnvelopeForSyncTest(*earlierIssueUpdate, 104),
-			eventEnvelopeForSyncTest(updated.Event, lastID),
+			eventEnvelopeForSyncTest(updated.Event, 105),
+			eventEnvelopeForSyncTest(jobEvent, 106),
+			eventEnvelopeForSyncTest(run.Events[0], lastID),
 		}
 	}
 	envelope := eventEnvelopeForSyncTest(localEvent, 100)
@@ -1874,6 +1890,7 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	require.NoError(t, err)
 	var legacyPollFailure atomic.Bool
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
 		switch r.URL.Path {
 		case "/api/v1/projects/42/federation/events:ingest":
 			var body api.FederationIngestEventsRequestBody
@@ -2000,6 +2017,12 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		require.NoError(t, err)
 		require.True(t, recorded)
 		require.True(t, due)
+		for _, uid := range cronEventUIDs {
+			due, recorded, err := spoke.FederationLocalReplayStatus(ctx, uid)
+			require.NoError(t, err)
+			require.True(t, recorded)
+			require.True(t, due)
+		}
 		legacyPollFailure.Store(false)
 		binding, err = spoke.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
@@ -2042,10 +2065,15 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		commentIssueIDs, err := spoke.CommentIssueIDsByUIDs(ctx, []string{earlierIssueCommentUID})
 		require.NoError(t, err)
 		assert.Equal(t, earlier.ID, commentIssueIDs[earlierIssueCommentUID], "retry projects the later comment on the existing issue")
-		assert.ElementsMatch(t, []string{laterPage[0].EventUID, laterPage[1].EventUID, laterPage[2].EventUID, laterPage[3].EventUID, projectEventUID}, deliveredUIDs)
+		assert.ElementsMatch(t, []string{laterPage[0].EventUID, laterPage[1].EventUID, laterPage[2].EventUID, laterPage[3].EventUID, projectEventUID, cronEventUIDs[0], cronEventUIDs[1]}, deliveredUIDs)
 		repairedProject, err := spoke.ProjectByID(ctx, project.ID)
 		require.NoError(t, err)
 		require.JSONEq(t, `{"area":"ops"}`, string(repairedProject.Metadata))
+		binding, err = spoke.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		delivered = nil
+		require.NoError(t, SyncFederationPullOnlyOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents))
+		require.Empty(t, delivered, "completed replay notifications are not delivered twice")
 		return
 	}
 	require.NotEmpty(t, delivered)
