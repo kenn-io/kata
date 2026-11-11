@@ -222,13 +222,11 @@ func TestWorkflowFormRoundTripsThroughDaemon(t *testing.T) {
 	require.Equal(t, []string{"printf", "", " ", "雪", "quote\";$", "line\nnext"}, reloaded.Definition.Steps[0].Argv)
 }
 
-func TestWorkflowEditorRefusesReservedArgvWithoutMutation(t *testing.T) {
-	for _, member := range []string{`"argv":null`} {
-		m, api := openWorkflow(t, workflowRecord(), false)
-		m.cron.form.val[cfDefinition] = `{"version":1,"steps":[{"key":"ship","kind":"prompt","prompt":"Ship",` + member + `}]}`
-		m, cmd := press(m, ctrlKey('o'))
-		require.Nil(t, cmd)
-		require.NotNil(t, m.cron.form)
-		require.Empty(t, api.workflowPuts)
-	}
+func TestWorkflowEditorRejectsInvalidArgvWithoutMutation(t *testing.T) {
+	m, api := openWorkflow(t, workflowRecord(), false)
+	m.cron.form.val[cfDefinition] = `{"version":1,"steps":[{"key":"ship","kind":"prompt","prompt":"Ship","argv":null}]}`
+	m, cmd := press(m, ctrlKey('o'))
+	require.Nil(t, cmd)
+	require.NotNil(t, m.cron.form)
+	require.Empty(t, api.workflowPuts)
 }

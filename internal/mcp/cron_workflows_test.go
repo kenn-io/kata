@@ -6,6 +6,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func cronWorkflowDefinition() map[string]any {
@@ -46,21 +47,19 @@ func TestCronWorkflowLifecycleAndInUseConflict(t *testing.T) {
 			t.Run("stale replacement", func(t *testing.T) {
 				conflict := cronCall(t, f.session, "cron_workflow_update", args)
 				require.True(t, conflict.IsError, "stale CAS conflicts")
-				require.NotEmpty(t, conflict.Content)
-				var envelope struct {
-					Status int `json:"status"`
-					Error  struct {
-						Code string `json:"code"`
-						Data struct {
-							Current map[string]any `json:"current"`
-						} `json:"data"`
-					} `json:"error"`
-				}
-				require.NoError(t, json.Unmarshal([]byte(conflict.Content[0].(*sdkmcp.TextContent).Text), &envelope))
-				require.Equal(t, 409, envelope.Status)
-				require.Equal(t, "cron_conflict", envelope.Error.Code)
-				require.Equal(t, workflow["definition_event_uid"], envelope.Error.Data.Current["definition_event_uid"])
-				check(envelope.Error.Data.Current)
+				raw := mustJSON(t, args)
+				var input CronWorkflowUpdateInput
+				require.NoError(t, json.Unmarshal(raw, &input))
+				h := toolHandlers{options: Options{Client: f.client, ProjectID: f.project.ID, ProjectName: f.project.Name, Actor: "example-agent"}}
+				_, _, err := h.cronWorkflowUpdate(t.Context(), &sdkmcp.CallToolRequest{Params: &sdkmcp.CallToolParamsRaw{Arguments: raw}}, input)
+				var envelope generated.ErrorEnvelope
+				require.ErrorAs(t, err, &envelope)
+				require.EqualValues(t, 409, envelope.Status)
+				require.Equal(t, "cron_conflict", envelope.ErrorData.Code)
+				current, ok := envelope.ErrorData.Data["current"].(map[string]any)
+				require.True(t, ok, "typed conflict must include current workflow")
+				require.Equal(t, workflow["definition_event_uid"], current["definition_event_uid"])
+				check(current)
 			})
 			definition := cronDefinition()
 			definition["action"] = map[string]any{"kind": "execute", "workflow_uid": id}
@@ -122,12 +121,8 @@ func TestCronWorkflowOpaqueNumbers(t *testing.T) {
 
 func TestCronWorkflowArgvInputPreservesValidation(t *testing.T) {
 	f := newCronFixture(t)
-	for _, step := range []map[string]any{
-		{"key": "run", "kind": "argv", "argv": []any{"echo", nil}},
-	} {
-		definition := map[string]any{"version": 1, "steps": []any{step}}
-		require.True(t, cronCall(t, f.session, "cron_workflow_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Invalid", "definition": definition}).IsError)
-	}
+	invalid := map[string]any{"version": 1, "steps": []any{map[string]any{"key": "run", "kind": "argv", "argv": []any{"echo", nil}}}}
+	require.True(t, cronCall(t, f.session, "cron_workflow_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Invalid", "definition": invalid}).IsError)
 	definition := map[string]any{"version": 1, "steps": []any{map[string]any{"key": "run", "kind": "argv", "argv": []string{"printf", "", "a b"}}}}
 	workflow := cronRecord(t, f.session, "cron_workflow_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Literal", "definition": definition}, "workflow")
 	stored := workflow["definition"].(map[string]any)

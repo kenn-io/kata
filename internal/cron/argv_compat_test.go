@@ -39,7 +39,7 @@ func TestArgvCompatHistoricalDecodeKeepsLegacyRules(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestArgvMemberRemainsRefused(t *testing.T) {
+func TestArgvMemberRequiresArgvKind(t *testing.T) {
 	for _, step := range []string{`"kind":"command","command":"true"`, `"kind":"argv"`} {
 		raw := []byte(`{"version":1,"steps":[{"key":"step",` + step + `,"argv":null}]}`)
 		_, err := cron.DecodeHistoricalWorkflow(raw)

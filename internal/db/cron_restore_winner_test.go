@@ -28,7 +28,7 @@ func TestOwnerRestoreRetainedWorkflowWinner(t *testing.T) {
 		{"unrepresentable null", `null`, false, true},
 		{"unrepresentable version", `{"version":0,"steps":[]}`, false, true},
 		{"later valid", `{"version":1,"steps":[]}`, false, false},
-		{"later argv", `{"version":1,"steps":[{"kind":"argv","argv":["printf",""]}]}`, false, false},
+		{"later argv", `{"version":1,"steps":[{"key":"run","kind":"argv","argv":["printf",""]}]}`, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := CronDefinitionEvent{UID: workflowUID, ProjectUID: projectUID, Name: "new", Author: "worker", CreatedAt: now, UpdatedAt: now, Definition: jsontext.Value(tc.document)}
@@ -54,6 +54,7 @@ func TestOwnerRestoreRetainedWorkflowWinner(t *testing.T) {
 			require.Equal(t, tc.deleted, row.DeletedAt != nil)
 			if tc.name == "later valid" || tc.name == "later argv" {
 				require.Empty(t, row.RawDefinition)
+				require.Equal(t, 1, row.Definition.Version)
 				if tc.name == "later argv" {
 					require.Equal(t, []string{"printf", ""}, row.Definition.Steps[0].Argv)
 				}

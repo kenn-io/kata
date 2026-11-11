@@ -472,7 +472,7 @@ func TestCronEditLargeIndentedDocumentAndNameBytes(t *testing.T) {
 	require.ErrorContains(t, err, "argv member requires argv kind")
 	withArgv = bytes.Replace(raw, []byte(`"kind": "command"`), []byte(`"kind": "command", "argv": 42`), 1)
 	_, err = cronEditParse("workflow", withArgv)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "argv")
 	for _, count := range []int{128, 129} {
 		name, err := json.Marshal("  " + strings.Repeat("é", count) + "  ")
 		require.NoError(t, err)
