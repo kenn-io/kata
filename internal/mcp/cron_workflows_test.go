@@ -82,7 +82,7 @@ func TestCronWorkflowOpaqueNumbers(t *testing.T) {
 		t.Helper()
 		arguments := fmt.Sprintf(`{"uid":%q,"name":"Raw workflow","definition":%s}`, id, definition)
 		wire := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kata.cron_workflow_create","arguments":` + arguments + `}}`
-		request := httptest.NewRequest(http.MethodPost, "http://localhost/mcp", strings.NewReader(wire)).WithContext(t.Context())
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost/mcp", strings.NewReader(wire))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Accept", "application/json, text/event-stream")
 		response := httptest.NewRecorder()
