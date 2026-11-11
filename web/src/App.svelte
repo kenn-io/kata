@@ -467,8 +467,10 @@
       void startAuthority()
       return
     }
-    listFromLoadedSnapshot = next
     acceptedRoute = next
+    // $state stores a proxy of next; keep that proxy so shellSnapshot's
+    // identity check matches.
+    listFromLoadedSnapshot = acceptedRoute
     mode = 'ready'
     if (authority?.snapshot?.capabilities.updates === 'poll') invalidations.refresh()
   }

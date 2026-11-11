@@ -116,6 +116,82 @@ describe('App', () => {
     expect(snapshotRequests[1]!.headers.get('If-None-Match')).toBe('"snapshot-1"')
   })
 
+  it('blocks a task-limited New task after leaving the task for its project list', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const projectUID = '01J00000000000000000000002'
+    const issueUID = '01J00000000000000000000001'
+    history.replaceState(null, '', `/kata?view=all-open&issue=${issueUID}`)
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const scoped = {
+      ...snapshot(),
+      capabilities: {
+        writable: true,
+        updates: 'poll',
+        actor_policy: 'token',
+        token_audit_read: false,
+        scope: { kind: 'issue_subtree', project_uid: projectUID, root_issue_uid: issueUID },
+        expires_at: '2099-01-01T00:00:00Z',
+        allowed_actions: ['issue.read', 'issue.create_child'],
+        close_requires_evidence: true,
+      },
+    }
+    const selected = {
+      ...scoped,
+      selected: {
+        state: 'available',
+        issue: { ...scoped.collection[0]! },
+        comments: [],
+        labels: [],
+        links: [],
+        recurrences: [],
+        history: [],
+      },
+    }
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          // Later reads stay in flight, so the list keeps showing the task's snapshot.
+          if (snapshotReads > 1) return new Promise<Response>(() => {})
+          return Response.json(selected, { headers: { ETag: '"snapshot-1"' } })
+        }
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 })
+      }),
+    )
+    render(App)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+
+    const projectButton = [
+      ...document.querySelectorAll<HTMLButtonElement>('.project-select-button'),
+    ].find((button) => button.textContent?.includes('example-project'))!
+    await fireEvent.click(projectButton)
+
+    expect(new URL(window.location.href).searchParams.get('issue')).toBeNull()
+    expect(
+      screen
+        .getByRole('button', {
+          name: 'New task',
+          description: 'Open a task first. This credential can only add subtasks.',
+        })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
+  })
+
   it('keeps the normalized collection when focus revalidation returns unchanged', async () => {
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     sessionStorage.setItem(
