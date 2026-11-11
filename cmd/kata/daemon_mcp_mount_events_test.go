@@ -80,6 +80,20 @@ func TestDaemonMCPEventsLifecycle(t *testing.T) {
 	for _, identity := range []bool{false, true} {
 		t.Run(strconv.FormatBool(identity), func(t *testing.T) {
 			env, endpoint := mountedEventsFixture(t, identity, true)
+			status, discovery := mcpRPC(t, endpoint, "server/discover", map[string]any{})
+			require.Equal(t, http.StatusOK, status)
+			require.NotContains(t, discovery, "error")
+			capabilities := discovery["result"].(map[string]any)["capabilities"].(map[string]any)
+			require.Equal(t, map[string]any{}, capabilities["events"])
+			require.Equal(t, map[string]any{}, capabilities["extensions"].(map[string]any)["io.modelcontextprotocol/events"])
+			status, listing := mcpRPC(t, endpoint, "events/list", map[string]any{})
+			require.Equal(t, http.StatusOK, status)
+			require.NotContains(t, listing, "error")
+			result := listing["result"].(map[string]any)
+			require.Equal(t, "complete", result["resultType"])
+			events := result["events"].([]any)
+			require.Len(t, events, 1)
+			require.Equal(t, mcpevents.EventName, events[0].(map[string]any)["name"])
 			project, err := env.DB.ProjectByName(t.Context(), "spoke-project")
 			require.NoError(t, err)
 			if identity {
