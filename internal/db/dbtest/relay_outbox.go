@@ -4,16 +4,19 @@ import (
 	"context"
 	"crypto/ed25519"
 	"database/sql"
+	"encoding/json/v2"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
 
 // RunRelayOutboxAtomicity exercises relay outbox atomicity on the supplied native store.
 // R4: queue intent commits with source data, survives retries, and acknowledges
 // only an actually emitted prefix in its binding/stream/reset namespace.
-func RunRelayOutboxAtomicity(t *testing.T, store db.Storage) {
+func RunRelayOutboxAtomicity(t *testing.T, store db.Storage, backend Backend) {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "shared-project")
 	require.NoError(t, err)
@@ -116,6 +119,109 @@ func RunRelayOutboxAtomicity(t *testing.T, store db.Storage) {
 	empty, err = store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 10)
 	require.NoError(t, err)
 	require.Empty(t, empty)
+
+	// A full owner backup may retain an older delivery after its source event
+	// has been compacted, independently of the current readable workflow.
+	definition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "first", Kind: "command", Command: "true"}}}
+	old, oldEvent, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Earlier", Actor: "worker", Definition: definition})
+	require.NoError(t, err)
+	current, currentEvent, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: old.UID, ExpectedEventUID: old.DefinitionEventUID, Name: "Current", Actor: "worker", Definition: definition})
+	require.NoError(t, err)
+	filter := db.ExportFilter{IncludeDeleted: true}
+	records, err := CollectImportRecords(ctx, store, filter)
+	require.NoError(t, err)
+	for record, exportErr := range store.ExportAttribution(ctx, filter) {
+		require.NoError(t, exportErr)
+		records = append(records, record)
+	}
+	var held *db.RelayOutboxExport
+	for record, exportErr := range store.ExportRelayState(ctx) {
+		require.NoError(t, exportErr)
+		if outbox, ok := record.(*db.RelayOutboxExport); ok && outbox.BindingUID == grant.Enrollment.RelayBindingUID && outbox.SourceUID == oldEvent.UID {
+			held = outbox
+		}
+		records = append(records, record)
+	}
+	require.NotNil(t, held)
+	require.Equal(t, grant.Enrollment.RelayResetEpoch, held.ResetEpoch)
+	require.Equal(t, db.RelayStreamEvent, held.Stream)
+	require.False(t, held.Emitted)
+	require.False(t, held.Acknowledged)
+	var envelope db.RelayEnvelope
+	require.NoError(t, json.Unmarshal([]byte(held.Envelope), &envelope))
+	require.Equal(t, project.UID, envelope.ProjectUID)
+	require.Equal(t, store.InstanceUID(), envelope.AuthorityUID)
+	require.Equal(t, store.InstanceUID(), envelope.SenderInstanceUID)
+	require.Equal(t, grant.Enrollment.SpokeInstanceUID, envelope.ReceiverInstanceUID)
+	oldSource, err := db.DecodeRelaySourceEvent(envelope.Body)
+	require.NoError(t, err)
+	var payload db.CronDefinitionEvent
+	require.NoError(t, json.Unmarshal(oldSource.Payload, &payload))
+	payload.Definition = []byte(`{"version":1,"steps":null}`)
+	oldSource.Payload, err = json.Marshal(payload)
+	require.NoError(t, err)
+	oldSource.ContentHash, err = db.RemoteEventContentHash(oldSource)
+	require.NoError(t, err)
+	envelope.SourceHash = oldSource.ContentHash
+	envelope.Body, err = db.EncodeRelaySourceEvent(oldSource)
+	require.NoError(t, err)
+	envelope, err = db.SealRelayEnvelope(envelope)
+	require.NoError(t, err)
+	held.SourceHash = envelope.SourceHash
+	rawEnvelope, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	held.Envelope = string(rawEnvelope)
+	require.NoError(t, db.ValidateRelayDeliveryRecord(held))
+	filtered := make([]db.ImportRecord, 0, len(records))
+	for _, record := range records {
+		if event, ok := record.(*db.EventExport); ok && event.UID == oldEvent.UID {
+			continue
+		}
+		filtered = append(filtered, record)
+	}
+	require.NoError(t, db.ValidateImportReplay(filtered, db.ImportOptions{}))
+	restored := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, restored.Close()) })
+	require.NoError(t, restored.ImportReplay(ctx, filtered, db.ImportOptions{}))
+	restoredProject, err := restored.ProjectByUID(ctx, project.UID)
+	require.NoError(t, err)
+	restoredWorkflow, err := restored.CronWorkflow(ctx, restoredProject.ID, current.UID)
+	require.NoError(t, err)
+	require.Equal(t, currentEvent.UID, restoredWorkflow.DefinitionEventUID)
+	currentEvents, err := restored.EventsByUIDs(ctx, restoredProject.ID, []string{currentEvent.UID})
+	require.NoError(t, err)
+	require.Len(t, currentEvents, 1)
+	requiredFeatures, err := restored.(db.RelayWorkflowFeatureReader).RelayWorkflowRequiredFeatures(ctx, project.UID)
+	require.NoError(t, err)
+	require.Empty(t, requiredFeatures, "current project evidence is readable by the peer")
+	_, err = restored.EventsByUIDs(ctx, restoredProject.ID, []string{oldEvent.UID})
+	require.ErrorIs(t, err, db.ErrNotFound)
+	readState := func() ([]db.RelayOutboxExport, []db.RelayCursorExport) {
+		var outbox []db.RelayOutboxExport
+		var cursors []db.RelayCursorExport
+		for record, exportErr := range restored.ExportRelayState(ctx) {
+			require.NoError(t, exportErr)
+			switch value := record.(type) {
+			case *db.RelayOutboxExport:
+				if value.BindingUID == held.BindingUID && value.Stream == held.Stream && value.ResetEpoch == held.ResetEpoch {
+					outbox = append(outbox, *value)
+				}
+			case *db.RelayCursorExport:
+				if value.BindingUID == held.BindingUID && value.Stream == held.Stream && value.ResetEpoch == held.ResetEpoch {
+					cursors = append(cursors, *value)
+				}
+			}
+		}
+		return outbox, cursors
+	}
+	beforeOutbox, beforeCursors := readState()
+	assert.Contains(t, beforeOutbox, *held)
+	_, err = restored.PendingRelayDeliveries(db.WithRelayPeerFeatures(ctx, held.BindingUID, ""), held.BindingUID, db.RelayStreamEvent, 100)
+	assert.ErrorIs(t, err, db.ErrHeldWorkflowEvidence)
+	afterOutbox, afterCursors := readState()
+	assert.Equal(t, beforeOutbox, afterOutbox, "refusal must not mark deliveries emitted")
+	assert.Equal(t, beforeCursors, afterCursors, "refusal must not advance the emission cursor")
+
 	_, _, err = store.RevokeAPIToken(ctx, parent.ID, "admin")
 	require.NoError(t, err)
 	_, err = store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamReceipt, 10)
