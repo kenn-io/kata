@@ -129,19 +129,17 @@ func TestMoveIssuesBatch_ClaimDenialBeforeTargetConflict(t *testing.T) {
 	enableClaimGateHelperHub(t, store, second.ID)
 	_, err = store.AcquireClaim(t.Context(), db.AcquireClaimParams{ProjectID: source.ID, IssueRef: issue.UID, Principal: db.ClaimPrincipal{HolderInstanceUID: store.InstanceUID(), Holder: "other"}, ClaimKind: "hard", Now: time.Now().UTC()})
 	require.NoError(t, err)
-	for _, dry := range []bool{false} {
-		req := &api.MoveIssuesRequest{}
-		req.Body.Actor, req.Body.DryRun = "agent", dry
-		req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ToProjectUID: first.UID}, {Ref: issue.UID, ToProjectUID: second.UID}}
-		out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
-		require.NoError(t, err)
-		for _, result := range out.Body.Results {
-			require.Equal(t, "claim_denied", result.Code)
-		}
-		got, err := store.IssueByID(t.Context(), issue.ID)
-		require.NoError(t, err)
-		require.Equal(t, source.ID, got.ProjectID)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor = "agent"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ToProjectUID: first.UID}, {Ref: issue.UID, ToProjectUID: second.UID}}
+	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
+	require.NoError(t, err)
+	for _, result := range out.Body.Results {
+		require.Equal(t, "claim_denied", result.Code)
 	}
+	got, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, got.ProjectID)
 }
 
 func TestMoveIssuesBatch_BudgetResume(t *testing.T) {
@@ -249,11 +247,16 @@ func TestMoveIssuesBatch_CutoffIncludesPreflight(t *testing.T) {
 	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
 	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID, ExpectedRevision: first.Revision + 1}}
+	owner := "changed"
+	_, _, _, err = store.EditIssue(t.Context(), db.EditIssueParams{IssueID: first.ID, Owner: &owner, Actor: "agent"})
+	require.NoError(t, err)
+	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID, ExpectedRevision: first.Revision}}
 	for range 100 {
 		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "route", Author: "agent"})
 		require.NoError(t, err)
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision + 1})
+		_, _, _, err = store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "agent"})
+		require.NoError(t, err)
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
 	}
 	wrapped := &batchResolveHookStore{Storage: store, delay: 5 * time.Millisecond}
 	//nolint:kennlint // deadlinetest: Preflight exceeds the request cutoff.
@@ -266,13 +269,12 @@ func TestMoveIssuesBatch_ResidentChangesAfterResolution(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		edit bool
-		dry  bool
 	}{
 		{name: "write"},
 		{name: "edited", edit: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			edit, dry := tc.edit, tc.dry
+			edit := tc.edit
 			store := openClaimGateHelperDB(t)
 			source, other := createClaimGateHelperIssue(t, store)
 			target, err := store.CreateProject(t.Context(), "target")
@@ -289,17 +291,13 @@ func TestMoveIssuesBatch_ResidentChangesAfterResolution(t *testing.T) {
 				require.NoError(t, err)
 			}}
 			req := &api.MoveIssuesRequest{}
-			req.Body.Actor, req.Body.DryRun, req.Body.ToProjectUID = "agent", dry, target.UID
+			req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
 			req.Body.Items = []api.MoveIssuesItem{{Ref: resident.UID}, {Ref: other.UID}}
 			out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
 			require.NoError(t, err)
 			require.Equal(t, "refused", out.Body.Results[0].Result)
 			require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
-			want := "moved"
-			if dry {
-				want = "would_move"
-			}
-			require.Equal(t, want, out.Body.Results[1].Result)
+			require.Equal(t, "moved", out.Body.Results[1].Result)
 		})
 	}
 }
@@ -441,30 +439,21 @@ func (s *batchFirstRefusal) MoveIssuesBatch(ctx context.Context, in db.MoveIssue
 }
 
 func TestMoveIssuesBatch_DuplicateAfterRefusal(t *testing.T) {
-	for _, preview := range []bool{false} {
-		t.Run(fmt.Sprint(preview), func(t *testing.T) {
-			store := openClaimGateHelperDB(t)
-			_, issue := createClaimGateHelperIssue(t, store)
-			target, err := store.CreateProject(t.Context(), "target")
-			require.NoError(t, err)
-			req := &api.MoveIssuesRequest{}
-			req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-			req.Body.DryRun = preview
-			req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}, {Ref: issue.UID}}
-			out, err := moveIssuesHandler(ServerConfig{DB: &batchFirstRefusal{Storage: store}})(t.Context(), req)
-			require.NoError(t, err)
-			require.Equal(t, "refused", out.Body.Results[0].Result)
-			require.Equal(t, "not_found", out.Body.Results[0].Code)
-			want, project := "moved", target.ID
-			if preview {
-				want, project = "would_move", issue.ProjectID
-			}
-			require.Equal(t, want, out.Body.Results[1].Result)
-			got, err := store.IssueByID(t.Context(), issue.ID)
-			require.NoError(t, err)
-			require.Equal(t, project, got.ProjectID)
-		})
-	}
+	store := openClaimGateHelperDB(t)
+	_, issue := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}, {Ref: issue.UID}}
+	out, err := moveIssuesHandler(ServerConfig{DB: &batchFirstRefusal{Storage: store}})(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, "refused", out.Body.Results[0].Result)
+	require.Equal(t, "not_found", out.Body.Results[0].Code)
+	require.Equal(t, "moved", out.Body.Results[1].Result)
+	got, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, got.ProjectID)
 }
 
 type batchAfterWriteStore struct {

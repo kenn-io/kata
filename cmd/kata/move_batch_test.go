@@ -142,6 +142,8 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 					require.Equal(t, "refused", reply.Results[0].Result)
 					require.Equal(t, 1, reply.Results[1].Index)
 					require.Equal(t, "moved", reply.Results[1].Result)
+				}
+				if !allInvalid {
 					got, err := env.DB.IssueByID(t.Context(), issue.ID)
 					require.NoError(t, err)
 					require.Equal(t, dst.ID, got.ProjectID)

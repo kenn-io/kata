@@ -145,57 +145,45 @@ func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
 
 func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 	for _, mode := range []string{"empty", "negative", "stale first", "stale second"} {
-		for _, dry := range []bool{false} {
-			t.Run(fmt.Sprintf("%s dry=%t", mode, dry), func(t *testing.T) {
-				env := testenv.New(t, testenv.WithAuthToken("tok"))
-				src, target, issue := seedMovePair(t, env)
-				other, err := env.DB.CreateProject(t.Context(), "other-target")
+		t.Run(mode, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			_, target, issue := seedMovePair(t, env)
+			other, err := env.DB.CreateProject(t.Context(), "other-target")
+			require.NoError(t, err)
+			var body string
+			switch mode {
+			case "empty":
+				body = fmt.Sprintf(`{"actor":"tester","comment":"routed","to_project_uid":%q,"items":[{"ref":""},{"ref":%q}]}`, target.UID, issue.UID)
+			case "negative":
+				body = fmt.Sprintf(`{"actor":"tester","comment":"routed","items":[{"ref":%q,"to_project_uid":%q,"expected_revision":-1},{"ref":%q,"to_project_uid":%q}]}`, issue.UID, other.UID, issue.UID, target.UID)
+			default:
+				owner := "changed"
+				changed, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
 				require.NoError(t, err)
-				var body string
-				switch mode {
-				case "empty":
-					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"to_project_uid":%q,"items":[{"ref":""},{"ref":%q}]}`, dry, target.UID, issue.UID)
-				case "negative":
-					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"items":[{"ref":%q,"to_project_uid":%q,"expected_revision":-1},{"ref":%q,"to_project_uid":%q}]}`, dry, issue.UID, other.UID, issue.UID, target.UID)
-				default:
-					owner := "changed"
-					changed, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
-					require.NoError(t, err)
-					require.Greater(t, changed.Revision, issue.Revision)
-					bad := fmt.Sprintf(`{"ref":%q,"to_project_uid":%q,"expected_revision":%d}`, issue.UID, other.UID, issue.Revision)
-					good := fmt.Sprintf(`{"ref":%q,"to_project_uid":%q}`, issue.UID, target.UID)
-					if mode == "stale second" {
-						good, bad = bad, good
-					}
-					body = fmt.Sprintf(`{"actor":"tester","comment":"routed","dry_run":%t,"items":[%s,%s]}`, dry, bad, good)
-				}
-				out := postMoveBatch(t, env, body)
-				stale, valid := 0, 1
+				require.Greater(t, changed.Revision, issue.Revision)
+				bad := fmt.Sprintf(`{"ref":%q,"to_project_uid":%q,"expected_revision":%d}`, issue.UID, other.UID, issue.Revision)
+				good := fmt.Sprintf(`{"ref":%q,"to_project_uid":%q}`, issue.UID, target.UID)
 				if mode == "stale second" {
-					stale, valid = 1, 0
+					good, bad = bad, good
 				}
-				require.Equal(t, "refused", out.Results[stale].Result)
-				want := "revision_conflict"
-				if mode == "negative" || mode == "empty" {
-					want = "validation"
-				}
-				require.Equal(t, want, out.Results[stale].Code)
-				outcome := "moved"
-				projectID := target.ID
-				if dry {
-					outcome, projectID = "would_move", src.ID
-				}
-				require.Equal(t, outcome, out.Results[valid].Result)
-				got, err := env.DB.IssueByID(t.Context(), issue.ID)
-				require.NoError(t, err)
-				require.Equal(t, projectID, got.ProjectID)
-				if dry {
-					comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
-					require.NoError(t, err)
-					require.Empty(t, comments)
-				}
-			})
-		}
+				body = fmt.Sprintf(`{"actor":"tester","comment":"routed","items":[%s,%s]}`, bad, good)
+			}
+			out := postMoveBatch(t, env, body)
+			stale, valid := 0, 1
+			if mode == "stale second" {
+				stale, valid = 1, 0
+			}
+			require.Equal(t, "refused", out.Results[stale].Result)
+			want := "revision_conflict"
+			if mode == "negative" || mode == "empty" {
+				want = "validation"
+			}
+			require.Equal(t, want, out.Results[stale].Code)
+			require.Equal(t, "moved", out.Results[valid].Result)
+			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, target.ID, got.ProjectID)
+		})
 	}
 }
 

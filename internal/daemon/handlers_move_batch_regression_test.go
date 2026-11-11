@@ -247,6 +247,9 @@ func TestMoveBatchUnsignedContinuationDoesNotGrantAccess(t *testing.T) {
 			var reply api.MoveIssuesResponse
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reply.Body))
 			require.Equal(t, "refused", reply.Body.Results[0].Result)
+			if !denied {
+				require.Equal(t, "issue_move_tree_changed", reply.Body.Results[0].Code)
+			}
 			if denied {
 				require.Empty(t, reply.Body.Results[0].UID)
 				require.Empty(t, reply.Body.Results[0].FromProjectUID)
