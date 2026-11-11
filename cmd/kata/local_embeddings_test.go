@@ -127,6 +127,48 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	require.Equal(t, old, info.ModTime())
 }
 
+func TestLocalEmbeddingsMarkerWriteFailure(t *testing.T) {
+	kataHome := setupKataEnv(t)
+	home := clearLocalEmbeddingsEnv(t)
+	stubLocalEmbeddingsInstall(t)
+	oldEndpoint := localEmbeddingsEndpoint
+	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+		if opts.Executable == "" {
+			return "", embedlocal.ErrNotFound
+		}
+		return "http://127.0.0.1:12345/v1", nil
+	}
+	marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
+	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0700))
+	if err := os.Symlink("missing", marker); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	chosen, err := embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.False(t, chosen)
+	run := localEmbeddingsRun{
+		confirm: func(context.Context, int64) (bool, error) { return true, nil },
+		notice:  func(string) error { return nil },
+		restart: func(_ context.Context, apply func() error) error { return apply() },
+	}
+	_, err = enableLocalEmbeddings(t.Context(), run)
+	require.ErrorContains(t, err, "sharing could not be confirmed")
+	require.ErrorContains(t, err, "record search by meaning choice")
+	cfg, err := config.ReadSearchConfig()
+	require.NoError(t, err)
+	require.True(t, cfg.Embeddings.Local)
+	client, _, err := preflightEmbeddingStartup(cfg.Embeddings, filepath.Join(kataHome, "kata.db"))
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	require.NoError(t, os.Remove(marker))
+	_, err = enableLocalEmbeddings(t.Context(), run)
+	require.NoError(t, err)
+	chosen, err = embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.True(t, chosen)
+}
+
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	for _, scenario := range []string{"environment override", "dangling symlink"} {
