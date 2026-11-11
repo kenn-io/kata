@@ -304,6 +304,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		if principal.RelayProtocolVersion == db.RelayProtocolVersion {
+			ctx = db.WithRelayPeerFeatures(ctx, principal.RelayBindingUID, in.EventFeatures)
+			pendingArtifacts, err := cfg.DB.PendingRelayDeliveries(ctx, principal.RelayBindingUID, db.RelayStreamArtifact, 1)
+			if err != nil {
+				return nil, relayTransportError(err)
+			}
 			body, err := buildProjectFederationBody(ctx, cfg.DB, in.ProjectID, false)
 			if err != nil {
 				return nil, err
@@ -318,13 +323,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, relayTransportError(err)
 			}
-			pendingArtifacts, err := cfg.DB.PendingRelayDeliveries(ctx, principal.RelayBindingUID, db.RelayStreamArtifact, 1)
-			if err != nil {
-				return nil, relayTransportError(err)
-			}
 			handshake.PendingArtifactOffers = len(pendingArtifacts) > 0
 			body.Relay = handshake
-			return &api.ProjectFederationResponse{Body: body}, nil
+			return &api.ProjectFederationResponse{Body: body, EventFeatures: db.SupportedEventFeatures}, nil
 		}
 		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, Metadata: true})
 		if err != nil {

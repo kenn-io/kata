@@ -242,6 +242,22 @@ func (c *Client) AcceptRelayDeliveries(ctx context.Context, projectID int64, bat
 	if err != nil {
 		return db.RelayAcceptance{}, err
 	}
+	// The runner attaches the advertisement only after validating the pinned hop.
+	if len(batch.Envelopes) > 0 {
+		if features, ok := db.RelayPeerFeatures(ctx, batch.Envelopes[0].BindingUID); ok {
+			for _, envelope := range batch.Envelopes {
+				if _, same := db.RelayPeerFeatures(ctx, envelope.BindingUID); !same {
+					return db.RelayAcceptance{}, db.ErrNotFound
+				}
+			}
+			if err := db.CheckRelayBatchFeatures(batch, features); err != nil {
+				return db.RelayAcceptance{}, err
+			}
+		} else if db.HasRelayPeerFeatures(ctx) {
+			return db.RelayAcceptance{}, db.ErrNotFound
+		}
+
+	}
 	raw, err := json.Marshal(batch)
 	if err != nil {
 		return db.RelayAcceptance{}, err
