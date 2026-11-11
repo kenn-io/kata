@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button, cleanupTheme, initTheme, setThemeMode } from '@kenn-io/kit-ui'
   import { startBrowserTelemetry } from '@kenn-io/kit-ui/utils/browser-telemetry'
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
 
   import { commentRetryIdentity } from './lib/kata/commentRetry'
@@ -891,17 +891,21 @@
     return authority?.snapshot?.selected?.issue
   }
 
+  const attachmentProjectUID = $derived(selectedIssue()?.project_uid)
+  const attachmentIssueUID = $derived(selectedIssue()?.uid)
+  const attachmentRequestedUID = $derived(route.kind === 'route-error' ? undefined : route.issueUID)
+
   $effect(() => {
-    const projectUID = selectedIssue()?.project_uid
-    const issueUID = selectedIssue()?.uid
-    const requestedUID = route.kind === 'route-error' ? undefined : route.issueUID
+    const projectUID = attachmentProjectUID
+    const issueUID = attachmentIssueUID
+    const requestedUID = attachmentRequestedUID
     const daemonID = activeDaemonID
     attachmentRouteGeneration += 1
     attachmentRouteAbort?.abort()
     attachmentRouteAbort = undefined
     attachmentRoute = undefined
     attachmentRouteProject = projectUID
-    if (projectUID && issueUID === requestedUID) void refreshAttachmentRoute(projectUID, daemonID)
+    if (projectUID && issueUID === requestedUID) untrack(() => void refreshAttachmentRoute(projectUID, daemonID))
     return () => {
       attachmentRouteGeneration += 1
       attachmentRouteAbort?.abort()
@@ -923,7 +927,6 @@
     const generation = attachmentRouteGeneration
     const abort = new AbortController()
     attachmentRouteAbort = abort
-    attachmentRoute = undefined
     try {
       const result = await readUIAttachmentRoute(
         { project_uid: projectUID },
@@ -946,7 +949,7 @@
         attachmentRoute = null
       }
     } catch {
-      // The attachment controls stay unavailable until the next refresh.
+      // Keep the last accepted route until a refresh succeeds.
     } finally {
       if (attachmentRouteAbort === abort) attachmentRouteAbort = undefined
     }

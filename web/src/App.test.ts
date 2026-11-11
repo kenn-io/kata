@@ -133,11 +133,115 @@ describe('App', () => {
         route: { project_uid: base.collection[0]!.project_uid, read: false, write: false },
       }),
     )
+    await new Promise((resolve) => setTimeout(resolve, 0))
     await tick()
     await fireEvent(window, new Event('focus'))
     await waitFor(() => expect(snapshotReads).toBeGreaterThan(1))
     await screen.findByRole('button', { name: 'Attach files' })
   })
+
+  it.each([304, 200])(
+    'keeps attachment controls and previews during a %s route refresh',
+    async (status) => {
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+      vi.stubGlobal(
+        'URL',
+        Object.assign(URL, {
+          createObjectURL: vi.fn(() => 'blob:preview'),
+          revokeObjectURL: vi.fn(),
+        }),
+      )
+      history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const base = snapshot()
+      const issue = base.collection[0]!
+      Object.assign(base.capabilities, { attachments: false })
+      issue.metadata = {
+        'attachment.file': {
+          name: 'screen.png',
+          media_type: 'image/png',
+          size: 1,
+          docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
+          origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+        },
+      }
+      let release!: (response: Response) => void
+      const pending = new Promise<Response>((resolve) => {
+        release = resolve
+      })
+      let routeReads = 0
+      let snapshotReads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const url = new URL(request.url)
+          if (url.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (url.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (url.pathname.endsWith('/references'))
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          if (url.pathname.endsWith('/content'))
+            return new Response(new Blob(['x'], { type: 'image/png' }))
+          if (url.pathname.endsWith('/attachment-route')) {
+            routeReads++
+            return routeReads === 1
+              ? Response.json({
+                  route: {
+                    project_uid: issue.project_uid,
+                    read: true,
+                    write: true,
+                    origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+                  },
+                })
+              : pending
+          }
+          snapshotReads++
+          if (request.headers.get('If-None-Match') && status === 304)
+            return new Response(null, { status: 304 })
+          return Response.json(
+            {
+              ...base,
+              selected: {
+                state: 'available',
+                issue,
+                comments: [],
+                labels: [],
+                links: [],
+                recurrences: [],
+                history: [],
+              },
+            },
+            { headers: { ETag: '"snapshot-1"' } },
+          )
+        }),
+      )
+      render(App)
+      await fireEvent.click(await screen.findByRole('button', { name: 'Preview screen.png' }))
+      await screen.findByRole('img', { name: 'screen.png' })
+      expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
+      await fireEvent(window, new Event('focus'))
+      await waitFor(() => expect(routeReads).toBe(2))
+      await waitFor(() => expect(snapshotReads).toBeGreaterThan(1))
+      await tick()
+      expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
+      expect(screen.getByRole('img', { name: 'screen.png' })).not.toBeNull()
+      release(
+        Response.json({
+          route: {
+            project_uid: issue.project_uid,
+            read: false,
+            write: false,
+            origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+          },
+        }),
+      )
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull())
+      expect(screen.queryByRole('img', { name: 'screen.png' })).toBeNull()
+    },
+  )
 
   it('ignores a late attachment route after selecting a different project', async () => {
     history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
