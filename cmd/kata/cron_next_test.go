@@ -57,23 +57,23 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/api/v1/projects":
-					fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
+					_, _ = fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
 				case r.URL.Path == "/api/v1/projects/1":
-					fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
+					_, _ = fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
 				case strings.HasSuffix(r.URL.Path, "/cron/capabilities"):
 					w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
-					fmt.Fprint(w, `{}`)
+					_, _ = fmt.Fprint(w, `{}`)
 				case strings.Contains(r.URL.Path, "/cron/jobs/"):
 					deleted := ""
 					if tc.deleted {
 						deleted = `,"deleted_at":"2026-01-01T00:00:00Z"`
 					}
-					fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":%s%s}}`, id, tc.definition, deleted)
+					_, _ = fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":%s%s}}`, id, tc.definition, deleted)
 				case strings.Contains(r.URL.Path, "/issues/"):
 					if tc.parent == "" {
 						t.Error("unexpected parent read")
 					}
-					fmt.Fprintf(w, `{"issue":%s}`, tc.parent)
+					_, _ = fmt.Fprintf(w, `{"issue":%s}`, tc.parent)
 				default:
 					t.Errorf("unexpected request: %s", r.URL)
 					w.WriteHeader(404)
@@ -119,14 +119,14 @@ func TestCronNextParentReadErrors(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/api/v1/projects":
-					fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
+					_, _ = fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
 				case r.URL.Path == "/api/v1/projects/1":
-					fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
+					_, _ = fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
 				case strings.HasSuffix(r.URL.Path, "/cron/capabilities"):
 					w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
-					fmt.Fprint(w, `{}`)
+					_, _ = fmt.Fprint(w, `{}`)
 				case strings.Contains(r.URL.Path, "/cron/jobs/"):
-					fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":7200},"action":{"kind":"notify","recipient":"current-owner-or-author"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","title":"Review"},"overlap":"allow","catchup":"all"}}}`, id)
+					_, _ = fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":7200},"action":{"kind":"notify","recipient":"current-owner-or-author"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","title":"Review"},"overlap":"allow","catchup":"all"}}}`, id)
 				case strings.Contains(r.URL.Path, "/issues/"):
 					if r.URL.Query().Get("include_deleted") != "true" {
 						t.Error("parent read must include deleted issues")
@@ -136,7 +136,7 @@ func TestCronNextParentReadErrors(t *testing.T) {
 						status = http.StatusForbidden
 					}
 					w.WriteHeader(status)
-					fmt.Fprintf(w, `{"error":{"code":%q,"message":"failed"}}`, code)
+					_, _ = fmt.Fprintf(w, `{"error":{"code":%q,"message":"failed"}}`, code)
 				default:
 					t.Errorf("unexpected request: %s", r.URL)
 					w.WriteHeader(404)
@@ -215,16 +215,16 @@ func TestCronNextRequiresCapability(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/v1/projects":
-					fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
+					_, _ = fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
 				case "/api/v1/projects/1":
-					fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
+					_, _ = fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
 				case "/api/v1/projects/1/cron/capabilities":
 					w.Header().Set(db.EventFeaturesHeader, tc.feature)
 					w.WriteHeader(tc.status)
 					if tc.status == 200 {
-						fmt.Fprint(w, `{}`)
+						_, _ = fmt.Fprint(w, `{}`)
 					} else {
-						fmt.Fprintf(w, `{"error":{"code":%q,"message":"denied"}}`, tc.code)
+						_, _ = fmt.Fprintf(w, `{"error":{"code":%q,"message":"denied"}}`, tc.code)
 					}
 				default:
 					t.Errorf("unexpected request: %s", r.URL)
