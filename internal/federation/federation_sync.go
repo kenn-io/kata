@@ -410,7 +410,7 @@ func syncDirectSpoke(
 	}
 	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 	if err != nil {
-		return recordPullError(err)
+		return recordPullError(fmt.Errorf("poll project %s: %w", binding.HubProjectUID, err))
 	}
 	if body.ResetRequired {
 		// A pull-only turn may still carry a writable binding. Reset safety
@@ -449,7 +449,7 @@ func syncDirectSpoke(
 		binding.PullCursorEventID = cursor
 		body, err = client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 		if err != nil {
-			return recordPullError(err)
+			return recordPullError(fmt.Errorf("poll project %s after reset: %w", binding.HubProjectUID, err))
 		}
 		if body.ResetRequired {
 			return recordPullError(ErrFederationResetRequired)
@@ -460,7 +460,7 @@ func syncDirectSpoke(
 	}
 	body.Events, err = backfillFederationMoveHistory(ctx, client, hubProjectID, body)
 	if err != nil {
-		return recordPullError(err)
+		return recordPullError(fmt.Errorf("backfill project %s: %w", binding.HubProjectUID, err))
 	}
 	var pulledEvents []db.Event
 	insertedThisPull := map[string]bool{}
@@ -488,17 +488,19 @@ func syncDirectSpoke(
 			projectID, ok := projectsByUID[ev.ProjectUID]
 			if !ok {
 				project, err := store.ProjectByUID(ctx, ev.ProjectUID)
-				if err != nil {
-					return err
+				if err != nil && !errors.Is(err, db.ErrNotFound) {
+					return fmt.Errorf("resolve echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
-				projectID = project.ID
-				projectsByUID[ev.ProjectUID] = projectID
+				if err == nil {
+					projectID = project.ID
+					projectsByUID[ev.ProjectUID] = projectID
+				}
 			}
 			eventProjects[i] = projectID
-			if ev.OriginInstanceUID == localInstanceUID {
+			if projectID != 0 && ev.OriginInstanceUID == localInstanceUID {
 				exists, err := store.ReconcileLocalFederationEcho(ctx, projectID, remoteEventFromEnvelope(ev))
 				if err != nil {
-					return err
+					return fmt.Errorf("reconcile echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
 				if exists {
 					duplicate[i] = true
@@ -523,7 +525,7 @@ func syncDirectSpoke(
 			}
 			inserted, err := store.InsertRemoteEvents(ctx, binding.ProjectID, batch)
 			if err != nil {
-				return err
+				return fmt.Errorf("append pull page for project %s: %w", binding.HubProjectUID, err)
 			}
 			for j, i := range pending {
 				deliver[i] = inserted[j]
@@ -531,7 +533,17 @@ func syncDirectSpoke(
 				insertedThisPull[body.Events[i].EventUID] = insertedThisPull[body.Events[i].EventUID] || inserted[j]
 			}
 		}
+		for i, ev := range body.Events {
+			if eventProjects[i] == 0 {
+				project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+				if err != nil {
+					return fmt.Errorf("resolve persisted project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+				}
+				eventProjects[i] = project.ID
+			}
+		}
 		deliverUIDs := map[int64][]string{}
+		deliverProjectUIDs := map[int64]string{}
 		var deliverProjects []int64
 		materializeUIDs := make([]string, 0, len(body.Events))
 		var applyUIDs []string
@@ -551,7 +563,7 @@ func syncDirectSpoke(
 					deliver[i], invalidate, err = recovery.recover(ctx, ev)
 				}
 				if err != nil {
-					return err
+					return fmt.Errorf("recover pull project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
 			}
 			if deliver[i] || invalidate {
@@ -561,6 +573,7 @@ func syncDirectSpoke(
 				project := eventProjects[i]
 				if _, ok := deliverUIDs[project]; !ok {
 					deliverProjects = append(deliverProjects, project)
+					deliverProjectUIDs[project] = ev.ProjectUID
 				}
 				deliverUIDs[project] = append(deliverUIDs[project], ev.EventUID)
 			}
@@ -586,7 +599,7 @@ func syncDirectSpoke(
 				err = store.MaterializeFederatedProject(applyCtx, binding.ProjectID)
 			}
 			if err != nil {
-				return err
+				return fmt.Errorf("apply pull page project %s through %d: %w", binding.HubProjectUID, body.NextAfterID, err)
 			}
 			if onPulledEvents != nil {
 				for _, reset := range resets.Resets {
@@ -599,7 +612,7 @@ func syncDirectSpoke(
 			for _, project := range deliverProjects {
 				events, err := store.EventsByUIDs(ctx, project, deliverUIDs[project])
 				if err != nil {
-					return err
+					return fmt.Errorf("load delivery project %s events %v: %w", deliverProjectUIDs[project], deliverUIDs[project], err)
 				}
 				for _, event := range events {
 					byUID[event.UID] = event
@@ -615,7 +628,10 @@ func syncDirectSpoke(
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
-		return store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID)
+		if err := store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID); err != nil {
+			return fmt.Errorf("advance pull project %s cursor %d: %w", binding.HubProjectUID, body.NextAfterID, err)
+		}
+		return nil
 	}); err != nil {
 		return recordPullError(err)
 	}

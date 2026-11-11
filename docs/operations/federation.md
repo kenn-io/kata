@@ -81,9 +81,11 @@ checks the whole tree without changing issues, claims, or cursors. Use `--single
 to move only the selected issue. The [CLI reference](../reference/cli.md) owns
 the per-issue restrictions.
 
-Spokes must join both projects before applying a move. Sync refuses the batch
-without partial writes when a project is missing; join it and retry sync. Upgrade
-both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+To author a federated move, a spoke must join both projects. A direct spoke
+pulling move history retains an archived, unbound identity for a missing
+counterpart without subscribing to that project. A later join can restore the
+identity and use `--project <local-name>` if its generated name differs from the
+hub name. Upgrade both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
 teammate attribution must match trusted history, and a spoke cannot change

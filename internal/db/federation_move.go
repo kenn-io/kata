@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -209,7 +210,7 @@ func CheckFederatedIssueMove(ctx context.Context, q moveQuery, from, to int64) e
 }
 
 // FederationMoveProjects checks the normal move envelope and its existing
-// snapshot format. Both local replicas must be joined before accepting a move.
+// snapshot format. Authoring and hub ingress require both replicas to be joined.
 func FederationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e RemoteEvent) (int64, int64, error) {
 	return federationMoveProjects(ctx, tx, routeID, e, false)
 }
@@ -240,6 +241,9 @@ func federationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e Re
 			query += ` AND deleted_at IS NULL`
 		}
 		err := tx.QueryRowContext(ctx, query, uid).Scan(&id)
+		if historical && errors.Is(err, sql.ErrNoRows) {
+			return retainFederationProject(ctx, tx, uid)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, fmt.Errorf("%w: move project %s is not joined; join it and retry sync", ErrFederationIngestValidation, uid)
 		}
@@ -269,16 +273,12 @@ func federationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e Re
 // destination, including a page that precedes the move itself.
 func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e RemoteEvent) (int64, error) {
 	var project int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, e.ProjectUID).Scan(&project); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
-		}
+	err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, e.ProjectUID).Scan(&project)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	if e.Type == "issue.moved" || project != route {
-		// Native pull trusts the joined hub with this stream's issue history.
-		// A retained historical project identity needs no live credential or
-		// binding after leave. Local authoring and hub push remain strict.
+	missing := errors.Is(err, sql.ErrNoRows)
+	if missing || e.Type == "issue.moved" || project != route {
 		var role string
 		var enabled int
 		var relay bool
@@ -290,17 +290,50 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 			return 0, errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)
 		}
 	}
+	if missing || project != route {
+		if EventIssueUID(e.IssueUID) == "" {
+			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
+		}
+	}
 	if e.Type == "issue.moved" {
 		if _, _, err := federationMoveProjects(ctx, tx, route, e, true); err != nil {
 			return 0, err
 		}
 	}
-	if project != route {
-		if EventIssueUID(e.IssueUID) == "" {
-			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
+	if missing {
+		if !katauid.Valid(e.ProjectUID) {
+			return 0, fmt.Errorf("%w: invalid project UID", ErrFederationIngestValidation)
+		}
+		return retainFederationProject(ctx, tx, e.ProjectUID)
+	}
+
+	return project, nil
+}
+
+// retainFederationProject keeps the envelope's UID without reserving its hub name.
+func retainFederationProject(ctx context.Context, tx *sql.Tx, uid string) (int64, error) {
+	for suffix := 0; ; suffix++ {
+		name := "federation-" + strings.ToLower(uid)
+		if suffix > 0 {
+			name = fmt.Sprintf("%s-%d", name, suffix)
+		}
+		var id int64
+		err := tx.QueryRowContext(ctx, `INSERT INTO projects(uid,name,deleted_at) VALUES($1,$2,$3)
+ ON CONFLICT DO NOTHING RETURNING id`, uid, name, time.Now().UTC().Format(time.RFC3339Nano)).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return 0, err
+		}
+		err = tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, uid).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return 0, err
 		}
 	}
-	return project, nil
 }
 
 // FederatedMoveDecision records the state used to decide whether to rehome an
