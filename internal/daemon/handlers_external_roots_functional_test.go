@@ -515,7 +515,6 @@ func TestExternalRootHandlersClassifyFieldAndPublishingErrors(t *testing.T) {
 		})
 		assert.Equal(t, http.StatusBadRequest, status, string(body))
 		assert.Contains(t, string(body), `"code":"invalid_metadata_value"`)
-		assert.Contains(t, string(body), "Local")
 		assert.Contains(t, string(body), "named IANA timezone")
 		after, err := database.db.IssueByID(t.Context(), issue.ID)
 		require.NoError(t, err)

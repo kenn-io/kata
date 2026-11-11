@@ -604,13 +604,14 @@ func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
 	require.Equal(t, "2026-01-01", *input.Set["deadline_on"])
 
 	for _, tc := range []struct {
-		name, scheduled, deadline string
-		readFail, noChange        bool
+		name, scheduled, deadline          string
+		readFail, noChange, readCrossesDay bool
 	}{
-		{"new day", "2026-06-01", "2026-06-02", false, false},
-		{"opened tomorrow becomes a change", "2026-01-01", "2026-01-02", false, false},
-		{"day refresh fails", "", "", true, false},
-		{"refreshed no-op", "2026-01-01", "2026-01-01", false, true},
+		{"new day", "2026-06-01", "2026-06-02", false, false, false},
+		{"read crosses saved-zone midnight", "2026-06-01", "2026-06-02", false, false, true},
+		{"opened tomorrow becomes a change", "2026-01-01", "2026-01-02", false, false, false},
+		{"day refresh fails", "", "", true, false, false},
+		{"refreshed no-op", "2026-01-01", "2026-01-01", false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Date(2026, 1, 1, 4, 59, 0, 0, time.UTC)
@@ -633,6 +634,9 @@ func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
 				if r.Method == http.MethodGet {
 					if tc.readFail {
 						return nil, fmt.Errorf("refresh unavailable")
+					}
+					if tc.readCrossesDay {
+						now = now.Add(2 * time.Minute)
 					}
 					fresh := current
 					fresh.ScheduledOnToday = now.In(scheduledZone).Format(time.DateOnly)
@@ -665,7 +669,9 @@ func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
 				m.input.field(fieldScheduled).setValue("today")
 				m.input.field(fieldDeadline).setValue("today")
 			}
-			now = now.Add(2 * time.Minute)
+			if !tc.readCrossesDay {
+				now = now.Add(2 * time.Minute)
+			}
 			m, cmd := m.commitDatesForm()
 			require.NotNil(t, cmd)
 			done := cmd().(mutationDoneMsg)

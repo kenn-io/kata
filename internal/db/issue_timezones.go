@@ -111,7 +111,7 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		}
 		if !changedZone && len(before[field]) > 0 {
 			saved, err := metadata.DecodeSavedSchedule(before[field])
-			if err != nil {
+			if metadata.IsUnsupportedSchedule(err) {
 				return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
 			}
 			if saved != nil {

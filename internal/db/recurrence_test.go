@@ -149,6 +149,15 @@ func TestExistingLocalIssueScheduleUsesPortableHostRules(t *testing.T) {
 	require.ErrorContains(t, err, "Local timezone rules differ")
 	_, err = PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local"}`), patch, "UTC", "Local")
 	require.ErrorContains(t, err, "Local timezone rules differ")
+	// Exercise an unbundled owner-supplied Local location, not OS discovery.
+	time.Local = time.FixedZone("Mars/Olympus_Mons", 0)
+	got, err = PrepareIssueSchedules(jsontext.Value(`{}`), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T09:00:00Z"`)}, "UTC", "Local")
+	require.NoError(t, err)
+	saved, err = metadata.DecodeSavedSchedule(got["scheduled_on"])
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	require.Equal(t, "UTC", saved.Timezone)
+	require.Equal(t, "2026-11-12T09:00:00Z", saved.Value)
 }
 
 func TestRecurrenceLocalRejectsChangedDeadlineCalendarDate(t *testing.T) {

@@ -1,12 +1,16 @@
 package daemon_test
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 func TestRowsHandleStoredScheduleObjects(t *testing.T) {
@@ -15,15 +19,19 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 		unsupported     bool
 	}{
 		{"unsupported rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, true},
+		{"unsupported members", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`, true},
 		{"opaque legacy value", `{"legacy":"opaque"}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRowDatesFixture(t)
-			// TestImportAcceptsOpaqueScheduleMetadata covers admission of these
-			// restore shapes. Seed the restored projection to exercise its readers.
-			_, err := f.env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`,
-				`{"scheduled_on":`+tc.scheduled+`,"deadline_on":"2026-11-02"}`, f.nodate.ID)
+			records, err := dbtest.CollectImportRecords(t.Context(), f.env.DB, db.ExportFilter{ProjectID: &f.project.ID})
 			require.NoError(t, err)
+			for _, record := range records {
+				if issue, ok := record.(*db.IssueExport); ok && issue.UID == f.nodate.UID {
+					issue.Metadata = jsontext.Value(`{"scheduled_on":` + tc.scheduled + `,"deadline_on":"2026-11-02"}`)
+				}
+			}
+			require.NoError(t, f.env.DB.ImportReplay(t.Context(), records, db.ImportOptions{}))
 			projectList := fmt.Sprintf("/api/v1/projects/%d/issues", f.project.ID)
 			show := projectList + "/" + f.nodate.ShortID
 			for _, path := range []string{projectList, "/api/v1/issues", show} {
@@ -31,7 +39,9 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 					status, raw := cronHTTP(t, f.env, http.MethodGet, path, nil)
 					if tc.unsupported {
 						require.NotEqual(t, http.StatusOK, status, string(raw))
-						require.Contains(t, string(raw), "unsupported schedule tzdata version")
+						if tc.name == "unsupported rules" {
+							require.Contains(t, string(raw), "unsupported schedule tzdata version")
+						}
 						return
 					}
 					require.Equal(t, http.StatusOK, status, string(raw))
@@ -58,6 +68,35 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 					require.Equal(t, f.nodate.UID, row["uid"])
 					require.NotContains(t, row, "scheduled_on_date")
 					require.Equal(t, "2026-11-02", row["deadline_on_date"])
+				})
+			}
+			for _, field := range []string{"scheduled_on", "deadline_on"} {
+				t.Run("replace "+field, func(t *testing.T) {
+					// Restore the same opaque or unsupported value in each planning field.
+					for _, record := range records {
+						if issue, ok := record.(*db.IssueExport); ok && issue.UID == f.nodate.UID {
+							issue.Metadata = jsontext.Value(`{"` + field + `":` + tc.scheduled + `}`)
+						}
+					}
+					require.NoError(t, f.env.DB.ImportReplay(t.Context(), records, db.ImportOptions{}))
+					before, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
+					require.NoError(t, err)
+					status, raw := cronHTTP(t, f.env, http.MethodPost, show+"/metadata", map[string]any{"actor": "tester", "patch": map[string]string{field: "2026-11-13"}})
+					after, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
+					require.NoError(t, err)
+					if tc.unsupported {
+						require.Equal(t, http.StatusBadRequest, status, string(raw))
+						require.Equal(t, before, after)
+						return
+					}
+					require.Equal(t, http.StatusOK, status, string(raw))
+					var fields map[string]jsontext.Value
+					require.NoError(t, json.Unmarshal([]byte(after.Metadata), &fields))
+					saved, err := metadata.DecodeSavedSchedule(fields[field])
+					require.NoError(t, err)
+					require.NotNil(t, saved)
+					require.Equal(t, "America/New_York", saved.Timezone)
+					require.Equal(t, "2026-11-13", saved.Value)
 				})
 			}
 		})

@@ -155,10 +155,10 @@ func (m Model) commitDatesForm() (Model, tea.Cmd) {
 	}
 	m.input.saving = true
 	m.input.err = ""
-	return m, withConnGen(dispatchFormSetDates(m.api, m.input.target, in, m.input, m.toastNow()), m.connGen)
+	return m, withConnGen(dispatchFormSetDates(m.api, m.input.target, in, m.input, m.toastNow), m.connGen)
 }
 
-func dispatchFormSetDates(apiClient KataAPI, target formTarget, in DatesInput, form inputState, now time.Time) tea.Cmd {
+func dispatchFormSetDates(apiClient KataAPI, target formTarget, in DatesInput, form inputState, now func() time.Time) tea.Cmd {
 	return func() tea.Msg {
 		writer, ok := apiClient.(datesAPI)
 		if !ok {
@@ -176,7 +176,7 @@ func dispatchFormSetDates(apiClient KataAPI, target formTarget, in DatesInput, f
 		}
 		if err == nil {
 			form.dates.scheduledToday, form.dates.deadlineToday = detail.Issue.ScheduledOnToday, detail.Issue.DeadlineOnToday
-			in, err = datesInputFromForm(form, now, in.Actor)
+			in, err = datesInputFromForm(form, now(), in.Actor)
 		}
 		if err == nil {
 			resp = &MutationResp{}
