@@ -183,8 +183,7 @@ reserved and untrusted mixed-address destinations remain forbidden. Redirects
 are never followed. A policy refusal reports `destination_not_allowed`,
 including in delivery's `lastError`. A syntactically valid private callback
 without a grant returns `CallbackEndpointError` (`-32027`) with
-`destination_not_allowed`; older versions returned `InvalidParams`
-(`-32602`) with `invalid_callback` for private literals. Policy refusals do
+`destination_not_allowed`. Policy refusals do
 not spend the failed-challenge budget. A delivery refusal clears the prior
 receiver-failure run, so the next receiver failure starts a new run. Deliveries
 still retry and eventually dead-letter the pending ping. Requests carry no
