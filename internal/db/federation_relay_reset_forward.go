@@ -32,9 +32,6 @@ type RelayRetainedPage struct {
 	Epoch      int64
 	After      int64
 	Limit      int
-	// UnemittedOnly selects the exact binding/epoch seeds a reset may delete;
-	// unlike ordinary forwarding, it does not filter by project UID.
-	UnemittedOnly bool
 }
 
 // RelayRetainedDeliveryCheck validates retained delivery rows from one hop

@@ -193,34 +193,6 @@ func (p RelayResetProtocol) InstallReset(ctx context.Context, bindingUID string,
 	if err := p.Backend.RequireLocalProjectWorkflows(ctx, install.projectUID); err != nil {
 		return err
 	}
-	// Next-epoch seeds can outlive their source event rows. Check exactly the
-	// unemitted event rows ForwardToDownstream will discard during replacement.
-	for _, downstream := range install.downstream {
-		page := RelayRetainedPage{BindingUID: downstream.RelayBindingUID, Epoch: downstream.RelayResetEpoch + 1, Stream: RelayStreamEvent, Limit: relayResetSeedPageSize, UnemittedOnly: true}
-		for {
-			rows, err := p.Backend.RelayOutboxPage(ctx, page)
-			if err != nil {
-				return err
-			}
-			if len(rows) == 0 {
-				break
-			}
-			for _, row := range rows {
-				var envelope RelayEnvelope
-				if err := json.Unmarshal([]byte(row.Envelope), &envelope, json.RejectUnknownMembers(true)); err != nil {
-					return err
-				}
-				event, err := DecodeRelaySourceEvent(envelope.Body)
-				if err != nil {
-					return err
-				}
-				if err := requireUsableResetEvents([]RemoteEvent{event}); err != nil {
-					return err
-				}
-				page.After = row.Sequence
-			}
-		}
-	}
 	install.config = *binding.RelayConfig
 	install.config.ResetEpoch = translation.Authority.Epoch
 	return p.applyReset(ctx, install)
