@@ -1284,6 +1284,10 @@ func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport, opts db.Imp
 		stringPtrValue(e.RelatedIssueUID), e.RelatedIssueID,
 		e.Type, e.Actor, string(e.Payload),
 		e.HLCPhysicalMS, e.HLCCounter, e.ContentHash, e.CreatedAt)
+	if err == nil && e.FederationReplayDue != nil && !opts.NewInstance && !opts.MergeProject {
+		_, err = tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1,$2)`,
+			e.UID, boolInt(*e.FederationReplayDue))
+	}
 	return wrapImportErr(db.ImportKindEvent, err)
 }
 
