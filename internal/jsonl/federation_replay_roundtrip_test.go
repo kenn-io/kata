@@ -2,7 +2,6 @@ package jsonl_test
 
 import (
 	"bytes"
-	"strconv"
 	"testing"
 	"time"
 
@@ -25,8 +24,9 @@ func TestFederationReplayJSONLRoundTrip(t *testing.T) {
 	require.NoError(t, jsonl.Export(ctx, source, &scoped, jsonl.ExportOptions{ProjectID: events[0].ProjectID}))
 	scopedRestore := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, &scoped, scopedRestore))
-	_, err := scopedRestore.EventsByUIDs(ctx, events[0].ProjectID, []string{events[0].UID})
-	require.NoError(t, err, "the scoped export still carries event history")
+	retained, err := scopedRestore.EventsByUIDs(ctx, events[0].ProjectID, []string{events[0].UID})
+	require.NoError(t, err)
+	require.Len(t, retained, 1, "the scoped restore retains the event")
 	due, err := scopedRestore.FederationLocalReplayDue(ctx, events[0].UID, true)
 	require.NoError(t, err)
 	require.False(t, due, "project exports omit replay delivery state")
@@ -116,9 +116,10 @@ func TestFederationReplayLegacyJSONLBackupRecoversInterruptedReset(t *testing.T)
 	require.NoError(t, err)
 
 	current := exportToBuffer(ctx, t, source).Bytes()
-	version := []byte(`"key":"export_version","value":"` + strconv.Itoa(db.CurrentSchemaVersion()) + `"`)
-	legacy := bytes.Replace(current, version, []byte(`"key":"export_version","value":"50"`), 1)
-	require.NotEqual(t, current, legacy, "fixture must advertise the old export version")
+	// Use the version-aware exporter used by read-only backups and cutovers.
+	_, err = source.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	legacy := exportToBuffer(ctx, t, source).Bytes()
 
 	t.Run("sqlite", func(t *testing.T) {
 		restored := openImportTargetDB(t)
@@ -129,6 +130,21 @@ func TestFederationReplayLegacyJSONLBackupRecoversInterruptedReset(t *testing.T)
 		restored := openPostgresImportTarget(t)
 		require.NoError(t, jsonl.Import(t.Context(), bytes.NewReader(legacy), restored))
 		requireFederationReplayJSONL(t, restored, events)
+	})
+	t.Run("scoped-does-not-infer", func(t *testing.T) {
+		ctx := t.Context()
+		var scoped bytes.Buffer
+		require.NoError(t, jsonl.Export(ctx, source, &scoped, jsonl.ExportOptions{
+			ProjectID: project.ID, IncludeDeleted: true,
+		}))
+		restored := openImportTargetDB(t)
+		require.NoError(t, jsonl.Import(ctx, &scoped, restored))
+		retained, err := restored.EventsByUIDs(ctx, project.ID, []string{events[0].UID})
+		require.NoError(t, err)
+		require.Len(t, retained, 1, "the scoped restore retains the unprojected event")
+		due, err := restored.FederationLocalReplayDue(ctx, events[0].UID, true)
+		require.NoError(t, err)
+		require.False(t, due, "scoped backups do not recover local replay markers")
 	})
 	t.Run("current-does-not-infer", func(t *testing.T) {
 		restored := openImportTargetDB(t)
