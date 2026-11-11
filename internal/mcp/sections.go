@@ -8,6 +8,38 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// LoadedSections retains section selections across servers with the same
+// principal and options. Its zero value is ready to use; it holds no servers.
+type LoadedSections struct {
+	mu  sync.Mutex
+	ids map[string]bool
+}
+
+func (s *LoadedSections) selectSection(id string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ids == nil {
+		s.ids = make(map[string]bool)
+	}
+	s.ids[id] = true
+}
+
+func (s *LoadedSections) snapshot() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.ids))
+	for id := range s.ids {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // ToolSectionInput loads one section's typed tools into the MCP catalog.
 type ToolSectionInput struct{}
 
@@ -66,6 +98,9 @@ func registerSectionLoaders(server *sdkmcp.Server, options Options) error {
 				mutex.Lock()
 				defer mutex.Unlock()
 				load(definition)
+				if loaded[definition.section] {
+					options.LoadedSections.selectSection(definition.section)
+				}
 				return successResult(), ToolSectionOutput{
 					Section: definition.section, Available: definition.available,
 					Loaded: loaded[definition.section], Tools: append([]string(nil), definition.tools...),
@@ -84,6 +119,11 @@ func registerSectionLoaders(server *sdkmcp.Server, options Options) error {
 			return fmt.Errorf("MCP startup section %q is unavailable", id)
 		}
 		load(definition)
+	}
+	for _, id := range options.LoadedSections.snapshot() {
+		if definition, ok := byID[id]; ok {
+			load(definition)
+		}
 	}
 	return nil
 }

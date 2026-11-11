@@ -64,7 +64,7 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 		identity                             bool
 	}{
 		{name: "shared TCP", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "application/json", checkMountPolicy: true},
-		{name: "identity TCP", listen: "127.0.0.1:0", contentType: "application/json", checkMountPolicy: true, identity: true},
+		{name: "identity TCP", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "application/json", checkMountPolicy: true, identity: true},
 		{name: "identity Unix with web listener", web: "listen = '127.0.0.1:0'\n", contentType: "application/json", checkMountPolicy: true, identity: true},
 		{name: "mixed-case JSON", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "Application/JSON"},
 		{name: "Unix with web listener", web: "listen = '127.0.0.1:0'\n", contentType: "application/json"},
@@ -183,6 +183,22 @@ all_projects = true
 					require.NoError(t, response.Body.Close())
 					require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 				}
+				if tt.checkMountPolicy {
+					raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": currentMCPProtocolVersion, "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}})
+					require.NoError(t, err)
+					request, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(raw))
+					require.NoError(t, err)
+					request.Host = tt.host
+					request.Header.Set("Authorization", "Bearer test-mcp-token")
+					request.Header.Set("Content-Type", "application/json")
+					request.Header.Set("Accept", "application/json, text/event-stream")
+					request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
+					request.Header.Set("Mcp-Method", "server/discover")
+					response, err := httpClient.Do(request)
+					require.NoError(t, err)
+					require.NoError(t, response.Body.Close())
+					require.Equal(t, http.StatusOK, response.StatusCode)
+				}
 				mcpTransport := newAuthenticatedMCPHTTPTestTransport(endpoint)
 				mcpTransport.HTTPClient.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
 					clone := request.Clone(request.Context())
@@ -193,7 +209,7 @@ all_projects = true
 					}
 					return transport.RoundTrip(clone)
 				})
-				session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, nil)
+				session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, &sdkmcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 				require.NoError(t, err)
 				defer func() { _ = session.Close() }()
 				assertMCPHTTPPublicIcon(t, httpClient, endpoint, tt.host, session.InitializeResult().ServerInfo)
