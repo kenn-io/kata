@@ -16,7 +16,7 @@ type refusalAfterRekeyStore struct {
 	beforeRefusal func()
 }
 
-func (s refusalAfterRekeyStore) AdoptProjectIntoFederation(_ context.Context, p db.AdoptProjectIntoFederationParams) (db.AdoptProjectIntoFederationResult, error) {
+func (s refusalAfterRekeyStore) AdoptProjectIntoFederation(_ context.Context, _ db.AdoptProjectIntoFederationParams) (db.AdoptProjectIntoFederationResult, error) {
 	s.beforeRefusal()
 	return db.AdoptProjectIntoFederationResult{}, db.ErrUnsupportedEventFeatures
 }
