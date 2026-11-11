@@ -144,7 +144,7 @@ func TestMoveIssuesBatch_BoundActorContinuation(t *testing.T) {
 	source, issue := createClaimGateHelperIssue(t, store)
 	target, err := store.CreateProject(t.Context(), "bound-target")
 	require.NoError(t, err)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.ClaimStatusBody{HubNow: time.Now().UTC()})
 	}))

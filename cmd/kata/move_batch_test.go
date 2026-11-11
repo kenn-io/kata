@@ -397,9 +397,10 @@ func TestMoveBatchCLI_Limits(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, _, dst, first := setupMoveCLIProjects(t)
 			count, comment := 5001, ""
-			if mode == "bytes" {
+			switch mode {
+			case "bytes":
 				count, comment = 4000, strings.Repeat("x", 800000)
-			} else if mode == "bytes-escaped" {
+			case "bytes-escaped":
 				count, comment = 1, strings.Repeat("<", 200000)
 			}
 			input := strings.Repeat(first.UID+"\n", count)
