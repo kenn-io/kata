@@ -37,11 +37,9 @@ func TestFederationReplayJSONLRoundTrip(t *testing.T) {
 
 			var scoped bytes.Buffer
 			require.NoError(t, jsonl.Export(ctx, restored, &scoped, jsonl.ExportOptions{IncludeDeleted: true, ProjectID: events[0].ProjectID}))
-			if backend == "sqlite" {
-				scopedRestore := open()
-				require.NoError(t, jsonl.Import(ctx, bytes.NewReader(scoped.Bytes()), scopedRestore))
-				requireFederationReplayJSONL(t, scopedRestore, events)
-			}
+			scopedRestore := open()
+			require.NoError(t, jsonl.Import(ctx, bytes.NewReader(scoped.Bytes()), scopedRestore))
+			requireFederationReplayJSONL(t, scopedRestore, events)
 			for _, opts := range []jsonl.ImportOptions{{NewInstance: true}, {MergeProject: true}} {
 				target := open()
 				require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(scoped.Bytes()), target, opts))

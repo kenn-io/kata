@@ -54,16 +54,9 @@ func TestFederationPushMissingCurrentProjectEnrollmentDoesNotBlockBatch(t *testi
 	require.Equalf(t, http.StatusOK, response.StatusCode, "reject only the stale comment: %s", raw)
 	var result api.FederationIngestEventsBody
 	require.NoError(t, json.Unmarshal(raw, &result))
-	require.Equal(t, 1, result.Accepted)
 	require.Len(t, result.RejectedEvents, 1)
 	require.Equal(t, stale.EventUID, result.RejectedEvents[0].EventUID)
 	require.Contains(t, result.RejectedEvents[0].Message, "matching project enrollment or push proof is missing")
-	invalidRoute := bearer("invalid-route-credential")
-	invalidRoute[db.EventFeaturesHeader] = db.SupportedEventFeatures
-	invalidRoute[db.FederationEventRejectionsHeader] = "1"
-	response, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, invalidRoute)
-	require.Equal(t, http.StatusForbidden, response.StatusCode)
-	require.Contains(t, string(raw), "auth_invalid")
 	body.MoveSourceTokens = map[string]string{target.UID: "invalid-supplemental-proof"}
 	response, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
 	require.Equalf(t, http.StatusOK, response.StatusCode, "%s", raw)

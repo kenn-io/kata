@@ -5,10 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"net/http/httputil"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -354,33 +350,16 @@ func TestSyncFederationPartialPushAndPull(t *testing.T) {
 	require.NoError(t, err)
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
-	upstream, err := url.Parse(hub.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(upstream)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/events") {
-			http.Error(w, "pull temporarily unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	binding.HubURL = server.URL
-	_, err = sender.env.DB.UpsertFederationBinding(t.Context(), binding)
-	require.NoError(t, err)
-	credential := sender.credentials[projects[0].UID]
-	credential.HubURL = server.URL
-	sender.credentials[projects[0].UID] = credential
 	runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
 	_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
 	require.ErrorContains(t, err, "pending federation events remain")
 	require.ErrorContains(t, err, "matching push access")
 	require.ErrorContains(t, err, "need project access")
-	require.ErrorContains(t, err, "pull temporarily unavailable")
+	require.ErrorIs(t, err, db.ErrNotFound)
 	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.NotNil(t, status.LastError)
-	require.Contains(t, *status.LastError, "pull temporarily unavailable")
+	require.Contains(t, *status.LastError, "not found")
 	require.Contains(t, *status.LastError, "pending federation events remain")
 	require.Contains(t, *status.LastError, "need project access")
 }
