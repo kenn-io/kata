@@ -61,6 +61,8 @@ The index also links the goroutine, allocation, mutex-contention, blocking,
 thread-creation, command-line, symbol, and execution-trace endpoints. Capture
 `/debug/pprof/trace?seconds=5` and open it with `go tool trace`.
 
+## Recover an unresponsive local daemon
+
 If a local process is alive but cannot answer ping, CLI errors report its PID,
 endpoint, log path, and recovery steps. If the advertised web origin responds,
 capture `/debug/pprof/goroutine?debug=2` there before stopping the process. These

@@ -54,7 +54,6 @@ type daemonDiagnosis struct {
 	// RootSigning is present when the live daemon cannot sign for a root project.
 	RootSigning *api.RootSigningHealth `json:"root_signing,omitempty"`
 	NextAction  string                 `json:"next_action"`
-	observed    *client.LocalDaemonUnreachableError
 }
 
 func daemonDiagnoseCmd() *cobra.Command {
@@ -93,7 +92,7 @@ func daemonRecoverCmd() *cobra.Command {
 			return diagnosisError(result)
 		}
 		if _, err := client.EnsureLocalProfileSelection(cmd.Context(), selection); err != nil {
-			return cliDaemonTargetError(err)
+			return cliDaemonTargetError(err, selection.Resolved.Name)
 		}
 		result, _, err = diagnoseDaemonSelection(cmd.Context(), expected, selection)
 		if err != nil {
@@ -347,7 +346,9 @@ func probeDaemonSelection(
 	}
 	if err != nil {
 		result.Message = err.Error()
-		result.observed, _ = errors.AsType[*client.LocalDaemonUnreachableError](err)
+		if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+			result.NextAction = localDaemonGuidance(unreachable, result.Profile)
+		}
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"
 			if mismatch, ok := errors.AsType[*client.LocalProfileIdentityError](err); ok {
@@ -508,17 +509,20 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	case "selection_error":
 		result.NextAction = "repair the selected routing configuration; current-home processes are listed separately"
 	default:
-		result.NextAction = "inspect the selected process and its credentials; do not switch databases"
-	}
-	if result.State == "local_unreachable" && result.observed != nil {
-		result.NextAction = localDaemonGuidance(result.observed)
+		if result.State != "local_unreachable" || result.NextAction == "" {
+			result.NextAction = "inspect the selected process and its credentials; do not switch databases"
+		}
 	}
 	return result
 }
 
 func diagnosisError(result daemonDiagnosis) error {
 	data, _ := json.Marshal(result)
-	return &cliError{Message: diagnosisMessage(result), Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
+	message := result.State + ": " + result.NextAction
+	if result.State == "local_unreachable" && result.Message != "" {
+		message = result.State + ": " + result.Message + ". " + result.NextAction
+	}
+	return &cliError{Message: message, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
 }
 
 func printDaemonDiagnosis(cmd *cobra.Command, result daemonDiagnosis) error {

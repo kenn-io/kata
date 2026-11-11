@@ -85,7 +85,6 @@ func discoverLocalProfileWithVerifier(
 	scan liveDaemonScanner,
 	verify func(context.Context, ResolvedDaemon) error,
 ) (result ResolvedDaemon, found bool, resultErr error) {
-	defer func() { resultErr = scopeProfileUnreachable(resultErr, selection.Resolved.Name) }()
 	resolved := selection.Resolved
 	if _, err := os.Stat(resolved.LocalProfile.DataDir); errors.Is(err, os.ErrNotExist) {
 		return resolved, false, nil
@@ -149,7 +148,6 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 }
 
 func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (result ResolvedDaemon, resultErr error) {
-	defer func() { resultErr = scopeProfileUnreachable(resultErr, selection.Resolved.Name) }()
 	profile := *selection.Profile
 	inspector, err := installedStorageInspector()
 	if err != nil {
@@ -241,12 +239,4 @@ func EnsureSameLocalProfile(ctx context.Context, resolved ResolvedDaemon) (Resol
 		return resolved, errors.New("local profile snapshot is unavailable")
 	}
 	return EnsureLocalProfileSelection(ctx, DaemonSelection{Resolved: resolved, Profile: resolved.profileConfig})
-}
-
-// scopeProfileUnreachable names the selected profile on the evidence in place.
-func scopeProfileUnreachable(err error, name string) error {
-	if unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
-		unreachable.Profile = name
-	}
-	return err
 }

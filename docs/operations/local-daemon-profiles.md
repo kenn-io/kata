@@ -96,7 +96,8 @@ Diagnosis, status, health, and locate never start the selected daemon.
 `daemon status` lists current-home processes and reports `selected` separately.
 Use that selected state to distinguish a healthy personal process from a
 stopped work profile. Diagnose returns the state even when it is not ready;
-failed recovery, health, and locate return an error.
+failed recovery, health, and locate return an error. For a live unreachable
+process, follow the [local recovery guidance](remote-daemon.md#recover-an-unresponsive-local-daemon).
 
 If routing configuration is invalid, diagnose reports `state=selection_error`
 and a `message` explaining the failure. Status still lists current-home processes
@@ -122,7 +123,7 @@ them.
 | `ready` | Continue using the selected daemon. |
 | `stopped_local_profile` | Run `daemon recover` to start that existing profile. |
 | `local_stopped` | Start the current home explicitly. It is not a pinned profile. |
-| `local_unreachable` | Inspect the selected process, transport, and credentials. |
+| `local_unreachable` | Follow the reported `next:` or `next_action` evidence and scoped recovery; if no process evidence is available, inspect transport and credentials. |
 | `selection_error` | Repair routing with `daemon diagnose`; status retains the current-home process list. |
 | `missing_profile_storage` | Restore access to the profile's existing storage. |
 | `unreadable_storage` | Use `message` to restore access to the selected storage metadata. |

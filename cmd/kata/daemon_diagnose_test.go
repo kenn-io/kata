@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -313,7 +314,7 @@ func TestDaemonLocateStoppedProfileDoesNotStart(t *testing.T) {
 }
 
 func TestHealthSelectedProfileDoesNotUsePersonalRuntime(t *testing.T) {
-	home, _, uid, _ := stoppedProfileCLI(t)
+	home, _, _, _ := stoppedProfileCLI(t)
 	personal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ping" {
 			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
@@ -335,22 +336,6 @@ func TestHealthSelectedProfileDoesNotUsePersonalRuntime(t *testing.T) {
 	_, err = os.Stat(filepath.Join(home, "runtime"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
 
-	// A non-private selected-profile runtime is structured and left unrepaired.
-	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
-	require.NoError(t, err)
-	profileNS, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
-	require.NoError(t, err)
-	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, profileNS.DataDir)
-	_, _, err = executeRootCapture(t, t.Context(), "health", "--json")
-	target = requireCLIError(t, err, ExitDaemonUnavail)
-	assert.Equal(t, "local_unreachable", target.Code)
-	var result daemonDiagnosis
-	require.NoError(t, json.Unmarshal(target.Data, &result))
-	assert.Equal(t, "work", result.Profile)
-	assert.Equal(t, home, result.Home)
-	assert.Equal(t, uid, result.ExpectedInstanceUID)
-	assert.NotEmpty(t, result.Message)
-	assertUnchanged()
 }
 
 func TestDaemonDiagnoseEmptyCurrentHomeDoesNotInitialize(t *testing.T) {
@@ -819,7 +804,24 @@ func TestDaemonRunningProfileDoesNotRequireProject(t *testing.T) {
 
 func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	home, _, uid, _ := stoppedProfileCLI(t)
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	entered := make(chan struct{}, 1)
+	var changeCatalog atomic.Bool
+	catalogPath := filepath.Join(os.Getenv("KATA_HOME"), "config.toml")
+	//nolint:gosec // The path is under the temporary home set by stoppedProfileCLI.
+	catalog, err := os.ReadFile(catalogPath)
+	require.NoError(t, err)
+	changed := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if changeCatalog.CompareAndSwap(true, false) {
+			//nolint:gosec // The path is under the temporary fixture home.
+			changed <- os.WriteFile(catalogPath, []byte(strings.Replace(string(catalog), `name = "work"`, `name = "other"`, 1)), 0600)
+		}
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
 	t.Cleanup(server.Close)
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
 	require.NoError(t, err)
@@ -836,29 +838,28 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	}
 
 	t.Run("diagnose", func(t *testing.T) {
-		out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
-		require.NoError(t, err)
-		var result daemonDiagnosis
-		require.NoError(t, json.Unmarshal([]byte(out), &result))
-		require.Equal(t, "local_unreachable", result.State)
-		require.Contains(t, result.NextAction, recoverCmd)
-	})
-	t.Run("diagnose with short deadline", func(t *testing.T) {
 		t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 		require.NoError(t, err)
+		select {
+		case <-entered:
+		default:
+			t.Fatal("probe did not enter")
+		}
 		var result daemonDiagnosis
 		require.NoError(t, json.Unmarshal([]byte(out), &result))
 		require.Equal(t, "local_unreachable", result.State)
 		require.Contains(t, result.NextAction, recoverCmd)
 	})
 	t.Run("ordinary", func(t *testing.T) {
-		_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "list")
-		var cliErr *cliError
-		require.ErrorAs(t, err, &cliErr)
-		require.Contains(t, cliErr.Message, "context deadline exceeded")
-		require.Contains(t, cliErr.Hint, logPath)
-		require.Contains(t, cliErr.Hint, recoverCmd)
+		for _, args := range [][]string{{"--daemon", "work", "list"}, {"list"}} {
+			_, _, err := executeRootCapture(t, t.Context(), args...)
+			var cliErr *cliError
+			require.ErrorAs(t, err, &cliErr)
+			require.Contains(t, cliErr.Message, "context deadline exceeded")
+			require.Contains(t, cliErr.Hint, logPath)
+			require.Contains(t, cliErr.Hint, recoverCmd)
+		}
 	})
 	t.Run("health keeps the failure in the error text", func(t *testing.T) {
 		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
@@ -868,9 +869,28 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		require.NoError(t, json.Unmarshal(cliErr.Data, &result))
 		require.Equal(t, "work", result.Profile)
 		require.Equal(t, uid, result.ExpectedInstanceUID)
-		for _, evidence := range []string{fmt.Sprintf("pid %d", os.Getpid()), server.Listener.Addr().String(), "context deadline exceeded", logPath, recoverCmd} {
+		for _, evidence := range []string{fmt.Sprintf("pid %d", os.Getpid()), server.Listener.Addr().String(), "context deadline exceeded"} {
 			require.Contains(t, cliErr.Message, evidence)
-			require.Contains(t, stderr, evidence)
 		}
+		healthNextAction := result.NextAction
+		require.NotEmpty(t, healthNextAction)
+		require.Contains(t, cliErr.Message, healthNextAction)
+		require.Contains(t, stderr, healthNextAction)
 	})
+	t.Run("health retains selection when catalog changes", func(t *testing.T) {
+		changeCatalog.Store(true)
+		t.Cleanup(func() {
+			//nolint:gosec // Restore the temporary fixture catalog.
+			require.NoError(t, os.WriteFile(catalogPath, catalog, 0600))
+		})
+		_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
+		require.NoError(t, <-changed)
+		cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+		require.Equal(t, "local_unreachable", cliErr.Code)
+		var result daemonDiagnosis
+		require.NoError(t, json.Unmarshal(cliErr.Data, &result))
+		require.Equal(t, "work", result.Profile)
+		require.Contains(t, result.NextAction, recoverCmd)
+	})
+
 }

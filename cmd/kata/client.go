@@ -63,14 +63,14 @@ func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	if flags.Daemon != "" {
 		resolved, err := client.PrepareResolvedNamed(ctx, flags.Daemon)
 		if err != nil {
-			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
+			return resolved, cliDaemonTargetError(err, resolvedProfileName(resolved))
 		}
 		return resolved, nil
 	}
 	workspaceStart := workspaceStartForRemote()
 	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStart)
 	if err != nil {
-		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
+		return resolved, cliDaemonTargetError(err, resolvedProfileName(resolved))
 	}
 	return resolved, nil
 }
@@ -129,22 +129,30 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 	if v, ok := ctx.Value(client.BaseURLKey{}).(string); ok && v != "" {
 		return client.EnsureResolvedInWorkspace(ctx, "")
 	}
-	resolved, found, err := client.DiscoverSelected(ctx, client.DiscoverRequest{
-		WorkspaceStart: workspaceStartForRemote(),
-		Name:           flags.Daemon,
-		ProbeRemote:    flags.Daemon != "",
-	})
-	if err != nil || !found {
-		if resolved.LocalProfile != nil {
-			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
+	selection, err := client.InspectSelection(ctx, workspaceStartForRemote(), flags.Daemon)
+	if err != nil {
+		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
+	}
+	if selection.Profile != nil {
+		resolved, found, err := client.DiscoverLocalProfileSelection(ctx, selection)
+		if err != nil || !found {
+			diagnosis, _, diagnoseErr := diagnoseDaemonSelection(ctx, "", selection)
 			if diagnoseErr != nil {
 				return resolved, diagnoseErr
 			}
 			return resolved, diagnosisError(diagnosis)
 		}
-		if err != nil {
-			return resolved, cliDaemonTargetError(err)
-		}
+		return resolved, nil
+	}
+	resolved, found, err := client.DiscoverSelected(ctx, client.DiscoverRequest{
+		WorkspaceStart: workspaceStartForRemote(),
+		Name:           flags.Daemon,
+		ProbeRemote:    flags.Daemon != "",
+	})
+	if err != nil {
+		return resolved, cliDaemonTargetError(err)
+	}
+	if !found {
 		return resolved, noDaemonRunningError()
 	}
 	return resolved, nil
@@ -165,9 +173,20 @@ func noDaemonRunningError() error {
 	}
 }
 
-func cliDaemonTargetError(err error) error {
+func resolvedProfileName(resolved client.ResolvedDaemon) string {
+	if resolved.LocalProfile != nil {
+		return resolved.Name
+	}
+	return ""
+}
+
+func cliDaemonTargetError(err error, profiles ...string) error {
 	if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-		return &cliError{Message: err.Error(), Hint: localDaemonGuidance(unreachable), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+		profile := ""
+		if len(profiles) > 0 {
+			profile = profiles[0]
+		}
+		return &cliError{Message: err.Error(), Hint: localDaemonGuidance(unreachable, profile), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	}
 	code := ""
 	switch {

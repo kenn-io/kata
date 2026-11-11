@@ -751,7 +751,7 @@ func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
 }
 
 func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
-	profile, _ := localProfileFixture(t)
+	profile, root := localProfileFixture(t)
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(server.Close)
 	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
@@ -759,16 +759,32 @@ func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
 	require.NoError(t, err)
-	for name, call := range map[string]func() error{
-		"named":    func() error { _, err := EnsureResolvedNamed(t.Context(), "work"); return err },
-		"discover": func() error { _, _, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "work"}); return err },
+	for name, call := range map[string]func() (string, error){
+		"named": func() (string, error) {
+			resolved, err := EnsureResolvedNamed(t.Context(), "work")
+			return resolved.Name, err
+		},
+		"workspace": func() (string, error) {
+			resolved, err := PrepareResolvedInWorkspace(t.Context(), root)
+			return resolved.Name, err
+		},
+		"web workspace": func() (string, error) {
+			prepared, err := PrepareWebUI(t.Context(), PrepareWebUIOptions{WorkspaceStart: root})
+			return prepared.DaemonName, err
+		},
+		"discover": func() (string, error) {
+			resolved, _, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "work"})
+			return resolved.Name, err
+		},
+		"web": func() (string, error) {
+			prepared, err := PrepareWebUI(t.Context(), PrepareWebUIOptions{DaemonName: "work"})
+			return prepared.DaemonName, err
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := call()
+			selected, err := call()
 			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-			var observed *LocalDaemonUnreachableError
-			require.ErrorAs(t, err, &observed)
-			require.Equal(t, "work", observed.Profile)
+			require.Equal(t, "work", selected)
 		})
 	}
 }

@@ -226,7 +226,7 @@ func restartLocalDaemon(ctx context.Context, ns *daemonruntime.Namespace, previo
 // until it calls release.
 func discoverForStart(ctx context.Context, dataDir string) (ensureDiscovery, func(), error) {
 	found, err := discoverForEnsure(ctx, dataDir)
-	if (err != nil && !errors.Is(err, ErrLocalDaemonUnreachable)) || found.Outcome == daemonScanCompatible {
+	if (err != nil && (!errors.Is(err, ErrLocalDaemonUnreachable) || ctx.Err() != nil)) || found.Outcome == daemonScanCompatible {
 		return found, func() {}, err
 	}
 	release, err := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
