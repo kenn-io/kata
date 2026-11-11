@@ -144,8 +144,9 @@ func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
 			h.fill("FREQ=DAIL", "2026-11-09", "Europe/Paris")
 			h.key(runeKey('Y'))
 			assert.Contains(t, h.m.input.err, refusal)
-			assert.Nil(t, h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}))
-
+			before, err := h.env.DB.IssueByID(t.Context(), h.issue.ID)
+			require.NoError(t, err)
+			beforeRows := h.rows()
 			var writes []string
 			hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				if r.Method != http.MethodGet {
@@ -169,17 +170,16 @@ func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
 				resp.Body = io.NopCloser(bytes.NewReader(body))
 				return resp, nil
 			})}
-			client := NewClient(h.env.URL, hc)
-			in := RecurrenceInput{
-				Terms:         recurrenceclient.Terms{Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "alice"},
-				IssueRevision: h.issue.Revision,
-				Recurrence:    current,
-			}
-			_, err := client.SaveRecurrence(t.Context(), h.issue.ProjectID, h.issue.UID, in)
-			require.ErrorContains(t, err, refusal)
+			h.m.api = NewClient(h.env.URL, hc)
+			h.save()
+			require.Contains(t, h.m.input.err, refusal)
 			require.Empty(t, writes)
+			after, err := h.env.DB.IssueByID(t.Context(), h.issue.ID)
+			require.NoError(t, err)
+			assert.Equal(t, before.Metadata, after.Metadata)
+			assert.Equal(t, before.Revision, after.Revision)
+			assert.Equal(t, beforeRows, h.rows())
 			if current != nil {
-				h.m.api = client
 				h.fill("", "", "")
 				h.save()
 				assert.Equal(t, []string{http.MethodDelete}, writes)
