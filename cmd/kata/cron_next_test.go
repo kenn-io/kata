@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
@@ -114,6 +115,17 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Contains(t, out, tc.want)
+			if tc.name == "local once" || tc.name == "native interval" {
+				previous := time.Local
+				t.Cleanup(func() { time.Local = previous })
+				for _, offset := range []int{-5 * 3600, 2 * 3600} {
+					time.Local = time.FixedZone("client", offset)
+					out, _, err := executeCronCLI(t, server.URL, nil, "job", "next", id, "--count", "1", "--from", "2026-06-01T01:00:00Z")
+					require.NoError(t, err)
+					require.Contains(t, out, `"timezone":"UTC"`)
+					require.Contains(t, out, `"local":"2026-06-01T08:00:00Z"`)
+				}
+			}
 		})
 	}
 }

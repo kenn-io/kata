@@ -48,10 +48,7 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 		if def.Trigger.Kind != "cron" {
 			return JobPreview{Status: "unsupported"}, nil
 		}
-		if scheduleErr != nil {
-			return JobPreview{}, scheduleErr
-		}
-		if schedule == nil {
+		if scheduleErr == nil && schedule == nil {
 			return JobPreview{Status: "unsupported"}, nil
 		}
 	}

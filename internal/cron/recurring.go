@@ -383,7 +383,8 @@ func adapterCronSchedule(t Trigger) (cronparser.Schedule, error) {
 }
 
 // TriggerLocation is the zone a trigger's wall-clock times are written in: the
-// expression's own directive, else the trigger timezone, else UTC.
+// expression's own directive, else the trigger timezone, else UTC. Local
+// falls back to UTC because the scheduler's timezone is unknown here.
 func TriggerLocation(t Trigger) *time.Location {
 	if t.Kind == "cron" {
 		schedule, err := adapterCronSchedule(t)
@@ -392,7 +393,7 @@ func TriggerLocation(t Trigger) *time.Location {
 		}
 		return time.UTC
 	}
-	if loc, err := time.LoadLocation(t.Timezone); err == nil && t.Timezone != "" {
+	if loc, err := time.LoadLocation(t.Timezone); err == nil && t.Timezone != "" && loc != time.Local {
 		return loc
 	}
 	return time.UTC
