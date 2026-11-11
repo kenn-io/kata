@@ -2,8 +2,8 @@ package daemon
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"os/exec"
@@ -63,15 +63,15 @@ func TestAPISchemaVersionMatchesRecordedContract(t *testing.T) {
 }
 
 func checkAPIVersionRecord(dir, version string, doc []byte) error {
-	var root map[string]json.RawMessage
+	var root map[string]jsontext.Value
 	if err := json.Unmarshal(doc, &root); err != nil {
 		return err
 	}
-	var info map[string]json.RawMessage
+	var info map[string]jsontext.Value
 	if err := json.Unmarshal(root["info"], &info); err != nil {
 		return err
 	}
-	info["version"] = json.RawMessage(`""`)
+	info["version"] = jsontext.Value(`""`)
 	var err error
 	root["info"], err = json.Marshal(info)
 	if err != nil {
