@@ -21,6 +21,7 @@ func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, _ db.Storage, backen
 		"active replicas", "pausing the source retains discussion", "source paused before destination joins",
 		"source leave retains discussion", "destination leave preserves standalone issue",
 		"destination leave waits for pending initial link", "destination leave waits for pending cron observation",
+		"destination leave waits for archived source",
 	} {
 		t.Run(lifecycle, func(t *testing.T) {
 			hub := backend.Open(t)
@@ -95,7 +96,10 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	baseline, refreshed, err := hub.RefreshProjectFederationBaseline(ctx, target.ID, "worker")
 	require.NoError(t, err)
 	require.True(t, refreshed)
-	_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: before.ID, Author: "worker", Body: "source-only newer discussion"})
+	if lifecycle == "destination leave waits for archived source" {
+		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
+	}
+	_, commentEvent, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: before.ID, Author: "worker", Body: "source-only newer discussion"})
 	require.NoError(t, err)
 	if lifecycle == "source paused before destination joins" {
 		binding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
@@ -106,6 +110,13 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	}
 	var pending db.Event
 	switch lifecycle {
+	case "destination leave waits for archived source":
+		archived, _, err := spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: localSource.ID, Actor: "worker", Force: true})
+		require.NoError(t, err, "the issue is still source-owned when the spoke archives it")
+		require.NotNil(t, archived.DeletedAt)
+		binding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
+		require.NoError(t, err, "archive retains the source enrollment")
+		require.Less(t, binding.PushCursorEventID, commentEvent.ID)
 	case "destination leave waits for pending initial link":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
 		var linked db.Issue
@@ -174,7 +185,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	cursor, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	for range 2 {
-		if lifecycle != "source paused before destination joins" {
+		if lifecycle != "source paused before destination joins" && lifecycle != "destination leave waits for archived source" {
 			require.NoError(t, spoke.MaterializeFederatedProject(ctx, localSource.ID), "newer source discussion must not restore source ownership")
 		}
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, localTarget.ID))
@@ -235,6 +246,24 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, pending.ID))
 		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
 		require.NoError(t, err, "acknowledging the pending event releases the destination enrollment")
+	case "destination leave waits for archived source":
+		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
+			"the archived source's pending comment still requires the destination enrollment")
+
+		restored, _, changed, err := spoke.RestoreProject(ctx, localSource.ID, "worker")
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Nil(t, restored.DeletedAt)
+		binding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
+		require.NoError(t, err)
+		events, err := spoke.PendingFederationPushEvents(ctx, localSource.ID, spoke.InstanceUID(), binding.PushCursorEventID, 100)
+		require.NoError(t, err)
+		require.NotEmpty(t, events)
+		require.Equal(t, commentEvent.UID, events[0].UID, "restoring the project makes its unsent comment eligible again")
+		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, commentEvent.ID))
+		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.NoError(t, err, "acknowledging the restored source's comment releases the destination enrollment")
 	case "destination leave preserves standalone issue":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
 		_, err := spoke.LeaveFederationReplica(ctx, localTarget.ID)

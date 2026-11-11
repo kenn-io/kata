@@ -74,7 +74,7 @@ func CheckFederationMoveSourceLifecycle(
 }
 
 // A source stream still needs the current owner's enrollment to push its
-// pending updates. Pausing sync does not acknowledge those updates.
+// pending updates. Pausing sync or archiving the source retains those updates.
 func checkFederationMoveDestinationLifecycle(
 	ctx context.Context, tx *sql.Tx, projectID int64, instanceUID, hubURL, actor string,
 	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
@@ -87,7 +87,6 @@ func checkFederationMoveDestinationLifecycle(
 	rows, err := tx.QueryContext(ctx, `SELECT b.hub_url,e.type,e.issue_uid,e.related_issue_uid,e.payload
  FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
- JOIN projects p ON p.id=b.project_id AND p.deleted_at IS NULL
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2 AND b.bound_actor=$3
  AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id
  AND (e.type LIKE 'issue.%' OR e.type IN ('cron.run.observed','cron.run.snapshot'))
@@ -153,7 +152,7 @@ func checkFederationMoveDestinationLifecycle(
 			return err
 		}
 		if pending {
-			return fmt.Errorf("%w: sync pending updates for moved issues from their former projects, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush)
+			return fmt.Errorf("%w: restore any archived former project and sync pending updates for moved issues, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush)
 		}
 	}
 	return nil
