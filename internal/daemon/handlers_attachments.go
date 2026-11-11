@@ -132,7 +132,8 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, true); err != nil {
+		var claimResult claimRefreshResult
+		if err := requireFederatedIssueClaimWithResult(ctx, cfg, iss, actor, true, &claimResult); err != nil {
 			return nil, err
 		}
 		if !metadata.ValidAttachmentName(in.Name) {
@@ -148,7 +149,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
-			e, err = forwardDocbankDescriptor(ctx, cfg, project, binding, iss, "", in.Name, nil, ctx.Value(attachmentUploadContextKey{}).(io.Reader))
+			e, err = forwardDocbankDescriptor(ctx, cfg, project, binding, iss, &claimResult, "", in.Name, nil, ctx.Value(attachmentUploadContextKey{}).(io.Reader))
 			if err != nil {
 				return nil, err
 			}

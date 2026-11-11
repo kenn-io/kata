@@ -34,6 +34,16 @@ func requireFederatedIssueClaimWithRefresh(
 	actor string,
 	refresh bool,
 ) error {
+	return requireFederatedIssueClaimWithResult(ctx, cfg, issue, actor, refresh, nil)
+}
+
+type claimRefreshResult struct {
+	binding db.FederationBinding
+	known   bool
+	missing bool
+}
+
+func requireFederatedIssueClaimWithResult(ctx context.Context, cfg ServerConfig, issue db.Issue, actor string, refresh bool, result *claimRefreshResult) error {
 	principal := db.ClaimPrincipal{
 		HolderInstanceUID: cfg.DB.InstanceUID(),
 		Holder:            strings.TrimSpace(actor),
@@ -46,7 +56,7 @@ func requireFederatedIssueClaimWithRefresh(
 		}
 		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, requestPrincipal.Subject).ClaimPrincipal
 	}
-	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, refresh)
+	return checkFederatedIssueClaim(ctx, cfg, issue, principal, refresh, false, result)
 }
 
 func requireFederatedIssueClaimForPrincipal(
@@ -66,12 +76,12 @@ func requireFederatedIssueClaimForPrincipalWithRefresh(
 	principal db.ClaimPrincipal,
 	refresh bool,
 ) error {
-	return checkFederatedIssueClaim(ctx, cfg, issue, principal, refresh, false)
+	return checkFederatedIssueClaim(ctx, cfg, issue, principal, refresh, false, nil)
 }
 
 // Service calls must admit external I/O through a transaction fence and retain
 // every component of the authenticated forwarded lease identity.
-func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Issue, principal db.ClaimPrincipal, refresh, service bool) error {
+func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Issue, principal db.ClaimPrincipal, refresh, service bool, result *claimRefreshResult) error {
 	// Claims belong to the resolved issue in its current project.
 	projectID := issue.ProjectID
 
@@ -109,7 +119,7 @@ func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 
 	if refresh && binding.Role == db.FederationRoleSpoke {
-		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue); err != nil {
+		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, result); err != nil {
 			return err
 		}
 	}
@@ -154,6 +164,7 @@ func refreshSpokeClaimStatusForGate(
 	cfg ServerConfig,
 	binding db.FederationBinding,
 	issue db.Issue,
+	result *claimRefreshResult,
 ) error {
 	remoteCtx, cancelRemote := context.WithTimeout(ctx, mutationClaimStatusRefreshTimeout)
 	defer cancelRemote()
@@ -173,10 +184,18 @@ func refreshSpokeClaimStatusForGate(
 		if pendingErr != nil {
 			return pendingErr
 		}
-		if pending {
+		var status *claimHubStatusError
+		missingRelayIssue := result != nil && binding.RelayConfig != nil && errors.As(err, &status) && status != nil && status.StatusCode == http.StatusNotFound && (hubStatusErrorCode(status) == "issue_not_found" || hubStatusErrorCode(status) == "hub_claim_failed")
+		if pending || missingRelayIssue {
+			if result != nil {
+				*result = claimRefreshResult{binding: binding, known: true, missing: true}
+			}
 			return nil
 		}
 		return claimForwardError(err)
+	}
+	if result != nil {
+		*result = claimRefreshResult{binding: binding, known: true}
 	}
 	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
 	if err != nil {

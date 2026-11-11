@@ -2,6 +2,7 @@ package federation_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -159,7 +160,7 @@ func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 	serveRelayDocbank(t, root, rootVault)
 	serveRelayDocbank(t, relay, nil)
 	serveRelayDocbank(t, leaf, nil)
-	var rootPreflights, relayPreflights atomic.Int32
+	var rootPreflights, relayPreflights, relayClaimLookups atomic.Int32
 	for _, entry := range []struct {
 		node  *relayMatrixNode
 		count *atomic.Int32
@@ -168,6 +169,9 @@ func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 		var wrapped http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasSuffix(r.URL.Path, "/federation/docbank/capabilities") {
 				entry.count.Add(1)
+			}
+			if entry.node == relay && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/lease") {
+				relayClaimLookups.Add(1)
 			}
 			previous.ServeHTTP(w, r)
 		})
@@ -179,6 +183,7 @@ func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
 	status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=report.pdf", "root document", "application/octet-stream")
 	require.Equal(t, http.StatusOK, status, string(raw))
+	require.EqualValues(t, 2, relayClaimLookups.Load(), "one claim refresh before and one after upload")
 	var out api.AddAttachmentResponseBody
 	require.NoError(t, json.Unmarshal(raw, &out))
 	require.Equal(t, root.store.InstanceUID(), out.Attachment.Origin)
@@ -198,8 +203,10 @@ func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 	require.EqualValues(t, 3, relayPreflights.Load())
 	version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222")
 	rootVault.Seed("/kata/link.pdf", docbank.Node{ID: 42, Name: "link.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("linked document")})
+	relayClaimLookups.Store(0)
 	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"/links", `{"path":"/kata/link.pdf"}`, "application/json")
 	require.Equal(t, http.StatusOK, status, string(raw))
+	require.EqualValues(t, 2, relayClaimLookups.Load(), "one claim refresh before and one after linking")
 	require.EqualValues(t, 4, rootPreflights.Load())
 	require.EqualValues(t, 4, relayPreflights.Load())
 	closeBody := fmt.Sprintf(`{"reason":"done","message":"Delivered the report and checked its final contents carefully.","evidence":[{"type":"attachment","attachment_id":%q}]}`, out.ID)
@@ -410,6 +417,9 @@ func TestRelayDocbankNewIssueCanAttachImmediately(t *testing.T) {
 			serveRelayDocbank(t, root, vault)
 			pending, _, err := leaf.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: leaf.project.ID, Author: leaf.account, Title: "new shared issue"})
 			require.NoError(t, err)
+			if operation == "link" {
+				syncRelayMatrixNode(t, leaf)
+			}
 			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, pending.UID)
 			var status int
 			var raw []byte
@@ -465,4 +475,54 @@ func TestRelayDocbankNewIssueSyncFailureAndRebind(t *testing.T) {
 			require.JSONEq(t, "{}", string(stored.Metadata))
 		})
 	}
+}
+
+func TestRelayDocbankNewIssueAcrossTwoRelays(t *testing.T) {
+	root := newRelayMatrixNode(t, "sqlite", "root-member")
+	project, err := root.store.CreateProject(t.Context(), "shared")
+	require.NoError(t, err)
+	root.project = project
+	_, err = root.store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+	require.NoError(t, err)
+	public := root.signer.PrivateKey.Public().(ed25519.PublicKey)
+	require.NoError(t, root.store.PinRootAuthority(t.Context(), db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: root.store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+	upper := newRelayMatrixNode(t, "sqlite", "upper-member")
+	lower := newRelayMatrixNode(t, "sqlite", "lower-member")
+	leaf := newRelayMatrixNode(t, "sqlite", "leaf-member")
+	enrollRelayMatrixReplica(t, root, upper, "upper", true)
+	syncRelayMatrixNode(t, upper)
+	enrollRelayMatrixReplica(t, upper, lower, "lower", true)
+	syncRelayMatrixNode(t, lower)
+	enrollRelayMatrixReplica(t, lower, leaf, "leaf", false)
+	syncRelayMatrixNode(t, leaf)
+	vault := docbanktest.New(t)
+	serveRelayDocbank(t, root, vault)
+	issue, _, err := leaf.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: leaf.project.ID, Author: leaf.account, Title: "new issue"})
+	require.NoError(t, err)
+	syncRelayMatrixNode(t, leaf)
+	syncRelayMatrixNode(t, lower)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?name=report.pdf", leaf.project.ID, issue.UID)
+	status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint, "report", "application/octet-stream")
+	require.Equal(t, http.StatusOK, status, string(raw))
+}
+
+func TestRelayDocbankNewIssueAfterClaimRefreshTimeout(t *testing.T) {
+	root, relay, leaf, _ := newRelayClaimChain(t)
+	serveRelayDocbank(t, root, docbanktest.New(t))
+	var calls atomic.Int32
+	previous := *relay.handler.Load()
+	var delayed http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/lease") && calls.Add(1) == 1 {
+			<-r.Context().Done()
+			return
+		}
+		previous.ServeHTTP(w, r)
+	})
+	relay.handler.Store(&delayed)
+	issue, _, err := leaf.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: leaf.project.ID, Author: leaf.account, Title: "new issue"})
+	require.NoError(t, err)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?name=report.pdf", leaf.project.ID, issue.UID)
+	status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint, "report", "application/octet-stream")
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.GreaterOrEqual(t, calls.Load(), int32(2))
 }

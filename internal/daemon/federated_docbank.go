@@ -139,17 +139,39 @@ func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.Fed
 	return nil, attachmentError(resp.StatusCode, code)
 }
 
+func sameClaimRefreshRoute(a, b db.FederationBinding) bool {
+	if a.Role != b.Role || a.Enabled != b.Enabled || a.PushEnabled != b.PushEnabled || a.HubURL != b.HubURL || a.HubProjectID != b.HubProjectID || a.HubProjectUID != b.HubProjectUID || a.AllowInsecure != b.AllowInsecure {
+		return false
+	}
+	if a.RelayConfig == nil {
+		return b.RelayConfig == nil
+	}
+	return b.RelayConfig != nil && a.RelayConfig.BindingUID == b.RelayConfig.BindingUID && a.RelayConfig.AuthorityUID == b.RelayConfig.AuthorityUID
+}
+
 // ensureDocbankIssueUpstream sends pending issue events before a forwarded write
 // only when the claim authority reports that it has not seen the issue yet.
-func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project db.Project, binding db.FederationBinding, issue db.Issue) error {
+func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project db.Project, binding db.FederationBinding, issue db.Issue, result *claimRefreshResult) error {
+	if result != nil && result.known && !sameClaimRefreshRoute(result.binding, binding) {
+		result = nil
+	}
+	if result != nil && result.known && !result.missing {
+		return nil
+	}
 	remote, credential, err := claimForwardClient(ctx, cfg, binding)
 	if err != nil {
 		return err
 	}
-	_, err = remote.ClaimStatus(ctx, credential.HubProjectID, issue.UID)
-	var status *claimHubStatusError
-	if err == nil || !errors.As(err, &status) || status == nil || status.StatusCode != http.StatusNotFound || hubStatusErrorCode(status) != "issue_not_found" {
-		return nil
+	if result == nil || !result.known {
+		_, err = remote.ClaimStatus(ctx, credential.HubProjectID, issue.UID)
+		var status *claimHubStatusError
+		if err == nil || !errors.As(err, &status) || status == nil || status.StatusCode != http.StatusNotFound {
+			return nil
+		}
+		code := hubStatusErrorCode(status)
+		if code != "issue_not_found" && !(binding.RelayConfig != nil && code == "hub_claim_failed") {
+			return nil
+		}
 	}
 	if cfg.FederationSyncOnce == nil {
 		return attachmentError(http.StatusServiceUnavailable, "federation_offline")
@@ -160,14 +182,7 @@ func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project d
 		return attachmentError(http.StatusServiceUnavailable, "federation_offline")
 	}
 	currentBinding, err := cfg.DB.FederationBindingByProject(ctx, project.ID)
-	if err != nil || !currentBinding.Enabled || !currentBinding.PushEnabled || currentBinding.Role != binding.Role || currentBinding.HubURL != binding.HubURL || currentBinding.HubProjectID != binding.HubProjectID || currentBinding.HubProjectUID != binding.HubProjectUID || currentBinding.AllowInsecure != binding.AllowInsecure {
-		return attachmentError(http.StatusServiceUnavailable, "federation_offline")
-	}
-	if binding.RelayConfig == nil {
-		if currentBinding.RelayConfig != nil {
-			return attachmentError(http.StatusServiceUnavailable, "federation_offline")
-		}
-	} else if currentBinding.RelayConfig == nil || currentBinding.RelayConfig.BindingUID != binding.RelayConfig.BindingUID || currentBinding.RelayConfig.AuthorityUID != binding.RelayConfig.AuthorityUID {
+	if err != nil || !sameClaimRefreshRoute(currentBinding, binding) {
 		return attachmentError(http.StatusServiceUnavailable, "federation_offline")
 	}
 	current, err := activeIssueByRef(ctx, cfg.DB, project.ID, issue.UID, db.IncludeDeletedNo)
@@ -180,7 +195,7 @@ func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project d
 	return nil
 }
 
-func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, issue db.Issue, expectedOrigin, name string, input *api.LinkAttachmentInput, body io.Reader) (metadata.Attachment, error) {
+func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, issue db.Issue, result *claimRefreshResult, expectedOrigin, name string, input *api.LinkAttachmentInput, body io.Reader) (metadata.Attachment, error) {
 	origin := expectedOrigin
 	if origin == "" {
 		caps, err := docbankOriginCapabilities(ctx, cfg, project, binding)
@@ -189,13 +204,10 @@ func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.
 		}
 		origin = caps.Origin
 	}
-	if binding == nil {
-		return metadata.Attachment{}, attachmentError(409, "attachment_origin_mismatch")
-	}
 	if !binding.PushEnabled {
 		return metadata.Attachment{}, federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
-	if err := ensureDocbankIssueUpstream(ctx, cfg, project, *binding, issue); err != nil {
+	if err := ensureDocbankIssueUpstream(ctx, cfg, project, *binding, issue, result); err != nil {
 		return metadata.Attachment{}, err
 	}
 	query := url.Values{"project_uid": {project.UID}, "origin": {origin}}

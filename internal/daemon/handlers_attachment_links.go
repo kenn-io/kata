@@ -29,7 +29,8 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 	if err != nil {
 		return nil, err
 	}
-	if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, true); err != nil {
+	var claimResult claimRefreshResult
+	if err := requireFederatedIssueClaimWithResult(ctx, cfg, iss, actor, true, &claimResult); err != nil {
 		return nil, err
 	}
 	input := in.Body
@@ -43,7 +44,7 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 		if err != nil {
 			return nil, err
 		}
-		attachment, err = forwardDocbankDescriptor(ctx, cfg, project, binding, iss, "", "", &input, nil)
+		attachment, err = forwardDocbankDescriptor(ctx, cfg, project, binding, iss, &claimResult, "", "", &input, nil)
 		if err != nil {
 			return nil, err
 		}
