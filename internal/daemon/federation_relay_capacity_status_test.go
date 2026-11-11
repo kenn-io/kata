@@ -120,7 +120,7 @@ func TestFederationStatusMeasuresOnlyRootedRelayProjects(t *testing.T) {
 		request.Header.Set("Authorization", "Bearer bootstrap-test-token")
 		response, err := httpServer.Client().Do(request)
 		require.NoError(t, err)
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		require.Equal(t, http.StatusOK, response.StatusCode)
 		data, err := io.ReadAll(response.Body)
 		require.NoError(t, err)
