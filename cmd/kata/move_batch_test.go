@@ -151,38 +151,63 @@ func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {
 }
 
 func TestMoveBatchCLI_RejectedPageIsUnattempted(t *testing.T) {
-	env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-rejected-page-token"))
-	src, err := env.DB.CreateProject(t.Context(), "source")
-	require.NoError(t, err)
-	dst, err := env.DB.CreateProject(t.Context(), "target")
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "issue", Author: "tester"})
-	require.NoError(t, err)
-	origin, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(origin)
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/issues/actions/move" {
-			calls++
-			if calls == 2 {
-				http.Error(w, "rejected", http.StatusBadRequest)
-				return
+	for _, status := range []int{http.StatusBadRequest, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-rejected-page-token"))
+			src, err := env.DB.CreateProject(t.Context(), "source")
+			require.NoError(t, err)
+			dst, err := env.DB.CreateProject(t.Context(), "target")
+			require.NoError(t, err)
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "issue", Author: "tester"})
+			require.NoError(t, err)
+			last, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "last", Author: "tester"})
+			require.NoError(t, err)
+			origin, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			proxy := httputil.NewSingleHostReverseProxy(origin)
+			calls := 0
+			proxy.ModifyResponse = func(response *http.Response) error {
+				if calls == 2 && status == http.StatusNotFound {
+					_ = response.Body.Close()
+					response.StatusCode = status
+					response.Status = "404 Not Found"
+					response.Body = io.NopCloser(strings.NewReader("withheld"))
+					response.ContentLength = -1
+					response.Header.Del("Content-Length")
+				}
+				return nil
 			}
-		}
-		r.Host = origin.Host
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, strings.Repeat(issue.UID+"\n", 51), "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
-	require.Error(t, err)
-	var reply struct {
-		Results []api.MoveIssuesResult `json:"results"`
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/issues/actions/move" {
+					calls++
+					if calls == 2 && status == http.StatusBadRequest {
+						http.Error(w, "rejected", http.StatusBadRequest)
+						return
+					}
+				}
+				r.Host = origin.Host
+				proxy.ServeHTTP(w, r)
+			}))
+			t.Cleanup(server.Close)
+			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, strings.Repeat(issue.UID+"\n", 50)+last.UID+"\n", "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
+			require.Error(t, err)
+			var reply struct {
+				Results []api.MoveIssuesResult `json:"results"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &reply))
+			require.Len(t, reply.Results, 51)
+			require.Equal(t, "moved", reply.Results[0].Result)
+			got, err := env.DB.IssueByID(t.Context(), last.ID)
+			require.NoError(t, err)
+			if status == http.StatusBadRequest {
+				require.Equal(t, "unattempted", reply.Results[50].Result)
+				require.Equal(t, src.ID, got.ProjectID)
+			} else {
+				require.Equal(t, "unknown", reply.Results[50].Result)
+				require.Equal(t, dst.ID, got.ProjectID)
+			}
+		})
 	}
-	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Len(t, reply.Results, 51)
-	require.Equal(t, "moved", reply.Results[0].Result)
-	require.Equal(t, "unattempted", reply.Results[50].Result)
 }
 
 func TestMoveBatchCLI_Quiet(t *testing.T) {

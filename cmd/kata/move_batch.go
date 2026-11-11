@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -525,7 +526,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 				}
 			}
 			classify()
-			if response.StatusCode >= 400 && response.StatusCode < 500 {
+			if response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnauthorized {
 				for _, i := range indexes[start : start+len(body.Items)] {
 					if results[i].Result == "unknown" {
 						results[i].Result = "unattempted"
