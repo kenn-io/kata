@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-11
+last_edited: 2026-11-10
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,12 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- See in `kata daemon status` when a process was automatically started by a
-  Kata command. See the [CLI reference](reference/cli.md) for output details.
-
-- Use `kata daemon status` in scripts to check the selected daemon's readiness.
-  Stopped or unavailable selections and the `version_mismatch` state now exit 7;
-  an unknown named daemon exits 3. Both print diagnostics and previously exited 0.
+- Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
