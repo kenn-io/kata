@@ -141,8 +141,8 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		require.Len(t, comments, entry.comments)
 	}
-	// A transient failure after one item wrote retries the complete chunk and
-	// exposes only the successful attempt's events and comments.
+	// A transient failure after a refusal retries the chunk only after the
+	// refusal cleanup has completed.
 	retryA, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: src.ID, Title: "retry a", Author: "worker"})
 	require.NoError(t, err)
 	retryB, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: deniedSource.ID, Title: "retry b", Author: "worker"})

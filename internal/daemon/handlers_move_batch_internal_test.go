@@ -170,7 +170,7 @@ func TestMoveIssuesBatch_BudgetResume(t *testing.T) {
 	}
 }
 
-func TestMoveIssuesBatch_CompletedContinuation(t *testing.T) {
+func TestMoveIssuesBatch_ContinuationAtEnd(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	req := &api.MoveIssuesRequest{}
 	req.Body.Actor = "agent"

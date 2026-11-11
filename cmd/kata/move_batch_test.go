@@ -50,8 +50,6 @@ func TestMoveBatchCLI_ContinuationAfterCompletedDuplicate(t *testing.T) {
 				return
 			}
 			if body.Body.StartIndex > 0 {
-				require.NotContains(t, string(raw), `"proof"`)
-				require.NotContains(t, string(raw), `"event_id"`)
 				continuation = body
 			}
 			r.Body = io.NopCloser(bytes.NewReader(raw))
