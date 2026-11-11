@@ -56,6 +56,21 @@ func checkArgvProjectionRepair(t *testing.T, store db.Storage) error {
 	var repeatRevision int64
 	require.NoError(t, q.QueryRowContext(ctx, `SELECT revision FROM cron_workflows WHERE uid=$1`, workflow.UID).Scan(&repeatRevision))
 	require.Equal(t, revision, repeatRevision)
+	// A retained older held event must not replace a newer healthy row.
+	newerClock := workflow.DefinitionHLC
+	newerClock.PhysicalMS++
+	clockJSON, err := json.Marshal(newerClock)
+	require.NoError(t, err)
+	newerEvent, err := uid.New()
+	require.NoError(t, err)
+	healthy, err := json.Marshal(workflow.Definition)
+	require.NoError(t, err)
+	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,definition_hlc_json=$2,definition_event_uid=$3 WHERE uid=$4`, string(healthy), string(clockJSON), newerEvent, workflow.UID)
+	require.NoError(t, err)
+	materialize()
+	require.NoError(t, q.QueryRowContext(ctx, `SELECT definition_json,revision FROM cron_workflows WHERE uid=$1`, workflow.UID).Scan(&raw, &repeatRevision))
+	require.JSONEq(t, string(healthy), raw)
+	require.Equal(t, revision, repeatRevision)
 	// Keep identity evidence for a compacted job while its current revision advances.
 	priorID, err := uid.New()
 	require.NoError(t, err)
