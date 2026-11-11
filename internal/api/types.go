@@ -1853,7 +1853,7 @@ type MoveIssuesRequest struct {
 	Body struct {
 		Actor            string                `json:"actor,omitempty"`
 		Teammate         string                `json:"teammate,omitempty"`
-		DryRun           bool                  `json:"dry_run,omitempty"`
+		DryRun           bool                  `json:"dry_run,omitempty" doc:"Preview one item without a continuation."`
 		Subtree          bool                  `json:"subtree,omitempty" doc:"Include descendants; requires exactly one item."`
 		Comment          string                `json:"comment,omitempty"`
 		DefaultProjectID int64                 `json:"default_project_id,omitempty"`

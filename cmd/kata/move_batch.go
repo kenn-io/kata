@@ -447,11 +447,11 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			return fmt.Errorf("invalid batch move result count")
 		}
 		for j, r := range reply.Results {
-			if r.Index != request.Body.StartIndex+j || r.Index >= len(indexes) {
+			if r.Index != request.Body.StartIndex+j || r.Index >= len(indexes) || !slices.Contains([]string{"moved", "unchanged", "refused", "would_move"}, r.Result) {
 				if printErr := printResults(); printErr != nil {
 					return printErr
 				}
-				return fmt.Errorf("invalid batch move result index")
+				return fmt.Errorf("invalid batch move result")
 			}
 		}
 		for _, r := range reply.Results {

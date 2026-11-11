@@ -4932,9 +4932,11 @@ type MoveIssuesRequestBody struct {
 	// Completed Outcomes for every item before start_index, copied from earlier results.
 	Completed        []MoveIssuesCompleted `json:"completed,omitempty"`
 	DefaultProjectID *int64                `json:"default_project_id,omitempty"`
-	DryRun           *bool                 `json:"dry_run,omitempty"`
-	Items            []MoveIssuesItem      `json:"items" validate:"required"`
-	StartIndex       *int64                `json:"start_index,omitempty" validate:"omitempty,gte=0"`
+
+	// DryRun Preview one item without a continuation.
+	DryRun     *bool            `json:"dry_run,omitempty"`
+	Items      []MoveIssuesItem `json:"items" validate:"required"`
+	StartIndex *int64           `json:"start_index,omitempty" validate:"omitempty,gte=0"`
 
 	// Subtree Include descendants; requires exactly one item.
 	Subtree      *bool   `json:"subtree,omitempty"`

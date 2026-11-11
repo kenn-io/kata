@@ -1013,9 +1013,6 @@ Human output summarizes the batch and lists every result. Descendants are listed
 
 Batch previews accept one item.
 
-If the daemon restarts between batch pages, the command stops and reports the
-results already received. Start a new batch for the remaining issues.
-
 | Result code | Meaning |
 | --- | --- |
 | `already_in_target` | The issue is already in its requested target. |
@@ -1031,8 +1028,8 @@ teammate attribution, to each issue that moves in the same transaction.
 Unchanged issues receive no comment, so rerunning an old ref file is safe
 while its move-history aliases remain available.
 
-Inputs over 5,000 items or a 1 MiB request body are refused before any write,
-including with `--dry`. The combined text of noncomment refs-file rows is also
+Inputs over 5,000 items or a 1 MiB request body are refused before any write.
+The combined text of noncomment refs-file rows is also
 limited to 1 MiB; an oversized line receives its own refusal. Split larger input
 into separate runs.
 The daemon commits chunks and returns a continuation after its soft four-second

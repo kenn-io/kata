@@ -222,22 +222,21 @@ func (s *batchResolveHookStore) IssueByUID(ctx context.Context, uid string, incl
 
 func TestMoveIssuesBatch_BudgetExcludesPreflight(t *testing.T) {
 	store := openClaimGateHelperDB(t)
-	source, first := createClaimGateHelperIssue(t, store)
+	_, first := createClaimGateHelperIssue(t, store)
 	target, err := store.CreateProject(t.Context(), "budget-target")
 	require.NoError(t, err)
 	req := &api.MoveIssuesRequest{}
 	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
 	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID}}
 	for range 100 {
-		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "route", Author: "agent"})
-		require.NoError(t, err)
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
+		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: "invalid!"})
 	}
-	wrapped := &batchResolveHookStore{Storage: store, delay: 10 * time.Millisecond}
+	wrapped := &batchResolveHookStore{Storage: store, delay: 3 * time.Second}
 	//nolint:kennlint // deadlinetest: Preflight takes longer than the write budget.
-	out, err := moveIssuesHandler(ServerConfig{DB: wrapped, MoveBatchBudget: 500 * time.Millisecond})(t.Context(), req)
+	out, err := moveIssuesHandler(ServerConfig{DB: wrapped, MoveBatchBudget: 2 * time.Second})(t.Context(), req)
 	require.NoError(t, err)
 	require.Greater(t, out.Body.NextIndex, moveBatchChunkIssues)
+	require.Equal(t, "moved", out.Body.Results[0].Result)
 }
 
 func TestMoveIssuesBatch_CutoffIncludesPreflight(t *testing.T) {
@@ -587,7 +586,7 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 			}
 			lastIndex := len(req.Body.Items)
 			req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
-			_, err = moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
+			_, err = moveIssuesHandler(ServerConfig{DB: wrapped, MoveBatchBudget: time.Minute})(t.Context(), req)
 			var apiErr *api.APIError
 			require.ErrorAs(t, err, &apiErr)
 			require.Equal(t, 500, apiErr.Status)

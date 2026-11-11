@@ -13,6 +13,7 @@ export interface MoveIssuesRequestBody {
    */
   completed?: MoveIssuesCompleted[]
   default_project_id?: number
+  /** Preview one item without a continuation. */
   dry_run?: boolean
   /**
    * @minItems 1

@@ -565,6 +565,26 @@ func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
 	}
 }
 
+func TestMoveBatchCLI_RejectsUnknownResult(t *testing.T) {
+	env, dir, _, target, issue := setupMoveCLIProjects(t)
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/issues/actions/move" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"results":[{"index":0,"result":"unknown"}],"next_index":1}`)
+			return
+		}
+		r.Host = origin.Host
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--json")
+	require.ErrorContains(t, err, "invalid batch move result")
+	require.NotContains(t, out, `"result":"unknown"`)
+}
+
 func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 	for _, mode := range []string{"partial", "decode", "continuation", "transport"} {
 		t.Run(mode, func(t *testing.T) {
