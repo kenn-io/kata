@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // Direct pulls retain issue history and missing move endpoints atomically.
@@ -108,11 +109,24 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	require.ErrorIs(t, err, db.ErrNotFound)
 	_, err = cold.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: existing.ID, Actor: "worker"})
 	require.ErrorIs(t, err, db.ErrFederationProjectIdentityRequired)
+	unrelated, err := cold.CreateProject(ctx, "unrelated-route")
+	require.NoError(t, err)
+	_, err = cold.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: unrelated.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: unrelated.ID, HubProjectUID: unrelated.UID, Enabled: true, Actor: "worker"})
+	require.NoError(t, err)
+	unrelatedCursor, err := cold.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.NoError(t, cold.ResetFederatedProject(ctx, unrelated.ID, unrelatedCursor+1, unrelatedCursor))
+	_, err = cold.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: existing.ID, Actor: "worker"})
+	require.ErrorIs(t, err, db.ErrFederationProjectIdentityRequired)
 	cursor, err := cold.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.NoError(t, cold.ResetFederatedProject(ctx, coldRoute.ID, cursor+1, cursor))
 	_, err = cold.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: existing.ID, Actor: "worker"})
-	require.ErrorIs(t, err, db.ErrFederationProjectIdentityRequired, "a reset must preserve pull-era holds after removing history")
+	require.ErrorIs(t, err, db.ErrFederationProjectIdentityRequired, "a reset must preserve stream holds after removing history")
+	_, err = cold.LeaveFederationReplica(ctx, coldRoute.ID)
+	require.NoError(t, err)
+	_, err = cold.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: existing.ID, Actor: "worker"})
+	require.NoError(t, err)
 
 	// A locally edited source projection must disappear after the outbound move,
 	// even though its local event refers to the projection by numeric ID.
@@ -157,7 +171,54 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	}
 	require.True(t, retainedEdit)
 
-	// Pruning must not silently cascade-delete connector-owned mappings.
+	// Reproduce normal retained and offline claim rows on a materialized source.
+	for _, kind := range []string{"released", "pending"} {
+		t.Run("claim-prune-"+kind, func(t *testing.T) {
+			spoke := backend.Open(t)
+			t.Cleanup(func() { require.NoError(t, spoke.Close()) })
+			route, err := spoke.CreateProjectWithUID(ctx, "claim-source", source.UID)
+			require.NoError(t, err)
+			_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+			require.NoError(t, err)
+			_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{creation})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+			local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			holder, err := uid.New()
+			require.NoError(t, err)
+			principal := db.ClaimPrincipal{HolderInstanceUID: holder, Holder: "worker", ClientKind: "agent"}
+			now := time.Now().UTC()
+			if kind == "released" {
+				claim, claimErr := spoke.AcquireClaim(ctx, db.AcquireClaimParams{ProjectID: route.ID, IssueRef: local.UID, Principal: principal, ClaimKind: "hard", Now: now})
+				require.NoError(t, claimErr, "fixture could not acquire claim on materialized spoke issue")
+				require.True(t, claim.Granted)
+				released, releaseErr := spoke.ReleaseClaim(ctx, db.ReleaseClaimParams{ProjectID: route.ID, IssueRef: local.UID, Principal: principal, Now: now.Add(time.Second)})
+				require.NoError(t, releaseErr)
+				require.NotNil(t, released.Claim.ReleasedAt)
+			} else {
+				pending, queueErr := spoke.EnqueuePendingClaim(ctx, db.PendingClaimParams{ProjectID: route.ID, IssueRef: local.UID, Principal: principal, ClaimKind: "hard", Purpose: "offline", Now: now})
+				require.NoError(t, queueErr, "fixture could not enqueue offline claim on materialized spoke issue")
+				require.Equal(t, issue.UID, pending.IssueUID)
+			}
+			_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{move})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+			_, err = spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.ErrorIs(t, err, db.ErrNotFound)
+			history, err := spoke.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
+			require.NoError(t, err)
+			var hasCreation, hasMove bool
+			for _, event := range history {
+				hasCreation = hasCreation || event.UID == creation.EventUID && event.ContentHash == creation.ContentHash
+				hasMove = hasMove || event.UID == move.EventUID && event.ContentHash == move.ContentHash
+			}
+			require.True(t, hasCreation)
+			require.True(t, hasMove)
+		})
+	}
+
+	// A connector mapping does not block pruning the former projection.
 	guarded := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, guarded.Close()) })
 	guardedRoute, err := guarded.CreateProjectWithUID(ctx, "guarded-source", source.UID)
@@ -173,14 +234,20 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	require.NoError(t, err)
 	_, err = guarded.InsertRemoteEvents(ctx, guardedRoute.ID, []db.RemoteEvent{move})
 	require.NoError(t, err)
-	err = guarded.MaterializeFederatedProject(ctx, guardedRoute.ID)
-	require.Error(t, err, "a move must not destroy a connector mapping")
+	require.NoError(t, guarded.MaterializeFederatedProject(ctx, guardedRoute.ID))
 	_, err = guarded.ImportMappingBySource(ctx, guardedRoute.ID, "connector", "issue", "external-issue")
-	require.NoError(t, err)
+	require.ErrorIs(t, err, db.ErrNotFound)
 	_, err = guarded.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err, "the failed apply must roll back")
+	require.ErrorIs(t, err, db.ErrNotFound)
+	guardedHistory, err := guarded.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
+	require.NoError(t, err)
+	var preservedMove bool
+	for _, event := range guardedHistory {
+		preservedMove = preservedMove || event.UID == move.EventUID && event.ContentHash == move.ContentHash
+	}
+	require.True(t, preservedMove)
 
-	// An explicit purge can release a pull-only hold after all its history is gone.
+	// Bound counterparts can be purged after their portable history is purged.
 	purged := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, purged.Close()) })
 	purgeSource, err := purged.CreateProjectWithUID(ctx, "purge-source", source.UID)

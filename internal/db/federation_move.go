@@ -318,8 +318,14 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 			return 0, err
 		}
 		for _, uid := range dependencies {
-			if err := recordPulledFederationProjectIdentityDependency(ctx, tx, routeUID, uid); err != nil {
+			var bound bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b JOIN projects p ON p.id=b.project_id WHERE p.uid=$1)`, uid).Scan(&bound); err != nil {
 				return 0, err
+			}
+			if !bound {
+				if err := recordFederationProjectIdentityDependency(ctx, tx, routeUID, uid); err != nil {
+					return 0, err
+				}
 			}
 		}
 	}
