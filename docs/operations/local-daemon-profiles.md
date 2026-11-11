@@ -78,6 +78,8 @@ those checks pass, it waits in the same way.
 
 ## Diagnose and recover
 
+For a live process that cannot answer, see [capture evidence and recover](remote-daemon.md#runtime-profiling).
+
 Run these commands from the bound workspace:
 
 ```sh

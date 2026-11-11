@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -110,13 +111,14 @@ func TestReadRuntimeRecordsFindsKitRuntimeStoreRecord(t *testing.T) {
 // The issue contract is evidence capture and scoped recovery for a live process
 // whose listener cannot answer ping; this fixture does not infer the hang's cause.
 func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
-	t.Setenv(HTTPTimeoutEnvVar, "20ms")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(server.Close)
 	for _, origin := range []string{server.URL, ""} {
 		t.Run(origin, func(t *testing.T) {
 			dir := t.TempDir()
-			_, err := (kitdaemon.RuntimeStore{Dir: dir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": origin}})
+			identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+			require.True(t, ok)
+			_, err := (kitdaemon.RuntimeStore{Dir: dir}).Write(kitdaemon.RuntimeRecord{ProcessIdentityV2: identity, Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": origin}})
 			require.NoError(t, err)
 			_, found, err := DiscoverResolvedReadOnly(t.Context(), dir)
 			require.False(t, found)
@@ -144,4 +146,20 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			require.NotNil(t, errors.Unwrap(err), "preserve the probe cause")
 		})
 	}
+}
+
+func TestUnverifiedUnreachableProcessHasNoSignalAdvice(t *testing.T) {
+	record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: "future-v1:12345", Network: "tcp", Address: "127.0.0.1:1"}
+	reader := func(string) ([]kitdaemon.RuntimeRecord, error) { return []kitdaemon.RuntimeRecord{record}, nil }
+	probe := func(context.Context, string) (string, PingInfo, error) {
+		return "", PingInfo{}, errors.New("probe failed")
+	}
+	for _, err := range liveDaemonsUsing(t.Context(), t.TempDir(), reader, probe) {
+		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+		advice := err.Error()
+		require.NotContains(t, advice, "kill -QUIT")
+		require.NotContains(t, advice, "taskkill")
+		return
+	}
+	t.Fatal("unverifiable live record was not probed")
 }

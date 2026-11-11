@@ -283,6 +283,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep syncing a joined project when issue history references projects the spoke
   has not joined. Issues moved out keep their folded hub content and local state
   in the retained counterpart; restore it and join with its local name to subscribe.
+- Diagnose a live but unreachable local daemon with its log path, available profiling endpoint, and recovery steps for the selected home or profile.
 
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
