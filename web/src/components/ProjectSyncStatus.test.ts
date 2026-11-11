@@ -10,6 +10,7 @@ function response(projectID = 7, uid = projectUID): Response {
       {
         project_id: projectID,
         project_uid: uid,
+        project_name: "spoke project's",
         role: 'replica',
         enabled: true,
         pending_push_count: 2,
@@ -30,8 +31,23 @@ function response(projectID = 7, uid = projectUID): Response {
     ],
   })
 }
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 describe('ProjectSyncStatus', () => {
+  it('copies a quoted status command without showing the private error', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    setGeneratedFetch(vi.fn(async () => response()))
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    const command = "kata federation status --project 'spoke project'\\''s'"
+    await screen.findByText(command)
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy sync status command' }))
+    expect(writeText).toHaveBeenCalledWith(command)
+    expect(screen.queryByText('private-token-never-display')).toBeNull()
+  })
+
   it('accepts a slow read after multiple refresh cycles', async () => {
     let resolveSlow!: (value: Response) => void
     let signal: AbortSignal | undefined

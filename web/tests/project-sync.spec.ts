@@ -45,6 +45,7 @@ test('local project readers see native sync status with bounded embedding summar
   await page.route(`**${statusPath}`, async (route) => {
     const response = await route.fetch()
     const data = await response.json()
+    data.statuses[0].last_error = 'example sync failure'
     data.statuses[0].embedding = {
       state: 'reused',
       artifact_limit: 32,
@@ -59,6 +60,7 @@ test('local project readers see native sync status with bounded embedding summar
   })
   await region.getByRole('button', { name: 'Refresh sync' }).click()
   await expect(region.getByText('Reused: 1')).toBeVisible()
+  await expect(region.getByRole('button', { name: 'Copy sync status command' })).toBeVisible()
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await expect(region.getByText('Retained without index: 1')).toBeVisible()

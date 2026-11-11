@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
+  import { CopyButton } from '@kenn-io/kit-ui'
   import { getProjectFederationStatus, type FederationProjectStatus } from '../lib/api/generated'
 
   interface Props {
@@ -14,6 +15,9 @@
   let hasResult = $state(false)
   let refresh: ((manual: boolean) => void) | undefined
   let identity = $derived(`${projectID}:${projectUID}`)
+  let statusCommand = $derived(
+    `kata federation status --project '${status?.project_name.replaceAll("'", "'\\''")}'`,
+  )
   let counts = $derived.by(() => {
     const result: Record<string, number> = {}
     for (const artifact of status?.embedding?.artifacts ?? []) {
@@ -120,7 +124,17 @@
         ></span
       >
     {/if}
-    {#if status.last_error}<span>Sync needs attention</span>{/if}
+    {#if status.last_error}
+      <span class="sync-attention">
+        Sync needs attention
+        <code>{statusCommand}</code>
+        <CopyButton
+          text={statusCommand}
+          ariaLabel="Copy sync status command"
+          copiedAriaLabel="Copied sync status command"
+        />
+      </span>
+    {/if}
     {#if status.credential_status}<span>Credential: {status.credential_status}</span>{/if}
     {#if status.embedding}
       <span>Embeddings: {status.embedding.state}</span>
@@ -160,6 +174,16 @@
   }
   .project-sync span {
     min-width: 0;
+  }
+  .sync-attention {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  code {
+    font-size: var(--font-size-sm);
+    overflow-wrap: anywhere;
   }
   button {
     color: var(--text-primary);
