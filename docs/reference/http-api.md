@@ -988,11 +988,11 @@ streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachme
 Federation transport uses these routes under `/api/v1/projects/{project_id}/federation/docbank`:
 
 - `GET /capabilities` identifies the project, origin, and protocol version.
-- `POST /issues/{ref}/uploads` forwards bytes for an issue with an active claim.
-- `POST /issues/{ref}/links` resolves a file reference for an issue with an active claim.
+- `POST /issues/{ref}/uploads` forwards bytes unless another holder has an active claim on the issue.
+- `POST /issues/{ref}/links` resolves a file reference unless another holder has an active claim on the issue.
 - `GET /versions/{version_id}/content` streams content from the origin.
 
-An attachment upload, link, or read checks the route's capabilities before forwarding. A read adds a capabilities round trip before the content request. References without an origin resolve in the local vault. The UI attachment capability reflects whether the daemon has a local vault or a spoke binding; individual requests report route errors.
+An attachment upload, link, or read checks the route's capabilities before forwarding. A read adds a capabilities round trip before the content request. References without an origin resolve in the local vault. The UI attachment capability reflects whether the daemon has a local vault or a spoke binding. A project without an available route can still show attachment controls; individual requests report route errors.
 
 ## Project Hygiene Endpoints
 

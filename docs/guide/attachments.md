@@ -76,7 +76,7 @@ commands stay the same on a leaf or intermediate relay. Only the root needs
 the Docbank key; every connection uses its own project enrollment credential.
 Upgrade the CLI and every daemon on the path before using this feature.
 An unsupported hop returns an explicit upgrade error.
-When a spoke's federation is disabled, uploads and links return `503 federation_offline`, even if that spoke has a local Docbank. Re-enable the spoke to add shared references; unmarked references remain readable from its local vault.
+When a spoke's federation is disabled, uploads and links return `503 federation_offline`, even if that spoke has a local Docbank. Re-enable the spoke to add shared references; unmarked references remain readable from its local vault. After a spoke is detached, references to a different origin return `410 attachment_origin_unavailable` because the route to that origin is gone.
 
 The root exposes its configured `folder` subtree to each enrolled project's
 readers and metadata writers. This includes upload folders for other projects

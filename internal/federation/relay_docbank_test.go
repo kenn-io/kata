@@ -173,6 +173,32 @@ func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 	}
 }
 
+func TestRelayDocbankContentAfterDetach(t *testing.T) {
+	root, relay, leaf, issue := newRelayClaimChain(t)
+	vault := docbanktest.New(t)
+	serveRelayDocbank(t, root, vault)
+	serveRelayDocbank(t, relay, nil)
+	serveRelayDocbank(t, leaf, nil)
+	status, claim := relayClaimAction(t, leaf, issue.UID, "acquire", "")
+	require.Equal(t, http.StatusOK, status)
+	require.True(t, claim.Granted)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
+	status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=report.pdf", "root document", "application/octet-stream")
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var out api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &out))
+	status, raw = relayDocbankRequest(t, leaf, http.MethodGet, endpoint+"/"+out.ID+"/content", "", "")
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.Equal(t, "root document", string(raw))
+	detacher, ok := leaf.store.(db.RelayLocalDetacher)
+	require.True(t, ok)
+	_, err := detacher.DetachRelayReplicaLocally(t.Context(), leaf.project.ID)
+	require.NoError(t, err)
+	status, raw = relayDocbankRequest(t, leaf, http.MethodGet, endpoint+"/"+out.ID+"/content", "", "")
+	require.Equal(t, http.StatusGone, status, string(raw))
+	require.Contains(t, string(raw), "attachment_origin_unavailable")
+}
+
 func TestRelayDocbankOfflineNeverUsesLocalVault(t *testing.T) {
 	root, _, leaf, issue := newRelayClaimChain(t)
 	rootVault, localVault := docbanktest.New(t), docbanktest.New(t)

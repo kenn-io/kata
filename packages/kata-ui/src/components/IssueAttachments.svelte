@@ -32,13 +32,11 @@
   const uploadDisabled = $derived(uploading || actionsDisabled)
   const entries = $derived(
     Object.entries(attachments).map(([id, e]) => {
-      const readable = attachmentsEnabled
       return {
         ...e,
         id,
-        readable,
         reference: JSON.stringify([
-          readable,
+          attachmentsEnabled,
           e.origin ?? 'local',
           e.name,
           e.media_type,
@@ -116,7 +114,7 @@
   }
   async function load(entry: (typeof entries)[number], preview: boolean): Promise<void> {
     const fetcher = fetchAttachment
-    if (!fetcher || !entry.readable || loading.get(entry.id)) return
+    if (!fetcher || !attachmentsEnabled || loading.get(entry.id)) return
     const accepted = generation
     const current = () => accepted === generation && references.get(entry.id) === entry.reference
     loading.set(entry.id, true)
@@ -172,7 +170,7 @@
               <span class="file-name">{entry.name}</span>
               <span class="description">{entry.media_type} · {entry.size} bytes</span>
             </div>
-            {#if entry.readable}
+            {#if attachmentsEnabled}
               <div class="file-actions">
                 {#if entry.size > 100 << 20}
                   <code>kata docbank attachments get &lt;issue&gt; {entry.id}</code>
