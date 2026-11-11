@@ -66,14 +66,76 @@ describe('ProjectSyncStatus', () => {
     hidden.mockRestore()
   })
 
-  it('cancels a slow read on the next cycle and ignores its late result', async () => {
+  it('finishes a slow initial read across refresh cycles and follows it with a fresh read', async () => {
     let resolveSlow!: (value: Response) => void
     let slowSignal: AbortSignal | undefined
     const fetcher = vi
       .fn()
-      .mockResolvedValueOnce(response())
       .mockImplementationOnce((_url, init) => {
         slowSignal = init.signal
+        return new Promise<Response>((resolve) => {
+          resolveSlow = resolve
+        })
+      })
+      .mockResolvedValueOnce(
+        Response.json({
+          statuses: [
+            {
+              project_id: 7,
+              project_uid: projectUID,
+              role: 'replica',
+              enabled: true,
+              pending_push_count: 0,
+            },
+          ],
+        }),
+      )
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await waitFor(() => expect(slowSignal).toBeDefined())
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    expect(slowSignal?.aborted).toBe(false)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    resolveSlow(response())
+    await screen.findByText('Pending: 0')
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries after a stalled read reaches its timeout', async () => {
+    let signal: AbortSignal | undefined
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce((_url, init) => {
+        signal = init.signal
+        return new Promise<Response>(() => {})
+      })
+      .mockResolvedValueOnce(response())
+    setGeneratedFetch(fetcher)
+    vi.useFakeTimers()
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    expect(signal?.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(signal?.aborted).toBe(true)
+    expect(screen.getByText('Pending: 2')).not.toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('lets a slow refresh finish and defers its queued retry while hidden', async () => {
+    let resolveSlow!: (value: Response) => void
+    let signal: AbortSignal | undefined
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockImplementationOnce((_url, init) => {
+        signal = init.signal
         return new Promise<Response>((resolve) => {
           resolveSlow = resolve
         })
@@ -85,12 +147,17 @@ describe('ProjectSyncStatus', () => {
     })
     await screen.findByText('Pending: 2')
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
-    expect(slowSignal?.aborted).toBe(true)
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
-    resolveSlow(response(9))
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh sync' }))
+    expect(signal?.aborted).toBe(false)
+    hidden.mockReturnValue(true)
+    resolveSlow(response())
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(screen.getByText('Pending: 2')).not.toBeNull()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    hidden.mockReturnValue(false)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
+    hidden.mockRestore()
   })
 
   it.each([403, 404, 'mismatch', 'malformed 403'])(

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { getProjectFederationStatus, type FederationProjectStatus } from '../lib/api/generated'
 
   interface Props {
@@ -11,8 +12,8 @@
   let loading = $state(true)
   let error = $state(false)
   let hasResult = $state(false)
-  let manualGeneration = $state(0)
-  let lastIdentity = ''
+  let refresh: ((manual?: boolean) => void) | undefined
+  let identity = $derived(`${projectID}:${projectUID}`)
   let counts = $derived.by(() => {
     const result: Record<string, number> = {}
     for (const artifact of status?.embedding?.artifacts ?? []) {
@@ -23,63 +24,96 @@
   })
 
   $effect(() => {
-    const id = projectID
-    const uid = projectUID
-    void refreshGeneration
-    void manualGeneration
-    const identity = `${id}:${uid}`
-    if (identity !== lastIdentity) {
-      lastIdentity = identity
-      status = undefined
-      hasResult = false
-      loading = true
-      error = false
-    }
-    if (document.hidden) return
-    const abort = new AbortController()
-    void load(id, uid, abort.signal)
-    return () => abort.abort()
-  })
+    void identity
+    const [id, uid] = untrack(() => [projectID, projectUID] as const)
+    let current: AbortController | undefined
+    let pending = false
+    let disposed = false
+    status = undefined
+    hasResult = false
+    loading = true
+    error = false
 
-  async function load(id: number, uid: string, signal: AbortSignal): Promise<void> {
-    try {
-      const response = await getProjectFederationStatus(
-        { projectId: id },
-        { compact: true },
-        { signal },
-      )
-      if (signal.aborted) return
-      if (response.status !== 200) {
-        if (
-          response.status >= 400 &&
-          response.status < 500 &&
-          response.status !== 408 &&
-          response.status !== 429
-        ) {
+    async function read(manual = false): Promise<void> {
+      if (document.hidden) return
+      if (current) {
+        pending = true
+        return
+      }
+      if (manual) loading = true
+      const abort = new AbortController()
+      current = abort
+      const finish = () => {
+        clearTimeout(timeout)
+        if (current !== abort) return
+        current = undefined
+        if (disposed) return
+        loading = false
+        if (pending) {
+          pending = false
+          if (!document.hidden) void read()
+        }
+      }
+      const timeout = setTimeout(() => {
+        error = true
+        abort.abort()
+        finish()
+      }, 120_000)
+      abort.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
+      try {
+        const response = await getProjectFederationStatus(
+          { projectId: id },
+          { compact: true },
+          { signal: abort.signal },
+        )
+        if (abort.signal.aborted || disposed) return
+        if (response.status !== 200) {
+          if (
+            response.status >= 400 &&
+            response.status < 500 &&
+            response.status !== 408 &&
+            response.status !== 429
+          ) {
+            status = undefined
+            hasResult = false
+          }
+          error = true
+          return
+        }
+        const found = response.data.statuses.find(
+          (entry) => entry.project_id === id && entry.project_uid === uid,
+        )
+        if (response.data.statuses.length && !found) {
           status = undefined
           hasResult = false
+          error = true
+          return
         }
-        error = true
-        return
+        status = found
+        hasResult = true
+        error = false
+      } catch {
+        if (!abort.signal.aborted && !disposed) error = true
+      } finally {
+        finish()
       }
-      const found = response.data.statuses.find(
-        (entry) => entry.project_id === id && entry.project_uid === uid,
-      )
-      if (response.data.statuses.length && !found) {
-        status = undefined
-        hasResult = false
-        error = true
-        return
-      }
-      status = found
-      hasResult = true
-      error = false
-    } catch {
-      if (!signal.aborted) error = true
-    } finally {
-      if (!signal.aborted) loading = false
     }
-  }
+    refresh = (manual) => {
+      void read(manual)
+    }
+    return () => {
+      disposed = true
+      current?.abort()
+      refresh = undefined
+    }
+  })
+
+  $effect(() => {
+    void projectID
+    void projectUID
+    void refreshGeneration
+    untrack(() => refresh?.())
+  })
 </script>
 
 <section class="project-sync" aria-label="Project sync" aria-busy={loading}>
@@ -123,13 +157,7 @@
   {/if}
   {#if error && hasResult}<span class="stale" role="status">Sync status may be out of date.</span
     >{/if}
-  <button
-    type="button"
-    onclick={() => {
-      loading = true
-      manualGeneration++
-    }}>Refresh sync</button
-  >
+  <button type="button" onclick={() => refresh?.(true)}>Refresh sync</button>
 </section>
 
 <style>
