@@ -585,66 +585,44 @@ describe('App', () => {
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
   })
 
-  it('recovers an initial daemon roster failure automatically', async () => {
-    vi.useFakeTimers()
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    let rosterReads = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const target = new URL(String(input), window.location.origin)
-        if (target.pathname === '/api/v1/ui/daemons') {
-          rosterReads++
-          return rosterReads === 1
-            ? new Response('', { status: 503 })
-            : Response.json(daemonRoster())
-        }
-        if (target.pathname.endsWith('/api/v1/ui/snapshot'))
-          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
-        return Response.json({})
-      }),
-    )
-    render(App)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(screen.queryByRole('button', { name: 'Retry daemon roster' })).toBeNull()
-    await vi.advanceTimersByTimeAsync(1000)
-    await tick()
-    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
-    expect(rosterReads).toBe(2)
-  })
-
-  it('offers roster recovery after transient retries are exhausted', async () => {
-    vi.useFakeTimers()
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    let reads = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const target = new URL(String(input), window.location.origin)
-        if (target.pathname === '/api/v1/ui/daemons') {
-          reads++
-          return reads <= 4 ? new Response('', { status: 503 }) : Response.json(daemonRoster())
-        }
-        if (target.pathname.endsWith('/api/v1/ui/snapshot'))
-          return Response.json(snapshot(), { headers: { ETag: '"snapshot"' } })
-        return Response.json({})
-      }),
-    )
-    render(App)
-    await vi.advanceTimersByTimeAsync(7000)
-    await tick()
-    await fireEvent.click(screen.getByRole('button', { name: 'Retry daemon roster' }))
-    await vi.advanceTimersByTimeAsync(0)
-    await tick()
-    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
-    expect(reads).toBe(5)
-  })
+  it.each([false, true])(
+    'recovers an initial daemon roster failure, exhausted: %s',
+    async (exhausted) => {
+      vi.useFakeTimers()
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      let reads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const target = new URL(String(input), window.location.origin)
+          if (target.pathname === '/api/v1/ui/daemons') {
+            reads++
+            return reads <= (exhausted ? 4 : 1)
+              ? new Response('', { status: 503 })
+              : Response.json(daemonRoster())
+          }
+          if (target.pathname.endsWith('/api/v1/ui/snapshot'))
+            return Response.json(snapshot(), { headers: { ETag: '"snapshot"' } })
+          return Response.json({})
+        }),
+      )
+      render(App)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(screen.queryByRole('button', { name: 'Retry daemon roster' })).toBeNull()
+      await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
+      await tick()
+      if (exhausted) {
+        await fireEvent.click(screen.getByRole('button', { name: 'Retry daemon roster' }))
+        await vi.advanceTimersByTimeAsync(0)
+        await tick()
+      }
+      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+      expect(reads).toBe(exhausted ? 5 : 2)
+    },
+  )
 
   it('cancels pending daemon roster retries on unmount', async () => {
     vi.useFakeTimers()

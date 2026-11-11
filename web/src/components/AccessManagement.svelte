@@ -159,7 +159,7 @@
 
   async function changeMember(actor: string, add: boolean): Promise<void> {
     const uid = teamUID
-    if (!uid || !actor || teamLoading || loading) return
+    if (!uid || !actor || teamLoading) return
     if (
       await mutate({ teamUID: uid, actor, add }, (context) =>
         (add ? addTeamMember : removeTeamMember)(
@@ -177,7 +177,7 @@
   async function removeTeam(): Promise<void> {
     const uid = teamUID
     const selectedProjectID = projectID
-    if (!uid || loading || !confirm('Delete this team and revoke its project access?')) return
+    if (!uid || !confirm('Delete this team and revoke its project access?')) return
     if (
       await mutate({ teamUID: uid }, (context) =>
         deleteTeam({ teamUid: uid }, { headers: context.headers, signal: lifetime.signal }),

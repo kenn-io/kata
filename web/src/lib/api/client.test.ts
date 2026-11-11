@@ -214,9 +214,9 @@ it('retries a generated read when the response body connection drops', async () 
   setGeneratedFetch(fetcher)
   try {
     const result = listTeams({ signal: new AbortController().signal, retry: true })
-    const observed = result.catch(() => undefined)
+    const outcome = expect(result).resolves.toMatchObject({ status: 200 })
     await vi.advanceTimersByTimeAsync(1000)
-    expect((await observed)?.status).toBe(200)
+    await outcome
     expect(fetcher).toHaveBeenCalledTimes(2)
   } finally {
     vi.useRealTimers()

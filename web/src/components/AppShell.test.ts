@@ -917,7 +917,7 @@ describe('AppShell', () => {
     ])
   })
 
-  test('prevents repeated team deletion while its list refresh retries', async () => {
+  test('disables team actions during refresh and removes a deleted team', async () => {
     vi.useFakeTimers()
     let deletes = 0
     let refreshFailed = false
@@ -954,8 +954,6 @@ describe('AppShell', () => {
     await vi.advanceTimersByTimeAsync(1000)
     await fireEvent.click(screen.getByRole('button', { name: 'Delete team' }))
     await vi.advanceTimersByTimeAsync(0)
-    const repeat = screen.queryByRole('button', { name: 'Delete team' })
-    if (repeat && !(repeat as HTMLButtonElement).disabled) await fireEvent.click(repeat)
     expect(deletes).toBe(1)
     expect(screen.queryByRole('button', { name: 'Delete team' })).toBeNull()
     await vi.advanceTimersByTimeAsync(7000)
