@@ -336,7 +336,7 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 				require.NoError(t, err)
 				_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: target, ReplayHorizonEventID: 1, Actor: "worker"})
 			} else {
-				_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Enabled: true})
+				_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, PullCursorEventID: 17, Enabled: true})
 				require.NoError(t, err)
 				if operation == "reset" {
 					err = store.ResetFederatedProject(ctx, project.ID, 20, 19)
@@ -359,7 +359,7 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 			} else {
 				binding, err := store.FederationBindingByProject(ctx, project.ID)
 				require.NoError(t, err)
-				require.NotEqual(t, int64(19), binding.PullCursorEventID)
+				require.Equal(t, int64(17), binding.PullCursorEventID)
 			}
 		}
 	}
