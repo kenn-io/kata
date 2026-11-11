@@ -774,9 +774,10 @@ available through MCP.
 Kata delegates protocol negotiation to the official Go MCP SDK. Stateless
 clients can use `server/discover`; session clients can use `initialize` and
 `notifications/initialized`. Stdio accepts both. The standalone and
-daemon-mounted HTTP endpoints route MCP 2026-07-28 requests to a stateless JSON server with Events. Legacy
-clients retain sessions and tool-list changes, without Events. JSON-RPC
-batches are rejected. Each compact JSON message is limited to 8 MiB.
+daemon-mounted HTTP endpoints route MCP 2026-07-28 requests to a stateless JSON
+server with Events. Legacy clients retain sessions and tool-list changes,
+without Events. JSON-RPC batches are rejected. Each compact JSON message is
+limited to 8 MiB.
 
 Kata advertises tools, including tool-list changes, and the webhook Events
 capability described in [Native inbox events](#native-inbox-events). It does

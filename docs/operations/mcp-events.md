@@ -34,14 +34,12 @@ enabled = true
 max_ttl = "720h"
 ```
 
-Then start or restart the daemon. The [configuration
+The [configuration
 reference](../reference/configuration.md#mcp-events) owns the `[mcp_events]`
-fields, the status reasons, and the key file. Point assistants at the daemon
-through `kata mcp serve` as usual. Enabling the daemon's
-[`[mcp]` mount](../reference/mcp.md#transport) also
-serves Events directly at `/mcp`, with either its separate static MCP token
-or caller identity tokens. Enable both `[mcp]` and `[mcp_events]`, then start
-or restart the daemon. The mount uses this daemon's Events backend.
+fields, the status reasons, and the key file. Connect assistants through
+`kata mcp serve` or enable the daemon's [`[mcp]` mount](../reference/mcp.md#transport)
+to serve Events directly at `/mcp` with a static MCP token or caller identity
+tokens. Enable both `[mcp]` and `[mcp_events]`, then start or restart the daemon.
 
 Modern HTTP clients use MCP 2026-07-28 discovery and per-request metadata;
 legacy sessions neither advertise Events nor accept `events/*`.
