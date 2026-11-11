@@ -63,5 +63,9 @@ func retryCommand(cmd *cobra.Command, command string, set, keep []string) (agent
 			}
 		}
 	}
+	if args := cmd.Flags().Args(); len(args) > 0 {
+		parts = append(parts, "--")
+		parts = append(parts, args...)
+	}
 	return agenthook.BuildCommand("kata", parts...)
 }
