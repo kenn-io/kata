@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 )
 
 // CronWorkflowArgvEventFeature is reserved for literal argument workflow steps.
@@ -13,12 +14,9 @@ import (
 // keep it out of SupportedEventFeatures until the complete contract is supported.
 const CronWorkflowArgvEventFeature = "cron_workflow_argv_v1"
 
+// workflowDefinitionEvent derives membership from the declared event registry.
 func workflowDefinitionEvent(kind string) bool {
-	switch kind {
-	case "cron.workflow.created", "cron.workflow.updated", "cron.workflow.deleted", "cron.workflow.restored", "cron.workflow.snapshot":
-		return true
-	}
-	return false
+	return isCronDefinitionEvent(kind) && strings.HasPrefix(kind, "cron.workflow.")
 }
 
 // Classify raw envelopes independently of typed decoding: an unsupported kind
