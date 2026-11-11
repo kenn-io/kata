@@ -57,15 +57,8 @@ func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
 	setupKataEnv(t)
 
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
-	requireDaemonUnavailable(t, err)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, err, ExitDaemonUnavail).Kind)
 	assert.Equal(t, "Selected daemon: local_stopped (source: local runtime)\nNo kata daemon is running in the current KATA_HOME.\n", string(out))
-}
-
-func requireDaemonUnavailable(t *testing.T, err error) {
-	t.Helper()
-	require.Error(t, err)
-	assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
-	assert.Equal(t, kindDaemonUnavail, cliErrorForErr(err, true).Kind)
 }
 
 func TestDaemonStatusReadinessExit(t *testing.T) {
@@ -89,7 +82,7 @@ func TestDaemonStatusReadinessExit(t *testing.T) {
 					require.NoError(t, err, "a ready selected remote does not require current-home processes")
 					assert.Empty(t, stderr)
 				} else {
-					requireDaemonUnavailable(t, err)
+					assert.Equal(t, kindDaemonUnavail, requireCLIError(t, err, ExitDaemonUnavail).Kind)
 					assert.NotEmpty(t, stderr)
 				}
 				switch mode {
@@ -360,7 +353,7 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	require.NoError(t, err)
 
 	out, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status")
-	requireDaemonUnavailable(t, statusErr)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 
 	assert.Contains(t, out, "kata running at http://127.0.0.1:7777\n")
 	assert.Contains(t, out, "  web UI:  http://127.0.0.1:28888\n")
@@ -394,7 +387,7 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	requireDaemonUnavailable(t, statusErr)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 	out := []byte(stdout)
 
 	var got struct {
@@ -444,7 +437,7 @@ func TestDaemonStatus_JSONReportsDBPathFromKitRuntimeMetadata(t *testing.T) {
 	require.NoError(t, err)
 
 	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	requireDaemonUnavailable(t, statusErr)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 	out := []byte(stdout)
 
 	var got struct {
@@ -462,7 +455,7 @@ func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) {
 	setupKataEnv(t)
 
 	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	requireDaemonUnavailable(t, statusErr)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 	out := []byte(stdout)
 
 	var got struct {
@@ -489,7 +482,7 @@ func TestDaemonStatus_JSONDegradesOnNonPrivateRuntimeDirectory(t *testing.T) {
 
 	stdout, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 
-	requireDaemonUnavailable(t, err)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, err, ExitDaemonUnavail).Kind)
 	var got struct {
 		Daemons  []json.RawMessage `json:"daemons"`
 		Selected struct {
@@ -506,7 +499,7 @@ func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
 	setupKataEnv(t)
 
 	stdout, _, statusErr := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
-	requireDaemonUnavailable(t, statusErr)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 	out := []byte(stdout)
 	assert.Equal(t, "OK daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
 }
@@ -518,7 +511,7 @@ func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	writeReusedRuntimePID(t, tmp, child.Process.Pid)
 
 	stdout, _, statusErr := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
-	requireDaemonUnavailable(t, statusErr)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 	out := []byte(stdout)
 
 	assert.Equal(t, "OK daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
@@ -533,7 +526,7 @@ func TestDaemonStatus_ListsUnverifiableRecord(t *testing.T) {
 	writeUnknownRuntimePID(t, child.Process.Pid)
 
 	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	requireDaemonUnavailable(t, statusErr)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 	out := []byte(stdout)
 
 	var got struct {
@@ -560,7 +553,7 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	require.NoError(t, err)
 
 	stdout, _, statusErr := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
-	requireDaemonUnavailable(t, statusErr)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 	out := []byte(stdout)
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
@@ -586,17 +579,17 @@ func TestDaemonStatusReportsMCPState(t *testing.T) {
 				} `json:"daemons"`
 			}
 			stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-			requireDaemonUnavailable(t, statusErr)
+			assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 			require.Len(t, got.Daemons, 1)
 			assert.Equal(t, state, got.Daemons[0].MCP)
 			resetFlags(t)
 			stdout, _, statusErr = executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
-			requireDaemonUnavailable(t, statusErr)
+			assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 			assert.Contains(t, stdout, " mcp="+state+" ")
 			resetFlags(t)
 			stdout, _, statusErr = executeRootCapture(t, t.Context(), "daemon", "status")
-			requireDaemonUnavailable(t, statusErr)
+			assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 			assert.Contains(t, stdout, "  MCP:     "+state+"\n")
 		})
 	}
