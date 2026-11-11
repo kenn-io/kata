@@ -21,6 +21,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"go.kenn.io/kata/internal/config"
 )
 
 const fixtureCallback = "https://receiver.example/events?route=inbox"
@@ -40,7 +42,7 @@ func fixtureSecret(b byte, size int) string {
 
 // The fixture replaces only the network socket: production URL validation,
 // public-IP policy, TLS hostname checking and HTTP/signature serialization run.
-func fixtureWebhook(t *testing.T, handler http.HandlerFunc, entries ...TrustedCallback) (*WebhookClient, *httptest.Server) {
+func fixtureWebhook(t *testing.T, handler http.HandlerFunc, entries ...config.MCPEventsTrustedCallback) (*WebhookClient, *httptest.Server) {
 	t.Helper()
 	server := httptest.NewUnstartedServer(handler)
 	server.StartTLS()

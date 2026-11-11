@@ -248,7 +248,8 @@ activated. The daemon sends a signed `{"type":"verification","challenge":"…"}`
 body. Return a 2xx JSON response that contains the same `challenge`.
 
 Changing the secret or the arguments does not trigger a new challenge when
-consent already exists. Failed challenges are rate limited to 10 per hour per
+consent already exists. Changing the pinned addresses for an origin also keeps
+existing consent without a new challenge. Failed challenges are rate limited to 10 per hour per
 destination host and 10 per hour per principal. Concurrent challenges for one
 principal and URL are coalesced.
 

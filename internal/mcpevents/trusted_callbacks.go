@@ -10,17 +10,13 @@ import (
 	"go.kenn.io/kata/internal/httpurl"
 )
 
-// TrustedCallback grants one exact HTTPS origin a static set of private peers.
-// Only daemon operator configuration should supply these grants.
-type TrustedCallback = config.MCPEventsTrustedCallback
-
 // TrustedCallbackPolicy is immutable after compilation and safe to share.
 // Its zero value keeps callbacks public-only.
 type TrustedCallbackPolicy struct{ origins map[string][]netip.Addr }
 
 // CompileTrustedCallbacks validates and copies operator grants. Errors never
 // include origins or addresses, which may disclose private network details.
-func CompileTrustedCallbacks(entries []TrustedCallback) (*TrustedCallbackPolicy, error) {
+func CompileTrustedCallbacks(entries []config.MCPEventsTrustedCallback) (*TrustedCallbackPolicy, error) {
 	policy := &TrustedCallbackPolicy{origins: make(map[string][]netip.Addr, len(entries))}
 	for i, entry := range entries {
 		u, err := parseWebhookCallback(entry.Origin)

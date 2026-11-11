@@ -9,6 +9,8 @@ import (
 	"net/netip"
 	"net/url"
 	"testing"
+
+	"go.kenn.io/kata/internal/config"
 )
 
 func TestTrustedCallbackPolicy(t *testing.T) {
@@ -19,7 +21,7 @@ func TestTrustedCallbackPolicy(t *testing.T) {
 		checkFixtureSignature(t, r, body, fixtureSecret(1, 32))
 		received++
 		rw.WriteHeader(204)
-	}, TrustedCallback{Origin: "https://EXAMPLE.com:443/", Addresses: []string{pin}})
+	}, config.MCPEventsTrustedCallback{Origin: "https://EXAMPLE.com:443/", Addresses: []string{pin}})
 	w.resolve = func(context.Context, string, string) ([]netip.Addr, error) {
 		t.Error("trusted callback used DNS")
 		return nil, nil
@@ -40,12 +42,12 @@ func TestTrustedCallbackPolicy(t *testing.T) {
 
 func TestTrustedCallbackPolicyConfiguration(t *testing.T) {
 	for _, pin := range []string{"10.1.2.3", "172.16.1.2", "192.168.1.2", "100.64.0.1", "fd00::1"} {
-		if _, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: "https://example.com", Addresses: []string{pin}}}); err != nil {
+		if _, err := CompileTrustedCallbacks([]config.MCPEventsTrustedCallback{{Origin: "https://example.com", Addresses: []string{pin}}}); err != nil {
 			t.Errorf("valid pin %s: %v", pin, err)
 		}
 	}
 	for _, origin := range []string{"https://events.corp.internal", "https://events.home.arpa"} {
-		policy, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}})
+		policy, err := CompileTrustedCallbacks([]config.MCPEventsTrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}})
 		if err != nil {
 			t.Fatalf("valid origin %s: %v", origin, err)
 		}
@@ -62,29 +64,29 @@ func TestTrustedCallbackPolicyConfiguration(t *testing.T) {
 	}
 	// Operator diagnostics identify only the configuration field and indexes,
 	// never the supplied origin or address, even after earlier valid entries.
-	checkError := func(entries []TrustedCallback, field string) {
+	checkError := func(entries []config.MCPEventsTrustedCallback, field string) {
 		t.Helper()
-		valid := TrustedCallback{Origin: "https://valid.example", Addresses: []string{"10.0.0.1"}}
-		_, err := CompileTrustedCallbacks(append([]TrustedCallback{valid}, entries...))
+		valid := config.MCPEventsTrustedCallback{Origin: "https://valid.example", Addresses: []string{"10.0.0.1"}}
+		_, err := CompileTrustedCallbacks(append([]config.MCPEventsTrustedCallback{valid}, entries...))
 		if err == nil || err.Error() != "invalid mcp_events.trusted_callbacks"+field {
 			t.Errorf("expected sanitized field %s, got %v", field, err)
 		}
 	}
 
 	for _, origin := range []string{"https://*.example.com", "https://example.com/path", "https://example.com/?"} {
-		checkError([]TrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}}, "[1].origin")
+		checkError([]config.MCPEventsTrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}}, "[1].origin")
 	}
 	for _, pin := range []string{"fd20:ce::254", "fd00:ec2::254", "100.100.100.200", "::ffff:100.100.100.200", "8.8.8.8", "fd00::1%eth0", "10.0.0.0/8", "receiver.example"} {
-		checkError([]TrustedCallback{{Origin: "https://example.com", Addresses: []string{"10.0.0.1", pin}}}, "[1].addresses[1]")
+		checkError([]config.MCPEventsTrustedCallback{{Origin: "https://example.com", Addresses: []string{"10.0.0.1", pin}}}, "[1].addresses[1]")
 	}
 	for _, tc := range []struct {
-		entries []TrustedCallback
+		entries []config.MCPEventsTrustedCallback
 		field   string
 	}{
-		{[]TrustedCallback{{Origin: "https://example.com"}}, "[1].addresses"},
-		{[]TrustedCallback{{Origin: "https://example.com", Addresses: []string{"10.0.0.1", "::ffff:10.0.0.1"}}}, "[1].addresses[1]"},
-		{[]TrustedCallback{{Origin: "https://example.com", Addresses: []string{"10.0.0.1"}}, {Origin: "https://EXAMPLE.com:443/", Addresses: []string{"10.0.0.2"}}}, "[2].origin"},
-		{[]TrustedCallback{{Origin: "https://10.0.0.1", Addresses: []string{"10.0.0.2"}}}, "[1].addresses[0]"},
+		{[]config.MCPEventsTrustedCallback{{Origin: "https://example.com"}}, "[1].addresses"},
+		{[]config.MCPEventsTrustedCallback{{Origin: "https://example.com", Addresses: []string{"10.0.0.1", "::ffff:10.0.0.1"}}}, "[1].addresses[1]"},
+		{[]config.MCPEventsTrustedCallback{{Origin: "https://example.com", Addresses: []string{"10.0.0.1"}}, {Origin: "https://EXAMPLE.com:443/", Addresses: []string{"10.0.0.2"}}}, "[2].origin"},
+		{[]config.MCPEventsTrustedCallback{{Origin: "https://10.0.0.1", Addresses: []string{"10.0.0.2"}}}, "[1].addresses[0]"},
 	} {
 		checkError(tc.entries, tc.field)
 	}
@@ -102,7 +104,7 @@ func TestTrustedCallbackTLSAndLiteral(t *testing.T) {
 		{"https://10.0.0.1", "10.0.0.1", "https://10.0.0.1/events"},
 		{"https://[fd00::1]:8443", "fd00::1", "https://[fd00::1]:8443/events"},
 	} {
-		policy, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: tc.origin, Addresses: []string{tc.pin}}})
+		policy, err := CompileTrustedCallbacks([]config.MCPEventsTrustedCallback{{Origin: tc.origin, Addresses: []string{tc.pin}}})
 		if err != nil {
 			t.Fatal(err)
 		}
