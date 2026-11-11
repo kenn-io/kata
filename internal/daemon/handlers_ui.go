@@ -99,9 +99,14 @@ type uiETagBasis struct {
 func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 	authorityCache := newUISnapshotAuthorityCache()
 	enrichmentCache := newUISnapshotEnrichmentCache()
+	// Scoped validators retain no response rows, only their calendar expiry.
+	validatorCache := newUISnapshotCache(func(data db.UISnapshotData) db.UISnapshotData {
+		return db.UISnapshotData{CalendarBoundary: data.CalendarBoundary}
+	})
 	if cfg.UIClock != nil {
 		authorityCache.clock = cfg.UIClock
 		enrichmentCache.clock = cfg.UIClock
+		validatorCache.clock = cfg.UIClock
 	}
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "resolveUIIssueReference",
@@ -170,6 +175,19 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return nil, internalAPIError(err)
 				}
 				observedCursor = &cursor
+				if intent.ScopeRootIssueUID != "" {
+					for candidate := range strings.SplitSeq(in.IfNoneMatch, ",") {
+						candidate = strings.TrimSpace(candidate)
+						key, err := uiSnapshotValidatorKey(intent, cursor, policy, candidate)
+						if err != nil {
+							return nil, internalAPIError(err)
+						}
+						if _, dependencies, ok := validatorCache.get(key); ok {
+							recordUISnapshotDependencies(ctx, dependencies)
+							return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: candidate}, nil
+						}
+					}
+				}
 			}
 			_, scopedIssueIDs, err := applyIssueScopeToUISnapshot(ctx, cfg.DB, &intent)
 			if err != nil {
@@ -282,6 +300,13 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			validator, err := makeUISnapshotETag(intent, data, policy)
 			if err != nil {
 				return nil, internalAPIError(err)
+			}
+			if scopedIssueIDs != nil {
+				key, err := uiSnapshotValidatorKey(intent, data.Cursor, policy, validator)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
+				validatorCache.put(key, data, dependencies)
 			}
 			recordUISnapshotDependencies(ctx, dependencies)
 			if matchesStrongETag(in.IfNoneMatch, validator) {
@@ -766,6 +791,14 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 		}
 	}
 	return policy
+}
+
+func uiSnapshotValidatorKey(intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, validator string) (string, error) {
+	intent.CalendarAt = ""
+	return makeUIETag(struct {
+		Intent    normalizedUISnapshotIntent
+		Validator string
+	}{intent, validator}, cursor, policy)
 }
 
 func makeUISnapshotETag(intent normalizedUISnapshotIntent, data db.UISnapshotData, policy uiPolicy) (string, error) {

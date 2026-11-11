@@ -9,6 +9,7 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
+// RunRecurrenceAttachmentKeepsDeadlineZone checks that attaching a recurrence preserves the deadline zone.
 func RunRecurrenceAttachmentKeepsDeadlineZone(t *testing.T, open func(*testing.T) db.Storage) {
 	for _, tc := range []struct {
 		name        string

@@ -135,7 +135,7 @@ func TestUISnapshotCalendarMidnightInvalidatesCacheWithoutEvent(t *testing.T) {
 	now := time.Date(2026, 1, 1, 4, 59, 59, 0, time.UTC)
 	store := &countingUIStore{cursor: 41, snapshotCursor: 41, snapshot: db.UISnapshotData{
 		CalendarBoundary: now.Add(time.Second),
-		Issues:           []db.UIIssue{{Issue: db.Issue{UID: "issue-1"}, ScheduledOnToday: "2025-12-31"}},
+		Issues:           []db.UIIssue{{Issue: {UID: "issue-1"}, ScheduledOnToday: "2025-12-31"}},
 	}}
 	ts := newUISnapshotServerWithClock(t, store, true, func() time.Time { return now })
 	query := url.Values{"view": {"all-open"}}
