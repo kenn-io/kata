@@ -22,12 +22,12 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 	if !def.Enabled {
 		return JobPreview{Status: "paused"}, nil
 	}
+	if localCron(def.Trigger) {
+		return JobPreview{Status: "unavailable"}, nil
+	}
 	var progress RecurringProgress
 	if IsRecurringIssueJob(def) {
-		if parent == nil {
-			return JobPreview{Status: "unavailable"}, nil
-		}
-		if parent.Progress == nil {
+		if parent == nil || parent.Progress == nil {
 			return JobPreview{Status: "unavailable"}, nil
 		}
 		if !parent.Open {
@@ -55,4 +55,9 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 		status = "exhausted"
 	}
 	return JobPreview{Status: status, Times: occurrences}, nil
+}
+
+func localCron(t Trigger) bool {
+	zone, _, has, _ := splitCronDirective(t.Cron)
+	return t.Kind == "cron" && (has && zone == "Local" || !has && t.Timezone == "Local")
 }

@@ -158,7 +158,7 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 	}
 	result.Status = preview.Status
 	if preview.Status == "unavailable" || preview.Status == "unsupported" {
-		reason := "native parent or stored progress is unavailable"
+		reason := "schedule, native parent or stored progress is unavailable"
 		if preview.Status == "unsupported" {
 			reason = "this adapter trigger cannot be previewed"
 		}

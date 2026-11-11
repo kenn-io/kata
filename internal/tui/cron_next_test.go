@@ -179,6 +179,16 @@ func TestCronJobDetailAdapterCronUsesOwnGrammar(t *testing.T) {
 	require.NotContains(t, got, "unavailable")
 }
 
+func TestCronJobDetailLocalCronUnavailable(t *testing.T) {
+	progress := cron.RecurringProgress{Version: 1, Anchor: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), Through: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)}
+	got := nextRunsDetail(t, "2026-06-01T05:00:00Z", nativeNotify(generated.TriggerResponse{Kind: "cron", Cron: new("0 9 * * *"), Timezone: new("Local")}), &progress)
+	require.Regexp(t, `Next:\s+unavailable`, got)
+	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("TZ=Local 0 9 * * *")}
+	}, nil)
+	require.Regexp(t, `Triggers:\s+unavailable`, got)
+}
+
 func TestCronScheduleNamesDeadlineLead(t *testing.T) {
 	for _, tc := range []struct {
 		seconds int64
