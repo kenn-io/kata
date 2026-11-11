@@ -36,6 +36,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   it too before it can pull again. See
   [repeating an adoption](operations/federation.md#repeating-an-adoption).
 
+- Purge an archived project from an embedding host with
+  `Service.PurgeArchivedProject`, including a project that is a federation hub.
+  The purge retires the hub binding, deletes the project's enrollments, and
+  writes the usual purge log, so the old project's task UIDs are free for a
+  replacement project. See
+  [embedding](development/embedding.md#host-managed-projects).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 

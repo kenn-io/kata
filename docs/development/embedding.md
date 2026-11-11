@@ -395,6 +395,36 @@ requires an actor for the retained event history. These methods are in-process
 application methods: they do not authenticate a network caller and should be
 invoked only after the host has authorized its own catalog lifecycle change.
 
+`PurgeArchivedProject` permanently deletes an archived project. Use it after
+replacing a project, so the old project's tasks no longer hold their UIDs on
+the hub and the same tasks can be imported into the replacement.
+
+```go
+result, err := service.PurgeArchivedProject(
+	ctx, "01HZNQ7VFPK1XGD8R5MABCD4EX", "Example Operator", "replaced",
+)
+```
+
+- The project must be archived first. An active project returns
+  `kata.ErrProjectNotArchived`.
+- A project that is a federation hub is accepted, unlike `kata projects purge`.
+  The purge retires the hub binding and deletes every enrollment scoped to the
+  project, active or revoked, in the same transaction. Those credentials stop
+  working at once. Hub-wide enrollments are unchanged.
+- A spoke still joined to the project is not notified. Its next sync fails, and
+  its operator runs `kata federation leave <project> --local-only`.
+- A replica of another hub's project returns `kata.ErrProjectFederationReplica`.
+  Leave that hub first.
+- `kata.ErrProjectPurgeBlocked` wraps a condition the operator must resolve
+  first: an active external root binding, or a joined project whose move
+  history still needs this project's identity.
+- The purge writes the same project and task purge log entries as
+  `kata projects purge`, and the result reports the log entry's UID with the
+  deleted task, event, and enrollment counts.
+- A purge cannot be undone. A second call returns `kata.ErrProjectNotFound`,
+  and `EnsureProject` may then create the same UID and name as a new, empty
+  project.
+
 ## Host-managed federation enrollments
 
 Restricted embedding keeps Kata's scoped federation transport routes but

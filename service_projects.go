@@ -20,6 +20,18 @@ var ErrProjectConflict = errors.New("kata: project identity conflict")
 // stable identity.
 var ErrProjectNotFound = errors.New("kata: project not found")
 
+// ErrProjectNotArchived reports that a project must be archived before it can
+// be purged.
+var ErrProjectNotArchived = errors.New("kata: project is not archived")
+
+// ErrProjectFederationReplica reports that a project is a replica of a project
+// on another hub. It must leave that hub before it can be purged.
+var ErrProjectFederationReplica = errors.New("kata: project is a federation replica")
+
+// ErrProjectPurgeBlocked reports that a purge cannot proceed until the
+// operator resolves the wrapped condition.
+var ErrProjectPurgeBlocked = errors.New("kata: project purge is blocked")
+
 // ProjectState describes whether a host-managed project is available for
 // ordinary operations.
 type ProjectState string
@@ -161,6 +173,102 @@ func (s *Service) ArchiveProject(
 		s.publish.Event(archived.ID, *event)
 	}
 	return ProjectMutationResult{Project: publicProject(archived), Changed: true}, nil
+}
+
+// ProjectPurgeResult describes a project that PurgeArchivedProject removed.
+type ProjectPurgeResult struct {
+	// Project is the identity the project had before the purge.
+	Project Project
+	// PurgeLogUID identifies the retained project purge log entry.
+	PurgeLogUID string
+	// IssueCount and EventCount are the tasks and events the purge deleted.
+	IssueCount int64
+	EventCount int64
+	// RemovedEnrollments counts the federation enrollment records, active or
+	// revoked, that were scoped to the project and deleted with it.
+	RemovedEnrollments int
+	Reason             string
+	PurgedAt           time.Time
+}
+
+// PurgeArchivedProject permanently deletes an archived project with its tasks,
+// comments, links, labels, and events, and writes the same purge log entries
+// as an ordinary project purge. Use it after replacing a project, so the old
+// tasks no longer hold their UIDs on this hub.
+//
+// Unlike the ordinary purge, it accepts a project that is a federation hub. It
+// retires the hub binding and deletes every enrollment scoped to the project
+// in the same transaction, so those credentials stop working at once. A spoke
+// still joined to the project is not notified: its next sync fails, and its
+// operator detaches it locally. Hub-wide enrollments are not changed.
+//
+// The project must be archived first; an active project returns
+// ErrProjectNotArchived. A replica of another hub's project returns
+// ErrProjectFederationReplica. A purge cannot be undone or repeated: a second
+// call returns ErrProjectNotFound, and EnsureProject may then create the same
+// UID and name again as a new, empty project.
+//
+// This is an in-process application method. It does not authenticate a
+// caller, so invoke it only after the host has authorized the deletion.
+func (s *Service) PurgeArchivedProject(
+	ctx context.Context,
+	projectUID string,
+	actor string,
+	reason string,
+) (ProjectPurgeResult, error) {
+	if !katauid.Valid(projectUID) || projectUID == db.SystemProjectUID {
+		return ProjectPurgeResult{}, ErrProjectNotFound
+	}
+	if strings.TrimSpace(actor) == "" {
+		return ProjectPurgeResult{}, errors.New("kata: purge actor is required")
+	}
+	callCtx, done, err := s.beginHostCall(ctx)
+	if err != nil {
+		return ProjectPurgeResult{}, err
+	}
+	defer done()
+
+	existing, found, err := s.projectByUID(callCtx, projectUID)
+	if err != nil {
+		return ProjectPurgeResult{}, err
+	}
+	if !found {
+		return ProjectPurgeResult{}, ErrProjectNotFound
+	}
+	if existing.DeletedAt == nil {
+		return ProjectPurgeResult{}, ErrProjectNotArchived
+	}
+	enrollments, err := s.store.ListProjectFederationEnrollments(callCtx, existing.ID)
+	if err != nil {
+		return ProjectPurgeResult{}, fmt.Errorf("kata: list federation enrollments: %w", err)
+	}
+	params := db.PurgeProjectParams{ProjectID: existing.ID, Actor: actor, RetireHubBinding: true}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		params.Reason = &reason
+	}
+	log, err := s.store.PurgeProject(callCtx, params)
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		return ProjectPurgeResult{}, ErrProjectNotFound
+	case errors.Is(err, db.ErrProjectNotArchived):
+		return ProjectPurgeResult{}, ErrProjectNotArchived
+	case errors.Is(err, db.ErrFederationProjectIdentityRequired), errors.Is(err, db.ErrExternalRootContentOwned):
+		return ProjectPurgeResult{}, fmt.Errorf("%w: %w", ErrProjectPurgeBlocked, err)
+	}
+	if _, federated := errors.AsType[*db.ProjectFederatedError](err); federated {
+		return ProjectPurgeResult{}, ErrProjectFederationReplica
+	}
+	if err != nil {
+		return ProjectPurgeResult{}, fmt.Errorf("kata: purge project: %w", err)
+	}
+	if log.PurgeResetAfterEventID != nil {
+		s.publish.Reset(existing.ID, *log.PurgeResetAfterEventID)
+	}
+	return ProjectPurgeResult{
+		Project: publicProject(existing), PurgeLogUID: log.UID,
+		IssueCount: log.IssueCount, EventCount: log.EventCount,
+		RemovedEnrollments: len(enrollments), Reason: reason, PurgedAt: log.PurgedAt,
+	}, nil
 }
 
 func validateProjectSpec(spec ProjectSpec) error {

@@ -212,7 +212,8 @@ type Storage interface {
 	// PurgeProject permanently deletes an archived project and all its
 	// project-scoped rows, writing a project_purge_log tombstone. Refuses
 	// active (ErrProjectNotArchived) or federated (*ProjectFederatedError)
-	// projects; ErrNotFound if the project does not exist.
+	// projects; ErrNotFound if the project does not exist. With
+	// RetireHubBinding it also accepts a hub project and removes its binding.
 	PurgeProject(ctx context.Context, p PurgeProjectParams) (ProjectPurgeLog, error)
 	ClaimOwner(ctx context.Context, p ClaimOwnerParams) (ClaimResult, error)
 	ExpireAssignments(ctx context.Context, p ExpireAssignmentsParams) ([]Event, error)
