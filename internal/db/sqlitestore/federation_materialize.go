@@ -46,7 +46,6 @@ type federationMaterialization struct {
 	linkIDs          map[string]int64
 	linkRows         map[db.FoldLinkKey]federatedLinkRow
 	movingLinkIDs    []int64
-	movingLinkStamp  [32]byte
 	movingLinkRows   map[db.FoldLinkKey]federatedLinkRow
 }
 
@@ -539,23 +538,18 @@ func canonicalFederatedLinkKey(key db.FoldLinkKey) db.FoldLinkKey {
 	return key
 }
 
-func federatedMovingLinkRows(ctx context.Context, tx *sql.Tx, issueIDs []int64) (map[db.FoldLinkKey]federatedLinkRow, [32]byte, error) {
+func federatedMovingLinkRows(ctx context.Context, tx *sql.Tx, issueIDs []int64) (map[db.FoldLinkKey]federatedLinkRow, error) {
 	encoded, err := json.Marshal(issueIDs)
 	if err != nil {
-		return nil, [32]byte{}, err
+		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id,from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,CAST(created_at AS TEXT)
-		FROM links WHERE from_issue_id IN (SELECT value FROM json_each(?)) OR to_issue_id IN (SELECT value FROM json_each(?)) ORDER BY id`, string(encoded), string(encoded))
+		FROM links WHERE from_issue_id IN (SELECT value FROM json_each(?)) OR to_issue_id IN (SELECT value FROM json_each(?))`, string(encoded), string(encoded))
 	if err != nil {
-		return nil, [32]byte{}, err
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	stamp := newFederationRowHasher(false)
-	result, err := scanFederatedLinkRows(rows, stamp)
-	if err != nil {
-		return nil, [32]byte{}, err
-	}
-	return result, stamp.sum(), nil
+	return scanFederatedLinkRows(rows, nil)
 }
 
 func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string, included map[string]int64, excluded map[string]bool) error {

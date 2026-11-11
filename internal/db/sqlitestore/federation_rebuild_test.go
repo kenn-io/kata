@@ -12,10 +12,36 @@ import (
 func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.Project) {
 	t.Helper()
 	ctx := t.Context()
-	_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+	hub := cloneIncrementalStore(t, d)
+	for _, project := range []db.Project{source, destination} {
+		_, err := hub.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectUID: project.UID, Enabled: true})
+		require.NoError(t, err)
+	}
+	move, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
 	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
+	for _, project := range []db.Project{source, destination} {
+		_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+		require.NoError(t, err)
+	}
+	event := incrementalRemoteEvent(t, destination, issue.UID, "issue.moved", string(move.Event.Payload), 9_000_000_000_000)
+	_, err = d.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{event})
 	require.NoError(t, err)
+}
+
+func resetToRemoteIssue(t *testing.T, d *Store, project db.Project, issue db.Issue) db.Issue {
+	t.Helper()
+	ctx := t.Context()
+	require.NoError(t, d.ResetFederatedProject(ctx, project.ID, 1, 0))
+	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+	require.NoError(t, err)
+	payload := fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":%q,"author":"tester","status":"open"}`, issue.UID, issue.ShortID, issue.Title)
+	event := incrementalRemoteEvent(t, project, issue.UID, "issue.created", payload, 1_000_000_000_000)
+	_, err = d.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{event})
+	require.NoError(t, err)
+	require.NoError(t, d.MaterializeFederatedProject(ctx, project.ID))
+	issue, err = d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	return issue
 }
 
 func TestFederationRebuildRetriesChangedRows(t *testing.T) {
@@ -77,7 +103,7 @@ func TestFederationMaterializationPreparesLargeIssueScope(t *testing.T) {
 		_, _, err = d.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: issue.Title, Actor: "tester"})
 		require.NoError(t, err)
 	}
-	// SQLite's default parameter limit is 32,766; the project ID adds one more.
+	// The large scope is bound as one JSON array instead of individual parameters.
 	scope := make([]string, 32_767)
 	for i := range scope {
 		scope[i] = fmt.Sprintf("absent-%05d", i)
@@ -132,11 +158,9 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, writer.Close()) })
 			unapplyMove(t, d, issue, source, destination)
-			if change == "history" {
-				for _, project := range []db.Project{source, destination} {
-					_, err = d.ExecContext(ctx, `UPDATE federation_bindings SET role='spoke',hub_url='https://example.com',hub_project_id=? WHERE project_id=?`, project.ID, project.ID)
-					require.NoError(t, err)
-				}
+			if change == "local-move" {
+				_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: other.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: other.ID, HubProjectUID: other.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+				require.NoError(t, err)
 			}
 			attempts := 0
 			d.federationIngestPrepared = func() {
@@ -220,8 +244,14 @@ func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
 	require.NoError(t, err)
 	orphan, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "orphan", Author: "tester"})
 	require.NoError(t, err)
+	third, err := d.CreateProject(ctx, "third")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, third.ID, "tester")
+	require.NoError(t, err)
+	orphan = resetToRemoteIssue(t, d, destination, orphan)
 	unapplyMove(t, d, issue, source, destination)
-	_, err = d.ExecContext(ctx, `DELETE FROM events WHERE issue_id=?`, orphan.ID)
+	unapplyMove(t, d, orphan, destination, third)
+	_, err = d.LeaveFederationReplica(ctx, third.ID)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'blocks','tester')`, orphan.ID, issue.ID, orphan.UID, issue.UID)
 	require.NoError(t, err)
@@ -283,15 +313,15 @@ func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
 				entries = append(entries, entry{second, otherSource})
 			}
 			for _, entry := range entries {
+				if !missing {
+					unapplyMove(t, d, entry.issue, entry.source, destination)
+					continue
+				}
 				_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: entry.issue.ID, FromProjectID: entry.source.ID, ToProjectID: destination.ID, IfMatchRev: entry.issue.Revision, Actor: "tester"})
 				require.NoError(t, err)
-				if missing {
-					_, err = d.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE issue_id=?`, entry.issue.ID)
-					require.NoError(t, err)
-					_, err = d.ExecContext(ctx, `DELETE FROM issues WHERE id=?`, entry.issue.ID)
-				} else {
-					_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, entry.source.ID, entry.issue.ShortID, entry.issue.ID)
-				}
+				_, err = d.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE issue_id=?`, entry.issue.ID)
+				require.NoError(t, err)
+				_, err = d.ExecContext(ctx, `DELETE FROM issues WHERE id=?`, entry.issue.ID)
 				require.NoError(t, err)
 			}
 			locked := cloneIncrementalStore(t, d)
@@ -332,12 +362,9 @@ func TestMoveRebuildPrunesDetachedDestinationSourceRow(t *testing.T) {
 	require.NoError(t, err)
 	_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
 	require.NoError(t, err)
+	issue = resetToRemoteIssue(t, d, source, issue)
 	unapplyMove(t, d, issue, source, destination)
-	_, err = d.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE issue_id=?`, issue.ID)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `UPDATE events SET related_issue_id=NULL WHERE related_issue_id=?`, issue.ID)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id=?`, destination.ID)
+	_, err = d.LeaveFederationReplica(ctx, destination.ID)
 	require.NoError(t, err)
 	attempts := 0
 	d.federationIngestPrepared = func() { attempts++ }

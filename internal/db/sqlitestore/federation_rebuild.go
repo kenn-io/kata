@@ -151,7 +151,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if len(p.materialization.movingLinkIDs) > 0 {
 			slices.Sort(p.materialization.movingLinkIDs)
 			var err error
-			p.materialization.movingLinkRows, p.materialization.movingLinkStamp, err = federatedMovingLinkRows(ctx, tx, p.materialization.movingLinkIDs)
+			p.materialization.movingLinkRows, err = federatedMovingLinkRows(ctx, tx, p.materialization.movingLinkIDs)
 			if err != nil {
 				return preparedFederationRebuild{}, err
 			}

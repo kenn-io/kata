@@ -7,6 +7,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -225,11 +226,11 @@ func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, 
 		return errStaleFederationPreparation
 	}
 	if len(m.movingLinkIDs) > 0 {
-		_, stamp, err := federatedMovingLinkRows(ctx, tx, m.movingLinkIDs)
+		rows, err := federatedMovingLinkRows(ctx, tx, m.movingLinkIDs)
 		if err != nil {
 			return err
 		}
-		if stamp != m.movingLinkStamp {
+		if !maps.Equal(rows, m.movingLinkRows) {
 			return errStaleFederationPreparation
 		}
 	}
@@ -259,10 +260,18 @@ func applyPulledFederationMaterialization(ctx context.Context, tx *sql.Tx, proje
 func scopedFederationRows(query string, projectID int64, column string, scope []string) (string, []any) {
 	args := []any{projectID}
 	if len(scope) > 0 {
-		encoded, _ := json.Marshal(scope)
-		//nolint:gosec // Only internal column names enter the query; values are bound.
-		query += " AND " + column + " IN (SELECT value FROM json_each(?))"
-		args = append(args, string(encoded))
+		if len(scope) <= federationIngestIssueScopeLimit {
+			//nolint:gosec // Only internal column names and generated placeholders enter the query.
+			query += " AND " + column + " IN (?" + strings.Repeat(",?", len(scope)-1) + ")"
+			for _, uid := range scope {
+				args = append(args, uid)
+			}
+		} else {
+			encoded, _ := json.Marshal(scope)
+			//nolint:gosec // Only internal column names enter the query; values are bound.
+			query += " AND " + column + " IN (SELECT value FROM json_each(?))"
+			args = append(args, string(encoded))
+		}
 	}
 	return query, args
 }

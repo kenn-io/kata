@@ -2812,12 +2812,11 @@ func federationGroupIssueIDs(
 	}
 	placeholders, args := projectIDPlaceholders(projectIDs)
 	//nolint:gosec // The generated placeholders contain only ? and commas; IDs are bound below.
-	query := `
+	rows, err := tx.QueryContext(ctx, `
 		SELECT uid, id, project_id
 		  FROM issues
-		 WHERE project_id IN (` + placeholders + `)
-		 ORDER BY project_id, id`
-	rows, err := tx.QueryContext(ctx, query, args...)
+		 WHERE project_id IN (`+placeholders+`)
+		 ORDER BY project_id, id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federation group issues: %w", err)
 	}
