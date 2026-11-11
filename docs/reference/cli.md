@@ -2005,9 +2005,12 @@ resolved web UI URL on its own line after the daemon transport address.
 diagnosis. It identifies processes automatically started by a Kata command when
 that provenance is available. It exits 0 only when the selected daemon is ready;
 stopped or unavailable selections exit 7 after printing diagnostics in every output mode.
+In agent mode, the `OK daemon` report on stdout indicates that the report was
+produced; a non-ready selection also emits an `ERR status` line on stderr.
 A ready selected remote or local profile succeeds even when the current home
-has no running daemon. `daemon diagnose` inspects selection, home, database/project identity,
-schema, process, and federation origin without starting or changing anything.
+has no running daemon. `daemon diagnose` inspects selection, home,
+database/project identity, schema, process, and federation origin without
+starting or changing anything.
 `daemon recover` starts only a registered existing local profile, verifies its
 pinned database UID, and optionally checks `--expect-project-uid` before and
 after startup. It never initializes storage or projects or changes routing. See

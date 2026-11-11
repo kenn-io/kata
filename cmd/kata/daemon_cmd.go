@@ -710,11 +710,7 @@ func daemonStatusCmd() *cobra.Command {
 				if selected.RootSigning != nil {
 					message += " root_signing=unavailable"
 				}
-				prefix := "OK"
-				if statusErr != nil {
-					prefix = "ERR"
-				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s daemon status=%s%s selected_state=%s selected_profile=%s%s\n", prefix, status, daemonFields, selected.State, agentValue(selected.Profile), message); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s selected_state=%s selected_profile=%s%s\n", status, daemonFields, selected.State, agentValue(selected.Profile), message); err != nil {
 					return err
 				}
 				return statusErr
