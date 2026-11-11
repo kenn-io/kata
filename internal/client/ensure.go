@@ -28,7 +28,7 @@ type DiscoveredWebRuntime struct {
 
 func validWebOrigin(origin string) bool {
 	parsed, err := url.Parse(origin)
-	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
+	return err == nil && parsed != nil && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
 		parsed.Host != "" && parsed.User == nil && parsed.Path == "" &&
 		parsed.RawQuery == "" && parsed.Fragment == ""
 }
