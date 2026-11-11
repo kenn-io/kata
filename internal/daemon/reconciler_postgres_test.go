@@ -130,6 +130,7 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 	require.NoError(t, otherIndex.CutOver(ctx, otherKey))
 	reconciler.Wake()
 	require.NoError(t, release())
+	//nolint:kennlint // sleeptest: PostgreSQL lease recovery and reconciliation require real I/O.
 	require.Eventually(t, func() bool {
 		return reconciler.Health().LastError == "shared embedding choice conflicts with the active generation"
 	}, 5*time.Second, 10*time.Millisecond)

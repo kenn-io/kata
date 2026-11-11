@@ -78,6 +78,7 @@ func TestSharedChoiceStartsPostgresCompatibleIndex(t *testing.T) {
 			baseURL := launchDaemon(t)
 			status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
 			require.Equal(t, "built_in", status.Provider)
+			//nolint:kennlint // sleeptest: The daemon publishes indexing progress through HTTP.
 			require.Eventually(t, func() bool {
 				status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
 				if mode == "other" {
@@ -85,11 +86,13 @@ func TestSharedChoiceStartsPostgresCompatibleIndex(t *testing.T) {
 				}
 				return status.Indexing == nil
 			}, 5*time.Second, 10*time.Millisecond)
+			//nolint:kennlint // sleeptest: PostgreSQL exposes the reconciler's active generation through database reads.
 			require.Eventually(t, func() bool {
 				active, ok, err := idx.ActiveGeneration(t.Context())
 				return err == nil && ok && active == key
 			}, 5*time.Second, 10*time.Millisecond)
 			if mode == "other" {
+				//nolint:kennlint // sleeptest: Observe the active generation over time while the daemon runs.
 				require.Never(t, func() bool {
 					active, ok, err := idx.ActiveGeneration(t.Context())
 					return err != nil || !ok || active != key
