@@ -125,3 +125,64 @@ func TestFoldEditAfterRepeatedSnapshotStillApplies(t *testing.T) {
 	assert.Equal(t, "current copy", got.Issues["issue-1"].Title)
 	assert.ElementsMatch(t, []string{"bug", "after"}, presentLabels(got, "issue-1"))
 }
+
+// A newer snapshot may carry a later edit time for a comment whose text is
+// unchanged. The fold must record it, or a later import with an intermediate
+// edit would overwrite the restored text.
+func TestFoldRepeatedSnapshotRecordsCommentEditTimeForUnchangedText(t *testing.T) {
+	snapshot := func(n int64, origin, updatedAt, body, editedAt string) FoldEvent {
+		return repeatedSnapshotEvent(n, origin, `{"uid":"issue-1","title":"task","status":"open",
+"comments":[{"comment_uid":"comment-1","author":"alice","body":"`+body+`","created_at":"2026-05-01T10:00:00.000Z","edited_at":"`+editedAt+`"}],
+"created_at":"2026-05-01T09:00:00.000Z","updated_at":"`+updatedAt+`"}`)
+	}
+	events := []FoldEvent{
+		snapshot(1, "spoke-a", "2026-05-02T09:00:00.000Z", "final text", "2026-05-01T11:00:00.000Z"),
+		snapshot(10, "spoke-b", "2026-06-01T09:00:00.000Z", "final text", "2026-05-20T10:00:00.000Z"),
+		snapshot(20, "spoke-c", "2026-07-01T09:00:00.000Z", "intermediate text", "2026-05-10T10:00:00.000Z"),
+	}
+
+	got := FoldEvents(events)
+
+	comment := got.Comments["comment-1"]
+	assert.Equal(t, "final text", comment.Body)
+	assert.Equal(t, "2026-05-20T10:00:00.000Z", comment.EditedAt)
+	assert.Equal(t, "alice", comment.Author)
+}
+
+// A repeated snapshot adds links but never replaces a child's parent, whether
+// the copy is older or newer. Reparenting goes through an ordinary link change.
+func TestFoldRepeatedSnapshotKeepsEstablishedParent(t *testing.T) {
+	child := func(n int64, origin, updatedAt, parent string) FoldEvent {
+		return repeatedSnapshotEvent(n, origin, `{"uid":"issue-1","title":"child","status":"open",
+"links":[{"type":"parent","to_issue_uid":"`+parent+`","author":"alice"},{"type":"blocks","to_issue_uid":"`+parent+`","author":"alice"}],
+"created_at":"2026-05-01T09:00:00.000Z","updated_at":"`+updatedAt+`"}`)
+	}
+	for name, updatedAt := range map[string]string{"older copy": "2026-05-01T12:00:00.000Z", "newer copy": "2026-06-01T09:00:00.000Z"} {
+		t.Run(name, func(t *testing.T) {
+			got := FoldEvents([]FoldEvent{
+				child(1, "spoke-a", "2026-05-02T09:00:00.000Z", "first-parent"),
+				child(10, "spoke-b", updatedAt, "other-parent"),
+			})
+			var parents, blocks []string
+			for _, edge := range got.PresentLinks() {
+				switch edge.Key.Type {
+				case "parent":
+					parents = append(parents, edge.Key.ToUID)
+				case "blocks":
+					blocks = append(blocks, edge.Key.ToUID)
+				}
+			}
+			assert.Equal(t, []string{"first-parent"}, parents)
+			assert.ElementsMatch(t, []string{"first-parent", "other-parent"}, blocks, "a link that does not conflict is added")
+		})
+	}
+	reparented := FoldEvents([]FoldEvent{
+		child(1, "spoke-a", "2026-05-02T09:00:00.000Z", "first-parent"),
+		testEvent("issue.links_changed", 5, `{"parent_set_uid":"other-parent"}`),
+	})
+	for _, edge := range reparented.PresentLinks() {
+		if edge.Key.Type == "parent" {
+			assert.Equal(t, "other-parent", edge.Key.ToUID, "an explicit link change still reparents")
+		}
+	}
+}

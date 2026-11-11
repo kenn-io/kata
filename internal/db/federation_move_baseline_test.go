@@ -101,3 +101,21 @@ func TestFederationMoveBaselineCoveredEditWithEqualTimestamp(t *testing.T) {
 	projection = FoldEvents(FederationMoveBaselineEvents(events))
 	require.Equal(t, "later logical discussion", projection.Comments["comment"].Body, "known coverage clock takes precedence over wall time")
 }
+
+// A repeated import leaves several snapshots of one issue from different
+// origins. When the issue later moves, the latest of them by clock may be the
+// stale copy, so it must not become the only baseline.
+func TestFederationMoveBaselineKeepsRepeatedImportFreshness(t *testing.T) {
+	events := []FoldEvent{
+		{UID: "current-copy", OriginInstanceUID: "spoke-a", ProjectUID: "source", IssueUID: "issue", Type: "issue.snapshot", HLCPhysicalMS: 2, Payload: jsontext.Value(`{"uid":"issue","author":"alice","title":"current title","labels":["kept"],"metadata":{"team":"core"},"comments":[{"comment_uid":"current-comment","author":"alice","body":"only in the current copy","created_at":"2026-05-01T10:00:00.000Z"}],"updated_at":"2026-06-01T09:00:00.000Z"}`)},
+		{UID: "stale-copy", OriginInstanceUID: "spoke-b", ProjectUID: "source", IssueUID: "issue", Type: "issue.snapshot", HLCPhysicalMS: 3, Payload: jsontext.Value(`{"uid":"issue","author":"alice","title":"stale title","labels":["ancient"],"updated_at":"2026-05-01T09:00:00.000Z"}`)},
+		{UID: "move", OriginInstanceUID: "hub", ProjectUID: "target", IssueUID: "issue", Type: "issue.moved", HLCPhysicalMS: 5, Payload: jsontext.Value(`{"from_project_uid":"source","to_project_uid":"target"}`)},
+	}
+	projection := FoldEvents(FederationMoveBaselineEvents(events))
+	require.Equal(t, "current title", projection.Issues["issue"].Title)
+	require.Equal(t, "target", projection.Issues["issue"].ProjectUID)
+	require.True(t, projection.Labels[FoldLabelKey{IssueUID: "issue", Label: "kept"}].Present)
+	require.False(t, projection.Labels[FoldLabelKey{IssueUID: "issue", Label: "ancient"}].Present)
+	require.JSONEq(t, `{"team":"core"}`, string(projection.IssueMetadata["issue"]))
+	require.Equal(t, "only in the current copy", projection.Comments["current-comment"].Body)
+}

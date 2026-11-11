@@ -1756,7 +1756,8 @@ These rules hold in every case:
   original author and created time. A comment the hub has keeps its author and
   created time, and takes a later edit only from a newer snapshot.
 - Links are added and never removed. Remove an unwanted link on the hub after
-  the push.
+  the push. An issue that already has a parent keeps it; change the parent on
+  the hub with `kata edit --parent`.
 - Issues the hub does not hold are created as usual.
 - Pushing the same snapshots twice from one Kata home is acknowledged as
   duplicates and changes nothing.

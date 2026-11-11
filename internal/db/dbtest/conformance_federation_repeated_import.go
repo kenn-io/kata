@@ -102,7 +102,7 @@ func (h repeatedImportHub) repeatedImportCopy(t *testing.T, target db.Project, e
 		Capabilities: "pull,push", AllowAdoptionSnapshotAuthors: true,
 	})
 	require.NoError(t, err)
-	var copied []db.RemoteEvent
+	copied := make([]db.RemoteEvent, 0, len(h.first))
 	for _, source := range h.first {
 		if source.Type != "issue.snapshot" {
 			continue
@@ -115,7 +115,7 @@ func (h repeatedImportHub) repeatedImportCopy(t *testing.T, target db.Project, e
 		event.ProjectName = target.Name
 		event.HLCPhysicalMS += 60_000
 		event.CreatedAt = event.CreatedAt.Add(time.Minute)
-		var payload map[string]any
+		payload := map[string]any{}
 		require.NoError(t, json.Unmarshal(event.Payload, &payload))
 		edit(*event.IssueUID, payload)
 		event.Payload = mustNativeJSON(t, payload)
@@ -175,6 +175,7 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 		})
 	})
 	// The newer copy also has a task the first import never saw.
+	require.NotEmpty(t, newer)
 	extra := newer[0]
 	extra.EventUID, err = uid.New()
 	require.NoError(t, err)
@@ -256,7 +257,7 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 		fresh.Type = eventType
 		fresh.HLCPhysicalMS += 120_000
 		// Use the bound actor throughout so the event reaches the guard.
-		var payload map[string]any
+		payload := map[string]any{}
 		require.NoError(t, json.Unmarshal(fresh.Payload, &payload))
 		payload["author"] = "operator"
 		delete(payload, "comments")

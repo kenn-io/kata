@@ -202,7 +202,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
 	}
 	if older {
-		p.addSnapshotLinks(uid, e, in.Links)
+		p.addSnapshotLinks(uid, e, in.Links, repeated)
 		return
 	}
 	if issue.UID == "" {
@@ -247,7 +247,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	for _, label := range in.Labels {
 		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
 	}
-	p.addSnapshotLinks(uid, e, in.Links)
+	p.addSnapshotLinks(uid, e, in.Links, repeated)
 }
 
 // foldSnapshotLink is one link entry of an issue.created or issue.snapshot
@@ -260,7 +260,12 @@ type foldSnapshotLink struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-func (p *FoldProjection) addSnapshotLinks(uid string, e FoldEvent, links []foldSnapshotLink) {
+// addSnapshotLinks adds a snapshot's links. An issue has one parent, so
+// setting a parent removes the previous one. A repeated snapshot must only add
+// links, so it leaves a child that already has a different parent alone.
+// repeated depends only on creation and snapshot events, which keeps the
+// result the same in a fold of link-affecting events.
+func (p *FoldProjection) addSnapshotLinks(uid string, e FoldEvent, links []foldSnapshotLink, repeated bool) {
 	for _, link := range links {
 		if link.ToIssueUID == "" {
 			continue
@@ -269,12 +274,24 @@ func (p *FoldProjection) addSnapshotLinks(uid string, e FoldEvent, links []foldS
 		if link.Incoming && link.Type != "related" {
 			from, to = to, from
 		}
+		if repeated && link.Type == "parent" && p.hasOtherParent(from, to) {
+			continue
+		}
 		author := link.Author
 		if author == "" {
 			author = e.Actor
 		}
 		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt)
 	}
+}
+
+func (p *FoldProjection) hasOtherParent(childUID, parentUID string) bool {
+	for key, state := range p.Links {
+		if key.Type == "parent" && key.FromUID == childUID && key.ToUID != parentUID && state.Present {
+			return true
+		}
+	}
+	return false
 }
 
 // retireSnapshotLabels removes the labels a newer repeated snapshot is about
@@ -298,7 +315,9 @@ func (p *FoldProjection) mergeSnapshotComment(commentUID, issueUID, author, team
 		p.setComment(commentUID, issueUID, author, teammate, body, createdAt, replyTo, replyKind, editedAt, clock)
 		return
 	}
-	if newer && editedAt != "" && existing.Body != body && foldTimeBefore(existing.EditedAt, editedAt) {
+	// Record a later edit even when the text is the same, so a later import
+	// that carries an intermediate edit cannot overwrite the restored text.
+	if newer && editedAt != "" && foldTimeBefore(existing.EditedAt, editedAt) {
 		p.editCommentBody(commentUID, issueUID, body, editedAt, clock)
 	}
 }
