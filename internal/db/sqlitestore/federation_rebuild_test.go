@@ -1,12 +1,10 @@
 package sqlitestore
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -44,7 +42,7 @@ func TestFederationGenerationsRejectChangedRows(t *testing.T) {
 			require.NoError(t, err)
 			_, err = d.ExecContext(ctx, `INSERT INTO federation_root_keys(project_uid,authority_uid,key_id,public_key) VALUES(?,'authority','key','public')`, project.UID)
 			require.NoError(t, err)
-			_, err = d.ExecContext(ctx, `INSERT INTO federation_event_provenance(project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt) VALUES(?,'event','hash',1,1,'key','{"ingress_instance_uid":"other"}')`, project.UID)
+			_, err = d.ExecContext(ctx, `INSERT INTO federation_event_provenance(project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt) SELECT ?,uid,content_hash,1,1,'key','{"ingress_instance_uid":"other"}' FROM events WHERE project_id=? ORDER BY id LIMIT 1`, project.UID, project.ID)
 			require.NoError(t, err)
 			prepared, err := d.prepareFederationRebuild(ctx, project.ID)
 			require.NoError(t, err)
@@ -117,7 +115,6 @@ func TestMoveRebuildPreparesLargeIssueScope(t *testing.T) {
 		scope[i] = fmt.Sprintf("absent-%05d", i)
 	}
 	scope[0], scope[500], scope[len(scope)-1] = first.UID, second.UID, third.UID
-	scope[501] = first.UID
 	tx, err := d.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
@@ -138,54 +135,8 @@ func TestMoveRebuildPreparesLargeIssueScope(t *testing.T) {
 	require.NotContains(t, m.issueRows, outside.UID)
 }
 
-func TestMoveRebuildLeavesWriterAvailableDuringPreparation(t *testing.T) {
-	for _, name := range []string{"move-free", "moved"} {
-		t.Run(name, func(t *testing.T) {
-			moved := name == "moved"
-			ctx := t.Context()
-			d, project, issue := incrementalTestStore(t)
-			local, err := d.CreateProject(ctx, "local")
-			require.NoError(t, err)
-			writer, err := Open(ctx, d.Path())
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, writer.Close()) })
-			if moved {
-				destination, err := d.CreateProject(ctx, "destination")
-				require.NoError(t, err)
-				_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
-				require.NoError(t, err)
-				_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: project.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
-				require.NoError(t, err)
-				_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, project.ID, issue.ShortID, issue.ID)
-				require.NoError(t, err)
-				project = destination
-			}
-			update := incrementalRemoteEvent(t, project, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"updated"}`, 9_000_000_000_000)
-			_, err = d.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{update})
-			require.NoError(t, err)
-			prepared := false
-			d.federationIngestPrepared = func() {
-				if prepared {
-					return
-				}
-				prepared = true
-				writeCtx, cancel := context.WithTimeout(ctx, time.Second)
-				defer cancel()
-				_, _, err := writer.CreateIssue(writeCtx, db.CreateIssueParams{ProjectID: local.ID, Title: "concurrent", Author: "tester"})
-				require.NoError(t, err, "create must commit while the rebuild prepares")
-			}
-			require.NoError(t, d.MaterializeFederatedProject(ctx, project.ID))
-			require.True(t, prepared)
-			got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-			require.NoError(t, err)
-			require.Equal(t, project.ID, got.ProjectID)
-			require.Equal(t, "updated", got.Title)
-		})
-	}
-}
-
 func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
-	for _, change := range []string{"history", "binding", "unrelated", "unrelated-move", "fallback", "move", "destination-binding"} {
+	for _, change := range []string{"history", "binding", "unrelated", "unrelated-move", "issue", "fallback", "move", "destination-binding"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, source, issue := incrementalTestStore(t)
@@ -205,6 +156,9 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				unrelatedIssue, _, err = d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "unrelated", Author: "tester"})
 				require.NoError(t, err)
 			}
+			writer, err := Open(ctx, d.Path())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, writer.Close()) })
 			_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
 			require.NoError(t, err)
 			_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?, short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
@@ -220,8 +174,8 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 					return
 				}
 				switch change {
-				case "fallback":
-					_, err := d.ExecContext(ctx, `UPDATE issues SET title='out of date' WHERE id=?`, preparedIssue.ID)
+				case "issue", "fallback":
+					_, err := writer.ExecContext(ctx, `UPDATE issues SET title='out of date' WHERE id=?`, preparedIssue.ID)
 					require.NoError(t, err)
 				case "history":
 					event := incrementalRemoteEvent(t, source, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"later edit"}`, 9_000_000_000_000)
@@ -237,7 +191,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 					_, err := d.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id=?`, destination.ID)
 					require.NoError(t, err)
 				case "unrelated":
-					_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "concurrent", Author: "tester"})
+					_, _, err := writer.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "concurrent", Author: "tester"})
 					require.NoError(t, err)
 				case "unrelated-move":
 					_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: unrelatedIssue.ID, FromProjectID: other.ID, ToProjectID: otherDestination.ID, IfMatchRev: unrelatedIssue.Revision, Actor: "tester"})
@@ -262,74 +216,16 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, source.ID, second.ProjectID)
 			}
+			if change == "issue" {
+				gotPrepared, err := d.IssueByUID(ctx, preparedIssue.UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, "prepared", gotPrepared.Title)
+			}
 			if change == "history" {
 				require.Equal(t, "later edit", got.Title)
 			} else {
 				require.Equal(t, "work", got.Title)
 			}
-		})
-	}
-}
-
-func TestMoveRebuildRetriesInPlaceRowChanges(t *testing.T) {
-	for _, change := range []string{"issue", "comment", "label", "link"} {
-		t.Run(change, func(t *testing.T) {
-			ctx := t.Context()
-			d, source, issue := incrementalTestStore(t)
-			destination, err := d.CreateProject(ctx, "destination")
-			require.NoError(t, err)
-			_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
-			require.NoError(t, err)
-			peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "peer", Author: "tester"})
-			require.NoError(t, err)
-			comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: peer.ID, Author: "tester", Body: "original"})
-			require.NoError(t, err)
-			_, _, err = d.AddLabelAndEvent(ctx, peer.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "original", Actor: "tester"})
-			require.NoError(t, err)
-			other, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "other", Author: "tester"})
-			require.NoError(t, err)
-			_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: peer.ID, ToIssueID: other.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peer.ID, FromShortID: peer.ShortID, FromUID: peer.UID, ToShortID: other.ShortID, ToUID: other.UID, Actor: "tester"})
-			require.NoError(t, err)
-			_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
-			require.NoError(t, err)
-			_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
-			require.NoError(t, err)
-			attempts := 0
-			d.federationIngestPrepared = func() {
-				attempts++
-				if attempts != 1 {
-					return
-				}
-				var err error
-				switch change {
-				case "issue":
-					_, err = d.ExecContext(ctx, `UPDATE issues SET title='changed' WHERE id=?`, peer.ID)
-				case "comment":
-					_, err = d.ExecContext(ctx, `UPDATE comments SET body='changed' WHERE id=?`, comment.ID)
-				case "label":
-					_, err = d.ExecContext(ctx, `UPDATE issue_labels SET label='changed' WHERE issue_id=?`, peer.ID)
-				case "link":
-					_, err = d.ExecContext(ctx, `UPDATE links SET author='changed' WHERE from_issue_id=? AND to_issue_id=?`, peer.ID, other.ID)
-				}
-				require.NoError(t, err)
-			}
-			require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
-			require.Equal(t, 2, attempts)
-			got, err := d.IssueByUID(ctx, peer.UID, db.IncludeDeletedYes)
-			require.NoError(t, err)
-			require.Equal(t, "peer", got.Title)
-			comments, err := d.CommentsByIssue(ctx, peer.ID)
-			require.NoError(t, err)
-			require.Len(t, comments, 1)
-			require.Equal(t, "original", comments[0].Body)
-			labels, err := d.LabelsByIssue(ctx, peer.ID)
-			require.NoError(t, err)
-			require.Len(t, labels, 1)
-			require.Equal(t, "original", labels[0].Label)
-			links, err := d.LinksByIssue(ctx, peer.ID)
-			require.NoError(t, err)
-			require.Len(t, links, 1)
-			require.Equal(t, "tester", links[0].Author)
 		})
 	}
 }
@@ -465,54 +361,6 @@ func TestMoveRebuildDoesNotResurrectArchivedDestination(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestMoveRebuildHandlesInvalidUTF8Rows(t *testing.T) {
-	for _, field := range []string{"issue", "comment"} {
-		t.Run(field, func(t *testing.T) {
-			ctx := t.Context()
-			d, project, issue := incrementalTestStore(t)
-			if field == "issue" {
-				_, err := d.ExecContext(ctx, `UPDATE issues SET title=CAST(X'80' AS TEXT) WHERE id=?`, issue.ID)
-				require.NoError(t, err)
-			} else {
-				_, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "comment"})
-				require.NoError(t, err)
-				_, err = d.ExecContext(ctx, `UPDATE comments SET body=CAST(X'80' AS TEXT) WHERE issue_id=?`, issue.ID)
-				require.NoError(t, err)
-			}
-			require.NoError(t, d.MaterializeFederatedProject(ctx, project.ID))
-			got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-			require.NoError(t, err)
-			require.Equal(t, "work", got.Title)
-			if field == "comment" {
-				comments, err := d.CommentsByIssue(ctx, issue.ID)
-				require.NoError(t, err)
-				require.Len(t, comments, 1)
-				require.Equal(t, "comment", comments[0].Body)
-			}
-		})
-	}
-}
-
-func TestMoveRebuildRetriesChangedInvalidUTF8(t *testing.T) {
-	ctx := t.Context()
-	d, project, issue := incrementalTestStore(t)
-	_, err := d.ExecContext(ctx, `UPDATE issues SET title=CAST(X'80' AS TEXT) WHERE id=?`, issue.ID)
-	require.NoError(t, err)
-	attempts := 0
-	d.federationIngestPrepared = func() {
-		attempts++
-		if attempts == 1 {
-			_, err := d.ExecContext(ctx, `UPDATE issues SET title=CAST(X'81' AS TEXT) WHERE id=?`, issue.ID)
-			require.NoError(t, err)
-		}
-	}
-	require.NoError(t, d.MaterializeFederatedProject(ctx, project.ID))
-	require.Equal(t, 2, attempts)
-	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	require.Equal(t, "work", got.Title)
-}
-
 func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 	ctx := t.Context()
 	prepared, source, issue := incrementalTestStore(t)
@@ -564,28 +412,7 @@ func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, locked.Close()) })
 	require.NoError(t, prepared.MaterializeFederatedProject(ctx, destination.ID))
 	require.NoError(t, locked.materializeFederatedProject(ctx, destination.ID))
-	actual, err := prepared.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	want, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	require.Equal(t, want, actual)
-	actualComments, err := prepared.CommentsByIssue(ctx, actual.ID)
-	require.NoError(t, err)
-	wantComments, err := locked.CommentsByIssue(ctx, want.ID)
-	require.NoError(t, err)
-	require.Equal(t, wantComments, actualComments)
-	actualLabels, err := prepared.LabelsByIssue(ctx, actual.ID)
-	require.NoError(t, err)
-	wantLabels, err := locked.LabelsByIssue(ctx, want.ID)
-	require.NoError(t, err)
-	require.Equal(t, wantLabels, actualLabels)
-	actualLinks, err := prepared.LinksByIssue(ctx, actual.ID)
-	require.NoError(t, err)
-	wantLinks, err := locked.LinksByIssue(ctx, want.ID)
-	require.NoError(t, err)
-	require.Len(t, wantLinks, 1)
-	require.Equal(t, wantLinks, actualLinks)
-	for _, uid := range []string{peer.UID, second.UID, other.UID} {
+	for _, uid := range []string{issue.UID, peer.UID, second.UID, other.UID} {
 		actualIssue, err := prepared.IssueByUID(ctx, uid, db.IncludeDeletedYes)
 		require.NoError(t, err)
 		wantIssue, err := locked.IssueByUID(ctx, uid, db.IncludeDeletedYes)

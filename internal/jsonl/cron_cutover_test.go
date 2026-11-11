@@ -32,7 +32,7 @@ func TestNativeCronCutoverPreservesVersion30DueRequest(t *testing.T) {
 		_, err = source.ExecContext(ctx, "DROP TABLE "+table)
 		require.NoError(t, err)
 	}
-	dropGenerationSchema(t, source.DB)
+	jsonl.DropGenerationSchema(t, source.DB)
 	_, err = source.ExecContext(ctx, `UPDATE meta SET value='30' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
