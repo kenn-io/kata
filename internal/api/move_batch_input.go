@@ -7,19 +7,22 @@ import (
 
 // UnmarshalJSON keeps malformed items separate from their valid neighbors.
 func (item *MoveIssuesItem) UnmarshalJSON(data []byte) error {
+	var members map[string]jsontext.Value
+	_ = json.Unmarshal(data, &members)
+	var ref string
+	if raw, ok := members["ref"]; ok {
+		_ = json.Unmarshal(raw, &ref)
+	}
 	type fields MoveIssuesItem
 	var decoded fields
 	if err := json.Unmarshal(data, &decoded, json.RejectUnknownMembers(true)); err != nil {
-		*item = MoveIssuesItem{Invalid: true}
+		*item = MoveIssuesItem{Ref: ref, Invalid: true}
 		return nil
 	}
-	var members map[string]jsontext.Value
-	if err := json.Unmarshal(data, &members); err == nil {
-		for _, value := range members {
-			if value.Kind() == 'n' {
-				*item = MoveIssuesItem{Invalid: true}
-				return nil
-			}
+	for _, value := range members {
+		if value.Kind() == 'n' {
+			*item = MoveIssuesItem{Ref: ref, Invalid: true}
+			return nil
 		}
 	}
 	*item = MoveIssuesItem(decoded)
