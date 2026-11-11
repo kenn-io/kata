@@ -40,7 +40,7 @@ func startDaemonLogging(_ context.Context) (io.Writer, io.Writer, func()) {
 		writer = os.Stderr
 		errorFile = nil
 	} else if err := debug.SetCrashOutput(file, debug.CrashOptions{}); err != nil {
-		fmt.Fprintf(writer, "kata daemon: cannot retain fatal diagnostics: %v\n", err)
+		_, _ = fmt.Fprintf(writer, "kata daemon: cannot retain fatal diagnostics: %v\n", err)
 	}
 	previousOutput := log.Writer()
 	// The default slog handler uses the standard logger too. Keeping it preserves

@@ -1256,7 +1256,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, n
 		err = restart.exec(ctx)
 	}
 	if err != nil && errorFile != nil {
-		fmt.Fprintln(errorFile, err)
+		_, _ = fmt.Fprintln(errorFile, err)
 	}
 	closeLog()
 	return err
@@ -1274,10 +1274,10 @@ func runDaemonProcess(
 	ns := startup.Namespace
 	endpoint := startup.Endpoint
 	if msg, ok := daemon.TrustPrivateNetworkWarning(listen, dcfg.Auth); ok {
-		fmt.Fprintln(diagnostics, msg)
+		_, _ = fmt.Fprintln(diagnostics, msg)
 	}
 	if msg, ok := daemon.UnauthenticatedPrivateNetworkWritesWarning(listen, dcfg.Auth); ok {
-		fmt.Fprintln(diagnostics, msg)
+		_, _ = fmt.Fprintln(diagnostics, msg)
 	}
 	if err := ns.EnsureDirs(); err != nil {
 		return err
@@ -1355,7 +1355,7 @@ func runDaemonProcess(
 		return fmt.Errorf("check root attribution signing key: %w", err)
 	}
 	if rootSigningHealth != nil {
-		fmt.Fprintln(diagnostics, "kata daemon: "+daemon.RootSigningWarning(*rootSigningHealth))
+		_, _ = fmt.Fprintln(diagnostics, "kata daemon: "+daemon.RootSigningWarning(*rootSigningHealth))
 	}
 
 	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
@@ -1385,7 +1385,7 @@ func runDaemonProcess(
 		return err
 	}
 	if idleIneligible {
-		fmt.Fprintln(diagnostics,
+		_, _ = fmt.Fprintln(diagnostics,
 			"kata daemon: auto-start idle shutdown disabled because the daemon is not owner-local")
 	}
 	var acquireHookDrain hooks.AcquireActivity
@@ -1804,13 +1804,13 @@ func runDaemonProcess(
 			}
 			runtimeFile = path
 			if federationIngressAddress != "" {
-				fmt.Fprintf(diagnostics, "federation ingress listening at %s\n", federationIngressAddress)
+				_, _ = fmt.Fprintf(diagnostics, "federation ingress listening at %s\n", federationIngressAddress)
 			}
 			if idleController != nil {
 				idleController.Start()
 			}
 			if listen != "" {
-				fmt.Fprintf(diagnostics, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
+				_, _ = fmt.Fprintf(diagnostics, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
 			}
 			return nil
 		})

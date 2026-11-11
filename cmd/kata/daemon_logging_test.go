@@ -35,14 +35,14 @@ func TestForegroundDaemonLoggingProcess(t *testing.T) {
 	}
 	if mode == "restart-after" {
 		writer, _, closeLog := startDaemonLogging(t.Context())
-		fmt.Fprintln(writer, "fixture after exec")
+		_, _ = fmt.Fprintln(writer, "fixture after exec")
 		fmt.Fprintln(os.Stderr, "fixture direct after exec")
 		closeLog()
 		return
 	}
 	oldOutput := log.Writer()
 	writer, _, closeLog := startDaemonLogging(t.Context())
-	fmt.Fprintln(writer, "fixture plain diagnostic")
+	_, _ = fmt.Fprintln(writer, "fixture plain diagnostic")
 	fmt.Fprintln(os.Stderr, "fixture direct stderr")
 	if mode == "restart" {
 		require.NoError(t, os.Setenv("KATA_LOGGING_HELPER", "restart-after"))
@@ -74,24 +74,26 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, os.MkdirAll(ns.DataDir, 0o700))
 			path := filepath.Join(ns.DataDir, "daemon.log")
-			if mode == "unavailable" {
+			switch mode {
+			case "unavailable":
 				require.NoError(t, os.Mkdir(path, 0o700))
-			} else if mode == "same-file" {
+			case "same-file":
 				require.NoError(t, os.WriteFile(path, []byte("previous diagnostic\n"), 0o600))
 			}
 			// Detached children inherit this same append-only file as stderr.
 			stderrPath := filepath.Join(t.TempDir(), "stderr")
-			if mode == "same-file" {
+			switch mode {
+			case "same-file":
 				stderrPath = path
-			} else if mode == "stderr-failed" {
+			case "stderr-failed":
 				stderrPath = "/dev/full"
 			}
-			stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+			stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- test-owned temporary path or /dev/full fixture
 			require.NoError(t, err)
-			defer stderr.Close()
+			defer func() { _ = stderr.Close() }()
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
+			child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$") // #nosec G204 G702 -- rerun the current test executable with a fixed test selector
 			child.Env = append(os.Environ(), "KATA_LOGGING_HELPER="+mode, "GOTRACEBACK=all")
 			if mode != "discarded" && mode != "restart" && mode != "panic-discarded" {
 				child.Stderr = stderr
@@ -103,13 +105,13 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 				require.NoError(t, err)
 			}
 			if mode == "unavailable" {
-				contents, readErr := os.ReadFile(stderrPath)
+				contents, readErr := os.ReadFile(stderrPath) // #nosec G304 -- test-owned temporary path
 				require.NoError(t, readErr)
 				assert.Contains(t, string(contents), "daemon.log")
 				assert.Contains(t, string(contents), "fixture plain diagnostic")
 				return
 			}
-			contents, err := os.ReadFile(path)
+			contents, err := os.ReadFile(path) // #nosec G304 -- test-owned temporary daemon log
 			require.NoError(t, err)
 			if mode != "startup-panic" && mode != "panic-discarded" && mode != "restart" {
 				for _, diagnostic := range []string{"fixture plain diagnostic", "fixture structured diagnostic", "fixture standard diagnostic"} {
@@ -117,7 +119,7 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 				}
 			}
 			if mode == "separate" {
-				stderrContents, err := os.ReadFile(stderrPath)
+				stderrContents, err := os.ReadFile(stderrPath) // #nosec G304 -- test-owned temporary path
 				require.NoError(t, err)
 				assert.Contains(t, string(stderrContents), "fixture direct stderr")
 				assert.Contains(t, string(stderrContents), "fixture plain diagnostic")
@@ -140,7 +142,7 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 				assert.Contains(t, string(contents), "goroutine ")
 			}
 			if mode == "separate" || mode == "same-file" || (mode == "discarded" && (runtime.GOOS == "linux" || runtime.GOOS == "darwin")) {
-				entrypoint := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
+				entrypoint := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$") // #nosec G204 G702 -- rerun the current test executable with a fixed test selector
 				entrypoint.Env = append(os.Environ(), "KATA_LOGGING_HELPER=entrypoint")
 				if mode != "discarded" {
 					entrypoint.Stderr = stderr
@@ -151,7 +153,7 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 					paths = append(paths, stderrPath)
 				}
 				for _, outputPath := range paths {
-					data, err := os.ReadFile(outputPath)
+					data, err := os.ReadFile(outputPath) // #nosec G304 -- test-owned temporary log or stderr path
 					require.NoError(t, err)
 					assert.Equal(t, 1, strings.Count(string(data), "invalid --listen value"), "%s: %s", outputPath, data)
 					assert.NotContains(t, string(data), "kata daemon: kata daemon:")
