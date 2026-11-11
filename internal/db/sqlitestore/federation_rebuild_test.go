@@ -146,7 +146,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				}
 				switch change {
 				case "fallback":
-					_, err := writer.ExecContext(ctx, `UPDATE issues SET title='out of date' WHERE id=?`, preparedIssue.ID)
+					_, err := writer.ExecContext(ctx, `UPDATE issues SET title=? WHERE id=?`, fmt.Sprintf("out of date %d", attempts), preparedIssue.ID)
 					require.NoError(t, err)
 				case "binding-group":
 					_, err := writer.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id=?`, destination.ID)
