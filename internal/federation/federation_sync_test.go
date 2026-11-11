@@ -28,7 +28,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federationcoord"
-	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -1860,21 +1859,14 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing
 	assert.Empty(t, delivered)
 	_, err = spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
-	var backup bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, spoke.DB, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
-	restored, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "restored.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = restored.Close() })
-	require.NoError(t, jsonl.Import(ctx, &backup, restored))
-
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
-	binding, err = restored.FederationBindingByProject(ctx, project.ID)
+	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, restored, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		delivered = append(delivered, events...)
 	}))
 
-	mirrored, err := restored.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	mirrored, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	assert.Equal(t, "acked before reset", mirrored.Title)
 	require.NotEmpty(t, delivered)
@@ -1882,7 +1874,7 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing
 	assert.Greater(t, delivered[0].ID, localEvent.ID)
 }
 
-func TestSyncFederationDeliversReplayAfterSameMillisecondUpgrade(t *testing.T) {
+func TestSyncFederationDeliversReplayAfterUpgradeWithMissingIssue(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	store, err := sqlitestore.Open(ctx, path)

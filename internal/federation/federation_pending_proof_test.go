@@ -73,7 +73,15 @@ func TestSyncFederationUnusableOptionalProofDoesNotBlockPush(t *testing.T) {
 			local, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Required source", Author: "worker"})
 			require.NoError(t, err)
 			spoke.move(t, local, 1, 0)
-			require.Error(t, spoke.sync(t, 0))
+			err = spoke.sync(t, 0)
+			switch kind {
+			case "origin":
+				require.ErrorContains(t, err, "move source credential origin differs from binding")
+			case "actor", "binding-project":
+				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+			case "project":
+				require.ErrorContains(t, err, "move source credential project differs from binding")
+			}
 		})
 	}
 }
