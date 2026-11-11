@@ -170,6 +170,19 @@ func TestMoveIssuesBatch_BudgetResume(t *testing.T) {
 	}
 }
 
+func TestMoveIssuesBatch_CompletedContinuation(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor = "agent"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: "invalid!"}}
+	req.Body.StartIndex = 1
+	req.Body.Completed = []api.MoveIssuesCompleted{{Result: "refused"}}
+	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, 1, out.Body.NextIndex)
+	require.Empty(t, out.Body.Results)
+}
+
 func TestMoveIssuesBatch_BoundActorContinuation(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	source, issue := createClaimGateHelperIssue(t, store)

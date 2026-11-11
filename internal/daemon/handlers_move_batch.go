@@ -295,6 +295,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 		}
 		out := &api.MoveIssuesResponse{}
+		out.Body.NextIndex = in.Body.StartIndex
 		budget := cfg.MoveBatchBudget
 		if budget <= 0 {
 			budget = moveBatchBudget
