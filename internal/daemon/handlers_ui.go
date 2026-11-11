@@ -722,9 +722,9 @@ func uiValidationError(field, message string, data map[string]any) error {
 
 func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	policy := uiPolicy{Capabilities: api.UICapabilities{
-		Attachments: uiAttachmentsAvailable(ctx, cfg),
-		Writable:    !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
+		Writable: !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
 	}}
+	policy.Capabilities.Attachments, policy.Capabilities.AttachmentLocal, policy.Capabilities.AttachmentInstanceUID, policy.Capabilities.AttachmentRoutes = uiAttachmentRoutes(ctx, cfg)
 	if cfg.WebSessions != nil {
 		principal, _ := PrincipalFromContext(ctx)
 		policy.Capabilities.Writable = cfg.WebSessions.CanWrite(principal)
@@ -758,23 +758,38 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	return policy
 }
 
-func uiAttachmentsAvailable(ctx context.Context, cfg ServerConfig) bool {
-	if cfg.Docbank != nil {
-		return true
-	}
+func uiAttachmentRoutes(ctx context.Context, cfg ServerConfig) (bool, bool, string, []api.UIAttachmentRoute) {
+	local := cfg.Docbank != nil
 	if cfg.DB == nil {
-		return false
+		return local, local, "", nil
 	}
 	bindings, err := cfg.DB.ListFederationBindings(ctx)
 	if err != nil {
-		return false
+		return false, false, cfg.DB.InstanceUID(), nil
 	}
+	available := local
+	var routes []api.UIAttachmentRoute
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	principal, _ := PrincipalFromContext(ctx)
 	for _, binding := range bindings {
-		if binding.Role == db.FederationRoleSpoke && binding.Enabled {
-			return true
+		if binding.Role != db.FederationRoleSpoke {
+			continue
 		}
+		if decision != nil && !decision.owner && !slices.Contains(decision.ProjectUIDs, binding.HubProjectUID) {
+			continue
+		}
+		if principal.Scope != nil && principal.Scope.ProjectUID != binding.HubProjectUID {
+			continue
+		}
+		route := api.UIAttachmentRoute{ProjectUID: binding.HubProjectUID, Read: binding.Enabled, Write: binding.Enabled && binding.PushEnabled}
+		if binding.RelayConfig != nil {
+			route.Origin = binding.RelayConfig.AuthorityUID
+		}
+		routes = append(routes, route)
+		available = available || route.Read
 	}
-	return false
+	slices.SortFunc(routes, func(a, b api.UIAttachmentRoute) int { return strings.Compare(a.ProjectUID, b.ProjectUID) })
+	return available, local, cfg.DB.InstanceUID(), routes
 }
 
 func makeUIETag(intent any, cursor int64, policy uiPolicy) (string, error) {

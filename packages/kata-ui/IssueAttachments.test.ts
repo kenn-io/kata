@@ -316,3 +316,23 @@ it('gives each reference a stable history anchor', () => {
   const { container } = render(IssueAttachments, { attachments: { [id]: entry }, baseURL: '/attachments' })
   expect(container.querySelector(`[id="kata-attachment-${id}"]`)?.textContent).toContain('screen.png')
 })
+
+it('shows actions only for references the host can read', async () => {
+  const remote = { ...entry, origin: 'root-instance' }
+  const { rerender } = render(IssueAttachments, {
+    attachmentsEnabled: false,
+    attachmentReadable: (value) => !value.origin,
+    attachments: { local: entry, remote },
+    baseURL: '/attachments',
+    fetchAttachment: async () => new Blob(['data']),
+  })
+  expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
+  expect(screen.getAllByRole('button', { name: 'Download screen.png' })).toHaveLength(1)
+  await rerender({
+    attachmentsEnabled: true,
+    attachmentReadable: (value) => Boolean(value.origin),
+    attachments: { local: entry, remote },
+    baseURL: '/attachments',
+  })
+  expect(screen.getAllByRole('button', { name: 'Download screen.png' })).toHaveLength(1)
+})

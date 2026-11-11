@@ -411,3 +411,36 @@ func TestAttachmentUploadStatusErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
+	env := testenv.New(t)
+	spoke, _ := seedProjectAndIssue(t, env)
+	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: spoke.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: spoke.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	local := seedProject(t, env, "local-project")
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: local.ID, Title: "Local issue", Author: "tester"})
+	require.NoError(t, err)
+	code, raw := env.Get(t, "/api/v1/ui/snapshot?view=inbox&selected_issue_uid="+issue.UID)
+	require.Equal(t, http.StatusOK, code, string(raw))
+	var snapshot struct {
+		Capabilities struct {
+			Local    bool   `json:"attachment_local"`
+			Instance string `json:"attachment_instance_uid"`
+			Routes   []struct {
+				ProjectUID string `json:"project_uid"`
+				Read       bool   `json:"read"`
+				Write      bool   `json:"write"`
+			} `json:"attachment_routes"`
+		} `json:"capabilities"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &snapshot))
+	require.False(t, snapshot.Capabilities.Local)
+	require.Equal(t, env.DB.InstanceUID(), snapshot.Capabilities.Instance)
+	require.Len(t, snapshot.Capabilities.Routes, 1)
+	require.Equal(t, spoke.UID, snapshot.Capabilities.Routes[0].ProjectUID)
+	require.True(t, snapshot.Capabilities.Routes[0].Read)
+	require.True(t, snapshot.Capabilities.Routes[0].Write)
+	code, raw = attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", local.ID, issue.UID), "file.pdf", strings.NewReader("data"))
+	require.Equal(t, http.StatusServiceUnavailable, code, string(raw))
+	require.Contains(t, string(raw), "docbank_not_configured")
+}

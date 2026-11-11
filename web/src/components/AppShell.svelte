@@ -20,6 +20,8 @@
   import SettingsIcon from '@lucide/svelte/icons/settings'
   import SunIcon from '@lucide/svelte/icons/sun'
 
+  import type { KataAttachment } from '@kenn-io/kata-ui'
+  import { attachmentAvailable, attachmentWritable } from '../lib/kata/attachmentAvailability'
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
   import type { KataRoute, ShareableFilters, SystemView } from '../lib/router'
@@ -932,7 +934,16 @@
         actionsDisabled={!canMutate || mutationPending || projection.selected_pending === true}
         authorityBlocked={!canMutate || projection.selected_pending === true}
         pending={projection.selected_pending === true}
-        attachmentsEnabled={snapshot.capabilities.attachments ?? false}
+        attachmentsEnabled={attachmentWritable(
+          snapshot.capabilities,
+          projection.selected_detail.issue.project_uid,
+        )}
+        attachmentReadable={(attachment: KataAttachment) =>
+          attachmentAvailable(
+            snapshot.capabilities,
+            projection.selected_detail!.issue.project_uid,
+            attachment,
+          )}
         {onUploadAttachment}
         administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}

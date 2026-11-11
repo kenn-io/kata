@@ -90,18 +90,18 @@ func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 	status, raw = relayDocbankRequest(t, leaf, http.MethodGet, endpoint+"/"+out.ID+"/content", "", "")
 	require.Equal(t, http.StatusOK, status, string(raw))
 	require.Equal(t, "root document", string(raw))
-	require.EqualValues(t, 1, rootPreflights.Load())
-	require.EqualValues(t, 1, relayPreflights.Load())
-	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=second.pdf", "second document", "application/octet-stream")
-	require.Equal(t, http.StatusOK, status, string(raw))
 	require.EqualValues(t, 2, rootPreflights.Load())
 	require.EqualValues(t, 2, relayPreflights.Load())
+	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=second.pdf", "second document", "application/octet-stream")
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.EqualValues(t, 3, rootPreflights.Load())
+	require.EqualValues(t, 3, relayPreflights.Load())
 	version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222")
 	rootVault.Seed("/kata/link.pdf", docbank.Node{ID: 42, Name: "link.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("linked document")})
 	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"/links", `{"path":"/kata/link.pdf"}`, "application/json")
 	require.Equal(t, http.StatusOK, status, string(raw))
-	require.EqualValues(t, 3, rootPreflights.Load())
-	require.EqualValues(t, 3, relayPreflights.Load())
+	require.EqualValues(t, 4, rootPreflights.Load())
+	require.EqualValues(t, 4, relayPreflights.Load())
 	closeBody := fmt.Sprintf(`{"reason":"done","message":"Delivered the report and checked its final contents carefully.","evidence":[{"type":"attachment","attachment_id":%q}]}`, out.ID)
 	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", leaf.project.ID, issue.UID), closeBody, "application/json")
 	require.Equal(t, http.StatusOK, status, string(raw))
@@ -276,4 +276,40 @@ func TestRelayDocbankUnsupportedPreflightLeavesUploadUnread(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), "docbank_forward_unsupported")
 	require.Zero(t, body.reads)
+}
+
+func TestRelayDocbankReadRejectsUnsupportedCapabilities(t *testing.T) {
+	for _, incompatible := range []string{"relay", "root"} {
+		t.Run(incompatible, func(t *testing.T) {
+			root, relay, leaf, issue := newRelayClaimChain(t)
+			serveRelayDocbank(t, root, docbanktest.New(t))
+			serveRelayDocbank(t, relay, nil)
+			serveRelayDocbank(t, leaf, nil)
+			status, acquired := relayClaimAction(t, leaf, issue.UID, "acquire", "")
+			require.Equal(t, http.StatusOK, status)
+			require.True(t, acquired.Granted)
+			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
+			status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=report.pdf", "root document", "application/octet-stream")
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var out api.AddAttachmentResponseBody
+			require.NoError(t, json.Unmarshal(raw, &out))
+			node := root
+			if incompatible == "relay" {
+				node = relay
+			}
+			previous := *node.handler.Load()
+			var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/federation/docbank/capabilities") {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprintf(w, `{"version":2,"project_uid":%q,"origin":%q}`, node.project.UID, root.store.InstanceUID())
+					return
+				}
+				previous.ServeHTTP(w, r)
+			})
+			node.handler.Store(&handler)
+			status, raw = relayDocbankRequest(t, leaf, http.MethodGet, endpoint+"/"+out.ID+"/content", "", "")
+			require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
+			require.Contains(t, string(raw), "docbank_forward_unsupported")
+		})
+	}
 }

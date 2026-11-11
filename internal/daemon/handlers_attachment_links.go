@@ -122,8 +122,7 @@ func resolveDocbankAttachment(ctx context.Context, cfg ServerConfig, input api.L
 		if err := exposedDocbankNode(cfg, node); err != nil {
 			return metadata.Attachment{}, err
 		}
-	}
-	if node.TrashedAt != "" {
+	} else if node.TrashedAt != "" {
 		return metadata.Attachment{}, attachmentError(410, "attachment_content_missing")
 	}
 	if node.Kind != "file" {

@@ -2239,6 +2239,50 @@ describe('AppShell task selection', () => {
     return current
   }
 
+  test('uses the selected project attachment route', async () => {
+    const current = twoTaskSnapshot()
+    const spoke = current.collection![0]!
+    const local = current.collection![1]!
+    local.project_uid = 'local-project'
+    local.project_id = 8
+    local.project_name = 'local-project'
+    local.qualified_id = 'local-project#a2'
+    current.catalog.push({
+      project: {
+        ...current.catalog[0]!.project,
+        id: 8,
+        uid: 'local-project',
+        name: 'local-project',
+      },
+    })
+    current.capabilities.attachment_instance_uid = 'leaf'
+    current.capabilities.attachment_routes = [
+      { project_uid: spoke.project_uid!, read: true, write: true, origin: 'root' },
+    ]
+    const onNavigate = vi.fn()
+    const props = {
+      route: { ...listRoute, issueUID: firstUID },
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate,
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+      onUploadAttachment: vi.fn(async () => {}),
+    }
+    const { rerender } = render(AppShell, { props })
+    expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: /Second issue/ }))
+    const localSnapshot = structuredClone(current)
+    localSnapshot.selected = { ...localSnapshot.selected!, issue: localSnapshot.collection![1]! }
+    await rerender({
+      ...props,
+      route: { ...listRoute, issueUID: secondUID },
+      snapshot: localSnapshot,
+    })
+    expect(shownTitle()).toContain('Second issue')
+    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
+  })
+
   test('shows a clicked task in the same frame, before its snapshot arrives', async () => {
     const onNavigate = vi.fn()
     const props = {

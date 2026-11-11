@@ -10,6 +10,7 @@
     fetchAttachment?: ((url: string) => Promise<Blob>) | undefined
     uploadAttachment?: ((file: File) => Promise<void>) | undefined
     attachmentsEnabled?: boolean | undefined
+    attachmentReadable?: ((attachment: KataAttachment) => boolean) | undefined
     actionsDisabled?: boolean | undefined
   }
   let {
@@ -18,6 +19,7 @@
     fetchAttachment,
     uploadAttachment,
     attachmentsEnabled = false,
+    attachmentReadable,
     actionsDisabled = false,
   }: Props = $props()
   const previews = new SvelteMap<string, string>()
@@ -34,7 +36,9 @@
     Object.entries(attachments).map(([id, e]) => ({
       ...e,
       id,
+      readable: attachmentReadable ? attachmentReadable(e) : attachmentsEnabled,
       reference: JSON.stringify([
+        attachmentReadable ? attachmentReadable(e) : attachmentsEnabled,
         e.origin ?? 'local',
         e.name,
         e.media_type,
@@ -111,7 +115,7 @@
   }
   async function load(entry: (typeof entries)[number], preview: boolean): Promise<void> {
     const fetcher = fetchAttachment
-    if (!fetcher || !attachmentsEnabled || loading.get(entry.id)) return
+    if (!fetcher || !entry.readable || loading.get(entry.id)) return
     const accepted = generation
     const current = () => accepted === generation && references.get(entry.id) === entry.reference
     loading.set(entry.id, true)
@@ -167,7 +171,7 @@
               <span class="file-name">{entry.name}</span>
               <span class="description">{entry.media_type} · {entry.size} bytes</span>
             </div>
-            {#if attachmentsEnabled}
+            {#if entry.readable}
               <div class="file-actions">
                 {#if entry.size > 100 << 20}
                   <code>kata docbank attachments get &lt;issue&gt; {entry.id}</code>

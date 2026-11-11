@@ -3,6 +3,7 @@
     IssueDetail as SharedIssueDetail,
     projectIssueDetail,
     type KataIssueHostAction,
+    type KataAttachment,
   } from '@kenn-io/kata-ui'
   import { Button } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
@@ -17,6 +18,7 @@
 
   let props: ComponentProps<typeof IssueEditor> & {
     attachmentsEnabled?: boolean | undefined
+    attachmentReadable?: ((attachment: KataAttachment) => boolean) | undefined
     onUploadAttachment?: ((uid: string, file: File) => Promise<void>) | undefined
     // True while the task shows the list's copy and its comments and history load.
     pending?: boolean | undefined
@@ -96,6 +98,7 @@
         ? (file) => props.onUploadAttachment!(props.issue.issue.uid, file)
         : undefined}
       attachmentsEnabled={props.attachmentsEnabled}
+      attachmentReadable={props.attachmentReadable}
       actionsDisabled={Boolean(props.actionsDisabled || props.authorityBlocked)}
       {actions}
       onOpenIssue={(uid) => void props.onSelectIssue?.({ uid })}

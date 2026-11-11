@@ -7145,6 +7145,22 @@ components:
       required:
         - kind
       type: object
+    UIAttachmentRoute:
+      additionalProperties: true
+      properties:
+        origin:
+          type: string
+        project_uid:
+          type: string
+        read:
+          type: boolean
+        write:
+          type: boolean
+      required:
+        - project_uid
+        - read
+        - write
+      type: object
     UICapabilities:
       additionalProperties: true
       properties:
@@ -7157,6 +7173,14 @@ components:
         allowed_actions:
           items:
             type: string
+          type: array
+        attachment_instance_uid:
+          type: string
+        attachment_local:
+          type: boolean
+        attachment_routes:
+          items:
+            $ref: "#/components/schemas/UIAttachmentRoute"
           type: array
         attachments:
           type: boolean

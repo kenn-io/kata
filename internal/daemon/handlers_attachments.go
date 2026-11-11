@@ -199,7 +199,20 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
-			resp, err = originDocbankContent(ctx, cfg, project, e)
+			binding, err := docbankUpstream(ctx, cfg, project.ID)
+			if err != nil {
+				return nil, err
+			}
+			if isDocbankSpoke(binding) {
+				caps, err := docbankOriginCapabilities(ctx, cfg, project, binding)
+				if err != nil {
+					return nil, err
+				}
+				if caps.Origin != e.Origin {
+					return nil, attachmentError(409, "attachment_origin_mismatch")
+				}
+			}
+			resp, err = originDocbankContent(ctx, cfg, project, binding, e)
 			if err != nil {
 				return nil, err
 			}

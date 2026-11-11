@@ -146,7 +146,11 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		e := metadata.Attachment{Origin: in.Origin, DocbankVersion: in.VersionID}
-		resp, err := originDocbankContent(ctx, cfg, project, e)
+		binding, err := docbankUpstream(ctx, cfg, project.ID)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := originDocbankContent(ctx, cfg, project, binding, e)
 		if err != nil {
 			return nil, err
 		}
@@ -164,11 +168,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 	})
 }
 
-func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Project, attachment metadata.Attachment) (*http.Response, error) {
-	binding, err := docbankUpstream(ctx, cfg, project.ID)
-	if err != nil {
-		return nil, err
-	}
+func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, attachment metadata.Attachment) (*http.Response, error) {
 	if !isDocbankSpoke(binding) {
 		// Only projects without an upstream may use this daemon's Docbank origin.
 		if attachment.Origin != cfg.DB.InstanceUID() {
