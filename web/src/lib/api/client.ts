@@ -50,13 +50,13 @@ export function setGeneratedFetch(fetcher: typeof fetch): void {
   generatedFetch = fetcher
 }
 
-async function readResponseBody(response: Response): Promise<unknown> {
+async function readRawResponseBody(response: Response): Promise<string | Blob | undefined> {
   const contentType = response.headers.get('Content-Type')
   if (contentType && !contentType.includes('json') && !contentType.startsWith('text/')) {
     return response.blob()
   }
   const text = await response.text()
-  return text ? (contentType?.includes('json') ? JSON.parse(text) : text) : undefined
+  return text || undefined
 }
 
 export async function orvalFetch<T>(
@@ -66,11 +66,20 @@ export async function orvalFetch<T>(
 ): Promise<T> {
   const { retry, ...requestOptions } = options
   const read = () => fetcher(applicationURL(url), requestOptions)
-  const response =
+  const result =
     retry && (requestOptions.method ?? 'GET').toUpperCase() === 'GET'
-      ? await retryTransientRead(read, requestOptions.signal ?? new AbortController().signal)
-      : await read()
-  const data = await readResponseBody(response)
+      ? await retryTransientRead(
+          read,
+          requestOptions.signal ?? new AbortController().signal,
+          readRawResponseBody,
+        )
+      : { response: await read() }
+  const response = result.response
+  const body = 'body' in result ? result.body : await readRawResponseBody(response)
+  const data =
+    typeof body === 'string' && response.headers.get('Content-Type')?.includes('json')
+      ? JSON.parse(body)
+      : body
   return {
     data,
     status: response.status,

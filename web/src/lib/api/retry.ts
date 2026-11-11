@@ -4,7 +4,8 @@ import { ReconnectBackoff, waitForReconnect } from '../events/controller'
 export async function retryTransientRead(
   read: () => Promise<Response>,
   signal: AbortSignal,
-): Promise<Response> {
+  readBody: (response: Response) => Promise<unknown>,
+): Promise<{ response: Response; body?: unknown }> {
   const backoff = new ReconnectBackoff()
   let waited = 0
   for (let attempt = 0; ; attempt++) {
@@ -13,15 +14,17 @@ export async function retryTransientRead(
     let failure: unknown
     try {
       response = await read()
+      if (response.ok) return { response, body: await readBody(response) }
     } catch (error) {
       if (signal.aborted || (error instanceof Error && error.name === 'AbortError') || attempt >= 3)
         throw error
       failure = error
+      response = undefined
     }
-    if (response && (attempt >= 3 || !isTransient(response.status))) return response
+    if (response && (attempt >= 3 || !isTransient(response.status))) return { response }
     const delay = Math.max(backoff.afterDisconnect(false), response ? retryAfter(response) : 0)
     if (waited + delay > 30_000) {
-      if (response) return response
+      if (response) return { response }
       throw failure
     }
     waited += delay

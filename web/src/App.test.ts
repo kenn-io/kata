@@ -1238,7 +1238,7 @@ describe('App', () => {
     expect(paths).toEqual(['/api/v1/ui/daemons'])
   })
 
-  it.each([503, 403])('handles an initial snapshot status %i', async (status) => {
+  it.each([503, 403, 'body'])('handles an initial snapshot failure %s', async (status) => {
     vi.useFakeTimers()
     history.replaceState(null, '', '/kata?view=all-open#direct=1')
     sessionStorage.setItem(
@@ -1252,15 +1252,25 @@ describe('App', () => {
         const target = new URL(String(input), window.location.origin)
         if (target.pathname !== '/api/v1/ui/snapshot') return Response.json({})
         snapshotReads++
-        if (snapshotReads === 1)
-          return new Response('{', { status, headers: { 'Content-Type': 'application/json' } })
+        if (snapshotReads === 1) {
+          if (status === 'body')
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.error(new TypeError('connection reset'))
+                },
+              }),
+              { headers: { 'Content-Type': 'application/json' } },
+            )
+          return new Response('{', { status: Number(status), headers: { 'Content-Type': 'application/json' } })
+        }
         return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
       }),
     )
     render(App)
     await vi.advanceTimersByTimeAsync(0)
     await tick()
-    if (status === 503) {
+    if (status !== 403) {
       expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
       await vi.advanceTimersByTimeAsync(1000)
       await tick()
@@ -1272,47 +1282,60 @@ describe('App', () => {
     }
   })
 
-  it('recovers an initial snapshot failure through an in-app retry', async () => {
-    vi.useFakeTimers()
-    history.replaceState(null, '', '/kata?view=all-open#direct=1')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    let snapshotReads = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const target = new URL(String(input), window.location.origin)
-        if (target.pathname !== '/api/v1/ui/snapshot') {
-          return new Response('{}', {
+  it.each(['status', 'body'])(
+    'recovers an initial snapshot %s failure through an in-app retry',
+    async (failure) => {
+      vi.useFakeTimers()
+      history.replaceState(null, '', '/kata?view=all-open#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      let snapshotReads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const target = new URL(String(input), window.location.origin)
+          if (target.pathname !== '/api/v1/ui/snapshot') {
+            return new Response('{}', {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          }
+          snapshotReads += 1
+          if (snapshotReads <= 4)
+            return failure === 'status'
+              ? new Response('', { status: 503 })
+              : new Response(
+                  new ReadableStream({
+                    start(controller) {
+                      controller.error(new TypeError('connection reset'))
+                    },
+                  }),
+                  { headers: { 'Content-Type': 'application/json' } },
+                )
+          return new Response(JSON.stringify(snapshot()), {
             status: 200,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
           })
-        }
-        snapshotReads += 1
-        if (snapshotReads <= 4) return new Response('', { status: 503 })
-        return new Response(JSON.stringify(snapshot()), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
-        })
-      }),
-    )
+        }),
+      )
 
-    render(App)
+      render(App)
 
-    await vi.advanceTimersByTimeAsync(7000)
-    await tick()
-    const retry = screen.getByRole('button', { name: 'Retry' })
-    expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
-    await fireEvent.click(retry)
+      await vi.advanceTimersByTimeAsync(7000)
+      await tick()
+      const retry = screen.getByRole('button', { name: 'Retry' })
+      expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
+      await fireEvent.click(retry)
 
-    await vi.advanceTimersByTimeAsync(0)
-    await tick()
-    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
-    expect(snapshotReads).toBe(5)
-    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
-  })
+      await vi.advanceTimersByTimeAsync(0)
+      await tick()
+      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+      expect(snapshotReads).toBe(5)
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    },
+  )
 
   it('fences browser authority when project creation rejects the session', async () => {
     history.replaceState(null, '', '/kata#direct=1')

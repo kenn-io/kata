@@ -209,3 +209,31 @@ it('does not retry opted-in writes', async () => {
   expect(fetcher).toHaveBeenCalledTimes(1)
   expect(fetcher.mock.calls[0]?.[1]).not.toHaveProperty('retry')
 })
+
+it('retries a generated read when the response body connection drops', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError('connection reset'))
+          },
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    .mockResolvedValueOnce(Response.json({ teams: [] }))
+  setGeneratedFetch(fetcher)
+  try {
+    const result = listTeams({ signal: new AbortController().signal, retry: true })
+    const observed = result.catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await observed)?.status).toBe(200)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
