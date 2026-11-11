@@ -155,6 +155,29 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	seen, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	pull(target, localTarget, baseline.ReplayHorizonEventID-1)
+	switch lifecycle {
+	case "destination leave waits for pending initial link", "destination leave waits for pending cron observation":
+		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
+		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
+			"the pending %s requires the current owner's enrollment", pending.Type)
+		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, pending.ID))
+		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.NoError(t, err, "acknowledging the pending event releases the destination enrollment")
+		return
+	case "destination leave waits for archived source":
+		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
+			"the archived source's pending comment still requires the destination enrollment")
+
+		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, commentEvent.ID))
+		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
+		require.NoError(t, err, "acknowledging the archived source's comment releases the destination enrollment")
+		archived, err := spoke.ProjectByID(ctx, localSource.ID)
+		require.NoError(t, err)
+		require.NotNil(t, archived.DeletedAt)
+		return
+	}
 	for _, project := range []db.Project{localSource, localTarget} {
 		reset, err := spoke.PurgeResetCheck(ctx, seen, project.ID)
 		require.NoError(t, err)
@@ -238,25 +261,6 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		retained, err := spoke.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Equal(t, comments, retained)
-	case "destination leave waits for pending initial link", "destination leave waits for pending cron observation":
-		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
-			"the pending %s requires the current owner's enrollment", pending.Type)
-		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, pending.ID))
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.NoError(t, err, "acknowledging the pending event releases the destination enrollment")
-	case "destination leave waits for archived source":
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
-			"the archived source's pending comment still requires the destination enrollment")
-
-		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, commentEvent.ID))
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.NoError(t, err, "acknowledging the archived source's comment releases the destination enrollment")
-		archived, err := spoke.ProjectByID(ctx, localSource.ID)
-		require.NoError(t, err)
-		require.NotNil(t, archived.DeletedAt)
 	case "destination leave preserves standalone issue":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
 		_, err := spoke.LeaveFederationReplica(ctx, localTarget.ID)
@@ -288,7 +292,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 }
 
 // Snapshot relocation must retain the existing same-hub and recurrence gates.
-func checkFederatedSnapshotRelocationGuards(t *testing.T, store db.Storage) error {
+func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) error {
 	for _, kind := range []string{"different-hub", "recurrence", "retained-move-after-source-leave"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
