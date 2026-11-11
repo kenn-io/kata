@@ -61,7 +61,7 @@ async function readRawResponseBody(response: Response): Promise<string | Blob | 
 
 export async function orvalFetch<T>(
   url: string,
-  options: RequestInit & { retry?: boolean },
+  options: RequestInit & ({ retry: true; signal: AbortSignal } | { retry?: false }),
   fetcher: typeof fetch = generatedFetch,
 ): Promise<T> {
   const { retry, ...requestOptions } = options
@@ -69,7 +69,7 @@ export async function orvalFetch<T>(
   const result = retry
     ? await retryTransientRead(
         read,
-        requestOptions.signal ?? new AbortController().signal,
+        options.signal,
         readRawResponseBody,
       )
     : { response: await read() }

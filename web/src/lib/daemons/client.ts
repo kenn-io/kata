@@ -48,8 +48,8 @@ export function createDaemonFetch(
 }
 
 export async function fetchWebDaemons(
-  fetcher: typeof fetch = fetch,
-  signal = new AbortController().signal,
+  fetcher: typeof fetch,
+  signal: AbortSignal,
 ): Promise<WebDaemonInfo[]> {
   const { response, body } = await retryTransientRead(
     () =>
