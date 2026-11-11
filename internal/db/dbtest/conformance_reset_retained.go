@@ -22,6 +22,7 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 	definition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "check", Kind: "command", Command: "true"}}}
 	bad, _, err := source.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Future", Actor: "worker", Definition: definition})
 	require.NoError(t, err)
+	createdUID := bad.DefinitionEventUID
 	bad, _, err = source.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: bad.UID, ExpectedEventUID: bad.DefinitionEventUID, Name: "Future", Actor: "worker", Definition: definition, Deleted: true})
 	require.NoError(t, err)
 	healthy, _, err := source.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Healthy", Actor: "worker", Definition: definition})
@@ -85,9 +86,9 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 				require.NoError(t, err)
 				maxBefore, err := target.MaxEventID(ctx)
 				require.NoError(t, err)
-				eventsBefore, err := target.EventsByUIDs(ctx, restored.ID, []string{bad.DefinitionEventUID, healthy.DefinitionEventUID, job.DefinitionEventUID})
+				eventsBefore, err := target.EventsByUIDs(ctx, restored.ID, []string{createdUID, bad.DefinitionEventUID, healthy.DefinitionEventUID, job.DefinitionEventUID})
 				require.NoError(t, err)
-				require.Len(t, eventsBefore, 3)
+				require.Len(t, eventsBefore, 4)
 				switch operation {
 				case "legacy":
 					err = target.ResetFederatedProject(ctx, restored.ID, 20, 19)
@@ -103,7 +104,7 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 				maxAfter, err := target.MaxEventID(ctx)
 				require.NoError(t, err)
 				require.Equal(t, maxBefore, maxAfter)
-				eventsAfter, err := target.EventsByUIDs(ctx, restored.ID, []string{bad.DefinitionEventUID, healthy.DefinitionEventUID, job.DefinitionEventUID})
+				eventsAfter, err := target.EventsByUIDs(ctx, restored.ID, []string{createdUID, bad.DefinitionEventUID, healthy.DefinitionEventUID, job.DefinitionEventUID})
 				require.NoError(t, err)
 				require.Equal(t, eventsBefore, eventsAfter)
 				restoredWorkflow, err := target.CronWorkflow(ctx, restored.ID, healthy.UID)
