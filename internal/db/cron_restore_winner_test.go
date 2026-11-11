@@ -23,6 +23,7 @@ func TestOwnerRestoreRetainedWorkflowWinner(t *testing.T) {
 		{"held edit", `{"version":1,"steps":[{"kind":"argv"}]}`, false, false},
 		{"held tombstone", `{"version":1,"steps":[{"kind":"argv"}]}`, true, false},
 		{"unrepresentable null", `null`, false, true},
+		{"unrepresentable version", `{"version":0,"steps":[]}`, false, true},
 		{"later valid", `{"version":1,"steps":[]}`, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
