@@ -304,8 +304,11 @@ func runActionWithHeaders(
 	}
 	if action == "close" {
 		if evidence, ok := body["evidence"].([]api.Evidence); ok && len(evidence) > 0 {
-			if ref := prepareCloseTranscript(ctx, cmd, client, apiClient, baseURL, pid, issue, headers["Idempotency-Key"] != ""); ref != nil {
+			if ref, selection := prepareCloseTranscript(ctx, cmd, baseURL, pid, issue, headers["Idempotency-Key"] != ""); ref != nil {
 				body["transcript"] = ref
+				if selection != nil {
+					body["transcript_selection"] = selection
+				}
 			}
 		}
 		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {

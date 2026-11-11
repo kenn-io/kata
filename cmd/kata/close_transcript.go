@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,46 +11,46 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/transcript"
-	kataclient "go.kenn.io/kata/pkg/client"
-	"go.kenn.io/kata/pkg/client/generated"
 )
 
-func prepareCloseTranscript(ctx context.Context, cmd *cobra.Command, httpClient *http.Client, client *kataclient.Client, baseURL string, pid int64, issue resolvedIssueRef, includeDeleted bool) *transcript.Transcript {
+func prepareCloseTranscript(ctx context.Context, cmd *cobra.Command, baseURL string, pid int64, issue resolvedIssueRef, includeDeleted bool) (*transcript.Transcript, *api.TranscriptSelection) {
 	cfg, err := config.ReadCloseTranscriptConfig()
 	warn := func(message string) { _, _ = fmt.Fprintln(cmd.ErrOrStderr(), "close: transcript: "+message) }
 	if err != nil {
 		warn(fmt.Sprintf("configuration unavailable (%v); skipping attachment", err))
-		return nil
+		return nil, nil
 	}
-	name := issue.ProjectName
+	if !cfg.AnyEnabled() {
+		return nil, nil
+	}
+	ref := closeTranscript(cmd, cfg)
+	if ref == nil {
+		return nil, nil
+	}
+	target := cfg.Target(issue.ProjectName)
+	var selection *api.TranscriptSelection
 	if len(cfg.Project) > 0 {
-		response, callErr := client.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
-			PathParams: &generated.ShowIssuePath{ProjectID: pid, Ref: issue.RefForAPI},
-			Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
-		})
-		if response == nil || externalCLIResponseError(response.StatusCode, response.Body, callErr) != nil {
-			warn("project unavailable; skipping attachment")
-			return nil
-		}
-		var out api.MutationResponse
-		if json.Unmarshal(response.Body, &out.Body) != nil || out.Body.Issue.ProjectID <= 0 {
-			warn("project unavailable; skipping attachment")
-			return nil
-		}
-		name, err = moveSourceProjectName(ctx, httpClient, baseURL, pid, out.Body.Issue.ProjectID, name)
+		hydrated, err := hydrateRefWithQualified(ctx, baseURL, pid, issue, includeDeleted)
 		if err != nil {
-			warn("project unavailable; skipping attachment")
-			return nil
+			warn("project unavailable; using process override for attachment")
+			return ref, &api.TranscriptSelection{Record: cfg.ForceEnabled()}
+		}
+		target = cfg.Target(hydrated.ProjectName)
+		selection = &api.TranscriptSelection{ProjectID: hydrated.CurrentProjectID, Record: *target.Enabled}
+	}
+	if target.AgentsViewURL != "" && (selection == nil || selection.Record) {
+		link, err := ref.Link(target.AgentsViewURL)
+		if err != nil {
+			warn("AgentsView URL invalid; attaching the session identifier only")
+		} else {
+			ref.URL = link
 		}
 	}
-	return closeTranscript(cmd, cfg, cfg.Target(name))
+	return ref, selection
 }
 
-func closeTranscript(cmd *cobra.Command, cfg config.CloseTranscriptConfig, target config.CloseTranscriptTarget) *transcript.Transcript {
+func closeTranscript(cmd *cobra.Command, cfg config.CloseTranscriptConfig) *transcript.Transcript {
 	warn := func(message string) { _, _ = fmt.Fprintln(cmd.ErrOrStderr(), "close: transcript: "+message) }
-	if target.Enabled == nil || !*target.Enabled {
-		return nil
-	}
 	agent, id := os.Getenv("KATA_TRANSCRIPT_AGENT"), os.Getenv("KATA_TRANSCRIPT_SESSION_ID")
 	var source string
 	if agent == "" && id == "" {
@@ -87,16 +86,6 @@ func closeTranscript(cmd *cobra.Command, cfg config.CloseTranscriptConfig, targe
 		}
 		return nil
 	}
-	// Preserve the exact harness session ID: no filesystem path, transcript body,
-	// hook ownership hash, or another session is used as a fallback.
-	if target.AgentsViewURL != "" {
-		link, err := ref.Link(target.AgentsViewURL)
-		if err != nil {
-			warn("AgentsView URL invalid; attaching the session identifier only")
-		} else {
-			ref.URL = link
-		}
-	}
 	return ref
 }
 
@@ -113,6 +102,9 @@ func dropUnsupportedTranscript(
 	if ref.Agent == "claude" || ref.Agent == "codex" {
 		required = apiVersionCloseTranscript
 	}
+	if body["transcript_selection"] != nil {
+		required = apiVersionTranscriptSelection
+	}
 	err := requireDaemonAPIVersion(ctx, client, baseURL, required, "close transcript")
 	if err == nil {
 		return nil
@@ -123,5 +115,6 @@ func dropUnsupportedTranscript(
 	}
 	_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "close: transcript: "+tooOld.Message+"; skipping attachment")
 	delete(body, "transcript")
+	delete(body, "transcript_selection")
 	return nil
 }

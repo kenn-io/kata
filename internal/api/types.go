@@ -1011,8 +1011,15 @@ type CloseActionRequest struct {
 // fields before they can ignore retry headers or provenance and mutate an issue.
 type CloseActionRequestBody struct {
 	ActionRequestBody
-	RetryProtocol string                 `json:"retry_protocol,omitempty" enum:"close-v1,"`
-	Transcript    *transcript.Transcript `json:"transcript,omitempty"`
+	RetryProtocol       string                 `json:"retry_protocol,omitempty" enum:"close-v1,"`
+	Transcript          *transcript.Transcript `json:"transcript,omitempty"`
+	TranscriptSelection *TranscriptSelection   `json:"transcript_selection,omitempty"`
+}
+
+// TranscriptSelection binds a candidate session to the chosen project policy.
+type TranscriptSelection struct {
+	ProjectID int64 `json:"project_id" minimum:"0"`
+	Record    bool  `json:"record" required:"true"`
 }
 
 // ActionRequestBody is the shared JSON body for close and reopen actions.

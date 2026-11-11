@@ -41,6 +41,27 @@ func (cfg CloseTranscriptConfig) Target(project string) CloseTranscriptTarget {
 	return target
 }
 
+// AnyEnabled reports whether any configured target can record a session.
+func (cfg CloseTranscriptConfig) AnyEnabled() bool {
+	if cfg.override != nil {
+		return *cfg.override
+	}
+	if cfg.Enabled {
+		return true
+	}
+	for name := range cfg.Project {
+		if *cfg.Target(name).Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+// ForceEnabled reports whether the process explicitly enabled recording.
+func (cfg CloseTranscriptConfig) ForceEnabled() bool {
+	return cfg.override != nil && *cfg.override
+}
+
 // ReadCloseTranscriptConfig avoids daemon policy and credential resolution.
 // KATA_CLOSE_TRANSCRIPT_ENABLED overrides the file's enabled flag for one
 // process; false skips the file, so its transcript settings cannot warn.

@@ -669,14 +669,15 @@ func (c ClaimViolationOut) Validate() error {
 }
 
 type CloseActionRequestBody struct {
-	Actor         *string                              `json:"actor,omitempty"`
-	DryRun        *bool                                `json:"dry_run,omitempty"`
-	Evidence      []Evidence                           `json:"evidence,omitempty"`
-	Message       *string                              `json:"message,omitempty"`
-	Reason        *CloseActionRequestBodyReason        `json:"reason,omitempty"`
-	RetryProtocol *CloseActionRequestBodyRetryProtocol `json:"retry_protocol,omitempty"`
-	Source        *CloseActionRequestBodySource        `json:"source,omitempty"`
-	Transcript    *Transcript                          `json:"transcript,omitempty"`
+	Actor               *string                              `json:"actor,omitempty"`
+	DryRun              *bool                                `json:"dry_run,omitempty"`
+	Evidence            []Evidence                           `json:"evidence,omitempty"`
+	Message             *string                              `json:"message,omitempty"`
+	Reason              *CloseActionRequestBodyReason        `json:"reason,omitempty"`
+	RetryProtocol       *CloseActionRequestBodyRetryProtocol `json:"retry_protocol,omitempty"`
+	Source              *CloseActionRequestBodySource        `json:"source,omitempty"`
+	Transcript          *Transcript                          `json:"transcript,omitempty"`
+	TranscriptSelection *TranscriptSelection                 `json:"transcript_selection,omitempty"`
 }
 
 func (c CloseActionRequestBody) Validate() error {
@@ -713,6 +714,13 @@ func (c CloseActionRequestBody) Validate() error {
 		if v, ok := any(c.Transcript).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Transcript", err)
+			}
+		}
+	}
+	if c.TranscriptSelection != nil {
+		if v, ok := any(c.TranscriptSelection).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("TranscriptSelection", err)
 			}
 		}
 	}
@@ -7239,6 +7247,15 @@ func (t Transcript) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type TranscriptSelection struct {
+	ProjectID int64 `json:"project_id" validate:"gte=0"`
+	Record    bool  `json:"record"`
+}
+
+func (t TranscriptSelection) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(t))
 }
 
 type Trigger struct {

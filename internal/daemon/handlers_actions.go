@@ -41,6 +41,11 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
 		}
+		if selection := in.Body.TranscriptSelection; selection != nil {
+			if in.Body.Transcript == nil || (selection.ProjectID == 0 && in.Body.Transcript.URL != "") {
+				return nil, api.NewError(400, "validation", "transcript selection requires a candidate and an unknown project requires an empty URL", "", nil)
+			}
+		}
 		// Owner-local TUI closes bypass substance / evidence validation:
 		// the interactive human path is "press x to close" and a 40-char
 		// rationale prompt would just annoy the user. Forwarded and
@@ -107,6 +112,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			idempotencyFingerprint = closeIdempotencyFingerprint(
 				issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
 				in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
+		}
+		if selection := in.Body.TranscriptSelection; selection != nil && selection.ProjectID > 0 && selection.ProjectID != issue.ProjectID {
+			return nil, api.NewError(409, "issue_moved", "issue moved to another project before the close", "resolve the issue in its current project and retry", nil)
 		}
 		if ifMatchRev != nil && issue.Revision != *ifMatchRev {
 			return nil, api.NewError(412, "revision_conflict",
@@ -199,6 +207,10 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			out.Body.Issue = issue
 			return out, nil
 		}
+		recordedTranscript := in.Body.Transcript
+		if selection := in.Body.TranscriptSelection; selection != nil && !selection.Record {
+			recordedTranscript = nil
+		}
 		var updated db.Issue
 		var evt *db.Event
 		var events []db.Event
@@ -211,7 +223,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				IssueID: issue.ID, ExpectedProjectID: issue.ProjectID,
 				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
-				Transcript:     in.Body.Transcript,
+				Transcript:     recordedTranscript,
 				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
 				DisallowRecurrenceEffects: issueScopeFromContext(ctx) != nil,
 			})
@@ -267,7 +279,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if errors.Is(err, db.ErrIssueProjectChanged) {
 				return nil, api.NewError(409, "issue_moved",
 					"issue moved to another project before the close committed",
-					"resolve the issue in its current project and retry with a fresh idempotency key", nil)
+					"resolve the issue in its current project and retry", nil)
 			}
 			if errors.Is(err, db.ErrRecurrenceEffectsForbidden) {
 				return nil, api.NewError(409, "scoped_effect_forbidden",

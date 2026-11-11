@@ -72,9 +72,7 @@ pi = "PI_SESSION_ID"
 `), 0600))
 		cfg, err := ReadCloseTranscriptConfig()
 		require.NoError(t, err)
-		assert.True(t, cfg.Enabled)
-		assert.Equal(t, "https://agentsview.example", cfg.AgentsViewURL)
-		assert.Equal(t, map[string]string{"pi": "PI_SESSION_ID"}, cfg.SessionIDEnv)
+		assert.Equal(t, CloseTranscriptConfig{Enabled: true, AgentsViewURL: "https://agentsview.example", SessionIDEnv: map[string]string{"pi": "PI_SESSION_ID"}, override: new(true)}, cfg)
 	})
 	t.Run("false ignores the file's invalid session settings", func(t *testing.T) {
 		home := t.TempDir()

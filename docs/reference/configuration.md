@@ -38,14 +38,18 @@ reference points to an issue that moved. An absent entry uses the global
 settings. A present entry inherits `enabled` when omitted and uses its own
 `agentsview_url`. An empty, omitted, or invalid URL records only the session
 identifier. Set a project's `enabled` to `false` to omit its transcript.
+For keyed retries, the client still sends the candidate session identifier to
+the daemon; an opted-out close stores only its fingerprint, not the transcript.
 If the issue or project lookup fails, Kata warns and closes without provenance.
-The selection reflects the read before close. A concurrent move can leave the
-former project's setting on the event. Supply `--if-match` to guard a known
-revision.
+An explicit process override of `true` records the identifier in that case.
+If the issue moves after selection and before close, the close returns an
+`issue_moved` conflict. Resolve the issue and retry with the same key.
 
 This is off by default and needs no daemon restart. Claude Code and Codex
 transcripts need HTTP API `0.26.0` or newer. Other agents need HTTP API
 `0.34.0` or newer.
+Project targets need HTTP API `0.45.0` or newer. With an older daemon, the
+close proceeds without a transcript when project targets are configured.
 Before attaching a transcript, `kata close` checks the daemon's API version. An older daemon
 causes a warning on stderr, and the close proceeds without the transcript.
 With attachment disabled, close requests remain unchanged.
@@ -54,7 +58,7 @@ To turn attachment on or off for one process without editing the file, set
 `KATA_CLOSE_TRANSCRIPT_ENABLED` to a boolean such as `true` or `false`. `true`
 attaches transcripts even without a config file; `agentsview_url` and
 `session_id_env` still come from the file. It also overrides project enablement.
-Project lookup failures still omit provenance. `false` attaches nothing, even when
+`false` attaches nothing, even when
 the file enables attachment, and ignores the file's other transcript settings,
 so a mistake there doesn't warn. A value that isn't a boolean warns on stderr,
 and the close proceeds without a transcript. Unset or empty leaves the file in
@@ -150,8 +154,8 @@ retains the old event. Keyed retries return their original event; keep the
 original session, evidence, actor, and other request fields unchanged. The
 AgentsView link is not part of retry identity, so changing `agentsview_url`
 does not break a retry. Adding or removing the transcript conflicts. A lookup
-failure can omit a previously recorded transcript and cause a conflict; retry
-with the original settings after lookup recovers. Retrying from another chat with different automatic
+failure or project move keeps the original receipt when the candidate session
+is unchanged. Retrying from another chat with different automatic
 context conflicts; set `KATA_TRANSCRIPT_SESSION_ID` to the original session ID and
 `KATA_TRANSCRIPT_AGENT` to the original agent. If the original close turned
 attachment on with `KATA_CLOSE_TRANSCRIPT_ENABLED`, set it again for the retry.

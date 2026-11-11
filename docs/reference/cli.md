@@ -1090,7 +1090,8 @@ after the original close advanced the issue state.
 An opt-in [closing-session transcript setting](configuration.md#closing-session-transcripts)
 records the current session ID and optional AgentsView link alongside the
 close evidence. Project settings select the target from the issue's current
-project. The setting maps each additional agent name to its session
+project. If the issue moves before the close commits, retry the conflict with
+the same key. The setting maps each additional agent name to its session
 variable. See the configuration reference for session ID requirements, agent names,
 and daemon API compatibility.
 Session provenance supplies no completion evidence on its own.
