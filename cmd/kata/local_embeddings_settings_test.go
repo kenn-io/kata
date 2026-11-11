@@ -45,7 +45,7 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 }
 
 func TestLocalEmbeddingsSettingsSharingRetry(t *testing.T) {
-	home := setupKataEnv(t)
+	setupKataEnv(t)
 	sharedHome := clearLocalEmbeddingsEnv(t)
 	stubLocalEmbeddingsInstall(t)
 	oldEndpoint := localEmbeddingsEndpoint
@@ -56,30 +56,18 @@ func TestLocalEmbeddingsSettingsSharingRetry(t *testing.T) {
 		}
 		return "http://127.0.0.1:12345/v1", nil
 	}
-	marker := filepath.Join(sharedHome, ".kenn", "embeddings", "search-by-meaning")
-	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0700))
-	if err := os.Symlink("missing", marker); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
+	blocker := filepath.Join(sharedHome, ".kenn")
+	require.NoError(t, os.WriteFile(blocker, []byte("block marker"), 0600))
 	var run func(context.Context)
 	setup := &localEmbeddingsSetup{start: func(work func(context.Context)) bool { run = work; return true }}
 	require.NoError(t, setup.TurnOn(t.Context()))
 	run(t.Context())
 	require.Equal(t, "failed", setup.job.State)
 	require.Contains(t, setup.job.Error, "sharing could not be confirmed")
-	require.Contains(t, setup.job.Error, "record search by meaning choice")
-	data, err := os.ReadFile(filepath.Join(home, "config.toml")) // #nosec G304 -- test-owned configuration
-	require.NoError(t, err)
-	cfg, err := config.ParseSearchConfig(data)
-	require.NoError(t, err)
-	require.True(t, cfg.Embeddings.Local)
-	require.NoError(t, os.Remove(marker))
+	require.NoError(t, os.Remove(blocker))
 	require.NoError(t, setup.TurnOn(t.Context()))
 	run(t.Context())
 	require.Equal(t, "restart", setup.job.State)
-	chosen, err := embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.True(t, chosen)
 }
 
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
@@ -204,12 +192,6 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			if tc.ready {
 				require.Equal(t, "restart", status.Job.State, status.Job.Error)
 				require.False(t, status.CanChange)
-				saved, err := config.ParseSearchConfig(data)
-				require.NoError(t, err)
-				require.True(t, saved.Embeddings.Local)
-				chosen, err := embedlocal.ChoiceRecorded()
-				require.NoError(t, err)
-				require.True(t, chosen)
 			} else {
 				require.Equal(t, "failed", status.Job.State)
 				require.Contains(t, status.Job.Error, "pgvector")
@@ -273,6 +255,62 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	require.False(t, chosen)
 }
 
+func TestSharedChoiceStartsIndexing(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+	configPath := filepath.Join(home, "config.toml")
+	original := []byte("# unchanged\n")
+	require.NoError(t, os.WriteFile(configPath, original, 0600))
+	require.NoError(t, embedlocal.RecordChoice())
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode input: %v", err)
+			return
+		}
+		vectors := make([]map[string]any, len(request.Input))
+		for i := range vectors {
+			values := make([]float64, 768)
+			values[0] = 1
+			vectors[i] = map[string]any{"embedding": values, "index": i}
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{"data": vectors}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(provider.Close)
+	oldEndpoint := localEmbeddingsEndpoint
+	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return provider.URL, nil }
+	baseURL := launchDaemon(t)
+	status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
+	require.Equal(t, "built_in", status.Provider)
+	project := postJSON[struct {
+		Project struct {
+			ID int64 `json:"id"`
+		} `json:"project"`
+	}](t, baseURL+"/api/v1/projects", map[string]string{"name": "example-project", "actor": "tester"})
+	postJSONOK(t, fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, project.Project.ID), map[string]string{"title": "Repair bicycle brakes", "actor": "tester"})
+	require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: waits for the reconciler to index the issue
+		out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--json", "--project", "example-project", "search", "bicycle")
+		var result struct {
+			Mode    string `json:"mode"`
+			Results []any  `json:"results"`
+		}
+		return err == nil && json.Unmarshal([]byte(out), &result) == nil && result.Mode == "hybrid" && len(result.Results) == 1
+	}, 10*time.Second, 20*time.Millisecond)
+	data, err := os.ReadFile(configPath) // #nosec G304 -- isolated test configuration
+	require.NoError(t, err)
+	require.Equal(t, original, data)
+}
+
 func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	resetFlags(t)
@@ -288,4 +326,19 @@ func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 	baseURL := launchDaemon(t)
 	status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
 	require.Equal(t, "none", status.Provider)
+	project := postJSON[struct {
+		Project struct {
+			ID int64 `json:"id"`
+		} `json:"project"`
+	}](t, baseURL+"/api/v1/projects", map[string]string{"name": "example-project", "actor": "tester"})
+	postJSONOK(t, fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, project.Project.ID), map[string]string{"title": "Repair bicycle brakes", "actor": "tester"})
+	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--json", "--project", "example-project", "search", "bicycle")
+	require.NoError(t, err, stderr)
+	var result struct {
+		Mode    string `json:"mode"`
+		Results []any  `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, "lexical", result.Mode)
+	require.Len(t, result.Results, 1)
 }

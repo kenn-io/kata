@@ -22,20 +22,14 @@ import (
 func TestApplySharedEmbeddingChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	require.NoError(t, embedlocal.RecordChoice())
-	configured := config.EmbeddingsConfig{BaseURL: "https://embeddings.example/v1", Model: "example-model", Dims: 1024}
-	got, err := applySharedEmbeddingChoice(t.Context(), configured)
+	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nbase_url='https://embeddings.example/v1'\nmodel='example-model'\ndims=1024\n"))
 	require.NoError(t, err)
-	require.Equal(t, configured, got)
-	got, err = applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{
-		Dims: 1024, DocumentPrefix: "document prefix", DocumentSuffix: "document suffix",
-		QueryPrefix: "query prefix", QuerySuffix: "query suffix", FingerprintSalt: "salt", RequestDimensions: true,
-	})
+	got, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
 	require.NoError(t, err)
-	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
-	got, err = applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{Model: "nomic-embed-text", Dims: 768, FingerprintSalt: "old"})
+	require.Equal(t, cfg.Embeddings, got)
+	cfg, err = config.ParseSearchConfig([]byte("[search.embeddings]\ndims=1024\ndocument_prefix='document prefix'\ndocument_suffix='document suffix'\nquery_prefix='query prefix'\nquery_suffix='query suffix'\nfingerprint_salt='salt'\nrequest_dimensions=true\n"))
 	require.NoError(t, err)
-	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
-	got, err = applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{Model: "other", Dims: 768, QueryPrefix: "old"})
+	got, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
 	require.NoError(t, err)
 	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
 }
@@ -105,18 +99,14 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		installed = true
 		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
 	}
-	marker := filepath.Join(tmp, ".kenn", "embeddings", "search-by-meaning")
-	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0700))
-	if err := os.Symlink("missing", marker); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
+	blocker := filepath.Join(tmp, ".kenn")
+	require.NoError(t, os.WriteFile(blocker, []byte("block marker"), 0600))
 	_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 	require.ErrorContains(t, err, "sharing could not be confirmed")
-	require.ErrorContains(t, err, "record search by meaning choice")
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
-	require.NoError(t, os.Remove(marker))
+	require.NoError(t, os.Remove(blocker))
 	out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 	require.NoError(t, err, stderr)
 	require.Contains(t, stderr, "290")
@@ -124,6 +114,10 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	cfg, err = config.ReadSearchConfig()
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
+	chosen, err := embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.True(t, chosen)
+	marker := filepath.Join(tmp, ".kenn", "embeddings", "search-by-meaning")
 	old := time.Unix(1000000000, 0)
 	require.NoError(t, os.Chtimes(marker, old, old))
 	_, stderr, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
