@@ -78,7 +78,7 @@ func seedMoveBatchContinuations(store db.Storage, in *api.MoveIssuesRequest, ite
 		if target == "" {
 			target = in.Body.ToProjectUID
 		}
-		moves[id] = moveBatchPrior{targetUID: target, revision: completed.Revision, moved: completed.Result == "moved"}
+		moves[id] = moveBatchPrior{targetUID: target, revision: completed.Revision, moved: completed.Result == "moved" || moves[id].moved}
 		if issue.Revision == completed.Revision {
 			succeeded[id] = api.MoveIssuesResult{Result: completed.Result, Revision: completed.Revision}
 		}

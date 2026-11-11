@@ -264,3 +264,43 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 		})
 	}
 }
+
+func TestMoveIssuesBatch_ThreePageDuplicateKeepsOriginalRevision(t *testing.T) {
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.MoveBatchBudget = time.Nanosecond }) //nolint:kennlint // deadlinetest: Yield after each duplicate.
+	_, target, issue := seedMovePair(t, env)
+	request := api.MoveIssuesRequest{}
+	request.Body.Actor, request.Body.ToProjectUID, request.Body.Comment = "tester", target.UID, "routed"
+	for page := range 3 {
+		if page > 0 {
+			for range 49 {
+				request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{})
+			}
+		}
+		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
+	}
+	for page := range 3 {
+		raw, err := json.Marshal(request.Body)
+		require.NoError(t, err)
+		resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(raw), "")
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		var out api.MoveIssuesResponse
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&out.Body))
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, min((page+1)*50, len(request.Body.Items)), out.Body.NextIndex)
+		require.NotEmpty(t, out.Body.Results)
+		result := out.Body.Results[0]
+		if page == 0 {
+			require.Equal(t, "moved", result.Result)
+		} else {
+			require.Equal(t, "duplicate_item", result.Code, "page %d result %q", page+1, result.Result)
+			require.Equal(t, "unchanged", result.Result)
+		}
+		request.Body.StartIndex = out.Body.NextIndex
+		for _, completed := range out.Body.Results {
+			request.Body.Completed = append(request.Body.Completed, api.MoveIssuesCompleted{Result: completed.Result, Code: completed.Code, UID: completed.UID, Revision: completed.Revision})
+		}
+	}
+	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+}
