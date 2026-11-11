@@ -148,34 +148,40 @@ describe('SearchSettings', () => {
     expect(screen.getByRole('alert').textContent).toContain('kata daemon status')
   })
 
-  test('shows a helper failure after an interrupted read on an ephemeral origin', async () => {
-    vi.useFakeTimers()
-    const pending = status({
-      can_restart: true,
-      job: { state: 'restart', downloaded: 1, total: 1 },
-    })
-    const failed = status({
-      can_restart: true,
-      job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
-    })
-    setGeneratedFetch(
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(Response.json(pending))
-        .mockRejectedValueOnce(new TypeError('disconnected'))
-        .mockResolvedValue(Response.json(failed)),
-    )
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    )
-    renderSettings({ postFetch: vi.fn(async () => new Response(null, { status: 202 })) })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    await vi.advanceTimersByTimeAsync(4000)
-    expect(screen.getByRole('alert').textContent).toContain('Restart failed')
-    expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
-  })
+  test.each([true, false])(
+    'shows a helper failure after an interrupted read, local request=%s',
+    async (localRequest) => {
+      vi.useFakeTimers()
+      const pending = status({
+        can_restart: localRequest,
+        job: { state: localRequest ? 'restart' : 'restarting', downloaded: 1, total: 1 },
+      })
+      const failed = status({
+        can_restart: true,
+        job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
+      })
+      setGeneratedFetch(
+        vi
+          .fn<typeof fetch>()
+          .mockResolvedValueOnce(Response.json(pending))
+          .mockRejectedValueOnce(new TypeError('disconnected'))
+          .mockResolvedValue(Response.json(failed)),
+      )
+      vi.stubGlobal(
+        'confirm',
+        vi.fn(() => true),
+      )
+      renderSettings({ postFetch: vi.fn(async () => new Response(null, { status: 202 })) })
+      await settle()
+      if (localRequest)
+        await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+      expect(screen.getByText('Restarting...', { exact: true })).not.toBeNull()
+      expect(screen.queryByText(/run kata daemon restart/)).toBeNull()
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(screen.getByRole('alert').textContent).toContain('Restart failed')
+      expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
+    },
+  )
 
   test('ends the wait with reopening instructions on an ephemeral origin', async () => {
     vi.useFakeTimers()
@@ -200,14 +206,18 @@ describe('SearchSettings', () => {
     expect(screen.getByRole('alert').textContent).toContain('reopen kata ui')
   })
 
-  test('shows a restart rejection and allows another attempt', async () => {
+  test('observes another client restarting after a rejected request', async () => {
     vi.useFakeTimers()
+    const pending = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
     setGeneratedFetch(
-      vi.fn(async () =>
-        Response.json(
-          status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
-        ),
-      ),
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(pending))
+        .mockResolvedValueOnce(Response.json(pending))
+        .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false }))),
     )
     vi.stubGlobal(
       'confirm',
@@ -221,6 +231,11 @@ describe('SearchSettings', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
     expect(screen.getByRole('alert').textContent).toContain("Couldn't restart")
     expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.getByRole('alert').textContent).toContain("Couldn't restart")
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.getByText('On', { exact: true })).not.toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   test.each([

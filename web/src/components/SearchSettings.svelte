@@ -45,8 +45,8 @@
   let status = $state<LocalEmbeddingsStatus>()
   let loading = $state(true)
   let posting = $state(false)
-  let restartPending = $state(false)
-  let restartDeadline = 0
+  let restartDeadline = $state(0)
+  let restartPending = $derived(restartDeadline > 0)
   // Set when a Turn on request fails; a read showing a job clears it.
   let requestError = $state<string>()
   // Aborted when the page goes away.
@@ -64,10 +64,10 @@
   let row = $derived(turning ? turningOn : base)
   let count = $derived(row?.kind === 'indexing' ? row.total : 0)
   let restartLabels = $derived({
-    off: restartPending ? 'Restarting...' : 'Turning on',
+    off: restartPending || job?.state === 'restarting' ? 'Restarting...' : 'Turning on',
     turnOn: 'Restart daemon',
     downloaded:
-      status?.can_restart && canAdministerDaemon && !remoteHost
+      (status?.can_restart || job?.state === 'restarting') && canAdministerDaemon && !remoteHost
         ? originStable
           ? ''
           : 'After restart, run kata ui to reopen. If this daemon uses a custom home, set KATA_HOME to it first.'
@@ -131,7 +131,12 @@
   // Polling runs only while something is under way.
   function active(current: LocalEmbeddingsStatus | undefined): boolean {
     const state = current?.job?.state
-    return state === 'downloading' || state === 'restart' || !!current?.indexing
+    return (
+      state === 'downloading' ||
+      state === 'restart' ||
+      state === 'restarting' ||
+      !!current?.indexing
+    )
   }
 
   // Adopts every successful read and keeps the last one through failed reads.
@@ -152,16 +157,22 @@
     }
     if (signal.aborted || post !== posts) return
     if (next) {
+      if (
+        next.job?.error ||
+        next.job?.state !== status?.job?.state ||
+        next.provider !== status?.provider ||
+        next.indexing
+      )
+        requestError = undefined
       status = next
-      if (next.job) requestError = undefined
       if (
         restartPending &&
         (next.job?.error || (next.job?.state !== 'restart' && next.job?.state !== 'restarting'))
       )
-        restartPending = false
+        restartDeadline = 0
     }
     if (restartPending && Date.now() >= restartDeadline) {
-      restartPending = false
+      restartDeadline = 0
       requestError = originStable
         ? "Couldn't reconnect. Run kata daemon status, then reopen kata ui."
         : 'Run kata daemon status, then reopen kata ui.'
@@ -191,8 +202,8 @@
       return
     const signal = page.signal
     posting = true
-    restartPending = true
     restartDeadline = Date.now() + 120_000
+    requestError = undefined
     posts++
     clearTimeout(timer)
     try {
@@ -202,17 +213,16 @@
         signal: postSignal,
       })
       if (!response.ok) {
-        restartPending = false
+        restartDeadline = 0
         requestError = "Couldn't restart the daemon. Try again or run kata daemon restart."
-        posting = false
-        return
       }
     } catch {
       if (!signal.aborted && !originStable)
         requestError = "Couldn't confirm restart. Run kata daemon status, then reopen kata ui."
+    } finally {
+      posting = false
+      if (!signal.aborted) poll()
     }
-    posting = false
-    if (!signal.aborted) poll()
   }
 
   async function turnOn(): Promise<void> {

@@ -11,7 +11,7 @@ const off = {
   can_change: true,
 }
 
-test('confirms a restart and reconnects after the daemon returns', async ({ page, kata }) => {
+test('restarts a provider saved after startup and reconnects', async ({ page, kata }) => {
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = []
     request.on('data', (chunk: Buffer) => chunks.push(chunk))
