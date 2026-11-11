@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -19,6 +20,32 @@ import (
 	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+type modernTokenState struct {
+	admission *mcpserver.ToolAdmission
+	sections  mcpserver.LoadedSections
+}
+
+type modernTokenStates struct {
+	tokens sync.Map
+}
+
+func (s *modernTokenStates) get(ctx context.Context, id string, expiration time.Time) *modernTokenState {
+	shared, loaded := s.tokens.LoadOrStore(id, &modernTokenState{admission: mcpserver.NewToolAdmission()})
+	state := shared.(*modernTokenState)
+	if !loaded && !expiration.IsZero() {
+		go func() {
+			timer := time.NewTimer(time.Until(expiration))
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				s.tokens.CompareAndDelete(id, state)
+			case <-ctx.Done():
+			}
+		}()
+	}
+	return state
+}
 
 func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg config.MCPConfig, scope *mcpserver.Scope, endpoint kitdaemon.Endpoint, auth config.AuthConfig) (http.Handler, error) {
 	// Each legacy session or modern request owns its clients and reporter.
@@ -87,11 +114,7 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 	// Modern requests share admission and section selections only within one
 	// verified credential. Legacy sessions retain their own limits and catalog.
 	// No credentials, clients, reporters or servers are cached.
-	type modernTokenState struct {
-		admission *mcpserver.ToolAdmission
-		sections  mcpserver.LoadedSections
-	}
-	var modernTokens sync.Map // verified token ID -> *modernTokenState
+	var modernTokens modernTokenStates
 
 	verify := func(ctx context.Context, bearer string, _ *http.Request) (*sdkauth.TokenInfo, error) {
 		if auth.Token != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(auth.Token)) == 1 {
@@ -123,8 +146,7 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 			var admission *mcpserver.ToolAdmission
 			var loaded *mcpserver.LoadedSections
 			if modern {
-				shared, _ := modernTokens.LoadOrStore(info.UserID, &modernTokenState{admission: mcpserver.NewToolAdmission()})
-				state := shared.(*modernTokenState)
+				state := modernTokens.get(ctx, info.UserID, info.Expiration)
 				admission, loaded = state.admission, &state.sections
 			}
 			server, release, err := newServer(r.Context(), bearer, info.Extra["actor"].(string), modern, admission, loaded)

@@ -335,3 +335,23 @@ func TestDaemonMCPIdentityModernLoadedSections(t *testing.T) {
 		require.NotEqual(t, "kata.create", tool.Name)
 	}
 }
+
+func TestDaemonMCPEventsDisabled(t *testing.T) {
+	for _, identity := range []bool{false, true} {
+		t.Run(strconv.FormatBool(identity), func(t *testing.T) {
+			_, endpoint := mountedEventsFixture(t, identity, false)
+			status, listing := mcpRPC(t, endpoint, "events/list", map[string]any{})
+			require.Equal(t, http.StatusOK, status)
+			require.NotContains(t, listing, "error")
+			result := listing["result"].(map[string]any)
+			require.Equal(t, "complete", result["resultType"])
+			require.Empty(t, result["events"])
+			for _, method := range []string{"events/subscribe", "events/unsubscribe"} {
+				status, wire := mcpRPC(t, endpoint, method, eventsSubscribeParams("example-agent/worker", nil))
+				require.Equal(t, http.StatusOK, status)
+				requireEventError(t, wire, mcpevents.CodeUnavailable)
+				require.Equal(t, "events_not_configured", wire["error"].(map[string]any)["data"].(map[string]any)["reason"])
+			}
+		})
+	}
+}
