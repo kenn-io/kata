@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -153,4 +154,22 @@ func TestDiscoverNeverStartsRemote(t *testing.T) {
 	assert.Nil(t, ranWith())
 	discovered, _ := api.Discovered()
 	assert.True(t, discovered.Remote)
+}
+
+func TestDiscoverStartWithRespectsDisabledAutostart(t *testing.T) {
+	home := isolateKataHome(t)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0o600))
+	namespace, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	kata, ranWith := fakeKataStarts(t, namespace, "unix://"+filepath.Join(home, "unused.sock"))
+	t.Setenv("FAKE_KATA_OUTPUT", "unexpected start")
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err = client.Discover(ctx, client.DiscoverOptions{StartWith: kata})
+
+	require.ErrorIs(t, err, client.ErrDaemonUnavailable)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorContains(t, err, "service manager")
+	assert.Nil(t, ranWith())
 }

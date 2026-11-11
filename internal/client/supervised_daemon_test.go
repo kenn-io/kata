@@ -139,7 +139,9 @@ func TestManagedExternallyProfileDoesNotAutostart(t *testing.T) {
 func TestManagedExternallyStaleDoesNotStop(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
-	stageStorageSchema(t, filepath.Join(home, "kata.db"), db.CurrentSchemaVersion())
+	previous := storageInspector
+	UseStorageInspector(nil)
+	t.Cleanup(func() { UseStorageInspector(previous) })
 	_, addr := startMockDaemonPing(t, map[string]any{"ok": true, "service": "kata", "version": "v0.1.0", "pid": os.Getpid()})
 	require.NoError(t, writeRuntimeRecord(t, home, addr))
 	state := patchEnsureHooks(t, "v0.2.0", "http://spawned")
@@ -185,4 +187,19 @@ func TestManagedExternallyProfileWaitVerifiesIdentity(t *testing.T) {
 	}
 	_, err = ensureLocalProfile(t.Context(), selection)
 	require.ErrorIs(t, err, ErrProfileIdentityMismatch)
+}
+
+func TestManagedExternallyProfileWaitsDuringSchemaUpgrade(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		profile, root := localProfileFixture(t)
+		require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n"), 0600))
+		stageStorageSchema(t, filepath.Join(profile.Home, "kata.db"), db.CurrentSchemaVersion()-1)
+		selection, err := InspectSelection(t.Context(), root, "")
+		require.NoError(t, err)
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		_, err = ensureLocalProfile(ctx, selection)
+		require.ErrorIs(t, err, ErrDaemonManagedExternally)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
 }
