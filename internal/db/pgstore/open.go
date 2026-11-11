@@ -19,6 +19,9 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
+// statementTimeout bounds each ordinary statement on a store connection.
+var statementTimeout = "30s"
+
 // Default connection pool sizing. Conservative for v1 single-daemon
 // deployments. Future phases may expose these through DSN params or
 // [storage] config.
@@ -104,7 +107,7 @@ func openInternal(
 	// these GUCs are guaranteed on every pooled connection — not just the
 	// one that handled an out-of-band SET ExecContext.
 	connConfig.RuntimeParams["application_name"] = "kata"
-	connConfig.RuntimeParams["statement_timeout"] = "30s"
+	connConfig.RuntimeParams["statement_timeout"] = statementTimeout
 	connConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "60s"
 	connConfig.RuntimeParams["search_path"] = quoteIdentifier(pgConfig.Schema)
 	if readOnly {
@@ -307,6 +310,13 @@ func (s *Store) bootstrap(ctx context.Context) (bool, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Migrations commit as one transaction, so canceling one long statement
+	// rolls back every earlier migration and the next start fails the same
+	// way. Lift the per-statement limit for this transaction, including the
+	// wait for another opener's migrations. ctx still ends the upgrade.
+	if _, err := tx.ExecContext(ctx, `SET LOCAL statement_timeout = 0`); err != nil {
+		return false, fmt.Errorf("lift statement limit for schema migrations: %w", err)
+	}
 	if err := acquireSchemaMigrationLock(ctx, tx); err != nil {
 		return false, fmt.Errorf("lock schema migrations: %w", err)
 	}
