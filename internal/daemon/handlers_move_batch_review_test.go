@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -10,6 +11,39 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
+
+type batchTargetFailureStore struct {
+	db.Storage
+	target string
+	failed bool
+}
+
+func (s *batchTargetFailureStore) ProjectByUID(ctx context.Context, uid string) (db.Project, error) {
+	if uid == s.target && !s.failed {
+		s.failed = true
+		return db.Project{}, errors.New("target temporarily unavailable")
+	}
+	return s.Storage.ProjectByUID(ctx, uid)
+}
+
+func TestMoveIssuesBatch_TargetFailureIsPerItem(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	source, first := createClaimGateHelperIssue(t, store)
+	second, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "independent", Author: "agent"})
+	require.NoError(t, err)
+	target, err := store.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID}, {Ref: second.UID}}
+	out, err := moveIssuesHandler(ServerConfig{DB: &batchTargetFailureStore{Storage: store, target: target.UID}})(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, "refused", out.Body.Results[0].Result)
+	require.Equal(t, "moved", out.Body.Results[1].Result)
+	got, err := store.IssueByID(t.Context(), second.ID)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, got.ProjectID)
+}
 
 // Each selected issue keeps its own revision precondition.
 func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {

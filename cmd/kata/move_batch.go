@@ -104,21 +104,20 @@ func readMoveBatchLine(reader *bufio.Reader) (string, bool, error) {
 	}
 }
 
-func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string, targetErrors map[string]error) (string, error) {
+func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string) (string, error) {
 	if item.ParseError != "" {
 		return "", &cliError{Message: item.ParseError, Code: "validation", Kind: kindUsage, ExitCode: ExitUsage}
 	}
 	uid := targets[item.TargetProject]
-	if uid == "" && targetErrors[item.TargetProject] == nil {
+	if uid == "" {
 		project, err := resolveProjectSelector(a, item.TargetProject)
 		if err != nil {
-			targetErrors[item.TargetProject] = err
-		} else {
-			uid = project.UID
-			targets[item.TargetProject] = uid
+			return "", err
 		}
+		uid = project.UID
+		targets[item.TargetProject] = uid
 	}
-	return uid, targetErrors[item.TargetProject]
+	return uid, nil
 }
 
 func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel moveSelector, opts moveBatchOptions) error {
@@ -335,11 +334,10 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		}
 	}
 	targets := map[string]string{}
-	targetErrors := map[string]error{}
 	indexes := make([]int, 0, len(items))
 	var results []api.MoveIssuesResult
 	for i, item := range items {
-		uid, err := moveBatchTarget(a, item, targets, targetErrors)
+		uid, err := moveBatchTarget(a, item, targets)
 		if err != nil {
 			r := api.MoveIssuesResult{Index: i, Ref: item.Ref, Result: "refused", Message: err.Error()}
 			if ce, ok := errors.AsType[*cliError](err); ok {

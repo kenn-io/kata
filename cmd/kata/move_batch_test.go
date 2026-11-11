@@ -186,6 +186,47 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 	}
 }
 
+func TestMoveBatchCLI_TargetFailureIsPerItem(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t, testenv.WithAuthToken("synthetic-target-token"))
+	dir, _ := initLocalBoundWorkspace(t, env, "kata")
+	src, err := env.DB.CreateProject(t.Context(), "source-project")
+	require.NoError(t, err)
+	dst, err := env.DB.CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	first, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "first", Author: "tester"})
+	require.NoError(t, err)
+	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "independent", Author: "tester"})
+	require.NoError(t, err)
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	failed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects" && !failed {
+			failed = true
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Host = origin.Host
+		proxy.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	input := first.UID + "\t" + dst.Name + "\n" + second.UID + "\t" + dst.Name + "\n"
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
+	require.Error(t, err)
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 2, "command error: %v", err)
+	require.Equal(t, "refused", reply.Results[0].Result)
+	require.Equal(t, "moved", reply.Results[1].Result)
+	got, err := env.DB.IssueByID(t.Context(), second.ID)
+	require.NoError(t, err)
+	require.Equal(t, dst.ID, got.ProjectID)
+}
+
 func TestMoveBatchCLI_SelectorLabel(t *testing.T) {
 	env, dir, src, dst, first := setupMoveCLIProjects(t)
 	_, err := env.DB.AddLabel(t.Context(), first.ID, "routing", "tester")

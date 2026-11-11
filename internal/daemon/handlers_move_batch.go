@@ -135,7 +135,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		items := make([]moveBatchItem, n)
 		results := make([]api.MoveIssuesResult, n)
 		targets := map[string]db.Project{}
-		targetErrors := map[string]error{}
 		authorize := func(uids []string) error { _, err := authorizeHostProjectScope(ctx, nil, uids, false); return err }
 		for j := in.Body.StartIndex; j < n; j++ {
 			input := in.Body.Items[j]
@@ -151,7 +150,8 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				uid = in.Body.ToProjectUID
 			}
 			target, known := targets[uid]
-			if !known && targetErrors[uid] == nil {
+			if !known {
+				var err error
 				if uid == "" {
 					err = api.NewError(400, "project_not_found", "target project is required", "", nil)
 				} else {
@@ -161,14 +161,10 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					err = authorize([]string{uid})
 				}
 				if err != nil {
-					targetErrors[uid] = err
-				} else {
-					targets[uid] = target
+					moveBatchRefusal(r, err)
+					continue
 				}
-			}
-			if err := targetErrors[uid]; err != nil {
-				moveBatchRefusal(r, err)
-				continue
+				targets[uid] = target
 			}
 			issue, source, err := resolveMoveBatchIssue(ctx, cfg.DB, in.Body.DefaultProjectID, input.Ref)
 			if err != nil {
