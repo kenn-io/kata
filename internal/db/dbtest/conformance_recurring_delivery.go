@@ -292,6 +292,25 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 			}
 		}
 		require.True(t, found)
+		for _, version := range []string{"1e0", "1.0"} {
+			occurrence["version"] = jsontext.Value(version)
+			occurrence["scheduled_at"] = jsontext.Value(`"2099-01-01T00:00:00Z"`)
+			metadata["cron.occurrence"], err = json.Marshal(occurrence)
+			require.NoError(t, err)
+			raw, err = json.Marshal(metadata)
+			require.NoError(t, err)
+			deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, string(raw), older.ID)
+			require.Equal(t, newest, deliveryRead(t, s, p, j, now).LastChild.UID)
+		}
+		occurrence["version"] = jsontext.Value("9223372036854775808")
+		metadata["cron.occurrence"], err = json.Marshal(occurrence)
+		require.NoError(t, err)
+		raw, err = json.Marshal(metadata)
+		require.NoError(t, err)
+		deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, string(raw), older.ID)
+		d = deliveryRead(t, s, p, j, now)
+		require.Equal(t, "error", d.State)
+		require.Nil(t, d.LastChild)
 		records, err := CollectImportRecords(ctx, s, db.ExportFilter{IncludeDeleted: true})
 		require.NoError(t, err)
 		restored := b.Open(t)

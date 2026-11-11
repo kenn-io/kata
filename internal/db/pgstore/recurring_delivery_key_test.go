@@ -36,13 +36,16 @@ func TestRecurringDeliveryKeyMatchesDecoder(t *testing.T) {
 		`{"version":"2","scheduled_at":"2025-01-01T00:00:00Z"}`,
 		`{"version":2,"scheduled_at":false}`,
 		`{"version":9999999999999999999999999}`,
+		`{"version":9223372036854775808}`,
+		`{"version":1e0,"scheduled_at":"2025-01-01T00:00:00Z"}`,
+		`{"version":1.0,"scheduled_at":"2025-01-01T00:00:00Z"}`,
 		`{"version":0}`,
 		`{"scheduled_at":"2025-01-01T00:00:00Z"}`,
 		`{"version":1,"scheduled_at":"2025-01-01T24:00:00Z"}`,
 		`{"version":1,"scheduled_at":"2025-01-01T23:59:60Z"}`,
 	} {
 		var got sql.NullString
-		require.NoError(t, store.QueryRowContext(ctx, `SELECT kata_occurrence_key($1::jsonb)`, occurrence).Scan(&got))
+		require.NoError(t, store.QueryRowContext(ctx, `SELECT kata_occurrence_key($1::json)`, occurrence).Scan(&got))
 		require.Equal(t, db.RecurringOccurrenceKey(occurrence), got.String, occurrence)
 	}
 }
@@ -71,7 +74,7 @@ func TestRecurringDeliveryMigrationPostgres(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, admin.Close()) })
-	_, err = admin.ExecContext(ctx, `DROP INDEX recurring_delivery_upgrade.idx_issues_recurring_delivery; DROP FUNCTION recurring_delivery_upgrade.kata_occurrence_key(jsonb); UPDATE recurring_delivery_upgrade.meta SET value='50' WHERE key='schema_version'`)
+	_, err = admin.ExecContext(ctx, `DROP INDEX recurring_delivery_upgrade.idx_issues_recurring_delivery; DROP FUNCTION recurring_delivery_upgrade.kata_occurrence_key(json); UPDATE recurring_delivery_upgrade.meta SET value='50' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)

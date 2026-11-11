@@ -3,9 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"go.kenn.io/kata/internal/cron"
@@ -53,12 +55,13 @@ var errRecurringOccurrenceVersion = errors.New("unsupported recurring occurrence
 // Empty keys are not evidence; future versions sort before every supported instant.
 func RecurringOccurrenceKey(occurrence string) string {
 	var header struct {
-		Version int `json:"version"`
+		Version jsontext.Value `json:"version"`
 	}
 	if err := json.Unmarshal([]byte(occurrence), &header); err != nil {
 		return ""
 	}
-	if header.Version > 1 {
+	version, ok := new(big.Int).SetString(string(header.Version), 10)
+	if ok && version.Cmp(big.NewInt(1)) > 0 {
 		return "~"
 	}
 	var value recurringOccurrence

@@ -23,7 +23,7 @@ func dropMCPEventSubscriptionsSchema(ctx context.Context, t *testing.T, admin *s
 
 func dropRecurringDeliverySchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %[1]s.idx_issues_recurring_delivery; DROP FUNCTION IF EXISTS %[1]s.kata_occurrence_key(jsonb)`, schema)) // #nosec G201 -- schema is a fixed test identifier.
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %[1]s.idx_issues_recurring_delivery; DROP FUNCTION IF EXISTS %[1]s.kata_occurrence_key(json)`, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
 

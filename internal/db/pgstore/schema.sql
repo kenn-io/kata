@@ -144,7 +144,7 @@ CREATE TABLE issues (
   CHECK (short_id !~ '[^0-9abcdefghjkmnpqrstvwxyz]'),
   CHECK (short_id = lower(substr(uid, 27 - length(short_id), length(short_id))))
 );
-CREATE FUNCTION kata_occurrence_key(occurrence jsonb) RETURNS text
+CREATE FUNCTION kata_occurrence_key(occurrence json) RETURNS text
 LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $$
 DECLARE
   version_text text;
@@ -155,13 +155,13 @@ DECLARE
   seconds bigint;
   fraction text;
 BEGIN
-  IF jsonb_typeof(occurrence) IS DISTINCT FROM 'object' OR jsonb_typeof(occurrence->'version') IS DISTINCT FROM 'number' THEN
+  IF json_typeof(occurrence) IS DISTINCT FROM 'object' OR json_typeof(occurrence->'version') IS DISTINCT FROM 'number' THEN
     RETURN NULL;
   END IF;
   version_text := occurrence->>'version';
   IF version_text !~ '^-?(0|[1-9][0-9]*)$' THEN RETURN NULL; END IF;
-  IF version_text::bigint > 1 THEN RETURN '~'; END IF;
-  IF version_text::bigint <> 1 OR jsonb_typeof(occurrence->'scheduled_at') IS DISTINCT FROM 'string' THEN RETURN NULL; END IF;
+  IF version_text::numeric > 1 THEN RETURN '~'; END IF;
+  IF version_text::numeric <> 1 OR json_typeof(occurrence->'scheduled_at') IS DISTINCT FROM 'string' THEN RETURN NULL; END IF;
   stamp := occurrence->>'scheduled_at';
   parts := regexp_match(stamp, '^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:[.]([0-9]+))?(Z|[+-][0-9]{2}:[0-9]{2})$');
   IF parts IS NULL OR parts[4]::integer > 23 OR parts[5]::integer > 59 OR parts[6]::integer > 59 THEN RETURN NULL; END IF;
@@ -182,9 +182,9 @@ $$;
 
 CREATE INDEX idx_issues_recurring_delivery ON issues (
   ((metadata::jsonb -> 'cron.occurrence' ->> 'job_uid') COLLATE "C"),
-  (kata_occurrence_key(metadata::jsonb -> 'cron.occurrence') COLLATE "C") DESC,
+  (kata_occurrence_key(metadata::json -> 'cron.occurrence') COLLATE "C") DESC,
   uid COLLATE "C" DESC
-) WHERE deleted_at IS NULL AND kata_occurrence_key(metadata::jsonb -> 'cron.occurrence') IS NOT NULL;
+) WHERE deleted_at IS NULL AND kata_occurrence_key(metadata::json -> 'cron.occurrence') IS NOT NULL;
 CREATE INDEX idx_issues_uid_prefix ON issues(uid text_pattern_ops);
 CREATE INDEX idx_issues_project_uid_prefix ON issues(project_id, uid text_pattern_ops);
 CREATE INDEX idx_issues_project_status_updated

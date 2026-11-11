@@ -13,12 +13,12 @@ import (
 const (
 	canonicalColumnFingerprint     = "2c573a26533e056618e458d7addc7836bf7d95e98b0ad258b6b7c2a50725186d"
 	canonicalConstraintFingerprint = "21a6429d8b06093928339598c69f71d48d65330c78e3274cbe8bcabc9fd5ed14"
-	canonicalIndexFingerprint      = "87011d16a9240107f32c12d775c67bb47dfe0dac7c044b570b08fe713caba4c8"
+	canonicalIndexFingerprint      = "4379fc661d62af8315731fd0bb84bf7d826f3ed2f24e91b1dcfb1c7f2a5c2684"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
 	canonicalTriggerFingerprint    = "d027a602b31936d09dee01e5182c092c9245faf34edb2c0445ac36795a4a3b46"
-	canonicalFunctionFingerprint   = "17dc83b7de442487814547c15285b0ac531e6c7ed5714b9e928b5064718c707d"
+	canonicalFunctionFingerprint   = "7d76d18f647e87867a1ab6098e718fa754b061626ec10ac4e6fbfa216e128547"
 	canonicalTextSearchFingerprint = "1206eb613d5e4cf9c00c447998c337ece326819f8b3261668f7a8c685571db06"
 )
 
@@ -108,7 +108,7 @@ trg_projects_uid_immutable trg_issues_uid_immutable trg_issue_sync_binding_immut
 issues_search_after_issue_insert issues_search_after_issue_update`)
 
 var canonicalFunctions = strings.Fields(`
-kata_occurrence_key(jsonb)
+kata_occurrence_key(json)
 enforce_links_uid_consistency()
 enforce_uid_immutable()
 rewrite_project_uid_for_adoption(bigint,text)
