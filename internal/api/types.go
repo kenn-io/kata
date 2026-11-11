@@ -1861,7 +1861,7 @@ type MoveIssuesBody struct {
 	Comment          string           `json:"comment,omitempty"`
 	DefaultProjectID int64            `json:"default_project_id,omitempty"`
 	ToProjectUID     string           `json:"to_project_uid,omitempty"`
-	Items            []MoveIssuesItem `json:"items" minItems:"1"`
+	Items            []MoveIssuesItem `json:"items" minItems:"1" maxItems:"50"`
 }
 
 // MoveIssuesItem selects an issue and its destination project.
