@@ -44,6 +44,11 @@ type ImportOptions struct {
 	// and inserts it without clearing existing domain state.
 	MergeProject bool
 
+	// LinkExistingIssues lets a MergeProject replay create a link between an
+	// imported issue and an issue of another project that is already in the
+	// target. Unset, the replay skips every such link.
+	LinkExistingIssues bool
+
 	// PreserveExternalRootBindingsEnabled keeps imported active external-root
 	// bindings in their source enabled/paused state. This is only for trusted
 	// local schema cutover; normal restore requires local reconfirmation.

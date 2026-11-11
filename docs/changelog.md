@@ -43,6 +43,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
   replacement project. See
   [embedding](development/embedding.md#host-managed-projects).
 
+- Keep links between projects when you move them one at a time. Pass
+  `--link-existing` to `kata import --merge` to create a snapshot's links to
+  issues of other projects that are already in the target. With the flag on
+  each merge, a link appears once both projects are merged, in either order,
+  and adopting the projects into a hub then carries it there. Without the flag
+  a merge still skips these links, as before. See
+  [links between merged projects](operations/backup-restore.md#links-between-merged-projects).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 

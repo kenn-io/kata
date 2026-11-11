@@ -60,7 +60,7 @@ func (s *Store) importReplayTx(
 	var preservedCreatedAt string
 	var err error
 	if opts.MergeProject {
-		records, err = s.prepareProjectMergeTx(ctx, tx, records)
+		records, err = s.prepareProjectMergeTx(ctx, tx, records, opts.LinkExistingIssues)
 		if err != nil {
 			return err
 		}
@@ -95,6 +95,10 @@ func (s *Store) importReplayTx(
 		fmt.Fprintf(os.Stderr,
 			"note: skipped %d link record(s) whose peer issue is not in this envelope or database\n",
 			missingPeers)
+		if opts.MergeProject {
+			fmt.Fprintln(os.Stderr,
+				"note: a merge creates links to issues of other projects only with --link-existing, and only when that issue is already in the target")
+		}
 	}
 	if duplicates > 0 {
 		fmt.Fprintf(os.Stderr,

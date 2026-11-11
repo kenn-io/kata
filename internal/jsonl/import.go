@@ -47,6 +47,10 @@ type ImportOptions struct {
 	// without replacing unrelated state.
 	MergeProject bool
 
+	// LinkExistingIssues lets a MergeProject import create links between the
+	// imported project and issues of projects already in the target.
+	LinkExistingIssues bool
+
 	// PreserveExternalRootBindingsEnabled is for trusted local schema cutover.
 	// Normal restores pause active bindings until an operator reconfirms them.
 	PreserveExternalRootBindingsEnabled bool
@@ -72,6 +76,9 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 	}
 	if opts.MergeProject && (opts.RequireFreshTarget || opts.NewInstance) {
 		return fmt.Errorf("project merge cannot use fresh-target or new-instance restore options")
+	}
+	if opts.LinkExistingIssues && !opts.MergeProject {
+		return fmt.Errorf("linking to existing issues applies only to a project merge")
 	}
 	envs, err := NewDecoder(r).ReadAll(ctx)
 	if err != nil {
@@ -145,6 +152,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		PreserveIssueSyncBindingEnabled:     opts.PreserveIssueSyncBindingEnabled,
 		PreserveExternalRootBindingsEnabled: opts.PreserveExternalRootBindingsEnabled,
 		MergeProject:                        opts.MergeProject,
+		LinkExistingIssues:                  opts.LinkExistingIssues,
 	})
 }
 

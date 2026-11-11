@@ -277,6 +277,32 @@ func TestPrepareProjectMergeRecordsDoesNotResolveExternalLinkPeer(t *testing.T) 
 	assert.False(t, lookupCalled)
 }
 
+func TestPrepareProjectMergeRecordsResolvesExternalLinkPeerWhenAllowed(t *testing.T) {
+	link := func(toUID string) []ImportRecord {
+		return []ImportRecord{
+			&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+			&IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2},
+			&LinkExport{
+				ID: 3, FromIssueID: 5, FromIssueUID: "01H00000000000000000000001",
+				ToIssueID: 9, ToIssueUID: toUID, Type: "blocks",
+			},
+		}
+	}
+	offsets := ProjectMergeOffsets{TargetProjectID: 4, Issue: 10, Link: 20, LinkExistingIssues: true}
+	lookup := func(uid string) (int64, bool, error) {
+		return 77, uid == "01H00000000000000000000002", nil
+	}
+
+	prepared, err := PrepareProjectMergeRecords(link("01H00000000000000000000002"), offsets, lookup)
+	require.NoError(t, err)
+	assert.Equal(t, int64(15), recordPayloadAs[LinkExport](t, prepared[2]).FromIssueID)
+	assert.Equal(t, int64(77), recordPayloadAs[LinkExport](t, prepared[2]).ToIssueID, "the peer already in the target resolves by UID")
+
+	prepared, err = PrepareProjectMergeRecords(link("01H00000000000000000000003"), offsets, lookup)
+	require.NoError(t, err)
+	assert.Zero(t, recordPayloadAs[LinkExport](t, prepared[2]).ToIssueID, "a peer that has not arrived leaves the link to be skipped")
+}
+
 func TestPrepareProjectMergeRecordsClearsUnresolvedEventRelatedIssueID(t *testing.T) {
 	relatedIssueID := int64(9)
 	relatedIssueUID := "01H00000000000000000000002"

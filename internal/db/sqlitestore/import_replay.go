@@ -61,6 +61,7 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		if err != nil {
 			return err
 		}
+		offsets.LinkExistingIssues = opts.LinkExistingIssues
 		recs, err = db.PrepareProjectMergeRecords(recs, offsets,
 			func(uid string) (int64, bool, error) {
 				var id int64
@@ -144,6 +145,10 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		fmt.Fprintf(os.Stderr,
 			"note: skipped %d link record(s) whose peer issue is not in this envelope or database\n",
 			skippedMissingPeer)
+		if opts.MergeProject {
+			fmt.Fprintln(os.Stderr,
+				"note: a merge creates links to issues of other projects only with --link-existing, and only when that issue is already in the target")
+		}
 	}
 	if skippedDup > 0 {
 		fmt.Fprintf(os.Stderr,
