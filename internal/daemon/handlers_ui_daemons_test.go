@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -544,5 +545,90 @@ func TestLocalProfileGatewayOmitsAndRejectsHomeEntries(t *testing.T) {
 				assert.Equal(t, http.StatusOK, response.StatusCode)
 			})
 		}
+	}
+}
+
+func TestWebDaemonGatewayOmitsUnixTargetsAndKeepsSupportedDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name, socketName, visibleName, target string
+	}{
+		{"unix only", "socket", "local", "fallback"},
+		{"fallback ID collision", "local", "local-local", "fallback"},
+		{"mixed HTTP", "socket", "remote", "http"},
+		{"mixed local", "socket", "source", "local"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := openTestDB(t)
+			entries := []config.CatalogDaemonConfig{{
+				Name: tc.socketName, URL: "unix://" + t.TempDir() + "/api.sock",
+				TokenEnv: "UNSELECTED_UNIX_WEB_TOKEN",
+			}}
+			t.Setenv("UNSELECTED_UNIX_WEB_TOKEN", "")
+			switch tc.target {
+			case "http":
+				target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					switch r.URL.Path {
+					case "/api/v1/instance":
+						_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
+					case "/api/v1/ping":
+						_, _ = io.WriteString(w, `{"ok":true,"service":"kata"}`)
+					default:
+						http.NotFound(w, r)
+					}
+				}))
+				t.Cleanup(target.Close)
+				entries = append(entries, config.CatalogDaemonConfig{Name: tc.visibleName, URL: target.URL})
+			case "local":
+				entries = append(entries, config.CatalogDaemonConfig{Name: tc.visibleName, Local: true})
+			}
+			server := startTestServer(t, daemon.ServerConfig{
+				DB: d.db, StartedAt: d.now, ActiveWebDaemon: tc.socketName, WebDaemons: entries,
+			})
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+			require.NoError(t, err)
+			response, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			require.NoError(t, response.Body.Close())
+			require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+			var roster struct {
+				Daemons []struct {
+					ID      string `json:"id"`
+					Local   bool   `json:"local"`
+					Default bool   `json:"default"`
+				} `json:"daemons"`
+			}
+			require.NoError(t, json.Unmarshal(body, &roster))
+			require.Len(t, roster.Daemons, 1)
+			assert.Equal(t, tc.visibleName, roster.Daemons[0].ID)
+			assert.Equal(t, tc.target != "http", roster.Daemons[0].Local)
+			assert.True(t, roster.Daemons[0].Default)
+
+			fetchPing := func(ctx context.Context, target string) (int, []byte) {
+				t.Helper()
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+				require.NoError(t, err)
+				if target != "" {
+					req.Header.Set("X-Kata-Web-Daemon", target)
+				}
+				response, err := http.DefaultClient.Do(req)
+				require.NoError(t, err)
+				body, err := io.ReadAll(response.Body)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				return response.StatusCode, body
+			}
+			status, body := fetchPing(t.Context(), "")
+			require.Equal(t, http.StatusOK, status, string(body))
+			var ping struct {
+				OK bool `json:"ok"`
+			}
+			require.NoError(t, json.Unmarshal(body, &ping))
+			assert.True(t, ping.OK)
+			status, body = fetchPing(t.Context(), tc.socketName)
+			assertAPIError(t, status, body, http.StatusBadRequest, "unknown_daemon")
+		})
 	}
 }

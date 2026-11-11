@@ -35,6 +35,8 @@ Kata closes its descriptor and removes its runtime record, but leaves the
 manager's socket intact. The browser listener is still a separate Kata-owned
 loopback TCP listener by default; adopting a Unix API socket does not eliminate
 that listener.
+The browser daemon switcher omits configured Unix API targets. If no supported
+catalog targets remain, it offers the serving daemon as the local choice.
 
 ## Configure a systemd user service
 
