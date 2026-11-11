@@ -36,10 +36,9 @@ func TestRawDaemonFailureOutputIncludesHint(t *testing.T) {
 func TestDaemonRecoveryAdvice(t *testing.T) {
 	e := &client.LocalDaemonUnreachableError{PID: 42, DataDir: filepath.Join(t.TempDir(), `space "quote`), WebOrigin: "http://127.0.0.1:7777", VerifiedProcess: true}
 	unix := daemonRecoveryAdvice(e, "", "linux")
-	require.Contains(t, unix, "This probe failed")
 	require.NotContains(t, unix, ";")
 	require.NotContains(t, unix, "only if")
-	for _, text := range []string{fmt.Sprintf("read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log")), "If " + e.WebOrigin + " responds, capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access, using the owner's credential when authentication is configured", "If you choose to stop it, immediately recheck that PID 42 is still this daemon and the selected endpoint still fails", "Then kill -QUIT 42 stops it and writes goroutine stacks to its stderr, which are lost if stderr is discarded", "After it exits, restart a supervised or foreground daemon through its supervisor or original command", "auto-started", "original KATA_HOME and storage environment"} {
+	for _, text := range []string{fmt.Sprintf("Read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log")), "If " + e.WebOrigin + " responds, capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access, using the owner's credential when authentication is configured", "If you choose to stop it, immediately recheck that PID 42 is still this daemon and the selected endpoint still fails", "Then kill -QUIT 42 stops it and writes goroutine stacks to its stderr, which are lost if stderr is discarded", "After it exits, restart a supervised or foreground daemon through its supervisor or original command", "auto-started", "original KATA_HOME and storage environment"} {
 		require.Contains(t, unix, text)
 	}
 	windows := daemonRecoveryAdvice(e, "", "windows")

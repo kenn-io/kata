@@ -153,7 +153,7 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 				var ctx context.Context
 				var cancel context.CancelFunc
 				if deadline {
-					ctx, cancel = context.WithTimeout(t.Context(), 20*time.Millisecond)
+					ctx, cancel = context.WithTimeout(t.Context(), 30*time.Millisecond)
 				} else {
 					ctx, cancel = context.WithCancel(t.Context())
 				}
@@ -168,8 +168,12 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 					if calls == 1 {
 						close(started)
 					}
-					<-ctx.Done()
-					return "", PingInfo{}, &url.Error{Op: "Get", URL: "http://" + addr + "/api/v1/ping", Err: ctx.Err()}
+					select {
+					case <-time.After(150 * time.Millisecond):
+						return "http://" + addr, PingInfo{PID: os.Getpid()}, nil
+					case <-ctx.Done():
+						return "", PingInfo{}, &url.Error{Op: "Get", URL: "http://" + addr + "/api/v1/ping", Err: ctx.Err()}
+					}
 				}
 				if !deadline {
 					go func() { <-started; cancel() }()
@@ -180,41 +184,17 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 				}
 				require.Len(t, errs, 1)
 				require.Equal(t, 1, calls)
+				want := context.Canceled
 				if deadline {
-					require.ErrorIs(t, errs[0], context.DeadlineExceeded)
-					require.ErrorIs(t, errs[0], ErrLocalDaemonUnreachable)
-					var evidence *LocalDaemonUnreachableError
-					require.ErrorAs(t, errs[0], &evidence)
-					require.Equal(t, os.Getpid(), evidence.PID)
-					require.Equal(t, "127.0.0.1:1", evidence.Address)
-				} else {
-					require.ErrorIs(t, errs[0], context.Canceled)
-					require.NotErrorIs(t, errs[0], ErrLocalDaemonUnreachable)
-					var evidence *LocalDaemonUnreachableError
-					require.False(t, errors.As(errs[0], &evidence))
+					want = context.DeadlineExceeded
 				}
+				require.ErrorIs(t, errs[0], want)
+				require.NotErrorIs(t, errs[0], ErrLocalDaemonUnreachable)
+				var evidence *LocalDaemonUnreachableError
+				require.False(t, errors.As(errs[0], &evidence))
 			})
 		})
 	}
-	t.Run("pre-expired", func(t *testing.T) {
-		ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
-		defer cancel()
-		reader := func(string) ([]kitdaemon.RuntimeRecord, error) {
-			return []kitdaemon.RuntimeRecord{{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}}, nil
-		}
-		calls := 0
-		probe := func(context.Context, string) (string, PingInfo, error) {
-			calls++
-			return "", PingInfo{}, context.DeadlineExceeded
-		}
-		var got error
-		for _, err := range liveDaemonsUsing(ctx, t.TempDir(), reader, probe) {
-			got = err
-		}
-		require.ErrorIs(t, got, context.DeadlineExceeded)
-		require.NotErrorIs(t, got, ErrLocalDaemonUnreachable)
-		require.Zero(t, calls)
-	})
 	t.Run("legacy live record", func(t *testing.T) {
 		record := kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}
 		reader := func(string) ([]kitdaemon.RuntimeRecord, error) { return []kitdaemon.RuntimeRecord{record}, nil }

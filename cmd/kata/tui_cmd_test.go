@@ -220,7 +220,7 @@ func TestTUI_MouseFlagOverridesConfigToml(t *testing.T) {
 
 // A failed TUI boot must give recovery advice for the selected local profile.
 func TestTUI_UnreachableBootUsesSelectedProfile(t *testing.T) {
-	for _, route := range []string{"explicit", "workspace", "active", "inspection failure"} {
+	for _, route := range []string{"explicit", "workspace", "active", "routing changed", "inspection failure"} {
 		t.Run(route, func(t *testing.T) {
 			home, workspace, uid, _ := stoppedProfileCLI(t)
 			if route == "active" {
@@ -230,11 +230,16 @@ func TestTUI_UnreachableBootUsesSelectedProfile(t *testing.T) {
 				catalog := fmt.Sprintf("active_daemon = \"work\"\n[[daemon]]\nname = \"work\"\nlocal = true\nhome = %q\ninstance_uid = %q\n", home, uid)
 				require.NoError(t, os.WriteFile(filepath.Join(personal, "config.toml"), []byte(catalog), 0600))
 			}
+			if route == "inspection failure" {
+				require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte("invalid = ["), 0600))
+			}
 			bootErr := &client.LocalDaemonUnreachableError{PID: 42, Address: "127.0.0.1:1", DataDir: t.TempDir()}
 			old := runTUI
-			runTUI = func(_ context.Context, _ tui.Options) error {
-				if route == "inspection failure" {
-					require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte("invalid = ["), 0600))
+			var receivedName string
+			runTUI = func(_ context.Context, opts tui.Options) error {
+				receivedName = opts.DaemonName
+				if route == "routing changed" {
+					require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte("[server]\ndaemon = \"other\"\n"), 0600))
 				}
 				return bootErr
 			}
@@ -246,11 +251,15 @@ func TestTUI_UnreachableBootUsesSelectedProfile(t *testing.T) {
 			args = append(args, "tui")
 			_, _, err := executeRootCapture(t, t.Context(), args...)
 			if route == "inspection failure" {
+				require.Empty(t, receivedName)
 				require.ErrorIs(t, err, bootErr)
+				require.Same(t, bootErr, err)
 				return
 			}
+			require.Equal(t, "work", receivedName)
 			ce := requireCLIError(t, err, ExitDaemonUnavail)
 			require.Contains(t, ce.Hint, "--daemon=work")
+			require.NotContains(t, ce.Hint, "other")
 			require.Contains(t, ce.Hint, "daemon")
 			require.Contains(t, ce.Hint, "recover")
 		})
