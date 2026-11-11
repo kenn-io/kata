@@ -45,20 +45,52 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	}
 }
 
-func TestLocalEmbeddingsRestartOnce(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	t.Setenv("HOME", t.TempDir())
-	var calls int
-	setup := &localEmbeddingsSetup{
-		job:     &api.LocalEmbeddingsJob{State: "restart"},
-		restart: func() error { calls++; return nil },
-	}
-	status, err := setup.Status(t.Context())
+func TestLocalEmbeddingsRestart(t *testing.T) {
+	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nbase_url = \"https://embeddings.example/v1\"\nmodel = \"model\"\ndims = 768\n"))
 	require.NoError(t, err)
-	require.True(t, status.CanRestart)
-	require.NoError(t, setup.Restart(t.Context()))
-	require.NoError(t, setup.Restart(t.Context()))
-	require.Equal(t, 1, calls)
+	startErr := errors.New("helper could not start")
+	exitErr := errors.New("replacement refused")
+	for _, tc := range []struct {
+		name, initial, final string
+		callback             bool
+		startErr, exitErr    error
+		attempts, calls      int
+		wantErr              error
+		canRestart           bool
+	}{
+		{name: "repeated request", initial: "restart", final: "restarting", callback: true, attempts: 2, calls: 1},
+		{name: "missing callback", initial: "restart", final: "restart", attempts: 1, wantErr: daemon.ErrLocalEmbeddingsBusy},
+		{name: "start failure", initial: "restart", final: "restart", callback: true, startErr: startErr, attempts: 1, calls: 1, wantErr: startErr, canRestart: true},
+		{name: "helper exit", initial: "restarting", final: "restart", callback: true, exitErr: exitErr, canRestart: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			setup := &localEmbeddingsSetup{embeddings: cfg.Embeddings, job: &api.LocalEmbeddingsJob{State: tc.initial}}
+			if tc.callback {
+				setup.restart = func() error { calls++; return tc.startErr }
+			}
+			status, err := setup.Status(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, tc.callback && tc.initial == "restart", status.CanRestart)
+			for range tc.attempts {
+				require.ErrorIs(t, setup.Restart(t.Context()), tc.wantErr)
+			}
+			if tc.exitErr != nil {
+				setup.restartExited(tc.exitErr)
+			}
+			status, err = setup.Status(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, tc.final, status.Job.State)
+			require.Equal(t, tc.canRestart, status.CanRestart)
+			require.Equal(t, tc.calls, calls)
+			if tc.startErr != nil {
+				require.Contains(t, status.Job.Error, tc.startErr.Error())
+			}
+			if tc.exitErr != nil {
+				require.Contains(t, status.Job.Error, tc.exitErr.Error())
+			}
+		})
+	}
 }
 
 func TestLocalEmbeddingsStatusDuringRestartStart(t *testing.T) {
@@ -81,44 +113,6 @@ func TestLocalEmbeddingsStatusDuringRestartStart(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("status blocked while restart was starting")
 	}
-}
-
-func TestLocalEmbeddingsRestartWithoutCallback(t *testing.T) {
-	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nbase_url = \"https://embeddings.example/v1\"\nmodel = \"model\"\ndims = 768\n"))
-	require.NoError(t, err)
-	setup := &localEmbeddingsSetup{embeddings: cfg.Embeddings, job: &api.LocalEmbeddingsJob{State: "restart"}}
-	status, err := setup.Status(t.Context())
-	require.NoError(t, err)
-	require.False(t, status.CanRestart)
-	require.ErrorIs(t, setup.Restart(t.Context()), daemon.ErrLocalEmbeddingsBusy)
-	require.Equal(t, "restart", setup.job.State)
-}
-
-func TestLocalEmbeddingsRestartFailureCanRetry(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	t.Setenv("HOME", t.TempDir())
-	setup := &localEmbeddingsSetup{
-		job:     &api.LocalEmbeddingsJob{State: "restart"},
-		restart: func() error { return errors.New("helper could not start") },
-	}
-	require.Error(t, setup.Restart(t.Context()))
-	status, err := setup.Status(t.Context())
-	require.NoError(t, err)
-	require.True(t, status.CanRestart)
-	require.Equal(t, "restart", status.Job.State)
-	require.Contains(t, status.Job.Error, "helper could not start")
-}
-
-func TestLocalEmbeddingsRestartHelperExitCanRetry(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	t.Setenv("HOME", t.TempDir())
-	setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restarting"}, restart: func() error { return nil }}
-	setup.restartExited(errors.New("replacement refused"))
-	status, err := setup.Status(t.Context())
-	require.NoError(t, err)
-	require.True(t, status.CanRestart)
-	require.Equal(t, "restart", status.Job.State)
-	require.Contains(t, status.Job.Error, "replacement refused")
 }
 
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {

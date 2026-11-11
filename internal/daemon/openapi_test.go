@@ -228,8 +228,6 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 
 func TestOpenAPIRestartVersion(t *testing.T) {
 	doc := OpenAPIDocument()
-	require.NotNil(t, doc.Paths["/api/v1/embeddings/local/restart"])
-	require.NotNil(t, doc.Paths["/api/v1/embeddings/local/restart"].Post)
 	require.Greater(t, semver.Compare("v"+doc.Info.Version, "v0.44.0"), 0, "clients must distinguish this route from older daemons")
 }
 

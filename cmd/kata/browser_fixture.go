@@ -33,7 +33,7 @@ func init() {
 	localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
 		path := os.Getenv("KATA_BROWSER_EMBEDDINGS_FIXTURE")
 		if _, err := os.Stat(path); path == "" || err != nil {
-			return embedlocal.Install(ctx, opts)
+			return embedlocal.Installation{}, errors.New("browser embedding fixture unavailable")
 		}
 		confirmed, err := opts.Confirm(ctx, 1)
 		if err != nil {

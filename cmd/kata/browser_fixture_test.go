@@ -3,8 +3,10 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,4 +31,18 @@ func TestBrowserFixtureDoesNotDiscoverHostOllama(t *testing.T) {
 	_, err = localEmbeddingsEndpoint(t.Context(), embedlocal.Options{})
 	require.ErrorIs(t, err, embedlocal.ErrNotFound)
 	require.Zero(t, calls)
+}
+
+func TestBrowserFixtureRequiresSyntheticInstaller(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("KATA_BROWSER_EMBEDDINGS_FIXTURE", filepath.Join(home, "missing"))
+	var confirmed bool
+	_, err := localEmbeddingsInstall(t.Context(), embedlocal.InstallOptions{
+		DataDir: home,
+		Confirm: func(context.Context, int64) (bool, error) { confirmed = true; return false, nil },
+	})
+	require.ErrorContains(t, err, "browser embedding fixture unavailable")
+	require.False(t, confirmed)
 }
