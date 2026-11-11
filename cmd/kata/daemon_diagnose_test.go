@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
@@ -481,6 +482,11 @@ func TestDaemonDiagnoseProjectReadFailureIsUnreadableStorage(t *testing.T) {
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
 	assertDiagnosticState(t, out, "unreadable_storage")
+	selection, err := client.InspectSelection(t.Context(), workspaceStartForRemote(), "work")
+	require.NoError(t, err)
+	result, _, err := diagnoseDaemonSelectionObserved(t.Context(), "", selection, &client.LocalDaemonUnreachableError{})
+	require.NoError(t, err)
+	assert.Equal(t, "unreadable_storage", result.State)
 }
 
 func TestDaemonDiagnoseUnsupportedSchemaCannotRecover(t *testing.T) {
@@ -819,8 +825,17 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	home, _, uid, _ := stoppedProfileCLI(t)
 	var calls atomic.Int32
 	var transient atomic.Bool
+	changedHome := t.TempDir()
+	catalog := filepath.Join(os.Getenv("KATA_HOME"), "config.toml")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if calls.Add(1) == 1 || !transient.Load() {
+		call := calls.Add(1)
+		if call == 1 && transient.Load() {
+			err := os.WriteFile(catalog, []byte(fmt.Sprintf("[[daemon]]\nname = \"work\"\nlocal = true\nhome = %q\ninstance_uid = %q\n", changedHome, uid)), 0600)
+			if err != nil {
+				t.Errorf("change catalog: %v", err)
+			}
+		}
+		if call == 1 || !transient.Load() {
 			<-r.Context().Done()
 			return
 		}
@@ -860,8 +875,18 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		transient.Store(true)
 		_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "unreachable")
-		require.NotContains(t, err.Error(), "selected daemon is ready")
 		require.Equal(t, int32(1), calls.Load())
+		var cliErr *cliError
+		require.ErrorAs(t, err, &cliErr)
+		require.Equal(t, ExitDaemonUnavail, cliErr.ExitCode)
+		require.Equal(t, "local_unreachable", cliErr.Code)
+		var result daemonDiagnosis
+		require.NoError(t, json.Unmarshal(cliErr.Data, &result))
+		require.Equal(t, "local_unreachable", result.State)
+		require.Equal(t, "work", result.Profile)
+		require.Equal(t, home, result.Home)
+		require.Equal(t, uid, result.ExpectedInstanceUID)
+		require.Contains(t, result.Message, "context deadline exceeded")
+		require.Contains(t, result.NextAction, "kata --daemon work daemon recover")
 	})
 }

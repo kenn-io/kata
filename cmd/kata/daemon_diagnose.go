@@ -176,6 +176,12 @@ func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
 func diagnoseDaemonSelection(
 	ctx context.Context, expectedProject string, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
+	return diagnoseDaemonSelectionObserved(ctx, expectedProject, selection, nil)
+}
+
+func diagnoseDaemonSelectionObserved(
+	ctx context.Context, expectedProject string, selection client.DaemonSelection, observed *client.LocalDaemonUnreachableError,
+) (daemonDiagnosis, client.DaemonSelection, error) {
 	ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 	defer cancel()
 	var err error
@@ -263,7 +269,7 @@ func diagnoseDaemonSelection(
 			return withDiagnosisAction(result), selection, nil
 		}
 	}
-	result, selection, err = probeDaemonSelection(ctx, result, selection)
+	result, selection, err = probeDaemonSelectionObserved(ctx, result, selection, observed)
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
 		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)
@@ -316,10 +322,18 @@ func inspectDiagnosisProject(ctx context.Context, store db.Storage, result *daem
 func probeDaemonSelection(
 	ctx context.Context, result daemonDiagnosis, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
+	return probeDaemonSelectionObserved(ctx, result, selection, nil)
+}
+
+func probeDaemonSelectionObserved(
+	ctx context.Context, result daemonDiagnosis, selection client.DaemonSelection, observed *client.LocalDaemonUnreachableError,
+) (daemonDiagnosis, client.DaemonSelection, error) {
 	var err error
 	var resolved client.ResolvedDaemon
 	var found bool
-	if selection.Profile != nil {
+	if observed != nil {
+		err = observed
+	} else if selection.Profile != nil {
 		resolved, found, err = client.DiscoverLocalProfileSelection(ctx, selection)
 	} else if result.Kind == "remote" {
 		resolved = selection.Resolved

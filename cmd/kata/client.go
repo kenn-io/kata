@@ -133,10 +133,19 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 		ProbeRemote:    flags.Daemon != "",
 	})
 	if err != nil || !found {
-		if _, typed := errors.AsType[*client.LocalDaemonUnreachableError](err); typed {
-			return resolved, cliDaemonTargetError(err)
-		}
 		if resolved.LocalProfile != nil {
+			if unreachable, typed := errors.AsType[*client.LocalDaemonUnreachableError](err); typed {
+				if selection, ok := resolved.LocalProfileSelection(); ok {
+					diagnosis, _, diagnoseErr := diagnoseDaemonSelectionObserved(ctx, "", selection, unreachable)
+					if diagnoseErr != nil {
+						diagnosis.State = "selection_error"
+						diagnosis.Message = diagnoseErr.Error()
+						diagnosis = withDiagnosisAction(diagnosis)
+					}
+					return resolved, diagnosisError(diagnosis)
+				}
+				return resolved, cliDaemonTargetError(err)
+			}
 			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
 			if diagnoseErr != nil {
 				return resolved, diagnoseErr

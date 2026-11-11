@@ -70,16 +70,20 @@ the owner's bearer credential from the daemon's authentication configuration
 The profiling listener may be the same listener that failed, so capture can also
 time out.
 
-After confirming the PID identifies the daemon, on Unix `kill -QUIT <pid>` is a fallback that writes goroutine stacks to stderr
-**and terminates the daemon**. Check the reported `daemon.log` or the supervisor's
-stderr log. Foreground and supervised launches may only retain supervisor stderr.
-After it exits, relaunch foreground and supervised daemons using their original
-command or supervisor. For an auto-started current home, run `kata daemon restart`
-with the original `KATA_HOME` and storage environment. For a named local profile,
-stop the reported PID (on Windows, use `taskkill /PID <pid> /F`), wait for it to exit, then run
-`kata --daemon <name> daemon recover`. This keeps the profile's pinned storage and
-instance identity; setting `KATA_HOME` alone does not preserve those checks. On
-Windows, quote profile names as PowerShell literal strings when needed.
+Check the reported `daemon.log` or the supervisor's stderr log. Foreground and
+supervised launches may only retain supervisor stderr. After confirming the PID
+identifies the daemon, Unix operators can use `kill -QUIT <pid>` as a fallback.
+It writes goroutine stacks to stderr **and terminates the daemon**. On Windows,
+stop the confirmed process with `taskkill /PID <pid> /F`.
+
+After the process exits, choose the recovery command for its launch mode:
+
+- Relaunch foreground and supervised daemons using the original command or supervisor.
+- For an auto-started current home, run `kata daemon restart` with the original
+  `KATA_HOME` and storage environment.
+- For a named local profile, run `kata --daemon <name> daemon recover`. This
+  preserves its pinned storage and instance identity. On Windows, quote profile
+  names as PowerShell literal strings when needed.
 
 ## Client setup
 

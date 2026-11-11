@@ -257,7 +257,7 @@ func scopeProfileUnreachable(err error, name string) error {
 }
 
 func profileRecoveryCommand(name, goos string) string {
-	safe := name != "" && strings.IndexFunc(name, func(r rune) bool {
+	safe := name != "" && (goos == "windows" || !strings.HasPrefix(name, "=")) && strings.IndexFunc(name, func(r rune) bool {
 		if goos == "windows" {
 			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_.-", r))
 		}
