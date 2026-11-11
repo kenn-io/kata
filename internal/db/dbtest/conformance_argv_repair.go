@@ -299,6 +299,9 @@ func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, _ Backend) er
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	job, workflow := nativeFederationDefinitions(t, store, project)
+	historicalWorkflowEvent := workflow.DefinitionEventUID
+	workflow, _, err = store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: workflow.UID, ExpectedEventUID: historicalWorkflowEvent, Name: "Edited workflow", Actor: "worker", Definition: workflow.Definition})
+	require.NoError(t, err)
 	sibling, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Sibling", Actor: "worker", Definition: workflow.Definition})
 	require.NoError(t, err)
 
@@ -344,6 +347,11 @@ func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, _ Backend) er
 	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = nil, nil
 	_, err = store.ObserveCronRun(ctx, fresh)
 	require.ErrorIs(t, err, cron.ErrInvalid, "job-only running must reject held snapshot")
+	fresh.UID, err = uid.New()
+	require.NoError(t, err)
+	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = &workflow.UID, &historicalWorkflowEvent
+	_, err = store.ObserveCronRun(ctx, fresh)
+	assert.NoError(t, err, "a supported historical revision of the job's workflow remains admissible")
 	var eventsBefore, eventsAfter int
 	require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE project_id=$1`, project.ID).Scan(&eventsBefore))
 	fresh.UID, err = uid.New()
