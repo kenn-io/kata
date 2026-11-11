@@ -1465,14 +1465,17 @@ func runDaemonProcess(
 	maps.Copy(rec.Metadata, restart.metadata())
 
 	originalEmbeddings := dcfg.Search.Embeddings
-	if chosen, err := applySharedEmbeddingChoice(ctx, originalEmbeddings); err != nil {
-		daemonLog.Printf("shared embeddings choice: %v", err)
-	} else if chosen != originalEmbeddings {
-		if candidate, path, err := preflightEmbeddingStartup(chosen, dbPath); err != nil {
+	// PostgreSQL replicas share vector generations, but not this machine's choice.
+	if _, postgres := store.(*pgstore.Store); !postgres {
+		if chosen, err := applySharedEmbeddingChoice(ctx, originalEmbeddings); err != nil {
 			daemonLog.Printf("shared embeddings choice: %v", err)
-		} else {
-			startup.Embedder, startup.VectorsPath = candidate, path
-			dcfg.Search.Embeddings = chosen
+		} else if chosen != originalEmbeddings {
+			if candidate, path, err := preflightEmbeddingStartup(chosen, dbPath); err != nil {
+				daemonLog.Printf("shared embeddings choice: %v", err)
+			} else {
+				startup.Embedder, startup.VectorsPath = candidate, path
+				dcfg.Search.Embeddings = chosen
+			}
 		}
 	}
 

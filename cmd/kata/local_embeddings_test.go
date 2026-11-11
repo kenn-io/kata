@@ -12,8 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/vector"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/embedlocal"
+	kitvec "go.kenn.io/kit/vector"
 )
 
 func TestApplySharedEmbeddingChoice(t *testing.T) {
@@ -29,6 +33,41 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 	got, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
 	require.NoError(t, err)
 	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
+}
+
+func TestSharedChoicePreservesPostgresActiveGeneration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires pgvector testcontainer")
+	}
+	setupKataEnv(t)
+	clearLocalEmbeddingsEnv(t)
+	resetFlags(t)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, t.Context())
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_DSN", dsn)
+	t.Setenv("KATA_POSTGRES_ALLOW_INSECURE", "1")
+	store, err := pgstore.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	idx, err := vector.OpenPostgres(t.Context(), store.DB)
+	require.NoError(t, err)
+	generation := kitvec.Generation{Model: "external-model", Dimensions: 768}
+	key := generation.Fingerprint()
+	release, err := idx.AcquireReconcilerLease(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, idx.EnsureBuilding(t.Context(), key, generation))
+	require.NoError(t, idx.CutOver(t.Context(), key))
+	require.NoError(t, release())
+	require.NoError(t, embedlocal.RecordChoice())
+	launchDaemon(t)
+	require.Never(t, func() bool {
+		active, ok, err := idx.ActiveGeneration(t.Context())
+		return err != nil || !ok || active != key
+	}, 2*time.Second, 10*time.Millisecond, "shared choice displaced the configured replica's index")
 }
 
 func TestLocalEmbeddingsRestartRefusalPreservesChoice(t *testing.T) {
