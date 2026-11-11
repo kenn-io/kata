@@ -1844,10 +1844,10 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		if err != nil {
 			return nil, err
 		}
-		if !source.Enabled || !source.PushEnabled {
+		if !source.Enabled || !source.PushEnabled || source.Actor != destination.Actor {
 			continue
 		}
-		if project.DeletedAt != nil || source.Role != db.FederationRoleSpoke || source.HubProjectUID != fromUID || source.Actor != destination.Actor {
+		if project.DeletedAt != nil || source.Role != db.FederationRoleSpoke || source.HubProjectUID != fromUID {
 			return nil, db.ErrFederationMoveSourceUnauthorized
 		}
 		destinationOrigin, err := httpurl.CanonicalHTTPOrigin(hubURL)

@@ -243,7 +243,7 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 }
 
 func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
-	for _, mode := range []string{"missing", "leave", "enrollment", "disabled", "uploads-disabled"} {
+	for _, mode := range []string{"missing", "leave", "enrollment", "disabled", "uploads-disabled", "different-actor"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			hub, projects, spoke, issue, local := newPushDeferralFixture(t, true)
@@ -286,6 +286,11 @@ func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
 				changed.PushEnabled = mode != "uploads-disabled"
 				_, err = spoke.env.DB.UpsertFederationBinding(ctx, changed)
 				require.NoError(t, err)
+			case "different-actor":
+				changed := sourceBinding
+				changed.Actor = "other-worker"
+				_, err = spoke.env.DB.UpsertFederationBinding(ctx, changed)
+				require.NoError(t, err)
 			}
 			push := func() error {
 				return pushDirectSpoke(ctx, pushStore, &binding, projects[1].ID, client, nil, spoke.credentials, clientpkg.Opts{})
@@ -308,7 +313,7 @@ func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
 			require.ErrorIs(t, err, db.ErrNotFound)
 
 			spoke.credentials[projects[0].UID] = sourceProof
-			if mode == "disabled" || mode == "uploads-disabled" {
+			if mode == "disabled" || mode == "uploads-disabled" || mode == "different-actor" {
 				_, err = spoke.env.DB.UpsertFederationBinding(ctx, sourceBinding)
 				require.NoError(t, err)
 			}
