@@ -43,11 +43,7 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 		if err != nil {
 			return nil, err
 		}
-		principal, err := attachmentForwardPrincipal(ctx, cfg, *binding, iss, actor, in.Body.ClientKind)
-		if err != nil {
-			return nil, err
-		}
-		attachment, err = forwardDocbankDescriptor(ctx, cfg, project, binding, iss, principal, "", "", &input, nil)
+		attachment, err = forwardDocbankDescriptor(ctx, cfg, project, binding, iss, "", "", &input, nil)
 		if err != nil {
 			return nil, err
 		}

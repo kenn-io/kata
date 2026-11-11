@@ -111,7 +111,7 @@ func TestAttachmentWritesRefreshStaleFederatedClaimDenials(t *testing.T) {
 				status, raw = attachmentUpload(t, spoke, endpoint, "shot.png", strings.NewReader("image bytes"))
 			} else {
 				var err error
-				status, raw, err = postAttachmentLink(t, spoke, endpoint+"/links", `{"path":"/kata/report.pdf","actor":"operator","client_kind":"cli"}`)
+				status, raw, err = postAttachmentLink(t, spoke, endpoint+"/links", `{"path":"/kata/report.pdf","actor":"operator"}`)
 				require.NoError(t, err)
 			}
 			require.Equal(t, http.StatusOK, status, string(raw))

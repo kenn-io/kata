@@ -3939,8 +3939,6 @@ components:
       properties:
         actor:
           type: string
-        client_kind:
-          type: string
         node_id:
           format: int64
           type: integer
@@ -9464,11 +9462,6 @@ paths:
           required: true
           schema:
             type: string
-        - explode: false
-          in: query
-          name: client_kind
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -9523,11 +9516,6 @@ paths:
           in: query
           name: name
           required: true
-          schema:
-            type: string
-        - explode: false
-          in: query
-          name: client_kind
           schema:
             type: string
       requestBody:
@@ -10943,11 +10931,6 @@ paths:
     post:
       operationId: addAttachment
       parameters:
-        - explode: false
-          in: query
-          name: client_kind
-          schema:
-            type: string
         - in: path
           name: project_id
           required: true

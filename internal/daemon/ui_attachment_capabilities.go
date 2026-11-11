@@ -1,0 +1,78 @@
+package daemon
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"sync"
+	"time"
+
+	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
+)
+
+type uiAttachmentRouteKey struct {
+	url, projectUID, authorityUID string
+	projectID                     int64
+}
+
+type uiAttachmentCapability struct {
+	key       uiAttachmentRouteKey
+	available bool
+	expires   time.Time
+}
+
+type uiAttachmentCapabilityCache struct {
+	mu      sync.Mutex
+	entries map[int64]uiAttachmentCapability
+	now     func() time.Time
+}
+
+func newUIAttachmentCapabilityCache() *uiAttachmentCapabilityCache {
+	return &uiAttachmentCapabilityCache{entries: make(map[int64]uiAttachmentCapability), now: time.Now}
+}
+
+func attachmentRouteKey(binding db.FederationBinding) uiAttachmentRouteKey {
+	key := uiAttachmentRouteKey{url: binding.HubURL, projectID: binding.HubProjectID, projectUID: binding.HubProjectUID}
+	if binding.RelayConfig != nil {
+		key.authorityUID = binding.RelayConfig.AuthorityUID
+	}
+	return key
+}
+
+func (c *uiAttachmentCapabilityCache) prune(bindings []db.FederationBinding) {
+	present := make(map[int64]bool, len(bindings))
+	for _, binding := range bindings {
+		present[binding.ProjectID] = true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id := range c.entries {
+		if !present[id] {
+			delete(c.entries, id)
+		}
+	}
+}
+
+func (c *uiAttachmentCapabilityCache) available(ctx, parent context.Context, cfg ServerConfig, binding db.FederationBinding) bool {
+	key := attachmentRouteKey(binding)
+	c.mu.Lock()
+	entry, ok := c.entries[binding.ProjectID]
+	if ok && entry.key == key && c.now().Before(entry.expires) {
+		c.mu.Unlock()
+		return entry.available
+	}
+	c.mu.Unlock()
+	project, err := cfg.DB.ProjectByID(ctx, binding.ProjectID)
+	if err == nil {
+		_, err = docbankOriginCapabilities(ctx, cfg, project, &binding)
+	}
+	available := err == nil
+	var apiErr *api.APIError
+	if parent.Err() == nil && !(errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnauthorized || apiErr.Status == http.StatusForbidden)) {
+		c.mu.Lock()
+		c.entries[binding.ProjectID] = uiAttachmentCapability{key: key, available: available, expires: c.now().Add(5 * time.Second)}
+		c.mu.Unlock()
+	}
+	return available
+}

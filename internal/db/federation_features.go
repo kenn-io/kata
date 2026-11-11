@@ -169,7 +169,7 @@ func EventRequiredFeatures(kind string) string {
 func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, projectUID, supported string) (string, error) {
+}, projectUID string) (string, error) {
 	var cronPresent, issueMoved bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
  EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=p.id) OR
@@ -181,18 +181,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	if err != nil {
 		return "", err
 	}
-	origin := false
-	if RequireEventFeatures(supported, DocbankOriginEventFeature) != nil {
-		var err error
-		origin, err = projectHasDocbankOrigin(ctx, q, projectUID)
-		if err != nil {
-			return "", err
-		}
-	}
 	required := ""
-	if origin {
-		required = DocbankOriginEventFeature
-	}
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}
@@ -284,14 +273,12 @@ func nativeProjectionRequired(ctx context.Context, q interface {
 // unsupported readers fail before that write or any returned reset/cursor.
 // Features is protocol support, independent of enrollment permissions.
 type FederationReadParams struct {
-	// FeaturesOnly validates current project protocol requirements without reading a page.
-	FeaturesOnly bool
-	ProjectID    int64
-	Features     string
-	Metadata     bool
-	AfterID      int64
-	IssueUID     string
-	Limit        int
+	ProjectID int64
+	Features  string
+	Metadata  bool
+	AfterID   int64
+	IssueUID  string
+	Limit     int
 }
 
 // FederationReadResult captures one consistent metadata or event-page transaction.
@@ -310,15 +297,12 @@ type FederationReadResult struct {
 func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func() ([]Event, error)) (FederationReadResult, error) {
 	out := FederationReadResult{Project: project, Binding: binding, Events: []Event{}, NextAfterID: in.AfterID}
 	var err error
-	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID, in.Features)
+	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID)
 	if err != nil {
 		return out, err
 	}
 	if err = RequireEventFeatures(in.Features, out.RequiredFeatures); err != nil {
 		return out, err
-	}
-	if in.FeaturesOnly {
-		return out, nil
 	}
 	if in.IssueUID != "" {
 		var owned bool

@@ -353,8 +353,6 @@ type ClaimStatus struct {
 // ClaimGateParams checks whether a local mutation can proceed using the
 // cached authoritative claim state available to this database.
 type ClaimGateParams struct {
-	// StrictPrincipal preserves the complete forwarded holder identity.
-	StrictPrincipal bool
 	// ApplyTransactionFence admits external effects even without a local mutation.
 	ApplyTransactionFence bool
 	ProjectID             int64

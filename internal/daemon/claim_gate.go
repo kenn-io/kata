@@ -115,7 +115,6 @@ func checkFederatedIssueClaim(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 
 	err = cfg.DB.CheckClaimGate(ctx, db.ClaimGateParams{
-		StrictPrincipal:       service,
 		ApplyTransactionFence: service,
 		ProjectID:             projectID,
 		IssueRef:              issue.UID,

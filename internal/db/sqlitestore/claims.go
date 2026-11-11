@@ -714,7 +714,7 @@ func (d *Store) CheckClaimGate(ctx context.Context, p db.ClaimGateParams) error 
 	if live.ClaimKind == "timed" && live.ExpiresAt != nil && !live.ExpiresAt.After(now) {
 		return finish()
 	}
-	if (p.StrictPrincipal && !db.SameClaimPrincipal(live, p.Principal)) || (!p.StrictPrincipal && !sameClaimGateHolder(live, p.Principal)) {
+	if !sameClaimGateHolder(live, p.Principal) {
 		return db.ErrClaimDenied
 	}
 	return finish()

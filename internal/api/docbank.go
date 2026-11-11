@@ -35,17 +35,15 @@ type DocbankDescriptorResponse struct{ Body DocbankDescriptor }
 type DocbankUploadRequest struct {
 	Origin string `query:"origin" required:"true"`
 	DocbankServiceRequest
-	Ref        string `path:"ref"`
-	Name       string `query:"name" required:"true"`
-	ClientKind string `query:"client_kind"`
+	Ref  string `path:"ref"`
+	Name string `query:"name" required:"true"`
 }
 
 type DocbankLinkRequest struct {
 	Origin string `query:"origin" required:"true"`
 	DocbankServiceRequest
-	Ref        string `path:"ref"`
-	ClientKind string `query:"client_kind"`
-	Body       LinkAttachmentInput
+	Ref  string `path:"ref"`
+	Body LinkAttachmentInput
 }
 
 type DocbankContentRequest struct {

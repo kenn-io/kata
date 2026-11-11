@@ -419,6 +419,6 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 	require.Len(t, snapshot.Capabilities.Routes, 1)
 	require.Equal(t, spoke.UID, snapshot.Capabilities.Routes[0].ProjectUID)
 	require.True(t, snapshot.Capabilities.Routes[0].Read)
-	require.True(t, snapshot.Capabilities.Routes[0].Write)
+	require.False(t, snapshot.Capabilities.Routes[0].Write)
 
 }

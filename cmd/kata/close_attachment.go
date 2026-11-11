@@ -55,7 +55,7 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 	if err != nil {
 		return nil, err
 	}
-	health, err := requireDaemonAPIVersionHealth(ctx, hc, base, apiVersionAttachmentEvidence, "attachment close evidence")
+	_, err = requireDaemonAPIVersionHealth(ctx, hc, base, apiVersionAttachmentEvidence, "attachment close evidence")
 	if err != nil {
 		return nil, err
 	}
@@ -104,9 +104,6 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 	var linked []string
 	for i, input := range inputs {
 		input.Actor = &actor
-		if supported, _ := apiVersionAtLeast(health.APISchemaVersion, apiVersionDocbankOrigin); supported {
-			input.ClientKind = new("cli")
-		}
 		result, err := linkAttachmentCLI(ctx, hc, base, pid, ref.RefForAPI, input)
 		if err != nil {
 			return nil, fmt.Errorf("docbank selector %q failed; already linked attachment IDs: [%s]; issue was not closed: %w", files[i], strings.Join(linked, ", "), err)

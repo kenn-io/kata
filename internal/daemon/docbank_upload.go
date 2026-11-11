@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+
+	"go.kenn.io/kata/internal/federationsigning"
 	"os"
 	"path"
 	"time"
@@ -20,7 +22,7 @@ import (
 func attachmentRawBody(ctx huma.Context, next func(huma.Context)) {
 	r, w := humago.Unwrap(ctx)
 	_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
-	next(huma.WithContext(ctx, context.WithValue(ctx.Context(), attachmentUploadContextKey{}, http.MaxBytesReader(w, r.Body, maxAttachmentBytes))))
+	next(huma.WithContext(ctx, context.WithValue(ctx.Context(), attachmentUploadContextKey{}, http.MaxBytesReader(w, r.Body, federationsigning.AttachmentMaxBodyBytes))))
 }
 
 func uploadDocbankAttachment(ctx context.Context, cfg ServerConfig, iss db.Issue, name string, reader io.Reader, recheck func() error) (metadata.Attachment, error) {

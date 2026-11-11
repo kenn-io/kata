@@ -63,7 +63,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		principal := db.ClaimPrincipal{HolderInstanceUID: fed.SpokeInstanceUID, Holder: fed.Actor, ClientKind: in.ClientKind}
+		principal := db.ClaimPrincipal{HolderInstanceUID: fed.SpokeInstanceUID, Holder: fed.Actor}
 		issue, err := docbankServiceIssue(ctx, cfg, project, in.Ref, principal)
 		if err != nil {
 			return nil, err
@@ -90,7 +90,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 		}
 		var descriptor metadata.Attachment
 		if binding != nil && binding.Role == db.FederationRoleSpoke {
-			descriptor, err = forwardDocbankDescriptor(ctx, cfg, project, binding, issue, boundSpokeClaimPrincipal(*binding, principal, cfg.DB.InstanceUID()), in.Origin, in.Name, nil, ctx.Value(attachmentUploadContextKey{}).(io.Reader))
+			descriptor, err = forwardDocbankDescriptor(ctx, cfg, project, binding, issue, in.Origin, in.Name, nil, ctx.Value(attachmentUploadContextKey{}).(io.Reader))
 		} else {
 			descriptor, err = uploadDocbankAttachment(ctx, cfg, issue, in.Name, ctx.Value(attachmentUploadContextKey{}).(io.Reader), recheck)
 			descriptor.Origin = cfg.DB.InstanceUID()
@@ -108,7 +108,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		principal := db.ClaimPrincipal{HolderInstanceUID: fed.SpokeInstanceUID, Holder: fed.Actor, ClientKind: in.ClientKind}
+		principal := db.ClaimPrincipal{HolderInstanceUID: fed.SpokeInstanceUID, Holder: fed.Actor}
 		issue, err := docbankServiceIssue(ctx, cfg, project, in.Ref, principal)
 		if err != nil {
 			return nil, err
@@ -122,7 +122,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 		}
 		var descriptor metadata.Attachment
 		if binding != nil && binding.Role == db.FederationRoleSpoke {
-			descriptor, err = forwardDocbankDescriptor(ctx, cfg, project, binding, issue, boundSpokeClaimPrincipal(*binding, principal, cfg.DB.InstanceUID()), in.Origin, "", &in.Body, nil)
+			descriptor, err = forwardDocbankDescriptor(ctx, cfg, project, binding, issue, in.Origin, "", &in.Body, nil)
 		} else {
 			descriptor, err = resolveDocbankAttachment(ctx, cfg, in.Body, true)
 			descriptor.Origin = cfg.DB.InstanceUID()

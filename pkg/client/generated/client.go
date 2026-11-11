@@ -4967,7 +4967,6 @@ func (c *Client) LinkFederatedDocbank(ctx context.Context, options *LinkFederate
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"client_kind": {Style: "form", Explode: &[]bool{false}[0]},
 		"origin":      {Style: "form", Explode: &[]bool{false}[0]},
 		"project_uid": {Style: "form", Explode: &[]bool{false}[0]},
 	}
@@ -5037,7 +5036,6 @@ func (c *Client) UploadFederatedDocbank(ctx context.Context, options *UploadFede
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"client_kind": {Style: "form", Explode: &[]bool{false}[0]},
 		"name":        {Style: "form", Explode: &[]bool{false}[0]},
 		"origin":      {Style: "form", Explode: &[]bool{false}[0]},
 		"project_uid": {Style: "form", Explode: &[]bool{false}[0]},
@@ -7163,9 +7161,8 @@ func (c *Client) AddAttachment(ctx context.Context, options *AddAttachmentReques
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"actor":       {Style: "form", Explode: &[]bool{false}[0]},
-		"client_kind": {Style: "form", Explode: &[]bool{false}[0]},
-		"name":        {Style: "form", Explode: &[]bool{false}[0]},
+		"actor": {Style: "form", Explode: &[]bool{false}[0]},
+		"name":  {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/attachments",

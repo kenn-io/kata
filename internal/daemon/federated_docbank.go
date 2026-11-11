@@ -11,7 +11,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"time"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -139,34 +138,7 @@ func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.Fed
 	return nil, attachmentError(resp.StatusCode, code)
 }
 
-// attachmentForwardPrincipal is used only by a local initiating request. The
-// cache holds the already-bound lease tuple; hashing it again would change its
-// identity. Ordinary local clients may switch labels while retaining ownership.
-// Forwarded service requests never use this cache to select their principal.
-func attachmentForwardPrincipal(ctx context.Context, cfg ServerConfig, binding db.FederationBinding, issue db.Issue, actor, clientKind string) (db.ClaimPrincipal, error) {
-	principal := db.ClaimPrincipal{HolderInstanceUID: cfg.DB.InstanceUID(), Holder: actor, ClientKind: clientKind}
-	if cfg.HostAccess != nil {
-		requestPrincipal, ok := PrincipalFromContext(ctx)
-		if !ok || !validHostPrincipal(requestPrincipal) {
-			return db.ClaimPrincipal{}, attachmentError(401, "auth_required")
-		}
-		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, requestPrincipal.Subject).ClaimPrincipal
-	}
-	principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
-	if principal.AuthenticatedHost {
-		return principal, nil
-	}
-	cached, err := cfg.DB.ClaimStatusReadOnly(ctx, issue.ProjectID, issue.UID, time.Now().UTC())
-	if err != nil {
-		return db.ClaimPrincipal{}, claimAPIError(err)
-	}
-	if cached.Held && cached.Claim != nil && db.SameClaimGateHolder(*cached.Claim, principal) {
-		principal.ClientKind = cached.Claim.ClientKind
-	}
-	return principal, nil
-}
-
-func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, issue db.Issue, forwarded db.ClaimPrincipal, expectedOrigin, name string, input *api.LinkAttachmentInput, body io.Reader) (metadata.Attachment, error) {
+func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, issue db.Issue, expectedOrigin, name string, input *api.LinkAttachmentInput, body io.Reader) (metadata.Attachment, error) {
 	origin := expectedOrigin
 	if origin == "" {
 		caps, err := docbankOriginCapabilities(ctx, cfg, project, binding)
@@ -181,7 +153,7 @@ func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.
 	if !binding.PushEnabled {
 		return metadata.Attachment{}, federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
-	query := url.Values{"project_uid": {project.UID}, "client_kind": {forwarded.ClientKind}, "origin": {origin}}
+	query := url.Values{"project_uid": {project.UID}, "origin": {origin}}
 	suffix := "issues/" + url.PathEscape(issue.UID)
 	if input == nil {
 		suffix += "/uploads"
@@ -189,7 +161,7 @@ func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.
 	} else {
 		suffix += "/links"
 		forwardInput := *input
-		forwardInput.Actor, forwardInput.ClientKind, forwardInput.ReuseExisting = "", "", false
+		forwardInput.Actor, forwardInput.ReuseExisting = "", false
 		encoded, err := json.Marshal(forwardInput)
 		if err != nil {
 			return metadata.Attachment{}, internalAPIError(err)

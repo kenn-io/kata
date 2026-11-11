@@ -26,7 +26,6 @@ import (
 )
 
 const attachmentPath = "/api/v1/projects/{project_id}/issues/{ref}/attachments"
-const maxAttachmentBytes = 256 << 20
 
 // attachmentProxyTimeout covers both sequential legs of a maximum-size transfer through the daemon switcher.
 const attachmentProxyTimeout = 75 * time.Minute
@@ -149,11 +148,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
-			principal, err := attachmentForwardPrincipal(ctx, cfg, *binding, iss, actor, in.ClientKind)
-			if err != nil {
-				return nil, err
-			}
-			e, err = forwardDocbankDescriptor(ctx, cfg, project, binding, iss, principal, "", in.Name, nil, ctx.Value(attachmentUploadContextKey{}).(io.Reader))
+			e, err = forwardDocbankDescriptor(ctx, cfg, project, binding, iss, "", in.Name, nil, ctx.Value(attachmentUploadContextKey{}).(io.Reader))
 			if err != nil {
 				return nil, err
 			}

@@ -58,9 +58,9 @@ func TestDocbankOriginTransportFence(t *testing.T) {
 			if marked {
 				want = http.StatusConflict
 			}
-			// Project metadata must reject old peers even before they poll a page.
+			// Metadata carries no issue data; the page and relay checks fence events.
 			status, _, raw := f.request(t, http.MethodGet, projectPath(f.private.ID)+"/federation/metadata", "", nil, headers)
-			assert.Equal(t, want, status, string(raw))
+			assert.Equal(t, http.StatusOK, status, string(raw))
 			base := projectPath(f.private.ID) + "/federation/relay"
 			for range 2 {
 				status, _, raw = f.request(t, http.MethodGet, base+"?stream=events&limit=1024", "", nil, headers)

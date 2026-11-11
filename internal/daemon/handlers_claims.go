@@ -26,7 +26,6 @@ import (
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
-	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/projectscope"
 )
 
@@ -705,11 +704,6 @@ func newClaimForwardClient(ctx context.Context, binding db.FederationBinding, cr
 	}
 	if strings.TrimSpace(cred.Token) == "" {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "federation claim credentials are unavailable", "", nil)
-	}
-	credentialURL, credentialErr := httpurl.CanonicalHTTPBaseURL(cred.HubURL)
-	bindingURL, bindingErr := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
-	if credentialErr != nil || bindingErr != nil || credentialURL != bindingURL || cred.HubProjectID != binding.HubProjectID {
-		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "federation credential target differs from the binding", "reconnect the project before retrying", nil)
 	}
 	cred = config.FederationTransportCredential(
 		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,

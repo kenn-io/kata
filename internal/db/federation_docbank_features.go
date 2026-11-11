@@ -1,8 +1,6 @@
 package db
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"strings"
@@ -63,30 +61,6 @@ func docbankOriginReference(raw jsontext.Value) bool {
 		Origin string `json:"origin"`
 	}
 	return json.Unmarshal(raw, &ref) == nil && ref.Origin != ""
-}
-
-func projectHasDocbankOrigin(ctx context.Context, q interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, projectUID string) (bool, error) {
-	// Probe only current candidate issue documents, never retained history on
-	// every poll. Escaped keys remain candidates and are classified as JSON.
-	rows, err := q.QueryContext(ctx, `SELECT i.metadata FROM issues i JOIN projects p ON p.id=i.project_id
-WHERE p.uid=$1 AND (i.metadata LIKE '%"attachment.%' OR i.metadata LIKE '%\u%' ESCAPE '!')`, projectUID)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return false, err
-		}
-		found, err := payloadHasDocbankOrigin("projection.issue", `{"metadata":`+raw+`}`)
-		if err != nil || found {
-			return found, err
-		}
-	}
-	return false, rows.Err()
 }
 
 // RelayBatchRequiredFeatures inspects exact event source bytes without

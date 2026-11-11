@@ -3,7 +3,6 @@ package daemon_test
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -24,56 +23,6 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
-
-// Credentials for a former target may not leave the daemon through either
-// capability preflight or the ordinary lease refresh that precedes a write.
-func TestDocbankOriginRejectsMismatchedCredentialTarget(t *testing.T) {
-	for _, mismatch := range []string{"origin", "project"} {
-		for _, operation := range []string{"upload", "link", "content"} {
-			t.Run(mismatch+"/"+operation, func(t *testing.T) {
-				var calls atomic.Int32
-				receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					calls.Add(1)
-					_, _ = io.WriteString(w, `{}`)
-				}))
-				t.Cleanup(receiver.Close)
-				credentials := newReplicaCredentialStore()
-				env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.FederationCredentials = credentials })
-				project, issue := seedProjectAndIssue(t, env)
-				origin, err := uid.New()
-				require.NoError(t, err)
-				attachmentID, err := uid.New()
-				require.NoError(t, err)
-				raw := jsontext.Value(fmt.Sprintf(`{"name":"file.pdf","media_type":"application/pdf","size":7,"docbank_version":%q,"origin":%q}`, linkVersion, origin))
-				_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment." + attachmentID: raw}})
-				require.NoError(t, err)
-				_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: receiver.URL, HubProjectID: 42, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator", AllowInsecure: true})
-				require.NoError(t, err)
-				credential := config.FederationCredential{HubURL: receiver.URL, HubProjectID: 42, Token: "fixture-enrollment", Actor: "operator", Capabilities: "pull,push,claim", AllowInsecure: true}
-				if mismatch == "origin" {
-					credential.HubURL = "https://former-hub.example"
-				} else {
-					credential.HubProjectID++
-				}
-				require.NoError(t, credentials.StoreFederationCredential(t.Context(), project.UID, credential))
-				endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.UID)
-				var status int
-				var body []byte
-				switch operation {
-				case "upload":
-					status, body = attachmentUpload(t, env, endpoint, "file.pdf", strings.NewReader("fixture"))
-				case "link":
-					status, body, err = postAttachmentLink(t, env, endpoint+"/links", `{"path":"/kata/file.pdf","actor":"operator"}`)
-					require.NoError(t, err)
-				default:
-					status, body = env.Get(t, endpoint+"/"+attachmentID+"/content")
-				}
-				require.Equal(t, http.StatusServiceUnavailable, status, string(body))
-				require.Zero(t, calls.Load(), "a credential must not be retargeted before authentication")
-			})
-		}
-	}
-}
 
 type rejectingDocbankFence struct{}
 

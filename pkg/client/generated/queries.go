@@ -205,9 +205,8 @@ func (f FederatedDocbankCapabilitiesQuery) Validate() error {
 }
 
 type LinkFederatedDocbankQuery struct {
-	Origin     string  `json:"origin" validate:"required"`
-	ProjectUID string  `json:"project_uid" validate:"required"`
-	ClientKind *string `json:"client_kind,omitempty"`
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
 }
 
 func (l LinkFederatedDocbankQuery) Validate() error {
@@ -215,10 +214,9 @@ func (l LinkFederatedDocbankQuery) Validate() error {
 }
 
 type UploadFederatedDocbankQuery struct {
-	Origin     string  `json:"origin" validate:"required"`
-	ProjectUID string  `json:"project_uid" validate:"required"`
-	Name       string  `json:"name" validate:"required"`
-	ClientKind *string `json:"client_kind,omitempty"`
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Name       string `json:"name" validate:"required"`
 }
 
 func (u UploadFederatedDocbankQuery) Validate() error {
@@ -350,9 +348,8 @@ func (s ShowIssueQuery) Validate() error {
 }
 
 type AddAttachmentQuery struct {
-	ClientKind *string `json:"client_kind,omitempty"`
-	Name       string  `json:"name" validate:"required"`
-	Actor      *string `json:"actor,omitempty"`
+	Name  string  `json:"name" validate:"required"`
+	Actor *string `json:"actor,omitempty"`
 }
 
 func (a AddAttachmentQuery) Validate() error {

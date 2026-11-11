@@ -51,6 +51,58 @@ func relayDocbankRequest(t *testing.T, node *relayMatrixNode, method, endpoint, 
 	return resp.StatusCode, raw
 }
 
+func TestRelayDocbankUIOriginAvailability(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		t.Run(fmt.Sprintf("configured=%t", configured), func(t *testing.T) {
+			root, relay, leaf, _ := newRelayClaimChain(t)
+			var vault *docbanktest.Fake
+			if configured {
+				vault = docbanktest.New(t)
+			}
+			serveRelayDocbank(t, root, vault)
+			var probes atomic.Int32
+			previous := *root.handler.Load()
+			var counted http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/capabilities") {
+					probes.Add(1)
+				}
+				previous.ServeHTTP(w, r)
+			})
+			root.handler.Store(&counted)
+			serveRelayDocbank(t, relay, nil)
+			serveRelayDocbank(t, leaf, nil)
+			status, raw := relayDocbankRequest(t, leaf, http.MethodGet, "/api/v1/instance", "", "")
+			require.Equal(t, http.StatusOK, status, string(raw))
+			require.Zero(t, probes.Load())
+			status, raw = relayDocbankRequest(t, leaf, http.MethodGet, "/api/v1/ui/snapshot?view=inbox", "", "")
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var snapshot struct {
+				Capabilities api.UICapabilities `json:"capabilities"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &snapshot))
+			require.Len(t, snapshot.Capabilities.AttachmentRoutes, 1)
+			route := snapshot.Capabilities.AttachmentRoutes[0]
+			require.Equal(t, leaf.project.UID, route.ProjectUID)
+			require.True(t, route.Read)
+			require.Equal(t, configured, route.Write)
+			require.Equal(t, root.store.InstanceUID(), route.Origin)
+			status, raw = relayDocbankRequest(t, leaf, http.MethodGet, "/api/v1/ui/snapshot?view=inbox", "", "")
+			require.Equal(t, http.StatusOK, status, string(raw))
+			require.EqualValues(t, 1, probes.Load())
+			binding, err := leaf.store.FederationBindingByProject(t.Context(), leaf.project.ID)
+			require.NoError(t, err)
+			binding.PushEnabled = false
+			_, err = leaf.store.UpsertFederationBinding(t.Context(), binding)
+			require.NoError(t, err)
+			status, raw = relayDocbankRequest(t, leaf, http.MethodGet, "/api/v1/ui/snapshot?view=inbox", "", "")
+			require.Equal(t, http.StatusOK, status, string(raw))
+			require.NoError(t, json.Unmarshal(raw, &snapshot))
+			require.True(t, snapshot.Capabilities.AttachmentRoutes[0].Read)
+			require.False(t, snapshot.Capabilities.AttachmentRoutes[0].Write)
+		})
+	}
+}
+
 // The initiating replica must get an immediately usable reference while only
 // the root's Docbank receives bytes. No metadata sync is needed for content.
 func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
@@ -213,22 +265,22 @@ func TestRelayDocbankLinkUsesRootAndRefusesSubtreeEscape(t *testing.T) {
 }
 
 // Ordinary local mutation authority belongs to holder+instance across client
-// labels; only the initiating daemon may recover that held lease's exact tuple.
+// labels on the initiating daemon.
 func TestRelayDocbankLeaseSurvivesClientSwitch(t *testing.T) {
-	for _, pair := range []struct{ lease, request string }{{"cli", "cli"}, {"cli", ""}, {"", "cli"}} {
-		t.Run(pair.lease+"-to-"+pair.request, func(t *testing.T) {
+	for _, lease := range []string{"cli", ""} {
+		t.Run("lease="+lease, func(t *testing.T) {
 			root, _, leaf, issue := newRelayClaimChain(t)
 			vault := docbanktest.New(t)
 			serveRelayDocbank(t, root, vault)
-			status, acquired := relayClaimAction(t, leaf, issue.UID, "acquire", pair.lease)
+			status, acquired := relayClaimAction(t, leaf, issue.UID, "acquire", lease)
 			require.Equal(t, http.StatusOK, status)
 			require.True(t, acquired.Granted)
 			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
-			status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=file.pdf&client_kind="+pair.request, "switched fixture", "application/octet-stream")
+			status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=file.pdf", "switched fixture", "application/octet-stream")
 			require.Equal(t, http.StatusOK, status, string(raw))
 			version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222221")
 			vault.Seed("/kata/existing.pdf", docbank.Node{ID: 99, Name: "existing.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("linked fixture")})
-			status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"/links", fmt.Sprintf(`{"path":"/kata/existing.pdf","client_kind":%q}`, pair.request), "application/json")
+			status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"/links", `{"path":"/kata/existing.pdf"}`, "application/json")
 			require.Equal(t, http.StatusOK, status, string(raw))
 			var linked api.AddAttachmentResponseBody
 			require.NoError(t, json.Unmarshal(raw, &linked))

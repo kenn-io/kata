@@ -4024,10 +4024,9 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 }
 
 type LinkAttachmentInput struct {
-	Actor      *string `json:"actor,omitempty"`
-	ClientKind *string `json:"client_kind,omitempty"`
-	NodeID     *int64  `json:"node_id,omitempty"`
-	Path       *string `json:"path,omitempty"`
+	Actor  *string `json:"actor,omitempty"`
+	NodeID *int64  `json:"node_id,omitempty"`
+	Path   *string `json:"path,omitempty"`
 
 	// ReuseExisting When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
 	ReuseExisting *bool      `json:"reuse_existing,omitempty"`
