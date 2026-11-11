@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -496,12 +497,11 @@ func TestDoctorUnreachableRecoveryGuidance(t *testing.T) {
 			check := doctorFinding(t, collectDoctor(t.Context()), "daemon.connection")
 			assert.EqualValues(t, "fail", check.Status)
 			assert.Contains(t, check.Summary, "503")
-			assert.Contains(t, check.Fix, filepath.Join(ns.DataDir, "daemon.log"))
+			assert.Contains(t, check.Fix, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
 			if selection == "current home" {
 				assert.Contains(t, check.Fix, "kata daemon restart")
 			} else {
-				assert.Contains(t, check.Fix, "--daemon=work")
-				assert.Contains(t, check.Fix, "daemon recover")
+				assert.Contains(t, check.Fix, profileRecoveryCommand("work", runtime.GOOS))
 				assert.NotContains(t, check.Fix, "kata daemon restart")
 			}
 		})
