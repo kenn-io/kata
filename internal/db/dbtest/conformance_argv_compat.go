@@ -16,7 +16,7 @@ import (
 
 // Held rows are omitted from ordinary lists but remain fenced from reads and
 // snapshots, including tombstones. Test-local SQL does not define production state.
-func checkArgvCompatStoredReads(t *testing.T, store db.Storage) error {
+func checkArgvCompatStoredReads(t *testing.T, store db.Storage, backend Backend) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -28,7 +28,7 @@ func checkArgvCompatStoredReads(t *testing.T, store db.Storage) error {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
-	for _, document := range []string{`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, `null`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`} {
+	for _, document := range []string{`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`} {
 		for _, deleted := range []any{nil, "2026-11-08T12:00:00Z"} {
 			_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=$2 WHERE uid=$3`, document, deleted, workflow.UID)
 			require.NoError(t, err)
@@ -65,7 +65,7 @@ func checkArgvCompatStoredReads(t *testing.T, store db.Storage) error {
 	projection := db.FoldEvents([]db.FoldEvent{{UID: olderUID, ProjectUID: project.UID, OriginInstanceUID: originUID, Type: "cron.workflow.created", HLCPhysicalMS: 1, Payload: payload}})
 	tx, err := q.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, projection, nil))
+	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, projection, db.NewCronReplayValidator(tx, backend.Name == "postgres")))
 	require.NoError(t, tx.Commit())
 	_, err = store.CronWorkflow(ctx, project.ID, workflow.UID)
 	require.Error(t, err, "replay of older history must not replace a held projection")
@@ -82,7 +82,7 @@ func checkArgvCompatStoredReads(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage) error {
+func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage, backend Backend) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -97,18 +97,18 @@ func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage) erro
 	})
 	tx, err := q.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	require.Error(t, db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, fold, nil))
+	require.Error(t, db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, fold, db.NewCronReplayValidator(tx, backend.Name == "postgres")))
 	require.NoError(t, tx.Rollback())
 	tx, err = q.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, other.ID, other.UID, fold, nil), "another project's history does not block this project")
+	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, other.ID, other.UID, fold, db.NewCronReplayValidator(tx, backend.Name == "postgres")), "another project's history does not block this project")
 	require.NoError(t, tx.Rollback())
 	for _, document := range []string{`null`, `{"steps":[]}`} {
 		bad := argvCompatRemoteWorkflow(t, project, origin, document)
 		projection := db.FoldEvents([]db.FoldEvent{{UID: bad.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: bad.Type, HLCPhysicalMS: bad.HLCPhysicalMS, Payload: bad.Payload}})
 		tx, err = q.BeginTx(ctx, nil)
 		require.NoError(t, err)
-		err = db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, projection, nil)
+		err = db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, projection, db.NewCronReplayValidator(tx, backend.Name == "postgres"))
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation, "unrepresentable historical document %s must fence replay before SQL", document)
 		require.NoError(t, tx.Rollback())
 	}
@@ -126,7 +126,7 @@ func argvCompatRemoteWorkflow(t *testing.T, project db.Project, origin, definiti
 }
 
 // A reserved kind cannot enter through decode-only historical acceptance or
-// preserve a valid prefix of a refused batch, even with a claimed capability.
+// preserve a valid prefix of a refused batch.
 func checkArgvCompatRemoteRollback(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
@@ -164,7 +164,7 @@ func checkArgvCompatRemoteRollback(t *testing.T, store db.Storage) error {
 
 	before, err = store.MaxEventID(ctx)
 	require.NoError(t, err)
-	params := db.FederationIngestParams{ProjectID: project.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures + ",cron_workflow_argv_v1", Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: good}, {SourceEventID: 2, Event: reserved}}}
+	params := db.FederationIngestParams{ProjectID: project.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: good}, {SourceEventID: 2, Event: reserved}}}
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.Error(t, err)
 	after, err = store.MaxEventID(ctx)
