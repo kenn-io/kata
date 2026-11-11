@@ -490,7 +490,6 @@ func syncDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) (resultErr error) {
-	startPushCursor := binding.PushCursorEventID
 	var pushErr error
 	if pushThisTurn {
 		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
@@ -574,6 +573,7 @@ func syncDirectSpoke(
 	var pulledEvents []db.Event
 	insertedThisPull := map[string]bool{}
 	if err := store.RetryTransient(ctx, func() error {
+		pulledEvents = nil
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
@@ -656,7 +656,7 @@ func syncDirectSpoke(
 			if duplicate[i] && shouldDeliverPage {
 				var err error
 				if ev.OriginInstanceUID == localInstanceUID {
-					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, startPushCursor, eventProjects[i], resumePull, ev)
+					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, eventProjects[i], resumePull, ev)
 				} else if insertedThisPull[ev.EventUID] {
 					deliver[i] = true
 				} else {
@@ -706,6 +706,7 @@ func syncDirectSpoke(
 				}
 			}
 		}
+		var localReplayUIDs []string
 		if shouldDeliverPage && len(deliverUIDs) > 0 {
 			byUID := map[string]db.Event{}
 			for _, project := range deliverProjects {
@@ -717,17 +718,35 @@ func syncDirectSpoke(
 					byUID[event.UID] = event
 				}
 			}
-			pulledEvents = nil
 			for i, event := range body.Events {
 				if deliver[i] {
 					pulledEvents = append(pulledEvents, byUID[event.EventUID])
+					if event.OriginInstanceUID == localInstanceUID {
+						localReplayUIDs = append(localReplayUIDs, event.EventUID)
+					}
 				}
 			}
 		}
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
-		return store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID)
+		if len(localReplayUIDs) == 0 {
+			return store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID)
+		}
+		claimed, err := store.CompleteFederationPullPage(ctx, binding.ProjectID, body.NextAfterID, localReplayUIDs)
+		if err != nil {
+			return err
+		}
+		// Another binding can apply overlapping history. Only the transaction
+		// that claimed a local replay may notify its consumers.
+		claimedSet := make(map[string]bool, len(claimed))
+		for _, uid := range claimed {
+			claimedSet[uid] = true
+		}
+		pulledEvents = slices.DeleteFunc(pulledEvents, func(event db.Event) bool {
+			return event.OriginInstanceUID == localInstanceUID && !claimedSet[event.UID]
+		})
+		return nil
 	}); err != nil {
 		return recordPullError(err)
 	}
@@ -785,46 +804,55 @@ func shouldDeliverDuplicateLocalEcho(
 	ctx context.Context,
 	store db.Storage,
 	binding db.FederationBinding,
-	pushCursor, projectID int64,
+	projectID int64,
 	resumePull bool,
 	ev api.EventEnvelope,
 ) (bool, error) {
-	progress := binding
+	due, recorded, err := store.FederationLocalReplayStatus(ctx, ev.EventUID)
+	if err != nil || recorded || !resumePull {
+		return due, err
+	}
+
+	// Older data may lack a marker on later reset pages. Limit repair to
+	// unfinished, unadvanced history with a missing local projection.
 	if projectID != binding.ProjectID {
-		source, err := store.FederationBindingByProject(ctx, projectID)
+		binding, err = store.FederationBindingByProject(ctx, projectID)
 		if errors.Is(err, db.ErrNotFound) {
-			// Applied before its source left: backfilling it through a
-			// destination needs no delivery or retired-stream acknowledgement.
 			return false, nil
 		}
 		if err != nil {
 			return false, err
 		}
-		progress, pushCursor = source, source.PushCursorEventID
 	}
-	if progress.PullCursorEventID >= ev.EventID {
+	if binding.PullCursorEventID >= ev.EventID {
 		return false, nil
 	}
 	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
 	if err != nil || len(events) != 1 {
 		return false, err
 	}
-	// This turn's push can acknowledge the replay before the pull applies it, so
-	// the cursor from before the turn decides. A replay found unacknowledged stays
-	// owed after a later push acknowledges it.
 	event := events[0]
-	unresolvedIssue := event.IssueID == nil && event.IssueUID != nil
-	due, err := store.FederationLocalReplayDue(ctx, ev.EventUID, event.ID > pushCursor || unresolvedIssue)
-	if err != nil || due || !resumePull || !unresolvedIssue {
-		return due, err
+	if event.IssueID != nil || event.IssueUID == nil {
+		return false, nil
 	}
-	// Older data may lack a replay marker on later reset pages. A retained
-	// event on the unfinished page still needs delivery if its issue is absent.
 	_, err = store.IssueByUID(ctx, *event.IssueUID, db.IncludeDeletedYes)
 	if errors.Is(err, db.ErrNotFound) {
 		return true, nil
 	}
-	return false, err
+	if err != nil || event.Type != "issue.commented" {
+		return false, err
+	}
+	var payload struct {
+		CommentUID string `json:"comment_uid"`
+	}
+	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+		return false, err
+	}
+	if payload.CommentUID == "" {
+		return false, nil
+	}
+	comments, err := store.CommentIssueIDsByUIDs(ctx, []string{payload.CommentUID})
+	return len(comments) == 0, err
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {

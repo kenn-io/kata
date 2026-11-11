@@ -128,6 +128,7 @@ var alreadyImplemented = map[string]bool{
 	"ActiveFederationQuarantinesByProject": true, // federation_quarantine.go
 	"AdoptProjectIntoFederation":           true, // federation_adoption.go
 	"AdvanceFederationPullCursor":          true, // federation_control.go
+	"CompleteFederationPullPage":           true, // federation_control.go
 	"AdvanceFederationPushCursor":          true, // federation_control.go
 	"AuthorizeFederationToken":             true, // federation_control.go
 	"ClearFederationSyncError":             true, // federation_control.go
@@ -339,7 +340,7 @@ var alreadyImplemented = map[string]bool{
 	"RecentSiblingCloses":                  true, // events.go
 	"EnsureScheduledReachedFloor":          true, // due_notifications.go
 	"ReconcileDueNotification":             true, // due_notifications.go
-	"FederationLocalReplayDue":             true, // federation_events.go
+	"FederationLocalReplayStatus":          true, // federation_events.go
 	"ReconcileLocalFederationEcho":         true, // federation_events.go
 	"RecordIssueSyncError":                 true, // issue_sync.go
 	"RecordIssueSyncSuccess":               true, // issue_sync.go

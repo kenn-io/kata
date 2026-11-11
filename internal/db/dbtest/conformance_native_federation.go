@@ -393,29 +393,59 @@ func checkFederationLocalReplayStorage(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
-	_, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local event", Author: "tester"})
-	require.NoError(t, err)
 	sqlStore := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	_, err = sqlStore.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, event.UID)
+	insertReplay := func(title string, due bool) string {
+		t.Helper()
+		_, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: title, Author: "tester"})
+		require.NoError(t, err)
+		_, err = sqlStore.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, event.UID)
+		require.NoError(t, err)
+		inserted, err := store.InsertRemoteEvent(db.WithFederationLocalReplayDelivery(ctx, due), project.ID, portableNativeEvent(event))
+		require.NoError(t, err)
+		require.True(t, inserted)
+		return event.UID
+	}
+
+	owed := insertReplay("Owed replay", true)
+	quiet := insertReplay("Quiet replay", false)
+	legacy := insertReplay("Legacy replay", true)
+	_, err = sqlStore.ExecContext(ctx, `DELETE FROM federation_local_replays WHERE event_uid=$1`, legacy)
 	require.NoError(t, err)
-	inserted, err := store.InsertRemoteEvent(ctx, project.ID, portableNativeEvent(event))
+	check := func(uid string, due, recorded bool) {
+		t.Helper()
+		gotDue, gotRecorded, err := store.FederationLocalReplayStatus(ctx, uid)
+		require.NoError(t, err)
+		require.Equal(t, due, gotDue)
+		require.Equal(t, recorded, gotRecorded)
+	}
+	check(owed, true, true)
+	check(quiet, false, true)
+	check(legacy, false, false)
+
+	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubProjectUID: project.UID,
+		HubURL: "http://127.0.0.1:1", HubProjectID: 42, Enabled: true, Actor: "tester",
+	})
 	require.NoError(t, err)
-	require.True(t, inserted)
-	due, err := store.FederationLocalReplayDue(ctx, event.UID, false)
+
+	_, err = store.CompleteFederationPullPage(ctx, -1, 100, []string{owed})
+	require.ErrorIs(t, err, db.ErrNotFound)
+	check(owed, true, true)
+
+	candidates := []string{owed, quiet, legacy}
+	claimed, err := store.CompleteFederationPullPage(ctx, binding.ProjectID, 100, candidates)
 	require.NoError(t, err)
-	require.False(t, due, "an inserted replay is not owed until a turn finds it unacknowledged")
-	due, err = store.FederationLocalReplayDue(ctx, event.UID, true)
+	require.ElementsMatch(t, []string{owed, legacy}, claimed)
+	for _, uid := range candidates {
+		check(uid, false, true)
+	}
+	claimed, err = store.CompleteFederationPullPage(ctx, binding.ProjectID, 101, candidates)
 	require.NoError(t, err)
-	require.True(t, due)
-	due, err = store.FederationLocalReplayDue(ctx, event.UID, false)
+	require.Empty(t, claimed)
+	binding, err = store.FederationBindingByProject(ctx, binding.ProjectID)
 	require.NoError(t, err)
-	require.True(t, due, "a delivery found owed stays owed across turns")
-	_, other, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "ordinary local event", Author: "tester"})
-	require.NoError(t, err)
-	due, err = store.FederationLocalReplayDue(ctx, other.UID, true)
-	require.NoError(t, err)
-	require.False(t, due, "only recorded replays can be owed")
+	require.EqualValues(t, 101, binding.PullCursorEventID)
 	return nil
 }

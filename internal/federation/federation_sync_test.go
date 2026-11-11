@@ -1958,9 +1958,9 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		require.NotNil(t, status.LastPullStartedAt)
 		require.NotNil(t, status.LastPullSuccessAt)
 		require.True(t, status.LastPullStartedAt.After(*status.LastPullSuccessAt), "the later page was interrupted")
-		due, err := spoke.FederationLocalReplayDue(ctx, localEvent.UID, true)
+		_, recorded, err := spoke.FederationLocalReplayStatus(ctx, localEvent.UID)
 		require.NoError(t, err)
-		require.False(t, due, "legacy inference has no marker after the first reset page")
+		require.False(t, recorded, "legacy inference has no marker after the first reset page")
 	}
 
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")

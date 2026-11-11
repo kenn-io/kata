@@ -27,15 +27,15 @@ func TestFederationReplayJSONLRoundTrip(t *testing.T) {
 	retained, err := scopedRestore.EventsByUIDs(ctx, events[0].ProjectID, []string{events[0].UID})
 	require.NoError(t, err)
 	require.Len(t, retained, 1, "the scoped restore retains the event")
-	due, err := scopedRestore.FederationLocalReplayDue(ctx, events[0].UID, true)
+	_, recorded, err := scopedRestore.FederationLocalReplayStatus(ctx, events[0].UID)
 	require.NoError(t, err)
-	require.False(t, due, "project exports omit replay delivery state")
+	require.False(t, recorded, "project exports omit replay delivery state")
 
 	newInstance := openImportTargetDB(t)
 	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(backup), newInstance, jsonl.ImportOptions{NewInstance: true}))
-	due, err = newInstance.FederationLocalReplayDue(ctx, events[0].UID, true)
+	_, recorded, err = newInstance.FederationLocalReplayStatus(ctx, events[0].UID)
 	require.NoError(t, err)
-	require.False(t, due, "a new instance does not inherit local replay markers")
+	require.False(t, recorded, "a new instance does not inherit local replay markers")
 }
 
 func TestFederationReplayJSONLRoundTripAcrossPostgres(t *testing.T) {
@@ -45,7 +45,6 @@ func TestFederationReplayJSONLRoundTripAcrossPostgres(t *testing.T) {
 	backup := exportToBuffer(ctx, t, source)
 	require.NoError(t, jsonl.Import(ctx, backup, postgres))
 
-	// Export before probing the quiet marker, which records delivery debt.
 	var back bytes.Buffer
 	require.NoError(t, jsonl.Export(ctx, postgres, &back, jsonl.ExportOptions{IncludeDeleted: true}))
 	requireFederationReplayJSONL(t, postgres, events)
@@ -77,18 +76,17 @@ func federationReplayJSONLFixture(t *testing.T, withMarkers bool) (*sqlitestore.
 func requireFederationReplayJSONL(t *testing.T, store db.Storage, events []db.Event) {
 	t.Helper()
 	ctx := t.Context()
-	due, err := store.FederationLocalReplayDue(ctx, events[0].UID, false)
+	due, recorded, err := store.FederationLocalReplayStatus(ctx, events[0].UID)
 	require.NoError(t, err)
+	require.True(t, recorded)
 	require.True(t, due, "a full restore preserves pending replay delivery")
-	due, err = store.FederationLocalReplayDue(ctx, events[1].UID, false)
+	due, recorded, err = store.FederationLocalReplayStatus(ctx, events[1].UID)
 	require.NoError(t, err)
-	require.False(t, due, "an acknowledged replay stays silent")
-	due, err = store.FederationLocalReplayDue(ctx, events[1].UID, true)
+	require.True(t, recorded)
+	require.False(t, due, "a recorded quiet replay stays silent")
+	_, recorded, err = store.FederationLocalReplayStatus(ctx, events[2].UID)
 	require.NoError(t, err)
-	require.True(t, due, "the acknowledged replay marker still exists")
-	due, err = store.FederationLocalReplayDue(ctx, events[2].UID, true)
-	require.NoError(t, err)
-	require.False(t, due, "ordinary history must not become a replay")
+	require.False(t, recorded, "ordinary history must not become a replay")
 }
 
 func TestFederationReplayLegacyJSONLBackupRecoversInterruptedReset(t *testing.T) {
@@ -142,15 +140,15 @@ func TestFederationReplayLegacyJSONLBackupRecoversInterruptedReset(t *testing.T)
 		retained, err := restored.EventsByUIDs(ctx, project.ID, []string{events[0].UID})
 		require.NoError(t, err)
 		require.Len(t, retained, 1, "the scoped restore retains the unprojected event")
-		due, err := restored.FederationLocalReplayDue(ctx, events[0].UID, true)
+		_, recorded, err := restored.FederationLocalReplayStatus(ctx, events[0].UID)
 		require.NoError(t, err)
-		require.False(t, due, "scoped backups do not recover local replay markers")
+		require.False(t, recorded, "scoped backups do not recover local replay markers")
 	})
 	t.Run("current-does-not-infer", func(t *testing.T) {
 		restored := openImportTargetDB(t)
 		require.NoError(t, jsonl.Import(t.Context(), bytes.NewReader(current), restored))
-		due, err := restored.FederationLocalReplayDue(t.Context(), events[0].UID, true)
+		_, recorded, err := restored.FederationLocalReplayStatus(t.Context(), events[0].UID)
 		require.NoError(t, err)
-		require.False(t, due, "current backups restore only the recorded markers")
+		require.False(t, recorded, "current backups restore only the recorded markers")
 	})
 }

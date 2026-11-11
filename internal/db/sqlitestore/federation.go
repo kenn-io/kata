@@ -720,25 +720,48 @@ func (d *Store) effectiveLocalEventActorTx(
 // spoke binding.
 func (d *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `
-			UPDATE federation_bindings
-			   SET pull_cursor_event_id = MAX(pull_cursor_event_id, ?),
-			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE project_id = ?`,
-			nextCursor, projectID)
-		if err != nil {
-			return fmt.Errorf("advance federation pull cursor: %w", err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("advance federation pull cursor rows affected: %w", err)
-		}
-		if n == 0 {
-			return db.ErrNotFound
-		}
-		return nil
+		return advanceFederationPullCursor(ctx, d, projectID, nextCursor)
 	})
+}
+
+// CompleteFederationPullPage advances the cursor and claims local replay
+// delivery in the same transaction.
+func (d *Store) CompleteFederationPullPage(ctx context.Context, projectID, nextCursor int64, replayUIDs []string) ([]string, error) {
+	return retryWrite1(ctx, d, func() ([]string, error) {
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := advanceFederationPullCursor(ctx, tx, projectID, nextCursor); err != nil {
+			return nil, err
+		}
+		claimed, err := db.ClaimFederationLocalReplays(ctx, tx, replayUIDs)
+		if err != nil {
+			return nil, err
+		}
+		return claimed, tx.Commit()
+	})
+}
+
+func advanceFederationPullCursor(ctx context.Context, execer contextExecer, projectID, nextCursor int64) error {
+	res, err := execer.ExecContext(ctx, `
+		UPDATE federation_bindings
+		   SET pull_cursor_event_id = MAX(pull_cursor_event_id, ?),
+		       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE project_id = ?`, nextCursor, projectID)
+	if err != nil {
+		return fmt.Errorf("advance federation pull cursor: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("advance federation pull cursor rows affected: %w", err)
+	}
+	if n == 0 {
+		return db.ErrNotFound
+	}
+	return nil
 }
 
 // InsertRemoteEvent appends one hub event to the local log. See InsertRemoteEvents.
@@ -3330,16 +3353,7 @@ func (d *Store) quarantineRelayBindingTx(ctx context.Context, tx *sql.Tx, projec
 	return binding.RelayConfig != nil, err
 }
 
-// FederationLocalReplayDue reports whether a pulled local-origin event still
-// owes its consumers a notification. A turn that finds the replay
-// unacknowledged records the debt, so a later push acknowledgment cannot erase it.
-func (d *Store) FederationLocalReplayDue(ctx context.Context, eventUID string, unacknowledged bool) (bool, error) {
-	var due int
-	err := d.QueryRowContext(ctx, `
-		UPDATE federation_local_replays SET delivery_due = max(delivery_due, $2)
-		 WHERE event_uid=$1 RETURNING delivery_due`, eventUID, boolInt(unacknowledged)).Scan(&due)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return due == 1, err
+// FederationLocalReplayStatus reads the recorded notification state.
+func (d *Store) FederationLocalReplayStatus(ctx context.Context, eventUID string) (due, recorded bool, err error) {
+	return db.ReadFederationLocalReplayStatus(ctx, d, eventUID)
 }
