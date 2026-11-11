@@ -84,9 +84,6 @@
 
   function rowState(current: LocalEmbeddingsStatus): SearchByMeaningState {
     const job = current.job
-    // Sharing a saved setup that's already installed has nothing to download.
-    if (job?.state === 'downloading' && current.provider === 'built_in' && !job.total)
-      return { kind: 'on' }
     if (job?.state === 'downloading')
       return { kind: 'downloading', doneBytes: job.downloaded, totalBytes: job.total }
     if (current.indexing)

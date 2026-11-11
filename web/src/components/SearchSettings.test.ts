@@ -129,6 +129,26 @@ describe('SearchSettings', () => {
     expect(screen.queryByRole('button', { name: 'Share with other apps' })).toBeNull()
   })
 
+  test('shows a saved setup with an unknown download size as in progress', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json(
+          status({
+            provider: 'built_in',
+            can_change: false,
+            download_bytes: 0,
+            job: { state: 'downloading', downloaded: 0, total: 0 },
+          }),
+        ),
+      ),
+    )
+    renderSettings()
+    await settle()
+    expect(screen.getByText('Turning on', { exact: true })).not.toBeNull()
+    expect(screen.getByText(/^Downloading 0 MB of 0 MB/)).not.toBeNull()
+  })
+
   test.each([undefined, 'daemon.example'])(
     'shows the manual restart step for host=%s after download',
     async (remoteHost) => {
