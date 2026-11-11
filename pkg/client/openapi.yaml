@@ -9954,6 +9954,10 @@ paths:
           name: Authorization
           schema:
             type: string
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
       requestBody:
         content:
           application/json:

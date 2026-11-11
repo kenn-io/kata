@@ -279,6 +279,7 @@ type RelayOfferResponse struct {
 type RelayAcceptRequest struct {
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	Body          db.RelayBatch
 }
 

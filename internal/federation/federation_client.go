@@ -206,12 +206,23 @@ func (c *Client) RelayReset(ctx context.Context, projectID int64) (db.RelayReset
 		return db.RelayResetCheckpoint{}, err
 	}
 	response, callErr := apiClient.GetRelayResetWithResponse(ctx, &generated.GetRelayResetRequestOptions{PathParams: &generated.GetRelayResetPath{ProjectID: projectID}})
-	var checkpoint db.RelayResetCheckpoint
 	if response == nil {
-		return checkpoint, callErr
+		return db.RelayResetCheckpoint{}, callErr
 	}
-	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &checkpoint)
-	return checkpoint, err
+	return decodeRelayReset(response.HTTPResponse, response.Body)
+}
+
+// decodeRelayReset validates the checkpoint it received instead of trusting the
+// sender's feature headers.
+func decodeRelayReset(response *http.Response, raw []byte) (db.RelayResetCheckpoint, error) {
+	var checkpoint db.RelayResetCheckpoint
+	if err := decodeReplicationResponse(response, raw, &checkpoint); err != nil {
+		return checkpoint, err
+	}
+	if _, err := db.RelayResetRequiredFeatures(checkpoint.Snapshot); err != nil {
+		return db.RelayResetCheckpoint{}, db.ErrFederationIngestValidation
+	}
+	return checkpoint, nil
 }
 
 // OfferRelayDeliveries polls the existing enrolled connection. Offers retain
