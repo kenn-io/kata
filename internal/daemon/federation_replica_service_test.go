@@ -2472,7 +2472,7 @@ var _ config.FederationCredentialStore = baseCredentialStore{}
 type argvBeforeAdoptionStore struct{ db.Storage }
 
 func (s argvBeforeAdoptionStore) AdoptProjectIntoFederation(ctx context.Context, p db.AdoptProjectIntoFederationParams) (db.AdoptProjectIntoFederationResult, error) {
-	_, _, err := s.Storage.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: p.ProjectID, Name: "concurrent", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
+	_, _, err := s.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: p.ProjectID, Name: "concurrent", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
