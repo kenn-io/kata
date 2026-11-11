@@ -175,6 +175,20 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				require.NoError(t, err)
 				require.Equal(t, "Must not be known", created.Title)
 			}
+			if kind == "rejected-move" {
+				current, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push,pull", Actor: "worker"})
+				require.NoError(t, err)
+				params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: current.Enrollment.ID}
+				retry, err := store.IngestFederationEvents(ctx, params)
+				require.NoError(t, err)
+				require.Empty(t, retry.RejectedEvents)
+				require.Equal(t, 2, retry.Accepted)
+				require.Equal(t, 1, retry.Duplicates)
+				moved, err := store.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, source.ID, moved.ProjectID)
+				require.Equal(t, "Must not acquire route authority", moved.Title)
+			}
 			if moveBeforeSourceCreation {
 				_, err := store.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
 				require.ErrorIs(t, err, db.ErrNotFound)

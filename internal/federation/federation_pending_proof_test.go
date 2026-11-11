@@ -24,12 +24,48 @@ func TestSyncFederationInterruptedLeaveDoesNotBlockUnrelatedPush(t *testing.T) {
 			retained, err := hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			require.Equal(t, projects[0].ID, retained.ProjectID)
-			// The same pending credential is required for an explicit source move.
-			local, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Required source proof", Author: "worker"})
+		})
+	}
+}
+
+func TestSyncFederationPendingMoveSourceRetainsOnlyDependentWork(t *testing.T) {
+	for _, pending := range []string{"leave", "enrollment"} {
+		t.Run(pending, func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "source", "destination")
+			spoke := newMoveDeliverySpoke(t, hub, projects)
+			local, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Moved issue", Author: "worker"})
 			require.NoError(t, err)
-			spoke.move(t, local, 1, 0)
-			err = spoke.sync(t, 0)
-			require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized, "required move-source credentials remain strict")
+			require.NoError(t, spoke.sync(t, 0))
+			moved := spoke.move(t, local, 0, 1)
+			_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: moved.ID, Author: "worker", Body: "After move"})
+			require.NoError(t, err)
+			independent, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Independent issue", Author: "worker"})
+			require.NoError(t, err)
+			credential := spoke.credentials[projects[0].UID]
+			credential.LeavePending = pending == "leave"
+			credential.RelayEnrollmentPending = pending == "enrollment"
+			spoke.credentials[projects[0].UID] = credential
+			err = spoke.sync(t, 1)
+			require.ErrorContains(t, err, "pending federation events remain")
+			require.ErrorContains(t, err, projects[0].UID)
+			_, err = hub.DB.IssueByUID(ctx, independent.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			onHub, err := hub.DB.IssueByUID(ctx, local.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, projects[0].ID, onHub.ProjectID)
+			comments, err := hub.DB.CommentsByIssue(ctx, onHub.ID)
+			require.NoError(t, err)
+			require.Empty(t, comments)
+			credential.LeavePending, credential.RelayEnrollmentPending = false, false
+			spoke.credentials[projects[0].UID] = credential
+			require.NoError(t, spoke.sync(t, 1))
+			onHub, err = hub.DB.IssueByUID(ctx, local.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, projects[1].ID, onHub.ProjectID)
+			comments, err = hub.DB.CommentsByIssue(ctx, onHub.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
 		})
 	}
 }
@@ -63,13 +99,9 @@ func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 			require.NoError(t, err)
 			tokens, err := federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, []db.Event{event}, clientpkg.Opts{})
-			if kind == "signing" {
-				require.ErrorIs(t, err, signingpolicy.ErrInvalid)
-				return
-			}
 			require.NoError(t, err)
 			require.NotContains(t, tokens, projects[1].UID)
-			if kind == "origin" {
+			if kind == "origin" || kind == "signing" {
 				require.NoError(t, spoke.sync(t, 0))
 				events, err := hub.DB.EventsByUIDs(ctx, projects[0].ID, []string{event.UID})
 				require.NoError(t, err)
@@ -89,6 +121,8 @@ func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 			case "project":
 				require.ErrorContains(t, err, "move source credential project differs from binding")
+			case "signing":
+				require.ErrorIs(t, err, signingpolicy.ErrInvalid)
 			}
 		})
 	}

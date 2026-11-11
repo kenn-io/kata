@@ -1899,9 +1899,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			continue
 		}
 		if credential.LeavePending || credential.RelayEnrollmentPending {
-			if requiredSources[fromUID] {
-				return nil, db.ErrFederationMoveSourceUnauthorized
-			}
+			// Let the hub reject dependent events while accepting independent work.
 			continue
 		}
 		if credential.HubProjectID != 0 && credential.HubProjectID != source.HubProjectID {
@@ -1948,6 +1946,9 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		}
 		if sourceOpts.FederationSigning != nil {
 			if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, sourceOpts); err != nil {
+				if !requiredSources[fromUID] {
+					continue
+				}
 				return nil, err
 			}
 		}
