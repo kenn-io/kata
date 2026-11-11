@@ -656,7 +656,7 @@ func syncDirectSpoke(
 			if duplicate[i] && shouldDeliverPage {
 				var err error
 				if ev.OriginInstanceUID == localInstanceUID {
-					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, startPushCursor, eventProjects[i], ev)
+					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, startPushCursor, eventProjects[i], resumePull, ev)
 				} else if insertedThisPull[ev.EventUID] {
 					deliver[i] = true
 				} else {
@@ -786,8 +786,10 @@ func shouldDeliverDuplicateLocalEcho(
 	store db.Storage,
 	binding db.FederationBinding,
 	pushCursor, projectID int64,
+	resumePull bool,
 	ev api.EventEnvelope,
 ) (bool, error) {
+	progress := binding
 	if projectID != binding.ProjectID {
 		source, err := store.FederationBindingByProject(ctx, projectID)
 		if errors.Is(err, db.ErrNotFound) {
@@ -795,10 +797,13 @@ func shouldDeliverDuplicateLocalEcho(
 			// destination needs no delivery or retired-stream acknowledgement.
 			return false, nil
 		}
-		if err != nil || source.PullCursorEventID >= ev.EventID {
+		if err != nil {
 			return false, err
 		}
-		pushCursor = source.PushCursorEventID
+		progress, pushCursor = source, source.PushCursorEventID
+	}
+	if progress.PullCursorEventID >= ev.EventID {
+		return false, nil
 	}
 	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
 	if err != nil || len(events) != 1 {
@@ -806,10 +811,20 @@ func shouldDeliverDuplicateLocalEcho(
 	}
 	// This turn's push can acknowledge the replay before the pull applies it, so
 	// the cursor from before the turn decides. A replay found unacknowledged stays
-	// owed after a later push acknowledges it. Other acknowledged replays stay
-	// silent unless their issue is unprojected, which proves they never reached consumers.
+	// owed after a later push acknowledges it.
 	event := events[0]
-	return store.FederationLocalReplayDue(ctx, ev.EventUID, event.ID > pushCursor || event.IssueID == nil && event.IssueUID != nil)
+	unresolvedIssue := event.IssueID == nil && event.IssueUID != nil
+	due, err := store.FederationLocalReplayDue(ctx, ev.EventUID, event.ID > pushCursor || unresolvedIssue)
+	if err != nil || due || !resumePull || projectID != binding.ProjectID || ev.Type != "issue.created" || !unresolvedIssue {
+		return due, err
+	}
+	// Older data may lack a replay marker on later reset pages. A retained
+	// creation on the unfinished page with no issue projection still needs apply.
+	_, err = store.IssueByUID(ctx, *event.IssueUID, db.IncludeDeletedYes)
+	if errors.Is(err, db.ErrNotFound) {
+		return true, nil
+	}
+	return false, err
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {
