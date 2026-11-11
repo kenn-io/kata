@@ -3,6 +3,7 @@ package federation_test
 import (
 	"encoding/json/jsontext"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,9 +49,7 @@ func TestRelaySavedScheduleRequiresPeerSupport(t *testing.T) {
 					response := httptest.NewRecorder()
 					handler.ServeHTTP(response, r)
 					response.Header().Set(db.EventFeaturesHeader, preScheduleEventFeatures)
-					for key, values := range response.Header() {
-						w.Header()[key] = values
-					}
+					maps.Copy(w.Header(), response.Header())
 					w.WriteHeader(response.Code)
 					_, _ = w.Write(response.Body.Bytes())
 					return
