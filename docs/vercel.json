@@ -246,6 +246,16 @@
       "permanent": true
     },
     {
+      "source": "/operations/socket-activation/",
+      "destination": "/docs/operations/socket-activation/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/socket-activation.md",
+      "destination": "/docs/operations/socket-activation.md",
+      "permanent": true
+    },
+    {
       "source": "/operations/doctor/",
       "destination": "/docs/operations/doctor/",
       "permanent": true
