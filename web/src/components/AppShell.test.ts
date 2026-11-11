@@ -851,6 +851,30 @@ describe('AppShell', () => {
     expect(calls.filter((call) => call.init?.method === 'GET').length).toBeGreaterThanOrEqual(2)
   })
 
+  test.each([503, 403])('handles teams read status %i', async (status) => {
+    vi.useFakeTimers()
+    let reads = 0
+    setGeneratedFetch(async () => {
+      reads++
+      if (reads === 1) return new Response('', { status })
+      return Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+    })
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await vi.advanceTimersByTimeAsync(0)
+    if (status === 503) {
+      expect(
+        (screen.getByRole('button', { name: 'Refresh teams' }) as HTMLButtonElement).disabled,
+      ).toBe(true)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(screen.getByRole('option', { name: 'Example team' })).not.toBeNull()
+      expect(screen.queryByText('Unable to read teams. Refresh to try again.')).toBeNull()
+      expect(reads).toBe(2)
+    } else {
+      expect(screen.getByText('Unable to read teams. Refresh to try again.')).not.toBeNull()
+      expect(reads).toBe(1)
+    }
+  })
+
   test('manages selected team membership and deletion through owner mutation authority', async () => {
     const writes: { path: string; method: string }[] = []
     let members = ['existing-member']

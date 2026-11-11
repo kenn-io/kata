@@ -1,3 +1,4 @@
+import { retryTransientRead } from '../api/retry'
 import type { UISnapshotResponseBody } from '../api/generated'
 import { readUISnapshot, type ReadUISnapshotParams } from '../api/generated'
 import { AuthenticationRequiredError, isAuthenticationRequiredError } from '../auth/session'
@@ -16,6 +17,7 @@ export interface SnapshotRequestOptions {
   signal: AbortSignal
   etag?: string
   full: boolean
+  retry?: boolean
 }
 
 export type SnapshotResponse<TSnapshot> =
@@ -94,6 +96,7 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
       const requestOptions: SnapshotRequestOptions = {
         signal: abort.signal,
         full: options.full === true,
+        retry: this.state.snapshot === undefined,
       }
       if (sameAuthority && this.state.etag && !requestOptions.full) {
         requestOptions.etag = this.state.etag
@@ -295,10 +298,12 @@ export function createUISnapshotRequest(
     if (intent.selectedIssueUID) params.selected_issue_uid = intent.selectedIssueUID
     if (intent.localDate) params.local_date = intent.localDate
     if (intent.timeZone) params.time_zone = intent.timeZone
-    const response = await request(params, {
-      signal: options.signal,
-      ...(options.etag ? { headers: { 'If-None-Match': options.etag } } : {}),
-    })
+    const read = () =>
+      request(params, {
+        signal: options.signal,
+        ...(options.etag ? { headers: { 'If-None-Match': options.etag } } : {}),
+      })
+    const response = await (options.retry ? retryTransientRead(read, options.signal) : read())
     const status: number = response.status
     if (status === 304) {
       const etag = response.headers.get('ETag')

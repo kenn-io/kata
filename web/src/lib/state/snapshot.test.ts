@@ -20,6 +20,16 @@ interface TestSnapshot {
 }
 
 describe('SnapshotController', () => {
+  it('enables retries only until a snapshot is accepted', async () => {
+    const request = vi
+      .fn<SnapshotRequest<TestIntent, TestSnapshot>>()
+      .mockResolvedValue({ status: 200, etag: '"ok"', snapshot: snapshot('first', 1) })
+    const controller = new SnapshotController(request, (intent) => intent.key)
+    await controller.load({ key: 'same' })
+    await controller.load({ key: 'same' })
+    expect(request.mock.calls.map(([, options]) => options.retry)).toEqual([true, false])
+  })
+
   it('aborts the previous generation and rejects a slow old route', async () => {
     const pending: Array<ReturnType<typeof deferredSnapshot>> = []
     const request: SnapshotRequest<TestIntent, TestSnapshot> = (intent, options) => {
@@ -208,6 +218,61 @@ describe('snapshotIntentForRoute', () => {
 })
 
 describe('createUISnapshotRequest', () => {
+  it('retries a transport error on the first read', async () => {
+    vi.useFakeTimers()
+    try {
+      const generatedRequest = vi
+        .fn()
+        .mockRejectedValueOnce(new TypeError('network'))
+        .mockResolvedValueOnce({
+          status: 200,
+          headers: new Headers(),
+          data: { cursor: 1, capabilities: { writable: true, updates: 'poll' } },
+        })
+      const request = createUISnapshotRequest(generatedRequest)
+      const result = request(
+        {
+          view: 'all-open',
+          statuses: [],
+          owners: [],
+          labels: [],
+          relationships: [],
+          includeGraph: false,
+          includeHistory: false,
+        },
+        { signal: new AbortController().signal, full: false, retry: true },
+      )
+      await vi.advanceTimersByTimeAsync(1000)
+      expect((await result).status).toBe(200)
+      expect(generatedRequest).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    { status: 503, retry: false },
+    { status: 404, retry: true },
+  ])('does not retry status $status when retry is $retry', async ({ status, retry }) => {
+    const generatedRequest = vi.fn().mockResolvedValue({ status, headers: new Headers(), data: {} })
+    const request = createUISnapshotRequest(generatedRequest)
+    await expect(
+      request(
+        {
+          view: 'all-open',
+          statuses: [],
+          owners: [],
+          labels: [],
+          relationships: [],
+          includeGraph: false,
+          includeHistory: false,
+        },
+        { signal: new AbortController().signal, full: false, retry },
+      ),
+    ).rejects.toThrow('Snapshot unavailable')
+    expect(generatedRequest).toHaveBeenCalledTimes(1)
+  })
+
   it('delegates snapshot transport and query serialization to the generated client', async () => {
     const generatedRequest = vi.fn(async () => ({
       status: 200 as const,

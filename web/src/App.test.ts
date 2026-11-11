@@ -1238,7 +1238,41 @@ describe('App', () => {
     expect(paths).toEqual(['/api/v1/ui/daemons'])
   })
 
+  it.each([503, 403])('handles an initial snapshot status %i', async (status) => {
+    vi.useFakeTimers()
+    history.replaceState(null, '', '/kata?view=all-open#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        if (target.pathname !== '/api/v1/ui/snapshot') return Response.json({})
+        snapshotReads++
+        if (snapshotReads === 1) return new Response('', { status })
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    if (status === 503) {
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+      await vi.advanceTimersByTimeAsync(1000)
+      await tick()
+      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+      expect(snapshotReads).toBe(2)
+    } else {
+      expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
+      expect(snapshotReads).toBe(1)
+    }
+  })
+
   it('recovers an initial snapshot failure through an in-app retry', async () => {
+    vi.useFakeTimers()
     history.replaceState(null, '', '/kata?view=all-open#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -1256,7 +1290,7 @@ describe('App', () => {
           })
         }
         snapshotReads += 1
-        if (snapshotReads === 1) return new Response('', { status: 503 })
+        if (snapshotReads <= 4) return new Response('', { status: 503 })
         return new Response(JSON.stringify(snapshot()), {
           status: 200,
           headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
@@ -1266,12 +1300,16 @@ describe('App', () => {
 
     render(App)
 
-    const retry = await screen.findByRole('button', { name: 'Retry' })
+    await vi.advanceTimersByTimeAsync(7000)
+    await tick()
+    const retry = screen.getByRole('button', { name: 'Retry' })
     expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
     await fireEvent.click(retry)
 
-    expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
-    expect(snapshotReads).toBe(2)
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+    expect(snapshotReads).toBe(5)
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
   })
 
@@ -2036,6 +2074,7 @@ describe('App', () => {
   })
 
   it('offers daemon switching when the default snapshot is unavailable', async () => {
+    vi.useFakeTimers()
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -2083,10 +2122,14 @@ describe('App', () => {
 
     render(App)
 
-    expect((await screen.findByRole('alert')).textContent).toContain("Couldn't load workspace")
+    await vi.advanceTimersByTimeAsync(7000)
+    await tick()
+    expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
-    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
   it.each(['success', 'creation refusal', 'designation retry', 'conflict', 'event overlap'])(

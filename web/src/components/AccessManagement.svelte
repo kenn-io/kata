@@ -13,6 +13,7 @@
     type Team,
     type UIProject,
   } from '../lib/api/generated'
+  import { retryTransientRead } from '../lib/api/retry'
   import type { MutationContext, MutationResult } from '../lib/mutations/controller'
 
   interface Props {
@@ -71,7 +72,10 @@
     const abort = (listAbort = new AbortController())
     loading = true
     try {
-      const response = await listTeams({ signal: abort.signal })
+      const response = await retryTransientRead(
+        () => listTeams({ signal: abort.signal }),
+        abort.signal,
+      )
       if (abort.signal.aborted || lifetime.signal.aborted) return
       if (response.status !== 200) throw new Error()
       teams = response.data.teams
