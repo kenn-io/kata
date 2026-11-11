@@ -13,7 +13,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// Owner restore retains unsupported source events even when no row can represent them.
+// Owner restore retains unsupported source events, including rowless and held projections.
 // Neither legacy reset nor signed installation may erase that evidence.
 func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend Backend) error {
 	ctx := t.Context()
@@ -32,9 +32,15 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 	require.NoError(t, err)
 	records, err := CollectImportRecords(ctx, source, db.ExportFilter{IncludeDeleted: true})
 	require.NoError(t, err)
-	for _, document := range []string{`{"version":2,"steps":[]}`, `{"version":1,"steps":[{"key":"check","kind":"future-step"}]}`} {
+	for _, tc := range []struct {
+		document string
+		rows     int
+	}{
+		{`{"version":2,"steps":[]}`, 0},
+		{`{"version":1,"steps":[{"key":"check","kind":"future-step"}]}`, 1},
+	} {
 		for _, operation := range []string{"legacy", "conditional", "signed"} {
-			t.Run(operation+"/"+document, func(t *testing.T) {
+			t.Run(operation+"/"+tc.document, func(t *testing.T) {
 				fixture := append([]db.ImportRecord(nil), records...)
 				var original []byte
 				for i, record := range fixture {
@@ -42,7 +48,7 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 						copyEvent := *event
 						var body db.CronDefinitionEvent
 						require.NoError(t, json.Unmarshal(event.Payload, &body))
-						body.Definition = []byte(document)
+						body.Definition = []byte(tc.document)
 						copyEvent.Payload, err = json.Marshal(body)
 						require.NoError(t, err)
 						original = copyEvent.Payload
@@ -60,7 +66,7 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 				})
 				var count int
 				require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM cron_workflows WHERE uid=$1`, bad.UID).Scan(&count))
-				require.Zero(t, count)
+				require.Equal(t, tc.rows, count)
 				acknowledged, err := target.MaxEventID(ctx)
 				require.NoError(t, err)
 				_, err = target.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: restored.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true, PushCursorEventID: acknowledged, PullCursorEventID: 17, ReplayHorizonEventID: 13})
