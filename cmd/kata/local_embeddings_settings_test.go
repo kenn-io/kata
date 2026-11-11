@@ -70,6 +70,51 @@ func TestLocalEmbeddingsSettingsSharingRetry(t *testing.T) {
 	require.Equal(t, "restart", setup.job.State)
 }
 
+func TestLocalEmbeddingsSettingsSharesSavedSetup(t *testing.T) {
+	home := setupKataEnv(t)
+	sharedHome := clearLocalEmbeddingsEnv(t)
+	original := []byte("[search.embeddings]\nlocal=true\nmodel='nomic-embed-text'\ndims=768\n")
+	path := filepath.Join(home, "config.toml")
+	require.NoError(t, os.WriteFile(path, original, 0600))
+	cfg, err := config.ParseSearchConfig(original)
+	require.NoError(t, err)
+	oldInstall := localEmbeddingsInstall
+	t.Cleanup(func() { localEmbeddingsInstall = oldInstall })
+	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		t.Fatal("sharing an existing setup must not install")
+		return embedlocal.Installation{}, nil
+	}
+	var run func(context.Context)
+	setup := &localEmbeddingsSetup{embeddings: cfg.Embeddings, start: func(work func(context.Context)) bool { run = work; return true }}
+	status, err := setup.Status(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "built_in", status.Provider)
+	require.True(t, status.CanChange)
+	blocker := filepath.Join(sharedHome, ".kenn")
+	require.NoError(t, os.WriteFile(blocker, []byte("block marker"), 0600))
+	require.NoError(t, setup.TurnOn(t.Context()))
+	run(t.Context())
+	status, err = setup.Status(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "failed", status.Job.State)
+	require.True(t, status.CanChange)
+	require.NoError(t, os.Remove(blocker))
+	require.NoError(t, setup.TurnOn(t.Context()))
+	run(t.Context())
+	status, err = setup.Status(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "built_in", status.Provider)
+	require.False(t, status.CanChange)
+	require.Nil(t, status.Job)
+	chosen, err := embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.True(t, chosen)
+	got, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
+	require.NoError(t, err)
+	require.Equal(t, original, got)
+	require.ErrorIs(t, setup.TurnOn(t.Context()), daemon.ErrLocalEmbeddingsConfigured)
+}
+
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

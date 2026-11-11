@@ -221,15 +221,22 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		return "", err
 	}
 	if next.Embeddings.UsesLocal() {
-		chosen, err := embedlocal.ChoiceRecorded()
-		if err == nil && !chosen {
-			err = embedlocal.RecordChoice()
-		}
-		if err != nil {
-			return "", fmt.Errorf("built-in embeddings are configured, but sharing could not be confirmed; retry setup: %w", err)
+		if err := recordLocalEmbeddingsChoice(); err != nil {
+			return "", err
 		}
 	}
 	return index, nil
+}
+
+func recordLocalEmbeddingsChoice() error {
+	chosen, err := embedlocal.ChoiceRecorded()
+	if err == nil && !chosen {
+		err = embedlocal.RecordChoice()
+	}
+	if err != nil {
+		return fmt.Errorf("built-in embeddings are configured, but sharing could not be confirmed; retry setup: %w", err)
+	}
+	return nil
 }
 
 // applySharedEmbeddingChoice derives the active provider without changing the config file.
@@ -532,7 +539,12 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 		status.Job = &job
 	}
 	s.mu.Unlock()
-	status.CanChange = status.Provider == "none" && (status.Job == nil || status.Job.State == "failed")
+	canChange := status.Provider == "none"
+	if s.embeddings.UsesLocal() {
+		chosen, err := embedlocal.ChoiceRecorded()
+		canChange = err != nil || !chosen
+	}
+	status.CanChange = canChange && (status.Job == nil || status.Job.State == "failed")
 	return status, nil
 }
 
@@ -542,8 +554,14 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 	if s.job != nil && s.job.State != "failed" {
 		return daemon.ErrLocalEmbeddingsBusy
 	}
-	if s.embeddings.Enabled() {
+	sharing := s.embeddings.UsesLocal()
+	if s.embeddings.Enabled() && !sharing {
 		return daemon.ErrLocalEmbeddingsConfigured
+	}
+	if sharing {
+		if chosen, err := embedlocal.ChoiceRecorded(); err == nil && chosen {
+			return daemon.ErrLocalEmbeddingsConfigured
+		}
 	}
 	var release func()
 	if s.idle != nil {
@@ -559,10 +577,12 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 			defer release()
 		}
 		var err error
-		if s.vectorReady != nil {
+		if sharing {
+			err = recordLocalEmbeddingsChoice()
+		} else if s.vectorReady != nil {
 			err = s.vectorReady(ctx)
 		}
-		if err == nil {
+		if err == nil && !sharing {
 			_, err = enableLocalEmbeddings(ctx, localEmbeddingsRun{
 				confirm:      func(context.Context, int64) (bool, error) { return true, nil },
 				notice:       func(string) error { return nil },
@@ -580,6 +600,10 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 		if err != nil {
 			s.mu.Lock()
 			s.job.State, s.job.Error = "failed", err.Error()
+			s.mu.Unlock()
+		} else if sharing {
+			s.mu.Lock()
+			s.job = nil
 			s.mu.Unlock()
 		} else {
 			s.mu.Lock()

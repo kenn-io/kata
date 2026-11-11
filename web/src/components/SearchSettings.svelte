@@ -1,6 +1,11 @@
 <script lang="ts">
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
-  import { PageHeader, SearchByMeaningRow, type SearchByMeaningState } from '@kenn-io/kit-ui'
+  import {
+    Button,
+    PageHeader,
+    SearchByMeaningRow,
+    type SearchByMeaningState,
+  } from '@kenn-io/kit-ui'
   import { untrack } from 'svelte'
 
   import { orvalFetch } from '../lib/api/client'
@@ -79,6 +84,7 @@
 
   function rowState(current: LocalEmbeddingsStatus): SearchByMeaningState {
     const job = current.job
+    if (job?.state === 'downloading' && current.provider === 'built_in') return { kind: 'on' }
     if (job?.state === 'downloading')
       return { kind: 'downloading', doneBytes: job.downloaded, totalBytes: job.total }
     if (current.indexing)
@@ -193,6 +199,11 @@
             onusebuiltin={() => {}}
           />
         </fieldset>
+        {#if status?.provider === 'built_in' && status.can_change && canAdministerDaemon}
+          <div>
+            <Button size="sm" label="Share with other apps" disabled={posting} onclick={turnOn} />
+          </div>
+        {/if}
         {#if failure}
           <p class="settings-note" role="alert">{failure}</p>
         {/if}

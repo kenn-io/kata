@@ -113,6 +113,20 @@ describe('SearchSettings', () => {
     expect(screen.queryByText(/Downloads 290 MB/)).toBeNull()
   })
 
+  test('offers to share an existing built-in setup and sends the request', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(vi.fn(async () => Response.json(status({ provider: 'built_in' }))))
+    const postFetch = vi.fn<typeof fetch>(async () =>
+      Response.json(status({ provider: 'built_in', can_change: false }), { status: 202 }),
+    )
+    renderSettings({ postFetch })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Share with other apps' }))
+    await settle()
+    expect(postFetch).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Share with other apps' })).toBeNull()
+  })
+
   test.each([undefined, 'daemon.example'])(
     'shows the manual restart step for host=%s after download',
     async (remoteHost) => {
