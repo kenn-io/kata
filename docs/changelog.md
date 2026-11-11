@@ -9,10 +9,19 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Keep issue schedules consistent across daemons by saving each date's zone and
-  timezone-data version. Stop older daemons sharing the database before upgrading;
-  their notification sweeps skip the new values. MCP forwards saved values and
-  daemon-projected dates across timezone-data versions. See [schedule metadata](reference/metadata.md).
+- Keep each issue date on the same day and time on every daemon and client.
+  New and edited dates save their timezone and timezone-data version; older
+  dates keep their prior behavior until saved. A date saved with timezone data
+  this version lacks reports an error. Stop older daemons sharing the database
+  before upgrading; their notification sweeps skip saved dates. See
+  [schedule metadata](reference/metadata.md).
+
+- Upgrade a large PostgreSQL database without the schema migration rolling
+  back. A migration statement no longer stops after 30 seconds, so a long index
+  build finishes, and an opener waiting for another opener's migration keeps
+  waiting. Ordinary queries keep the 30-second limit. See
+  [PostgreSQL operations](operations/postgres.md).
+
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
   stop on a failed selected source without fallback. See

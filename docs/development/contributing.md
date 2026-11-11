@@ -182,6 +182,12 @@ make docs-serve
 Zensical's preview server is for local preview only. Publish the generated
 static files from `site/` with a real static host, CDN, or web server.
 
+The release command check compares README and installer examples with the latest
+release. For a command that hasn't shipped, put a visible
+`Not in the latest release yet` paragraph before its README block. In an installer, put
+`# Not in the latest release yet` before the output lines and leave a blank
+source line after them. Remove the note once the command ships.
+
 ## Documentation standards
 
 Write for the person trying to use or maintain Kata:
