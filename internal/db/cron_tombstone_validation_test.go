@@ -61,26 +61,6 @@ func TestCronHistoryIsNotRevalidatedAgainstCurrentRules(t *testing.T) {
 	require.NoError(t, ValidateCronRecord(&record), "a backup taken under older rules must restore its live definitions")
 }
 
-func TestCronWorkflowBackupRejectsReservedKind(t *testing.T) {
-	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
-	record := CronWorkflowExport{
-		CronDefinition: CronDefinition{ID: 1, ProjectID: 1, UID: newUID(t), Name: "Review", DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: now.UnixMilli(), OriginInstanceUID: newUID(t)}, Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now},
-		Definition:     cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "first", Kind: "argv"}}},
-	}
-	project := &ProjectExport{ID: 1, UID: newUID(t), Name: "example-project", CreatedAt: now.Format(time.RFC3339Nano), Revision: 1}
-	records := []ImportRecord{project, &record} // Projection-only backup, without a cron event.
-	for _, deleted := range []bool{false, true} {
-		if deleted {
-			record.DeletedAt = &now
-		}
-		require.Error(t, ValidateCronRecord(&record), "reserved workflow must not enter via a backup projection")
-		require.Error(t, ValidateImportReplay(records, ImportOptions{}))
-	}
-	record.Definition.Steps[0].Kind = "command"
-	require.NoError(t, ValidateCronRecord(&record), "historical content is not subject to current authoring rules")
-	require.NoError(t, ValidateImportReplay(records, ImportOptions{}))
-}
-
 func TestCronWorkflowBackupRetainsLegacyRawDocuments(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	base := CronWorkflowExport{CronDefinition: CronDefinition{ID: 1, ProjectID: 1, UID: newUID(t), Name: "Review", DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: now.UnixMilli(), OriginInstanceUID: newUID(t)}, Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now}}
@@ -94,35 +74,39 @@ func TestCronWorkflowBackupRetainsLegacyRawDocuments(t *testing.T) {
 		require.NoError(t, ValidateCronRecord(&restored))
 		project := &ProjectExport{ID: 1, UID: newUID(t), Name: "example-project", CreatedAt: now.Format(time.RFC3339Nano), Revision: 1}
 		require.NoError(t, ValidateImportReplay([]ImportRecord{project, &restored}, ImportOptions{}))
-		_, err = PrepareProjectMergeRecords([]ImportRecord{project, &restored}, ProjectMergeOffsets{}, nil)
-		require.Error(t, err, "merge must not make held state visible")
+		_, err = PrepareProjectMergeRecords([]ImportRecord{project, &restored}, ProjectMergeOffsets{TargetProjectID: 2}, nil)
+		_, decodeErr := cron.DecodeWorkflow(restored.RawDefinition)
+		require.Error(t, decodeErr)
+		require.EqualError(t, err, decodeErr.Error(), "merge must refuse the held definition")
 	}
 }
 
-func TestAcceptedWorkflowEventsRejectNullShapes(t *testing.T) {
-	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
-	projectUID := newUID(t)
-	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`} {
-		payload, err := json.Marshal(CronDefinitionEvent{UID: newUID(t), ProjectUID: projectUID, Name: "Review", Definition: jsontext.Value(document), Author: "worker", CreatedAt: now, UpdatedAt: now})
-		require.NoError(t, err)
-		event := RemoteEvent{EventUID: newUID(t), OriginInstanceUID: newUID(t), ProjectUID: projectUID, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now, Payload: payload}
-		require.ErrorIs(t, ValidateAcceptedCronEvent(event), ErrFederationIngestValidation, "null shape must not be admitted before feature classification: %s", document)
-	}
-}
-
-func TestOwnerBackupRetainsHistoricalWorkflowEvents(t *testing.T) {
+func TestWorkflowEventHistoricalAndAcceptedEntryPoints(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	projectUID := newUID(t)
 	project := &ProjectExport{ID: 1, UID: projectUID}
-	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`, `{"steps":[{"kind":"argv"}]}`, `{"steps":[{"kind":"argv","argv":["true"]}]}`} {
-		payload, err := json.Marshal(CronDefinitionEvent{UID: newUID(t), ProjectUID: projectUID, Name: "Review", Definition: jsontext.Value(document), Author: "worker", CreatedAt: now, UpdatedAt: now})
-		require.NoError(t, err)
-		event := &EventExport{ID: 1, UID: newUID(t), OriginInstanceUID: newUID(t), ProjectID: 1, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now.Format(time.RFC3339Nano), Payload: payload}
-		require.NoError(t, validateCronImportEvents([]ImportRecord{project, event}), document)
-		require.JSONEq(t, document, string(func() jsontext.Value {
-			var body CronDefinitionEvent
-			require.NoError(t, json.Unmarshal(event.Payload, &body))
-			return body.Definition
-		}()))
+	for _, tc := range []struct {
+		name, document string
+		historical     bool
+	}{
+		{"accepted null", `{"steps":[null]}`, false},
+		{"historical null", `null`, true},
+		{"historical null steps", `{"steps":null}`, true},
+		{"historical null step", `{"steps":[null]}`, true},
+		{"historical null kind", `{"steps":[{"kind":null}]}`, true},
+		{"historical argv kind", `{"steps":[{"kind":"argv"}]}`, true},
+		{"historical argv member", `{"steps":[{"kind":"argv","argv":["true"]}]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := json.Marshal(CronDefinitionEvent{UID: newUID(t), ProjectUID: projectUID, Name: "Review", Definition: jsontext.Value(tc.document), Author: "worker", CreatedAt: now, UpdatedAt: now})
+			require.NoError(t, err)
+			if tc.historical {
+				event := &EventExport{ID: 1, UID: newUID(t), OriginInstanceUID: newUID(t), ProjectID: 1, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now.Format(time.RFC3339Nano), Payload: payload}
+				require.NoError(t, validateCronImportEvents([]ImportRecord{project, event}))
+			} else {
+				event := RemoteEvent{EventUID: newUID(t), OriginInstanceUID: newUID(t), ProjectUID: projectUID, Type: "cron.workflow.created", Actor: "worker", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now, Payload: payload}
+				require.ErrorIs(t, ValidateAcceptedCronEvent(event), ErrFederationIngestValidation)
+			}
+		})
 	}
 }

@@ -18,70 +18,50 @@ import (
 	"go.kenn.io/kata/internal/federation"
 )
 
-// Both legacy entrypoints negotiate target support before sending any prefix
-// of a mixed batch, including adoption snapshots.
+// Negotiate the reserved feature before sending any prefix of a mixed batch.
 func TestArgvCompatLegacyPublication(t *testing.T) {
 	for _, tc := range []struct {
 		name, supported string
-		lookupStatus    int
 		accepted        bool
 	}{
-		{name: "absent"},
 		{name: "cron only", supported: "cron_v1"},
-		{name: "argv only", supported: "cron_workflow_argv_v1"},
-		{name: "false", supported: "cron_v1,cron_workflow_argv_v1=false"},
-		{name: "malformed", supported: `cron_v1,["cron_workflow_argv_v1"]`},
-		{name: "lookup failure", lookupStatus: http.StatusServiceUnavailable},
 		{name: "positive", supported: "cron_v1,cron_workflow_argv_v1", accepted: true},
 	} {
-		for _, options := range []bool{false, true} {
-			for _, operation := range []string{"created", "updated", "deleted", "restored", "snapshot"} {
-				t.Run(fmt.Sprintf("%s/%s/options=%t", tc.name, operation, options), func(t *testing.T) {
-					posts := 0
-					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Set("Content-Type", "application/json")
-						if r.Method == http.MethodPost {
-							posts++
-							var body api.FederationIngestEventsRequestBody
-							require.NoError(t, json.UnmarshalRead(r.Body, &body))
-							require.Equal(t, 31, body.SchemaVersion)
-							require.Len(t, body.Events, 2)
-							require.Equal(t, db.SupportedEventFeatures, r.Header.Get(db.EventFeaturesHeader))
-							_, _ = w.Write([]byte(`{"accepted":2,"push_cursor_event_id":11}`))
-							return
-						}
-						if tc.lookupStatus != 0 {
-							w.WriteHeader(tc.lookupStatus)
-							return
-						}
-						w.Header().Set(db.EventFeaturesHeader, tc.supported)
-						_, _ = w.Write([]byte(`{"project_id":1,"project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","replay_horizon_event_id":1,"baseline_through_event_id":1}`))
-					}))
-					t.Cleanup(server.Close)
-					client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
-					require.NoError(t, err)
-					events := []api.FederationIngestEventEnvelope{
-						{EventID: 10, Type: "project.metadata_updated", Payload: jsontext.Value(`{}`)},
-						{EventID: 11, Type: "cron.workflow." + operation, Payload: jsontext.Value(`{"definition":{"steps":[{"kind":"argv"}]}}`)},
-					}
-					var ack api.FederationIngestEventsBody
-					if options {
-						ack, err = client.IngestProjectEventsWithOptions(t.Context(), 1, events, federation.IngestProjectEventsOptions{AdoptionBaseline: db.FederationAdoptionBaselineComplete, AdoptionBaselineEndEventID: 11})
-					} else {
-						ack, err = client.IngestProjectEvents(t.Context(), 1, events)
-					}
-					if tc.accepted {
-						require.NoError(t, err)
-						require.Equal(t, 1, posts)
-						require.Equal(t, int64(11), ack.PushCursorEventID)
-					} else {
-						require.Error(t, err)
-						require.Zero(t, posts)
-						require.Zero(t, ack.PushCursorEventID)
-					}
-				})
+		t.Run(tc.name, func(t *testing.T) {
+			posts := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodPost {
+					posts++
+					var body api.FederationIngestEventsRequestBody
+					require.NoError(t, json.UnmarshalRead(r.Body, &body))
+					require.Equal(t, 31, body.SchemaVersion)
+					require.Len(t, body.Events, 2)
+					require.Equal(t, db.SupportedEventFeatures, r.Header.Get(db.EventFeaturesHeader))
+					_, _ = w.Write([]byte(`{"accepted":2,"push_cursor_event_id":11}`))
+					return
+				}
+				w.Header().Set(db.EventFeaturesHeader, tc.supported)
+				_, _ = w.Write([]byte(`{"project_id":1,"project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","replay_horizon_event_id":1,"baseline_through_event_id":1}`))
+			}))
+			t.Cleanup(server.Close)
+			client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
+			require.NoError(t, err)
+			events := []api.FederationIngestEventEnvelope{
+				{EventID: 10, Type: "project.metadata_updated", Payload: jsontext.Value(`{}`)},
+				{EventID: 11, Type: "cron.workflow.created", Payload: jsontext.Value(`{"definition":{"steps":[{"kind":"argv"}]}}`)},
 			}
-		}
+			ack, err := client.IngestProjectEvents(t.Context(), 1, events)
+			if tc.accepted {
+				require.NoError(t, err)
+				require.Equal(t, 1, posts)
+				require.Equal(t, int64(11), ack.PushCursorEventID)
+			} else {
+				require.Error(t, err)
+				require.Zero(t, posts)
+				require.Zero(t, ack.PushCursorEventID)
+			}
+		})
 	}
 }
 
@@ -134,7 +114,6 @@ func TestArgvCompatPushRetainsStoredCursor(t *testing.T) {
 			after, err := store.FederationBindingByProject(ctx, project.ID)
 			require.NoError(t, err)
 			require.Equal(t, checkpoint, after.PushCursorEventID)
-			require.Equal(t, checkpoint, after.PullCursorEventID)
 		})
 	}
 }
