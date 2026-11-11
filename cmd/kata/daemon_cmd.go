@@ -970,21 +970,21 @@ func daemonRestartCmd() *cobra.Command {
 }
 
 type daemonStartupPreflight struct {
-	Config          *config.DaemonConfig
-	Web             config.WebConfig
-	MCPToken        string
-	Listen          string
-	Namespace       *daemonruntime.Namespace
-	Endpoint        kitdaemon.Endpoint
-	DBPath          string
-	StoreConfig     storeopen.Config
-	KataHome        string
-	HookConfigPath  string
-	HookConfig      hooks.LoadedConfig
-	Embedder        *embedding.Client
-	VectorsPath     string
-	SavedEmbeddings config.EmbeddingsConfig
-	SharedChoiceErr error
+	Config         *config.DaemonConfig
+	Web            config.WebConfig
+	MCPToken       string
+	Listen         string
+	Namespace      *daemonruntime.Namespace
+	Endpoint       kitdaemon.Endpoint
+	DBPath         string
+	StoreConfig    storeopen.Config
+	KataHome       string
+	HookConfigPath string
+	HookConfig     hooks.LoadedConfig
+	Embedder       *embedding.Client
+	VectorsPath    string
+	SavedEmbedding config.EmbeddingsConfig
+	ChoiceErr      error
 }
 
 func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartupPreflight, error) {
@@ -1090,21 +1090,21 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		return daemonStartupPreflight{}, err
 	}
 	return daemonStartupPreflight{
-		Config:          dcfg,
-		Web:             dcfg.Web,
-		MCPToken:        mcpToken,
-		Listen:          listen,
-		Namespace:       ns,
-		Endpoint:        endpoint,
-		DBPath:          dbPath,
-		StoreConfig:     storeConfig,
-		KataHome:        home,
-		HookConfigPath:  hookCfgPath,
-		HookConfig:      loadedHooks,
-		Embedder:        embedder,
-		VectorsPath:     vectorsPath,
-		SavedEmbeddings: savedEmbeddings,
-		SharedChoiceErr: choiceErr,
+		Config:         dcfg,
+		Web:            dcfg.Web,
+		MCPToken:       mcpToken,
+		Listen:         listen,
+		Namespace:      ns,
+		Endpoint:       endpoint,
+		DBPath:         dbPath,
+		StoreConfig:    storeConfig,
+		KataHome:       home,
+		HookConfigPath: hookCfgPath,
+		HookConfig:     loadedHooks,
+		Embedder:       embedder,
+		VectorsPath:    vectorsPath,
+		SavedEmbedding: savedEmbeddings,
+		ChoiceErr:      choiceErr,
 	}, nil
 }
 
@@ -1478,9 +1478,8 @@ func runDaemonProcess(
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	maps.Copy(rec.Metadata, restart.metadata())
 
-	originalEmbeddings := startup.SavedEmbeddings
-	if startup.SharedChoiceErr != nil {
-		daemonLog.Printf("shared embeddings choice: %v", startup.SharedChoiceErr)
+	if startup.ChoiceErr != nil {
+		daemonLog.Printf("shared embeddings choice: %v", startup.ChoiceErr)
 	}
 
 	broadcaster := daemon.NewEventBroadcaster()
@@ -1489,11 +1488,11 @@ func runDaemonProcess(
 		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, publisher,
 	)
 	if err != nil {
-		if dcfg.Search.Embeddings == originalEmbeddings {
+		if dcfg.Search.Embeddings == startup.SavedEmbedding {
 			return err
 		}
 		daemonLog.Printf("shared embeddings choice: %v", err)
-		dcfg.Search.Embeddings = originalEmbeddings
+		dcfg.Search.Embeddings = startup.SavedEmbedding
 	}
 	defer func() {
 		if closeDependencies && vectorIndex != nil {

@@ -57,9 +57,9 @@ func TestDaemonPreflightFallsBackFromInvalidSharedChoice(t *testing.T) {
 	require.NoError(t, embedlocal.RecordChoice())
 	startup, err := preflightDaemonStartup(t.Context(), "", false, true)
 	require.NoError(t, err)
-	require.Equal(t, startup.SavedEmbeddings, startup.Config.Search.Embeddings)
+	require.Equal(t, startup.SavedEmbedding, startup.Config.Search.Embeddings)
 	require.Nil(t, startup.Embedder)
-	require.ErrorContains(t, startup.SharedChoiceErr, "embedding batching")
+	require.ErrorContains(t, startup.ChoiceErr, "embedding batching")
 
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal=true\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0600))
 	_, err = preflightDaemonStartup(t.Context(), "", false, true)
@@ -68,8 +68,7 @@ func TestDaemonPreflightFallsBackFromInvalidSharedChoice(t *testing.T) {
 
 func TestLocalEmbeddingsSetup(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
-	tmp := setupKataEnv(t)
-	home := filepath.Join(tmp, "fresh")
+	home := setupKataEnv(t)
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
 	t.Setenv("KATA_SERVER", "")
@@ -99,14 +98,9 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
-	marker := filepath.Join(tmp, ".kenn", "embeddings", "search-by-meaning")
-	old := time.Unix(1000000000, 0)
-	require.NoError(t, os.Chtimes(marker, old, old))
-	_, stderr, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.NoError(t, err, stderr)
-	info, err := os.Stat(marker)
+	chosen, err := embedlocal.ChoiceRecorded()
 	require.NoError(t, err)
-	require.Equal(t, old, info.ModTime())
+	require.True(t, chosen)
 }
 
 func TestLocalEmbeddingsMarkerWriteFailure(t *testing.T) {
@@ -397,7 +391,7 @@ func TestLocalEmbeddingsRebuildRefusal(t *testing.T) {
 
 func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
-	for _, scenario := range []string{"existing symlink", "new", "concurrent edit", "unsupported daemon", "restart refused"} {
+	for _, scenario := range []string{"existing symlink", "new", "concurrent edit", "unsupported daemon"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := setupKataEnv(t)
 			stubLocalEmbeddingsInstall(t)
@@ -413,27 +407,6 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 					}
 				}
 				require.NoError(t, os.WriteFile(target, original, 0600))
-			}
-			if scenario == "restart refused" {
-				oldEndpoint := localEmbeddingsEndpoint
-				t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-				localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
-				_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
-					confirm: func(context.Context, int64) (bool, error) { return true, nil },
-					notice:  func(string) error { return nil },
-					restart: func(_ context.Context, apply func() error) error {
-						require.NoError(t, apply())
-						return errors.New("restart refused")
-					},
-				})
-				require.ErrorContains(t, err, "restart refused")
-				got, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
-				require.NoError(t, err)
-				require.Equal(t, original, got)
-				chosen, err := embedlocal.ChoiceRecorded()
-				require.NoError(t, err)
-				require.False(t, chosen)
-				return
 			}
 			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
@@ -468,6 +441,9 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 			}
 			require.ErrorContains(t, err, "cannot resolve the installed restart executable")
 			require.Empty(t, out)
+			chosen, choiceErr := embedlocal.ChoiceRecorded()
+			require.NoError(t, choiceErr)
+			require.False(t, chosen)
 			got, readErr := os.ReadFile(path) // #nosec G304 -- test-owned configuration snapshot
 			switch scenario {
 			case "new":

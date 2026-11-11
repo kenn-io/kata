@@ -222,22 +222,11 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		return "", err
 	}
 	if next.Embeddings.UsesLocal() {
-		if err := recordLocalEmbeddingsChoice(); err != nil {
-			return "", err
+		if err := embedlocal.RecordChoice(); err != nil {
+			return "", fmt.Errorf("built-in embeddings are configured, but sharing could not be confirmed; retry setup: %w", err)
 		}
 	}
 	return index, nil
-}
-
-func recordLocalEmbeddingsChoice() error {
-	chosen, err := embedlocal.ChoiceRecorded()
-	if err == nil && !chosen {
-		err = embedlocal.RecordChoice()
-	}
-	if err != nil {
-		return fmt.Errorf("built-in embeddings are configured, but sharing could not be confirmed; retry setup: %w", err)
-	}
-	return nil
 }
 
 // applySharedEmbeddingChoice derives the active provider without changing the config file.
