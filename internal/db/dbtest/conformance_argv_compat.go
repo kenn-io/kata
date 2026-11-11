@@ -90,6 +90,15 @@ func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage) erro
 	require.NoError(t, err)
 	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, other.ID, other.UID, fold, nil), "another project's history does not block this project")
 	require.NoError(t, tx.Rollback())
+	for _, document := range []string{`null`, `{"steps":[]}`} {
+		bad := argvCompatRemoteWorkflow(t, project, origin, document)
+		projection := db.FoldEvents([]db.FoldEvent{{UID: bad.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: bad.Type, HLCPhysicalMS: bad.HLCPhysicalMS, Payload: bad.Payload}})
+		tx, err = q.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		err = db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, projection, nil)
+		require.ErrorIs(t, err, db.ErrFederationIngestValidation, "unrepresentable historical document %s must fence replay before SQL", document)
+		require.NoError(t, tx.Rollback())
+	}
 	return nil
 }
 
