@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -63,6 +64,29 @@ func TestCloseTranscript_PersistenceAndRetries(t *testing.T) {
 				ids = append(ids, p.Transcript.SessionID)
 			}
 			assert.Equal(t, []string{tc.id, tc.otherID}, ids)
+		})
+	}
+}
+
+func TestCloseTranscript_PresenceConflict(t *testing.T) {
+	for _, present := range []bool{false, true} {
+		t.Run(fmt.Sprintf("initially present=%t", present), func(t *testing.T) {
+			_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+			path := issueURL(projectID, issueID, "actions/close")
+			body := map[string]any{"actor": "agent-one", "reason": "done", "message": "Implemented the example behavior and ran the focused tests.", "evidence": []map[string]any{{"type": "test", "command": "go test ./internal/example"}}, "retry_protocol": "close-v1"}
+			ref := map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}
+			if present {
+				body["transcript"] = ref
+			}
+			headers := map[string]string{"Idempotency-Key": "transcript-presence"}
+			requireOK(t, postWithHeader(t, ts, path, headers, body))
+			if present {
+				delete(body, "transcript")
+			} else {
+				body["transcript"] = ref
+			}
+			response := postWithHeader(t, ts, path, headers, body)
+			assert.Equal(t, http.StatusConflict, response.status, string(response.body))
 		})
 	}
 }

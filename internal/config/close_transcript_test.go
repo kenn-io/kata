@@ -72,7 +72,9 @@ pi = "PI_SESSION_ID"
 `), 0600))
 		cfg, err := ReadCloseTranscriptConfig()
 		require.NoError(t, err)
-		assert.Equal(t, CloseTranscriptConfig{Enabled: true, AgentsViewURL: "https://agentsview.example", SessionIDEnv: map[string]string{"pi": "PI_SESSION_ID"}}, cfg)
+		assert.True(t, cfg.Enabled)
+		assert.Equal(t, "https://agentsview.example", cfg.AgentsViewURL)
+		assert.Equal(t, map[string]string{"pi": "PI_SESSION_ID"}, cfg.SessionIDEnv)
 	})
 	t.Run("false ignores the file's invalid session settings", func(t *testing.T) {
 		home := t.TempDir()
@@ -93,6 +95,38 @@ pi = "PI_SESSION_ID"
 	})
 }
 
+func TestReadCloseTranscriptConfig_ProjectTargets(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`[close.transcript]
+enabled = true
+agentsview_url = "https://global.example"
+[close.transcript.project.team]
+enabled = false
+agentsview_url = "https://team.example"
+`), 0600))
+	for _, tc := range []struct {
+		override string
+		team     bool
+		global   bool
+	}{{"", false, true}, {"true", true, true}, {"false", false, false}} {
+		t.Run("override="+tc.override, func(t *testing.T) {
+			t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", tc.override)
+			cfg, err := ReadCloseTranscriptConfig()
+			require.NoError(t, err)
+			team, global := cfg.Target("team"), cfg.Target("other")
+			require.NotNil(t, team.Enabled)
+			require.NotNil(t, global.Enabled)
+			assert.Equal(t, tc.team, *team.Enabled)
+			assert.Equal(t, tc.global, *global.Enabled)
+			if tc.override != "false" {
+				assert.Equal(t, "https://team.example", team.AgentsViewURL)
+				assert.Equal(t, "https://global.example", global.AgentsViewURL)
+			}
+		})
+	}
+}
+
 // The client preference shares the daemon's strict config file, so the
 // daemon must still start when a user enables it.
 func TestReadDaemonConfigAcceptsCloseTranscript(t *testing.T) {
@@ -103,6 +137,9 @@ enabled = true
 agentsview_url = "https://agentsview.example"
 [close.transcript.session_id_env]
 pi = "PI_SESSION_ID"
+[close.transcript.project.team]
+enabled = false
+agentsview_url = "https://team.example"
 `), 0600))
 	_, err := ReadDaemonConfig()
 	require.NoError(t, err)
