@@ -563,3 +563,9 @@ func TestDoctorHookNamesPATHMismatch(t *testing.T) {
 	require.EqualValues(t, "fail", check.Status)
 	require.Contains(t, fmt.Sprint(check.Details), "PATH")
 }
+
+func TestDoctorReportsUnreachableRecoveryAdvice(t *testing.T) {
+	err := &client.LocalDaemonUnreachableError{PID: 123, Address: "127.0.0.1:1"}
+	check := doctorDiscoveryCheck(err)
+	require.Contains(t, check.Fix, "daemon.log")
+}

@@ -68,13 +68,6 @@ func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 		resolved, err = client.PrepareResolvedInWorkspace(ctx, workspaceStartForRemote())
 	}
 	if err != nil {
-		if resolved.LocalProfile != nil && errors.Is(err, client.ErrLocalDaemonUnreachable) {
-			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
-			if diagnoseErr != nil {
-				return resolved, diagnoseErr
-			}
-			return resolved, diagnosisError(diagnosis)
-		}
 		return resolved, cliDaemonTargetError(err)
 	}
 	return resolved, nil
@@ -140,7 +133,10 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 		ProbeRemote:    flags.Daemon != "",
 	})
 	if err != nil || !found {
-		if resolved.LocalProfile != nil {
+		if _, typed := errors.AsType[*client.LocalDaemonUnreachableError](err); typed {
+			return resolved, cliDaemonTargetError(err)
+		}
+		if resolved.LocalProfile != nil && err == nil {
 			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
 			if diagnoseErr != nil {
 				return resolved, diagnoseErr

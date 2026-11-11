@@ -12,7 +12,6 @@ import (
 	"iter"
 	"net"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -73,15 +72,17 @@ var ErrLocalDaemonUnreachable = errors.New("local daemon is unreachable")
 
 // LocalDaemonUnreachableError retains the failed process and its evidence paths.
 type LocalDaemonUnreachableError struct {
-	PID       int
-	Address   string
-	dataDir   string
-	webOrigin string
-	cause     error
+	PID             int
+	Address         string
+	dataDir         string
+	webOrigin       string
+	verifiedProcess bool
+	recoverCommand  string
+	cause           error
 }
 
 func (e *LocalDaemonUnreachableError) Error() string {
-	return e.Summary() + "; " + e.RecoveryAdvice("")
+	return e.Summary() + "; " + e.RecoveryAdvice(e.recoverCommand)
 }
 
 // Summary describes the probe failure without assuming a recovery target.
@@ -101,14 +102,16 @@ func (e *LocalDaemonUnreachableError) Is(target error) bool {
 // recoverCommand must be a safely quoted command for the selected local profile.
 func (e *LocalDaemonUnreachableError) RecoveryAdvice(recoverCommand string) string {
 	advice := fmt.Sprintf("inspect %q or the supervisor stderr log", filepath.Join(e.dataDir, "daemon.log"))
-	origin, err := url.Parse(e.webOrigin)
-	if err == nil && (origin.Scheme == "http" || origin.Scheme == "https") && origin.Host != "" && origin.User == nil && origin.Path == "" && origin.RawQuery == "" && origin.Fragment == "" {
+	if validWebOrigin(e.webOrigin) {
 		advice += "; if responsive, capture " + e.webOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner authentication (a signed-in browser alone is insufficient)"
 	}
-	if goruntime.GOOS != "windows" {
+	if e.verifiedProcess && goruntime.GOOS != "windows" {
 		advice += fmt.Sprintf("; fallback: kill -QUIT %d dumps goroutines to stderr and terminates the daemon", e.PID)
-	} else if recoverCommand != "" {
+	} else if e.verifiedProcess && goruntime.GOOS == "windows" {
 		advice += fmt.Sprintf("; stop the failed process with taskkill /PID %d /F", e.PID)
+	}
+	if !e.verifiedProcess {
+		advice += "; verify the process identity and stop it using your supervisor before recovery"
 	}
 	if recoverCommand != "" {
 		advice += "; after it exits, run " + recoverCommand
@@ -171,11 +174,12 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 					return
 				}
 				if !yield(liveDaemon{}, &LocalDaemonUnreachableError{
-					PID:       r.PID,
-					Address:   address,
-					dataDir:   dataDir,
-					webOrigin: r.Metadata["web_origin"],
-					cause:     probeErr,
+					PID:             r.PID,
+					Address:         address,
+					dataDir:         dataDir,
+					webOrigin:       r.Metadata["web_origin"],
+					verifiedProcess: daemonruntime.RuntimeProcessAlive(r) && kitdaemon.CompareRuntimeProcessIdentity(r) == kitdaemon.ProcessIdentityMatch,
+					cause:           probeErr,
 				}) {
 					return
 				}

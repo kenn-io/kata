@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -832,4 +833,55 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), recoverCommand)
 	require.Contains(t, err.Error(), fmt.Sprint(os.Getpid()))
+	_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", "list")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), recoverCommand)
+}
+
+func TestProfileInstanceFailureKeepsOriginalError(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"%s","pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", "list")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "local profile instance is unavailable")
+}
+
+func TestProfileTransientPingFailureIsNotReprobed(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= 2 {
+			<-r.Context().Done()
+			return
+		}
+		fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"%s","pid":%d}`, version.Version, os.Getpid())
+	}))
+	t.Cleanup(server.Close)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", "list")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unreachable")
+	require.NotContains(t, err.Error(), "selected daemon is ready")
+	require.LessOrEqual(t, calls.Load(), int32(2))
 }

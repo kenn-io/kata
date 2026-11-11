@@ -26,13 +26,17 @@ type DiscoveredWebRuntime struct {
 	Capabilities []string
 }
 
+func validWebOrigin(origin string) bool {
+	parsed, err := url.Parse(origin)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
+		parsed.Host != "" && parsed.User == nil && parsed.Path == "" &&
+		parsed.RawQuery == "" && parsed.Fragment == ""
+}
+
 // DiscoverWebRuntime validates browser metadata from a live runtime record.
 func DiscoverWebRuntime(record kitdaemon.RuntimeRecord) (DiscoveredWebRuntime, error) {
 	origin := record.Metadata["web_origin"]
-	parsedOrigin, err := url.Parse(origin)
-	if err != nil || (parsedOrigin.Scheme != "http" && parsedOrigin.Scheme != "https") ||
-		parsedOrigin.Host == "" || parsedOrigin.User != nil || parsedOrigin.Path != "" ||
-		parsedOrigin.RawQuery != "" || parsedOrigin.Fragment != "" {
+	if !validWebOrigin(origin) {
 		return DiscoveredWebRuntime{}, errors.New("web runtime origin is invalid")
 	}
 	stable, err := strconv.ParseBool(record.Metadata["web_origin_stable"])

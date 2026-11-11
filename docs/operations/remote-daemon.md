@@ -65,11 +65,11 @@ If a local process is alive but cannot answer ping, CLI errors report its PID,
 endpoint, log path, and recovery steps. If the advertised web origin responds,
 capture `/debug/pprof/goroutine?debug=2` there before stopping the process. These
 handlers require daemon-owner authority; an ordinary owner-local browser session
-cannot access them. Configured deployments need the owner's bearer credential.
+cannot access them. Configured deployments need the owner's bearer credential from the daemon's authentication configuration (for example, `[auth].token` or `KATA_AUTH_TOKEN`).
 The profiling listener may be the same listener that failed, so capture can also
 time out.
 
-On Unix, `kill -QUIT <pid>` is a fallback that writes goroutine stacks to stderr
+After confirming the PID identifies the daemon, on Unix `kill -QUIT <pid>` is a fallback that writes goroutine stacks to stderr
 **and terminates the daemon**. Check the reported `daemon.log` or the supervisor's
 stderr log. Foreground and supervised launches may only retain supervisor stderr.
 For the current home, run `kata daemon restart` with the original `KATA_HOME` and

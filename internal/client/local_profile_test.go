@@ -749,3 +749,30 @@ func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
 	assert.Zero(t, state.stopCalls)
 	assert.Equal(t, live.URL, resolved.BaseURL)
 }
+
+func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
+	profile, root := localProfileFixture(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(server.Close)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	for name, call := range map[string]func() error{
+		"named":     func() error { _, err := EnsureResolvedNamed(t.Context(), "work"); return err },
+		"workspace": func() error { _, err := EnsureResolvedInWorkspace(t.Context(), root); return err },
+		"discover":  func() error { _, _, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "work"}); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+			command := "kata --daemon work daemon recover"
+			if runtime.GOOS == "windows" {
+				command = "kata --daemon 'work' daemon recover"
+			}
+			require.Contains(t, err.Error(), command)
+			require.NotContains(t, err.Error(), "kata daemon restart")
+		})
+	}
+}

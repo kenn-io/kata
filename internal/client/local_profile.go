@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	goruntime "runtime"
+	"strings"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/oklog/ulid/v2"
@@ -84,7 +86,8 @@ func discoverLocalProfileWithVerifier(
 	selection DaemonSelection,
 	scan liveDaemonScanner,
 	verify func(context.Context, ResolvedDaemon) error,
-) (ResolvedDaemon, bool, error) {
+) (result ResolvedDaemon, found bool, resultErr error) {
+	defer func() { resultErr = scopeProfileUnreachable(resultErr, selection.Resolved.Name) }()
 	resolved := selection.Resolved
 	if _, err := os.Stat(resolved.LocalProfile.DataDir); errors.Is(err, os.ErrNotExist) {
 		return resolved, false, nil
@@ -147,7 +150,8 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 	return nil
 }
 
-func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, error) {
+func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (result ResolvedDaemon, resultErr error) {
+	defer func() { resultErr = scopeProfileUnreachable(resultErr, selection.Resolved.Name) }()
 	profile := *selection.Profile
 	inspector, err := installedStorageInspector()
 	if err != nil {
@@ -239,4 +243,23 @@ func EnsureSameLocalProfile(ctx context.Context, resolved ResolvedDaemon) (Resol
 		return resolved, errors.New("local profile snapshot is unavailable")
 	}
 	return EnsureLocalProfileSelection(ctx, DaemonSelection{Resolved: resolved, Profile: resolved.profileConfig})
+}
+
+// scopeProfileUnreachable adds recovery for the selected profile without probing again.
+func scopeProfileUnreachable(err error, name string) error {
+	unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err)
+	if !ok {
+		return err
+	}
+	copy := *unreachable
+	arg := name
+	if goruntime.GOOS == "windows" {
+		arg = "'" + strings.ReplaceAll(name, "'", "''") + "'"
+	} else if name == "" || strings.IndexFunc(name, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("@%_+=:,./-", r))
+	}) >= 0 {
+		arg = "'" + strings.ReplaceAll(name, "'", "'\\''") + "'"
+	}
+	copy.recoverCommand = "kata --daemon " + arg + " daemon recover"
+	return &copy
 }
