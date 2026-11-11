@@ -46,13 +46,14 @@ func checkServicePurgeArchivedHubProject(t *testing.T, service *kata.Service) {
 
 	_, err = service.PurgeArchivedProject(ctx, spec.UID, "Example Operator", "replaced")
 	require.ErrorIs(t, err, kata.ErrProjectNotArchived, "an active project is refused")
-	_, err = service.PurgeArchivedProject(ctx, spec.UID, " ", "replaced")
-	require.Error(t, err, "an actor is required for the purge log")
 	_, err = service.PurgeArchivedProject(ctx, "01HZNQ7VFPK1XGD8R5MABCD4EY", "Example Operator", "")
 	require.ErrorIs(t, err, kata.ErrProjectNotFound)
 
 	_, err = service.ArchiveProject(ctx, spec.UID, "Example Operator")
 	require.NoError(t, err)
+	// The project is now purgeable, so only the missing actor refuses it.
+	_, err = service.PurgeArchivedProject(ctx, spec.UID, " ", "replaced")
+	require.ErrorIs(t, err, kata.ErrProjectPurgeActorRequired, "the purge log names who purged")
 	purged, err := service.PurgeArchivedProject(ctx, spec.UID, "Example Operator", "replaced")
 	require.NoError(t, err)
 	assert.Equal(t, spec.UID, purged.Project.UID)

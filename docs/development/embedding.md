@@ -407,6 +407,8 @@ result, err := service.PurgeArchivedProject(
 
 - The project must be archived first. An active project returns
   `kata.ErrProjectNotArchived`.
+- The actor is required, because the purge log records who purged the
+  project. A blank actor returns `kata.ErrProjectPurgeActorRequired`.
 - A project that is a federation hub is accepted, unlike `kata projects purge`.
   The purge retires the hub binding and deletes every enrollment scoped to the
   project, active or revoked, in the same transaction. Those credentials stop

@@ -32,6 +32,10 @@ var ErrProjectFederationReplica = errors.New("kata: project is a federation repl
 // operator resolves the wrapped condition.
 var ErrProjectPurgeBlocked = errors.New("kata: project purge is blocked")
 
+// ErrProjectPurgeActorRequired reports a purge without an actor. The purge log
+// records who purged the project.
+var ErrProjectPurgeActorRequired = errors.New("kata: purge actor is required")
+
 // ProjectState describes whether a host-managed project is available for
 // ordinary operations.
 type ProjectState string
@@ -220,7 +224,7 @@ func (s *Service) PurgeArchivedProject(
 		return ProjectPurgeResult{}, ErrProjectNotFound
 	}
 	if strings.TrimSpace(actor) == "" {
-		return ProjectPurgeResult{}, errors.New("kata: purge actor is required")
+		return ProjectPurgeResult{}, ErrProjectPurgeActorRequired
 	}
 	callCtx, done, err := s.beginHostCall(ctx)
 	if err != nil {
