@@ -274,9 +274,6 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
 		}
-		if len(response.Body) == 0 {
-			return nil, io.EOF
-		}
 		page := response.JSON200
 		if page == nil {
 			return nil, fmt.Errorf("unexpected search response status %d", response.StatusCode)
