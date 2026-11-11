@@ -821,26 +821,16 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 	if !f.IncludeDeleted {
 		subjectLiveClause = `((events.issue_id IS NULL AND subject_issue.id IS NULL) OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 	}
-	acceptedProjects := `accepted.projects`
-	acceptedJoin := `LEFT JOIN (SELECT event_id, json_group_array(project_id) AS projects FROM federation_push_accepted GROUP BY event_id) accepted ON accepted.event_id=events.id`
-	if f.ProjectID != nil {
-		acceptedProjects = `NULLIF((SELECT json_group_array(project_id) FROM federation_push_accepted WHERE project_id=events.project_id AND event_id=events.id), '[]')`
-		acceptedJoin = ``
-	}
-	replayDue := "replay.delivery_due"
-	replayJoin := " LEFT JOIN federation_local_replays replay ON replay.event_uid = events.uid"
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, events.project_name, ` + issueIDExpr + `, events.issue_uid,
 	                 ` + relatedIDExpr + `, ` + relatedUIDExpr + `,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
-	                 CAST(events.created_at AS TEXT), ` + acceptedProjects + `, ` + replayDue + `
-
+	                 CAST(events.created_at AS TEXT)
 	          FROM events
 	          JOIN projects export_project ON export_project.id = events.project_id
 	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
 	               OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
 	          LEFT JOIN issues peer ON peer.id = events.related_issue_id
-	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)
-	          ` + acceptedJoin + replayJoin
+	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)`
 
 	clauses := []string{subjectLiveClause}
 	// SELECT-list args bind in column order — the subject scrub (issue_id
@@ -870,17 +860,10 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 		func(rows *sql.Rows) (db.EventExport, error) {
 			var rec db.EventExport
 			var payload string
-			var acceptedProjects *string
 			if err := rows.Scan(&rec.ID, &rec.UID, &rec.OriginInstanceUID, &rec.ProjectID, &rec.ProjectUID, &rec.ProjectName, &rec.IssueID,
 				&rec.IssueUID, &rec.RelatedIssueID, &rec.RelatedIssueUID,
-				&rec.Type, &rec.Actor, &payload, &rec.HLCPhysicalMS, &rec.HLCCounter, &rec.ContentHash, &rec.CreatedAt, &acceptedProjects, &rec.FederationReplayDue); err != nil {
-
+				&rec.Type, &rec.Actor, &payload, &rec.HLCPhysicalMS, &rec.HLCCounter, &rec.ContentHash, &rec.CreatedAt); err != nil {
 				return db.EventExport{}, scanError("event", err)
-			}
-			if acceptedProjects != nil {
-				if err := json.Unmarshal([]byte(*acceptedProjects), &rec.AcceptedProjectIDs); err != nil {
-					return db.EventExport{}, fmt.Errorf("decode accepted federation projects: %w", err)
-				}
 			}
 			if !jsontext.Value([]byte(payload)).IsValid() {
 				return db.EventExport{}, invalidJSONErr("event", rec.ID, "payload")

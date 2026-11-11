@@ -466,4 +466,4 @@ there is no down migration.
 
 ## Schema 51: federation push acknowledgments
 
-The 50 to 51 migration creates `federation_push_accepted` for events acknowledged above a binding's push cursor and `federation_local_replays` for replay notification state. It backfills replay state for interrupted resets. SQLite creates and backfills the same tables in place. Stop the daemon, back up the database, and run `kata storage postgres migrate` with schema-owner credentials before starting the new binary. Grant the runtime role access to both new tables using the normal PostgreSQL role setup. Older binaries cannot reopen schema 51; rollback requires the backup and matching older binary.
+The 50 to 51 migration creates `federation_push_accepted` for events acknowledged above a binding's push cursor. SQLite creates the same table in place. Stop the daemon, back up the database, and run `kata storage postgres migrate` with schema-owner credentials before starting the new binary. Grant the runtime role access to the new table using the normal PostgreSQL role setup. Older binaries cannot reopen schema 51; rollback requires the backup and matching older binary.

@@ -2280,14 +2280,10 @@ The pull fix is tracked in [kata#1049](https://github.com/kenn-io/kata/issues/10
 Keep the local data and wait for a build with that fix before relying on the
 join to restore pull.
 The event keeps its original UID and content hash. Until recovery, the durable
-push cursor stays before the earliest rejected event. The spoke records later
-accepted events and excludes them from pending push and future retries. The
-status diagnostic counts the other events the hub acknowledged. Backups preserve these acknowledgments and pending replay notifications independently.
+push cursor stays before the earliest rejected event. The spoke records later accepted events to suppress duplicate local notifications.
+The status diagnostic counts the other events the hub acknowledged.
 
-Missing enrollment alone does not create a quarantine or offer a skip action. A later poisoned
-batch retains both the rejected events and the poison batch in blocking
-quarantine. Only that quarantined range can be skipped;
-skip deliberately abandons its outbound events. Older peers keep atomic batch
+Missing enrollment alone does not create a quarantine or offer a skip action. A later poisoned batch enters blocking quarantine. Skipping it abandons outbound events through that batch. Older peers keep atomic batch
 failure. Adoption snapshot
 baselines remain atomic: a missing enrollment keeps the whole baseline pending
 until joining allows its original snapshots to retry.
@@ -2482,8 +2478,8 @@ brings a project back under the
 [relay checkpoint capacity](#relay-checkpoint-capacity); the purged events'
 receipts remain in it.
 
-A direct, push-enabled spoke refuses reset while it has unaccepted local-origin
-events or active quarantine. Negotiated relays use the full
+A direct, push-enabled spoke refuses reset while it has local-origin events above
+its push cursor or active quarantine. Negotiated relays use the full
 [reset blocker checks](#reset-recovery).
 
 ## Consistency limitations

@@ -68,7 +68,7 @@ func TestSchemaBootstrapRejectsExtensionsOutsidePublic(t *testing.T) {
 // Full constraint/index name parity with sqlitestore belongs in the later
 // conformance suite; this test pins the baseline acceptance subset.
 var expectedTables = []string{
-	"cron_jobs", "cron_workflows", "cron_runs", "mcp_event_subscriptions", "federation_push_accepted", "federation_local_replays",
+	"cron_jobs", "cron_workflows", "cron_runs", "mcp_event_subscriptions", "federation_push_accepted",
 	"federation_embedding_artifacts",
 	"federation_relay_outbox", "federation_relay_inbox", "federation_relay_cursors",
 	"federation_root_keys", "federation_event_provenance", "federation_entity_provenance",
@@ -126,7 +126,6 @@ var expectedFKCounts = map[string]int{
 	"issue_labels":             1, // -> issues
 	"events":                   3, // -> projects, -> issues, -> issues (related)
 	"federation_push_accepted": 2,
-	"federation_local_replays": 1,
 	"federation_bindings":      1, // -> projects
 	"federation_sync_status":   1, // -> projects
 	"federation_quarantine":    1, // -> projects

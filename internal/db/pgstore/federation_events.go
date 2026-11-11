@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -15,18 +16,6 @@ var federationPushEventTypeList = "(" + db.FederationPushEventTypesSQL() + ")"
 
 func pgFederationPushEventTypeCondition(column string) string {
 	return column + ` IN ` + federationPushEventTypeList
-}
-
-// FederationPushAcceptedThrough finds the accepted prefix before the next pending event.
-func (s *Store) FederationPushAcceptedThrough(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, error) {
-	var id sql.NullInt64
-	err := s.QueryRowContext(ctx, `SELECT MAX(a.event_id) FROM federation_push_accepted a JOIN events accepted ON accepted.id=a.event_id
-		WHERE a.project_id=$1 AND accepted.project_id=a.project_id AND accepted.origin_instance_uid=$2 AND a.event_id>$3 AND a.event_id < COALESCE((
-			SELECT MIN(e.id) FROM events e WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3
-			AND `+pgFederationPushEventTypeCondition("e.type")+`
-			AND NOT EXISTS (SELECT 1 FROM federation_push_accepted p WHERE p.project_id=e.project_id AND p.event_id=e.id)
-		), 9223372036854775807)`, projectID, originInstanceUID, afterID).Scan(&id)
-	return id.Int64, err
 }
 
 // PendingFederationPushEvents returns supported local-origin events above one acknowledgement cursor.
@@ -42,33 +31,21 @@ func (s *Store) PendingFederationPushEvents(
 	}
 	output, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
 WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3
-  AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
   AND `+pgFederationPushEventTypeCondition("e.type")+`
 ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
-	for _, event := range output {
-		if !db.IsFederationSnapshotEvent(event.Type) {
-			continue
-		}
-		var barrier sql.NullInt64
-		err := s.QueryRowContext(ctx, `SELECT MIN(id) FROM events WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushEventTypeCondition("type")+` AND type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)`, projectID, originInstanceUID, event.ID).Scan(&barrier)
-		if err != nil {
-			return nil, mapSQLError(err, nil)
-		}
-		if barrier.Valid {
-			for i, candidate := range output {
-				if candidate.ID >= barrier.Int64 {
-					return output[:i], nil
-				}
+	if len(output) == limit && len(output) > 0 && db.IsFederationSnapshotEvent(output[len(output)-1].Type) {
+		runStartAfterID := afterID
+		for _, o := range slices.Backward(output) {
+			if !db.IsFederationSnapshotEvent(o.Type) {
+				runStartAfterID = o.ID
+				break
 			}
 		}
-		break
-	}
-	if len(output) == limit && len(output) > 0 && db.IsFederationSnapshotEvent(output[len(output)-1].Type) {
 		extra, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id) AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
   AND e.id <= COALESCE((
     SELECT MIN(barrier.id) FROM events barrier
      WHERE barrier.project_id=$1
@@ -77,11 +54,22 @@ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND NOT EXISTS (S
        AND `+pgFederationPushEventTypeCondition("barrier.type")+`
        AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
   ), 9223372036854775807)
-ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, output[len(output)-1].ID)
+ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, runStartAfterID)
 		if err != nil {
 			return nil, err
 		}
 		output = append(output, extra...)
+	}
+	for index, event := range output {
+		if !db.IsFederationSnapshotEvent(event.Type) {
+			continue
+		}
+		for next := index + 1; next < len(output); next++ {
+			if !db.IsFederationSnapshotEvent(output[next].Type) {
+				return output[:next], nil
+			}
+		}
+		break
 	}
 	return output, nil
 }
@@ -116,8 +104,8 @@ func (s *Store) PendingFederationPushStats(
 
 	var count int64
 	var highWater sql.NullInt64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(e.id) FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id) AND `+pgFederationPushEventTypeCondition("e.type"),
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(id) FROM events
+WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushEventTypeCondition("type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &highWater)
 	if err != nil {
 		return 0, 0, mapSQLError(err, nil)
@@ -226,11 +214,6 @@ func (s *Store) insertRemoteEventTx(
 	if err != nil {
 		return false, err
 	}
-	if remote.OriginInstanceUID == s.instanceUID {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1,$2)`, remote.EventUID, boolInt(db.FederationLocalReplayDeliveryDue(ctx))); err != nil {
-			return false, fmt.Errorf("record local federation replay: %w", err)
-		}
-	}
 	return true, nil
 }
 
@@ -271,14 +254,4 @@ func (s *Store) ReconcileLocalFederationEcho(
 		return mapSQLError(err, nil)
 	})
 	return found, err
-}
-
-// RecordFederationLocalReplayDue remembers debt for an unprojected legacy replay.
-func (s *Store) RecordFederationLocalReplayDue(ctx context.Context, eventUID string) error {
-	return mapSQLError(db.RecordFederationLocalReplayDue(ctx, s, eventUID), nil)
-}
-
-// FederationLocalReplayStatus reads the recorded notification state.
-func (s *Store) FederationLocalReplayStatus(ctx context.Context, eventUID string) (due, recorded bool, err error) {
-	return db.ReadFederationLocalReplayStatus(ctx, s, eventUID)
 }

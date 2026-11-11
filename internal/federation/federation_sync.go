@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -252,10 +251,6 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
-		resetAt, err := interruptedFederationReset(ctx, store, binding.ProjectID)
-		if err != nil {
-			return err
-		}
 		scanCursor := binding.PushCursorEventID
 		acknowledged := 0
 		var rejectedEvents []db.Event
@@ -287,24 +282,11 @@ func pushDirectSpoke(
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
-			pending, err := pendingFederationPushEvents(ctx, store, binding, max(scanCursor, binding.PushCursorEventID), resetAt, validateLease)
+			pending, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), max(scanCursor, binding.PushCursorEventID), federationPollLimit)
 			if err != nil {
-				return err
+				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			if len(pending) == 0 {
-				through, err := store.FederationPushAcceptedThrough(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
-				if err != nil {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				if through > binding.PushCursorEventID {
-					if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-						return err
-					}
-					if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, through); err != nil {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-					}
-					binding.PushCursorEventID = through
-				}
 				break
 			}
 			scanCursor = pending[len(pending)-1].ID
@@ -400,16 +382,6 @@ func pushDirectSpoke(
 					}
 					binding.PushCursorEventID = durableCursor
 				}
-				through, err := store.FederationPushAcceptedThrough(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
-				if err != nil {
-					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-				}
-				if through > binding.PushCursorEventID {
-					if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, through); err != nil {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-					}
-					binding.PushCursorEventID = through
-				}
 				pending = append(pendingFederationEventsAfterCursor(batch, ack.PushCursorEventID), pending...)
 			}
 		}
@@ -422,47 +394,6 @@ func pushDirectSpoke(
 		}
 	}
 	return nil
-}
-
-// interruptedFederationReset returns when the project was reset if a pull since then never finished.
-func interruptedFederationReset(ctx context.Context, store db.Storage, projectID int64) (*time.Time, error) {
-	status, err := store.FederationSyncStatusByProject(ctx, projectID)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return nil, err
-	}
-	if status.LastResetAt != nil && status.LastPullStartedAt != nil &&
-		(status.LastPullSuccessAt == nil || status.LastPullStartedAt.After(*status.LastPullSuccessAt)) {
-		return status.LastResetAt, nil
-	}
-	return nil, nil
-}
-
-// pendingFederationPushEvents loads the next push events, first marking events that predate an
-// interrupted reset as due for local replay so advancing the push cursor cannot hide them.
-func pendingFederationPushEvents(
-	ctx context.Context,
-	store db.Storage,
-	binding *db.FederationBinding,
-	cursor int64,
-	resetAt *time.Time,
-	validateLease func(context.Context) error,
-) ([]db.Event, error) {
-	pending, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), cursor, federationPollLimit)
-	if err != nil {
-		return nil, recordFederationSyncError(ctx, store, binding.ProjectID, err)
-	}
-	for _, event := range pending {
-		if resetAt == nil || event.CreatedAt.After(*resetAt) {
-			continue
-		}
-		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-			return nil, err
-		}
-		if err := store.RecordFederationLocalReplayDue(ctx, event.UID); err != nil {
-			return nil, recordFederationSyncError(ctx, store, binding.ProjectID, err)
-		}
-	}
-	return pending, nil
 }
 
 type rejectedFederationEvent struct {
@@ -570,6 +501,7 @@ func syncDirectSpoke(
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
 ) (resultErr error) {
+	runStartBinding := binding
 	var pushErr error
 	if pushThisTurn {
 		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
@@ -714,10 +646,7 @@ func syncDirectSpoke(
 			for j, i := range pending {
 				batch[j] = remoteEventFromEnvelope(body.Events[i])
 			}
-			// An intervening push can acknowledge these new replays before
-			// the page is applied. Preserve their delivery debt at insert.
-			insertCtx := db.WithFederationLocalReplayDelivery(ctx, shouldDeliverPage)
-			inserted, err := store.InsertRemoteEvents(insertCtx, binding.ProjectID, batch)
+			inserted, err := store.InsertRemoteEvents(ctx, binding.ProjectID, batch)
 			if err != nil {
 				return err
 			}
@@ -740,7 +669,7 @@ func syncDirectSpoke(
 			if duplicate[i] && shouldDeliverPage {
 				var err error
 				if ev.OriginInstanceUID == localInstanceUID {
-					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, eventProjects[i], resumePull, ev)
+					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, runStartBinding, ev)
 				} else if insertedThisPull[ev.EventUID] {
 					deliver[i] = true
 				} else {
@@ -790,7 +719,6 @@ func syncDirectSpoke(
 				}
 			}
 		}
-		var localReplayUIDs []string
 		if shouldDeliverPage && len(deliverUIDs) > 0 {
 			byUID := map[string]db.Event{}
 			for _, project := range deliverProjects {
@@ -805,32 +733,13 @@ func syncDirectSpoke(
 			for i, event := range body.Events {
 				if deliver[i] {
 					pulledEvents = append(pulledEvents, byUID[event.EventUID])
-					if event.OriginInstanceUID == localInstanceUID {
-						localReplayUIDs = append(localReplayUIDs, event.EventUID)
-					}
 				}
 			}
 		}
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
-		if len(localReplayUIDs) == 0 {
-			return store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID)
-		}
-		claimed, err := store.CompleteFederationPullPage(ctx, binding.ProjectID, body.NextAfterID, localReplayUIDs)
-		if err != nil {
-			return err
-		}
-		// Another binding can apply overlapping history. Only the transaction
-		// that claimed a local replay may notify its consumers.
-		claimedSet := make(map[string]bool, len(claimed))
-		for _, uid := range claimed {
-			claimedSet[uid] = true
-		}
-		pulledEvents = slices.DeleteFunc(pulledEvents, func(event db.Event) bool {
-			return event.OriginInstanceUID == localInstanceUID && !claimedSet[event.UID]
-		})
-		return nil
+		return store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID)
 	}); err != nil {
 		return recordPullError(err)
 	}
@@ -888,74 +797,70 @@ func shouldDeliverDuplicateLocalEcho(
 	ctx context.Context,
 	store db.Storage,
 	binding db.FederationBinding,
-	projectID int64,
-	resumePull bool,
+	runStartBinding db.FederationBinding,
 	ev api.EventEnvelope,
 ) (bool, error) {
-	due, recorded, err := store.FederationLocalReplayStatus(ctx, ev.EventUID)
-	if err != nil || recorded || !resumePull {
-		return due, err
-	}
-
-	// Older data may lack a marker on later reset pages.
-	if projectID == binding.ProjectID && binding.PullCursorEventID >= ev.EventID {
-		return false, nil
+	projectID := binding.ProjectID
+	if ev.ProjectUID != binding.HubProjectUID {
+		project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+		if err != nil {
+			return false, err
+		}
+		projectID = project.ID
 	}
 	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
-	if err != nil || len(events) != 1 {
+	if err != nil {
 		return false, err
+	}
+	if len(events) != 1 {
+		return false, nil
 	}
 	event := events[0]
-	if event.IssueUID == nil {
-		if projectID == binding.ProjectID && event.ID > binding.PushCursorEventID {
-			status, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
-			if err != nil {
-				return false, err
-			}
-			if status.LastResetAt != nil && !event.CreatedAt.After(*status.LastResetAt) {
-				return true, store.RecordFederationLocalReplayDue(ctx, ev.EventUID)
-			}
+	// Duplicate local history uses its own stream's acknowledgement boundary.
+	// Its former source's cursor cannot tell whether the move was pushed.
+	if projectID != binding.ProjectID {
+		actualBinding, err := store.FederationBindingByProject(ctx, projectID)
+		if errors.Is(err, db.ErrNotFound) {
+			// This local event was already applied before its source left.
+			// Backfilling it through a destination needs no new delivery or
+			// acknowledgement from the retired source stream.
+			return false, nil
 		}
+		if err != nil {
+			return false, err
+		}
+		binding, runStartBinding = actualBinding, actualBinding
+	}
+	if event.ID > binding.PushCursorEventID {
+		accepted, err := store.FederationPushAccepted(ctx, projectID, event.ID)
+		return !accepted, err
+	}
+	if event.IssueID == nil && event.IssueUID != nil {
+		return true, nil
+	}
+	if event.ID <= runStartBinding.PushCursorEventID {
 		return false, nil
 	}
-	_, err = store.IssueByUID(ctx, *event.IssueUID, db.IncludeDeletedYes)
+	if runStartBinding.PullCursorEventID != runStartBinding.ReplayHorizonEventID-1 {
+		return false, nil
+	}
+	status, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
 	if errors.Is(err, db.ErrNotFound) {
-		// A destination can replay source history after the source cursor passed it.
-		if projectID != binding.ProjectID {
-			status, statusErr := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
-			if statusErr != nil || status.LastResetAt == nil {
-				return false, statusErr
-			}
-		}
-		return true, store.RecordFederationLocalReplayDue(ctx, ev.EventUID)
-	}
-	if err == nil && projectID == binding.ProjectID {
-		// A later reset page can update an issue projected by an earlier page.
-		status, statusErr := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
-		if statusErr != nil {
-			return false, statusErr
-		}
-		if status.LastResetAt != nil && !event.CreatedAt.After(*status.LastResetAt) {
-			return true, store.RecordFederationLocalReplayDue(ctx, ev.EventUID)
-		}
-	}
-	if err != nil || event.Type != "issue.commented" {
-		return false, err
-	}
-	var payload struct {
-		CommentUID string `json:"comment_uid"`
-	}
-	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-		return false, err
-	}
-	if payload.CommentUID == "" {
 		return false, nil
 	}
-	comments, err := store.CommentIssueIDsByUIDs(ctx, []string{payload.CommentUID})
-	if err != nil || len(comments) > 0 {
+	if err != nil {
 		return false, err
 	}
-	return true, store.RecordFederationLocalReplayDue(ctx, ev.EventUID)
+	if status.LastResetAt == nil {
+		return false, nil
+	}
+	if !event.CreatedAt.Before(*status.LastResetAt) {
+		return false, nil
+	}
+	if status.LastPullSuccessAt != nil && !status.LastPullSuccessAt.Before(*status.LastResetAt) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {
@@ -1878,7 +1783,6 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, destination db.FederationBinding, hubURL string, events []db.Event, opts clientpkg.Opts) (map[string]string, error) {
 	var tokens map[string]string
 	var projectUIDs []string
-	requiredSources := map[string]bool{}
 	issueWork := false
 	for _, event := range events {
 		if event.Type != "issue.moved" {
@@ -1895,7 +1799,6 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			return nil, db.ErrFederationIngestValidation
 		}
 		projectUIDs = append(projectUIDs, fromUID)
-		requiredSources[fromUID] = true
 	}
 	if issueWork {
 		bindings, err := store.ListFederationBindings(ctx)
@@ -1958,15 +1861,9 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			continue
 		}
 		if credential.HubProjectID != 0 && credential.HubProjectID != source.HubProjectID {
-			if !requiredSources[fromUID] {
-				continue
-			}
 			return nil, errors.New("move source credential project differs from binding")
 		}
 		if credential.Actor != "" && credential.Actor != source.Actor {
-			if !requiredSources[fromUID] {
-				continue
-			}
 			return nil, db.ErrFederationMoveSourceUnauthorized
 		}
 		credentialURL := credential.HubURL
@@ -1975,25 +1872,16 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		}
 		credentialBase, err := httpurl.CanonicalHTTPBaseURL(credentialURL)
 		if err != nil {
-			if !requiredSources[fromUID] {
-				continue
-			}
 			return nil, errors.New("move source credential origin is invalid")
 		}
 		credentialOrigin, err := httpurl.CanonicalHTTPOrigin(credentialBase)
 		if err != nil || credentialOrigin != sourceOrigin {
-			if !requiredSources[fromUID] {
-				continue
-			}
 			return nil, errors.New("move source credential origin differs from binding")
 		}
 		// Validate the source's own plaintext policy before including its token.
 		// The destination credential's opt-in does not authorize source transport.
 		sourceCredential := config.FederationTransportCredential(source.HubURL, source.HubProjectID, source.AllowInsecure, credential)
 		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
-			if !requiredSources[fromUID] {
-				continue
-			}
 			return nil, err
 		}
 		if tokens == nil {

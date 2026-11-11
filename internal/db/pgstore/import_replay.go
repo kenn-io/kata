@@ -122,17 +122,6 @@ func (s *Store) importReplayTx(
 		if err := pgReplayRestoreInstanceCreatedAt(ctx, tx, preservedInstanceUID, preservedCreatedAt); err != nil {
 			return err
 		}
-		if opts.RecoverLegacyFederationReplays && !opts.NewInstance {
-			// Restore uses the migration's backfill with the table already present.
-			const insert = "INSERT INTO federation_local_replays"
-			_, backfill, ok := strings.Cut(federationPushAcceptedMigrationSQL, insert)
-			if !ok {
-				return fmt.Errorf("federation local replay migration is missing its backfill")
-			}
-			if _, err := tx.ExecContext(ctx, insert+backfill); err != nil {
-				return fmt.Errorf("recover legacy federation local replays: %w", mapSQLError(err, nil))
-			}
-		}
 		if err := s.replayAPITokens(ctx, tx); err != nil {
 			return err
 		}

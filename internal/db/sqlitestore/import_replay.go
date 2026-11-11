@@ -164,11 +164,6 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 				return err
 			}
 		}
-		if opts.RecoverLegacyFederationReplays && !opts.NewInstance {
-			if _, err := tx.ExecContext(ctx, federationLocalReplaysBackfill); err != nil {
-				return fmt.Errorf("recover legacy federation local replays: %w", err)
-			}
-		}
 		if err := replayAPITokenProjection(ctx, tx); err != nil {
 			return err
 		}
@@ -1289,18 +1284,6 @@ func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport, opts db.Imp
 		stringPtrValue(e.RelatedIssueUID), e.RelatedIssueID,
 		e.Type, e.Actor, string(e.Payload),
 		e.HLCPhysicalMS, e.HLCCounter, e.ContentHash, e.CreatedAt)
-	if err != nil || opts.NewInstance || opts.MergeProject {
-		return wrapImportErr(db.ImportKindEvent, err)
-	}
-	for _, projectID := range e.AcceptedProjectIDs {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_push_accepted(project_id,event_id) VALUES($1,$2)`, projectID, e.ID); err != nil {
-			return wrapImportErr(db.ImportKindEvent, err)
-		}
-	}
-	if e.FederationReplayDue != nil {
-		_, err = tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1,$2)`,
-			e.UID, boolInt(*e.FederationReplayDue))
-	}
 	return wrapImportErr(db.ImportKindEvent, err)
 }
 

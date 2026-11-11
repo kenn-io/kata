@@ -51,7 +51,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
-	{name: "federation accepted push events", methods: []string{"AdvanceFederationPushCursor", "CreateIssue", "CreateProject", "FederationPushAcceptedThrough", "PendingFederationPushEvents", "PendingFederationPushStats", "RecordFederationPushAccepted", "UpsertFederationBinding", "EnableFederationPush"}, runWithBackend: checkFederationAcceptedPushEvents},
+	{name: "federation accepted push events", methods: []string{"CreateIssue", "CreateProject", "FederationPushAccepted", "RecordFederationPushAccepted", "UpsertFederationBinding"}, runWithBackend: checkFederationAcceptedPushEvents},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
@@ -318,7 +318,6 @@ var storageScenarios = []scenario{
 	{name: "federated move snapshot authority", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EnableProjectFederation", "CreateFederationEnrollment", "IngestFederationEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveSnapshotAuthority},
 	{name: "moved ordinary issue adoption", methods: []string{"CreateProject", "CreateIssue", "MoveIssueProject", "AdoptProjectIntoFederation", "IssueByUID", "PendingFederationPushEvents"}, run: checkMovedOrdinaryIssueAdoption},
 	{name: "federated cron run issue authority", methods: []string{"IngestFederationEvents", "MoveIssueProject", "ObserveCronRun"}, run: checkFederatedCronRunIssueAuthority},
-	{name: "federation local replay storage", methods: []string{"InsertRemoteEvent", "FederationLocalReplayStatus", "RecordFederationLocalReplayDue", "CompleteFederationPullPage"}, run: checkFederationLocalReplayStorage},
 	{name: "federated missing enrollment partial batch", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedMissingEnrollmentPartialBatch},
 	{name: "federated rejected adoption baseline", methods: []string{"IngestFederationEvents", "MoveIssueProject", "CreateFederationEnrollment", "EventsByUIDs", "IssueByUID"}, run: checkRejectedAdoptionBaseline},
 	{name: "federated fresh current project authority", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedFreshCurrentProjectAuthority},

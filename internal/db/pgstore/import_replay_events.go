@@ -45,18 +45,6 @@ $8,COALESCE($9,(SELECT uid FROM issues WHERE id=$8)),$10,$11,$12,$13,$14,$15,$16
 		event.IssueID, event.IssueUID, event.RelatedIssueID, event.RelatedIssueUID,
 		event.Type, event.Actor, string(event.Payload), event.HLCPhysicalMS,
 		event.HLCCounter, event.ContentHash, event.CreatedAt)
-	if err != nil || opts.NewInstance || opts.MergeProject {
-		return pgReplayError(db.ImportKindEvent, err)
-	}
-	for _, projectID := range event.AcceptedProjectIDs {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_push_accepted(project_id,event_id) VALUES($1,$2)`, projectID, event.ID); err != nil {
-			return pgReplayError(db.ImportKindEvent, err)
-		}
-	}
-	if event.FederationReplayDue != nil {
-		_, err = tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1,$2)`,
-			event.UID, boolInt(*event.FederationReplayDue))
-	}
 	return pgReplayError(db.ImportKindEvent, err)
 }
 

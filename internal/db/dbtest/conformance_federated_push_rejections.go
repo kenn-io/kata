@@ -7,33 +7,18 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/uid"
 )
 
 func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"mixed", "revoked-race", "all-rejected", "payload-only", "moved-peer", "dependent-on-rejected-create", "rejected-move", "rejected-move-new-route", "rejected-move-before-source-creation", "duplicate-rejected-uid", "malformed-comment", "known-create", "known-snapshot"} {
+	for _, kind := range []string{"mixed", "revoked-race", "all-rejected", "payload-only", "moved-peer", "dependent-on-rejected-create", "rejected-move", "malformed-comment"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
-			moveBeforeSourceCreation := kind == "rejected-move-before-source-creation"
-			rejectedMove := kind == "rejected-move" || kind == "rejected-move-new-route" || moveBeforeSourceCreation
+			rejectedMove := kind == "rejected-move"
 			hasDependent := rejectedMove || kind == "dependent-on-rejected-create"
 			source, target, moved, _ := federatedRehomeFixture(t, store, "partial-"+kind)
 			_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: moved.Revision, Actor: "worker"})
 			require.NoError(t, err)
-			if kind == "rejected-move-new-route" {
-				moved, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "Never in source", Author: "worker"})
-				require.NoError(t, err)
-			}
-			if moveBeforeSourceCreation {
-				// The destination can push a locally authored move before the source
-				// creation has reached the hub.
-				movedUID, err := uid.New()
-				require.NoError(t, err)
-				movedShortID, err := shortid.Derive(movedUID, shortid.MinLength)
-				require.NoError(t, err)
-				moved = db.Issue{UID: movedUID, ShortID: movedShortID, Title: "Undelivered source issue"}
-			}
 			good, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Independent", Author: "worker"})
 			require.NoError(t, err)
 			origin, err := uid.New()
@@ -48,13 +33,6 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				// Malformed actor attribution is atomic poison even when the same
 				// event also lacks authority for its issue's current project.
 				bad = newRemoteEvent(t, source, &moved.UID, "issue.commented", "worker", origin, at, []byte(`{"comment_uid":"`+commentUID+`","author":"worker","body":"Malformed","teammate":23}`))
-			}
-			if kind == "known-create" || kind == "known-snapshot" {
-				eventType := "issue.created"
-				if kind == "known-snapshot" {
-					eventType = "issue.snapshot"
-				}
-				bad = newRemoteEvent(t, source, &moved.UID, eventType, "worker", origin, at, []byte(`{"uid":"`+moved.UID+`","title":"Duplicate","author":"worker","status":"open"}`))
 			}
 			if kind == "payload-only" {
 				// Older federated history can carry issue identity only in the payload.
@@ -93,12 +71,6 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				afterMove := newRemoteEvent(t, source, &moved.UID, "issue.updated", "worker", origin, at, []byte(`{"uid":"`+moved.UID+`","title":"Must not acquire route authority"}`))
 				params.Events = []db.FederationIngestEvent{{SourceEventID: 1, Event: bad}, {SourceEventID: 2, Event: afterMove}, {SourceEventID: 3, Event: valid}}
 			}
-			if kind == "duplicate-rejected-uid" {
-				valid.EventUID = bad.EventUID
-				valid.ContentHash, err = db.RemoteEventContentHash(valid)
-				require.NoError(t, err)
-				params.Events[1].Event = valid
-			}
 			before, err := store.MaxEventID(ctx)
 			require.NoError(t, err)
 			if kind == "mixed" {
@@ -111,11 +83,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: current.Enrollment.ID}
 			}
 			result, err := store.IngestFederationEvents(ctx, params)
-			if kind == "duplicate-rejected-uid" {
-				require.ErrorIs(t, err, db.ErrRemoteEventConflict)
-				return
-			}
-			if kind == "malformed-comment" || kind == "known-create" || kind == "known-snapshot" {
+			if kind == "malformed-comment" {
 				require.ErrorIs(t, err, db.ErrFederationIngestValidation, "independent payload validation remains atomic despite missing enrollment")
 				after, err := store.MaxEventID(ctx)
 				require.NoError(t, err)
@@ -184,10 +152,6 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				require.NoError(t, err)
 				require.Equal(t, source.ID, moved.ProjectID)
 				require.Equal(t, "Must not acquire route authority", moved.Title)
-			}
-			if moveBeforeSourceCreation {
-				_, err := store.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
-				require.ErrorIs(t, err, db.ErrNotFound)
 			}
 			if kind != "mixed" && kind != "revoked-race" && kind != "moved-peer" && !rejectedMove {
 				got, err = store.IssueByID(ctx, moved.ID)

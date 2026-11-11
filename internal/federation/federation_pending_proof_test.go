@@ -52,13 +52,8 @@ func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 				credential.Signing = &signingpolicy.Source{HubURL: "https://other.example"}
 			}
 			spoke.credentials[projects[1].UID] = credential
-			_, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Independent work", Author: "worker"})
-			require.NoError(t, err)
 			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 			require.NoError(t, err)
-			tokens, err := federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, []db.Event{event}, clientpkg.Opts{})
-			require.NoError(t, err)
-			require.NotContains(t, tokens, projects[1].UID)
 			local, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Required source", Author: "worker"})
 			require.NoError(t, err)
 			move, err := spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: spoke.projects[1].ID, ToProjectID: spoke.projects[0].ID, IfMatchRev: local.Revision, Actor: "worker"})

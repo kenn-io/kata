@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -26,37 +27,24 @@ func (d *Store) PendingFederationPushEvents(
 		WHERE e.project_id = ?
 		  AND e.origin_instance_uid = ?
 		  AND e.id > ?
-		  AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
 		  AND `+federationPushEventTypeCondition("e.type")+`
 		ORDER BY e.id ASC
 		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
-	for _, event := range out {
-		if !db.IsFederationSnapshotEvent(event.Type) {
-			continue
-		}
-		var barrier sql.NullInt64
-		err := d.QueryRowContext(ctx, `SELECT MIN(id) FROM events WHERE project_id=? AND origin_instance_uid=? AND id>? AND `+federationPushEventTypeCondition("type")+` AND type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)`, projectID, originInstanceUID, event.ID).Scan(&barrier)
-		if err != nil {
-			return nil, err
-		}
-		if barrier.Valid {
-			for i, candidate := range out {
-				if candidate.ID >= barrier.Int64 {
-					return out[:i], nil
-				}
+	if len(out) == limit && len(out) > 0 && db.IsFederationSnapshotEvent(out[len(out)-1].Type) {
+		runStartAfterID := afterID
+		for _, o := range slices.Backward(out) {
+			if !db.IsFederationSnapshotEvent(o.Type) {
+				runStartAfterID = o.ID
+				break
 			}
 		}
-		break
-	}
-	if len(out) == limit && len(out) > 0 && db.IsFederationSnapshotEvent(out[len(out)-1].Type) {
 		extra, err := d.queryPendingFederationPushEvents(ctx, `
 			WHERE e.project_id = ?
 			  AND e.origin_instance_uid = ?
 			  AND e.id > ?
-			  AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
 			  AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  AND e.id <= COALESCE((
 			    SELECT MIN(barrier.id)
@@ -67,11 +55,22 @@ func (d *Store) PendingFederationPushEvents(
 			       AND `+federationPushEventTypeCondition("barrier.type")+`
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  ), 9223372036854775807)
-			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, out[len(out)-1].ID)
+			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, extra...)
+	}
+	for i, ev := range out {
+		if !db.IsFederationSnapshotEvent(ev.Type) {
+			continue
+		}
+		for j := i + 1; j < len(out); j++ {
+			if !db.IsFederationSnapshotEvent(out[j].Type) {
+				return out[:j], nil
+			}
+		}
+		break
 	}
 	return out, nil
 }
@@ -115,13 +114,12 @@ func (d *Store) PendingFederationPushStats(
 	var count int64
 	var maxID sql.NullInt64
 	if err := d.QueryRowContext(ctx, `
-		SELECT COUNT(*), MAX(e.id)
-		  FROM events e
-		 WHERE e.project_id = ?
-		   AND e.origin_instance_uid = ?
-		   AND e.id > ?
-		   AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
-		   AND `+federationPushEventTypeCondition("e.type"),
+		SELECT COUNT(*), MAX(id)
+		  FROM events
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		   AND id > ?
+		   AND `+federationPushEventTypeCondition("type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
 	}
@@ -133,18 +131,6 @@ func (d *Store) PendingFederationPushStats(
 
 func federationPushEventTypeCondition(column string) string {
 	return column + " IN (" + db.FederationPushEventTypesSQL() + ")"
-}
-
-// FederationPushAcceptedThrough finds the accepted prefix before the next pending event.
-func (d *Store) FederationPushAcceptedThrough(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, error) {
-	var id sql.NullInt64
-	err := d.QueryRowContext(ctx, `SELECT MAX(a.event_id) FROM federation_push_accepted a JOIN events accepted ON accepted.id=a.event_id
-		WHERE a.project_id=? AND accepted.project_id=a.project_id AND accepted.origin_instance_uid=? AND a.event_id>? AND a.event_id < COALESCE((
-			SELECT MIN(e.id) FROM events e WHERE e.project_id=? AND e.origin_instance_uid=? AND e.id>?
-			AND `+federationPushEventTypeCondition("e.type")+`
-			AND NOT EXISTS (SELECT 1 FROM federation_push_accepted p WHERE p.project_id=e.project_id AND p.event_id=e.id)
-		), 9223372036854775807)`, projectID, originInstanceUID, afterID, projectID, originInstanceUID, afterID).Scan(&id)
-	return id.Int64, err
 }
 
 // RecordFederationPushAccepted retains acknowledgements above the binding cursor.
@@ -187,12 +173,7 @@ func pruneFederationPushAccepted(ctx context.Context, tx *sql.Tx, projectID int6
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
-		tx, err := d.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = tx.Rollback() }()
-		res, err := tx.ExecContext(ctx, `
+		res, err := d.ExecContext(ctx, `
 			UPDATE federation_bindings
 			   SET push_cursor_event_id = CASE
 			         WHEN push_cursor_event_id < ? THEN ?
@@ -212,10 +193,7 @@ func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, next
 		if n == 0 {
 			return db.ErrNotFound
 		}
-		if err := pruneFederationPushAccepted(ctx, tx, projectID); err != nil {
-			return err
-		}
-		return tx.Commit()
+		return nil
 	})
 }
 
@@ -316,12 +294,11 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		 WHERE project_id = ?
 		   AND NOT EXISTS (
 		       SELECT 1
-		         FROM events e
-		        WHERE e.project_id = ?
-		          AND e.origin_instance_uid = ?
-		          AND e.id > ?
-		          AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
-		          AND `+federationPushEventTypeCondition("e.type")+`
+		         FROM events
+		        WHERE project_id = ?
+		          AND origin_instance_uid = ?
+		          AND id > ?
+		          AND `+federationPushEventTypeCondition("type")+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1
@@ -370,4 +347,11 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		return fmt.Errorf("commit guarded federated reset: %w", err)
 	}
 	return nil
+}
+
+// FederationPushAccepted reports whether the hub acknowledged an event.
+func (d *Store) FederationPushAccepted(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var accepted bool
+	err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=? AND event_id=?)`, projectID, eventID).Scan(&accepted)
+	return accepted, err
 }

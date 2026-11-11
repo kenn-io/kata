@@ -179,8 +179,7 @@ subscriptions. Re-run the `GRANT ... ON ALL TABLES` statement below after the
 migration so the runtime role can use it. The table has no sequences. See the
 [schema 50 migration requirements](../development/postgres-migrations.md#schema-50-mcp-events-subscriptions).
 
-Schema 51 adds `federation_push_accepted` for push acknowledgments and
-`federation_local_replays` for replay notification state.
+Schema 51 adds `federation_push_accepted` for push acknowledgments.
 Re-run the table grants below after migrating. See the
 [schema 51 migration requirements](../development/postgres-migrations.md#schema-51-federation-push-acknowledgments).
 

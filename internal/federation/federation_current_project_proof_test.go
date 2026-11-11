@@ -18,7 +18,6 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
@@ -184,20 +183,33 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	}
 }
 
+func newPushDeferralFixture(t *testing.T, joinTarget, withJob bool) (*testenv.Env, []db.Project, moveDeliverySpoke, db.Issue, db.Issue, db.CronJob) {
+	t.Helper()
+	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+	joined := projects[:1]
+	if joinTarget {
+		joined = projects
+	}
+	spoke := newMoveDeliverySpoke(t, hub, joined)
+	var job db.CronJob
+	if withJob {
+		definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+		require.NoError(t, err)
+		job, _, err = hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: projects[0].ID, Name: "Review", Actor: "worker", Definition: definition})
+		require.NoError(t, err)
+	}
+	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	local, err := spoke.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	return hub, projects, spoke, issue, local, job
+}
+
 func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 	for _, mode := range []string{"pages", "body-splits"} {
 		t.Run(mode, func(t *testing.T) {
-			hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
-			sender := newMoveDeliverySpoke(t, hub, projects[:1])
-			definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
-			require.NoError(t, err)
-			job, _, err := hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: projects[0].ID, Name: "Review", Actor: "worker", Definition: definition})
-			require.NoError(t, err)
-			moved, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved", Author: "worker"})
-			require.NoError(t, err)
-			require.NoError(t, sender.sync(t, 0))
-			local, err := sender.env.DB.IssueByUID(t.Context(), moved.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
+			hub, projects, sender, moved, local, job := newPushDeferralFixture(t, false, true)
 			body := ""
 			if mode == "body-splits" {
 				body = strings.Repeat("x", 400<<10)
@@ -230,8 +242,8 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			require.ErrorContains(t, err, "pending federation events remain")
 			pending, pendingErr := sender.env.DB.PendingFederationPushEvents(t.Context(), binding.ProjectID, sender.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
 			require.NoError(t, pendingErr)
-			require.ErrorContains(t, err, fmt.Sprintf("%d events need project access", len(pending)))
-			accepted, err := dbtest.AcceptedPushRow(t.Context(), sender.env.DB, binding.ProjectID, independentEvent.ID)
+			require.ErrorContains(t, err, fmt.Sprintf("%d events need project access", len(pending)-1))
+			accepted, err := sender.env.DB.FederationPushAccepted(t.Context(), binding.ProjectID, independentEvent.ID)
 			require.NoError(t, err)
 			require.True(t, accepted)
 			_, err = hub.DB.IssueByUID(t.Context(), independent.UID, db.IncludeDeletedNo)
@@ -262,15 +274,7 @@ func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
 	for _, mode := range []string{"missing", "leave", "enrollment"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
-			spoke := newMoveDeliverySpoke(t, hub, projects)
-			issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
-				ProjectID: projects[0].ID, Title: "Ready to move", Author: "worker",
-			})
-			require.NoError(t, err)
-			require.NoError(t, spoke.sync(t, 0))
-			local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
+			hub, projects, spoke, issue, local, _ := newPushDeferralFixture(t, true, false)
 			moved := spoke.move(t, local, 0, 1)
 			const commentBody = "Work after moving"
 			_, comment, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: moved.ID, Author: "worker", Body: commentBody})
@@ -385,58 +389,6 @@ func TestSyncFederationPartialPushAndPull(t *testing.T) {
 	require.Contains(t, *status.LastError, "need project access")
 }
 
-func TestFederationMissingEnrollmentThenPoisonBlocksPush(t *testing.T) {
-	hub, projects := newMoveDeliveryHub(t, "poison-source", "poison-target")
-	spoke := newMoveDeliverySpoke(t, hub, projects[:1])
-	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved work", Author: "worker"})
-	require.NoError(t, err)
-	poisonIssue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Purged work", Author: "worker"})
-	require.NoError(t, err)
-	require.NoError(t, spoke.sync(t, 0))
-	local, err := spoke.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Retain this event"})
-	require.NoError(t, err)
-	dependent, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Retained creation", Author: "worker", Links: []db.InitialLink{{ToNumber: local.ID, Type: "related"}}})
-	require.NoError(t, err)
-	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	localPoison, err := spoke.env.DB.IssueByUID(t.Context(), poisonIssue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	_, poison, err := spoke.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: localPoison.ID, Author: "worker", Body: "Edit after purge"})
-	require.NoError(t, err)
-	_, err = hub.DB.PurgeIssue(t.Context(), poisonIssue.ID, "worker", nil)
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: dependent.ID, Author: "worker", Body: "Retained dependency"})
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Wait behind poison", Author: "worker"})
-	require.NoError(t, err)
-	binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[0].ID)
-	require.NoError(t, err)
-	client, err := NewClient(t.Context(), hub.URL, spoke.credentials[projects[0].UID].Token, clientpkg.Opts{})
-	require.NoError(t, err)
-	paged := &boundedPushPageStore{Storage: spoke.env.DB, limit: 2}
-	err = pushDirectSpoke(t.Context(), paged, &binding, projects[0].ID, client, nil, spoke.credentials, clientpkg.Opts{})
-	var status *HubStatusError
-	require.ErrorAs(t, err, &status)
-	require.Equal(t, 400, status.StatusCode)
-	q, err := spoke.env.DB.ActiveFederationQuarantine(t.Context(), binding.ProjectID, db.FederationQuarantineDirectionPush)
-	require.NoError(t, err)
-	require.Contains(t, q.EventUIDs, poison.UID)
-	_, err = spoke.env.DB.SkipFederationQuarantine(t.Context(), db.SkipFederationQuarantineParams{ID: q.ID, ProjectID: binding.ProjectID, Actor: "worker", Reason: "discard poison"})
-	require.NoError(t, err)
-	joinMoveTarget(t, hub, projects[1], spoke)
-	binding, err = spoke.env.DB.FederationBindingByProject(t.Context(), binding.ProjectID)
-	require.NoError(t, err)
-	require.NoError(t, pushDirectSpoke(t.Context(), paged, &binding, projects[0].ID, client, nil, spoke.credentials, clientpkg.Opts{}))
-	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	require.Equal(t, "Retain this event", comments[0].Body)
-}
-
-// Matching local echoes must not publish a mutation twice merely because an
-// unrelated rejection holds the retry cursor behind work the hub accepted.
 func TestFederationSuppressesAcceptedLocalEcho(t *testing.T) {
 	for _, reopen := range []bool{false, true} {
 		name := "same turn"

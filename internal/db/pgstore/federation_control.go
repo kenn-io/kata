@@ -181,35 +181,12 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 
 // AdvanceFederationPullCursor records the highest consumed hub event id.
 func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
-	return updateFederationCursor(ctx, s, projectID, nextCursor, false)
-}
-
-// CompleteFederationPullPage advances the cursor and claims local replay
-// delivery in the same transaction.
-func (s *Store) CompleteFederationPullPage(ctx context.Context, projectID, nextCursor int64, replayUIDs []string) ([]string, error) {
-	var claimed []string
-	err := s.withTx(ctx, sql.LevelDefault, func(tx *sql.Tx) error {
-		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, false); err != nil {
-			return err
-		}
-		var err error
-		claimed, err = db.ClaimFederationLocalReplays(ctx, tx, replayUIDs)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return claimed, nil
+	return s.updateFederationCursor(ctx, projectID, nextCursor, false)
 }
 
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
-	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
-			return err
-		}
-		return pruneFederationPushAccepted(ctx, tx, projectID)
-	})
+	return s.updateFederationCursor(ctx, projectID, nextCursor, true)
 }
 
 func pruneFederationPushAccepted(ctx context.Context, tx *sql.Tx, projectID int64) error {
@@ -239,7 +216,7 @@ func (s *Store) RecordFederationPushAccepted(ctx context.Context, projectID int6
 	})
 }
 
-func updateFederationCursor(ctx context.Context, execer contextExecer, projectID, nextCursor int64, push bool) error {
+func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCursor int64, push bool) error {
 	column := "pull_cursor_event_id"
 	if push {
 		column = "push_cursor_event_id"
@@ -250,7 +227,7 @@ func updateFederationCursor(ctx context.Context, execer contextExecer, projectID
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`
-	result, err := execer.ExecContext(ctx, query, nextCursor, projectID)
+	result, err := s.ExecContext(ctx, query, nextCursor, projectID)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}
@@ -818,4 +795,11 @@ func encodeStringList(values []string) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+// FederationPushAccepted reports whether the hub acknowledged an event.
+func (s *Store) FederationPushAccepted(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var accepted bool
+	err := s.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=$1 AND event_id=$2)`, projectID, eventID).Scan(&accepted)
+	return accepted, err
 }
