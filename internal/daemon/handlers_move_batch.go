@@ -181,23 +181,23 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			if uid == "" {
 				uid = in.Body.ToProjectUID
 			}
+			if uid == "" {
+				moveBatchRefusal(r, api.NewError(400, "project_not_found", "target project is required", "", nil))
+				continue
+			}
+			if err := authorize([]string{uid}); err != nil {
+				moveBatchRefusal(r, err)
+				continue
+			}
 			target, known := targets[uid]
 			if !known {
 				var err error
-				if uid == "" {
-					err = api.NewError(400, "project_not_found", "target project is required", "", nil)
-				} else {
-					target, err = activeProjectByUID(ctx, cfg.DB, uid)
-				}
+				target, err = activeProjectByUID(ctx, cfg.DB, uid)
 				if err != nil {
 					moveBatchRefusal(r, err)
 					continue
 				}
 				targets[uid] = target
-			}
-			if err := authorize([]string{uid}); err != nil {
-				moveBatchRefusal(r, err)
-				continue
 			}
 			issue, source, err := resolveMoveBatchIssue(itemCtx, cfg.DB, in.Body.DefaultProjectID, input.Ref)
 			if err != nil {

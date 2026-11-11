@@ -62,11 +62,11 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 		if targetUID == "" {
 			targetUID = in.Body.ToProjectUID
 		}
-		target, err := activeProjectByUID(itemCtx, cfg.DB, targetUID)
-		if err != nil {
+		if _, err := authorizeHostProjectScope(itemCtx, nil, []string{targetUID}, false); err != nil {
 			continue
 		}
-		if _, err := authorizeHostProjectScope(itemCtx, nil, []string{targetUID}, false); err != nil {
+		target, err := activeProjectByUID(itemCtx, cfg.DB, targetUID)
+		if err != nil {
 			continue
 		}
 		current, _, err := resolveMoveBatchIssue(itemCtx, cfg.DB, 0, issue.UID)
