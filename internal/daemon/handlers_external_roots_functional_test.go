@@ -495,6 +495,49 @@ func TestExternalRootHandlersClassifyFieldAndPublishingErrors(t *testing.T) {
 		"connector": "example-connector", "external": "opaque-locator", "actor": "operator", "publish_comments": true,
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
+	t.Run("unportable inherited zone keeps a rejected field conflict", func(t *testing.T) {
+		status, body := requestExternalRootJSON(t, ts.URL, http.MethodPut,
+			"/api/v1/connectors/example-connector/fields/scheduled_on", map[string]any{"external_field": "start-date"})
+		require.Equal(t, http.StatusOK, status, string(body))
+		created, err := database.db.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
+			IssueID: issue.ID,
+			Recurrence: db.CreateRecurrenceIn{
+				ProjectID: project.ID, Actor: "operator", Rule: "FREQ=DAILY",
+				DTStart: "2026-08-20", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: issue.Title},
+			},
+		})
+		require.NoError(t, err)
+		_, err = database.db.PatchRecurrence(t.Context(), db.PatchRecurrenceIn{
+			RecurrenceID: created.Recurrence.ID, IfMatchRev: created.Recurrence.Revision,
+			Actor: "operator", Update: db.RecurrenceUpdate{Timezone: new("Local")},
+		})
+		require.NoError(t, err)
+		cleared, err := database.db.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+			IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value("null"), "timezone": jsontext.Value("null"),
+			},
+		})
+		require.NoError(t, err)
+		client.fieldValues["start-date"] = connector.FieldValue{Kind: "date", Value: "2026-08-22"}
+		status, body = requestExternalRootJSON(t, ts.URL, http.MethodPost, bridgePath+"/actions/reconcile", map[string]any{"actor": "operator"})
+		require.Equal(t, http.StatusOK, status, string(body))
+		assert.Contains(t, string(body), `"field_conflicts":1`)
+
+		status, body = requestExternalRootJSON(t, ts.URL, http.MethodPost, bridgePath+"/actions/resolve-field", map[string]any{
+			"kata_field": "scheduled_on", "use": "external", "actor": "operator",
+		})
+		assert.Equal(t, http.StatusBadRequest, status, string(body))
+		assert.Contains(t, string(body), `"code":"invalid_metadata_value"`)
+		assert.Contains(t, string(body), "Local")
+		assert.Contains(t, string(body), "named IANA timezone")
+		after, err := database.db.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		assert.Equal(t, cleared.Issue.Revision, after.Revision)
+		status, body = requestExternalRootJSON(t, ts.URL, http.MethodGet, bridgePath, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		assert.Contains(t, string(body), `"external_candidate":{"kind":"date","value":"2026-08-22"}`)
+	})
+
 	status, body = requestExternalRootJSON(t, ts.URL, http.MethodPost, bridgePath+"/actions/pause", map[string]any{
 		"actor": "operator", "reason": "operator_pause",
 	})

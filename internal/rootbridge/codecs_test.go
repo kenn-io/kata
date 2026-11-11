@@ -104,8 +104,12 @@ func TestScheduleCodecRecurrenceZonePrecedence(t *testing.T) {
 		{"connector zone", "scheduled_on", `{}`, "Asia/Tokyo", connector.FieldValue{Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "Asia/Tokyo"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			codec := scheduleCodec{key: tc.field, defaultTimezone: "UTC", recurrenceZone: "America/New_York"}
-			patch, err := codec.KataPatch(db.Issue{Metadata: db.JSONBlob(tc.raw)}, tc.value)
+			codec := scheduleCodec{key: tc.field, defaultTimezone: "UTC"}
+			recurrenceZone := ""
+			if tc.field == "scheduled_on" {
+				recurrenceZone = "America/New_York"
+			}
+			patch, err := codec.kataPatch(db.Issue{Metadata: db.JSONBlob(tc.raw)}, tc.value, recurrenceZone)
 			require.NoError(t, err)
 			got, err := metadata.DecodeSavedSchedule(patch[tc.field])
 			require.NoError(t, err)

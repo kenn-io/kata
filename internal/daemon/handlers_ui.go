@@ -247,10 +247,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 						return nil, internalAPIError(err)
 					}
 					recordUISnapshotDependencies(ctx, cachedDependencies)
-					if matchesStrongETag(in.IfNoneMatch, validator) {
-						return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
-					}
-					return snapshotResponse(ctx, cachedResponse, intent, policy, validator)
+					return snapshotResponseIfChanged(ctx, cachedResponse, intent, policy, validator, in.IfNoneMatch)
 				}
 			}
 			query := intent.storeQuery()
@@ -288,10 +285,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			recordUISnapshotDependencies(ctx, dependencies)
-			if matchesStrongETag(in.IfNoneMatch, validator) {
-				return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
-			}
-			return snapshotResponse(ctx, data, intent, policy, validator)
+			return snapshotResponseIfChanged(ctx, data, intent, policy, validator, in.IfNoneMatch)
 		})
 
 	referencesOperation := huma.Operation{
@@ -770,6 +764,18 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 		}
 	}
 	return policy
+}
+
+// snapshotResponseIfChanged answers 304 with the current validator when
+// If-None-Match is "*" or names it. A wildcard needs the built snapshot's
+// calendar boundary, so it cannot take the projection-free tag shortcut.
+func snapshotResponseIfChanged(ctx context.Context, data db.UISnapshotData, intent normalizedUISnapshotIntent,
+	policy uiPolicy, validator, ifNoneMatch string,
+) (*api.UISnapshotResponse, error) {
+	if matchesStrongETag(ifNoneMatch, validator) {
+		return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
+	}
+	return snapshotResponse(ctx, data, intent, policy, validator)
 }
 
 func makeUISnapshotETag(intent normalizedUISnapshotIntent, data db.UISnapshotData, policy uiPolicy) (string, error) {

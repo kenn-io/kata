@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.kenn.io/kata/internal/metadata"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -804,6 +805,9 @@ func ValidateExternalFieldProjectionParams(params ExternalFieldProjectionParams)
 		}
 		if !jsontext.Value(raw).IsValid() {
 			return fmt.Errorf("%w: field projection patch contains invalid JSON", ErrExternalRootValidation)
+		}
+		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+			return fmt.Errorf("validate %q: %w", key, err)
 		}
 	}
 	return nil

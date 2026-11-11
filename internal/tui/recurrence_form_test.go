@@ -2,6 +2,7 @@ package tui
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -123,12 +124,23 @@ func (h *recurrenceHarness) save() {
 }
 
 func TestRecurrenceFormUsesSavedScheduleZone(t *testing.T) {
-	t.Setenv("TZ", "Asia/Tokyo")
-	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+	h := newRecurrenceHarness(t, viewDetail)
+	saved, err := metadata.NewScheduleValue("2026-11-09", "America/New_York")
 	require.NoError(t, err)
-	issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: "2025-12-31"}
-	form := newRecurrenceForm(formTarget{}, issue, nil)
-	assert.Equal(t, "America/New_York", form.fieldValue(fieldZone))
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: h.issue.ID, Actor: "alice", Patch: map[string]jsontext.Value{
+			"scheduled_on": saved, "timezone": jsontext.Value(`"Europe/Paris"`),
+		},
+	})
+	require.NoError(t, err)
+	h.reload()
+	h.open()
+	assert.Equal(t, "America/New_York", h.m.input.fieldValue(fieldZone))
+	h.fill("FREQ=DAILY", "2026-11-09", "")
+	h.save()
+	recs := h.rows()
+	require.Len(t, recs, 1)
+	assert.Equal(t, "America/New_York", recs[0].Timezone)
 }
 
 func TestRecurrenceTodayUsesSelectedZone(t *testing.T) {
@@ -209,6 +221,24 @@ func TestRecurrenceTodayUsesBundledRules(t *testing.T) {
 	cmd.Env = append(os.Environ(), "ZONEINFO="+dir, "KATA_TEST_INUVIK_RULES=1")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
+}
+
+func TestRecurrenceTodayUsesSavedZoneWhenZoneBlank(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	h.m.toastNow = func() time.Time { return time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC) }
+	saved, err := metadata.NewScheduleValue("2026-11-09", "America/New_York")
+	require.NoError(t, err)
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved, "timezone": jsontext.Value(`"Asia/Tokyo"`)}})
+	require.NoError(t, err)
+	h.reload()
+	h.open()
+	h.fill("FREQ=DAILY", "today", "")
+	assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, h.m.toastNow())), "2026-11-09 Mon")
+	h.save()
+	recs := h.rows()
+	require.Len(t, recs, 1)
+	require.Equal(t, "America/New_York", recs[0].Timezone)
+	require.Equal(t, "2026-11-09", recs[0].DTStart)
 }
 
 func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
@@ -635,33 +665,57 @@ func TestSaveRecurrenceRequiresGuardedStartAPI(t *testing.T) {
 }
 
 func TestSaveRecurrenceRejectsUnknownRulesOnReadback(t *testing.T) {
-	for _, field := range []string{"scheduled_on", "deadline_on"} {
-		t.Run(field, func(t *testing.T) {
+	const saved = `{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`
+	const refusal = "unsupported schedule tzdata version"
+	for _, test := range []struct{ name, field string }{
+		{"start scheduled", "scheduled_on"}, {"change scheduled", "scheduled_on"},
+		{"start deadline", "deadline_on"}, {"change deadline", "deadline_on"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewDetail)
+			var current *recurrenceclient.View
+			if strings.HasPrefix(test.name, "change") {
+				rec := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+				current = &rec
+			}
+			// The form opens on readable data. A newer peer returns unknown
+			// rules only when the public client reads back before saving.
+			h.open()
+			require.Empty(t, h.m.input.err)
+			h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+			var writes []string
 			hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					writes = append(writes, r.Method)
+				}
 				resp, err := h.env.HTTP.Do(r)
-				if err != nil || r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/issues/") {
+				if err != nil || !strings.HasSuffix(r.URL.Path, "/issues/"+h.issue.UID) {
 					return resp, err
 				}
 				body, err := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
 				require.NoError(t, err)
-				require.NoError(t, resp.Body.Close())
-				var wire map[string]any
-				require.NoError(t, json.Unmarshal(body, &wire))
-				issue := wire["issue"].(map[string]any)
-				issue["metadata"] = map[string]any{field: map[string]any{"value": "2026-11-12", "timezone": "UTC", "tzdata_version": "unknown"}}
-				body, err = json.Marshal(wire)
+				var shown generated.ShowIssueResponse
+				require.NoError(t, json.Unmarshal(body, &shown))
+				if shown.Issue.Metadata == nil {
+					shown.Issue.Metadata = map[string]any{}
+				}
+				shown.Issue.Metadata[test.field] = jsontext.Value(saved)
+				body, err = json.Marshal(shown)
 				require.NoError(t, err)
-				resp.Body = io.NopCloser(strings.NewReader(string(body)))
+				resp.Body = io.NopCloser(bytes.NewReader(body))
 				return resp, nil
 			})}
-			client := NewClient(h.env.URL, hc)
-			_, err := client.SaveRecurrence(t.Context(), h.issue.ProjectID, h.issue.UID, RecurrenceInput{
-				Rule: "FREQ=DAILY", Start: "2026-11-12", Zone: "UTC", Actor: "alice", IssueRevision: h.issue.Revision,
-			})
-			require.ErrorContains(t, err, "unsupported schedule tzdata version")
-			assert.Empty(t, h.rows())
-			assert.Equal(t, h.issue.Revision, h.revision())
+			h.m.api = NewClient(h.env.URL, hc)
+			h.save()
+			require.Contains(t, h.m.input.err, refusal)
+			require.Empty(t, writes)
+			if current != nil {
+				h.fill("", "", "")
+				h.save()
+				assert.Equal(t, []string{http.MethodDelete}, writes)
+				assert.Empty(t, h.rows())
+			}
 		})
 	}
 }

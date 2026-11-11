@@ -200,6 +200,11 @@ func TestUISnapshotETagFastPath(t *testing.T) {
 	require.Equal(t, http.StatusNotModified, listed.StatusCode, string(body))
 	weak, body := getUISnapshot(t, ts, query, "W/"+etag)
 	require.Equal(t, http.StatusOK, weak.StatusCode, string(body))
+	wildcard, body := getUISnapshot(t, ts, query, "*")
+	require.Equal(t, http.StatusNotModified, wildcard.StatusCode, string(body))
+	require.NotEmpty(t, wildcard.Header.Get("ETag"))
+	validated, body := getUISnapshot(t, ts, query, wildcard.Header.Get("ETag"))
+	require.Equal(t, http.StatusNotModified, validated.StatusCode, string(body))
 }
 
 func TestUISnapshotValidatorSurvivesCacheEvictionAndRestart(t *testing.T) {

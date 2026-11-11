@@ -626,7 +626,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 				string(issue.Metadata), readyAt,
 				scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 			)
-			if err != nil && (limit == 0 || len(issues) < limit) {
+			if err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("read UI issue %s schedule: %w", issue.UID, err)
 			}
@@ -643,11 +643,11 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 			string(issue.Metadata), query,
 			scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 		)
-		if err != nil && (limit == 0 || len(issues) < limit) {
+		if err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
 		}
-		if !matches || (limit > 0 && len(issues) >= limit) {
+		if !matches {
 			continue
 		}
 		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)

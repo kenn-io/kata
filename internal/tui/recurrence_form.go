@@ -45,7 +45,7 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 		input.Blur()
 		s.fields = append(s.fields, inputField{id: f.id, kind: fieldSingleLine, input: input, label: f.label})
 	}
-	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec, issueZone: issue.timezone(), unreadable: issue.datesState().unreadable}
+	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec, issueZone: recurrenceIssueZone(issue), unreadable: issue.datesState().unreadable}
 	rule, start, zone, errText := recurrenceFormSeed(issue, rec, state.unreadable)
 	s.err = errText
 	s.recurrence, s.target.projectID = state, issue.ProjectID
@@ -61,6 +61,11 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 	}
 	_ = s.fields[0].focus()
 	return s
+}
+
+func recurrenceIssueZone(issue Issue) string {
+	zone, _ := savedFormZone(issue)
+	return zone
 }
 
 // recurrenceFormSeed is the rule, start, zone, and error text a Repeat form

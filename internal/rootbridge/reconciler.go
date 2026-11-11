@@ -11,6 +11,7 @@ import (
 
 	connectorclient "go.kenn.io/kata/internal/connector"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/connector"
 )
@@ -566,15 +567,18 @@ func (r *Reconciler) reconcileField(
 	case MergeConflict:
 		return r.storeFieldConflict(ctx, snapshot, mapping, state, hasBaseline, kata, external, claimToken, result)
 	case MergeWriteKata:
-		patch, patchErr := prepareFieldPatch(ctx, r.store, codec, snapshot.issue, decision.Baseline)
+		projectionCtx, patch, patchErr := fieldProjectionPatch(ctx, codec, snapshot.issue, decision.Baseline)
 		if patchErr != nil {
 			return r.storeFieldConflict(ctx, snapshot, mapping, state, hasBaseline, kata, external, claimToken, result)
 		}
-		projected, event, _, projectionErr := r.store.ApplyExternalFieldProjection(ctx, db.ExternalFieldProjectionParams{
+		projected, event, _, projectionErr := r.store.ApplyExternalFieldProjection(projectionCtx, db.ExternalFieldProjectionParams{
 			BindingID: snapshot.binding.ID, MappingID: mapping.ID, ClaimToken: claimToken,
 			KataField: mapping.KataField, Patch: patch, ExpectedIssueRevision: snapshot.issue.Revision,
 			IntegrationActor: integrationActor(snapshot.binding),
 		})
+		if errors.Is(projectionErr, metadata.ErrInvalidValue) {
+			return r.storeFieldConflict(ctx, snapshot, mapping, state, hasBaseline, kata, external, claimToken, result)
+		}
 		if projectionErr != nil {
 			return result, projectionErr
 		}

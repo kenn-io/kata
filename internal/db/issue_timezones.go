@@ -1,6 +1,7 @@
 package db
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -41,7 +42,7 @@ func legacyScheduleZoneKnown(issueZone jsontext.Value, field, defaultZone, recur
 		_, err := metadata.ScheduleLocation(recurrenceZone, metadata.ScheduleTZDataVersion)
 		return err == nil
 	}
-	return bundledScheduleZone(defaultZone)
+	return bundledScheduleZone(cmp.Or(defaultZone, "UTC"))
 }
 
 func bundledScheduleZone(zone string) bool {
@@ -173,7 +174,7 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		}
 		result[field], err = metadata.NewScheduleValue(value, zone)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
+			return nil, fmt.Errorf("%w: %s: %v; set a named IANA %s", metadata.ErrInvalidValue, field, err, source)
 		}
 		if legacyLocal {
 			if err := compareLocalSchedule(value, result[field]); err != nil {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/v2"
 	"errors"
@@ -77,6 +78,7 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 // preflightRecurrenceZone refuses a save while the issue's saved dates are
 // unreadable here, else resolves the zone the recurrence will use.
 func preflightRecurrenceZone(in RecurrenceInput, meta map[string]any) (string, error) {
+	var savedZone string
 	for _, field := range []string{"scheduled_on", "deadline_on"} {
 		raw, err := json.Marshal(meta[field])
 		if err != nil {
@@ -85,9 +87,12 @@ func preflightRecurrenceZone(in RecurrenceInput, meta map[string]any) (string, e
 		if _, err := metadata.ScheduleValueText(raw); err != nil {
 			return "", err
 		}
+		if field == "scheduled_on" {
+			savedZone, _ = metadata.SavedScheduleZone(raw)
+		}
 	}
 	issueZone, _ := meta["timezone"].(string)
-	zone, err := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
+	zone, err := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), cmp.Or(savedZone, issueZone), localZone)
 	switch {
 	case errors.Is(err, recurrenceclient.ErrLocalZone):
 		return "", errors.New(`"Local" is not an IANA zone; enter a name like Europe/Paris`)

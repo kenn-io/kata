@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -184,21 +185,18 @@ func CalendarDateAndToday(
 			return "", "", false, err
 		}
 	}
-	var display string
-	switch {
-	case displayTimezone != nil:
+	display := defaultTimezone
+	if displayTimezone != nil {
 		display = *displayTimezone
-	case issueTimezone != "":
+	} else if issueTimezone != "" {
 		display = issueTimezone
-	default:
-		display = defaultTimezone
-	}
-	if display == "" {
-		display = "UTC"
 	}
 	displayLocation := savedLocation
 	if displayLocation == nil && (kind != scheduledOnDate || !now.IsZero()) {
-		displayLocation, err = time.LoadLocation(display)
+		displayLocation, err = time.LoadLocation(cmp.Or(display, "UTC"))
+		if err != nil && kind == scheduledOnDate {
+			return scheduleValue, "", true, nil // a calendar date needs no zone
+		}
 		if err != nil {
 			return "", "", false, fmt.Errorf("load display timezone %q: %w", display, err)
 		}

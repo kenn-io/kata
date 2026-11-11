@@ -42,10 +42,16 @@ func shortIDs(issues []Issue) []string {
 }
 
 func TestDateToggleUsesScheduleDay(t *testing.T) {
-	issue := dated("tokyo", "2026-01-01", "")
-	issue.ScheduledOnToday = "2026-01-01"
-	require.True(t, matchesDate(issue, ListFilter{Date: dateToday, Day: "2025-12-31"}))
-	require.False(t, matchesDate(issue, ListFilter{Date: dateScheduled, Day: "2025-12-31"}))
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		issue := dated("tokyo", "", "")
+		if field == "scheduled_on" {
+			issue.ScheduledOnDate, issue.ScheduledOnToday = "2026-01-01", "2026-01-01"
+		} else {
+			issue.DeadlineOnDate, issue.DeadlineOnToday = "2026-01-01", "2026-01-01"
+		}
+		require.True(t, matchesDate(issue, ListFilter{Date: dateToday, Day: "2025-12-31"}), field)
+		require.False(t, matchesDate(issue, ListFilter{Date: dateScheduled, Day: "2025-12-31"}), field)
+	}
 }
 
 func TestDateToggleSavedZoneMidnightKeepsSelection(t *testing.T) {
@@ -628,4 +634,32 @@ func TestDateToggle_DaemonCheckIgnoresSupersededFailure(t *testing.T) {
 	require.Empty(t, m.list.status)
 	m, _ = stepModel(m, oldResult)
 	assert.Empty(t, m.list.status, "the current filter must ignore the superseded HTTP 503")
+}
+
+// A saved zone can reach midnight while the TUI host is still on the same day.
+func TestDateToggle_IdleTickRefreshesSavedCalendar(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Date(2026, 1, 1, 14, 59, 0, 0, time.UTC)
+		withClock(t, func() time.Time { return now })
+		future, keep := dated("new", "2026-01-02", ""), dated("keep", "2026-01-01", "")
+		future.ScheduledOnToday, keep.ScheduledOnToday = "2026-01-01", "2026-01-01"
+		calls := 0
+		client := NewClient("http://127.0.0.1:7777", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			require.Equal(t, "/api/v1/projects/7/issues", r.URL.Path)
+			calls++
+			future.ScheduledOnToday, keep.ScheduledOnToday = "2026-01-02", "2026-01-02"
+			return jsonResponse(t, map[string]any{"issues": []Issue{future, keep}}), nil
+		})})
+		m := filterFormFixture()
+		m.api = newUndoClient(client)
+		m.list.filter = ListFilter{Date: dateToday}.stampDay()
+		m.list = m.list.applyFetched(initialFetchMsg{issues: []Issue{future, keep}})
+		assertQueueShortIDs(t, m.list.visibleRows(), []string{"keep"})
+		now = now.Add(2 * time.Minute)
+		next, cmd, handled := m.routeSSE(dayTickMsg{})
+		require.True(t, handled)
+		m = drainInboxCmds(next.(Model), cmd)
+		require.Equal(t, 1, calls, "idle date filters must refresh server-projected calendar days")
+		assertQueueShortIDs(t, m.list.visibleRows(), []string{"new", "keep"})
+	})
 }

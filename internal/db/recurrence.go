@@ -1,6 +1,7 @@
 package db
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -149,31 +150,39 @@ func freezeRecurrenceDeadline(object map[string]jsontext.Value, recurrenceZone, 
 	}
 	zone := recurrenceZone
 	if !template {
-		zone = defaultZone
-		if len(object["timezone"]) > 0 && string(object["timezone"]) != "null" && string(object["timezone"]) != `""` {
-			if err := json.Unmarshal(object["timezone"], &zone); err != nil {
-				return fmt.Errorf("%w: deadline timezone: %v", ErrInvalidRecurrence, err)
-			}
-		}
-		if zone == "" {
-			zone = "UTC"
-		}
-	}
-	localDeadline := template && local || zone == "Local"
-	if zone == "Local" {
-		zone, err = portableLocalZone()
-		if err != nil {
+		if zone, err = issueDeadlineZone(object, defaultZone); err != nil {
 			return err
 		}
 	}
-	object["deadline_on"], err = metadata.NewScheduleValue(deadline, zone)
-	if err != nil {
-		return fmt.Errorf("%w: deadline_on: %v", ErrInvalidRecurrence, err)
+	legacyLocal := zone == "Local"
+	if legacyLocal {
+		zone, err = portableLocalZone()
 	}
-	if localDeadline {
+	if err == nil {
+		object["deadline_on"], err = metadata.NewScheduleValue(deadline, zone)
+	}
+	if err != nil && strings.HasSuffix(deadline, "Z") {
+		object["deadline_on"], err = metadata.NewScheduleValue(deadline, "UTC")
+		legacyLocal = false
+	}
+	if err != nil {
+		return fmt.Errorf("%w: deadline_on: %v; change the issue timezone to a named IANA timezone", ErrInvalidRecurrence, err)
+	}
+	if legacyLocal || template && local {
 		return compareLocalSchedule(deadline, object["deadline_on"])
 	}
 	return nil
+}
+
+// issueDeadlineZone is the zone an existing issue's legacy deadline resolves in.
+func issueDeadlineZone(object map[string]jsontext.Value, defaultZone string) (string, error) {
+	zone := defaultZone
+	if raw := object["timezone"]; len(raw) > 0 && string(raw) != "null" && string(raw) != `""` {
+		if err := json.Unmarshal(raw, &zone); err != nil {
+			return "", fmt.Errorf("%w: deadline timezone: %v", ErrInvalidRecurrence, err)
+		}
+	}
+	return cmp.Or(zone, "UTC"), nil
 }
 
 func compareLocalSchedule(value string, saved jsontext.Value) error {

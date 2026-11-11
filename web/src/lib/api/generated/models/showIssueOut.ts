@@ -13,7 +13,7 @@ export interface ShowIssueOut {
   closed_at?: string
   closed_reason?: string
   created_at: string
-  /** deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable. */
+  /** deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request. */
   deadline_on_date?: string
   /** Saved deadline instant as a local date and time using its saved timezone rules. */
   deadline_on_display?: string
@@ -30,7 +30,7 @@ export interface ShowIssueOut {
   project_uid?: string
   recurrence_id?: number
   revision: number
-  /** scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable. */
+  /** scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request. */
   scheduled_on_date?: string
   /** Saved scheduled instant as a local date and time using its saved timezone rules. */
   scheduled_on_display?: string

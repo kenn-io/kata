@@ -39,6 +39,7 @@ func TestPrepareIssueSchedules(t *testing.T) {
 		{"restored no-op", `{"timezone":17,"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "Local", "", "", false},
 		{"legacy no-op with known zone", `{"timezone":"America/New_York","$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "", "America/New_York", false},
 		{"legacy no-op with daemon zone", `{"$field":"2026-11-12T09:00"}`, `{"$field":"2026-11-12T09:00"}`, "America/New_York", "", "America/New_York", false},
+		{"legacy no-op with implicit UTC", `{"$field":"2026-11-12T09:00"}`, `{"$field":"2026-11-12T09:00"}`, "", "", "UTC", false},
 		{"legacy no-op with recurrence zone", `{"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "US/Eastern", "US/Eastern", false},
 		{"deadline uses existing alias", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"deadline_on":"2026-11-14"}`, "Local", "US/Eastern", "US/Eastern", false},
 		{"clear recurrence zone", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"timezone":null,"scheduled_on":"2026-11-15"}`, "Local", "US/Eastern", "US/Eastern", false},
