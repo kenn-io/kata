@@ -6,6 +6,7 @@
   import { orvalFetch } from '../lib/api/client'
   import {
     getLocalEmbeddings,
+    getRestartLocalEmbeddingsUrl,
     getTurnOnLocalEmbeddingsUrl,
     type LocalEmbeddingsStatus,
     type turnOnLocalEmbeddingsResponse,
@@ -21,9 +22,16 @@
     postFetch: typeof fetch
     /** Host the built-in server downloads to, when the daemon isn't on this computer. */
     remoteHost?: string | undefined
+    originStable?: boolean
   }
 
-  let { canAdministerDaemon, onback, postFetch, remoteHost = undefined }: Props = $props()
+  let {
+    canAdministerDaemon,
+    onback,
+    postFetch,
+    remoteHost = undefined,
+    originStable = false,
+  }: Props = $props()
 
   const pollMs = 2000
   // Ollama shows its status only; switching to the built-in server comes later.
@@ -37,6 +45,8 @@
   let status = $state<LocalEmbeddingsStatus>()
   let loading = $state(true)
   let posting = $state(false)
+  let restartPending = $state(false)
+  let restartDeadline = 0
   // Set when a Turn on request fails; a read showing a job clears it.
   let requestError = $state<string>()
   // Aborted when the page goes away.
@@ -47,24 +57,36 @@
   let timer: ReturnType<typeof setTimeout> | undefined
 
   let job = $derived(status?.job)
-  let restarting = $derived(job?.state === 'restart')
+  let restarting = $derived(job?.state === 'restart' || job?.state === 'restarting')
   let base = $derived(status ? rowState(status) : undefined)
   let countFree = $derived(base?.kind === 'indexing' && !base.total)
   let turning = $derived(restarting || countFree)
   let row = $derived(turning ? turningOn : base)
   let count = $derived(row?.kind === 'indexing' ? row.total : 0)
   let restartLabels = $derived({
-    off: 'Turning on',
-    downloaded: remoteHost
-      ? `Restart the daemon on ${remoteHost} to finish.`
-      : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+    off: restartPending ? 'Restarting...' : 'Turning on',
+    turnOn: 'Restart daemon',
+    downloaded:
+      status?.can_restart && canAdministerDaemon && !remoteHost
+        ? originStable
+          ? ''
+          : 'After restart, run kata ui to reopen. If this daemon uses a custom home, set KATA_HOME to it first.'
+        : remoteHost
+          ? `Restart the daemon on ${remoteHost} to finish.`
+          : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
   })
-  let failure = $derived(requestError ?? (job?.state === 'failed' ? job.error : undefined))
+  let failure = $derived(
+    requestError ?? (job?.state === 'failed' || job?.state === 'restart' ? job.error : undefined),
+  )
   // Indexing keeps polling while failed, so the note clears once a pass succeeds.
   let indexingFailed = $derived(status?.indexing?.failed === true)
 
-  // The borrowed state offers Turn on, so it never shows a button.
-  let readonly = $derived(turning || !(status?.can_change && canAdministerDaemon))
+  // The borrowed state offers an action only when restart is available.
+  let readonly = $derived(
+    restarting
+      ? !(status?.can_restart && canAdministerDaemon && !remoteHost && !restartPending)
+      : turning || !(status?.can_change && canAdministerDaemon),
+  )
 
   $effect(() => {
     const abort = new AbortController()
@@ -120,7 +142,14 @@
     const post = posts
     let next: LocalEmbeddingsStatus | undefined
     try {
-      const response = await getLocalEmbeddings({ signal })
+      const readSignal =
+        restartPending && originStable
+          ? AbortSignal.any([
+              signal,
+              AbortSignal.timeout(Math.max(0, restartDeadline - Date.now())),
+            ])
+          : signal
+      const response = await getLocalEmbeddings({ signal: readSignal })
       if (response.status === 200) next = response.data
     } catch {
       // The next poll retries while setup is under way.
@@ -129,6 +158,18 @@
     if (next) {
       status = next
       if (next.job) requestError = undefined
+      if (
+        restartPending &&
+        (next.job?.error || (next.job?.state !== 'restart' && next.job?.state !== 'restarting'))
+      )
+        restartPending = false
+    }
+    if (!next && restartPending && !originStable) return
+    if (restartPending && originStable && Date.now() >= restartDeadline) {
+      restartPending = false
+      requestError = "Couldn't reconnect. Run kata daemon status, then reopen kata ui."
+      loading = false
+      return
     }
     loading = false
     poll()
@@ -136,8 +177,45 @@
 
   function poll(): void {
     clearTimeout(timer)
-    if (page?.signal.aborted || posting || !active(status)) return
+    if (page?.signal.aborted || posting || (!active(status) && !restartPending)) return
     timer = setTimeout(() => void refresh(), pollMs)
+  }
+
+  async function restartDaemon(): Promise<void> {
+    if (posting || restartPending || !page) return
+    const reopen = originStable
+      ? ''
+      : '\n\nAfter restart, run kata ui to reopen. If this daemon uses a custom home, set KATA_HOME to it first.'
+    if (
+      !confirm(
+        `Restart this daemon? All projects and clients on it will disconnect briefly.${reopen}`,
+      )
+    )
+      return
+    const signal = page.signal
+    posting = true
+    restartPending = true
+    restartDeadline = Date.now() + 120_000
+    posts++
+    clearTimeout(timer)
+    try {
+      const postSignal = AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+      const response = await postFetch(getRestartLocalEmbeddingsUrl(), {
+        method: 'POST',
+        signal: postSignal,
+      })
+      if (!response.ok) {
+        restartPending = false
+        requestError = "Couldn't restart the daemon. Try again or run kata daemon restart."
+        posting = false
+        return
+      }
+    } catch {
+      if (!signal.aborted && !originStable)
+        requestError = "Couldn't confirm restart. Run kata daemon status, then reopen kata ui."
+    }
+    posting = false
+    if (!signal.aborted) poll()
   }
 
   async function turnOn(): Promise<void> {
@@ -189,7 +267,7 @@
             itemNoun={count === 1 ? 'issue' : 'issues'}
             labels={restarting ? restartLabels : countFree ? turningOnLabels : labels}
             {readonly}
-            onturnon={turnOn}
+            onturnon={restarting ? restartDaemon : turnOn}
             onusebuiltin={() => {}}
           />
         </fieldset>

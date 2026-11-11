@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"errors"
@@ -900,6 +901,7 @@ func daemonRestartCmd() *cobra.Command {
 		listen           string
 		insecureReadonly bool
 		noAutoToken      bool
+		generation       string
 	)
 	cmd := &cobra.Command{
 		Use:   "restart",
@@ -912,11 +914,20 @@ func daemonRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			running, release, err := lockLiveDaemons(cmd.Context(), ns, cmd.ErrOrStderr())
+			lockCtx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			running, release, err := lockLiveDaemons(lockCtx, ns, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
 			defer release()
+			if generation != "" {
+				record, err := selectRestartGeneration(running, generation)
+				if err != nil {
+					return err
+				}
+				running = []kitdaemon.RuntimeRecord{record}
+			}
 			if err := requireRestartable(running); err != nil {
 				return err
 			}
@@ -980,6 +991,8 @@ func daemonRestartCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
 	cmd.Flags().BoolVar(&insecureReadonly, "insecure-readonly", false,
 		"permit unauthenticated GETs on non-loopback TCP when no token is configured (DEV ONLY)")
+	cmd.Flags().StringVar(&generation, "generation", "", "restart only this daemon generation")
+	_ = cmd.Flags().MarkHidden("generation")
 	return cmd
 }
 
@@ -1275,6 +1288,7 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // re-executes itself only after every listener and the runtime record have
 // been released.
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
+	reapRestartHelper()
 	restart := newDaemonRestart(os.Stderr)
 	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart); err != nil {
 		return reportRestartFailure(startedForRestartReply, err)
@@ -1665,6 +1679,30 @@ func runDaemonProcess(
 	localSetup := &localEmbeddingsSetup{
 		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
 		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
+	}
+	if restart != nil && requireRestartable([]kitdaemon.RuntimeRecord{rec}) == nil {
+		localSetup.restart = func() error {
+			var output bytes.Buffer
+			// The caller must hold the start lock after this daemon shuts down.
+			return kitdaemon.StartDetached(context.WithoutCancel(ctx), kitdaemon.StartDetachedOptions{
+				Executable: restart.executable,
+				Args:       []string{"daemon", "restart", "--generation", restartGeneration(rec)},
+				Env:        os.Environ(), Stdout: &output, Stderr: &output,
+				AfterStart: func(cmd *exec.Cmd) { restart.helperPID.Store(int64(cmd.Process.Pid)) },
+				Exited: func(err error) {
+					restart.helperPID.Store(0)
+					if err == nil {
+						return
+					}
+					localSetup.mu.Lock()
+					defer localSetup.mu.Unlock()
+					if localSetup.job != nil && localSetup.job.State == "restarting" {
+						localSetup.job.State = "restart"
+						localSetup.job.Error = fmt.Sprintf("restart failed: %v: %s", err, strings.TrimSpace(output.String()))
+					}
+				},
+			})
+		}
 	}
 	if pg, ok := store.(*pgstore.Store); ok {
 		localSetup.vectorReady = func(ctx context.Context) error {

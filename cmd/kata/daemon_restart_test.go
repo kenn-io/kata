@@ -29,6 +29,18 @@ func stubDaemonExecutable(t *testing.T, resolve func() (string, error)) {
 	t.Cleanup(func() { resolveDaemonExecutable = original })
 }
 
+func TestSelectRestartGeneration(t *testing.T) {
+	first := kitdaemon.RuntimeRecord{PID: 10, StartedAt: time.Unix(1, 0)}
+	second := kitdaemon.RuntimeRecord{PID: 10, StartedAt: time.Unix(2, 0)}
+	got, err := selectRestartGeneration([]kitdaemon.RuntimeRecord{first, second}, restartGeneration(first))
+	require.NoError(t, err)
+	require.Equal(t, first, got)
+	_, err = selectRestartGeneration([]kitdaemon.RuntimeRecord{second}, restartGeneration(first))
+	require.Error(t, err)
+	_, err = selectRestartGeneration(nil, restartGeneration(first))
+	require.Error(t, err)
+}
+
 func TestNewDaemonRestart_UnresolvableExecutableDisablesRestart(t *testing.T) {
 	stubDaemonExecutable(t, func() (string, error) { return "", errors.New("procfs unavailable") })
 	var stderr bytes.Buffer

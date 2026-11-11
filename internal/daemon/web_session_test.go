@@ -79,6 +79,8 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "daemon roster", method: http.MethodGet, path: "/api/v1/ui/daemons", want: http.StatusNoContent},
 		{name: "local embeddings status", method: http.MethodGet, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
 		{name: "local embeddings setup", method: http.MethodPost, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
+		{name: "local embeddings restart", method: http.MethodPost, path: "/api/v1/embeddings/local/restart", want: http.StatusNoContent},
+		{name: "proxied embeddings restart", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/embeddings/local/restart", want: http.StatusForbidden},
 		{name: "project sync status", method: http.MethodGet, path: "/api/v1/projects/7/federation/status", want: http.StatusNoContent},
 		{name: "global sync status", method: http.MethodGet, path: "/api/v1/federation/status", want: http.StatusForbidden},
 		{name: "proxied project sync status", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/projects/7/federation/status", want: http.StatusForbidden},
@@ -124,6 +126,15 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 			assert.Equal(t, test.want, response.Code)
 		})
 	}
+	t.Run("restart rejects invalid csrf", func(t *testing.T) {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/api/v1/embeddings/local/restart", nil)
+		request.AddCookie(manager.Cookie(issued.Cookie))
+		request.Header.Set(webSessionHeader, issued.Session)
+		request.Header.Set(webCSRFHeader, "invalid")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		require.Equal(t, http.StatusForbidden, response.Code)
+	})
 }
 
 func TestIssueScopedBrowserSessionUsesSameRouteAllowlist(t *testing.T) {

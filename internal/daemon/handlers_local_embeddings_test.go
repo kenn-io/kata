@@ -30,6 +30,33 @@ func (f *localEmbeddingsFixture) TurnOn(context.Context) error {
 	return nil
 }
 
+func (f *localEmbeddingsFixture) Restart(context.Context) error { f.calls++; return nil }
+
+func TestLocalEmbeddingsRestartAdministration(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind PrincipalKind
+		want int
+	}{
+		{"owner", PrincipalWebLocal, 202}, {"member", PrincipalDBToken, 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := &localEmbeddingsFixture{}
+			mux := http.NewServeMux()
+			registerLocalEmbeddingsHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{LocalEmbeddings: fixture})
+			req := httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: tc.kind}), http.MethodPost, "/api/v1/embeddings/local/restart", nil)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, req)
+			require.Equal(t, tc.want, response.Code)
+			if tc.want == 202 {
+				require.Equal(t, 1, fixture.calls)
+			} else {
+				require.Zero(t, fixture.calls)
+			}
+		})
+	}
+}
+
 func TestLocalEmbeddingsAdministration(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

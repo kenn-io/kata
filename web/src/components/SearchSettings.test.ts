@@ -11,11 +11,14 @@ function status(patch: Partial<LocalEmbeddingsStatus> = {}): LocalEmbeddingsStat
     download_bytes: 290_000_000,
     ollama_available: false,
     can_change: true,
+    can_restart: false,
     ...patch,
   }
 }
 
-function renderSettings(props: { canAdministerDaemon?: boolean; postFetch?: typeof fetch } = {}) {
+function renderSettings(
+  props: { canAdministerDaemon?: boolean; postFetch?: typeof fetch; originStable?: boolean } = {},
+) {
   return render(SearchSettings, {
     props: { canAdministerDaemon: true, onback: vi.fn(), postFetch: fetch, ...props },
   })
@@ -30,6 +33,142 @@ describe('SearchSettings', () => {
     cleanup()
     vi.unstubAllGlobals()
     vi.useRealTimers()
+  })
+
+  test('asks before restarting and cancel sends no request', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json(
+          status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
+        ),
+      ),
+    )
+    const postFetch = vi.fn<typeof fetch>()
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => false),
+    )
+    renderSettings({ postFetch })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(postFetch).not.toHaveBeenCalled()
+  })
+
+  test('keeps the manual step when the viewer cannot restart', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json(
+          status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
+        ),
+      ),
+    )
+    renderSettings({ canAdministerDaemon: false })
+    await settle()
+    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+    expect(screen.getByText(/run kata daemon restart/)).not.toBeNull()
+  })
+
+  test('sends a single restart request after confirmation', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json(
+          status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
+        ),
+      ),
+    )
+    const postFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }))
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    renderSettings({ postFetch })
+    await settle()
+    const button = screen.getByRole('button', { name: 'Restart daemon' })
+    await fireEvent.click(button)
+    await fireEvent.click(button)
+    expect(postFetch).toHaveBeenCalledOnce()
+    expect(postFetch.mock.calls[0]?.[0]).toBe('/api/v1/embeddings/local/restart')
+    expect(postFetch.mock.calls[0]?.[1]?.method).toBe('POST')
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('run kata ui'))
+  })
+
+  test('reconnects a stable origin after the restart interrupts reads', async () => {
+    vi.useFakeTimers()
+    const pending = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    const read = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(pending))
+      .mockRejectedValueOnce(new TypeError('disconnected'))
+      .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false })))
+    setGeneratedFetch(read)
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    const postFetch = vi.fn<typeof fetch>(async () => {
+      throw new TypeError('disconnected')
+    })
+    renderSettings({ postFetch, originStable: true })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(screen.getByText('On', { exact: true })).not.toBeNull()
+    expect(read).toHaveBeenCalledTimes(3)
+  })
+
+  test('offers recovery when a stable origin does not return', async () => {
+    vi.useFakeTimers()
+    const read = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json(
+          status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
+        ),
+      )
+      .mockRejectedValue(new TypeError('disconnected'))
+    setGeneratedFetch(read)
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    renderSettings({
+      postFetch: vi.fn(async () => new Response(null, { status: 202 })),
+      originStable: true,
+    })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(screen.getByRole('alert').textContent).toContain('kata daemon status')
+  })
+
+  test('shows a restart rejection and allows another attempt', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(
+      vi.fn(async () =>
+        Response.json(
+          status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
+        ),
+      ),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    renderSettings({
+      postFetch: vi.fn(async () => new Response(null, { status: 409 })),
+      originStable: true,
+    })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    expect(screen.getByRole('alert').textContent).toContain("Couldn't restart")
+    expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
   })
 
   test.each([

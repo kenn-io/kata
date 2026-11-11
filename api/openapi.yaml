@@ -4425,6 +4425,8 @@ components:
       properties:
         can_change:
           type: boolean
+        can_restart:
+          type: boolean
         download_bytes:
           format: int64
           type: integer
@@ -4446,6 +4448,7 @@ components:
         - download_bytes
         - ollama_available
         - can_change
+        - can_restart
       type: object
     MCPEventsArguments:
       additionalProperties: false
@@ -7830,6 +7833,40 @@ paths:
           description: Internal Server Error
     post:
       operationId: turnOnLocalEmbeddings
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalEmbeddingsStatus"
+          description: Accepted
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+  /api/v1/embeddings/local/restart:
+    post:
+      operationId: restartLocalEmbeddings
       responses:
         "202":
           content:

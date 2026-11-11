@@ -189,6 +189,18 @@ func TestDaemonLifecycle(t *testing.T) {
 	fixture := daemonLifecycle(t)
 	t.Run("update", func(t *testing.T) { testUpdateInstallDaemonLifecycle(t, fixture) })
 	t.Run("restart", func(t *testing.T) { testDaemonRestartLifecycle(t, fixture) })
+	t.Run("restart selected generation", func(t *testing.T) {
+		setupKataEnv(t)
+		f := fixture(t, "selected generation")
+		before := f.record()
+		output, err := f.restart(t, "--generation", restartGeneration(before))
+		require.NoError(t, err, "%s", output)
+		after := f.record()
+		require.True(t, after.StartedAt.After(before.StartedAt))
+		output, err = f.restart(t, "--generation", restartGeneration(before))
+		require.Error(t, err, "%s", output)
+		require.Equal(t, after.StartedAt, f.record().StartedAt)
+	})
 	t.Run("stop waits for held request", func(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("holds an HTTP request over a Unix socket")

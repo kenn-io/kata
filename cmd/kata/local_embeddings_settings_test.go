@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +43,37 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 			require.False(t, status.CanChange)
 		})
 	}
+}
+
+func TestLocalEmbeddingsRestartOnce(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	var calls int
+	setup := &localEmbeddingsSetup{
+		job:     &api.LocalEmbeddingsJob{State: "restart"},
+		restart: func() error { calls++; return nil },
+	}
+	status, err := setup.Status(t.Context())
+	require.NoError(t, err)
+	require.True(t, status.CanRestart)
+	require.NoError(t, setup.Restart(t.Context()))
+	require.NoError(t, setup.Restart(t.Context()))
+	require.Equal(t, 1, calls)
+}
+
+func TestLocalEmbeddingsRestartFailureCanRetry(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	setup := &localEmbeddingsSetup{
+		job:     &api.LocalEmbeddingsJob{State: "restart"},
+		restart: func() error { return errors.New("helper could not start") },
+	}
+	require.Error(t, setup.Restart(t.Context()))
+	status, err := setup.Status(t.Context())
+	require.NoError(t, err)
+	require.True(t, status.CanRestart)
+	require.Equal(t, "restart", status.Job.State)
+	require.Contains(t, status.Job.Error, "helper could not start")
 }
 
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {

@@ -1825,6 +1825,7 @@ type LocalEmbeddingsStatus struct {
 	DownloadBytes   int64                    `json:"download_bytes"`
 	OllamaAvailable bool                     `json:"ollama_available"`
 	CanChange       bool                     `json:"can_change"`
+	CanRestart      bool                     `json:"can_restart"`
 	Job             *LocalEmbeddingsJob      `json:"job,omitempty"`
 	Indexing        *LocalEmbeddingsIndexing `json:"indexing,omitempty"`
 }

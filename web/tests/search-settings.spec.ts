@@ -9,6 +9,35 @@ const off = {
   can_change: true,
 }
 
+test('confirms a restart and reconnects after the daemon returns', async ({ page, kata }) => {
+  let restarted = false
+  await page.route('**/api/v1/embeddings/local', async (route) => {
+    await route.fulfill({
+      json: restarted
+        ? { ...off, provider: 'built_in', can_change: false, can_restart: false }
+        : {
+            ...off,
+            can_change: false,
+            can_restart: true,
+            job: { state: 'restart', downloaded: 1, total: 1 },
+          },
+    })
+  })
+  await page.route('**/api/v1/embeddings/local/restart', async (route) => {
+    await route.abort()
+    await kata.restart()
+    restarted = true
+  })
+  await kata.launch(page)
+  await page.goto(`${kata.origin}/kata?view=settings`)
+  const button = page.getByRole('button', { name: 'Restart daemon' })
+  await expect(button).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  page.once('dialog', (dialog) => dialog.accept())
+  await button.click()
+  await expect(page.getByText('On', { exact: true })).toBeVisible({ timeout: 30_000 })
+})
+
 test('Settings keeps status colors, spacing, and title alignment consistent', async ({
   page,
   kata,

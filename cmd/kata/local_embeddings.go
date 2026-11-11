@@ -506,6 +506,7 @@ type localEmbeddingsSetup struct {
 	idle        daemon.IdleForegroundAdmission
 	start       func(func(context.Context)) bool
 	vectorReady func(context.Context) error
+	restart     func() error
 	mu          sync.Mutex
 	job         *api.LocalEmbeddingsJob
 }
@@ -535,9 +536,27 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 		job := *s.job
 		status.Job = &job
 	}
+	status.CanRestart = s.restart != nil && s.job != nil && s.job.State == "restart"
 	s.mu.Unlock()
 	status.CanChange = status.Provider == "none" && (status.Job == nil || status.Job.State == "failed")
 	return status, nil
+}
+
+func (s *localEmbeddingsSetup) Restart(_ context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.job != nil && s.job.State == "restarting" {
+		return nil
+	}
+	if s.restart == nil || s.job == nil || s.job.State != "restart" {
+		return daemon.ErrLocalEmbeddingsBusy
+	}
+	s.job.State, s.job.Error = "restarting", ""
+	if err := s.restart(); err != nil {
+		s.job.State, s.job.Error = "restart", err.Error()
+		return err
+	}
+	return nil
 }
 
 func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
