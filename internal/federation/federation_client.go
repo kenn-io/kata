@@ -211,9 +211,6 @@ func (c *Client) RelayReset(ctx context.Context, projectID int64) (db.RelayReset
 		return checkpoint, callErr
 	}
 	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &checkpoint)
-	if err == nil {
-		_, err = db.RelayResetRequiredFeatures(checkpoint.Snapshot)
-	}
 	return checkpoint, err
 }
 
@@ -236,9 +233,6 @@ func (c *Client) OfferRelayDeliveries(ctx context.Context, projectID int64, stre
 		return batch, callErr
 	}
 	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &batch)
-	if err == nil {
-		_, err = db.RelayBatchRequiredFeatures(batch)
-	}
 	return batch, err
 }
 

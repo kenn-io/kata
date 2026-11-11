@@ -12,7 +12,7 @@ func registerTaskOperationPolicies(policies map[string]HostOperationPolicy) {
 		"listLabels", "listRecurrences", "showRecurrence", "readyIssues", "readyIssuesGlobal",
 		"searchIssues", "pollEvents", "pollProjectEvents", "auditCloses", "digestGlobal",
 		"digestProject", "getIssueLeaseStatus", "readUISnapshot", "readUIReferences",
-		"resolveUIIssueReference", "readUILaunchTarget")
+		"resolveUIIssueReference", "readUILaunchTarget", "readUIAttachmentRoute")
 
 	// MCP Events subscriptions are daemon-owned delivery state, not project
 	// data. Delivery re-authorizes with the read policy of pollEvents.

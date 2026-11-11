@@ -169,7 +169,7 @@ func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project d
 			return nil
 		}
 		code := hubStatusErrorCode(status)
-		if code != "issue_not_found" && !(binding.RelayConfig != nil && code == "hub_claim_failed") {
+		if code != "issue_not_found" && (binding.RelayConfig == nil || code != "hub_claim_failed") {
 			return nil
 		}
 	}
@@ -247,7 +247,7 @@ func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.
 	if err != nil {
 		return metadata.Attachment{}, err
 	}
-	if current == nil || current.Role != db.FederationRoleSpoke || current.HubURL != binding.HubURL || current.HubProjectUID != binding.HubProjectUID || current.HubProjectID != binding.HubProjectID {
+	if current == nil || !sameClaimRefreshRoute(*current, *binding) {
 		return metadata.Attachment{}, attachmentError(409, "attachment_origin_mismatch")
 	}
 	return descriptor.Attachment, nil

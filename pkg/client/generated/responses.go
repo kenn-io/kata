@@ -623,6 +623,12 @@ type RevokeTokenResponse = RevokeTokenResponseBody
 
 type RevokeTokenErrorResponse = ErrorEnvelope
 
+type ReadUIAttachmentRouteResponse struct {
+	Route *ReadUIAttachmentRoute_Response_Route `json:"route"`
+}
+
+type ReadUIAttachmentRouteErrorResponse = ErrorEnvelope
+
 type ResolveUIIssueReferenceResponse = UIIssueReferenceResponseBody
 
 type ResolveUIIssueReferenceErrorResponse = ErrorEnvelope
@@ -2005,6 +2011,14 @@ type RevokeTokenResp struct {
 	StatusCode   int
 	JSON200      *RevokeTokenResponse
 	JSONDefault  *RevokeTokenErrorResponse
+}
+
+type ReadUIAttachmentRouteResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReadUIAttachmentRouteResponse
+	JSONDefault  *ReadUIAttachmentRouteErrorResponse
 }
 
 type ResolveUIIssueReferenceResp struct {

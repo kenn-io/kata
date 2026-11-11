@@ -5,5 +5,4 @@
 export type LinkFederatedDocbankParams = {
   origin: string
   project_uid: string
-  client_kind?: string
 }

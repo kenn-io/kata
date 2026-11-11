@@ -5,11 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -100,6 +100,33 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 	attachmentCache := newUIAttachmentCapabilityCache()
 	authorityCache := newUISnapshotAuthorityCache()
 	enrichmentCache := newUISnapshotEnrichmentCache()
+	huma.Register(humaAPI, huma.Operation{OperationID: "readUIAttachmentRoute", Method: http.MethodGet, Path: "/api/v1/ui/attachment-route"}, func(ctx context.Context, in *api.UIAttachmentRouteRequest) (*api.UIAttachmentRouteResponse, error) {
+		ctx, err := authorizeHostProjectScope(ctx, nil, []string{in.ProjectUID}, false)
+		if err != nil {
+			return nil, err
+		}
+		project, err := activeProjectByUID(ctx, cfg.DB, in.ProjectUID)
+		if err != nil {
+			return nil, err
+		}
+		if err := authorizeIssueScopedProject(ctx, project); err != nil {
+			return nil, err
+		}
+		binding, err := cfg.DB.FederationBindingByProject(ctx, project.ID)
+		out := &api.UIAttachmentRouteResponse{}
+		if errors.Is(err, db.ErrNotFound) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		if binding.Role != db.FederationRoleSpoke {
+			return out, nil
+		}
+		out.Body.Route = uiAttachmentRoute(ctx, cfg, attachmentCache, binding)
+		out.Body.Route.Write = out.Body.Route.Write && effectiveUIPolicy(ctx, cfg).Capabilities.Writable
+		return out, nil
+	})
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "resolveUIIssueReference",
 		Method:      http.MethodGet,
@@ -150,7 +177,6 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 			policy := effectiveUIPolicy(ctx, cfg)
-			policy.Capabilities.AttachmentInstanceUID, policy.Capabilities.AttachmentRoutes = uiAttachmentRoutes(ctx, cfg, attachmentCache)
 			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 				policy.ProjectAccessActor = decision.Actor
 				policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -329,7 +355,6 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return nil, err
 				}
 				policy := effectiveUIPolicy(ctx, cfg)
-				policy.Capabilities.AttachmentInstanceUID, policy.Capabilities.AttachmentRoutes = uiAttachmentRoutes(ctx, cfg, attachmentCache)
 				if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 					policy.ProjectAccessActor = decision.Actor
 					policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -349,7 +374,6 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 			policy := effectiveUIPolicy(ctx, cfg)
-			policy.Capabilities.AttachmentInstanceUID, policy.Capabilities.AttachmentRoutes = uiAttachmentRoutes(ctx, cfg, attachmentCache)
 			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 				policy.ProjectAccessActor = decision.Actor
 				policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -766,48 +790,19 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	return policy
 }
 
-func uiAttachmentRoutes(ctx context.Context, cfg ServerConfig, cache *uiAttachmentCapabilityCache) (string, []api.UIAttachmentRoute) {
-	if cfg.DB == nil {
-		return "", nil
+func uiAttachmentRoute(ctx context.Context, cfg ServerConfig, cache *uiAttachmentCapabilityCache, binding db.FederationBinding) *api.UIAttachmentRoute {
+	route := &api.UIAttachmentRoute{ProjectUID: binding.HubProjectUID, Read: binding.Enabled}
+	if binding.RelayConfig != nil {
+		route.Origin = binding.RelayConfig.AuthorityUID
 	}
-	bindings, err := cfg.DB.ListFederationBindings(ctx)
-	if err != nil {
-		return cfg.DB.InstanceUID(), nil
+	if binding.Enabled {
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		available, unavailable := cache.available(probeCtx, ctx, cfg, binding)
+		route.Read = !unavailable
+		route.Write = binding.PushEnabled && available
 	}
-	cache.prune(bindings)
-	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	var probes sync.WaitGroup
-	routes := make([]api.UIAttachmentRoute, 0, len(bindings))
-	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
-	principal, _ := PrincipalFromContext(ctx)
-	for _, binding := range bindings {
-		if binding.Role != db.FederationRoleSpoke {
-			continue
-		}
-		if decision != nil && !decision.owner && !slices.Contains(decision.ProjectUIDs, binding.HubProjectUID) {
-			continue
-		}
-		if principal.Scope != nil && principal.Scope.ProjectUID != binding.HubProjectUID {
-			continue
-		}
-		route := api.UIAttachmentRoute{ProjectUID: binding.HubProjectUID, Read: binding.Enabled, Write: false}
-		if binding.RelayConfig != nil {
-			route.Origin = binding.RelayConfig.AuthorityUID
-		}
-		routes = append(routes, route)
-		if binding.Enabled {
-			route := &routes[len(routes)-1]
-			probes.Go(func() {
-				available, unavailable := cache.available(probeCtx, ctx, cfg, binding)
-				route.Read = !unavailable
-				route.Write = binding.PushEnabled && available
-			})
-		}
-	}
-	probes.Wait()
-	slices.SortFunc(routes, func(a, b api.UIAttachmentRoute) int { return strings.Compare(a.ProjectUID, b.ProjectUID) })
-	return cfg.DB.InstanceUID(), routes
+	return route
 }
 
 func makeUIETag(intent any, cursor int64, policy uiPolicy) (string, error) {

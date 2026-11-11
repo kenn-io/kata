@@ -41,23 +41,14 @@ func attachmentRouteKey(binding db.FederationBinding) uiAttachmentRouteKey {
 	return key
 }
 
-func (c *uiAttachmentCapabilityCache) prune(bindings []db.FederationBinding) {
-	present := make(map[int64]bool, len(bindings))
-	for _, binding := range bindings {
-		present[binding.ProjectID] = true
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for id := range c.entries {
-		if !present[id] {
-			delete(c.entries, id)
-		}
-	}
-}
-
 func (c *uiAttachmentCapabilityCache) available(ctx, parent context.Context, cfg ServerConfig, binding db.FederationBinding) (bool, bool) {
 	key := attachmentRouteKey(binding)
 	c.mu.Lock()
+	for id, cached := range c.entries {
+		if !c.now().Before(cached.expires) {
+			delete(c.entries, id)
+		}
+	}
 	entry, ok := c.entries[binding.ProjectID]
 	if ok && entry.key == key && c.now().Before(entry.expires) {
 		c.mu.Unlock()
@@ -69,8 +60,8 @@ func (c *uiAttachmentCapabilityCache) available(ctx, parent context.Context, cfg
 		_, err = docbankOriginCapabilities(ctx, cfg, project, &binding)
 	}
 	var apiErr *api.APIError
-	unavailable := errors.As(err, &apiErr) && (apiErr.Code == "docbank_not_configured" || apiErr.Code == "docbank_forward_unsupported")
-	if parent.Err() == nil && !(errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnauthorized || apiErr.Status == http.StatusForbidden)) {
+	unavailable := errors.As(err, &apiErr) && apiErr != nil && (apiErr.Code == "docbank_not_configured" || apiErr.Code == "docbank_forward_unsupported")
+	if parent.Err() == nil && (!errors.As(err, &apiErr) || apiErr == nil || (apiErr.Status != http.StatusUnauthorized && apiErr.Status != http.StatusForbidden)) {
 		c.mu.Lock()
 		c.entries[binding.ProjectID] = uiAttachmentCapability{key: key, available: err == nil, unavailable: unavailable, expires: c.now().Add(5 * time.Second)}
 		c.mu.Unlock()

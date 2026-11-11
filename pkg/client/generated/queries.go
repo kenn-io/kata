@@ -516,6 +516,14 @@ func (r ReadyIssuesGlobalQuery) Validate() error {
 	return errors
 }
 
+type ReadUIAttachmentRouteQuery struct {
+	ProjectUID string `json:"project_uid" validate:"required"`
+}
+
+func (r ReadUIAttachmentRouteQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type ResolveUIIssueReferenceQuery struct {
 	ProjectID int64  `json:"project_id"`
 	Ref       string `json:"ref" validate:"required"`

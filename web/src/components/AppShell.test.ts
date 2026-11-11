@@ -2257,7 +2257,12 @@ describe('AppShell task selection', () => {
     const older = structuredClone(current)
     older.capabilities.attachments = true
     delete older.capabilities.attachment_instance_uid
-    await rerender({ ...props, snapshot: older })
+    await rerender({
+      ...props,
+      snapshot: older,
+      attachmentRoute: null,
+      attachmentRouteProject: older.selected!.issue!.project_uid,
+    })
     expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
   })
 
@@ -2309,18 +2314,18 @@ describe('AppShell task selection', () => {
     })
     current.capabilities.attachment_instance_uid = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
     current.capabilities.attachments = false
-    current.capabilities.attachment_routes = [
-      {
-        project_uid: spoke.project_uid!,
-        read: true,
-        write: true,
-        origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
-      },
-    ]
+    const attachmentRoute = {
+      project_uid: spoke.project_uid!,
+      read: true,
+      write: true,
+      origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+    }
     const onNavigate = vi.fn()
     const props = {
       route: { ...listRoute, issueUID: firstUID },
       snapshot: current,
+      attachmentRoute,
+      attachmentRouteProject: spoke.project_uid!,
       loading: false,
       ...mutationProps(),
       onNavigate,

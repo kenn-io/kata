@@ -33,6 +33,7 @@
     patchProjectMetadata,
     patchRecurrence as patchRecurrenceRequest,
     readUIReferences,
+    readUIAttachmentRoute,
     removeLabel as removeLabelRequest,
     reopenIssue as reopenIssueRequest,
     setIssuePriority,
@@ -44,6 +45,7 @@
     type RecurrenceTemplateUpdateInput,
     type UIIssueReference,
     type UIReferencesResponseBody,
+    type ReadUIAttachmentRoute200Route,
     type TokenOut,
   } from './lib/api/generated'
   import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
@@ -136,6 +138,10 @@
   let daemonError = $state<string | undefined>()
   let referenceAbort: AbortController | undefined
   let referenceGeneration = 0
+  let attachmentRoute = $state<ReadUIAttachmentRoute200Route | undefined>()
+  let attachmentRouteProject = $state<string | undefined>()
+  let attachmentRouteAbort: AbortController | undefined
+  let attachmentRouteGeneration = 0
   let credentialTokens = $state<TokenOut[]>([])
   let credentialLoading = $state(false)
   let credentialError = $state<string | undefined>()
@@ -273,7 +279,10 @@
     },
   })
   const scheduler = new RefreshScheduler({
-    refresh: () => invalidations.refresh(),
+    refresh: () => {
+      invalidations.refresh()
+      void refreshAttachmentRoute()
+    },
     openEvents: () => {
       if (authority?.snapshot) stream.start(authority.cursor)
     },
@@ -359,6 +368,8 @@
       snapshots.abort()
       referenceGeneration += 1
       referenceAbort?.abort()
+      attachmentRouteGeneration += 1
+      attachmentRouteAbort?.abort()
       fenceCredentialAudit()
       unsubscribe()
       cleanupTheme()
@@ -880,6 +891,67 @@
     return authority?.snapshot?.selected?.issue
   }
 
+  $effect(() => {
+    const projectUID = selectedIssue()?.project_uid
+    const issueUID = selectedIssue()?.uid
+    const requestedUID = route.kind === 'route-error' ? undefined : route.issueUID
+    const daemonID = activeDaemonID
+    attachmentRouteGeneration += 1
+    attachmentRouteAbort?.abort()
+    attachmentRouteAbort = undefined
+    attachmentRoute = undefined
+    attachmentRouteProject = projectUID
+    if (projectUID && issueUID === requestedUID) void refreshAttachmentRoute(projectUID, daemonID)
+    return () => {
+      attachmentRouteGeneration += 1
+      attachmentRouteAbort?.abort()
+    }
+  })
+
+  async function refreshAttachmentRoute(
+    projectUID = selectedIssue()?.project_uid,
+    daemonID = activeDaemonID,
+  ): Promise<void> {
+    if (
+      !projectUID ||
+      destroyed ||
+      attachmentRouteAbort ||
+      route.kind === 'route-error' ||
+      route.issueUID !== selectedIssue()?.uid
+    )
+      return
+    const generation = attachmentRouteGeneration
+    const abort = new AbortController()
+    attachmentRouteAbort = abort
+    attachmentRoute = undefined
+    try {
+      const result = await readUIAttachmentRoute(
+        { project_uid: projectUID },
+        { signal: abort.signal },
+      )
+      if (
+        !abort.signal.aborted &&
+        generation === attachmentRouteGeneration &&
+        daemonID === activeDaemonID &&
+        result.status === 200
+      ) {
+        attachmentRoute = result.data.route
+      } else if (
+        !abort.signal.aborted &&
+        generation === attachmentRouteGeneration &&
+        daemonID === activeDaemonID &&
+        result.status === 404 &&
+        typeof result.data === 'string'
+      ) {
+        attachmentRoute = null
+      }
+    } catch {
+      // The attachment controls stay unavailable until the next refresh.
+    } finally {
+      if (attachmentRouteAbort === abort) attachmentRouteAbort = undefined
+    }
+  }
+
   function selectedMutationTarget(uid: string): { project_id: number; ref: string } | undefined {
     const selected = selectedIssue()
     return selected?.uid === uid
@@ -1283,6 +1355,8 @@
         requestedRoute={route !== acceptedRoute ? route : undefined}
         onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={shellSnapshot!}
+        {attachmentRoute}
+        {attachmentRouteProject}
         loading={authority.loading}
         canMutate={authority.canMutate}
         {mutationPending}

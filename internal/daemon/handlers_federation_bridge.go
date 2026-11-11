@@ -103,13 +103,6 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		required, err := db.RelayBatchRequiredFeatures(in.Body)
-		if err != nil {
-			return nil, relayTransportError(err)
-		}
-		if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {
-			return nil, federationFeatureError(err)
-		}
 		if cfg.RootSigning != nil {
 			ctx = db.WithRootAttribution(ctx, cfg.RootSigning.Signer(), principal.Actor)
 		}

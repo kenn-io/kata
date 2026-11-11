@@ -60,8 +60,22 @@ func IsAttachmentTransfer(method, path string) bool {
 // directory have stopped; never sweep files that another process may be using.
 type bodySpool struct {
 	*os.File
-	once sync.Once
-	err  error
+	digest string
+	once   sync.Once
+	err    error
+}
+
+// VerifiedUpload returns the authenticated spool while its request is active.
+func VerifiedUpload(r *http.Request) (*os.File, string, int64, bool) {
+	spool, ok := r.Body.(*bodySpool)
+	if !ok || spool.digest == "" {
+		return nil, "", 0, false
+	}
+	info, err := spool.Stat()
+	if err != nil {
+		return nil, "", 0, false
+	}
+	return spool.File, spool.digest, info.Size(), true
 }
 
 func (s *bodySpool) Close() error {

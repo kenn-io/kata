@@ -55,8 +55,7 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 	if err != nil {
 		return nil, err
 	}
-	_, err = requireDaemonAPIVersionHealth(ctx, hc, base, apiVersionAttachmentEvidence, "attachment close evidence")
-	if err != nil {
+	if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionAttachmentEvidence, "attachment close evidence"); err != nil {
 		return nil, err
 	}
 	out := append([]api.Evidence(nil), evidence...)

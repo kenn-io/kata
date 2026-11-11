@@ -197,6 +197,9 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				// alive through the handler, including final authorization failures.
 				body := r.Body
 				defer func() { _ = body.Close() }()
+				if file, digest, size, ok := federationsigning.VerifiedUpload(r); ok && r.Method == http.MethodPost {
+					ctx = context.WithValue(ctx, verifiedAttachmentUploadKey{}, verifiedAttachmentUpload{file: file, digest: digest, size: size})
+				}
 			}
 			// Revocation during body upload must also stop reads. Mutations retain
 			// their native transaction fence through the cached authorization.

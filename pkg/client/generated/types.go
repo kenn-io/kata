@@ -7301,25 +7301,13 @@ func (t TriggerResponse) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(t))
 }
 
-type UIAttachmentRoute struct {
-	Origin     *string `json:"origin,omitempty"`
-	ProjectUID string  `json:"project_uid" validate:"required"`
-	Read       bool    `json:"read"`
-	Write      bool    `json:"write"`
-}
-
-func (u UIAttachmentRoute) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(u))
-}
-
 type UICapabilities struct {
-	AccessAdmin           *bool               `json:"access_admin,omitempty"`
-	Account               *string             `json:"account,omitempty"`
-	ActorPolicy           string              `json:"actor_policy" validate:"required"`
-	AllowedActions        []string            `json:"allowed_actions,omitempty"`
-	AttachmentInstanceUID *string             `json:"attachment_instance_uid,omitempty"`
-	AttachmentRoutes      []UIAttachmentRoute `json:"attachment_routes,omitempty"`
-	Attachments           *bool               `json:"attachments,omitempty"`
+	AccessAdmin           *bool    `json:"access_admin,omitempty"`
+	Account               *string  `json:"account,omitempty"`
+	ActorPolicy           string   `json:"actor_policy" validate:"required"`
+	AllowedActions        []string `json:"allowed_actions,omitempty"`
+	AttachmentInstanceUID *string  `json:"attachment_instance_uid,omitempty"`
+	Attachments           *bool    `json:"attachments,omitempty"`
 
 	// AuthKind How this request authenticated; matches the instance auth kind. Never contains credentials.
 	AuthKind              *string               `json:"auth_kind,omitempty"`
@@ -7335,13 +7323,6 @@ func (u UICapabilities) Validate() error {
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(u.ActorPolicy, "required"); err != nil {
 		errors = errors.Append("ActorPolicy", err)
-	}
-	for i, item := range u.AttachmentRoutes {
-		if v, ok := any(item).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append(fmt.Sprintf("AttachmentRoutes[%d]", i), err)
-			}
-		}
 	}
 	if u.Scope != nil {
 		if v, ok := any(u.Scope).(runtime.Validator); ok {
@@ -7836,4 +7817,15 @@ func (u UISnapshotResponseBody) Validate() error {
 type UnassignRequestBody struct {
 	Actor         *string `json:"actor,omitempty"`
 	ExpectedOwner *string `json:"expected_owner,omitempty"`
+}
+
+type ReadUIAttachmentRoute_Response_Route struct {
+	Origin     *string `json:"origin,omitempty"`
+	ProjectUID string  `json:"project_uid" validate:"required"`
+	Read       bool    `json:"read"`
+	Write      bool    `json:"write"`
+}
+
+func (r ReadUIAttachmentRoute_Response_Route) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }

@@ -71,14 +71,14 @@ func TestRelayDocbankUIOriginAvailability(t *testing.T) {
 			serveRelayDocbank(t, root, vault)
 			serveRelayDocbank(t, relay, nil)
 			serveRelayDocbank(t, leaf, nil)
-			status, raw := relayDocbankRequest(t, leaf, http.MethodGet, "/api/v1/ui/snapshot?view=inbox", "", "")
+			status, raw := relayDocbankRequest(t, leaf, http.MethodGet, "/api/v1/ui/attachment-route?project_uid="+leaf.project.UID, "", "")
 			require.Equal(t, http.StatusOK, status, string(raw))
-			var snapshot struct {
-				Capabilities api.UICapabilities `json:"capabilities"`
+			var result struct {
+				Route *api.UIAttachmentRoute `json:"route"`
 			}
-			require.NoError(t, json.Unmarshal(raw, &snapshot))
-			require.Len(t, snapshot.Capabilities.AttachmentRoutes, 1)
-			route := snapshot.Capabilities.AttachmentRoutes[0]
+			require.NoError(t, json.Unmarshal(raw, &result))
+			require.NotNil(t, result.Route)
+			route := *result.Route
 			require.Equal(t, leaf.project.UID, route.ProjectUID)
 			require.Equal(t, configured, route.Read)
 			require.Equal(t, configured, route.Write)
@@ -110,14 +110,15 @@ func TestRelayDocbankUIConditionalCapabilitiesRefresh(t *testing.T) {
 	serveRelayDocbank(t, leaf, nil) // Refresh the cache without changing the stored event cursor.
 	changed := request(etag)
 	defer func() { _ = changed.Body.Close() }()
-	require.Equal(t, http.StatusOK, changed.StatusCode)
-	require.NotEqual(t, etag, changed.Header.Get("ETag"))
-	var snapshot struct {
-		Capabilities api.UICapabilities `json:"capabilities"`
+	require.Equal(t, http.StatusNotModified, changed.StatusCode)
+	status, raw := relayDocbankRequest(t, leaf, http.MethodGet, "/api/v1/ui/attachment-route?project_uid="+leaf.project.UID, "", "")
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var result struct {
+		Route *api.UIAttachmentRoute `json:"route"`
 	}
-	require.NoError(t, json.UnmarshalRead(changed.Body, &snapshot))
-	require.Len(t, snapshot.Capabilities.AttachmentRoutes, 1)
-	require.True(t, snapshot.Capabilities.AttachmentRoutes[0].Write)
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.NotNil(t, result.Route)
+	require.True(t, result.Route.Write)
 }
 
 // The initiating replica must get an immediately usable reference while only

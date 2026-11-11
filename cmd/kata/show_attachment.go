@@ -130,8 +130,7 @@ func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {
 				state := ""
 				if !live {
 					state = " (removed)"
-				} else if current.DocbankVersion != frozen.DocbankVersion ||
-					current.Origin != frozen.Origin {
+				} else if current.DocbankVersion != frozen.DocbankVersion {
 					state = " (changed)"
 				}
 				label = fmt.Sprintf("attachment %s: %s · %d bytes%s", e.AttachmentID, frozen.Name, frozen.Size, state)

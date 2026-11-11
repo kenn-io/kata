@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -256,6 +257,7 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 			_ = body.Close()
 			return err
 		}
+		body.digest = hex.EncodeToString(digestBytes)
 		r.Body = body
 		return nil
 	}

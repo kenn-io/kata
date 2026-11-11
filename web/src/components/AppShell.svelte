@@ -70,6 +70,8 @@
     route: AppRoute
     requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
+    attachmentRoute?: import('../lib/api/generated').ReadUIAttachmentRoute200Route | undefined
+    attachmentRouteProject?: string | undefined
     loading: boolean
     canMutate: boolean
     mutationPending: boolean
@@ -142,6 +144,8 @@
     route: acceptedRoute,
     requestedRoute = undefined,
     snapshot,
+    attachmentRoute = undefined,
+    attachmentRouteProject = undefined,
     loading,
     canMutate,
     mutationPending,
@@ -937,11 +941,17 @@
         attachmentsEnabled={attachmentWritable(
           snapshot.capabilities,
           projection.selected_detail.issue.project_uid,
+          attachmentRouteProject === projection.selected_detail.issue.project_uid
+            ? attachmentRoute
+            : undefined,
         )}
         attachmentReadable={(attachment: KataAttachment) =>
           attachmentAvailable(
             snapshot.capabilities,
             projection.selected_detail!.issue.project_uid,
+            attachmentRouteProject === projection.selected_detail!.issue.project_uid
+              ? attachmentRoute
+              : undefined,
             attachment,
           )}
         {onUploadAttachment}

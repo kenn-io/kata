@@ -6,5 +6,4 @@ export type UploadFederatedDocbankParams = {
   origin: string
   project_uid: string
   name: string
-  client_kind?: string
 }

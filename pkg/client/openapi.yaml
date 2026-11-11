@@ -6934,21 +6934,6 @@ components:
       required:
         - kind
       type: object
-    UIAttachmentRoute:
-      properties:
-        origin:
-          type: string
-        project_uid:
-          type: string
-        read:
-          type: boolean
-        write:
-          type: boolean
-      required:
-        - project_uid
-        - read
-        - write
-      type: object
     UICapabilities:
       properties:
         access_admin:
@@ -6963,10 +6948,6 @@ components:
           type: array
         attachment_instance_uid:
           type: string
-        attachment_routes:
-          items:
-            $ref: "#/components/schemas/UIAttachmentRoute"
-          type: array
         attachments:
           type: boolean
         auth_kind:
@@ -9966,10 +9947,6 @@ paths:
           name: Authorization
           schema:
             type: string
-        - in: header
-          name: X-Kata-Event-Features
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -12708,6 +12685,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RevokeTokenResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/ui/attachment-route:
+    get:
+      operationId: readUIAttachmentRoute
+      parameters:
+        - explode: false
+          in: query
+          name: project_uid
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  route:
+                    nullable: true
+                    properties:
+                      origin:
+                        type: string
+                      project_uid:
+                        type: string
+                      read:
+                        type: boolean
+                      write:
+                        type: boolean
+                    required:
+                      - project_uid
+                      - read
+                      - write
+                    type: object
+                required:
+                  - route
+                type: object
           description: OK
         default:
           content:

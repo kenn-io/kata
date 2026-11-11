@@ -71,6 +71,159 @@ describe('App', () => {
     expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
+  it('keeps the selected issue usable while its attachment route loads and refreshes on 304', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const base = snapshot()
+    Object.assign(base.capabilities, { attachments: true })
+    const selected = {
+      ...base,
+      selected: {
+        state: 'available',
+        issue: base.collection[0],
+        comments: [],
+        labels: [],
+        links: [],
+        recurrences: [],
+        history: [],
+      },
+    }
+    let release!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve
+    })
+    let routeReads = 0
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const url = new URL(request.url)
+        if (url.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (url.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (url.pathname.endsWith('/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        if (url.pathname.endsWith('/attachment-route')) {
+          routeReads++
+          if (routeReads === 1) return pending
+          return Response.json({
+            route: {
+              project_uid: base.collection[0]!.project_uid,
+              read: true,
+              write: true,
+              origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+            },
+          })
+        }
+        snapshotReads++
+        if (request.headers.get('If-None-Match')) return new Response(null, { status: 304 })
+        return Response.json(selected, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await screen.findByText('Example issue', { selector: 'h1, h2' })
+    await waitFor(() => expect(routeReads).toBe(1))
+    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
+    release(
+      Response.json({
+        route: { project_uid: base.collection[0]!.project_uid, read: false, write: false },
+      }),
+    )
+    await tick()
+    await fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(snapshotReads).toBeGreaterThan(1))
+    await screen.findByRole('button', { name: 'Attach files' })
+  })
+
+  it('ignores a late attachment route after selecting a different project', async () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const base = snapshot()
+    Object.assign(base.capabilities, { attachments: true })
+    const first = base.collection[0]!
+    const second = {
+      ...first,
+      id: 2,
+      uid: '01J00000000000000000000003',
+      project_id: 8,
+      project_uid: '01J00000000000000000000004',
+      project_name: 'other-project',
+      qualified_id: 'other-project#a1',
+      title: 'Other issue',
+    }
+    base.collection.push(second)
+    base.catalog.push({
+      ...base.catalog[0]!,
+      project: {
+        ...base.catalog[0]!.project,
+        id: 8,
+        uid: second.project_uid,
+        name: second.project_name,
+      },
+    })
+    let releaseFirst!: (value: Response) => void
+    let releaseSecond!: (value: Response) => void
+    const pendingFirst = new Promise<Response>((resolve) => {
+      releaseFirst = resolve
+    })
+    const pendingSecond = new Promise<Response>((resolve) => {
+      releaseSecond = resolve
+    })
+    const routeRequests: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(requestOf(input, init).url)
+        if (url.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (url.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (url.pathname.endsWith('/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        if (url.pathname.endsWith('/attachment-route')) {
+          const project = url.searchParams.get('project_uid')!
+          routeRequests.push(project)
+          return project === first.project_uid ? pendingFirst : pendingSecond
+        }
+        const issue = url.searchParams.get('selected_issue_uid') === second.uid ? second : first
+        return Response.json(
+          {
+            ...base,
+            selected: {
+              state: 'available',
+              issue,
+              comments: [],
+              labels: [],
+              links: [],
+              recurrences: [],
+              history: [],
+            },
+          },
+          { headers: { ETag: '"snapshot-1"' } },
+        )
+      }),
+    )
+    render(App)
+    await waitFor(() => expect(routeRequests).toContain(first.project_uid))
+    await fireEvent.click(await screen.findByRole('button', { name: /Other issue/ }))
+    await waitFor(() => expect(routeRequests).toContain(second.project_uid))
+    releaseFirst(
+      Response.json({ route: { project_uid: first.project_uid, read: true, write: true } }),
+    )
+    await tick()
+    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
+    releaseSecond(
+      Response.json({ route: { project_uid: second.project_uid, read: false, write: false } }),
+    )
+    await tick()
+    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
+  })
+
   it.each([
     { pending: false, future: false, changed: false },
     { pending: true, future: false, changed: false },
@@ -286,6 +439,7 @@ describe('App', () => {
           )
           if (url.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
           if (url.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (url.pathname === '/api/v1/ui/attachment-route') return Response.json({ route: null })
           if (init?.method === 'POST' && url.pathname.endsWith('/attachments')) {
             uploadURL = url
             uploadInit = init

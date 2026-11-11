@@ -6,15 +6,14 @@ const capabilities = {
   updates: 'poll' as const,
   writable: true,
   attachment_instance_uid: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-  attachments: false,
-  attachment_routes: [
-    {
-      project_uid: '01ARZ3NDEKTSV4RRFFQ69G5FAX',
-      read: true,
-      write: true,
-      origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
-    },
-  ],
+  attachments: true,
+}
+const project = '01ARZ3NDEKTSV4RRFFQ69G5FAX'
+const route = {
+  project_uid: project,
+  read: true,
+  write: true,
+  origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
 }
 const file = {
   name: 'file.pdf',
@@ -24,61 +23,22 @@ const file = {
 }
 
 describe('attachment availability', () => {
-  it('uses the selected project and reference origin', () => {
-    const older = {
-      actor_policy: 'request',
-      updates: 'poll' as const,
-      writable: true,
-      attachments: true,
-    }
-    expect(attachmentWritable(older, '01ARZ3NDEKTSV4RRFFQ69G5FAX')).toBe(true)
-    expect(attachmentAvailable(older, '01ARZ3NDEKTSV4RRFFQ69G5FAX', file)).toBe(true)
-    expect(attachmentWritable(capabilities, '01ARZ3NDEKTSV4RRFFQ69G5FAX')).toBe(true)
-    expect(attachmentWritable(capabilities, '01ARZ3NDEKTSV4RRFFQ69G5FAY')).toBe(false)
+  it('gates shared controls while a project route is pending', () => {
+    expect(attachmentWritable(capabilities, project, undefined)).toBe(false)
+    expect(attachmentAvailable(capabilities, project, undefined, file)).toBe(true)
     expect(
-      attachmentAvailable(capabilities, '01ARZ3NDEKTSV4RRFFQ69G5FAX', {
-        ...file,
-        origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
-      }),
-    ).toBe(true)
-    expect(attachmentAvailable(capabilities, '01ARZ3NDEKTSV4RRFFQ69G5FAX', file)).toBe(false)
-    expect(
-      attachmentAvailable(capabilities, '01ARZ3NDEKTSV4RRFFQ69G5FAY', {
-        ...file,
-        origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
-      }),
+      attachmentAvailable(capabilities, project, undefined, { ...file, origin: route.origin }),
     ).toBe(false)
+    expect(attachmentWritable(capabilities, project, null)).toBe(true)
+    expect(attachmentWritable(capabilities, project, route)).toBe(true)
+    expect(attachmentWritable(capabilities, 'other-project', route)).toBe(false)
     expect(
-      attachmentAvailable(
-        { ...capabilities, attachments: true },
-        '01ARZ3NDEKTSV4RRFFQ69G5FAX',
-        file,
-      ),
+      attachmentAvailable(capabilities, project, route, { ...file, origin: route.origin }),
     ).toBe(true)
     expect(
-      attachmentAvailable(
-        {
-          ...capabilities,
-          attachments: true,
-          attachment_routes: [
-            { project_uid: '01ARZ3NDEKTSV4RRFFQ69G5FAX', read: false, write: false },
-          ],
-        },
-        '01ARZ3NDEKTSV4RRFFQ69G5FAX',
-        file,
-      ),
-    ).toBe(true)
-    expect(
-      attachmentWritable(
-        {
-          ...capabilities,
-          attachments: true,
-          attachment_routes: [
-            { project_uid: '01ARZ3NDEKTSV4RRFFQ69G5FAX', read: false, write: false },
-          ],
-        },
-        '01ARZ3NDEKTSV4RRFFQ69G5FAX',
-      ),
+      attachmentAvailable(capabilities, project, route, { ...file, origin: 'another-origin' }),
     ).toBe(false)
+    expect(attachmentWritable(capabilities, project, { ...route, write: false })).toBe(false)
+    expect(attachmentAvailable(capabilities, project, { ...route, read: false }, file)).toBe(true)
   })
 })

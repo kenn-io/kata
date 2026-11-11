@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -57,6 +58,10 @@ func (r *docbankFixtureRoutes) replace(t *testing.T, old *httptest.Server, host 
 // verifier, root Docbank and immediate content route. Generic body wrappers
 // must not turn an unknown client length into an exact empty body.
 func TestRelayDocbankSignedUploadThroughBothHops(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("TMPDIR", temp)
+	t.Setenv("TMP", temp)
+	t.Setenv("TEMP", temp)
 	synctest.Test(t, func(t *testing.T) {
 		routes := new(docbankFixtureRoutes)
 		previous := http.DefaultTransport
@@ -72,6 +77,22 @@ func TestRelayDocbankSignedUploadThroughBothHops(t *testing.T) {
 			vault := docbanktest.New(t)
 			vault.Server = routes.replace(t, vault.Server, fmt.Sprintf("vault%d.example.com", i))
 			vaults[node] = vault
+		}
+		spools := make(chan []string, 2)
+		vaults[root].BeforeResponse = func(method, path string) {
+			if method != http.MethodPost || path != "/api/v1/uploads" {
+				return
+			}
+			entries, err := os.ReadDir(temp)
+			if err != nil {
+				spools <- nil
+				return
+			}
+			var names []string
+			for _, entry := range entries {
+				names = append(names, entry.Name())
+			}
+			spools <- names
 		}
 		t.Setenv("TEST_DOCBANK_ROOT_HOP_KEY", strings.Repeat("a", 64))
 		t.Setenv("TEST_DOCBANK_RELAY_HOP_KEY", strings.Repeat("b", 64))
@@ -108,6 +129,13 @@ func TestRelayDocbankSignedUploadThroughBothHops(t *testing.T) {
 		endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
 		status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=signed.pdf&client_kind=cli", "signed fixture bytes", "application/octet-stream")
 		require.Equal(t, http.StatusOK, status, string(raw))
+		names := <-spools
+		var foundSpool bool
+		for _, name := range names {
+			require.NotContains(t, name, "kata-attachment-")
+			foundSpool = foundSpool || strings.HasPrefix(name, "kata-federation-body-")
+		}
+		require.True(t, foundSpool)
 		var uploaded api.AddAttachmentResponseBody
 		require.NoError(t, json.Unmarshal(raw, &uploaded))
 		require.Equal(t, root.store.InstanceUID(), uploaded.Attachment.Origin)
