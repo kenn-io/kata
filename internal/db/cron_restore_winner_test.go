@@ -56,3 +56,19 @@ func TestOwnerRestoreRetainedWorkflowWinner(t *testing.T) {
 		})
 	}
 }
+
+func TestOwnerRestoreRepairsSameRevisionHeldOriginal(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	projectUID, workflowUID, origin, eventUID := newUID(t), newUID(t), newUID(t), newUID(t)
+	project := &ProjectExport{ID: 1, UID: projectUID}
+	row := &CronWorkflowExport{CronDefinition: CronDefinition{ID: 1, ProjectID: 1, UID: workflowUID, Name: "Review", Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now, DefinitionEventUID: eventUID, DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: 2, OriginInstanceUID: origin}}}
+	body := CronDefinitionEvent{UID: workflowUID, ProjectUID: projectUID, Name: row.Name, Author: row.Author, CreatedAt: now, UpdatedAt: now, Definition: jsontext.Value(`{"version":1,"steps":[null]}`)}
+	payload, err := json.Marshal(body)
+	require.NoError(t, err)
+	event := &EventExport{UID: eventUID, ProjectID: 1, OriginInstanceUID: origin, Type: "cron.workflow.created", HLCPhysicalMS: 2, Payload: payload}
+	result := ReconcileOwnerCronWorkflowReplay([]ImportRecord{project, row, event})
+	repaired := result[1].(*CronWorkflowExport)
+	require.JSONEq(t, string(body.Definition), string(repaired.RawDefinition))
+	again := ReconcileOwnerCronWorkflowReplay(result)
+	require.Same(t, repaired, again[1], "already retained original must not be rewritten")
+}

@@ -288,6 +288,8 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 					}
 				}
 			}
+		} else {
+			return fmt.Errorf("%w: job revision document is unavailable", cron.ErrInvalid)
 		}
 	}
 	if value.IssueUID == nil {
