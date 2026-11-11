@@ -22,13 +22,7 @@ func reloadEmbeddingCredentials(ctx context.Context, initial config.EmbeddingsCo
 	if err != nil {
 		return err
 	}
-	providerOnly := func(ec config.EmbeddingsConfig) config.EmbeddingsConfig {
-		ec.APIKey = ""
-		ec.APIKeyFile = ""
-		ec.APIKeyEnv = ""
-		return ec
-	}
-	if providerOnly(current) != providerOnly(initial) {
+	if embeddingProviderIdentity(current) != embeddingProviderIdentity(initial) {
 		return fmt.Errorf("embedding provider settings changed; restart the daemon to apply them (keeping the running credential)")
 	}
 	client.SetCredential(current.ResolveCredential())
@@ -36,4 +30,21 @@ func reloadEmbeddingCredentials(ctx context.Context, initial config.EmbeddingsCo
 		wake()
 	}
 	return nil
+}
+
+// embeddingProviderIdentity drops credentials and fills the built-in server's
+// default model and width, so a saved local = true matches its effective choice.
+func embeddingProviderIdentity(ec config.EmbeddingsConfig) config.EmbeddingsConfig {
+	ec.APIKey = ""
+	ec.APIKeyFile = ""
+	ec.APIKeyEnv = ""
+	if ec.UsesLocal() {
+		if ec.Model == "" {
+			ec.Model = "nomic-embed-text"
+		}
+		if ec.Dims == 0 {
+			ec.Dims = 768
+		}
+	}
+	return ec
 }

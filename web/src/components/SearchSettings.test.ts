@@ -115,7 +115,9 @@ describe('SearchSettings', () => {
 
   test('offers to share an existing built-in setup and sends the request', async () => {
     vi.useFakeTimers()
-    setGeneratedFetch(vi.fn(async () => Response.json(status({ provider: 'built_in' }))))
+    setGeneratedFetch(
+      vi.fn(async () => Response.json(status({ provider: 'built_in', download_bytes: 0 }))),
+    )
     const postFetch = vi.fn<typeof fetch>(async () =>
       Response.json(status({ provider: 'built_in', can_change: false }), { status: 202 }),
     )
@@ -281,5 +283,18 @@ describe('SearchSettings', () => {
     expect(read.mock.calls[1]?.[1]?.signal?.aborted).toBe(true)
     await vi.advanceTimersByTimeAsync(10000)
     expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  test('offers the download for a saved built-in setup missing its model', async () => {
+    vi.useFakeTimers()
+    setGeneratedFetch(vi.fn(async () => Response.json(status({ provider: 'built_in' }))))
+    const postFetch = vi.fn<typeof fetch>(async () =>
+      Response.json(status({ provider: 'built_in', can_change: false }), { status: 202 }),
+    )
+    renderSettings({ postFetch })
+    await settle()
+    expect(screen.getByText('Downloads 290 MB once, shared by all Kenn apps')).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Turn on' }))
+    expect(postFetch).toHaveBeenCalledOnce()
   })
 })

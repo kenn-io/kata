@@ -29,12 +29,12 @@ import (
 var localEmbeddingsEndpoint = embedlocal.Endpoint
 var localEmbeddingsInstall = embedlocal.Install
 
-func resolveLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error)) (string, error) {
+func resolveLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error), progress func(int64, int64)) (string, error) {
 	endpoint, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true})
 	if !errors.Is(err, embedlocal.ErrNotFound) {
 		return endpoint, err
 	}
-	installed, err := installLocalEmbeddings(ctx, confirm, nil)
+	installed, err := installLocalEmbeddings(ctx, confirm, progress)
 	if err != nil {
 		return "", err
 	}
@@ -525,14 +525,6 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 			status.Provider = "ollama"
 		}
 	}
-	// Only an unconfigured daemon depends on the shared installation files.
-	if status.Provider == "none" {
-		inspected, err := embedlocal.Inspect(ctx, embedlocal.Options{})
-		if err != nil {
-			return status, err
-		}
-		status.DownloadBytes, status.OllamaAvailable = inspected.DownloadBytes, inspected.OllamaAvailable
-	}
 	s.mu.Lock()
 	if s.job != nil {
 		job := *s.job
@@ -545,7 +537,28 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 		canChange = err != nil || !chosen
 	}
 	status.CanChange = canChange && (status.Job == nil || status.Job.State == "failed")
-	return status, nil
+	err := s.inspectDownload(ctx, &status)
+	return status, err
+}
+
+// inspectDownload reports what Turn on would download. An unconfigured daemon
+// depends on the shared installation files, as does a saved built-in setup
+// that hasn't shared its choice yet; a failed inspection there leaves the size unknown.
+func (s *localEmbeddingsSetup) inspectDownload(ctx context.Context, status *api.LocalEmbeddingsStatus) error {
+	saved := status.Provider == "built_in" && status.CanChange
+	if status.Provider != "none" && !saved {
+		return nil
+	}
+	inspected, err := embedlocal.Inspect(ctx, embedlocal.Options{SkipOllama: saved})
+	if err != nil {
+		if saved {
+			return nil
+		}
+		return err
+	}
+	status.DownloadBytes = inspected.DownloadBytes
+	status.OllamaAvailable = inspected.OllamaAvailable
+	return nil
 }
 
 func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
@@ -576,40 +589,7 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 		if release != nil {
 			defer release()
 		}
-		var err error
-		if sharing {
-			err = recordLocalEmbeddingsChoice()
-		} else if s.vectorReady != nil {
-			err = s.vectorReady(ctx)
-		}
-		if err == nil && !sharing {
-			_, err = enableLocalEmbeddings(ctx, localEmbeddingsRun{
-				confirm:      func(context.Context, int64) (bool, error) { return true, nil },
-				notice:       func(string) error { return nil },
-				keepProvider: true,
-				progress: func(downloaded, total int64) {
-					s.mu.Lock()
-					s.job.Downloaded, s.job.Total = downloaded, total
-					s.mu.Unlock()
-				},
-				restart: func(_ context.Context, apply func() error) error {
-					return apply()
-				},
-			})
-		}
-		if err != nil {
-			s.mu.Lock()
-			s.job.State, s.job.Error = "failed", err.Error()
-			s.mu.Unlock()
-		} else if sharing {
-			s.mu.Lock()
-			s.job = nil
-			s.mu.Unlock()
-		} else {
-			s.mu.Lock()
-			s.job.State = "restart"
-			s.mu.Unlock()
-		}
+		s.finish(sharing, s.work(ctx, sharing))
 	}) {
 		if release != nil {
 			release()
@@ -618,6 +598,57 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 		return errors.New("daemon is shutting down")
 	}
 	return nil
+}
+
+func (s *localEmbeddingsSetup) setProgress(downloaded, total int64) {
+	s.mu.Lock()
+	s.job.Downloaded, s.job.Total = downloaded, total
+	s.mu.Unlock()
+}
+
+// work installs and enables the built-in server, or for a saved setup, shares it
+// without touching the config. The user's Turn on click is the download consent.
+func (s *localEmbeddingsSetup) work(ctx context.Context, sharing bool) error {
+	if sharing {
+		return s.shareSaved(ctx)
+	}
+	if s.vectorReady != nil {
+		if err := s.vectorReady(ctx); err != nil {
+			return err
+		}
+	}
+	_, err := enableLocalEmbeddings(ctx, localEmbeddingsRun{
+		confirm:      func(context.Context, int64) (bool, error) { return true, nil },
+		notice:       func(string) error { return nil },
+		keepProvider: true,
+		progress:     s.setProgress,
+		restart: func(_ context.Context, apply func() error) error {
+			return apply()
+		},
+	})
+	return err
+}
+
+// shareSaved publishes the shared choice only once the model is installed and its endpoint answers.
+func (s *localEmbeddingsSetup) shareSaved(ctx context.Context) error {
+	confirm := func(context.Context, int64) (bool, error) { return true, nil }
+	if _, err := resolveLocalEmbeddings(ctx, confirm, s.setProgress); err != nil {
+		return err
+	}
+	return recordLocalEmbeddingsChoice()
+}
+
+func (s *localEmbeddingsSetup) finish(sharing bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case err != nil:
+		s.job.State, s.job.Error = "failed", err.Error()
+	case sharing:
+		s.job = nil
+	default:
+		s.job.State = "restart"
+	}
 }
 
 func localEmbeddingsIndex(current, next config.EmbeddingsConfig) (string, error) {

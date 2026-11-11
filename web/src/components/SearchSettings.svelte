@@ -84,7 +84,9 @@
 
   function rowState(current: LocalEmbeddingsStatus): SearchByMeaningState {
     const job = current.job
-    if (job?.state === 'downloading' && current.provider === 'built_in') return { kind: 'on' }
+    // Sharing a saved setup that's already installed has nothing to download.
+    if (job?.state === 'downloading' && current.provider === 'built_in' && !job.total)
+      return { kind: 'on' }
     if (job?.state === 'downloading')
       return { kind: 'downloading', doneBytes: job.downloaded, totalBytes: job.total }
     if (current.indexing)
@@ -107,6 +109,15 @@
             }
       case 'ollama':
         return { kind: 'ollama' }
+      case 'built_in':
+        // A saved setup missing its model files needs the user's click to download them.
+        return current.can_change && current.download_bytes
+          ? {
+              kind: 'off',
+              downloadBytes: current.download_bytes,
+              ...(remoteHost ? { host: remoteHost } : {}),
+            }
+          : { kind: 'on' }
       default:
         return { kind: 'on' }
     }
@@ -199,7 +210,7 @@
             onusebuiltin={() => {}}
           />
         </fieldset>
-        {#if status?.provider === 'built_in' && status.can_change && canAdministerDaemon}
+        {#if status?.provider === 'built_in' && status.can_change && !status.download_bytes && canAdministerDaemon}
           <div>
             <Button size="sm" label="Share with other apps" disabled={posting} onclick={turnOn} />
           </div>

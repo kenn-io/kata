@@ -2169,7 +2169,7 @@ func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
 					err = errors.New("run kata daemon local-embeddings to approve the download")
 				}
 				return chosen, err
-			})
+			}, nil)
 		}
 	}
 	return cfg
