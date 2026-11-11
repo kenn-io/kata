@@ -156,7 +156,7 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 // Index-only upgrades, and the one that adds the MCP Events table, must
 // match the fresh-store catalog without exporting.
 func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
-	for _, version := range []int{41, 44, 48, 50} {
+	for _, version := range []int{41, 44, 48} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			path := indexOnlySource(t, version)

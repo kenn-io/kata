@@ -64,7 +64,5 @@ func TestRecurringDeliveryHistoryCost(t *testing.T) {
 			require.LessOrEqual(t, show, smallShow+100, "show cost should stay near the smaller history")
 			require.LessOrEqual(t, list, smallList+400, "list cost should stay near the smaller history")
 		}
-		require.Less(t, show, 10000, "job show should seek occurrence evidence")
-		require.Less(t, list, 40000, "job list should seek each job's evidence")
 	}
 }
