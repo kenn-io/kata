@@ -32,6 +32,58 @@ function response(projectID = 7, uid = projectUID): Response {
 }
 afterEach(cleanup)
 describe('ProjectSyncStatus', () => {
+  it('refreshes after return when an earlier read is still pending', async () => {
+    let resolveSlow!: (value: Response) => void
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveSlow = resolve
+          }),
+      )
+      .mockResolvedValueOnce(response())
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0, visibilityGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1, visibilityGeneration: 0 })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1, visibilityGeneration: 1 })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    resolveSlow(response())
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
+  })
+
+  it('marks a stalled read stale and retries on a later cycle', async () => {
+    let signal: AbortSignal | undefined
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockImplementationOnce((_url, init) => {
+        signal = init.signal
+        return new Promise<Response>(() => {})
+      })
+      .mockResolvedValueOnce(response())
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    vi.useFakeTimers()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(signal?.aborted).toBe(true)
+    expect(screen.getByText('Sync status may be out of date.')).not.toBeNull()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    expect(screen.queryByText('Sync status may be out of date.')).toBeNull()
+    vi.useRealTimers()
+  })
+
   it('accepts a slow read after multiple refresh cycles', async () => {
     let resolveSlow!: (value: Response) => void
     let signal: AbortSignal | undefined
