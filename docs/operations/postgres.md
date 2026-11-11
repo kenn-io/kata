@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-05
+last_edited: 2026-11-10
 ---
 
 # PostgreSQL operations
@@ -81,6 +81,11 @@ or applies every registered forward migration, records the version in the same
 transaction, and completes the required installation metadata. It is safe to
 retry after interruption. It never prints the DSN.
 
+Migration statements have no time limit, so an index build on a large table
+finishes instead of rolling the upgrade back. Ordinary queries keep their
+30-second limit. Stopping the command cancels the upgrade, and PostgreSQL rolls
+back every migration in it.
+
 PostgreSQL support first ships with one canonical current schema. There are no
 pretend migrations for development-only schema versions that were never
 released. That first released version is the migration floor; subsequent
@@ -153,11 +158,26 @@ for downtime and rollback. SQLite's JSONL cutover installs global and
 project-scoped prefix indexes; candidates sort by case-insensitive UID value,
 then original bytes.
 
+The schema 46→47 migration adds an update-order index for limited cross-project
+ready lists. Stop daemons and imports while it scans `issues` and builds the
+index. See the [schema 47 migration requirements](../development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index)
+for the offline window, grants, and rollback. SQLite installs this index in place.
+
 The schema 47→48 migration adds a project departure cursor index to match SQLite's event polling
 index. PostgreSQL's event query stays unchanged. Stop daemons and imports while
 the migration reads `events` and builds the index. See the
 [schema 48 migration requirements](../development/postgres-migrations.md#schema-48-project-departure-cursor-index)
 for the offline window, grants, and rollback.
+
+The schema 48→49 migration indexes cron event histories by project, type, and
+run UID. Stop daemons and imports while it scans `events` and builds the index.
+See the [schema 49 migration requirements](../development/postgres-migrations.md#schema-49-cron-run-history-index)
+for the offline window, grants, and rollback. SQLite installs this index in place.
+
+Schema 50 adds the `mcp_event_subscriptions` table for daemon-owned MCP Events
+subscriptions. Re-run the `GRANT ... ON ALL TABLES` statement below after the
+migration so the runtime role can use it. The table has no sequences. See the
+[schema 50 migration requirements](../development/postgres-migrations.md#schema-50-mcp-events-subscriptions).
 
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:

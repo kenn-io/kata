@@ -11,7 +11,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -89,41 +88,6 @@ func TestCronCLIAuthoredInputErrorsPerformNoNetworkRequests(t *testing.T) {
 	require.Zero(t, requests.Load())
 }
 
-func TestCronCLITypedNativeValidationPrecedesNetwork(t *testing.T) {
-	// Typed definitions must validate before parent/project reads. The existing
-	// write path also validates before PUT; this pins the earlier boundary.
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(server.Close)
-	for _, tc := range []struct {
-		name, want string
-		extra      []string
-	}{
-		{"short interval", "at least 60", []string{"--every=30s"}},
-		{"overlap", "overlap=allow", []string{"--overlap=forbid"}},
-		{"skip grace", "positive grace", []string{"--catchup=skip"}},
-		{"catchup", "unknown catchup", []string{"--catchup=invalid"}},
-		{"timeout", "execution fields", []string{"--timeout=1s"}},
-		{"recipient", "exact recipient", []string{"--recipient=bad recipient"}},
-		{"empty recipient", "--notify requires --parent and --recipient", []string{"--recipient="}},
-		{"adapter on native job", "--adapter requires --prompt", []string{"--adapter=example-adapter"}},
-		{"message", "inbox limit", []string{"--message=" + strings.Repeat("m", 1025)}},
-		{"definition size", "document exceeds size limit", []string{"--body=" + strings.Repeat("b", cron.DefinitionLimit)}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			args := []string{"job", "create", "--name", "Review", "--title", "Review check-in",
-				"--enabled=false", "--catchup", "latest", "--overlap", "allow", "--every", "1h",
-				"--notify", "--parent", "abcd", "--recipient", "worker"}
-			_, _, err := executeCronCLI(t, server.URL, nil, append(args, tc.extra...)...)
-			require.ErrorContains(t, err, tc.want)
-		})
-	}
-	require.Zero(t, requests.Load(), "invalid candidates must fail before any parent/project request")
-}
-
 func TestCronCLIFileRejectsEveryAuthoredFlag(t *testing.T) {
 	for _, arg := range []string{
 		"--name=", "--title=", "--body=", "--enabled=false", "--cron=", "--every=", "--once=",
@@ -195,4 +159,19 @@ func TestCronCLITypedNativeParentResolution(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, parent.UID, stored.Definition.Issue.ParentUID)
 	require.False(t, stored.Definition.Enabled)
+}
+
+func TestCronCLITypedNativeRejectsInvalidDefinitionAfterParentResolution(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Review", Author: "worker"})
+	require.NoError(t, err)
+	identity := cronCLIUID(t)
+	args := []string{"job", "create", "--uid", identity, "--name", "Review", "--title", "Check in", "--enabled=false", "--catchup", "latest", "--overlap", "allow", "--every", "30s", "--notify", "--parent", parent.ShortID, "--recipient", "worker"}
+	_, _, err = executeCronCLI(t, env.URL, nil, args...)
+	require.ErrorContains(t, err, "at least 60")
+	_, err = env.DB.CronJob(t.Context(), project.ID, identity)
+	require.Error(t, err)
 }

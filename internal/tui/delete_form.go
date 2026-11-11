@@ -40,12 +40,15 @@ func (m Model) deleteHidden() bool {
 	return !m.mutationAllowed(false)
 }
 
-// helpKeymap is the keymap the help overlay lists: without the delete key
-// when it is not on offer.
+// helpKeymap is the keymap the help overlay lists: without the delete and
+// move keys when they are not on offer.
 func (m Model) helpKeymap() keymap {
 	km := m.keymap
 	if m.deleteHidden() {
 		km.Delete = key{}
+	}
+	if m.moveHidden() {
+		km.MoveIssue = key{}
 	}
 	return km
 }
@@ -211,15 +214,30 @@ func (m Model) forgetDeletedIssue(target formTarget) (Model, tea.Cmd) {
 // withoutIssue drops a deleted issue from the list and selects the row after
 // it, or the row before it when it was the last.
 func (lm listModel) withoutIssue(uid string) listModel {
+	return lm.droppingIssues(uid, []string{uid})
+}
+
+// droppingIssues drops the issues from the list. When anchor was the selection,
+// it selects the row after it, or the row before it when it was the last,
+// skipping any other dropped row, such as a moved subtree.
+func (lm listModel) droppingIssues(anchor string, gone []string) listModel {
+	isGone := func(uid string) bool { return slices.Contains(gone, uid) }
 	rows := lm.visibleRows()
-	at := slices.IndexFunc(rows, func(row queueRow) bool { return row.issue.UID == uid })
-	lm.issues = slices.DeleteFunc(slices.Clone(lm.issues), func(issue Issue) bool { return issue.UID == uid })
-	if at < 0 || lm.selectedUID != uid {
+	at := slices.IndexFunc(rows, func(row queueRow) bool { return row.issue.UID == anchor })
+	lm.issues = slices.DeleteFunc(slices.Clone(lm.issues), func(issue Issue) bool { return isGone(issue.UID) })
+	if at < 0 || lm.selectedUID != anchor {
 		return lm.restoreCursorToSelection()
 	}
-	next := at + 1
-	if next >= len(rows) {
-		next = at - 1
+	next := -1
+	for i := at + 1; i < len(rows) && next < 0; i++ {
+		if !isGone(rows[i].issue.UID) {
+			next = i
+		}
+	}
+	for i := at - 1; i >= 0 && next < 0; i-- {
+		if !isGone(rows[i].issue.UID) {
+			next = i
+		}
 	}
 	lm.selectedUID, lm.selectedProjectID = "", 0
 	if next >= 0 {

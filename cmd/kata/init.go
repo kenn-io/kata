@@ -16,6 +16,7 @@ import (
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 
+	"go.kenn.io/kata/internal/agentguide"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
 	"go.kenn.io/kit/atomicfile"
@@ -28,6 +29,7 @@ type initOptions struct {
 	Replace        bool
 	Reassign       bool
 	WithAgents     bool
+	AgentMode      string
 	WithHooks      bool
 	WithCodexHooks bool
 	WithAgentHooks []string
@@ -43,6 +45,7 @@ type callInitOpts struct {
 	Replace        bool
 	Reassign       bool
 	WithAgents     bool
+	AgentMode      string
 	WithHooks      bool
 	WithCodexHooks bool
 	WithAgentHooks []string
@@ -153,6 +156,14 @@ Name agents for explicit setup; use --local for project scope. If a user-level h
 		Example: `  kata init --project example-project --agent
   kata init --with-agents --agent`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if cmd.Flags().Changed("agent-mode") {
+				if opts.AgentMode != "cli" && opts.AgentMode != "mcp" {
+					return agentHookUsage("--agent-mode must be cli or mcp")
+				}
+				if !opts.WithAgents {
+					return agentHookUsage("--agent-mode requires --with-agents")
+				}
+			}
 			if cmd.Flags().Changed("agent-hooks") {
 				for name := range strings.SplitSeq(agentHooksCSV, ",") {
 					name = strings.TrimSpace(name)
@@ -193,6 +204,7 @@ Name agents for explicit setup; use --local for project scope. If a user-level h
 	cmd.Flags().BoolVar(&opts.Replace, "replace", false, "overwrite .kata.toml binding when it conflicts")
 	cmd.Flags().BoolVar(&opts.Reassign, "reassign", false, "move an existing alias to this project")
 	cmd.Flags().BoolVar(&opts.WithAgents, "with-agents", false, "write kata agent guidance into AGENTS.md/CLAUDE.md in the workspace")
+	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "with --with-agents, select cli (default) or mcp instructions")
 	cmd.Flags().BoolVar(&opts.WithHooks, "with-hooks", false, "install work.attention harness hooks into the workspace's Claude Code config (.claude/)")
 	cmd.Flags().StringVar(&agentHooksCSV, "agent-hooks", "", "install project contract and available attention hooks for comma-separated agents")
 	cmd.Flags().BoolVar(&opts.ContractOnly, "contract-only", false, "with --agent-hooks, install contracts without adding attention")
@@ -361,11 +373,16 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	}
 
 	dest := config.WriteDestination(in.Disc, in.StartPath)
+	guidanceWarning := ""
 	tomlChanged := needsTomlWrite(in.ExistingToml, resp.Project.Name)
 	if tomlChanged {
 		if err := config.WriteProjectConfig(dest, resp.Project.Name); err != nil {
 			return "", fmt.Errorf("write .kata.toml: %w", err)
 		}
+	} else if tomlChanged, err = config.EnsureProjectConfigHeader(dest); err != nil {
+		err = fmt.Errorf("write .kata.toml: %w", err)
+		warnAgentsUpdate(err)
+		guidanceWarning = err.Error()
 	}
 	gitignoreChanged, err := ensureGitignoreEntry(dest, ".kata.local.toml")
 	if err != nil {
@@ -373,9 +390,13 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	}
 	agentsChanged := false
 	if opts.WithAgents {
-		agentsChanged, err = applyAgentGuidance(dest)
+		agentsChanged, err = applyAgentGuidance(dest, opts.AgentMode)
 		if err != nil {
 			warnAgentsUpdate(err)
+			if guidanceWarning != "" {
+				guidanceWarning += "; "
+			}
+			guidanceWarning += err.Error()
 		}
 	}
 	hooksChanged := false
@@ -399,7 +420,7 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	if err != nil {
 		return "", initAgentHooksFailure(bs, resp.Project.Name, dest, resp.Created, nativeHooksChanged, err)
 	}
-	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged || nativeHooksChanged, hookResults)
+	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged || nativeHooksChanged, hookResults, guidanceWarning)
 }
 
 // runStartPathInit is the fallback used when the client cannot derive a name
@@ -445,11 +466,12 @@ func runStartPathInit(ctx context.Context, baseURL, startPath string, opts callI
 	if err != nil {
 		warnGitignoreUpdate(err)
 	}
-	agentsChanged := false
+	agentsChanged, guidanceWarning := false, ""
 	if opts.WithAgents {
-		agentsChanged, err = applyAgentGuidance(gitignoreDir)
+		agentsChanged, err = applyAgentGuidance(gitignoreDir, opts.AgentMode)
 		if err != nil {
 			warnAgentsUpdate(err)
+			guidanceWarning = err.Error()
 		}
 	}
 	hooksChanged := false
@@ -475,7 +497,7 @@ func runStartPathInit(ctx context.Context, baseURL, startPath string, opts callI
 	}
 	// The path-based daemon flow writes workspace files remotely and exposes no
 	// local file-change bit today; project creation is the closest stable signal.
-	return formatInitOutput(bs, resp.Project.Name, gitignoreDir, resp.Created, resp.Created || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged || nativeHooksChanged, hookResults)
+	return formatInitOutput(bs, resp.Project.Name, gitignoreDir, resp.Created, resp.Created || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged || nativeHooksChanged, hookResults, guidanceWarning)
 }
 
 func warnGitignoreUpdate(err error) {
@@ -604,10 +626,10 @@ func needsTomlWrite(existing *config.ProjectConfig, name string) bool {
 
 // formatInitOutput renders the selected output mode for init, shared between
 // the path-free and path-based flows.
-func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed bool, hookResults []agentHookMutation) (string, error) {
+func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed bool, hookResults []agentHookMutation, guidanceWarning string) (string, error) {
 	switch currentOutputMode() {
 	case outputJSON:
-		if hookResults != nil {
+		if hookResults != nil || guidanceWarning != "" {
 			var response map[string]jsontext.Value
 			if err := json.Unmarshal(bs, &response); err != nil {
 				return "", err
@@ -615,11 +637,21 @@ func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed
 			if response == nil {
 				return "", errors.New("init response must be a JSON object")
 			}
-			encoded, err := json.Marshal(hookResults)
-			if err != nil {
-				return "", err
+			if hookResults != nil {
+				encoded, err := json.Marshal(hookResults)
+				if err != nil {
+					return "", err
+				}
+				response["agent_hooks"] = encoded
 			}
-			response["agent_hooks"] = encoded
+			if guidanceWarning != "" {
+				encoded, err := json.Marshal(guidanceWarning)
+				if err != nil {
+					return "", err
+				}
+				response["agent_guidance_warning"] = encoded
+			}
+			var err error
 			bs, err = json.Marshal(response, json.Deterministic(true))
 			if err != nil {
 				return "", err
@@ -633,6 +665,9 @@ func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed
 	case outputAgent:
 		var out strings.Builder
 		fmt.Fprintf(&out, "OK init project=%s workspace=%s changed=%t\n", agentValue(name), agentValue(workspace), changed)
+		if guidanceWarning != "" {
+			fmt.Fprintf(&out, "agent_guidance_warning=%s\n", agentValue(guidanceWarning))
+		}
 		for _, result := range hookResults {
 			fmt.Fprintf(&out, "agent_hooks_harness=%s agent_hooks_state=%s changed=%t reason=%s\n", agentValue(result.Harness), result.State, result.Changed, agentValue(result.Reason))
 		}
@@ -774,7 +809,11 @@ const agentsProposalSuffix = ".kata-proposed"
 // a destructive edit: if a file still carries a beads integration block, kata
 // leaves it untouched and writes a <file>.kata-proposed copy (beads block
 // removed, kata block added) for the user to adopt or discard.
-func applyAgentGuidance(dir string) (bool, error) {
+func applyAgentGuidance(dir, mode string) (bool, error) {
+	block, err := agentguide.ManagedBlock(mode)
+	if err != nil {
+		return false, err
+	}
 	changed := false
 
 	agentsPath := filepath.Join(dir, "AGENTS.md")
@@ -795,22 +834,24 @@ func applyAgentGuidance(dir string) (bool, error) {
 		return changed, err
 	}
 
-	if agentsExists || !claudeExists {
-		c, err := applyAgentGuidanceFile(agentsPath, agentsExists)
-		if err != nil {
-			return changed, err
-		}
+	// A conflict stays confined to its file so one bad file cannot leave the
+	// other on a stale instruction mode.
+	var failures []error
+	apply := func(path string, exists bool) {
+		c, err := applyAgentGuidanceFile(path, exists, block)
 		changed = changed || c
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", filepath.Base(path), err))
+		}
+	}
+	if agentsExists || !claudeExists {
+		apply(agentsPath, agentsExists)
 	}
 	if claudeExists {
-		c, err := applyAgentGuidanceFile(claudePath, true)
-		if err != nil {
-			return changed, err
-		}
-		changed = changed || c
+		apply(claudePath, true)
 	}
 
-	return changed, nil
+	return changed, errors.Join(failures...)
 }
 
 // regularGuidanceFileExists reports whether path is an existing real guidance
@@ -827,21 +868,21 @@ func regularGuidanceFileExists(path string) (bool, error) {
 	}
 }
 
-func applyAgentGuidanceFile(path string, exists bool) (bool, error) {
+func applyAgentGuidanceFile(path string, exists bool, block string) (bool, error) {
 	content, readExists, err := readIfExists(path)
 	if err != nil {
 		return false, err
 	}
 	exists = exists && readExists
 	if exists && hasBeadsBlock(content) {
-		sidecar, err := writeMigrationProposal(path, content)
+		sidecar, err := writeMigrationProposal(path, content, block)
 		if err != nil {
 			return false, err
 		}
 		warnBeadsConflict(path, sidecar)
 		return true, nil
 	}
-	return ensureAgentsBlock(path, content, exists)
+	return ensureAgentsBlock(path, content, exists, block)
 }
 
 // ensureAgentsBlock writes kata's block into an agent guidance file whose
@@ -849,8 +890,8 @@ func applyAgentGuidanceFile(path string, exists bool) (bool, error) {
 // the block when the file has no kata markers, and rewrites the block in place
 // when its content drifts. A begin marker with no matching end marker is an
 // error rather than a guessed span. Returns whether the file changed.
-func ensureAgentsBlock(path, content string, exists bool) (bool, error) {
-	updated, err := upsertKataBlock(content)
+func ensureAgentsBlock(path, content string, exists bool, block string) (bool, error) {
+	updated, err := agentguide.UpsertManagedBlock(content, block)
 	if err != nil {
 		return false, err
 	}
@@ -867,39 +908,11 @@ func ensureAgentsBlock(path, content string, exists bool) (bool, error) {
 	return true, nil
 }
 
-// upsertKataBlock returns content with kata's managed block present: appended
-// (with a blank line of separation) when absent, or rewritten in place when a
-// stale block already exists. A non-empty result always ends with a newline.
-func upsertKataBlock(content string) (string, error) {
-	block := agentsManagedBlock()
-	begin := strings.Index(content, agentsBlockBegin)
-	if begin == -1 {
-		var prefix string
-		switch {
-		case len(content) == 0, strings.HasSuffix(content, "\n\n"):
-		case strings.HasSuffix(content, "\n"):
-			prefix = "\n"
-		default:
-			prefix = "\n\n"
-		}
-		return content + prefix + block + "\n", nil
-	}
-	rel := strings.Index(content[begin:], agentsBlockEnd)
-	if rel == -1 {
-		return "", fmt.Errorf("agent guidance file has %q without a matching %q", agentsBlockBegin, agentsBlockEnd)
-	}
-	end := begin + rel + len(agentsBlockEnd)
-	if content[begin:end] == block {
-		return content, nil
-	}
-	return content[:begin] + block + content[end:], nil
-}
-
 // writeMigrationProposal writes a <path><suffix> copy of an existing file with
 // the beads block stripped and kata's block added, leaving the original
 // untouched. Returns the sidecar path.
-func writeMigrationProposal(path, content string) (string, error) {
-	proposed, err := upsertKataBlock(stripBeadsBlock(content))
+func writeMigrationProposal(path, content, block string) (string, error) {
+	proposed, err := agentguide.UpsertManagedBlock(stripBeadsBlock(content), block)
 	if err != nil {
 		return "", err
 	}

@@ -83,6 +83,12 @@ func (s *doctorState) daemonChecks(ctx context.Context) {
 		}
 		return doctorEmbeddings(health)
 	})
+	s.add("daemon.docbank", "integration", func() diagnostics.Check {
+		if !healthOK {
+			return skippedDoctorCheck("Daemon health is unavailable")
+		}
+		return doctorDocbank(health)
+	})
 	s.add("daemon.federation", "integration", func() diagnostics.Check {
 		if !healthOK {
 			return skippedDoctorCheck("Daemon health is unavailable")
@@ -206,6 +212,39 @@ func doctorEmbeddings(health *generated.HealthResponse) diagnostics.Check {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Embedding reconciler has a pending backlog", Details: []string{fmt.Sprintf("pending: %d", h.Backlog)}}
 	}
 	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Embedding reconciler reports no provider error or backlog"}
+}
+
+func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
+	h := health.Docbank
+	if h == nil && health.DBPath == nil {
+		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon did not provide Docbank health details; its attachment key state is unknown"}
+	}
+	if h == nil {
+		reported := ""
+		if health.APISchemaVersion != nil {
+			reported = *health.APISchemaVersion
+		}
+		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankKeyHealth); !current {
+			return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: daemonAPITooOldMessage("Docbank key health", apiVersionDocbankKeyHealth, reported)}
+		}
+		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon has no Docbank key source to check: Docbank is not configured, or it uses the Docbank on this machine"}
+	}
+	if h.Credential == "ok" {
+		return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}
+	}
+	var details []string
+	if h.CredentialSource != nil {
+		details = append(details, "source: "+*h.CredentialSource)
+	}
+	if h.CredentialReason != nil {
+		details = append(details, "reason: "+*h.CredentialReason)
+	}
+	return diagnostics.Check{
+		Status:  diagnostics.StatusWarn,
+		Summary: "Daemon cannot resolve its Docbank API key; attachments fail without contacting Docbank",
+		Details: details,
+		Fix:     `Fix the [docbank] key source on the daemon host. A key file must be private to the daemon user: chmod 600 on Unix; on Windows, in PowerShell, icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R". An api_key_env variable must be set in the daemon's environment.`,
+	}
 }
 
 func doctorFederation(h *generated.FederationConfigHealth) diagnostics.Check {

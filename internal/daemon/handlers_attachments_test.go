@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
@@ -302,6 +304,25 @@ func TestAttachmentMalformedReferenceAndReadErrors(t *testing.T) {
 		require.Equal(t, tc.want, code, string(raw))
 		require.Contains(t, string(raw), tc.code)
 	}
+}
+
+func TestAttachmentReportsUnresolvableKeyWithoutContactingDocbank(t *testing.T) {
+	f := docbanktest.New(t)
+	keyFile := filepath.Join(t.TempDir(), "missing", "docbank.key")
+	keys := config.DocbankConfig{APIKeyFile: keyFile}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.Docbank = docbank.NewClient(f.Server.URL, keys.ResolveKey)
+		cfg.DocbankFolder = "/kata"
+	})
+	p, iss := seedProjectAndIssue(t, env)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
+
+	code, raw := attachmentUpload(t, env, endpoint, "shot.png", strings.NewReader("image bytes"))
+
+	envelope := assertAPIError(t, code, raw, http.StatusServiceUnavailable, "docbank_key_unavailable")
+	require.Contains(t, envelope.Error.Message, "cannot read credential file")
+	require.NotContains(t, string(raw), keyFile, "daemon-host paths stay in health and the daemon log")
+	require.Empty(t, f.Requests())
 }
 func TestAttachmentScopeBeforeOutbound(t *testing.T) {
 	f := docbanktest.New(t)

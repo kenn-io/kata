@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json/v2"
 	"fmt"
-	"math/big"
 	"strings"
 	"time"
 
@@ -64,51 +63,23 @@ func (o *cronAuthorOptions) used(cmd *cobra.Command) bool {
 	return false
 }
 
-// cronAuthorSeconds rejects truncation and time.Duration overflow before any
-// network request. Duration syntax is shared by interval, grace, and timeout.
+// cronAuthorSeconds converts durations to whole seconds.
 func cronAuthorSeconds(value, flag string, allowZero bool) (int64, error) {
-	_, err := time.ParseDuration(value)
+	d, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, cronCLIValidation(fmt.Sprintf("--%s requires a supported duration: %v", flag, err))
 	}
-	// ParseDuration validates syntax and bounds, but discards fractions of a
-	// nanosecond. Sum the original decimals exactly before converting seconds.
-	negative := strings.HasPrefix(value, "-")
-	remaining := strings.TrimPrefix(strings.TrimPrefix(value, "-"), "+")
-	total := new(big.Rat)
-	units := map[string]int64{"ns": 1, "us": 1000, "µs": 1000, "μs": 1000, "ms": 1000000, "s": 1000000000, "m": 60000000000, "h": 3600000000000}
-	for remaining != "" && remaining != "0" {
-		i := 0
-		for i < len(remaining) && (remaining[i] >= '0' && remaining[i] <= '9' || remaining[i] == '.') {
-			i++
-		}
-		part, ok := new(big.Rat).SetString(remaining[:i])
-		if !ok {
-			return 0, cronCLIValidation("--" + flag + " requires a supported duration")
-		}
-		remaining = remaining[i:]
-		i = 0
-		for i < len(remaining) && (remaining[i] < '0' || remaining[i] > '9') && remaining[i] != '.' {
-			i++
-		}
-		part.Mul(part, new(big.Rat).SetFrac64(units[remaining[:i]], int64(time.Second)))
-		total.Add(total, part)
-		remaining = remaining[i:]
-	}
-	if negative {
-		total.Neg(total)
-	}
-	if total.Sign() < 0 || !allowZero && total.Sign() == 0 {
+	if d < 0 || !allowZero && d == 0 {
 		rule := "positive"
 		if allowZero {
 			rule = "nonnegative"
 		}
 		return 0, cronCLIValidation("--" + flag + " must be " + rule)
 	}
-	if !total.IsInt() {
+	if d%time.Second != 0 {
 		return 0, cronCLIValidation("--" + flag + " must use whole seconds")
 	}
-	return total.Num().Int64(), nil
+	return int64(d / time.Second), nil
 }
 
 func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCronJobBody, error) {
@@ -161,9 +132,6 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 			}
 		}
 		out.Definition.Action = cron.Action{Kind: "notify", Recipient: o.recipient, Message: o.message}
-		if err := out.Definition.Native().ValidateBeforeParentResolution(); err != nil {
-			return out, cronCLIValidation(err.Error())
-		}
 		// The existing --parent resolver fills parent_uid before full validation.
 		return out, nil
 	}
@@ -183,9 +151,6 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 		options["agent"] = o.agent
 	}
 	out.Definition.Options, err = json.Marshal(options)
-	if err == nil {
-		err = out.Definition.Native().Validate()
-	}
 	if err != nil {
 		return out, cronCLIValidation(err.Error())
 	}
@@ -228,9 +193,6 @@ func (o *cronAuthorOptions) trigger(cmd *cobra.Command) (cron.Trigger, error) {
 		trigger.IntervalSeconds = seconds
 	case cmd.Flags().Changed("once"):
 		trigger.Kind, trigger.At = "once", o.once
-	}
-	if err := trigger.Validate(); err != nil {
-		return trigger, cronCLIValidation(err.Error())
 	}
 	return trigger, nil
 }

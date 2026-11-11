@@ -19,6 +19,7 @@ func scopedRoute(method, pattern string) scopedRouteRule {
 // at the domain boundary; this first gate ensures new or administrative routes
 // fail closed before their handlers resolve any target.
 var issueScopedRoutes = []scopedRouteRule{
+	scopedRoute(http.MethodGet, `/api/v1/embeddings/local`),
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+/attachments/[^/]+/content`),
 	scopedRoute(http.MethodPost, `/api/v1/ui/telemetry`),
 	scopedRoute(http.MethodGet, `/api/v1/instance`),
@@ -41,6 +42,9 @@ var issueScopedRoutes = []scopedRouteRule{
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+/(?:graph|lease)`),
 	scopedRoute(http.MethodPost, `/api/v1/projects/[^/]+/issues/[^/]+/lease/actions/(?:acquire|release|renew)`),
 	scopedRoute(http.MethodGet, `/api/v1/ui/(?:issue-reference|references|snapshot)`),
+	// MCP Events: the service confines a scoped credential to its subtree.
+	scopedRoute(http.MethodPost, `/api/v1/mcp-events/(?:list|subscribe|unsubscribe)`),
+	scopedRoute(http.MethodGet, `/api/v1/mcp-events/subscriptions`),
 }
 
 func issueScopedRouteAllowed(method, path string) bool {

@@ -14,7 +14,7 @@
     ariaLabel: string
     onResize: (size: number) => void
     primary: SnippetFunction
-    secondary: SnippetFunction
+    secondary?: SnippetFunction | undefined
   }
 
   let {
@@ -73,7 +73,7 @@
   })
 
   $effect(() => {
-    if (totalSize <= 0) return
+    if (!secondary || totalSize <= 0) return
     const clamped = clampSize(primarySize, totalSize)
     if (clamped !== primarySize) onResize(clamped)
   })
@@ -100,22 +100,28 @@
   data-orientation={effectiveOrientation}
   bind:this={container}
 >
-  <div class="pane pane-primary" style:flex-basis={`${Math.round(appliedSize)}px`}>
+  <div
+    class:single={!secondary}
+    class="pane pane-primary"
+    style:flex-basis={secondary ? `${Math.round(appliedSize)}px` : undefined}
+  >
     {@render primary()}
   </div>
-  <SplitResizeHandle
-    orientation={effectiveOrientation}
-    {ariaLabel}
-    ariaValueMin={minPrimary}
-    ariaValueMax={Math.round(valueMax)}
-    ariaValueNow={Math.round(appliedSize)}
-    keyboardStep={16}
-    onResizeStart={startResize}
-    onResize={handleResize}
-  />
-  <div class="pane pane-secondary">
-    {@render secondary()}
-  </div>
+  {#if secondary}
+    <SplitResizeHandle
+      orientation={effectiveOrientation}
+      {ariaLabel}
+      ariaValueMin={minPrimary}
+      ariaValueMax={Math.round(valueMax)}
+      ariaValueNow={Math.round(appliedSize)}
+      keyboardStep={16}
+      onResizeStart={startResize}
+      onResize={handleResize}
+    />
+    <div class="pane pane-secondary">
+      {@render secondary()}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -147,6 +153,10 @@
   }
 
   .pane-secondary {
+    flex: 1 1 auto;
+  }
+
+  .pane-primary.single {
     flex: 1 1 auto;
   }
 </style>

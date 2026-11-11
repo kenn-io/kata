@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-05
+last_edited: 2026-11-09
 ---
 
 # HTTP API schema
@@ -14,6 +14,18 @@ Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
 transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
 discovery. [Cron](cron.md) documents job and workflow resources.
+
+## Search configuration header
+
+Search responses include `X-Kata-Embeddings-Configured: true` when the answering daemon has an embeddings provider, even while its index is empty or read-only mode forces lexical search. The value is `false` when no provider is configured. The response body is unchanged.
+
+## Local embeddings setup
+
+`GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, setup job, indexing progress, and `can_change`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. Issue-scoped credentials can read the status.
+
+`POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It shares the CLI's download and config checks, saves the setting, and reports the `restart` job state until the daemon restarts. Run `kata daemon restart` locally, or restart the daemon on its host. Reopen `kata ui` or sign in again afterward to see indexing progress.
+
+Setup is available only when no embeddings provider is configured and no setup job is active. It requires a local owner browser session, a bootstrap token, or a static daemon token, with a writable browser session manager when present. It returns `403` for other viewers and through the daemon switcher proxy, `404` when setup is unavailable, and `409` while setup is already running. The switcher proxy permits status reads.
 
 ## Getting the schema
 
@@ -201,6 +213,12 @@ Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
 API contract versions advance independently of Kata release versions.
+Kata 0.23.0 includes API `0.43.0`. Local embeddings setup requires `0.42.0`,
+and MCP Events require `0.43.0`.
+
+Kata 0.22.0 includes API `0.41.0`, and Kata 0.21.0 includes API `0.40.0`, the
+changes from `0.32.0` through `0.40.0` below.
+
 Kata 0.20.0 includes API `0.31.0`, the changes from `0.29.0` through `0.31.0`
 below. Bridge preflight checks for cross-project issue links require hub API
 `0.31.0`; acknowledging a request in the TUI Attention inbox requires `0.13.0`.
@@ -251,6 +269,9 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
+| `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. Both issue list routes accept `compact=true`. |
+| `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |
 | `0.41.0` | Adds `sort=priority` to both ready routes. `kata next` and MCP `kata.next` request one priority-ordered row; older daemons retain the full-queue fetch and client-side selection. |
 | `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |
 | `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |
@@ -300,8 +321,8 @@ request schema and are rejected for strict request objects.
 ## Health diagnostics
 
 `GET /api/v1/health` without credentials provides liveness and version fields.
-`db_path`, `embeddings`, `federation_config`, and `root_signing` are optional
-diagnostics:
+`db_path`, `embeddings`, `docbank`, `federation_config`, and `root_signing` are
+optional diagnostics:
 daemon-owner credentials and genuine owner-local transport receive them
 when configured. Public remote probes and scoped credentials do not. An
 explicit scoped bearer remains scoped over loopback; an invalid bearer returns
@@ -317,6 +338,17 @@ hub project it roots:
 | `key_loaded` | Whether the daemon holds a usable signing key. |
 | `key_problem` | Why no key is loaded, such as `key file is missing`. |
 | `projects` | Hub projects whose pin the loaded key cannot satisfy. Signed writes to them return `409 root_signing_key_unavailable`. |
+
+`docbank` appears when `[docbank]` names a key source. With `local = true` and
+no `url`, the key comes from the local Docbank's runtime record and the block
+is absent. The daemon resolves its key source for each health request without
+contacting Docbank:
+
+| Field | Meaning |
+| --- | --- |
+| `credential` | `ok` when the key resolves, otherwise `missing`. |
+| `credential_source` | The source that failed, `file:<path>` or `env:<NAME>`; absent when `ok`. |
+| `credential_reason` | Why that source cannot supply a key; absent when `ok`. |
 
 `GET /api/v1/federation/status` adds `root_signing_key` (`available` or
 `unavailable`) to each hub project this daemon roots, and
@@ -592,6 +624,14 @@ another page exists. Pass the opaque `next_cursor` as `cursor` with the same
 explicit sort and filters. `limit=0` returns all remaining matches. Optional
 `include_total=true` adds `total`, a SQL count with the same filters and
 permissions, independent of the cursor and page size.
+
+`compact=true` returns each row without its `body` and with only the metadata
+keys that `meta` filters name. Use it when only those keys matter: an imported
+issue can carry a body, title, or metadata value larger than a client is
+willing to read. A compact row larger than 64 KiB carries only the issue's
+identity and status, with `oversized: true`, so a page of up to 100 compact
+rows stays under 8 MiB and still reaches the next cursor. It requires API 0.43.0;
+older daemons ignore it and return full rows.
 
 Use `priority=none` for issues with unset priority. It is mutually exclusive
 with `max_priority`; numeric `priority` accepts 0 through 4. `max_priority`
@@ -942,7 +982,7 @@ federated event log.
 uploads the raw request body as `application/octet-stream` to Docbank and
 returns the new `attachment_id` with its stored reference. `GET
 /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
-streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. All three routes return `docbank_not_configured` when the daemon has no Docbank. See [Issue attachments](../guide/attachments.md).
+streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. All three routes return `docbank_not_configured` when the daemon has no Docbank, and `503 docbank_key_unavailable` without contacting Docbank when the daemon cannot resolve its Docbank key; the message gives the reason, and the health `docbank` block names the source. See [Issue attachments](../guide/attachments.md).
 
 ## Project Hygiene Endpoints
 

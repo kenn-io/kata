@@ -1274,7 +1274,13 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 	if qualified == "" {
 		qualified = project.Name + "#" + issue.ShortID
 	}
+	projectUID := project.UID
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
 	return IssueSummary{
+		oversized:           issue.Oversized != nil && *issue.Oversized,
+		projectUID:          projectUID,
 		Author:              issue.Author,
 		AccountableActor:    issue.AccountableActor,
 		SourceActor:         issue.SourceActor,
@@ -1304,7 +1310,13 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 }
 
 func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
+	projectUID := ""
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
 	return IssueSummary{
+		oversized:        issue.Oversized != nil && *issue.Oversized,
+		projectUID:       projectUID,
 		Author:           issue.Author,
 		AccountableActor: issue.AccountableActor,
 		SourceActor:      issue.SourceActor,

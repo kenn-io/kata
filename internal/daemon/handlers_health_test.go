@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/embedding"
 )
 
@@ -144,8 +146,9 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 	assert.True(t, body.Embeddings.LastSuccessAt.Equal(last))
 }
 
-func TestHealth_DoesNotExposeEmbeddingProviderDiagnostics(t *testing.T) {
+func TestHealth_DoesNotExposeProviderDiagnosticsToPublicProbes(t *testing.T) {
 	d := openTestDB(t)
+	keyFile := filepath.Join(t.TempDir(), "missing", "docbank.key")
 	ts := startTestServer(t, daemon.ServerConfig{
 		DB:        d.db,
 		StartedAt: d.now,
@@ -157,16 +160,19 @@ func TestHealth_DoesNotExposeEmbeddingProviderDiagnostics(t *testing.T) {
 				Backlog:         1,
 			}
 		},
+		Docbank: docbank.NewClient("http://127.0.0.1:9", config.DocbankConfig{APIKeyFile: keyFile}.ResolveKey),
 	})
 
 	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/health", nil,
 		map[string]string{"Forwarded": "for=198.51.100.1"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
 	assert.NotContains(t, string(bs), "reflected issue title")
+	assert.NotContains(t, string(bs), "docbank.key", "the Docbank key path is a daemon-host diagnostic")
 
 	var body map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(bs, &body))
 	assert.NotContains(t, body, "embeddings")
+	assert.NotContains(t, body, "docbank")
 }
 
 func TestHealth_KeylessDaemonRejectsExplicitInvalidAuthorizationBeforeDiagnostics(t *testing.T) {
@@ -301,6 +307,47 @@ func TestHealthIncludesSafeEmbeddingCredentialWarning(t *testing.T) {
 	assert.Contains(t, body.Embeddings.CredentialReason, "unset")
 	require.NotNil(t, body.Embeddings.LastSuccessAt)
 	assert.True(t, body.Embeddings.LastSuccessAt.Equal(last), "credential state must not replace reconciliation time")
+}
+
+func TestHealthReportsDocbankKeySource(t *testing.T) {
+	keyFile := filepath.Join(t.TempDir(), "missing", "docbank.key")
+	for _, tc := range []struct {
+		name string
+		key  func() (string, error)
+		want api.DocbankHealth
+	}{
+		{
+			name: "unreadable key file",
+			key:  config.DocbankConfig{APIKeyFile: keyFile}.ResolveKey,
+			want: api.DocbankHealth{Credential: "missing", CredentialSource: "file:" + keyFile, CredentialReason: "cannot read credential file"},
+		},
+		{
+			name: "resolvable key",
+			key:  func() (string, error) { return "test-key", nil },
+			want: api.DocbankHealth{Credential: "ok"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := openTestDB(t)
+			ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Docbank: docbank.NewClient("http://127.0.0.1:9", tc.key)})
+			var body struct {
+				OK      bool               `json:"ok"`
+				Docbank *api.DocbankHealth `json:"docbank"`
+			}
+			getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+			require.True(t, body.OK, "a Docbank key problem is advisory")
+			require.NotNil(t, body.Docbank)
+			assert.Equal(t, tc.want, *body.Docbank)
+		})
+	}
+}
+
+func TestHealthOmitsDocbankKeyStateForLocalDocbank(t *testing.T) {
+	d := openTestDB(t)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Docbank: docbank.NewLocalClient(docbank.Local{})})
+	var body map[string]jsontext.Value
+	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	assert.NotContains(t, body, "docbank", "the local Docbank's key comes from its runtime record, not a key source")
 }
 
 func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {

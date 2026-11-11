@@ -26,9 +26,11 @@ import (
 )
 
 func TestDaemonTargetsFromConfigIncludesConfiguredEntries(t *testing.T) {
+	token := t.Name()
+	file := filepath.Join(t.TempDir(), "missing-credential")
 	daemons := []config.CatalogDaemonConfig{
 		{Name: "local", Local: true},
-		{Name: "shared", URL: "http://100.64.0.5:7777", TokenEnv: "KATA_SHARED_TOKEN", AllowInsecure: true}, //nolint:gosec // env var name, not a credential
+		{Name: "shared", URL: "http://100.64.0.5:7777", Token: token, TokenFile: file, TokenEnv: "KATA_SHARED_TOKEN", AllowInsecure: true}, //nolint:gosec // env var name, not a credential
 	}
 
 	targets := daemonTargetsFromConfig(daemons)
@@ -36,10 +38,12 @@ func TestDaemonTargetsFromConfigIncludesConfiguredEntries(t *testing.T) {
 	require.Len(t, targets, 2)
 	assert.Equal(t, daemonTarget{Name: "local", Local: true}, targets[0])
 	assert.Equal(t, daemonTarget{ //nolint:gosec // env var name, not a credential
-		Name:     "shared",
-		URL:      "http://100.64.0.5:7777",
-		TokenEnv: "KATA_SHARED_TOKEN",
-		resolved: clientpkg.ResolvedDaemon{AllowInsecure: true},
+		Name:      "shared",
+		URL:       "http://100.64.0.5:7777",
+		Token:     token,
+		TokenFile: file,
+		TokenEnv:  "KATA_SHARED_TOKEN",
+		resolved:  clientpkg.ResolvedDaemon{Token: token, AllowInsecure: true},
 	}, targets[1])
 }
 

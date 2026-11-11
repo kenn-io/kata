@@ -538,7 +538,9 @@ func (d *Store) lookalikeMatch(ctx context.Context, titleQuery string) (string, 
 	slices.Sort(titles)
 	titles = slices.Compact(titles)
 	if len(titles) == 0 {
-		return "", false, nil
+		// Stop words and one-letter words leave no title words to filter on,
+		// but full-text search still indexes them, so use ordinary retrieval.
+		return "", true, nil
 	}
 	for i, token := range titles {
 		titles[i] = `{title} : "` + token + `"*`

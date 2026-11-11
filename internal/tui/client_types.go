@@ -10,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // Issue is a strict subset of the daemon's wire shape. Labels rides on
@@ -56,18 +57,21 @@ type Issue struct {
 	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
 }
 
-// issueMetadata keeps the two planning-date keys of an issue's metadata as
-// the daemon stores them. Other keys are not read by the TUI.
+// issueMetadata keeps the two planning-date keys and the timezone of an
+// issue's metadata as the daemon stores them. Other keys are not read by the TUI.
 type issueMetadata struct {
 	ScheduledOn jsontext.Value `json:"scheduled_on,omitzero"`
 	DeadlineOn  jsontext.Value `json:"deadline_on,omitzero"`
+	Timezone    jsontext.Value `json:"timezone,omitzero"`
 }
 
-// scheduledOn and deadlineOn are the raw stored dates, "" when absent.
-func (i Issue) scheduledOn() string { return rawDate(i.Metadata.ScheduledOn) }
-func (i Issue) deadlineOn() string  { return rawDate(i.Metadata.DeadlineOn) }
+// scheduledOn, deadlineOn and timezone are the raw stored values, "" when
+// absent.
+func (i Issue) scheduledOn() string { return rawString(i.Metadata.ScheduledOn) }
+func (i Issue) deadlineOn() string  { return rawString(i.Metadata.DeadlineOn) }
+func (i Issue) timezone() string    { return rawString(i.Metadata.Timezone) }
 
-func rawDate(v jsontext.Value) string {
+func rawString(v jsontext.Value) string {
 	var s string
 	if len(v) == 0 || json.Unmarshal(v, &s) != nil {
 		return ""
@@ -173,7 +177,23 @@ type MutationResp struct {
 	Event   *EventEnvelope `json:"event,omitempty"`
 	Changed bool           `json:"changed"`
 	Reused  bool           `json:"reused,omitempty"`
-	undo    *undoAttempt
+	// Issues lists every issue a move (or its dry run) covers, the moved
+	// issue first. NewShortID is the moved issue's id in its new project.
+	Issues     []Issue `json:"issues,omitempty"`
+	NewShortID string  `json:"new_short_id,omitempty"`
+	// Revision is the issue revision the daemon reported in its ETag.
+	Revision int64 `json:"-"`
+	undo     *undoAttempt
+}
+
+// MoveInput is one move request. A DryRun validates and previews without
+// writing. IfMatchRevision guards the move on the revision the preview read;
+// zero sends no If-Match header.
+type MoveInput struct {
+	Actor           string
+	ToProjectUID    string
+	DryRun          bool
+	IfMatchRevision int64
 }
 
 // EventEnvelope is the minimal event projection embedded in mutation
@@ -209,6 +229,7 @@ type ProjectSummary struct {
 	UID      string `json:"uid,omitempty"`
 	Metadata struct {
 		Role jsontext.Value `json:"role"`
+		Area jsontext.Value `json:"area"`
 	} `json:"metadata"`
 }
 
@@ -399,6 +420,9 @@ type IssueDetail struct {
 	Parent   *IssueRef
 	Children []Issue
 	Lease    *api.IssueClaimOut
+	// Recurrence is nil when absent or unreadable; RecurrenceErr distinguishes them.
+	Recurrence    *recurrenceclient.View
+	RecurrenceErr error
 }
 
 // showIssueLabel is the per-label projection from showIssue's labels

@@ -93,4 +93,15 @@ describe('SplitLayout', () => {
       screen.getByRole('separator', { name: 'Resize Kata panes' }).getAttribute('aria-orientation'),
     ).toBe('horizontal')
   })
+
+  it('preserves the split preference while the detail pane is closed', () => {
+    mockRect(400, 600)
+    const onResize = vi.fn()
+    render(SplitLayoutTestHarness, {
+      props: { primarySize: 300, showSecondary: false, onResize },
+    })
+
+    expect(screen.queryByRole('separator')).toBeNull()
+    expect(onResize).not.toHaveBeenCalled()
+  })
 })

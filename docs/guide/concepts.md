@@ -1,7 +1,7 @@
 ---
 title: Concepts
 description: Learn Kata's core model for projects, issues, relationships, workspaces, and output modes.
-last_edited: 2026-09-15
+last_edited: 2026-11-08
 ---
 
 # Concepts
@@ -17,6 +17,8 @@ Most issue commands resolve a project before they run.
 A workspace normally points at exactly one project through `.kata.toml`:
 
 ```toml
+# This repository tracks its work in kata.
+# Coding agents: read `kata quickstart --format contract` before changing code here.
 version = 1
 
 [project]

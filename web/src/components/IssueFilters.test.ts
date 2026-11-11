@@ -108,6 +108,26 @@ describe('IssueFilters', () => {
       scope: { kind: 'project', project_uid: 'project-example' },
     })
   })
+
+  test.each([
+    ['Search tasks', 'query'],
+    ['Owner', 'owner'],
+    ['Label', 'label'],
+  ] as const)('keeps a trailing space when the route acknowledges %s', async (name, field) => {
+    const onChange = vi.fn()
+    const { rerender } = render(IssueFilters, { props: { filters, projects, onChange } })
+    const input = screen.getByLabelText(name) as HTMLInputElement
+    await fireEvent.input(input, { target: { value: 'Alice ' } })
+    await rerender({ filters: { ...filters, [field]: 'Alice', status: 'ready' } })
+    expect(input.value).toBe('Alice ')
+    await fireEvent.input(input, { target: { value: 'Alice Smith' } })
+    expect(onChange).toHaveBeenLastCalledWith(
+      { ...filters, [field]: 'Alice Smith', status: 'ready' },
+      field,
+    )
+    await rerender({ filters: { ...filters, [field]: 'other' } })
+    expect(input.value).toBe('other')
+  })
 })
 
 const projects: KataProjectSummary[] = [

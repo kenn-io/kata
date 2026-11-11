@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-06
+last_edited: 2026-11-10
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,32 +9,160 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Keep federation polls fast on busy hubs by skipping other projects' event history.
-- Attach oh-my-pi sessions to closes by copying the documented
-  [closing-session transcript](reference/configuration.md#closing-session-transcripts)
-  configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
-  `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
-  recorded oh-my-pi closes as pi sessions.
-- Upgrade SQLite schemas 41 through 47 to 48 by adding indexes in place, avoiding
-  a full JSONL export/import and its retained database backup. The indexes and
-  version stamp commit together; interrupted upgrades retry on the next start.
+- Upgrade a large PostgreSQL database without the schema migration rolling
+  back. A migration statement no longer stops after 30 seconds, so a long index
+  build finishes, and an opener waiting for another opener's migration keeps
+  waiting. Ordinary queries keep the 30-second limit. See
+  [PostgreSQL operations](operations/postgres.md).
+
+- Keep a daemon catalog credential in an owner-only device file with
+  `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
+  stop on a failed selected source without fallback. See
+  [catalog credentials](reference/configuration.md#daemon-config).
+
+- Keep search focus and text when keyboard selection opens task detail.
+- Keep local writes responsive while a federation pull updates projects with long histories.
+- See why Docbank attachments fail when the daemon cannot read its own key.
+  With daemon API 0.44.0 or newer, uploads, reads, and links return HTTP 503
+  `docbank_key_unavailable` with the reason, such as
+  `group/world-readable; use chmod 600`, instead of `docbank_unauthorized`,
+  which suggested Docbank had refused a correct key. The message never names
+  the key file or variable. For daemon-owner and owner-local callers,
+  `/api/v1/health` adds a `docbank` block naming the failing source, and
+  `kata doctor` adds a `daemon.docbank` check that reads it. The block is
+  absent for `local = true`, which has no key source of its own. On Windows, the
+  reason now says to turn off inheritance, and the
+  [key file rules](reference/configuration.md#credentials-and-batching) show
+  the `icacls` fix. An unset `api_key_env` for `[docbank]` or
+  `[search.embeddings]`, `token_env` for `[auth]` or `[mcp]`, or
+  `--hub-token-env` or `kata mcp --http-token-env` variable now reports
+  `env:<NAME>: environment variable is unset or empty`.
+
+## 0.23.0
+<small>2026-11-09</small>
+
+Kata 0.23.0 adds one-command search by meaning, terminal UI controls for moving
+issues, repeating schedules, and workflows, and guided Docbank setup. Assistants
+that use MCP can now set up without a shell, find tools by task, and wake when
+their inbox changes. Large stores and federated projects search, create, and
+sync faster.
+
+[Release downloads](https://github.com/kenn-io/kata/releases/tag/v0.23.0)
+· [Changes since 0.22.0](https://github.com/kenn-io/kata/compare/v0.22.0...v0.23.0)
+
+**Before upgrading**
+
+- Keep a [backup](operations/backup-restore.md) from before the upgrade. Kata
+  0.23.0 upgrades the database from schema 46 to schema 50, and older binaries
+  cannot open the result. Rollback requires that backup and its matching binary.
+- SQLite: the upgrade runs in place at startup and does not export and reimport
+  the store. See
+  [Slow or interrupted upgrade startup](operations/backup-restore.md#slow-or-interrupted-upgrade-startup).
+- PostgreSQL: stop daemons and imports, then run
+  `kata storage postgres migrate` with schema-owner credentials. The migration
+  builds indexes on the `issues` and `events` tables, so allow an offline window
+  that fits their size. Schema 50 adds a table, so reapply the runtime role
+  grants afterward. See the [upgrade procedure](operations/postgres.md#upgrade-ceremony).
+- Federation: upgrade the hub before retrying a push quarantined for an actor
+  mismatch.
+
+**New features**
+
+- Enable search by meaning with `kata daemon local-embeddings`. A fresh home uses a running Ollama; otherwise, it asks before downloading the shared built-in server. Switching keeps compatible Nomic indexes and warns before changing a federation recipe.
+- Turn on search by meaning from the web's Settings page. Watch the download, then run `kata daemon restart` to finish. Reopen `kata ui` to watch indexing. Other viewers can read the status. Unconfigured `kata search` results point to Settings and the CLI setup command on stderr; `--quiet` and `--agent` suppress the line.
+- Move an issue to another project from `kata tui` with `M` on the selected row
+  of the issue list, after a dry-run preview of the subtree that would move.
+  Daemon API `0.35.0` or newer is required. See the
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Start, change, or stop an issue's recurrence in `kata tui` with `O` only while the detail is focused.
+  The form takes an RRULE (outer spaces trimmed), a start date, and an IANA zone, and
+  shows the daemon's error with your input kept. Saves are revision-guarded;
+  after a conflict, press `Esc`, then `O` once the detail refreshes.
+  An issue that parents a recurring cron job is refused on save, as in
+  `kata schedule --repeat`. Clear the rule and save to stop an existing recurrence, keeping its occurrences. A blank rule cannot start a recurrence.
+  The detail shows the rule, the next occurrence, and the zone.
+  See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Create and edit workflows in the `kata tui` Workflows tab with `n` and `e`. Edit the JSON definition with `Ctrl+e` and save with `Ctrl+o`. The form keeps your draft after errors and shows the current definition after concurrent changes. See [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Turn on attachments with `kata docbank setup`: without `--url` it writes
+  `[docbank] local = true` for the Docbank on this machine; with `--url` and
+  `--key-file` it uses one that runs elsewhere. Setup checks the key before
+  writing `config.toml`, restarts running daemons, and changes nothing while a
+  `KATA_DOCBANK_*` variable is set or `config.toml` has a different `[docbank]`
+  section. See [Issue attachments](guide/attachments.md#configure-the-daemon).
+- Attach files through the Docbank on the same machine with
+  `[docbank] local = true`, without copying its URL or API key. Docbank restarts
+  and updates need no Kata change, and the daemon runs `docbank daemon start`
+  when none is running, so `docbank` must be on its `PATH`. Needs Docbank 0.16.0
+  or later. A `url` or `KATA_DOCBANK_URL` still selects that Docbank instead. See
+  [Issue attachments](guide/attachments.md#configure-the-daemon).
+- Find commands by describing a task with `kata cli search "<task>"`, even
+  offline. It needs no daemon, workspace, or credentials and returns five
+  commands unless you set `--limit`. See the
+  [CLI reference](reference/cli.md).
+- Find MCP tools for a task with `kata.search_tools`, including tools in
+  sections that are not loaded yet. See
+  [Find tools for a task](reference/mcp.md#find-tools-for-a-task).
+- Set up assistants that use MCP without a shell. Run
+  `kata init --with-agents --agent-mode=mcp`, or request `setup` through
+  `kata.skills` for instructions to install locally. See
+  [Install MCP-only instructions](reference/mcp.md#install-mcp-only-instructions).
+- Wake an assistant within about a second of a change to its inbox, even when
+  it is not running. Turn on `[mcp_events] enabled = true` in the daemon
+  configuration, and MCP clients can subscribe to `kata.inbox.changed` through
+  `kata mcp serve`. The daemon stores each subscription, verifies its HTTPS
+  callback, and sends a signed webhook ping that names only the recipient; the
+  receiver then reads `kata.inbox`. Subscriptions survive daemon restarts and
+  need daemon API `0.43.0`. PostgreSQL deployments run
+  `kata storage postgres migrate` to reach schema 50 first. See
+  [MCP Events](operations/mcp-events.md).
+- Connect MCP clients directly to an identity-mode daemon's `/mcp` using each
+  caller's identity token. Reads and writes retain that token's actor and
+  authorization, and sessions reject requests made with a different token.
+  Remove `[mcp] token_file` and `token_env` when enabling identity mode; the
+  mount uses caller tokens instead. See
+  [Daemon mount with identity tokens](reference/mcp.md#daemon-mount-with-identity-tokens).
 - Create your first project from the web UI's empty task list. **New task**
   makes that project Inbox and opens task capture when no projects exist.
-- Keep pulling from a federation hub after its event history passes one million
-  events. Spokes no longer stall with `after_id: invalid integer`, and other large
-  integer query values such as `kata events --after` cursors go out as plain
-  numbers.
-- Open the web UI manually over SSH or in a container: `kata ui` and `kata ui <issue-ref>` print the browser URL in the selected output format before launching the browser and exit 0 with a manual-open hint if no browser opens. Cancelling the command still returns an error.
-- Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
-  requests, so operators can raise the 60-second budget for a slow hub.
-- Find every cron HTTP operation, its CLI command and MCP tool in the
-  [cron route table](reference/cron.md#routes-events-and-records), with run-list
-  page defaults for each surface.
+
+**Improvements**
+
+- Open long web UI lists with the first 150 rows and add more as you scroll. The
+  browser's own Find sees only rendered rows. End and deep links to late rows
+  still draw the remaining rows once.
+- Keep large task lists responsive when an unchanged refresh arrives, reuse the loaded list when live updates first connect, and keep Inbox and Scheduled current at midnight.
+- Search faster on large SQLite stores when a query combines rare and common words, preserving results, ranking, and match flags.
+- Create issues faster on large SQLite stores while keeping look-alike warnings for existing titles with rewritten bodies.
+- Create issues faster on large SQLite stores by reading look-alike match flags from the returned page.
+- Fetch cross-project ready lists with a limit quickly as stores grow. SQLite and PostgreSQL use an ordered index for `kata ready --all --limit N`, MCP `kata.ready`, and `GET /api/v1/ready` without changing their filters or order. SQLite adds the index in place on upgrade; PostgreSQL needs the [offline migration](development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index).
+- Poll and stream one project's events faster on large SQLite stores by skipping unrelated history and earlier departures. SQLite adds the index in place on upgrade; PostgreSQL needs the [offline migration from schema 47](development/postgres-migrations.md#schema-48-project-departure-cursor-index).
+- Keep federation polls fast on busy hubs by skipping other projects' event history.
+- Keep local writes responsive during SQLite cron-only federation pulls by looking up only the runs carried by each page and their complete observation history. Schema 49 adds a cron event index on SQLite and PostgreSQL.
+- Push ordinary issue changes to large SQLite hubs without replaying every
+  unrelated issue. Preparation folds touched issue histories; project-wide
+  changes and move history retain complete replay, and link reconciliation
+  keeps its existing scope.
+- Sync shared cron updates faster on large SQLite hubs and spokes. Pushes and
+  pulls replay cron history without reconciling unrelated issues and their
+  short IDs, including when the same batch carries issue updates.
+- See why a multi-word `kata search` came back empty. Lexical search returns
+  only issues that contain every word, so an empty multi-word search now
+  prints a hint on stderr to search again with fewer words, instead of letting
+  an agent conclude that no related issue exists and file a duplicate.
+- Read empty multi-word search reasons in CLI JSON and MCP, including filtered
+  searches. Empty lists report matching issues of the other status and a retry
+  that keeps scope and filters, with PowerShell syntax on Windows.
+- Give coding agents a shorter kata contract. The text that hooks inject,
+  `kata init --with-agents` writes, and the MCP `workflow` guide serves now
+  covers one agent's loop in plain prose: skip kata for questions, search with
+  one or two distinctive words, reuse or create one issue, claim it, and close
+  it with evidence. Attention signals, branch stamps, fan-out and join, inboxes,
+  and planning dates moved to `kata quickstart` and the MCP `teammates` guide.
+  In Codex runs, agents now reuse an existing issue instead of filing a
+  duplicate, and recording a bug no longer sets attention metadata.
+- Agents opening `.kata.toml` learn that the repository tracks work in kata and where to read the agent contract. Rerun `kata init` to add the header to an existing binding.
 - Create unprioritized issues with `kata create --priority none` even when the
   invoking client has a default priority. Keyed automation can keep its original
   request stable across changes to that preference.
-- Prevent duplicate creates with identical full title text when either issue's
-  body has no searchable words. `--force-new` still creates a separate issue.
 - Turn close transcripts on or off for one process with
   `KATA_CLOSE_TRANSCRIPT_ENABLED`, without editing `<KATA_HOME>/config.toml`.
   An agent integration can attach its own sessions while other agents on the
@@ -44,47 +172,116 @@ All notable changes to kata, grouped by release. Versioned releases start with
   warns and the close proceeds without a transcript. Unset or empty leaves the
   file in charge. See
   [Closing-session transcripts](reference/configuration.md#closing-session-transcripts).
-- Enable search by meaning with `kata daemon local-embeddings`. A fresh home uses a running Ollama; otherwise, it asks before downloading the shared built-in server. Switching keeps compatible Nomic indexes and warns before changing a federation recipe.
+- Upgrade SQLite schemas 41 through 49 to 50 in place by adding indexes and the
+  empty MCP Events subscriptions table, avoiding a full JSONL export/import and
+  its retained database backup. The indexes and
+  version stamp commit together; interrupted upgrades retry on the next start.
+- Find every cron HTTP operation, its CLI command and MCP tool in the
+  [cron route table](reference/cron.md#routes-events-and-records), with run-list
+  page defaults for each surface.
+
+**Bug fixes**
+
+- Keep pulling from a federation hub after its event history passes one million
+  events. Spokes no longer stall with `after_id: invalid integer`, and other large
+  integer query values such as `kata events --after` cursors go out as plain
+  numbers.
+- Retry federation history after an enrollment actor change when the hub
+  already retains the exact events. Upgrade the hub before retrying an
+  actor-mismatch quarantine. See
+  [quarantine recovery](operations/federation.md#quarantine).
+- Let SQLite federation pushes and pulls reach the writer-held fallback after
+  slow snapshot preparation instead of exhausting contention retries first.
 - Read spoke issues with cached lease state when a busy local writer or a federation endpoint change prevents the optional lease refresh from finishing.
-- Open long web UI lists with the first 150 rows and add more as you scroll. The
-  browser's own Find sees only rendered rows. End and deep links to late rows
-  still draw the remaining rows once.
-- Connect MCP clients directly to an identity-mode daemon's `/mcp` using each
-  caller's identity token. Reads and writes retain that token's actor and
-  authorization, and sessions reject requests made with a different token.
-  Remove `[mcp] token_file` and `token_env` when enabling identity mode; the
-  mount uses caller tokens instead. See
-  [Daemon mount with identity tokens](reference/mcp.md#daemon-mount-with-identity-tokens-unreleased).
-- Read empty multi-word search reasons in CLI JSON and MCP, including filtered
-  searches. Empty lists report matching issues of the other status and a retry
-  that keeps scope and filters, with PowerShell syntax on Windows.
-- Create issues faster on large SQLite stores while keeping look-alike warnings for existing titles with rewritten bodies.
-- Search faster on large SQLite stores when a query combines rare and common words, preserving results, ranking, and match flags.
-- Give coding agents a shorter kata contract. The text that hooks inject,
-  `kata init --with-agents` writes, and the MCP `workflow` guide serves now
-  covers one agent's loop in plain prose: skip kata for questions, search with
-  one or two distinctive words, reuse or create one issue, claim it, and close
-  it with evidence. Attention signals, branch stamps, fan-out and join, inboxes,
-  and planning dates moved to `kata quickstart` and the MCP `teammates` guide.
-  In Codex runs, agents now reuse an existing issue instead of filing a
-  duplicate, and recording a bug no longer sets attention metadata.
+- Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
+  requests, so operators can raise the 60-second budget for a slow hub.
+- Prevent duplicate creates with identical full title text when either issue's
+  body has no searchable words. `--force-new` still creates a separate issue.
+- Find matching issues from human-mode `kata create` look-alike refusals, which
+  now include the existing issues' qualified refs.
+- Open the web UI manually over SSH or in a container: `kata ui` and `kata ui <issue-ref>` print the browser URL in the selected output format before launching the browser and exit 0 with a manual-open hint if no browser opens. Cancelling the command still returns an error.
+- Keep strict MCP clients from rejecting the tool catalog when scheduled-job tools load.
 - Keep coding agents focused outside kata workspaces. User-scope contract hooks
   installed by `kata agent-hook install` now inject the contract only when the
   session starts under a `.kata.toml`; elsewhere they return an empty response
   instead of telling the agent to search, create, and close kata issues in a
   repository that does not use kata.
-- Poll and stream one project's events faster on large SQLite stores by skipping unrelated history and earlier departures. Existing stores upgrade to schema 48 through SQLite's JSONL cutover or the [offline PostgreSQL migration from schema 47](development/postgres-migrations.md#schema-48-project-departure-cursor-index).
-- Create issues faster on large SQLite stores by reading look-alike match flags from the returned page.
+- Keep the web page from shifting during routine refreshes on a healthy connection.
+- Keep the TUI confirmation for reopening an issue with accumulated recurring
+  work readable on short terminals, and prevent delayed confirmations from
+  opening over Help.
+- CLI crashes now exit 1 with an internal error and bug-report hint in the selected human, JSON, or agent format, instead of exit 2 with a raw panic trace. Foreground daemon crashes keep their trace. See [CLI reference](reference/cli.md).
+- Attach oh-my-pi sessions to closes by copying the documented
+  [closing-session transcript](reference/configuration.md#closing-session-transcripts)
+  configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
+  `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
+  recorded oh-my-pi closes as pi sessions.
+
+**Acknowledgements**
+
+- Thanks to [Rod Boev](https://github.com/rodboev) for search by meaning from the
+  CLI and web Settings, faster long lists and Inbox in the web UI, faster search,
+  issue creation, ready lists, and federation polling, in-place SQLite upgrades,
+  empty-result hints, duplicate-title warnings, large federation cursors, first
+  project setup, the printed web URL, the `.kata.toml` agent pointer and shorter
+  agent help, and faster, more reliable CI.
+- Thanks to [Rusty Shackleford](https://github.com/salmonumbrella) for offline
+  command and MCP tool discovery, MCP-only setup, identity tokens on the daemon
+  MCP mount, work on MCP Events, faster federated issue and cron sync, federation
+  recovery after actor changes, strict MCP schemas for cron tools, the cron route
+  table, `--priority none`, responsive `kata show`, CLI crash reporting, the
+  federation timeout fix, stable web connection status, and the refreshed README.
+- Thanks to [Dangerboi](https://github.com/Dangerboi) for moving issues,
+  recurrence editing, and workflow editing in the TUI, `kata docbank setup` and
+  local Docbank discovery, per-process close transcripts, and the oh-my-pi
+  transcript example.
+- Thanks to [Joi Ito](https://github.com/Joi) for keeping the TUI reopen
+  confirmation usable on Help and short terminals.
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for
+  standardizing property tests on Rapid, labeling dependency pull requests, and
+  quieter sibling pin checks.
+- Thanks to [Phillip Cloud](https://github.com/cpcloud) for the faster CI gate
+  and the shared release-age policy for dependency updates.
+- Thanks to [Wes McKinney](https://github.com/wesm) for MCP Events inbox wakeups,
+  the short agent contract, multi-word search hints, agent hooks that stay quiet
+  outside kata workspaces, and duplicate warnings for stop-word titles.
+
+## 0.22.0
+<small>2026-11-05</small>
+
+Kata 0.22.0 adds issue deletion in the terminal UI. Large stores get faster
+ready queues, issue creation, label loading, project statistics, and GitHub
+sync.
+
+[Release downloads](https://github.com/kenn-io/kata/releases/tag/v0.22.0)
+· [Changes since 0.21.0](https://github.com/kenn-io/kata/compare/v0.21.0...v0.22.0)
+
+**Before upgrading**
+
+- Keep a [backup](operations/backup-restore.md) from before the upgrade. Kata
+  0.22.0 upgrades the database from schema 43 to schema 46, and older binaries
+  cannot open the result. Rollback requires that backup and its matching binary.
+- PostgreSQL: stop daemons and imports, then run
+  `kata storage postgres migrate` with schema-owner credentials. The migration
+  builds indexes on the events and issues tables and blocks their writes, so
+  allow an offline window that fits their size. Existing runtime grants remain
+  sufficient. See the [upgrade procedure](operations/postgres.md#upgrade-ceremony).
+
+**New features**
+
+- Delete an issue from `kata tui` with `X` from the list or detail, including
+  Inbox and a detail opened from Attention. Saved views drop the deleted
+  issue. Type `DELETE <project>#<id>` to confirm; the selection moves to the
+  neighbouring row and `u` restores the issue, including from Attention, the
+  way `kata restore` does.
+  Issue-scoped credentials cannot delete, so they are not offered the key. See
+  the [CLI reference](reference/cli.md#daemon-and-diagnostics).
+
+**Improvements**
+
 - Load web UI suggestions faster on large SQLite stores with unrestricted local owner access; scoped and account-bound access keep today's speed.
-- See why a multi-word `kata search` came back empty. Lexical search returns
-  only issues that contain every word, so an empty multi-word search now
-  prints a hint on stderr to search again with fewer words, instead of letting
-  an agent conclude that no related issue exists and file a duplicate.
-- Fetch cross-project ready lists with a limit quickly as stores grow. SQLite and PostgreSQL use an ordered index for `kata ready --all --limit N`, MCP `kata.ready`, and `GET /api/v1/ready` without changing their filters or order. Existing stores upgrade to schema 47 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-47-cross-project-ready-update-order-index).
 - Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
 - Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
-- Let SQLite federation pushes and pulls reach the writer-held fallback after
-  slow snapshot preparation instead of exhausting contention retries first.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.
@@ -96,18 +293,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   stores upgrade to schema 45 through SQLite's JSONL cutover or the
   [offline PostgreSQL index build](development/postgres-migrations.md#schema-45-issue-uid-prefix-index).
 - Fetch the highest-priority ready issue with flat lookup cost as ready queues grow using `kata next` and MCP `kata.next`. SQLite and PostgreSQL walk priority indexes instead of sorting every ready row; PostgreSQL bounds each request and expands it when scheduled issues fill the batch. Daemons with API `0.41.0` or newer return one priority-ordered row per request; older daemons keep the existing selection behavior. Existing stores upgrade to schema 46 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-46-ready-priority-indexes).
-- CLI crashes now exit 1 with an internal error and bug-report hint in the selected human, JSON, or agent format, instead of exit 2 with a raw panic trace. Foreground daemon crashes keep their trace. See [CLI reference](reference/cli.md). Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.
-- Push ordinary issue changes to large SQLite hubs without replaying every
-  unrelated issue. Preparation folds touched issue histories; project-wide
-  changes and move history retain complete replay, and link reconciliation
-  keeps its existing scope.
-
-- Pull shared cron updates faster on large SQLite spokes by replaying cron
-  history without reconciling unrelated issues and their short IDs.
-
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding
@@ -117,24 +305,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep issue creation and missing short ID lookups fast as event history grows.
   Existing stores upgrade to schema 44 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-44-reset-reference-lookup-index).
-- Keep creates and comments responsive during issue syncs by committing imports
-  in smaller chunks.
+
+**Bug fixes**
+
 - Keep legacy spokes from adding stored sibling-project references after either
   project enrolls for relay. The hub rejects the whole fresh push batch with
   `400 validation` and identifies the offending event; accepted history,
   duplicate retries, missing peers, and cleanup keep their existing behavior.
   See [quarantine recovery](operations/federation.md#quarantine) before skipping
   a refused batch.
-- Delete an issue from `kata tui` with `X` from the list or detail, including
-  Inbox and a detail opened from Attention. Saved views drop the deleted
-  issue. Type `DELETE <project>#<id>` to confirm; the selection moves to the
-  neighbouring row and `u` restores the issue, including from Attention, the
-  way `kata restore` does.
-  Issue-scoped credentials cannot delete, so they are not offered the key. See
-  the [CLI reference](reference/cli.md#daemon-and-diagnostics).
-
-- Find matching issues from human-mode `kata create` look-alike refusals, which
-  now include the existing issues' qualified refs.
+- Keep creates and comments responsive during issue syncs by committing imports
+  in smaller chunks.
 
 ## 0.21.0
 <small>2026-11-04</small>

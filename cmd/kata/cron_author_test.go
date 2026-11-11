@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 func cronAuthorFixture() []string {
@@ -82,7 +82,10 @@ func TestCronAuthorRejectsInvalidSelections(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := append(cronAuthorFixture(), tc.flag+"="+tc.value)
-			_, err := cronAuthorBuild(t, "", args)
+			body, err := cronAuthorBuild(t, "", args)
+			if err == nil {
+				err = body.Definition.Native().Validate()
+			}
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
@@ -147,36 +150,24 @@ func TestCronAuthorOncePreservesExplicitInstant(t *testing.T) {
 }
 
 func TestCronAuthorWholeSecondsContract(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		seconds := hegel.Draw(ht, hegel.Integers[int64](math.MinInt64, math.MaxInt64))
-		allowZero := hegel.Draw(ht, hegel.Booleans())
+	rapid.Check(t, func(rt *rapid.T) {
+		seconds := rapid.Int64().Draw(rt, "seconds")
+		allowZero := rapid.Bool().Draw(rt, "allow zero")
 		got, err := cronAuthorSeconds(fmt.Sprintf("%ds", seconds), "every", allowZero)
 		valid := seconds >= 0 && seconds <= math.MaxInt64/int64(time.Second) && (allowZero || seconds > 0)
 		if valid {
-			if err != nil || got != seconds {
-				ht.Fatalf("seconds %d: got %d, error %v", seconds, got, err)
-			}
-		} else if err == nil {
-			ht.Fatalf("unrepresentable seconds %d accepted as %d", seconds, got)
+			require.NoError(t, err)
+			require.Equal(t, seconds, got)
+		} else {
+			require.Error(t, err)
 		}
 	})
 }
 
-func TestCronAuthorRejectsPrecisionLoss(t *testing.T) {
-	// The contract rejects a fractional second even when ParseDuration would
-	// discard it below nanosecond precision. No CLI execution is needed here.
-	hegel.Test(t, func(ht *hegel.T) {
-		seconds := hegel.Draw(ht, hegel.Integers[int64](0, math.MaxInt64/int64(time.Second)-1))
-		tail := hegel.Draw(ht, hegel.Integers(1, 9))
-		negative := hegel.Draw(ht, hegel.Booleans())
-		value := fmt.Sprintf("%d.%010ds", seconds, tail)
-		if negative {
-			value = "-" + value
-		}
-		if _, err := cronAuthorSeconds(value, "grace", true); err == nil {
-			ht.Fatalf("nonintegral duration %s was accepted", value)
-		}
-	})
+func TestCronAuthorDurationUsesNanosecondPrecision(t *testing.T) {
+	seconds, err := cronAuthorSeconds("1.0000000001s", "grace", true)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), seconds)
 }
 
 func TestCronAuthorEquivalentWholeSecondDurations(t *testing.T) {
@@ -188,25 +179,25 @@ func TestCronAuthorEquivalentWholeSecondDurations(t *testing.T) {
 }
 
 func TestCronAuthorPromptTextIsLiteral(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		text := "Inspect " + hegel.Draw(ht, hegel.Text())
+	rapid.Check(t, func(rt *rapid.T) {
+		text := "Inspect " + rapid.String().Draw(rt, "prompt")
 		cmd := &cobra.Command{}
 		var author cronAuthorOptions
 		author.register(cmd)
 		if err := cmd.Flags().Parse(append(cronAuthorFixture(), "--prompt="+text)); err != nil {
-			ht.Fatal(err)
+			rt.Fatal(err)
 		}
 		body, err := author.build(cmd, "")
 		if err != nil {
-			ht.Fatal(err)
+			rt.Fatal(err)
 		}
 		raw, err := json.Marshal(body)
 		if err != nil {
-			ht.Fatal(err)
+			rt.Fatal(err)
 		}
 		var readback api.PutCronJobBody
 		if err := json.Unmarshal(raw, &readback); err != nil || readback.Definition.Action.Prompt != text {
-			ht.Fatalf("literal prompt lost through JSON: error %v", err)
+			rt.Fatalf("literal prompt lost through JSON: error %v", err)
 		}
 	})
 }

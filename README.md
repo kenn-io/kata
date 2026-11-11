@@ -1,6 +1,18 @@
-# kata カタ
+<h1 align="center">kata カタ</h1>
 
-The issue tracker built for coding agents and the humans steering them.
+<p align="center">
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/kenn-io/kata" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://katatracker.com/docs/"><img src="https://img.shields.io/badge/Docs-katatracker.com-blue" alt="Documentation"></a>
+</p>
+
+<p align="center">
+  <a href="https://katatracker.com/docs/">Documentation</a> ·
+  <a href="https://katatracker.com/docs/get-started/quickstart/">Setup Guide</a> ·
+  <a href="https://katatracker.com/docs/#two-ways-to-supervise">Interactive TUI</a>
+</p>
+
+**The issue tracker built for coding agents and the humans steering them.**
 
 Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the
@@ -9,29 +21,43 @@ same work in a terminal UI. By default, issue state lives in a local SQLite
 database, so your repo stays clean and no hosted tracker is required. When a team
 of humans and agents needs to share, you can opt into a remote daemon or
 federation; a shared daemon can use Postgres by setting `KATA_DSN`.
-Production Postgres deployments can use separate schema-owner and runtime roles;
-see the [operator ceremony](docs/operations/postgres.md).
-Go applications can instead mount kata's listener-free HTTP service in-process;
-see [Embedding kata in Go](docs/development/embedding.md).
-MCP clients can start Kata's native server over stdio or Streamable HTTP with
-`kata mcp serve`. It binds the current workspace's project by default, and can
-serve a fixed allowlist or the complete daemon catalog on request. Section
-loaders progressively expose Kata's typed issue, administration,
-automation, and event workflows. See the [MCP reference](docs/reference/mcp.md).
 
-The documentation in [`docs/`](docs/) is the definitive guide, published with
-Zensical at <https://katatracker.com/>.
+## What you can do
 
-> **Stable:** Since v0.14.0, kata releases preserve backward compatibility
-> across upgrades.
+- **Track work from the CLI.** Create, claim, relate, and close issues with
+  evidence that records what was done and who did it.
+- **Supervise in the terminal or browser.** Browse and triage the same work with
+  `kata tui` or `kata ui`. See the [Web UI guide](docs/guide/web-ui.md).
+- **Automate recurring work.** Schedule `kata cron` jobs and workflows that run
+  on triggers, keep per-run evidence, and let you preview and prune old terminal
+  runs in batches. See the [cron reference](docs/reference/cron.md).
+- **Request attention where the work is.** `kata notify <ref> --to
+  <actor>/<teammate>` flags an issue for a person or agent with a reason and
+  resolves it with `--clear` once handled. See the
+  [CLI reference](docs/reference/cli.md).
+- **Give subagents their own identity.** `KATA_TEAMMATE` attributes a helper's
+  comments and new issues, while `KATA_INBOX_USER` points `kata inbox` and the
+  TUI at that helper's own inbox, so delegated work stays separable. See
+  [Configuration](docs/reference/configuration.md).
+- **Answer evidence with evidence.** Reply to any comment, or record a verdict
+  with `kata comment --confirm`, `--refute`, or `--supersede`, each backed by
+  its own evidence note. See
+  [Teammate requests](docs/reference/cli.md#teammate-requests).
+- **Share when you need to.** Opt into a remote daemon or
+  [federation](docs/operations/federation.md). Shared daemons can use Postgres
+  with `KATA_DSN`, including separate schema-owner and runtime roles; see the
+  [Postgres operator guide](docs/operations/postgres.md).
+- **Connect MCP clients.** Run `kata mcp serve` over stdio or Streamable HTTP.
+  It defaults to the workspace's project, with optional project allowlists or
+  the full daemon catalog and section loaders for typed workflows. See the
+  [MCP reference](docs/reference/mcp.md).
+- **Embed kata in Go.** Mount its listener-free HTTP service in your own
+  application. See [Embedding kata in Go](docs/development/embedding.md).
+- **Keep installations current.** Follow [Updating Kata](docs/get-started/install.md#updating-kata)
+  for installation and federation upgrade guidance, and the
+  [changelog](docs/changelog.md) for release notes.
 
-The latest release is [0.20.0](docs/changelog.md#0200). It adds an Attention
-inbox to the terminal UI, requests for replies to specific comments,
-participant broadcasts, and events for reached schedules. See
-[Updating Kata](docs/get-started/install.md#updating-kata) for installation
-and federation upgrade guidance.
-
-## Install
+## Installation
 
 macOS:
 
@@ -66,7 +92,7 @@ kata version
 Release-archive builds update themselves with `kata update`. Homebrew installs
 use `brew upgrade kata`; Linux `.deb` and `.rpm` packages are published for
 `amd64` and `arm64` and remain owned by the system package manager. Prefer to
-build from source? kata needs **Go 1.27.3 or later**:
+build from source? kata needs **Go 1.27.4 or later**:
 
 ```sh
 go install go.kenn.io/kata/cmd/kata@latest
@@ -84,20 +110,11 @@ downloads, and build-from-source steps.
 Coding agents follow this loop. `kata quickstart` covers subagents, inboxes,
 attention signals, and scheduling.
 
-```mermaid
-flowchart TB
-  arrive{"Does the request change this workspace?"} -->|no: a question or review| answer["Answer without kata"]
-  arrive -->|yes| search["kata search #34;#60;one or two words#62;#34; --agent"]
-  search --> found{"Open issue covers it?"}
-  found -->|yes| claim["kata claim #60;ref#62;"]
-  found -->|no| create["kata create #34;#60;title#62;#34; --idempotency-key #60;key#62; --agent"]
-  create -->|work it| claim
-  create -->|record only| stop["Leave it open"]
-  claim --> work["Do the work; comment findings a later reader needs"]
-  work --> done{"Verified complete?"}
-  done -->|yes| close["kata close #60;ref#62; --done --message #34;#60;what and how verified#62;#34; --test #60;cmd#62;"]
-  done -->|no| review["kata label add #60;ref#62; needs-review --comment #34;#60;what remains#62;#34;"]
-```
+1. For a question or review that doesn't change the workspace, answer without kata.
+2. For a change, search with `kata search "<one or two words>" --agent`.
+3. If an open issue covers the work, claim it with `kata claim <ref>`. Otherwise, create one with `kata create "<title>" --idempotency-key <key> --agent`. Claim it if you'll work on it; leave it open if you're only recording it.
+4. Do the work and comment on findings a later reader needs.
+5. If the work is verified complete, close it with `kata close <ref> --done --message "<what and how verified>" --test <cmd>`. Otherwise, use `kata label add <ref> needs-review --comment "<what remains>"`.
 
 ## Quickstart
 

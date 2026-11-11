@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -387,7 +386,7 @@ func TestInit_AgentOutputChangedWhenOnlyGitignoreUpdated(t *testing.T) {
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"), //nolint:gosec // test fixture matches production .kata.toml mode
-		[]byte(`version = 1
+		[]byte("# Read kata quickstart --format contract first.\n"+`version = 1
 
 [project]
 identity = "github.com/wesm/kata"
@@ -398,6 +397,72 @@ name     = "kata"
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
+}
+
+func TestInit_AddsHeaderToHeaderlessKataToml(t *testing.T) {
+	resetFlags(t)
+	flags.Mode = outputAgent
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	original := "# Keep this comment.\nversion = 1\n\n[project]\nname = \"spoke-project\"\n"
+	path := filepath.Join(dir, ".kata.toml")
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o644))                                         //nolint:gosec // test fixture matches production .kata.toml mode
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".kata.local.toml\n"), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	out, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
+	require.NoError(t, err)
+	content, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "kata quickstart --format contract")
+	assert.Contains(t, string(content), original)
+	assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=true\n", out)
+
+	out, err = callInit(t.Context(), env.URL, dir, callInitOpts{})
+	require.NoError(t, err)
+	assert.Equal(t, "OK init project=spoke-project workspace="+agentValue(dir)+" changed=false\n", out)
+}
+
+func TestInit_HeaderWriteFailureWarns(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions don't block writes")
+	}
+	for _, mode := range []outputMode{outputHuman, outputAgent, outputJSON} {
+		t.Run(string(mode), func(t *testing.T) {
+			resetFlags(t)
+			flags.Mode = mode
+			env := testenv.New(t)
+			_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			dir := t.TempDir()
+			original := "version = 1\n[project]\nname = \"spoke-project\"\n"
+			path := filepath.Join(dir, ".kata.toml")
+			require.NoError(t, os.WriteFile(path, []byte(original), 0o644)) //nolint:gosec // test fixture matches committed binding mode
+			require.NoError(t, os.Chmod(dir, 0o555))                        //nolint:gosec // read-only directory makes the header update fail
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })                  //nolint:gosec // restore test fixture permissions for cleanup
+			var out string
+			stderr := captureProcessStderr(t, func() {
+				out, err = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
+			})
+			require.NoError(t, err)
+			warning := stderr
+			switch mode {
+			case outputJSON:
+				var body struct {
+					Warning string `json:"agent_guidance_warning"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(out), &body))
+				warning = body.Warning
+			case outputAgent:
+				assert.Contains(t, out, "agent_guidance_warning=")
+				warning = out
+			}
+			assert.Contains(t, warning, ".kata.toml")
+			assert.Contains(t, warning, "AGENTS.md", "guidance setup must continue after the failed header update")
+		})
+	}
 }
 
 func TestInit_AgentOutputQuotesProjectName(t *testing.T) {
@@ -855,20 +920,23 @@ func TestInit_WithAgents_AgentsBeadsSymlinkNotMigrated(t *testing.T) {
 func captureProcessStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr
-	r, w, err := os.Pipe()
+	// A pipe drained only after fn returns can fill while fn prints a warning.
+	// Use a fixture file so capture cannot block on the platform's pipe capacity.
+	w, err := os.CreateTemp(t.TempDir(), "stderr")
 	require.NoError(t, err)
 	os.Stderr = w
-	t.Cleanup(func() { os.Stderr = old })
+	defer func() {
+		os.Stderr = old
+		_ = w.Close()
+	}()
 
 	fn()
 
-	require.NoError(t, w.Close())
-	var buf bytes.Buffer
-	_, err = io.Copy(&buf, r)
+	_, err = w.Seek(0, io.SeekStart)
 	require.NoError(t, err)
-	require.NoError(t, r.Close())
-	os.Stderr = old
-	return buf.String()
+	data, err := io.ReadAll(w)
+	require.NoError(t, err)
+	return string(data)
 }
 
 func TestRewriteGuidanceFileKeepsFileMode(t *testing.T) {

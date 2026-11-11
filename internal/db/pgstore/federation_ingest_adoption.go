@@ -410,7 +410,7 @@ func federationEventHashMatches(
 	if storedHash == event.ContentHash {
 		return true, nil
 	}
-	if !allowCanonicalSnapshotAuthors {
+	if !allowCanonicalSnapshotAuthors || event.Actor != boundActor {
 		return false, nil
 	}
 	canonical, err := db.CanonicalizeFederationSnapshotAuthors(event, boundActor)
