@@ -60,6 +60,23 @@ func TestReadFederationQuietPageBudget(t *testing.T) {
 			})
 		}
 	}
+	_, err = d.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+ INSERT INTO issues(uid,short_id,project_id,title,author,metadata)
+ SELECT printf('%026d',x),printf('%06d',x),?,'Attachment issue','tester',
+ '{"attachment.a":{"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV"}}' FROM n`, project.ID)
+	require.NoError(t, err)
+	conn, err := raw.Conn(ctx)
+	require.NoError(t, err)
+	sqlitePageFetches(t, conn, true)
+	require.NoError(t, conn.Close())
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, FeaturesOnly: true, Features: db.SupportedEventFeatures})
+	require.NoError(t, err)
+	conn, err = raw.Conn(ctx)
+	require.NoError(t, err)
+	pages := sqlitePageFetches(t, conn, false)
+	require.NoError(t, conn.Close())
+	require.LessOrEqual(t, pages, 256, "supported peers must skip the attachment scan")
+
 }
 
 func TestReadFederationBulkMovePageBudget(t *testing.T) {

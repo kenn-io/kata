@@ -689,29 +689,35 @@ func (d *Store) CheckClaimGate(ctx context.Context, p db.ClaimGateParams) error 
 	if err := validateClaimPrincipal(p.Principal); err != nil {
 		return err
 	}
-	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: !p.ApplyTransactionFence})
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	finish := func() error {
+		if p.ApplyTransactionFence {
+			return tx.Commit()
+		}
+		return nil
+	}
 	issue, err := resolveClaimGateIssueTx(ctx, tx, p.ProjectID, p.IssueRef)
 	if err != nil {
 		return err
 	}
 	live, err := liveClaimForIssueTx(ctx, tx, issue.UID)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil
+		return finish()
 	}
 	if err != nil {
 		return err
 	}
 	if live.ClaimKind == "timed" && live.ExpiresAt != nil && !live.ExpiresAt.After(now) {
-		return nil
+		return finish()
 	}
-	if !sameClaimGateHolder(live, p.Principal) {
+	if (p.StrictPrincipal && !db.SameClaimPrincipal(live, p.Principal)) || (!p.StrictPrincipal && !sameClaimGateHolder(live, p.Principal)) {
 		return db.ErrClaimDenied
 	}
-	return nil
+	return finish()
 }
 
 func resolveClaimGateIssueTx(ctx context.Context, tx claimStore, projectID int64, issueRef string) (db.Issue, error) {

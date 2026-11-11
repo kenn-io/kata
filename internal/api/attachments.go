@@ -8,10 +8,11 @@ import (
 )
 
 type AddAttachmentRequest struct {
-	ProjectID int64  `path:"project_id"`
-	Ref       string `path:"ref"`
-	Name      string `query:"name" required:"true"`
-	Actor     string `query:"actor"`
+	ClientKind string `query:"client_kind"`
+	ProjectID  int64  `path:"project_id"`
+	Ref        string `path:"ref"`
+	Name       string `query:"name" required:"true"`
+	Actor      string `query:"actor"`
 }
 type AttachmentReadRequest struct {
 	ProjectID    int64  `path:"project_id"`
@@ -31,6 +32,7 @@ type AddAttachmentResponse struct {
 
 // LinkAttachmentInput selects an existing Docbank file version.
 type LinkAttachmentInput struct {
+	ClientKind    string     `json:"client_kind,omitempty"`
 	NodeID        *int64     `json:"node_id,omitempty"`
 	Path          *string    `json:"path,omitempty"`
 	VersionID     *uuid.UUID `json:"version_id,omitempty"`

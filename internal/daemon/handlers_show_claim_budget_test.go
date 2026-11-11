@@ -34,6 +34,41 @@ type showRefreshProjectFailure struct {
 	delay time.Duration
 }
 
+type showClaimCredentialFixture struct {
+	config.FederationCredentialStore
+	projectUID          string
+	credential          config.FederationCredential
+	requestedProjectUID string
+}
+
+func (s *showClaimCredentialFixture) FederationCredential(_ context.Context, projectUID string) (config.FederationCredential, bool, error) {
+	s.requestedProjectUID = projectUID
+	if projectUID != s.projectUID {
+		return config.FederationCredential{}, false, fmt.Errorf("unexpected project uid %q", projectUID)
+	}
+	return s.credential, true, nil
+}
+
+func TestShowClaimForwardRejectsCredentialForDifferentHub(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	project, _ := createClaimGateHelperIssue(t, store)
+	credentials := &showClaimCredentialFixture{
+		projectUID: project.UID,
+		credential: config.FederationCredential{
+			HubURL: "https://other.example", HubProjectID: 42, Token: "synthetic-test-token",
+		},
+	}
+	cfg := ServerConfig{
+		DB: store, FederationCredentials: credentials,
+	}
+	binding := db.FederationBinding{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42}
+
+	_, _, err := showClaimForwardClient(t.Context(), cfg, binding)
+
+	require.ErrorContains(t, err, "federation credential target differs from the binding")
+	require.Equal(t, project.UID, credentials.requestedProjectUID)
+}
+
 func (s showRefreshProjectFailure) ProjectByID(context.Context, int64) (db.Project, error) {
 	//nolint:kennlint // sleeptest: every caller runs inside synctest; advance fake time past the refresh deadlines.
 	time.Sleep(s.delay)

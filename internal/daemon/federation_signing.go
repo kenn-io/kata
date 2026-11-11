@@ -35,6 +35,10 @@ var signingCapabilities = map[string][]string{
 	"renewIssueLease":               {"claim"},
 	"releaseIssueLease":             {"claim"},
 	"getIssueLeaseStatus":           {"claim"},
+	"uploadFederatedDocbank":        {"push"},
+	"linkFederatedDocbank":          {"push"},
+	"federatedDocbankCapabilities":  {"pull", "push"},
+	"federatedDocbankContent":       {"pull"},
 }
 
 func isCronJobWriteOperation(operation string) bool {
@@ -105,9 +109,16 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		// used by metadata, event polls, and lease requests.
 		admission := s.federationControlAdmission
 		bodyLimit := int64(64 << 10)
+		attachmentTransfer := signingpolicy.Unambiguous(r.URL) && federationsigning.IsAttachmentTransfer(r.Method, r.URL.Path)
 		if route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation) {
 			admission = s.federationIngestAdmission
 			bodyLimit = federationsigning.MaxBodyBytes
+		}
+		if attachmentTransfer {
+			admission = s.federationIngestAdmission
+			if r.Method == http.MethodPost {
+				bodyLimit = federationsigning.AttachmentMaxBodyBytes
+			}
 		}
 		select {
 		case admission <- struct{}{}:
@@ -118,6 +129,9 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			return
 		}
 		deadline := time.Now().Add(60 * time.Second)
+		if attachmentTransfer {
+			deadline = time.Now().Add(federationsigning.AttachmentTransferTimeout)
+		}
 		_ = http.NewResponseController(w).SetReadDeadline(deadline)
 		_ = http.NewResponseController(w).SetWriteDeadline(deadline)
 		ctx, cancel := context.WithDeadline(r.Context(), deadline)
@@ -177,6 +191,12 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				}
 				api.WriteEnvelope(w, status, "signature_invalid", "federation signature rejected")
 				return
+			}
+			if attachmentTransfer {
+				// Verify replaced the wire body with a verified disk spool. Keep it
+				// alive through the handler, including final authorization failures.
+				body := r.Body
+				defer func() { _ = body.Close() }()
 			}
 			// Revocation during body upload must also stop reads. Mutations retain
 			// their native transaction fence through the cached authorization.

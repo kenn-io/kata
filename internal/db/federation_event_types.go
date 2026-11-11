@@ -96,6 +96,13 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 	if err != nil {
 		return 0, "", err
 	}
+	// Reference formats can widen an existing event type without changing its
+	// wire schema version. Senders must negotiate those payload features too.
+	required, err := PayloadRequiredFeatures(kind, string(payload))
+	if err != nil {
+		return 0, "", err
+	}
+	feature = MergeEventFeatures(feature, required)
 	if payloadCarriesCommentReply(kind, payload) {
 		version = max(version, commentReplyWireVersion)
 	}

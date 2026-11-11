@@ -47,7 +47,7 @@ func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
 	projectUID, err := uid.New()
 	require.NoError(t, err)
 	for range 2 {
-		features, err := db.ProjectRequiredEventFeatures(t.Context(), database, projectUID)
+		features, err := db.ProjectRequiredEventFeatures(t.Context(), database, projectUID, "")
 		require.NoError(t, err)
 		require.Equal(t, db.CronEventFeature, features)
 	}

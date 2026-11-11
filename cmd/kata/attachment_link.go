@@ -36,11 +36,15 @@ func newAttachmentLinkCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionDocbankAttachmentLink, "Docbank attachment linking"); err != nil {
+		health, err := requireDaemonAPIVersionHealth(ctx, hc, base, apiVersionDocbankAttachmentLink, "Docbank attachment linking")
+		if err != nil {
 			return err
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
 		input.Actor = &actor
+		if supported, _ := apiVersionAtLeast(health.APISchemaVersion, apiVersionDocbankOrigin); supported {
+			input.ClientKind = new("cli")
+		}
 		out, err := linkAttachmentCLI(ctx, hc, base, pid, ref.RefForAPI, input)
 		if err != nil {
 			return err

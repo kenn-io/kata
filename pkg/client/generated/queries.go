@@ -196,6 +196,44 @@ func (g GetProjectFederationQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(g))
 }
 
+type FederatedDocbankCapabilitiesQuery struct {
+	ProjectUID string `json:"project_uid" validate:"required"`
+}
+
+func (f FederatedDocbankCapabilitiesQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type LinkFederatedDocbankQuery struct {
+	Origin     string  `json:"origin" validate:"required"`
+	ProjectUID string  `json:"project_uid" validate:"required"`
+	ClientKind *string `json:"client_kind,omitempty"`
+}
+
+func (l LinkFederatedDocbankQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type UploadFederatedDocbankQuery struct {
+	Origin     string  `json:"origin" validate:"required"`
+	ProjectUID string  `json:"project_uid" validate:"required"`
+	Name       string  `json:"name" validate:"required"`
+	ClientKind *string `json:"client_kind,omitempty"`
+}
+
+func (u UploadFederatedDocbankQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type FederatedDocbankContentQuery struct {
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Origin     string `json:"origin" validate:"required"`
+}
+
+func (f FederatedDocbankContentQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
 type PollFederationProjectEventsQuery struct {
 	AfterID *int64 `json:"after_id,omitempty"`
 
@@ -312,8 +350,9 @@ func (s ShowIssueQuery) Validate() error {
 }
 
 type AddAttachmentQuery struct {
-	Name  string  `json:"name" validate:"required"`
-	Actor *string `json:"actor,omitempty"`
+	ClientKind *string `json:"client_kind,omitempty"`
+	Name       string  `json:"name" validate:"required"`
+	Actor      *string `json:"actor,omitempty"`
 }
 
 func (a AddAttachmentQuery) Validate() error {

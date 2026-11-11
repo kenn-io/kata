@@ -1,4 +1,5 @@
 export interface KataAttachment {
+  origin?: string | undefined
   name: string
   media_type: string
   size: number

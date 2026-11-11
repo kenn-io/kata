@@ -19,7 +19,7 @@ const CronEventFeature = "cron_v1"
 const IssueMoveEventFeature = "issue_move_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + DocbankOriginEventFeature + "," + IssueMoveEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -53,6 +53,13 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	}
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
+	}
+	origin, err := payloadHasDocbankOrigin(kind, payload)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
+	}
+	if origin {
+		required = MergeEventFeatures(required, DocbankOriginEventFeature)
 	}
 	return required, nil
 }
@@ -162,7 +169,7 @@ func EventRequiredFeatures(kind string) string {
 func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, projectUID string) (string, error) {
+}, projectUID, supported string) (string, error) {
 	var cronPresent, issueMoved bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
  EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=p.id) OR
@@ -174,7 +181,18 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	if err != nil {
 		return "", err
 	}
+	origin := false
+	if RequireEventFeatures(supported, DocbankOriginEventFeature) != nil {
+		var err error
+		origin, err = projectHasDocbankOrigin(ctx, q, projectUID)
+		if err != nil {
+			return "", err
+		}
+	}
 	required := ""
+	if origin {
+		required = DocbankOriginEventFeature
+	}
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}
@@ -266,12 +284,14 @@ func nativeProjectionRequired(ctx context.Context, q interface {
 // unsupported readers fail before that write or any returned reset/cursor.
 // Features is protocol support, independent of enrollment permissions.
 type FederationReadParams struct {
-	ProjectID int64
-	Features  string
-	Metadata  bool
-	AfterID   int64
-	IssueUID  string
-	Limit     int
+	// FeaturesOnly validates current project protocol requirements without reading a page.
+	FeaturesOnly bool
+	ProjectID    int64
+	Features     string
+	Metadata     bool
+	AfterID      int64
+	IssueUID     string
+	Limit        int
 }
 
 // FederationReadResult captures one consistent metadata or event-page transaction.
@@ -290,12 +310,15 @@ type FederationReadResult struct {
 func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func() ([]Event, error)) (FederationReadResult, error) {
 	out := FederationReadResult{Project: project, Binding: binding, Events: []Event{}, NextAfterID: in.AfterID}
 	var err error
-	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID)
+	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID, in.Features)
 	if err != nil {
 		return out, err
 	}
 	if err = RequireEventFeatures(in.Features, out.RequiredFeatures); err != nil {
 		return out, err
+	}
+	if in.FeaturesOnly {
+		return out, nil
 	}
 	if in.IssueUID != "" {
 		var owned bool

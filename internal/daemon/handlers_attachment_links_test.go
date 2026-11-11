@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
@@ -68,6 +70,73 @@ func TestAttachmentLinkPinsExistingVersion(t *testing.T) {
 	for _, request := range f.Requests() {
 		require.True(t, strings.HasPrefix(request, "GET "), request)
 	}
+}
+
+func TestAttachmentWritesRefreshStaleFederatedClaimDenials(t *testing.T) {
+	for _, operation := range []string{"upload", "link"} {
+		t.Run(operation, func(t *testing.T) {
+			f := docbanktest.New(t)
+			if operation == "link" {
+				f.Seed("/kata/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: uuid.MustParse(linkVersion)}, map[uuid.UUID][]byte{
+					uuid.MustParse(linkVersion): []byte("sample bytes"),
+				})
+			}
+			hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim,push,pull", func(cfg *daemon.ServerConfig) {
+				cfg.Docbank = docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
+				cfg.DocbankFolder = "/kata"
+			})
+			require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
+				HubURL: hub.URL, HubProjectID: hubProject.ID, Token: token, Capabilities: "claim,push,pull",
+			}))
+
+			ctx := t.Context()
+			holder := db.ClaimPrincipal{HolderInstanceUID: claimTestOtherSpokeUID, Holder: "other-spoke", ClientKind: "cli"}
+			_, err := hub.DB.AcquireClaim(ctx, db.AcquireClaimParams{
+				ProjectID: hubProject.ID, IssueRef: issue.UID, Principal: holder, ClaimKind: "hard", Now: time.Now().UTC(),
+			})
+			require.NoError(t, err)
+			stale, err := hub.DB.ClaimStatusReadOnly(ctx, hubProject.ID, issue.UID, time.Now().UTC())
+			require.NoError(t, err)
+			require.True(t, stale.Held)
+			require.NoError(t, spoke.DB.ApplyClaimStatus(ctx, spokeProject.ID, issue.UID, stale))
+			_, err = hub.DB.ReleaseClaim(ctx, db.ReleaseClaimParams{
+				ProjectID: hubProject.ID, IssueRef: issue.UID, Principal: holder, Reason: "done", Now: time.Now().UTC(),
+			})
+			require.NoError(t, err)
+
+			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", spokeProject.ID, issue.ShortID)
+			var status int
+			var raw []byte
+			if operation == "upload" {
+				status, raw = attachmentUpload(t, spoke, endpoint, "shot.png", strings.NewReader("image bytes"))
+			} else {
+				var err error
+				status, raw, err = postAttachmentLink(t, spoke, endpoint+"/links", `{"path":"/kata/report.pdf","actor":"operator","client_kind":"cli"}`)
+				require.NoError(t, err)
+			}
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var out api.AddAttachmentResponseBody
+			require.NoError(t, json.Unmarshal(raw, &out))
+			require.Equal(t, hub.DB.InstanceUID(), out.Attachment.Origin)
+		})
+	}
+}
+
+func TestFederatedAttachmentUploadPreservesBodyLimitError(t *testing.T) {
+	f := docbanktest.New(t)
+	hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim,push,pull", func(cfg *daemon.ServerConfig) {
+		cfg.Docbank = docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
+		cfg.DocbankFolder = "/kata"
+	})
+	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
+		HubURL: hub.URL, HubProjectID: hubProject.ID, Token: token, Capabilities: "claim,push,pull",
+	}))
+
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", spokeProject.ID, issue.ShortID)
+	status, raw := attachmentUpload(t, spoke, endpoint, "shot.png", io.LimitReader(attachmentZeros{}, (256<<20)+1))
+	require.Equal(t, http.StatusRequestEntityTooLarge, status, string(raw))
+	require.Contains(t, string(raw), "attachment_too_large")
+	require.Empty(t, f.Requests(), "oversized upload must be rejected before reaching Docbank")
 }
 
 func TestAttachmentLinkCanReuseAnExistingVersion(t *testing.T) {
@@ -332,4 +401,45 @@ func TestAttachmentLinkRejectsInvalidSelections(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAttachmentOriginBeforeSharing(t *testing.T) {
+	env, vault := attachmentEnv(t)
+	project, issue := seedProjectAndIssue(t, env)
+	seedLinkFile(vault)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.ShortID)
+	status, raw, err := postAttachmentLink(t, env, endpoint+"/links", `{"path":"/reports/report.pdf","actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var linked api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &linked))
+	require.Equal(t, env.DB.InstanceUID(), linked.Attachment.Origin)
+	status, raw = attachmentUpload(t, env, endpoint, "report.pdf", strings.NewReader("upload"))
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var uploaded api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &uploaded))
+	require.Equal(t, env.DB.InstanceUID(), uploaded.Attachment.Origin)
+	read := func(id string) *http.Response {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+endpoint+"/"+id+"/content", nil)
+		require.NoError(t, err)
+		resp, err := env.HTTP.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		return resp
+	}
+	require.Equal(t, http.StatusOK, read(linked.ID).StatusCode)
+	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "operator")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusForbidden, read(linked.ID).StatusCode)
+	require.Equal(t, http.StatusOK, read(uploaded.ID).StatusCode)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	binding.Enabled = false
+	_, err = env.DB.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
+	status, raw = attachmentUpload(t, env, endpoint, "disabled.pdf", strings.NewReader("upload"))
+	require.Equal(t, http.StatusOK, status, string(raw))
+	status, raw, err = postAttachmentLink(t, env, endpoint+"/links", `{"path":"/reports/report.pdf","actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusForbidden, status, string(raw))
 }

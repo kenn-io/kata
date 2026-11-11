@@ -203,6 +203,7 @@ type Attachment struct {
 	DocbankVersion uuid.UUID `json:"docbank_version" validate:"required"`
 	MediaType      string    `json:"media_type" validate:"required"`
 	Name           string    `json:"name" validate:"required"`
+	Origin         *string   `json:"origin,omitempty"`
 	Size           int64     `json:"size"`
 }
 
@@ -1933,6 +1934,27 @@ type DisconnectRelayResponseBody struct {
 	Revoked bool `json:"revoked"`
 }
 
+type DocbankDescriptor struct {
+	Attachment Attachment `json:"attachment"`
+	ProjectUID string     `json:"project_uid" validate:"required"`
+}
+
+func (d DocbankDescriptor) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(d.Attachment).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Attachment", err)
+		}
+	}
+	if err := typesValidator.Var(d.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type DocbankHealth struct {
 	// Credential Docbank API key state, ok or missing; an advisory warning that does not change health.ok.
 	Credential string `json:"credential" validate:"required"`
@@ -1945,6 +1967,16 @@ type DocbankHealth struct {
 }
 
 func (d DocbankHealth) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
+type DocbankServiceCapabilities struct {
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Version    int64  `json:"version"`
+}
+
+func (d DocbankServiceCapabilities) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
@@ -3992,9 +4024,10 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 }
 
 type LinkAttachmentInput struct {
-	Actor  *string `json:"actor,omitempty"`
-	NodeID *int64  `json:"node_id,omitempty"`
-	Path   *string `json:"path,omitempty"`
+	Actor      *string `json:"actor,omitempty"`
+	ClientKind *string `json:"client_kind,omitempty"`
+	NodeID     *int64  `json:"node_id,omitempty"`
+	Path       *string `json:"path,omitempty"`
 
 	// ReuseExisting When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
 	ReuseExisting *bool      `json:"reuse_existing,omitempty"`

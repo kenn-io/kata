@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Use attachments through project relays with Docbank configured only on the root. Upgrade every daemon on the route. References created before this change continue to use the local vault. See [Issue attachments](guide/attachments.md#use-attachments-through-project-relays).
+
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
   build finishes, and an opener waiting for another opener's migration keeps

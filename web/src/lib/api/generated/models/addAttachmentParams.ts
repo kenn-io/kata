@@ -3,6 +3,7 @@
  */
 
 export type AddAttachmentParams = {
+  client_kind?: string
   name: string
   actor?: string
 }

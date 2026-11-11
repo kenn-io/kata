@@ -53,7 +53,14 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, relayTransportError(err)
 		}
-		return &api.RelayResetResponse{Body: checkpoint}, nil
+		required, err := db.RelayResetRequiredFeatures(checkpoint.Snapshot)
+		if err != nil {
+			return nil, relayTransportError(err)
+		}
+		if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {
+			return nil, federationFeatureError(err)
+		}
+		return &api.RelayResetResponse{Body: checkpoint, EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: required}, nil
 	})
 	huma.Register(humaAPI, huma.Operation{OperationID: "offerRelayDeliveries", Method: http.MethodGet, Path: "/api/v1/projects/{project_id}/federation/relay"}, func(ctx context.Context, in *api.RelayOfferRequest) (*api.RelayOfferResponse, error) {
 		ctx, principal, err := authorizeRelayRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull", "offerRelayDeliveries")
@@ -81,12 +88,27 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		// Zero is a valid replay baseline. Durable per-hop acceptance rejects
 		// skipped prefixes and deduplicates the retained envelopes after lost ACKs.
-		return &api.RelayOfferResponse{Body: db.RelayBatch{Stream: in.Stream, Envelopes: envelopes}}, nil
+		batch := db.RelayBatch{Stream: in.Stream, Envelopes: envelopes}
+		required, err := db.RelayBatchRequiredFeatures(batch)
+		if err != nil {
+			return nil, relayTransportError(err)
+		}
+		if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {
+			return nil, federationFeatureError(err)
+		}
+		return &api.RelayOfferResponse{Body: batch, EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: required}, nil
 	})
 	huma.Register(humaAPI, huma.Operation{OperationID: "acceptRelayDeliveries", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/relay:accept", MaxBodyBytes: 128 << 20}, func(ctx context.Context, in *api.RelayAcceptRequest) (*api.RelayAcceptResponse, error) {
 		ctx, principal, err := authorizeRelayRequest(ctx, cfg, in.Authorization, in.ProjectID, "push", "acceptRelayDeliveries")
 		if err != nil {
 			return nil, err
+		}
+		required, err := db.RelayBatchRequiredFeatures(in.Body)
+		if err != nil {
+			return nil, relayTransportError(err)
+		}
+		if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {
+			return nil, federationFeatureError(err)
 		}
 		if cfg.RootSigning != nil {
 			ctx = db.WithRootAttribution(ctx, cfg.RootSigning.Signer(), principal.Actor)
