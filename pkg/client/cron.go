@@ -4,8 +4,12 @@ import (
 	"context"
 	"net/http"
 
-	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
+)
+
+const (
+	eventFeaturesHeader          = "X-Kata-Event-Features"
+	cronWorkflowArgvEventFeature = "cron_workflow_argv_v1"
 )
 
 // NewCronUID generates a normalized ULID for a cron definition or run
@@ -18,6 +22,6 @@ func NewCronUID() (string, error) { return uid.New() }
 // CronWorkflowArgvSupport declares that a client preserves literal argv steps.
 // It does not grant permission to execute a workflow.
 func CronWorkflowArgvSupport(_ context.Context, req *http.Request) error {
-	req.Header.Set(db.EventFeaturesHeader, db.CronWorkflowArgvEventFeature)
+	req.Header.Set(eventFeaturesHeader, cronWorkflowArgvEventFeature)
 	return nil
 }

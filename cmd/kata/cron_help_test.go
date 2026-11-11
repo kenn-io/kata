@@ -179,7 +179,7 @@ func TestCronReferenceRequestExamples(t *testing.T) {
 		require.NoError(t, err, "reference request %q", request.Name)
 		count++
 	}
-	require.Equal(t, 4, count, "exercise all job and workflow request examples")
+	require.Equal(t, 5, count, "exercise all job and workflow request examples")
 }
 
 func cronHelpRequests(t *testing.T, help string) []cronHelpRequest {
