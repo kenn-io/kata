@@ -50,6 +50,11 @@ func TestFederationEnrollAnonymousSpokeIgnoresUnselectedCredentialFailure(t *tes
 					endpoint = "unix://" + socket
 				}
 				workspace := t.TempDir()
+				// A higher-priority URL must not inspect an unrelated active
+				// catalog entry, even when its transport and credential differ.
+				inactive := fmt.Sprintf("active_daemon = \"unselected\"\n[[daemon]]\nname = \"unselected\"\nurl = %q\ntoken_file = %q\n",
+					"unix://"+filepath.Join(hub.Home, "unused.sock"), filepath.Join(hub.Home, "missing-unselected-token"))
+				require.NoError(t, os.WriteFile(filepath.Join(hub.Home, "config.toml"), []byte(inactive), 0600))
 				require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"), []byte("version = 1\n[project]\nname = \"spoke-project\"\n"), 0600))
 				t.Setenv("KATA_SERVER", "")
 				if source == "environment" {
@@ -138,5 +143,42 @@ func TestFederationEnrollUnixCatalogSpokeKeepsIndependentHubAuth(t *testing.T) {
 			require.Len(t, enrollments, 1)
 			assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 		})
+	}
+}
+
+func TestFederationWorkspaceHTTPSpokeDoesNotInheritActiveCatalogToken(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	authorization := make(chan []string, 1)
+	spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects" {
+			authorization <- r.Header.Values("Authorization")
+		}
+		_, _ = fmt.Fprint(w, `{"ok":true,"service":"kata","version":"test"}`)
+	}))
+	t.Cleanup(spoke.Close)
+	flags.Workspace = t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(flags.Workspace, ".kata.toml"), []byte("version=1\n[project]\nname=\"spoke-project\"\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(flags.Workspace, ".kata.local.toml"), []byte(fmt.Sprintf("version=1\n[server]\nurl=%q\n", spoke.URL)), 0600))
+	catalog := fmt.Sprintf("active_daemon=\"unselected\"\n[[daemon]]\nname=\"unselected\"\nurl=%q\ntoken=\"unselected-token\"\n", spoke.URL)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(catalog), 0600))
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+	ctx, base, err := ensureSpokeDaemonContext(t.Context())
+	require.NoError(t, err)
+	hc, err := federationSpokeHTTPClient(ctx, base)
+	require.NoError(t, err)
+	t.Cleanup(hc.CloseIdleConnections)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	response, err := hc.Do(request)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	select {
+	case values := <-authorization:
+		require.Empty(t, values, "workspace URL selection is anonymous even if the active catalog URL matches")
+	default:
+		t.Fatal("selected HTTP spoke did not receive the request")
 	}
 }

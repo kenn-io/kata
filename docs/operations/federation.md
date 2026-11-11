@@ -419,8 +419,9 @@ in the `kata federation join ...` command is a separate spoke transport
 credential.
 
 Spoke probes selected by an environment or workspace URL are anonymous; they
-do not use ambient hub credentials or fail because an unselected ambient token
-file is unavailable. Named catalog entries and pinned local profiles use their
+do not use ambient hub credentials or inspect an unselected active catalog
+entry, even if its URL matches the spoke. An unavailable unselected ambient
+token file does not block these probes. Named catalog entries and pinned local profiles use their
 own selected credentials. An active legacy `local = true` entry without a
 profile home also uses its catalog credential for the current home's daemon,
 over either TCP or Unix. An unavailable selected credential remains an error.
