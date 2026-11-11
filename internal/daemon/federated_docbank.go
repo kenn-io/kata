@@ -183,14 +183,14 @@ func beginDocbankForward(ctx context.Context, cfg ServerConfig, binding db.Feder
 		return nil, err
 	}
 	current, err := cfg.DB.FederationBindingByProject(ctx, binding.ProjectID)
-	if err != nil || !sameClaimRefreshRoute(current, binding) {
+	if err != nil || !sameDocbankForwardRoute(current, binding) {
 		finish()
 		return nil, attachmentError(http.StatusServiceUnavailable, "federation_offline")
 	}
 	return finish, nil
 }
 
-func sameClaimRefreshRoute(a, b db.FederationBinding) bool {
+func sameDocbankForwardRoute(a, b db.FederationBinding) bool {
 	if a.Role != b.Role || a.Enabled != b.Enabled || a.PushEnabled != b.PushEnabled || a.HubURL != b.HubURL || a.HubProjectID != b.HubProjectID || a.HubProjectUID != b.HubProjectUID || a.AllowInsecure != b.AllowInsecure {
 		return false
 	}
@@ -203,7 +203,7 @@ func sameClaimRefreshRoute(a, b db.FederationBinding) bool {
 // ensureDocbankIssueUpstream sends pending issue events before a forwarded write
 // only when the claim authority reports that it has not seen the issue yet.
 func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project db.Project, binding db.FederationBinding, issue db.Issue, result *claimRefreshResult) error {
-	if result != nil && result.known && !sameClaimRefreshRoute(result.binding, binding) {
+	if result != nil && result.known && !sameDocbankForwardRoute(result.binding, binding) {
 		result = nil
 	}
 	if result != nil && result.known && !result.missing {
@@ -242,7 +242,7 @@ func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project d
 		return attachmentError(http.StatusServiceUnavailable, "federation_offline")
 	}
 	currentBinding, err := cfg.DB.FederationBindingByProject(ctx, project.ID)
-	if err != nil || !sameClaimRefreshRoute(currentBinding, binding) {
+	if err != nil || !sameDocbankForwardRoute(currentBinding, binding) {
 		return attachmentError(http.StatusServiceUnavailable, "federation_offline")
 	}
 	current, err := activeIssueByRef(ctx, cfg.DB, project.ID, issue.UID, db.IncludeDeletedNo)
@@ -307,7 +307,7 @@ func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.
 	if err != nil {
 		return metadata.Attachment{}, err
 	}
-	if current == nil || !sameClaimRefreshRoute(*current, *binding) {
+	if current == nil || !sameDocbankForwardRoute(*current, *binding) {
 		return metadata.Attachment{}, attachmentError(409, "attachment_origin_mismatch")
 	}
 	return attachment, nil
