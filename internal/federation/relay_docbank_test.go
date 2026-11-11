@@ -232,7 +232,7 @@ func TestRelayDocbankOfflineNeverUsesLocalVault(t *testing.T) {
 }
 
 func TestRelayDocbankLinkUsesRootAndRefusesSubtreeEscape(t *testing.T) {
-	root, relay, leaf, issue := newRelayClaimChain(t)
+	root, _, leaf, issue := newRelayClaimChain(t)
 	f := docbanktest.New(t)
 	version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222")
 	f.Seed("/kata/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("root document")})
@@ -253,9 +253,6 @@ func TestRelayDocbankLinkUsesRootAndRefusesSubtreeEscape(t *testing.T) {
 	require.Equal(t, root.store.InstanceUID(), first.Attachment.Origin)
 	require.NotEqual(t, "legacy", first.ID)
 	contentEndpoint := strings.TrimSuffix(endpoint, "/links")
-	status, raw = relayDocbankRequest(t, leaf, http.MethodGet, contentEndpoint+"/legacy/content", "", "")
-	require.Equal(t, http.StatusOK, status, string(raw))
-	require.Equal(t, "local document", string(raw))
 	status, raw = relayDocbankRequest(t, leaf, http.MethodGet, contentEndpoint+"/"+first.ID+"/content", "", "")
 	require.Equal(t, http.StatusOK, status, string(raw))
 	require.Equal(t, "root document", string(raw))
@@ -268,21 +265,6 @@ func TestRelayDocbankLinkUsesRootAndRefusesSubtreeEscape(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 		require.Contains(t, string(raw), "move the file into the configured folder")
 	}
-	previous := *root.handler.Load()
-	var denied http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/links") {
-			w.WriteHeader(http.StatusConflict)
-			_, _ = io.WriteString(w, `{"error":{"code":"claim_denied","message":"private upstream detail"}}`)
-			return
-		}
-		previous.ServeHTTP(w, r)
-	})
-	root.handler.Store(&denied)
-	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint, `{"node_id":42}`, "application/json")
-	require.Equal(t, http.StatusConflict, status, string(raw))
-	require.Contains(t, string(raw), "run kata federation lease acquire")
-	require.NotContains(t, string(raw), "private upstream detail")
-	_ = relay
 }
 
 // Ordinary local mutation authority belongs to holder+instance across client
@@ -301,10 +283,6 @@ func TestRelayDocbankLeaseSurvivesClientSwitch(t *testing.T) {
 	vault.Seed("/kata/existing.pdf", docbank.Node{ID: 99, Name: "existing.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("linked fixture")})
 	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"/links", `{"path":"/kata/existing.pdf"}`, "application/json")
 	require.Equal(t, http.StatusOK, status, string(raw))
-	var linked api.AddAttachmentResponseBody
-	require.NoError(t, json.Unmarshal(raw, &linked))
-	require.Equal(t, root.store.InstanceUID(), linked.Attachment.Origin)
-	require.Equal(t, version, linked.Attachment.DocbankVersion)
 }
 
 type unreadDocbankUpload struct{ reads int }

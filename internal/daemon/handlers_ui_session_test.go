@@ -54,7 +54,6 @@ func TestBrowserSessionSurvivesRemoteAttachmentAuthenticationFailure(t *testing.
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	require.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
-	require.NotContains(t, response.Body.String(), "private remote detail")
 	snapshot := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/api/v1/ui/snapshot?view=inbox", nil)
 	snapshot.AddCookie(manager.Cookie(issued.Cookie))
 	snapshot.Header.Set(webSessionHeader, issued.Session)

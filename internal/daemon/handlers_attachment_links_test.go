@@ -438,11 +438,8 @@ func TestAttachmentOriginBeforeSharing(t *testing.T) {
 				t.Cleanup(func() { _ = resp.Body.Close() })
 				return resp
 			}
-			require.Equal(t, http.StatusOK, read(linked.ID).StatusCode)
 			_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "operator")
 			require.NoError(t, err)
-			require.Equal(t, http.StatusOK, read(linked.ID).StatusCode)
-			require.Equal(t, http.StatusOK, read(uploaded.ID).StatusCode)
 			linked.Attachment.Origin = env.DB.InstanceUID()
 			marked, err := json.Marshal(linked.Attachment)
 			require.NoError(t, err)

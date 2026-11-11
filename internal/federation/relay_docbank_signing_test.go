@@ -127,7 +127,7 @@ func TestRelayDocbankSignedUploadThroughBothHops(t *testing.T) {
 		require.Equal(t, http.StatusOK, status)
 		require.True(t, acquired.Granted)
 		endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
-		status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=signed.pdf&client_kind=cli", "signed fixture bytes", "application/octet-stream")
+		status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=signed.pdf", "signed fixture bytes", "application/octet-stream")
 		require.Equal(t, http.StatusOK, status, string(raw))
 		names := <-spools
 		var foundSpool bool

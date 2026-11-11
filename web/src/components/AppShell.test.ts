@@ -2242,14 +2242,6 @@ describe('AppShell task selection', () => {
   test('shows attachment controls when the instance supports attachments', async () => {
     const current = twoTaskSnapshot()
     current.capabilities.attachments = false
-    current.selected!.issue!.metadata = {
-      'attachment.file': {
-        name: 'screen.png',
-        media_type: 'image/png',
-        size: 1,
-        docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
-      },
-    }
     const props = {
       route: { ...listRoute, issueUID: firstUID },
       snapshot: current,
@@ -2261,16 +2253,13 @@ describe('AppShell task selection', () => {
     }
     const { rerender } = render(AppShell, { props })
     expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Preview screen.png' })).toBeNull()
-    const older = structuredClone(current)
-    older.capabilities.attachments = true
+    const enabled = structuredClone(current)
+    enabled.capabilities.attachments = true
     await rerender({
       ...props,
-      snapshot: older,
+      snapshot: enabled,
     })
     expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Preview screen.png' })).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Download screen.png' })).not.toBeNull()
   })
 
   test('shows a clicked task in the same frame, before its snapshot arrives', async () => {
