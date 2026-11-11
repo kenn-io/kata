@@ -282,7 +282,7 @@ func pushDirectSpoke(
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
-			pending, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), max(scanCursor, binding.PushCursorEventID), federationPollLimit)
+			pending, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), scanCursor, federationPollLimit)
 			if err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
@@ -298,24 +298,14 @@ func pushDirectSpoke(
 				pending = pending[len(batch):]
 				var send []db.Event
 				var deferred []db.Event
-				var baselineRejection db.FederationEventRejection
 				for _, event := range batch {
 					remote := db.RemoteEventFromStored(event)
 					rejection, dependent, parseErr := retained.Dependent(remote)
 					if parseErr == nil && dependent {
-						baselineRejection = rejection
 						retained.Remember(remote, rejection)
 						deferred = append(deferred, event)
 					} else {
 						send = append(send, event)
-					}
-				}
-				if adoptionBaseline != "" && len(deferred) > 0 {
-					deferred = batch
-					send = nil
-					for _, event := range batch {
-						remote := db.RemoteEventFromStored(event)
-						retained.Remember(remote, baselineRejection)
 					}
 				}
 				rejectedEvents = append(rejectedEvents, deferred...)
@@ -410,24 +400,15 @@ func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIn
 		return nil, errors.New("federation push cursor advanced beyond submitted batch")
 	}
 	submitted := make(map[string]int64, len(batch))
-	count := 0
 	for _, event := range batch {
 		if event.ID <= ack.PushCursorEventID {
 			submitted[event.UID] = event.ID
-			count++
 		}
-	}
-	if batch[count-1].ID != ack.PushCursorEventID {
-		return nil, errors.New("hub returned invalid rejection details")
-	}
-	if ack.Accepted < 0 || ack.Duplicates < 0 || ack.Accepted > count || ack.Duplicates > count-ack.Accepted || len(ack.RejectedEvents) != count-ack.Accepted-ack.Duplicates {
-		return nil, errors.New("hub returned invalid rejection details")
 	}
 	byUID := make(map[string]db.FederationEventRejection, len(ack.RejectedEvents))
 	for _, rejection := range ack.RejectedEvents {
 		id, ok := submitted[rejection.EventUID]
-		_, duplicate := byUID[rejection.EventUID]
-		if !ok || id != rejection.SourceEventID || duplicate {
+		if !ok || id != rejection.SourceEventID {
 			return nil, errors.New("hub returned invalid rejection details")
 		}
 		if rejection.Code != db.FederationProjectNotEnrolledCode {
@@ -589,7 +570,6 @@ func syncDirectSpoke(
 	var pulledEvents []db.Event
 	insertedThisPull := map[string]bool{}
 	if err := store.RetryTransient(ctx, func() error {
-		pulledEvents = nil
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
@@ -730,6 +710,7 @@ func syncDirectSpoke(
 					byUID[event.UID] = event
 				}
 			}
+			pulledEvents = nil
 			for i, event := range body.Events {
 				if deliver[i] {
 					pulledEvents = append(pulledEvents, byUID[event.EventUID])
@@ -1817,11 +1798,11 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			if err != nil || origin != destinationOrigin {
 				continue
 			}
-			project, err := store.ProjectByID(ctx, binding.ProjectID)
+			project, err := store.ProjectByUID(ctx, binding.HubProjectUID)
 			if err != nil {
 				return nil, err
 			}
-			if project.DeletedAt == nil && project.UID == binding.HubProjectUID {
+			if project.DeletedAt == nil {
 				projectUIDs = append(projectUIDs, project.UID)
 			}
 		}

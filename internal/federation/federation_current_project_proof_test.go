@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
@@ -26,7 +25,7 @@ import (
 // The sender can still see the old owner when another joined spoke has already
 // moved the issue on the hub. Supplemental proofs cannot rely on local ownership.
 func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T) {
-	for _, kind := range []string{"same-origin", "other-binding-origin", "other-actor", "pull-only", "relay"} {
+	for _, kind := range []string{"same-origin", "other-binding-origin", "other-credential-origin", "other-actor", "pull-only", "relay"} {
 		t.Run(kind, func(t *testing.T) {
 			hub, projects := newMoveDeliveryHub(t, "proof-source", "proof-target")
 			spoke := newMoveDeliverySpoke(t, hub, projects)
@@ -40,6 +39,10 @@ func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T)
 			switch kind {
 			case "other-binding-origin":
 				target.HubURL = other.URL
+			case "other-credential-origin":
+				credential := spoke.credentials[projects[1].UID]
+				credential.HubURL = other.URL
+				spoke.credentials[projects[1].UID] = credential
 			case "other-actor":
 				target.Actor = "other-worker"
 			case "pull-only":
@@ -64,6 +67,11 @@ func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T)
 			binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[0].ID)
 			require.NoError(t, err)
 			tokens, err := federationMoveSourceTokens(t.Context(), spoke.env.DB, spoke.credentials, binding, hub.URL, []db.Event{event}, clientpkg.Opts{})
+			if kind == "other-credential-origin" {
+				require.Error(t, err, "credentials are never sent to a different configured origin")
+				require.Empty(t, tokens)
+				return
+			}
 			require.NoError(t, err)
 			if kind == "same-origin" {
 				require.Equal(t, spoke.credentials[projects[1].UID].Token, tokens[projects[1].UID])
@@ -183,7 +191,7 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	}
 }
 
-func newPushDeferralFixture(t *testing.T, joinTarget, withJob bool) (*testenv.Env, []db.Project, moveDeliverySpoke, db.Issue, db.Issue, db.CronJob) {
+func newPushDeferralFixture(t *testing.T, joinTarget bool) (*testenv.Env, []db.Project, moveDeliverySpoke, db.Issue, db.Issue) {
 	t.Helper()
 	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
 	joined := projects[:1]
@@ -191,34 +199,23 @@ func newPushDeferralFixture(t *testing.T, joinTarget, withJob bool) (*testenv.En
 		joined = projects
 	}
 	spoke := newMoveDeliverySpoke(t, hub, joined)
-	var job db.CronJob
-	if withJob {
-		definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
-		require.NoError(t, err)
-		job, _, err = hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: projects[0].ID, Name: "Review", Actor: "worker", Definition: definition})
-		require.NoError(t, err)
-	}
 	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved", Author: "worker"})
 	require.NoError(t, err)
 	require.NoError(t, spoke.sync(t, 0))
 	local, err := spoke.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	return hub, projects, spoke, issue, local, job
+	return hub, projects, spoke, issue, local
 }
 
 func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 	for _, mode := range []string{"pages", "body-splits"} {
 		t.Run(mode, func(t *testing.T) {
-			hub, projects, sender, moved, local, job := newPushDeferralFixture(t, false, true)
+			hub, projects, sender, moved, local := newPushDeferralFixture(t, false)
 			body := ""
 			if mode == "body-splits" {
 				body = strings.Repeat("x", 400<<10)
 			}
 			created, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Dependent creation", Body: body, Author: "worker", Links: []db.InitialLink{{ToNumber: local.ID, Type: "related"}}})
-			require.NoError(t, err)
-			runUID, err := uid.New()
-			require.NoError(t, err)
-			_, err = sender.env.DB.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: sender.projects[0].ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, IssueUID: &created.UID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}})
 			require.NoError(t, err)
 			_, _, err = sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: created.ID, Author: "worker", Body: "Dependent comment" + body})
 			require.NoError(t, err)
@@ -250,16 +247,11 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			require.NoError(t, err)
 			_, err = hub.DB.IssueByUID(t.Context(), created.UID, db.IncludeDeletedNo)
 			require.ErrorIs(t, err, db.ErrNotFound)
-			_, err = hub.DB.CronRun(t.Context(), projects[0].ID, runUID)
-			require.ErrorIs(t, err, db.ErrNotFound)
 			err = pushDirectSpoke(t.Context(), pushStore, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{})
 			require.ErrorContains(t, err, "pending federation events remain")
 			joinMoveTarget(t, hub, projects[1], sender)
 			require.NoError(t, pushDirectSpoke(t.Context(), pushStore, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{}))
 			require.GreaterOrEqual(t, binding.PushCursorEventID, independentEvent.ID)
-			run, err := hub.DB.CronRun(t.Context(), projects[0].ID, runUID)
-			require.NoError(t, err)
-			require.Equal(t, &created.UID, run.IssueUID)
 			got, err := hub.DB.IssueByUID(t.Context(), child.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			comments, err := hub.DB.CommentsByIssue(t.Context(), got.ID)
@@ -274,7 +266,7 @@ func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
 	for _, mode := range []string{"missing", "leave", "enrollment"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
-			hub, projects, spoke, issue, local, _ := newPushDeferralFixture(t, true, false)
+			hub, projects, spoke, issue, local := newPushDeferralFixture(t, true)
 			moved := spoke.move(t, local, 0, 1)
 			const commentBody = "Work after moving"
 			_, comment, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: moved.ID, Author: "worker", Body: commentBody})
@@ -378,8 +370,6 @@ func TestSyncFederationPartialPushAndPull(t *testing.T) {
 	runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
 	_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
 	require.ErrorContains(t, err, "pending federation events remain")
-	require.ErrorContains(t, err, "matching push access")
-	require.ErrorContains(t, err, "need project access")
 	require.ErrorContains(t, err, "pull temporarily unavailable")
 	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)

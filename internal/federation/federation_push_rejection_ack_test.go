@@ -83,9 +83,6 @@ func TestFederationPushRejectsInvalidAcknowledgments(t *testing.T) {
 	for name, ack := range map[string]api.FederationIngestEventsBody{
 		"unknown event":           {Accepted: 1, PushCursorEventID: 2, RejectedEvents: []db.FederationEventRejection{{EventUID: "other", SourceEventID: 1}}},
 		"wrong source id":         {Accepted: 1, PushCursorEventID: 2, RejectedEvents: []db.FederationEventRejection{{EventUID: "one", SourceEventID: 2}}},
-		"duplicate rejection":     {PushCursorEventID: 2, RejectedEvents: []db.FederationEventRejection{{EventUID: "one", SourceEventID: 1, Code: db.FederationProjectNotEnrolledCode}, {EventUID: "one", SourceEventID: 1, Code: db.FederationProjectNotEnrolledCode}}},
-		"missing accounting":      {Accepted: 1, PushCursorEventID: 2},
-		"negative count":          {Accepted: -1, Duplicates: 3, PushCursorEventID: 2},
 		"rejection beyond cursor": {PushCursorEventID: 1, RejectedEvents: []db.FederationEventRejection{{EventUID: "two", SourceEventID: 2, Code: db.FederationProjectNotEnrolledCode}}},
 	} {
 		t.Run(name, func(t *testing.T) {

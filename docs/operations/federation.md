@@ -2274,11 +2274,6 @@ does not stop the pull phase, but a source-only spoke's pull remains blocked
 when it receives the move until the destination is available.
 
 Join the named project or update its binding to allow push with the same actor as the source. The next sync retries the push.
-If the spoke already holds a moved issue in the source project, joining the
-destination can leave pulls for both projects failing on a duplicate issue UID.
-The pull fix is tracked in [kata#1049](https://github.com/kenn-io/kata/issues/1049).
-Keep the local data and wait for a build with that fix before relying on the
-join to restore pull.
 The event keeps its original UID and content hash. Until recovery, the durable
 push cursor stays before the earliest rejected event. The spoke records later accepted events to suppress duplicate local notifications.
 The status diagnostic counts the other events the hub acknowledged.

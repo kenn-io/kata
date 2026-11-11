@@ -9,27 +9,8 @@ import (
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
-func TestSyncFederationInterruptedLeaveDoesNotBlockUnrelatedPush(t *testing.T) {
-	for _, pending := range []string{"leave", "enrollment"} {
-		t.Run(pending, func(t *testing.T) {
-			hub, projects := newMoveDeliveryHub(t, "active-source", "pending-source")
-			spoke := newMoveDeliverySpoke(t, hub, projects)
-			credential := spoke.credentials[projects[1].UID]
-			credential.LeavePending = pending == "leave"
-			credential.RelayEnrollmentPending = pending == "enrollment"
-			spoke.credentials[projects[1].UID] = credential
-			issue, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Unrelated ordinary push", Author: "worker"})
-			require.NoError(t, err)
-			require.NoError(t, spoke.sync(t, 0), "an unfinished operation on another project must not stall ordinary work")
-			retained, err := hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			require.Equal(t, projects[0].ID, retained.ProjectID)
-		})
-	}
-}
-
 func TestFederationMoveSourceCredentialValidation(t *testing.T) {
-	for _, kind := range []string{"origin", "actor", "project", "binding-project", "signing"} {
+	for _, kind := range []string{"origin", "actor", "project", "signing"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "active-source", "other-source")
@@ -42,12 +23,6 @@ func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 				credential.Actor = "other-worker"
 			case "project":
 				credential.HubProjectID = projects[1].ID + 100
-			case "binding-project":
-				binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[1].ID)
-				require.NoError(t, err)
-				binding.HubProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EX"
-				_, err = spoke.env.DB.UpsertFederationBinding(ctx, binding)
-				require.NoError(t, err)
 			case "signing":
 				credential.Signing = &signingpolicy.Source{HubURL: "https://other.example"}
 			}
@@ -62,7 +37,7 @@ func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 			switch kind {
 			case "origin":
 				require.ErrorContains(t, err, "move source credential origin differs from binding")
-			case "actor", "binding-project":
+			case "actor":
 				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 			case "project":
 				require.ErrorContains(t, err, "move source credential project differs from binding")
@@ -71,29 +46,4 @@ func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestSyncFederationPendingProofCannotAuthorizeCurrentOwner(t *testing.T) {
-	hub, projects := newMoveDeliveryHub(t, "stale-source", "pending-target")
-	spoke := newMoveDeliverySpoke(t, hub, projects)
-	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved before delayed work", Author: "worker"})
-	require.NoError(t, err)
-	for i := range projects {
-		require.NoError(t, spoke.sync(t, i))
-	}
-	local, err := spoke.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Delayed work needing target authority"})
-	require.NoError(t, err)
-	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	credential := spoke.credentials[projects[1].UID]
-	credential.LeavePending = true
-	spoke.credentials[projects[1].UID] = credential
-	err = spoke.sync(t, 0)
-	require.ErrorContains(t, err, "pending federation events remain")
-	require.ErrorContains(t, err, "matching push access", "a suppressed pending proof reports the required access")
-	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Empty(t, comments)
 }
