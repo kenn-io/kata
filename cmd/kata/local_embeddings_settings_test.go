@@ -488,3 +488,71 @@ func TestSharedChoiceUsesBuiltInDimensionsForInactiveConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, original, data)
 }
+
+func TestSharedChoiceKeepsLexicalSearchWhenVectorPathIsDirectory(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	resetFlags(t)
+	home := setupKataEnv(t)
+	setLocalEmbeddingsTestHome(t, home)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+	require.NoError(t, embedlocal.RecordChoice())
+	vectorsPath, err := vectorsPathForDSN(filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(vectorsPath, 0o700))
+	oldTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	t.Cleanup(func() { newTelemetryReporter = oldTelemetry })
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+			t.Error("daemon shutdown timed out")
+		}
+	})
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	var record daemonRuntimeRecordJSON
+	require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: observes daemon readiness
+		body, err := os.ReadFile(runtimePath) // #nosec G304 -- isolated runtime path
+		return err == nil && json.Unmarshal(body, &record) == nil
+	}, 3*time.Second, 10*time.Millisecond, "daemon must remain available")
+	baseURL := "http://" + record.Address
+	request := func(path, body string, output any) {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+path, strings.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = response.Body.Close() }()
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		if output != nil {
+			require.NoError(t, json.NewDecoder(response.Body).Decode(output))
+		}
+	}
+	var project struct {
+		Project struct {
+			ID int64 `json:"id"`
+		} `json:"project"`
+	}
+	request("/api/v1/projects", `{"name":"example-project","actor":"tester"}`, &project)
+	request(fmt.Sprintf("/api/v1/projects/%d/issues", project.Project.ID), `{"title":"Repair bicycle brakes","actor":"tester"}`, nil)
+	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--json", "--project", "example-project", "search", "bicycle")
+	require.NoError(t, err, stderr)
+	var result struct {
+		Mode    string `json:"mode"`
+		Results []any  `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, "lexical", result.Mode)
+	require.Len(t, result.Results, 1)
+}

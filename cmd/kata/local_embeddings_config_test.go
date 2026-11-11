@@ -104,3 +104,12 @@ func TestLocalEmbeddingsTestHomeIsIsolated(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(home, ".kenn", "embeddings"), dir)
 }
+
+func TestSetupKataEnvIsolatesSharedEmbeddings(t *testing.T) {
+	setLocalEmbeddingsTestHome(t, t.TempDir())
+	home := setupKataEnv(t)
+	dir, err := embedlocal.DefaultDir()
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(home, ".kenn", "embeddings"), dir)
+	require.Equal(t, home, os.Getenv("USERPROFILE"))
+}

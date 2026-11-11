@@ -1474,7 +1474,9 @@ func runDaemonProcess(
 			return idx.Close()
 		}
 	}
-	chosen, choiceErr := applySharedEmbeddingChoice(ctx, dcfg.Search.Embeddings)
+	originalEmbeddings := dcfg.Search.Embeddings
+	autoShared := false
+	chosen, choiceErr := applySharedEmbeddingChoice(ctx, originalEmbeddings)
 	if choiceErr == nil && chosen != dcfg.Search.Embeddings {
 		candidate, vectorsPath, err := preflightEmbeddingStartup(chosen, dbPath)
 		choiceErr = err
@@ -1484,6 +1486,7 @@ func runDaemonProcess(
 		if choiceErr == nil {
 			startup.Embedder, startup.VectorsPath = candidate, vectorsPath
 			dcfg.Search.Embeddings = chosen
+			autoShared = true
 		}
 	}
 	if choiceErr != nil {
@@ -1496,7 +1499,11 @@ func runDaemonProcess(
 		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, publisher,
 	)
 	if err != nil {
-		return err
+		if !autoShared {
+			return err
+		}
+		daemonLog.Printf("shared embeddings choice: %v", err)
+		dcfg.Search.Embeddings = originalEmbeddings
 	}
 	defer func() {
 		if closeDependencies && vectorIndex != nil {
