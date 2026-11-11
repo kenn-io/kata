@@ -18,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -25,7 +26,7 @@ import (
 // The sender can still see the old owner when another joined spoke has already
 // moved the issue on the hub. Supplemental proofs cannot rely on local ownership.
 func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T) {
-	for _, kind := range []string{"same-origin", "other-binding-origin", "other-credential-origin", "other-actor", "pull-only", "relay"} {
+	for _, kind := range []string{"same-origin", "unavailable-signing-key", "other-binding-origin", "other-credential-origin", "other-actor", "pull-only", "relay"} {
 		t.Run(kind, func(t *testing.T) {
 			hub, projects := newMoveDeliveryHub(t, "proof-source", "proof-target")
 			spoke := newMoveDeliverySpoke(t, hub, projects)
@@ -37,6 +38,11 @@ func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T)
 			target, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[1].ID)
 			require.NoError(t, err)
 			switch kind {
+			case "unavailable-signing-key":
+				t.Setenv("KATA_TEST_MISSING_SIGNING_KEY", "")
+				credential := spoke.credentials[projects[1].UID]
+				credential.Signing = &signingpolicy.Source{KeyID: "test-key", KeyEnv: "KATA_TEST_MISSING_SIGNING_KEY", HubURL: hub.URL}
+				spoke.credentials[projects[1].UID] = credential
 			case "other-binding-origin":
 				target.HubURL = other.URL
 			case "other-credential-origin":
@@ -73,7 +79,7 @@ func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T)
 				return
 			}
 			require.NoError(t, err)
-			if kind == "same-origin" {
+			if kind == "same-origin" || kind == "unavailable-signing-key" {
 				require.Equal(t, spoke.credentials[projects[1].UID].Token, tokens[projects[1].UID])
 			} else {
 				require.NotContains(t, tokens, projects[1].UID)

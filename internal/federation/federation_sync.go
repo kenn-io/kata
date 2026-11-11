@@ -1887,7 +1887,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		// Validate the source's own plaintext policy before including its token.
 		// The destination credential's opt-in does not authorize source transport.
 		sourceCredential := config.FederationTransportCredential(source.HubURL, source.HubProjectID, source.AllowInsecure, credential)
-		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
+		if _, err := clientpkg.NewHTTPClientWithBearer(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
 			return nil, err
 		}
 		if tokens == nil {

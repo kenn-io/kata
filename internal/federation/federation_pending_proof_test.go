@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 func TestSyncFederationInterruptedLeaveDoesNotBlockUnrelatedPush(t *testing.T) {
@@ -29,7 +28,7 @@ func TestSyncFederationInterruptedLeaveDoesNotBlockUnrelatedPush(t *testing.T) {
 }
 
 func TestFederationMoveSourceCredentialValidation(t *testing.T) {
-	for _, kind := range []string{"actor", "project", "signing"} {
+	for _, kind := range []string{"actor", "project"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "active-source", "other-source")
@@ -40,8 +39,6 @@ func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 				credential.Actor = "other-worker"
 			case "project":
 				credential.HubProjectID = projects[1].ID + 100
-			case "signing":
-				credential.Signing = &signingpolicy.Source{HubURL: "https://other.example"}
 			}
 			spoke.credentials[projects[1].UID] = credential
 			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
@@ -56,8 +53,6 @@ func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 			case "project":
 				require.ErrorContains(t, err, "move source credential project differs from binding")
-			case "signing":
-				require.ErrorIs(t, err, signingpolicy.ErrInvalid)
 			}
 		})
 	}
