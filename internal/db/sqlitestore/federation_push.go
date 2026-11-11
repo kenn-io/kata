@@ -196,7 +196,7 @@ func (d *Store) RecordFederationPushAccepted(ctx context.Context, projectID int6
 	})
 }
 
-// FederationPushAccepted reports whether a binding has acknowledged an event.
+// pruneFederationPushAccepted removes acknowledgments covered by the cursor.
 func pruneFederationPushAccepted(ctx context.Context, tx *sql.Tx, projectID int64) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM federation_push_accepted WHERE project_id=? AND event_id <= (SELECT push_cursor_event_id FROM federation_bindings WHERE project_id=?)`, projectID, projectID)
 	return err

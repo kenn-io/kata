@@ -274,10 +274,10 @@ Use it to copy a hub's data for a rehearsal or a move to a different hub.
 Ordinary restore recreates the source's federation bindings, enrollments, and
 database-managed API tokens. `--new-instance` changes the instance identity
 but keeps that authority. Neither option detaches a federated hub.
-Full backups keep pending replay recovery for the restored instance.
+Full and project-scoped backups keep pending replay recovery for the restored instance.
 For full backups from before schema 51, restore uses the schema upgrade rules
 to recover interrupted replays.
-Project exports and restores with a new instance identity omit that state.
+Project merges and restores with a new instance identity omit that state.
 
 Start with a full JSONL export, including deleted rows. Keep the protected
 original export: it contains the source's credential hashes and token events.

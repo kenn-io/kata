@@ -827,11 +827,8 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 		acceptedProjects = `(SELECT json_group_array(project_id) FROM federation_push_accepted WHERE project_id=events.project_id AND event_id=events.id)`
 		acceptedJoin = ``
 	}
-	replayDue, replayJoin := "NULL", ""
-	if f.ProjectID == nil {
-		replayDue = "replay.delivery_due"
-		replayJoin = " LEFT JOIN federation_local_replays replay ON replay.event_uid = events.uid"
-	}
+	replayDue := "replay.delivery_due"
+	replayJoin := " LEFT JOIN federation_local_replays replay ON replay.event_uid = events.uid"
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, events.project_name, ` + issueIDExpr + `, events.issue_uid,
 	                 ` + relatedIDExpr + `, ` + relatedUIDExpr + `,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,

@@ -834,11 +834,8 @@ OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 		acceptedProjects = `(SELECT json_agg(project_id) FROM federation_push_accepted WHERE project_id=events.project_id AND event_id=events.id)`
 		acceptedJoin = ``
 	}
-	replayDue, replayJoin := "NULL", ""
-	if filter.ProjectID == nil {
-		replayDue = "replay.delivery_due"
-		replayJoin = " LEFT JOIN federation_local_replays replay ON replay.event_uid = events.uid"
-	}
+	replayDue := "replay.delivery_due"
+	replayJoin := " LEFT JOIN federation_local_replays replay ON replay.event_uid = events.uid"
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id,
        export_project.uid, events.project_name, ` + issueIDExpression + `, events.issue_uid,
        ` + relatedIDExpression + `, ` + relatedUIDExpression + `,
