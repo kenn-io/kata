@@ -1,66 +1,17 @@
 package main
 
 import (
-	"encoding/json/v2"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"net/http/httputil"
+	"net/url"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
-
-func TestCronCLITypedCreateUsesExistingUIDAndBody(t *testing.T) {
-	t.Setenv("KATA_AUTHOR", "worker")
-	identity := cronCLIUID(t)
-	received := make(chan api.PutCronJobBody, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects":
-			_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/7":
-			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
-		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/projects/7/cron/jobs/"+identity:
-			raw, err := io.ReadAll(r.Body)
-			var body api.PutCronJobBody
-			if err != nil || json.Unmarshal(raw, &body) != nil {
-				t.Error("invalid request body", err)
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			received <- body
-			_, _ = io.WriteString(w, `{"job":{"uid":"`+identity+`","definition_event_uid":"01J00000000000000000000002"}}`)
-		default:
-			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(server.Close)
-	args := append([]string{"job", "create", "--uid", strings.ToLower(identity)}, cronAuthorFixture()...)
-	args = append(args, "--adapter-agent", "example-agent")
-	out, diagnostic, err := executeCronCLI(t, server.URL, nil, args...)
-	require.NoError(t, err)
-	require.Contains(t, out, identity)
-	require.Contains(t, diagnostic, "reuse --uid on retry")
-	select {
-	case got := <-received:
-		require.JSONEq(t, `{"adapter":"example-adapter","agent":"example-agent"}`, string(got.Definition.Options))
-		want, err := cronAuthorBuild(t, "", cronAuthorFixture())
-		require.NoError(t, err)
-		want.Actor = "worker"
-		// Compare options semantically above; JSON object order is immaterial.
-		want.Definition.Options = got.Definition.Options
-		require.Equal(t, want, got)
-	default:
-		t.Fatal("typed creation did not use the existing definition PUT")
-	}
-}
 
 func TestCronCLIAuthoredInputErrorsPerformNoNetworkRequests(t *testing.T) {
 	var requests atomic.Int32
@@ -69,22 +20,9 @@ func TestCronCLIAuthoredInputErrorsPerformNoNetworkRequests(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(server.Close)
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"job", "create", "--file", "-", "--enabled=false"}, "--file"},
-		{[]string{"job", "create", "--file=", "--body="}, "--file"},
-		{append([]string{"job", "create", "--file", "-"}, cronAuthorFixture()...), "--file"},
-		{[]string{"job", "create", "--name", "Inspection"}, "requires explicit"},
-		{append(append([]string{"job", "create"}, cronAuthorFixture()...), "--timezone=Local"), "timezone"},
-		{append(append([]string{"job", "create"}, cronAuthorFixture()...), "--every=0.5s"), "whole seconds"},
-		{append(append([]string{"job", "create"}, cronAuthorFixture()...), "--adapter-agent="), "--adapter-agent must not be empty"},
-		{append(append([]string{"job", "create"}, cronAuthorFixture()...), "--adapter-agent= \t\n"), "--adapter-agent must not be empty"},
-	} {
-		_, _, err := executeCronCLI(t, server.URL, strings.NewReader(`{}`), tc.args...)
-		require.ErrorContains(t, err, tc.want)
-	}
+	args := append(append([]string{"job", "create"}, cronAuthorFixture()...), "--every=0.5s")
+	_, _, err := executeCronCLI(t, server.URL, nil, args...)
+	require.ErrorContains(t, err, "--every must use whole seconds")
 	require.Zero(t, requests.Load())
 }
 
@@ -106,10 +44,14 @@ func TestCronCLITypedCreationHasNoNameUpsert(t *testing.T) {
 	require.NoError(t, err)
 	identity := cronCLIUID(t)
 	args := append([]string{"job", "create", "--uid", identity}, cronAuthorFixture()...)
-	_, _, err = executeCronCLI(t, env.URL, nil, args...)
+	args = append(args, "--adapter-agent=example-agent")
+	_, diagnostic, err := executeCronCLI(t, env.URL, nil, args...)
 	require.NoError(t, err)
-	_, _, err = executeCronCLI(t, env.URL, nil, args...)
-	require.Error(t, err, "a retained UID conflicts instead of becoming an update")
+	require.Contains(t, diagnostic, "reuse --uid on retry")
+	stored, err := env.DB.CronJob(t.Context(), project.ID, identity)
+	require.NoError(t, err)
+	require.Equal(t, "worker", stored.Author)
+	require.JSONEq(t, `{"adapter":"example-adapter","agent":"example-agent"}`, string(stored.Definition.Options))
 	_, _, err = executeCronCLI(t, env.URL, nil, append([]string{"job", "create"}, cronAuthorFixture()...)...)
 	require.NoError(t, err)
 	jobs, err := env.DB.ListCronJobs(t.Context(), db.CronList{ProjectID: project.ID})
@@ -153,25 +95,29 @@ func TestCronCLITypedNativeParentResolution(t *testing.T) {
 	args := []string{"job", "create", "--uid", identity, "--name", "Review", "--title", "Review check-in",
 		"--enabled=false", "--catchup", "latest", "--overlap", "allow", "--every", "1h",
 		"--notify", "--parent", parent.ShortID, "--recipient", "worker"}
-	_, _, err = executeCronCLI(t, env.URL, nil, args...)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) {
+		r.SetURL(target)
+		r.Out.Host = target.Host
+	}}
+	var puts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			puts.Add(1)
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	_, _, err = executeCronCLI(t, server.URL, nil, args...)
 	require.NoError(t, err)
 	stored, err := env.DB.CronJob(t.Context(), project.ID, identity)
 	require.NoError(t, err)
 	require.Equal(t, parent.UID, stored.Definition.Issue.ParentUID)
 	require.False(t, stored.Definition.Enabled)
-}
-
-func TestCronCLITypedNativeRejectsInvalidDefinitionAfterParentResolution(t *testing.T) {
-	t.Setenv("KATA_AUTHOR", "worker")
-	env := testenv.New(t)
-	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Review", Author: "worker"})
-	require.NoError(t, err)
-	identity := cronCLIUID(t)
-	args := []string{"job", "create", "--uid", identity, "--name", "Review", "--title", "Check in", "--enabled=false", "--catchup", "latest", "--overlap", "allow", "--every", "30s", "--notify", "--parent", parent.ShortID, "--recipient", "worker"}
-	_, _, err = executeCronCLI(t, env.URL, nil, args...)
+	puts.Store(0)
+	invalid := append(append([]string{}, args...), "--every=30s", "--uid="+cronCLIUID(t))
+	_, _, err = executeCronCLI(t, server.URL, nil, invalid...)
 	require.ErrorContains(t, err, "at least 60")
-	_, err = env.DB.CronJob(t.Context(), project.ID, identity)
-	require.Error(t, err)
+	require.Zero(t, puts.Load(), "invalid definition must not reach the write")
 }

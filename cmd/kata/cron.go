@@ -428,7 +428,7 @@ func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// readRequest selects bounded file input or a validated typed definition.
+// readRequest selects bounded file input or a typed definition.
 // Definition delete and restore may omit input and send an empty object.
 func (o *cronCLIOptions) readRequest(cmd *cobra.Command) ([]byte, error) {
 	if o.author.used(cmd) {
@@ -439,8 +439,7 @@ func (o *cronCLIOptions) readRequest(cmd *cobra.Command) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		// build bounds the encoded definition and name, keeping this envelope
-		// below the file-input limit before actor/precondition normalization.
+		// Validate enforces the definition size after parent resolution.
 		return json.Marshal(candidate)
 	}
 	if o.file == "" {

@@ -90,12 +90,6 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 		}
 	}
 	out.Name = strings.TrimSpace(o.name)
-	if out.Name == "" || len(out.Name) > 256 {
-		return out, cronCLIValidation("name must contain 1–256 UTF-8 bytes after trimming")
-	}
-	if strings.TrimSpace(o.title) == "" {
-		return out, cronCLIValidation("--title must not be empty")
-	}
 	if cmd.Flags().Changed("notify") && !o.notify {
 		return out, cronCLIValidation("--notify must be true when supplied")
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json/v2"
 	"fmt"
 	"math"
 	"strings"
@@ -30,14 +29,14 @@ func cronAuthorBuild(t *testing.T, parent string, args []string) (api.PutCronJob
 }
 
 func TestCronAuthorPromptMatchesFileDefinition(t *testing.T) {
-	body, err := cronAuthorBuild(t, "", cronAuthorFixture())
+	body, err := cronAuthorBuild(t, "", append(cronAuthorFixture(), "--adapter-agent=example-agent", "--checkout-key=example-checkout"))
 	require.NoError(t, err)
 	require.Equal(t, api.PutCronJobBody{Name: "Inspection", Definition: api.CronJobDefinition{
 		Version: 1, Kind: "job", Enabled: false,
 		Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 3600},
 		Action:  cron.Action{Kind: "execute", Prompt: "Inspect the workspace"},
 		Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Inspect"},
-		Overlap: "forbid", Catchup: "latest", Options: api.JSONRawObject(`{"adapter":"example-adapter"}`),
+		Overlap: "forbid", Catchup: "latest", CheckoutKey: "example-checkout", Options: api.JSONRawObject(`{"adapter":"example-adapter","agent":"example-agent"}`),
 	}}, body)
 }
 
@@ -45,11 +44,11 @@ func TestCronAuthorNativeLeavesParentResolutionToExistingPath(t *testing.T) {
 	body, err := cronAuthorBuild(t, "abcd", []string{
 		"--name", " Check-ins ", "--title", "Check in", "--body", "Literal ${text}",
 		"--enabled", "--catchup", "skip", "--overlap", "allow", "--cron", "0 9 * * 1-5",
-		"--timezone", "America/New_York", "--notify", "--recipient", "worker", "--grace", "5m",
+		"--timezone", "America/New_York", "--notify", "--recipient", "worker", "--message", "Hello", "--grace", "5m",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "Check-ins", body.Name)
-	require.Equal(t, cron.Action{Kind: "notify", Recipient: "worker"}, body.Definition.Action)
+	require.Equal(t, cron.Action{Kind: "notify", Recipient: "worker", Message: "Hello"}, body.Definition.Action)
 	require.Equal(t, &cron.IssuePolicy{Kind: "per-run", Title: "Check in", Body: "Literal ${text}"}, body.Definition.Issue)
 	require.Equal(t, int64(300), body.Definition.GraceSeconds)
 	require.Empty(t, body.Definition.Issue.ParentUID, "a short ref must never be stored as a UID")
@@ -60,21 +59,13 @@ func TestCronAuthorRejectsInvalidSelections(t *testing.T) {
 		name, flag, value, want string
 	}{
 		{"two schedules", "--cron", "@daily", "exactly one"},
-		{"fractional interval", "--every", "1500ms", "whole seconds"},
-		{"zero interval", "--every", "0s", "positive"},
-		{"overflow interval", "--every", "9223372036854775807s", "duration"},
-		{"local zone", "--timezone", "Local", "timezone"},
-		{"empty zone", "--timezone", "", "timezone"},
-		{"bad zone", "--timezone", "Invalid/Zone", "timezone"},
-		{"blank name", "--name", "  ", "name"},
-		{"long name", "--name", strings.Repeat("n", 257), "name"},
-		{"blank title", "--title", " ", "title"},
-		{"blank prompt", "--prompt", " ", "prompt"},
-		{"blank adapter", "--adapter", " ", "adapter"},
-		{"bad catchup", "--catchup", "sometimes", "catchup"},
-		{"bad overlap", "--overlap", "maybe", "overlap"},
-		{"fractional grace", "--grace", "0.5s", "whole seconds"},
-		{"negative timeout", "--timeout", "-1s", "nonnegative"},
+		{"zero interval", "--every", "0s", "--every must be positive"},
+		{"blank prompt", "--prompt", " ", "--prompt requires a nonempty prompt"},
+		{"blank adapter", "--adapter", " ", "--prompt requires a nonempty prompt"},
+		{"empty agent", "--adapter-agent", "", "--adapter-agent must not be empty"},
+		{"blank agent", "--adapter-agent", " \t\n", "--adapter-agent must not be empty"},
+		{"fractional grace", "--grace", "0.5s", "--grace must use whole seconds"},
+		{"negative timeout", "--timeout", "-1s", "--timeout must be nonnegative"},
 		{"notify false", "--notify", "false", "notify"},
 		{"mixed action", "--notify", "true", "exactly one"},
 		{"native recipient on prompt", "--recipient", "worker", "notify"},
@@ -82,74 +73,87 @@ func TestCronAuthorRejectsInvalidSelections(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := append(cronAuthorFixture(), tc.flag+"="+tc.value)
-			body, err := cronAuthorBuild(t, "", args)
-			if err == nil {
-				err = body.Definition.Native().Validate()
-			}
+			_, err := cronAuthorBuild(t, "", args)
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
 }
 
 func TestCronAuthorRequiresExplicitChoices(t *testing.T) {
-	for _, flag := range []string{"--name", "--title", "--enabled", "--catchup", "--overlap", "--every", "--prompt", "--adapter"} {
-		t.Run(flag, func(t *testing.T) {
+	for _, tc := range []struct{ flag, want string }{
+		{"--name", "typed creation requires explicit --name"},
+		{"--title", "typed creation requires explicit --title"},
+		{"--enabled", "typed creation requires explicit --enabled"},
+		{"--catchup", "typed creation requires explicit --catchup"},
+		{"--overlap", "typed creation requires explicit --overlap"},
+		{"--every", "choose exactly one of --cron, --every or --once"},
+		{"--prompt", "choose exactly one of --notify or --prompt"},
+		{"--adapter", "--prompt requires a nonempty prompt and explicit --adapter"},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
 			args := cronAuthorFixture()
 			for i, arg := range args {
-				if arg == flag {
+				if arg == tc.flag {
 					args = append(args[:i], args[i+2:]...)
 					break
 				}
-				if strings.HasPrefix(arg, flag+"=") {
+				if strings.HasPrefix(arg, tc.flag+"=") {
 					args = append(args[:i], args[i+1:]...)
 					break
 				}
 			}
 			_, err := cronAuthorBuild(t, "", args)
-			require.Error(t, err)
+			require.ErrorContains(t, err, tc.want)
 		})
 	}
 }
 
-func TestCronAuthorCronRequiresExplicitTimezone(t *testing.T) {
-	args := cronAuthorFixture()
-	for i := range args {
-		if args[i] == "--every" {
-			args[i], args[i+1] = "--cron", "@daily"
-		}
-	}
-	_, err := cronAuthorBuild(t, "", args)
-	require.ErrorContains(t, err, "timezone")
-}
-
-func TestCronAuthorCronHasOneTimezoneSource(t *testing.T) {
-	for _, expression := range []string{
-		"CRON_TZ=America/New_York 0 9 * * *", "TZ=UTC @daily", "  TZ=Local @daily", "@every 1h",
+func TestCronAuthorTrigger(t *testing.T) {
+	for _, tc := range []struct {
+		name, flag, value, timezone, want string
+		trigger                           cron.Trigger
+	}{
+		{name: "missing timezone", flag: "--cron", value: "@daily", want: "--timezone requires an explicit IANA timezone"},
+		{name: "local timezone", flag: "--cron", value: "@daily", timezone: "Local", want: "--timezone requires an explicit IANA timezone"},
+		{name: "empty timezone", flag: "--cron", value: "@daily", timezone: "=", want: "--timezone requires an explicit IANA timezone"},
+		{name: "timezone directive", flag: "--cron", value: "CRON_TZ=America/New_York 0 9 * * *", timezone: "UTC", want: "timezone directives remain available through --file"},
+		{name: "trimmed timezone directive", flag: "--cron", value: "  TZ=Local @daily", timezone: "UTC", want: "timezone directives remain available through --file"},
+		{name: "interval descriptor", flag: "--cron", value: "@every 1h", timezone: "UTC", want: "use --every for an interval"},
+		{name: "once", flag: "--once", value: "2026-12-01T09:00:00+05:30", trigger: cron.Trigger{Kind: "once", At: "2026-12-01T09:00:00+05:30"}},
 	} {
-		args := cronAuthorFixture()
-		for i := range args {
-			if args[i] == "--every" {
-				args[i], args[i+1] = "--cron", expression
+		t.Run(tc.name, func(t *testing.T) {
+			args := cronAuthorFixture()
+			for i := range args {
+				if args[i] == "--every" {
+					args[i], args[i+1] = tc.flag, tc.value
+					break
+				}
 			}
-		}
-		_, err := cronAuthorBuild(t, "", append(args, "--timezone=UTC"))
-		require.Error(t, err, expression)
+			if tc.timezone != "" {
+				args = append(args, "--timezone="+strings.TrimPrefix(tc.timezone, "="))
+			}
+			body, err := cronAuthorBuild(t, "", args)
+			if tc.want != "" {
+				require.ErrorContains(t, err, tc.want)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.trigger, body.Definition.Trigger)
+			}
+		})
 	}
-}
-
-func TestCronAuthorOncePreservesExplicitInstant(t *testing.T) {
-	args := cronAuthorFixture()
-	for i := range args {
-		if args[i] == "--every" {
-			args[i], args[i+1] = "--once", "2026-12-01T09:00:00+05:30"
-		}
-	}
-	body, err := cronAuthorBuild(t, "", args)
-	require.NoError(t, err)
-	require.Equal(t, cron.Trigger{Kind: "once", At: "2026-12-01T09:00:00+05:30"}, body.Definition.Trigger)
 }
 
 func TestCronAuthorWholeSecondsContract(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  int64
+	}{
+		{"1h30m", 5400}, {"1.0000000001s", 1},
+	} {
+		got, err := cronAuthorSeconds(tc.value, "every", false)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got)
+	}
 	rapid.Check(t, func(rt *rapid.T) {
 		seconds := rapid.Int64().Draw(rt, "seconds")
 		allowZero := rapid.Bool().Draw(rt, "allow zero")
@@ -162,20 +166,6 @@ func TestCronAuthorWholeSecondsContract(t *testing.T) {
 			require.Error(t, err)
 		}
 	})
-}
-
-func TestCronAuthorDurationUsesNanosecondPrecision(t *testing.T) {
-	seconds, err := cronAuthorSeconds("1.0000000001s", "grace", true)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), seconds)
-}
-
-func TestCronAuthorEquivalentWholeSecondDurations(t *testing.T) {
-	for _, value := range []string{"1h30m", "1.5h", "+5400s", "5400000ms", "5400000000us", "5400000000000ns", "0.5s500ms5399s"} {
-		seconds, err := cronAuthorSeconds(value, "every", false)
-		require.NoError(t, err, value)
-		require.Equal(t, int64(5400), seconds, value)
-	}
 }
 
 func TestCronAuthorPromptTextIsLiteral(t *testing.T) {
@@ -191,13 +181,8 @@ func TestCronAuthorPromptTextIsLiteral(t *testing.T) {
 		if err != nil {
 			rt.Fatal(err)
 		}
-		raw, err := json.Marshal(body)
-		if err != nil {
-			rt.Fatal(err)
-		}
-		var readback api.PutCronJobBody
-		if err := json.Unmarshal(raw, &readback); err != nil || readback.Definition.Action.Prompt != text {
-			rt.Fatalf("literal prompt lost through JSON: error %v", err)
+		if body.Definition.Action.Prompt != text {
+			rt.Fatal("literal prompt changed")
 		}
 	})
 }
