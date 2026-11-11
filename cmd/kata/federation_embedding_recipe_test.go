@@ -22,6 +22,7 @@ import (
 // without document generation, daemon connectivity, or credential disclosure.
 func TestFederationEmbeddingRecipeExport(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
+	// The configured provider takes precedence over the shared choice.
 	require.NoError(t, embedlocal.RecordChoice())
 	var calls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
