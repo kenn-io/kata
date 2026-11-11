@@ -820,7 +820,10 @@ func TestCronCLIRefusesArgvWithoutMutation(t *testing.T) {
 	for _, member := range []string{`"argv":null`, `"argv":[]`, `"argv":["printf",""]`} {
 		body := `{"name":"Inspect","definition":{"version":1,"steps":[{"key":"inspect","kind":"command","command":"true",` + member + `}]}}`
 		_, _, err := executeCronCLI(t, env.URL, strings.NewReader(body), "workflow", "create", "--uid", cronCLIUID(t), "--file", "-")
-		require.Error(t, err)
+		var cliErr *cliError
+		require.ErrorAs(t, err, &cliErr)
+		require.Equal(t, ExitValidation, cliErr.ExitCode)
+		require.Contains(t, cliErr.Message, "invalid workflow definition:")
 	}
 	workflows, err := env.DB.ListCronWorkflows(t.Context(), db.CronList{ProjectID: project.ID})
 	require.NoError(t, err)

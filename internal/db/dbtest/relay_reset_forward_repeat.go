@@ -58,9 +58,6 @@ func RunRelayResetRepeatedBeforeDownstreamActivation(t *testing.T, store db.Stor
 	_, err = store.IssueByUID(ctx, late.entity.EntityUID, db.IncludeDeletedYes)
 	require.NoError(t, err, "root-accepted work newer than the checkpoint survives installation")
 
-	// The root purges that issue and the relay installs the next checkpoint
-	// before the downstream ever asked for the first forwarded epoch.
-
 	// A next-epoch seed can outlive its event row; replacing that seed must
 	// still refuse unsupported workflow bytes before deleting the outbox row.
 	q := store.(interface {
@@ -77,6 +74,8 @@ func RunRelayResetRepeatedBeforeDownstreamActivation(t *testing.T, store db.Stor
 	envelope.Body, err = db.EncodeRelaySourceEvent(future)
 	require.NoError(t, err)
 	envelope.SourceUID, envelope.SourceHash = future.EventUID, future.ContentHash
+	envelope, err = db.SealRelayEnvelope(envelope)
+	require.NoError(t, err)
 	changed, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	_, err = q.ExecContext(ctx, `UPDATE federation_relay_outbox SET envelope=$1,source_uid=$2,source_hash=$3 WHERE id=$4`, string(changed), future.EventUID, future.ContentHash, seedID)
@@ -92,6 +91,9 @@ func RunRelayResetRepeatedBeforeDownstreamActivation(t *testing.T, store db.Stor
 	require.Equal(t, string(changed), preserved)
 	_, err = q.ExecContext(ctx, `UPDATE federation_relay_outbox SET envelope=$1,source_uid=$2,source_hash=$3 WHERE id=$4`, raw, sourceUID, sourceHash, seedID)
 	require.NoError(t, err)
+	// The root purges that issue and the relay installs the next checkpoint
+	// before the downstream ever asked for the first forwarded epoch.
+
 	manifest, snapshot, translation = root.checkpoint(4, 4, kept)
 	require.NoError(t, installer.InstallRelayReset(ctx, upstream, manifest, snapshot, translation))
 	_, err = store.IssueByUID(ctx, late.entity.EntityUID, db.IncludeDeletedYes)
